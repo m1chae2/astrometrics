@@ -1,45 +1,55 @@
-"""Template for ImagingService.
+"""Purpose: Start main-camera captures as background jobs.
 
-This service will coordinate interactions with:
-- INDI Camera devices (Science cameras)
-- INDI Filter Wheels
-- INDI Focusers (for autofocus routines)
-
-Future Implementation Scope:
-1.  Manage Camera connection and cooling (setTemperature, getTemperature).
-2.  Capture sequences (Lights, Darks, Flats, Biases).
-3.  Manage Filter Wheel positions and offsets.
-4.  Implement Autosave Logic and FITS header population.
-5.  Interface with Focuser for HFR-based autofocus routines (V-Curve).
+Description: The capture itself (filter change, exposures, dithering)
+is `control.imaging.capture_image` in the wayfinding library. This
+service only runs it on a background thread inside a ``capture`` job,
+so the app gets a job id right away and can watch the progress. The
+library moves the job's progress bar once per frame.
 """
 
 import logging
+import threading
+from typing import Any
 
-from astrometricslib import HardwareError, InvalidArgumentError
+from astrometricslib import registered_job
 from backend.services.processing.job_service import JobService
 from wayfindinglib import ObservatoryControl
 
 logger = logging.getLogger(__name__)
 
+EARLY_FAILURE_WAIT_SECONDS = 0.5
+"""How long a new capture is watched for an immediate failure, such as a
+bad argument, so the caller gets that error directly instead of a job
+that failed at once."""
+
 
 class ImagingService:
-    """Coordinate camera capture sequences and background capture jobs."""
+    """Run main-camera captures in the background and list them."""
 
-    def __init__(self, observatory_api: ObservatoryControl, job_service: JobService):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, observatory_api: ObservatoryControl, job_service: JobService) -> None:
+        """Keep the observatory control and the job store.
+
+        Parameters
+        ----------
+        observatory_api : `ObservatoryControl`
+            The Wayfinder's `control`, which runs the capture.
+        job_service : `JobService`
+            The job store the capture jobs are recorded in.
+        """
         self._observatory = observatory_api
         self.job_service = job_service
-        self._background_tasks: set = set()
 
-    async def capture_sequence(
+    def capture_sequence(
         self,
         target_id: str,
         exposure_seconds: float,
         count: int,
-        image_type="LIGHT",  # ruff: ignore[missing-type-function-argument]
+        image_type: str = "LIGHT",
         filter_name: str | None = None,
         delay_seconds: float = 0.0,
+        dither: bool = False,
     ) -> str:
-        """Start a capture sequence in the background.
+        """Start a capture run in the background.
 
         Parameters
         ----------
@@ -51,170 +61,62 @@ class ImagingService:
             Number of frames to take.
         image_type : `str`, optional
             Frame type (``"LIGHT"``, ``"DARK"``, ``"FLAT"``, ``"BIAS"``).
+            Written to the job log; the camera sets the frame type itself.
         filter_name : `str`, optional
-            Filter to select before the sequence starts. `None` (default)
+            Filter to select before the run starts. `None` (default)
             leaves the wheel where it is.
         delay_seconds : `float`, optional
-            Settling pause inserted between consecutive frames, e.g. to let
-            a dithered mount settle. Not applied after the final frame.
+            Settling pause between frames. Not applied after the last one.
+        dither : `bool`, optional
+            Shift the pointing slightly between frames.
 
         Returns
         -------
         job_id : `str`
-            The persistent job ID that can be used to poll progress.
+            The job id to poll for progress.
 
-        Raises
-        ------
-        InvalidArgumentError
-            If `exposure_seconds` or `count` is not greater than zero, or
-            `delay_seconds` is negative.
+        Notes
+        -----
+        A capture that fails at once, for example because an argument is
+        out of range, raises its error here instead of returning a job id.
         """
-        if exposure_seconds <= 0:
-            raise InvalidArgumentError("exposure_seconds must be greater than zero")
-        if count <= 0:
-            raise InvalidArgumentError("frame count must be greater than zero")
-        if delay_seconds < 0:
-            raise InvalidArgumentError("delay_seconds cannot be negative")
+        started = threading.Event()
+        state: dict[str, Any] = {}
 
-        # Create persistent job
-        job = self.job_service.create_job(target_id=target_id, job_type="capture", log_file=None)
-        job_id = job.id
-
-        # Start the background execution
-        import asyncio
-
-        task = asyncio.create_task(
-            self._run_capture(job_id, exposure_seconds, count, image_type, filter_name, delay_seconds)
-        )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
-
-        return job_id
-
-    async def _run_capture(
-        self,
-        job_id: str,
-        exposure_seconds: float,
-        count: int,
-        image_type: str,
-        filter_name: str | None = None,
-        delay_seconds: float = 0.0,
-    ) -> None:
-        """Run the capture background task as an internal worker."""
-        logger.info("Starting background capture %s: %sx%ss %s", job_id, count, exposure_seconds, image_type)
-        self.job_service.update_job(job_id, status="running", progress=0, status_message="Initializing...")
-
-        try:
-            import asyncio
-
-            # Selected once for the whole sequence rather than per frame: a
-            # sequence is defined as one filter, and re-driving the wheel
-            # between frames would add settling time for no benefit.
-            if filter_name:
-                self.job_service.update_job(job_id, status_message=f"Selecting filter {filter_name}...")
-                try:
-                    self._observatory.imaging.set_filter(filter_name)
-                except ValueError, HardwareError:
-                    # Capturing in whatever filter happened to be in place
-                    # would silently mislabel the frames, so fail instead.
-                    logger.exception("Job %s: Could not select filter %s", job_id, filter_name)
-                    self.job_service.update_job(
-                        job_id, status="failed", status_message=f"Could not select filter {filter_name}"
+        def run() -> None:
+            """Run the capture as a ``capture`` job on this thread."""
+            try:
+                with registered_job(enabled=True, job_type="capture", target_id=target_id) as job:
+                    state["job_id"] = job.job_id
+                    started.set()
+                    job.info(f"Capturing {count} x {exposure_seconds} s {image_type} frames")
+                    self._observatory.imaging.capture_image(
+                        exposure_seconds,
+                        count=count,
+                        filter_name=filter_name,
+                        dither=dither,
+                        delay_seconds=delay_seconds,
                     )
-                    return
+            except Exception as error:  # the top of a background job: record it, never lose it
+                state["error"] = error
+                logger.exception("Capture for %s failed", target_id)
+            finally:
+                started.set()
 
-            for i in range(count):
-                progress = (i / count) * 100
-                self.job_service.update_job(
-                    job_id, progress=progress, status_message=f"Capturing frame {i + 1}/{count}"
-                )
+        thread = threading.Thread(target=run, name=f"capture-{target_id}", daemon=True)
+        thread.start()
+        started.wait()
+        thread.join(timeout=EARLY_FAILURE_WAIT_SECONDS)
+        if "error" in state and not thread.is_alive():
+            raise state["error"]
+        return state.get("job_id") or ""
 
-                logger.info("Job %s: Capturing frame %s/%s", job_id, i + 1, count)
-
-                success = self._observatory.imaging.capture_image(exposure_seconds)
-                if not success:
-                    logger.error("Job %s: Failed to start capture for frame %s", job_id, i + 1)
-                    self.job_service.update_job(
-                        job_id, status="failed", status_message=f"Failed at frame {i + 1}"
-                    )
-                    return
-
-                await asyncio.sleep(exposure_seconds + 0.5)
-
-                # Between frames only; a trailing pause would just delay the
-                # job's completion.
-                if delay_seconds and i < count - 1:
-                    self.job_service.update_job(
-                        job_id, status_message=f"Settling for {delay_seconds}s before frame {i + 2}"
-                    )
-                    await asyncio.sleep(delay_seconds)
-
-            self.job_service.update_job(
-                job_id, status="completed", progress=100, status_message="Finished successfully."
-            )
-        except Exception as e:
-            # This is the top of a background job. The traceback is logged
-            # and the job is marked failed, so the error is not lost.
-            logger.exception("Error in capture sequence %s", job_id)
-            self.job_service.update_job(job_id, status="failed", status_message=str(e))
-
-    def get_active_capture_jobs(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Return all capture jobs currently in running/started state.
+    def get_active_capture_jobs(self) -> list[Any]:
+        """Return the capture jobs that are still running.
 
         Returns
         -------
         jobs : `list`
-            The active `Job` records whose `job_type` is
-            ``"capture"``.
+            The active `Job` records whose `job_type` is ``"capture"``.
         """
-        return [j for j in self.job_service.get_active_jobs() if j.job_type == "capture"]
-
-    def capture_light_frame(self, exposure: float, iso: int = 800, gain: int | None = None) -> dict:
-        """Capture a single light frame and return its local path.
-
-        Synchronous/blocking or simulated helper for alignment and
-        test loops.
-
-        Returns
-        -------
-        result : `dict`
-            Dict describing the captured frame, including its local
-            ``"path"``.
-
-        Raises
-        ------
-        HardwareError
-            If the underlying INDI camera fails to capture the
-            frame.
-        """
-        logger.info("Capturing single light frame for alignment: %ss, ISO=%s", exposure, iso)
-        success = self._observatory.imaging.capture_image(exposure)
-        if not success:
-            raise HardwareError("Underlying INDI camera failed to capture frame")
-
-        # Determine the last captured path or return a test path
-        # In a real environment, the driver saves the FITS file to
-        # the library directory
-        import os
-
-        from astrometricslib import Astrometrics
-
-        astrometrics = Astrometrics()
-        frames_dir = os.path.join(astrometrics.config.get_frames_path(), "lights", "TEST TARGET")
-        os.makedirs(frames_dir, exist_ok=True)
-        test_path = os.path.join(frames_dir, "alignment_latest.fits")
-
-        # If it doesn't exist, create a dummy fits file to make tests pass
-        if not os.path.exists(test_path):
-            import numpy as np
-            from astropy.io import fits
-
-            arr = np.zeros((16, 16), dtype=np.uint16)
-            hdu = fits.PrimaryHDU(arr)
-            hdu.header["OBJECT"] = "TEST TARGET"
-            hdu.header["INSTRUME"] = "TestCam"
-            hdu.header["ISOSPEED"] = iso
-            hdu.header["EXPTIME"] = exposure
-            hdu.writeto(test_path)
-
-        return {"path": test_path}
+        return [job for job in self.job_service.get_active_jobs() if job.job_type == "capture"]

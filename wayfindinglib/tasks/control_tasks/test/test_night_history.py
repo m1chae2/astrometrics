@@ -59,6 +59,32 @@ def _context(positions: int = 600) -> SimpleNamespace:
     )
 
 
+class _AlignmentLogs:
+    """A fake log database with one plate solve on one night."""
+
+    def get_session_alignment_attempts(self, session_id: str) -> list[dict[str, Any]]:
+        """Return one attempt.
+
+        Returns
+        -------
+        attempts : `list` [`dict` [`str`, `Any`]]
+            One aligned solve.
+        """
+        return [{"status": "aligned", "mount_ra": 10.0, "mount_dec": 20.0, "session_id": session_id}]
+
+    def get_polar_alignment_logs(
+        self, session_id: str | None = None, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Return no polar alignment runs.
+
+        Returns
+        -------
+        logs : `list`
+            Always empty.
+        """
+        return []
+
+
 class _Observatory:
     """A fake context whose night analyses record how they were called."""
 
@@ -66,7 +92,7 @@ class _Observatory:
         """Start with no calls and a known location."""
         self.calls: list[tuple[str, Any]] = []
         self.location: dict[str, float] | None = {"latitude": 45.0}
-        self.logger_interface = None
+        self.logger_interface = _AlignmentLogs()
 
     def capture_night_analysis(self, context: Any, session_id: str) -> Any:
         """Record the call; return an analysis unless the night is "none".

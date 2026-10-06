@@ -347,6 +347,9 @@ def manual_move(context: ControlContext, direction: str, start: bool = True) -> 
 def abort_motion(context: ControlContext) -> bool:
     """Stop all mount motion now. Requires `MOUNT_CONTROL`.
 
+    Also stops a centering loop (``control.mount.slew(center=True)``)
+    before its next step.
+
     Parameters
     ----------
     context : `ControlContext`
@@ -357,6 +360,7 @@ def abort_motion(context: ControlContext) -> bool:
     success : `bool`
         `True` if the abort command was accepted.
     """
+    context.motion_stop.set()
     _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
     return _run_sync(context.mount_driver.abort_motion())
 

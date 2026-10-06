@@ -1,0 +1,136 @@
+"""Purpose: Tests for `control.history.query(kind="alignment")`.
+
+Description: The alignment history lists one summary per night, built on
+the log database's `get_alignment_sessions`, with the night's mean
+pointing, or one night's attempts. The mean right ascension must wrap at
+0h/24h. The tests use a stand-in log database.
+"""
+
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from astrometricslib import NotFoundError
+from wayfindinglib.tasks.control_tasks import alignment_history, night_history
+
+
+class _Logs:
+    """A stand-in log database with two nights of plate solves."""
+
+    def get_alignment_sessions(self) -> list[dict[str, Any]]:
+        """Return the night summaries, newest first.
+
+        Returns
+        -------
+        sessions : `list` [`dict` [`str`, `Any`]]
+            Two nights.
+        """
+        return [
+            {
+                "session_id": "2026-09-25",
+                "session_date": "2026-09-25",
+                "sync_count": 2,
+                "start_time": 10.0,
+                "end_time": 20.0,
+                "avg_error_arcsec": 12.5,
+                "polar_error_arcsec": None,
+                "polar_alt_error_arcsec": None,
+                "polar_az_error_arcsec": None,
+            },
+            {"session_id": "2026-09-24", "session_date": "2026-09-24", "sync_count": 0},
+        ]
+
+    def get_session_alignment_attempts(self, session_id: str) -> list[dict[str, Any]]:
+        """Return one night's attempts, oldest first.
+
+        Returns
+        -------
+        attempts : `list` [`dict` [`str`, `Any`]]
+            Two solves either side of 0h for the newer night.
+        """
+        if session_id != "2026-09-25":
+            return []
+        return [
+            {
+                "status": "aligned",
+                "mount_ra": 359.0,
+                "mount_dec": 10.0,
+                "timestamp": 10.0,
+                "session_id": session_id,
+            },
+            {
+                "status": "synced",
+                "mount_ra": 1.0,
+                "mount_dec": 20.0,
+                "timestamp": 20.0,
+                "session_id": session_id,
+            },
+        ]
+
+    def get_polar_alignment_logs(
+        self, session_id: str | None = None, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Return no polar alignment runs.
+
+        Returns
+        -------
+        logs : `list`
+            Always empty.
+        """
+        return []
+
+
+def _context() -> SimpleNamespace:
+    """Build the parts of a `ControlContext` the alignment history reads.
+
+    Returns
+    -------
+    context : `types.SimpleNamespace`
+        The log database and a target catalog that counts one target on
+        the newer night.
+    """
+    targets = SimpleNamespace(query=lambda detail: {"nights": {"2026-09-25": 1}})
+    return SimpleNamespace(logger_interface=_Logs(), astrometrics=SimpleNamespace(targets=targets))
+
+
+def test_the_mean_right_ascension_wraps_at_zero_hours() -> None:
+    """359 and 1 degrees average to 0, not 180."""
+    ra_deg, dec_deg = alignment_history.mean_position_deg([(359.0, 10.0), (1.0, 20.0)])
+    assert ra_deg == pytest.approx(0.0, abs=1e-9) or ra_deg == pytest.approx(360.0)
+    assert dec_deg == pytest.approx(15.0)
+
+
+def test_an_empty_night_has_no_mean_position() -> None:
+    """No solves give no mean."""
+    assert alignment_history.mean_position_deg([]) == (None, None)
+
+
+def test_nights_are_listed_with_their_mean_pointing_and_target_count() -> None:
+    """Each night has the app's camelCase summary and its mean pointing."""
+    reply = night_history.build_night_history(_context(), "alignment", limit=10)
+
+    assert reply["total"] == 2
+    newest, older = reply["sessions"]
+    assert newest["sessionId"] == "2026-09-25"
+    assert newest["syncCount"] == 2
+    assert newest["targetCount"] == 1
+    assert newest["avgErrorArcsec"] == pytest.approx(12.5)
+    assert newest["meanRaDeg"] % 360.0 == pytest.approx(0.0, abs=1e-9)
+    assert older["meanRaDeg"] is None
+    assert older["targetCount"] == 0
+
+
+def test_one_night_lists_its_attempts_in_time_order() -> None:
+    """A night's attempts come back in order; odd statuses read as aligned."""
+    reply = night_history.build_night_history(_context(), "alignment", session_id="2026-09-25")
+
+    assert [attempt["ra"] for attempt in reply["attempts"]] == [359.0, 1.0]
+    assert [attempt["status"] for attempt in reply["attempts"]] == ["aligned", "aligned"]
+    assert reply["polar_alignment"] is None
+
+
+def test_a_night_with_no_attempts_is_not_found() -> None:
+    """Asking for a night with nothing recorded raises `NotFoundError`."""
+    with pytest.raises(NotFoundError):
+        night_history.build_night_history(_context(), "alignment", session_id="2026-09-24")

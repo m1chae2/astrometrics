@@ -117,6 +117,14 @@ class AlignmentSessionSummary(BaseModel):
     polar_error_arcsec: float | None = Field(default=None, alias="polarErrorArcsec")
     polar_alt_error_arcsec: float | None = Field(default=None, alias="polarAltErrorArcsec")
     polar_az_error_arcsec: float | None = Field(default=None, alias="polarAzErrorArcsec")
+    mean_ra_deg: float | None = Field(
+        default=None,
+        alias="meanRaDeg",
+        description="Average right ascension of the night's solves, wrapped at 0/360 degrees.",
+    )
+    mean_dec_deg: float | None = Field(
+        default=None, alias="meanDecDeg", description="Average declination of the night's solves."
+    )
 
 
 class IndiStatus(BaseModel):

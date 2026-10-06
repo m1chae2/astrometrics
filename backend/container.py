@@ -239,15 +239,10 @@ class Container:
 
         self.execution_service = ExecutionService(wayfinder=self.wayfinder)
 
-        from astrometricslib import StarIdentifier
         from backend.services.observatory.alignment_service import AlignmentService
 
-        star_identifier = StarIdentifier(config=self.config_service)
         self.alignment_service = AlignmentService(
-            observatory_api=self.wayfinder.control,
-            imaging_service=self.imaging_service,
-            star_identifier=star_identifier,
-            logger_interface=self.job_repository,
+            observatory_api=self.wayfinder.control, logger_interface=self.job_repository
         )
         self.telescope_service._alignment_service = self.alignment_service
 

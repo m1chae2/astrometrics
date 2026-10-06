@@ -1,7 +1,8 @@
 """Purpose: `control.mount`, pointing and tracking.
 
-Description: Reads the mount's position and commands it: slew, sync,
-park, tracking, manual moves and the slew rate. It also computes the
+Description: Reads the mount's position and commands it: slew (and
+center by plate solving), sync, park, tracking, manual moves and the
+slew rate. It also computes the
 pointing correction for one plate-solve iteration and fits tonight's
 polar alignment error. Each command needs `MOUNT_CONTROL` (or, for a
 sync, `PLATE_SOLVE_ALIGNMENT`) to be `AUTHORITATIVE` in the delegation
@@ -48,24 +49,68 @@ class MountControl(ControlChild):
 
         return hardware_operations.mount_status(self._context, include)
 
-    def slew(self, destination: str | Target | SkyPosition) -> bool:
+    def slew(
+        self,
+        destination: str | Target | SkyPosition,
+        center: bool = False,
+        tolerance_arcsec: float | None = None,
+        max_iterations: int | None = None,
+    ) -> bool:
         """Slew the mount to a library target or a sky position.
+
+        With ``center=True`` the mount is then centered by plate solving:
+        take a short frame, solve it, and if the pointing error is above
+        `tolerance_arcsec`, sync the mount to the solved position and slew
+        again. Each round is recorded as an alignment attempt (see
+        `control.history.query(kind="alignment")`). `abort_motion` stops
+        the rounds.
 
         Parameters
         ----------
         destination : `str`, `Target` or `SkyPosition`
             A library target or its id (its plate-solved coordinates are
             used), or a position ``{"ra_deg": ..., "dec_deg": ...}``.
+        center : `bool`, optional
+            Refine the pointing by plate solving after the slew. Needs
+            `CAPTURE_ORCHESTRATION` and `PLATE_SOLVE_ALIGNMENT` as well as
+            `MOUNT_CONTROL`.
+        tolerance_arcsec : `float`, optional
+            Largest pointing error that counts as centered. Used only with
+            ``center=True``. 30 arcseconds by default.
+        max_iterations : `int`, optional
+            Most solve-and-correct rounds. Used only with ``center=True``.
+            3 by default.
 
         Returns
         -------
         success : `bool`
-            Whether the slew command was accepted.
+            Whether the slew command was accepted, or with
+            ``center=True``, whether the mount ended within the tolerance.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `tolerance_arcsec` or `max_iterations` is given without
+            ``center=True``.
         """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
+        from astrometricslib import InvalidArgumentError
+        from wayfindinglib.tasks.control_tasks import centering, hardware_operations
 
         position = hardware_operations.resolve_destination(self._context, destination)
-        return hardware_operations.slew(self._context, position)
+        if not center:
+            if tolerance_arcsec is not None or max_iterations is not None:
+                raise InvalidArgumentError(
+                    "tolerance_arcsec and max_iterations are used only with center=True."
+                )
+            return hardware_operations.slew(self._context, position)
+        target_name = destination if isinstance(destination, str) else getattr(destination, "id", None)
+        return centering.center_on(
+            self._context,
+            position,
+            tolerance_arcsec=tolerance_arcsec,
+            max_iterations=max_iterations,
+            target_name=target_name,
+        )
 
     def sync(self, position: SkyPosition) -> bool:
         """Tell the mount it is pointing at a plate-solved position.

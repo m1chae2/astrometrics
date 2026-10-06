@@ -116,8 +116,9 @@ def test_indi_interface_ignores_zero_delta_echo_during_sync() -> None:
     assert syncs[0]["delta_ra_arcsec"] == pytest.approx(21.2, abs=0.5)
 
 
-def test_alignment_service_polls_external_syncs() -> None:
-    """Verify AlignmentService drains sync events into records."""
+def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
+    """Verify AlignmentService drains sync events into recorded attempts."""
+    from astrometricslib import LoggerInterface
     from backend.services.observatory.alignment_service import AlignmentService
 
     driver_mock = MagicMock()
@@ -129,10 +130,13 @@ def test_alignment_service_polls_external_syncs() -> None:
             "delta_dec_arcsec": -8.3,
         }
     ]
+    driver_mock.drain_polar_alignment.return_value = None
     observatory_mock = MagicMock()
     observatory_mock.driver = driver_mock
 
-    service = AlignmentService(observatory_api=observatory_mock)
+    service = AlignmentService(
+        observatory_api=observatory_mock, logger_interface=LoggerInterface(str(tmp_path / "logs.db"))
+    )
     service.poll_external_syncs()
 
     attempts = service.get_attempts()
@@ -580,7 +584,9 @@ def test_alignment_service_session_queries_and_retrieval() -> None:
         }
     ]
 
-    service = AlignmentService(observatory_api=MagicMock(), logger_interface=logger_mock)
+    observatory_mock = MagicMock()
+    observatory_mock.history.query.return_value = {"sessions": [{"sessionId": "2026-09-24", "syncCount": 5}]}
+    service = AlignmentService(observatory_api=observatory_mock, logger_interface=logger_mock)
     sessions = service.list_sessions()
     assert len(sessions) == 1
     assert sessions[0]["sessionId"] == "2026-09-24"

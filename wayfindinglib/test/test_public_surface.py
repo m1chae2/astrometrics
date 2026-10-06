@@ -32,6 +32,7 @@ EXPECTED_EXPORTS = frozenset({
     "SimulatorIndiInterface",
     # Models.
     "CalibrationAdvisory",
+    "CaptureResult",
     "DeepCatalogEstimate",
     "DeepCatalogStatus",
     "DitherConfig",

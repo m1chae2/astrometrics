@@ -1,6 +1,6 @@
 """Purpose: Unit tests for CameraController's guide-image retrieval.
 
-Description: Verifies `get_guide_image` extracts plain `bytes` out of the
+Description: Verifies `get_last_image` extracts plain `bytes` out of the
 INDI BLOB vector property rather than returning the raw (unpicklable) SWIG
 object -- this is load-bearing now that the real `IndiInterface` runs in a
 separate process (`backend/services/infrastructure/indi_worker.py`) and its
@@ -50,37 +50,37 @@ class _FakeDevice:
         return self._blobs.get(name)
 
 
-def test_get_guide_image_returns_plain_bytes_from_ccd1() -> None:
+def test_get_last_image_returns_plain_bytes_from_ccd1() -> None:
     """A CCD1 frame comes back as `bytes`, not the raw BLOB element/vector."""
     frame = b"\xff\xd8 fake fits bytes"
     device = _FakeDevice({"CCD1": _FakeBlobVector([_FakeBlobElement(frame)])})
     controller = CameraController(client=None)
 
-    result = controller.get_guide_image(device)
+    result = controller.get_last_image(device)
 
     assert result == frame
     assert isinstance(result, bytes)
 
 
-def test_get_guide_image_falls_back_to_ccd2_when_ccd1_absent() -> None:
+def test_get_last_image_falls_back_to_ccd2_when_ccd1_absent() -> None:
     """CCD2 is used when the device has no CCD1 BLOB."""
     frame = b"second camera frame"
     device = _FakeDevice({"CCD2": _FakeBlobVector([_FakeBlobElement(frame)])})
     controller = CameraController(client=None)
 
-    assert controller.get_guide_image(device) == frame
+    assert controller.get_last_image(device) == frame
 
 
-def test_get_guide_image_returns_none_with_no_device() -> None:
+def test_get_last_image_returns_none_with_no_device() -> None:
     """A missing device returns None rather than raising."""
     controller = CameraController(client=None)
 
-    assert controller.get_guide_image(None) is None
+    assert controller.get_last_image(None) is None
 
 
-def test_get_guide_image_returns_none_with_no_blob() -> None:
+def test_get_last_image_returns_none_with_no_blob() -> None:
     """A device with neither CCD1 nor CCD2 registered returns None."""
     device = _FakeDevice({})
     controller = CameraController(client=None)
 
-    assert controller.get_guide_image(device) is None
+    assert controller.get_last_image(device) is None

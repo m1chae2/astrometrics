@@ -1187,7 +1187,7 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
         {"id": "default"},
     )
 
-    assert control.imaging.capture_image(1.0) is True
+    assert control.imaging.capture_image(0.01, register_job=False).frames_captured == 1
     assert control.guiding.expose(1.0) is True
     assert control.guiding.get_image() is None
     assert control.mount.sync(SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
@@ -1200,7 +1200,7 @@ def test_capture_image_and_mount_sync_refused_when_not_authoritative(control: Ob
     control.driver = SimulatorIndiInterface(config=control._context.config)
 
     with pytest.raises(PermissionDeniedError, match="CAPTURE_ORCHESTRATION"):
-        control.imaging.capture_image(1.0)
+        control.imaging.capture_image(1.0, register_job=False)
     with pytest.raises(PermissionDeniedError, match="AUTOGUIDING"):
         control.guiding.expose(1.0)
     with pytest.raises(PermissionDeniedError, match="PLATE_SOLVE_ALIGNMENT"):

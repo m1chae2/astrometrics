@@ -1,92 +1,88 @@
-"""Iterative plate-solving alignment loop for the telescope mount."""
+"""Purpose: Start and stop mount centering, and serve the alignment records.
+
+Description: Centering the mount on a target by plate solving is
+``control.mount.slew(destination, center=True)`` in the wayfinding
+library, which records each round as an alignment attempt. This service
+only runs that call on a background thread and stops it, lists the
+recorded nights through ``control.history.query(kind="alignment")``, and
+records the plate-solve syncs and polar alignment runs that another
+program (such as Ekos) sends to the mount.
+"""
 
 import logging
-import math
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import DATA_ERRORS, AstrometricsError, InvalidArgumentError
+from astrometricslib import InvalidArgumentError
 from wayfindinglib import MountPointingModel, ObservatoryControl, SkyPosition
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
 logger = logging.getLogger(__name__)
 
+CENTERING_MAX_ITERATIONS = 10
+"""Most plate-solve rounds one centering run makes."""
 
-@dataclass
-class AlignmentResult:
-    """Result from plate solving an alignment image."""
+RECENT_ATTEMPTS_SHOWN = 50
+"""How many recorded attempts the live status lists when no run is active."""
 
-    success: bool
-    ra: float = 0.0
-    dec: float = 0.0
-    error: str = ""
+ATTEMPT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
+"""The statuses an `AlignmentAttempt` can have."""
 
 
 class AlignmentService:
-    """Service for telescope alignment using iterative plate solving.
+    """Run mount centering in the background and report alignment records."""
 
-        Performs alignment by capturing images, plate solving with
-    astrometry.net,
-        syncing the telescope mount, and re-slewing until within accuracy
-    threshold.
-    """
+    def __init__(self, observatory_api: ObservatoryControl, logger_interface: Any = None) -> None:
+        """Keep the observatory control and the log database.
 
-    def __init__(
-        self,
-        observatory_api: ObservatoryControl,
-        imaging_service: Any = None,
-        star_identifier: Any = None,
-        logger_interface: Any = None,
-    ) -> None:
+        Parameters
+        ----------
+        observatory_api : `ObservatoryControl`
+            The Wayfinder's `control`, which runs the centering.
+        logger_interface : `LoggerInterface`, optional
+            The log database that holds the alignment records.
+        """
         self._observatory = observatory_api
-        self._imaging_service = imaging_service
-        self._star_identifier = star_identifier
         self._logger_interface = logger_interface
-        self.alignment_attempts: list[AlignmentAttempt] = []
-        self._alignment_active = False
         self._alignment_thread: threading.Thread | None = None
-        self._stop_flag = threading.Event()
-
-        # Alignment parameters (can be set via setters)
-        self.accuracy_threshold = 30.0  # arcseconds
-        self.settle_time = 1.5  # seconds
-        self.alignment_exposure = 1.0  # seconds
+        self._run_started_at: float | None = None
 
     def get_attempts(self) -> list[dict]:
-        """Get current alignment attempts list for frontend consumption.
+        """List the alignment attempts for the app's live status.
+
+        Since a centering run was started, these are the attempts recorded
+        from then on, with a ``solving`` entry while it runs. Before any
+        run, they are the most recent recorded attempts.
 
         Returns
         -------
         attempts : `list` [`dict`]
-            One dict per attempt with coordinate and delta keys.
+            One dict per attempt with coordinate and delta keys, oldest
+            first.
         """
-        if not self.alignment_attempts and self._logger_interface:
-            try:
-                logs = self._logger_interface.get_alignment_logs(limit=50)
-                for log in reversed(logs):
-                    self.alignment_attempts.append(
-                        AlignmentAttempt(
-                            status=log.get("status", "aligned"),
-                            delta_ra_arcsec=log.get("delta_ra_arcsec"),
-                            delta_dec_arcsec=log.get("delta_dec_arcsec"),
-                            ra=log.get("mount_ra"),
-                            dec=log.get("mount_dec"),
-                            pointing_error_arcsec=log.get("pointing_error_arcsec"),
-                            timestamp=log.get("timestamp"),
-                            target_name=log.get("target_name"),
-                        )
-                    )
-            except (sqlite3.Error, ValueError) as exc:
-                logger.debug("Failed loading alignment attempts from SQLite: %s", exc)
-
-        return [attempt.model_dump(by_alias=True) for attempt in self.alignment_attempts]
-
-    def clear_attempts(self) -> None:
-        """Clear alignment attempt history."""
-        self.alignment_attempts = []
+        if not self._logger_interface:
+            return []
+        rows = list(reversed(self._logger_interface.get_alignment_logs(limit=RECENT_ATTEMPTS_SHOWN)))
+        if self._run_started_at is not None:
+            rows = [row for row in rows if (row.get("timestamp") or 0) >= self._run_started_at]
+        attempts = [
+            AlignmentAttempt(
+                status=row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
+                delta_ra_arcsec=row.get("delta_ra_arcsec"),
+                delta_dec_arcsec=row.get("delta_dec_arcsec"),
+                ra=row.get("mount_ra"),
+                dec=row.get("mount_dec"),
+                pointing_error_arcsec=row.get("pointing_error_arcsec"),
+                timestamp=row.get("timestamp"),
+                target_name=row.get("target_name"),
+            )
+            for row in rows
+        ]
+        if self.is_active():
+            attempts.append(AlignmentAttempt(status="solving"))
+        return [attempt.model_dump(by_alias=True) for attempt in attempts]
 
     def get_polar_alignment(self) -> dict[str, Any]:
         """Get current or latest polar alignment assistant status.
@@ -133,47 +129,16 @@ class AlignmentService:
         }
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        """List distinct past observing sessions that recorded alignment data.
+        """List the nights that recorded alignment data, newest first.
 
         Returns
         -------
         sessions : `list` [`dict` [`str`, `Any`]]
-            List of session summaries.
+            One summary per night, from
+            ``control.history.query(kind="alignment")``.
         """
-        if self._logger_interface:
-            try:
-                raw_sessions = self._logger_interface.get_alignment_sessions()
-
-                # Count targets per session date from the target library,
-                # when it is available
-                try:
-                    session_target_counts = self._observatory.astrometrics.targets.query(detail="nights")[
-                        "nights"
-                    ]
-                except (AstrometricsError, KeyError, sqlite3.Error) as target_count_err:
-                    logger.debug("Error computing session target counts: %s", target_count_err)
-                    session_target_counts = {}
-
-                sessions = []
-                for s in raw_sessions:
-                    sdate = s.get("session_date")
-                    t_count = session_target_counts.get(sdate, 0)
-                    sessions.append({
-                        "sessionId": s.get("session_id"),
-                        "sessionDate": sdate,
-                        "syncCount": s.get("sync_count", 0),
-                        "targetCount": t_count,
-                        "startTime": s.get("start_time"),
-                        "endTime": s.get("end_time"),
-                        "avgErrorArcsec": s.get("avg_error_arcsec"),
-                        "polarErrorArcsec": s.get("polar_error_arcsec"),
-                        "polarAltErrorArcsec": s.get("polar_alt_error_arcsec"),
-                        "polarAzErrorArcsec": s.get("polar_az_error_arcsec"),
-                    })
-                return sessions
-            except (sqlite3.Error, ValueError, TypeError) as exc:
-                logger.debug("Error listing alignment sessions: %s", exc)
-        return []
+        reply = self._observatory.history.query(kind="alignment", limit=50, register_job=False)
+        return reply["sessions"]
 
     def get_session_data(self, session_id: str) -> dict[str, Any]:
         """Fetch alignment attempts and polar alignment data for a session.
@@ -307,47 +272,23 @@ class AlignmentService:
         if hasattr(driver, "drain_external_syncs"):
             try:
                 sync_records = driver.drain_external_syncs()
+                driver_status = getattr(driver, "status", None)
+                target_name = driver_status.get("TARGET_NAME") if isinstance(driver_status, dict) else None
+                if not isinstance(target_name, str):
+                    target_name = None
                 for record in sync_records:
-                    status = record.get("status", "aligned")
-                    delta_ra = record.get("delta_ra_arcsec")
-                    delta_dec = record.get("delta_dec_arcsec")
-                    ra_val = record.get("ra")
-                    dec_val = record.get("dec")
-                    pointing_err = record.get("pointing_error_arcsec")
-                    timestamp = record.get("time", time.time())
-                    driver_status = getattr(driver, "status", None)
-                    target_name = (
-                        driver_status.get("TARGET_NAME") if isinstance(driver_status, dict) else None
-                    )
-                    if not isinstance(target_name, str):
-                        target_name = None
-
-                    attempt = AlignmentAttempt(
-                        status=status,
-                        delta_ra_arcsec=delta_ra,
-                        delta_dec_arcsec=delta_dec,
-                        ra=ra_val,
-                        dec=dec_val,
-                        pointing_error_arcsec=pointing_err,
-                        timestamp=timestamp,
-                        target_name=target_name,
-                    )
-                    self.alignment_attempts.append(attempt)
-                    if self._logger_interface:
-                        try:
-                            record_payload = {
-                                "status": status,
-                                "delta_ra_arcsec": delta_ra,
-                                "delta_dec_arcsec": delta_dec,
-                                "pointing_error_arcsec": pointing_err,
-                                "timestamp": timestamp,
-                                "ra": ra_val,
-                                "dec": dec_val,
-                                "target_name": target_name,
-                            }
-                            self._logger_interface.record_alignment_attempt(record_payload)
-                        except sqlite3.Error as log_err:
-                            logger.debug("Failed to record alignment attempt in SQLite: %s", log_err)
+                    if not self._logger_interface:
+                        continue
+                    self._logger_interface.record_alignment_attempt({
+                        "status": record.get("status", "aligned"),
+                        "delta_ra_arcsec": record.get("delta_ra_arcsec"),
+                        "delta_dec_arcsec": record.get("delta_dec_arcsec"),
+                        "pointing_error_arcsec": record.get("pointing_error_arcsec"),
+                        "timestamp": record.get("time", time.time()),
+                        "ra": record.get("ra"),
+                        "dec": record.get("dec"),
+                        "target_name": target_name,
+                    })
             except (sqlite3.Error, ValueError) as exc:
                 logger.debug("Error polling external syncs: %s", exc)
 
@@ -360,142 +301,8 @@ class AlignmentService:
             except sqlite3.Error as p_err:
                 logger.debug("Error polling polar alignment: %s", p_err)
 
-    def solve_image(self, image_path: str) -> AlignmentResult:
-        """Solves the given image using identifyStars (Astrometry.
-
-        net). Returns the center RA/DEC coordinates.
-
-        Returns
-        -------
-        result : `AlignmentResult`
-            The solved center RA/DEC on success, or a result with
-            ``success=False`` and an ``error`` message on failure.
-        """
-        try:
-            if not self._star_identifier:
-                return AlignmentResult(success=False, error="StarIdentifier not configured")
-
-            # Only need WCS, skip SIMBAD for speed during alignment
-            _, wcs = self._star_identifier.process_image(image_path, attempt_plate_solving=True)
-
-            if not wcs:
-                return AlignmentResult(success=False, error="Solver failed to find solution")
-
-            # Use WCS reference point (CRVAL) as image center coordinates
-            ra = wcs.wcs.crval[0]
-            dec = wcs.wcs.crval[1]
-
-            return AlignmentResult(success=True, ra=ra, dec=dec)
-
-        except (AstrometricsError, OSError, *DATA_ERRORS) as e:
-            logger.warning("Plate solving error: %s", e)
-            return AlignmentResult(success=False, error=str(e))
-
-    def _alignment_loop(self, target_ra: float, target_dec: float):  # ruff: ignore[missing-return-type-private-function]
-        """Run the alignment loop in a background thread.
-
-        Iteratively captures, solves, syncs, and re-slews until within
-        accuracy threshold.
-        """
-        max_attempts = 10
-        attempt_count = 0
-
-        while not self._stop_flag.is_set() and attempt_count < max_attempts:
-            attempt_count += 1
-
-            # Add a "solving" status attempt
-            solving_attempt = AlignmentAttempt(status="solving")
-            self.alignment_attempts.append(solving_attempt)
-
-            try:
-                # Wait for settle time
-                time.sleep(self.settle_time)
-
-                # Capture alignment image
-                logger.info("Capturing alignment image (attempt %s)", attempt_count)
-
-                if not self._imaging_service:
-                    logger.error("ImagingService not initialized in AlignmentService")
-                    solving_attempt.status = "failed"
-                    break
-
-                image_result = self._imaging_service.capture_light_frame(
-                    exposure=self.alignment_exposure,
-                    iso=800,
-                    gain=None,  # Default ISO
-                )
-
-                if not image_result or "path" not in image_result:
-                    logger.error("Failed to capture alignment image")
-                    solving_attempt.status = "failed"
-                    continue
-
-                # Plate solve
-                logger.info("Plate solving alignment image")
-                solve_result = self.solve_image(image_result["path"])
-
-                if not solve_result.success:
-                    logger.error("Plate solve failed: %s", solve_result.error)
-                    solving_attempt.status = "failed"
-                    continue
-
-                # Calculate coordinate delta (arcseconds). solve_result.ra
-                # (from the WCS solution's CRVAL) and target_ra are both
-                # decimal degrees, so no hours-to-degrees factor applies here
-                # -- that factor is only needed when RA is expressed in time
-                # units, which it isn't at this point in the pipeline.
-                # The RA difference is wrapped into -180..180 degrees so a
-                # target near 0h/24h does not read as a ~360 degree error,
-                # and scaled by cos(dec) so it is a distance on the sky.
-                d_ra_deg = (solve_result.ra - target_ra + 180.0) % 360.0 - 180.0
-                ra_error_arcsec = d_ra_deg * 3600.0 * math.cos(math.radians(target_dec))
-                dec_error_arcsec = (solve_result.dec - target_dec) * 3600.0
-
-                solving_attempt.delta_ra_arcsec = ra_error_arcsec
-                solving_attempt.delta_dec_arcsec = dec_error_arcsec
-
-                # Check accuracy
-                error_magnitude = (ra_error_arcsec**2 + dec_error_arcsec**2) ** 0.5
-
-                if error_magnitude < self.accuracy_threshold:
-                    # Success!
-                    logger.info("Alignment successful! Error: %.2f arcsec", error_magnitude)
-                    solving_attempt.status = "aligned"
-                    self._alignment_active = False
-                    break
-                elif error_magnitude < self.accuracy_threshold * 2:
-                    # Close but not quite there
-                    solving_attempt.status = "warning"
-                else:
-                    # Still far off, but we'll sync and retry
-                    solving_attempt.status = "warning"
-
-                # Sync telescope to solved coordinates. Both the solve and
-                # SkyPosition use degrees.
-                logger.info(
-                    "Syncing to solved coordinates: RA=%s deg, DEC=%s", solve_result.ra, solve_result.dec
-                )
-                self._observatory.mount.sync(
-                    SkyPosition(ra_deg=solve_result.ra % 360.0, dec_deg=solve_result.dec)
-                )
-
-                # Re-slew to target
-                logger.info("Re-slewing to target: RA=%s deg, DEC=%s", target_ra, target_dec)
-                self._observatory.mount.slew(SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec))
-
-            except Exception:
-                logger.exception("Alignment attempt %s failed", attempt_count)
-                solving_attempt.status = "failed"
-
-        if attempt_count >= max_attempts:
-            logger.warning("Alignment max attempts reached")
-
-        self._alignment_active = False
-
     def start_alignment(self, target_ra: float, target_dec: float) -> bool:
-        """Start the alignment process for the given target coordinates.
-
-        Runs in a background thread.
+        """Start centering the mount on a sky position, in the background.
 
         Parameters
         ----------
@@ -507,58 +314,59 @@ class AlignmentService:
         Returns
         -------
         started : `bool`
-            `True` if the alignment thread was started, `False` if
-            alignment was already active.
+            `True` if the centering thread was started, `False` if a run
+            is already active.
         """
-        if self._alignment_active:
+        if self.is_active():
             logger.warning("Alignment already in progress")
             return False
+        position = SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec)
+        self._run_started_at = time.time()
 
-        # Clear previous attempts
-        self.clear_attempts()
+        def run() -> None:
+            """Center the mount; the top of a background thread."""
+            try:
+                centered = self._observatory.mount.slew(
+                    position, center=True, max_iterations=CENTERING_MAX_ITERATIONS
+                )
+                logger.info(
+                    "Centering on RA=%s, DEC=%s finished; centered: %s", target_ra, target_dec, centered
+                )
+            except Exception:  # the top of a background thread: log it, never lose it
+                logger.exception("Centering on RA=%s, DEC=%s failed", target_ra, target_dec)
 
-        # Reset stop flag
-        self._stop_flag.clear()
-
-        # Start alignment thread
-        self._alignment_active = True
-        self._alignment_thread = threading.Thread(
-            target=self._alignment_loop, args=(target_ra, target_dec), daemon=True
-        )
+        self._alignment_thread = threading.Thread(target=run, name="centering", daemon=True)
         self._alignment_thread.start()
-
         logger.info("Started alignment for RA=%s, DEC=%s", target_ra, target_dec)
         return True
 
     def cancel_alignment(self) -> bool:
-        """Cancel the current alignment process.
+        """Stop the current centering run.
+
+        Stops the mount through `control.mount.abort_motion`, which also
+        ends the centering loop before its next step.
 
         Returns
         -------
         cancelled : `bool`
-            `True` once the alignment thread has been signalled to
-            stop and joined; `False` if no alignment was active.
+            `True` once the run has been stopped and its thread joined;
+            `False` if no run was active.
         """
-        if not self._alignment_active:
+        if not self.is_active():
             logger.warning("No alignment in progress")
             return False
-
         logger.info("Cancelling alignment")
-        self._stop_flag.set()
-        self._alignment_active = False
-
-        # Wait for thread to finish
-        if self._alignment_thread and self._alignment_thread.is_alive():
+        self._observatory.mount.abort_motion()
+        if self._alignment_thread is not None:
             self._alignment_thread.join(timeout=5.0)
-
         return True
 
     def is_active(self) -> bool:
-        """Check if alignment is currently active.
+        """Check whether a centering run is active.
 
         Returns
         -------
         active : `bool`
-            `True` if an alignment loop is currently running.
+            `True` if a centering thread is running.
         """
-        return self._alignment_active
+        return self._alignment_thread is not None and self._alignment_thread.is_alive()

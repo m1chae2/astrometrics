@@ -1,5 +1,7 @@
 """Camera and guiding controller for INDI devices."""
 
+from typing import Any
+
 
 class CameraController:
     """Manages camera exposure and mount pulse-guiding operations via INDI."""
@@ -87,13 +89,13 @@ class CameraController:
             return True
         return False
 
-    def get_guide_image(self, guide_camera_device) -> bytes | None:  # ruff: ignore[missing-type-function-argument]
-        """Retrieve the last image frame from the guide camera, as raw bytes.
+    def get_last_image(self, camera_device: Any) -> bytes | None:
+        """Retrieve the last image frame a camera sent, as raw bytes.
 
         Parameters
         ----------
-        guide_camera_device
-            INDI device handle for the guide camera.
+        camera_device : `PyIndi.BaseDevice` or `None`
+            INDI device handle for the main or the guide camera.
 
         Returns
         -------
@@ -105,12 +107,12 @@ class CameraController:
             value can cross a process boundary (e.g. to the caller running
             in a different process than this driver).
         """
-        if not guide_camera_device:
+        if not camera_device:
             return None
         # BaseDevice has no getBlobs() (plural) -- BLOB properties are
         # looked up by name like every other property type
         # (getSwitch/getNumber/getText).
-        blob_vector = guide_camera_device.getBLOB("CCD1") or guide_camera_device.getBLOB("CCD2")
+        blob_vector = camera_device.getBLOB("CCD1") or camera_device.getBLOB("CCD2")
         if not blob_vector:
             return None
         return bytes(blob_vector[0].getblobdata())

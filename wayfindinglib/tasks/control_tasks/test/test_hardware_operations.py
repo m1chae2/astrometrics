@@ -6,6 +6,7 @@ each command checks its capability in the delegation policy, then calls
 the right driver; each read calls its driver with no check.
 """
 
+import threading
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -66,6 +67,7 @@ class _FakeManager:
         astrometrics: Any = None,
     ) -> None:
         """Hold the given drivers, configuration and policy."""
+        self.motion_stop = threading.Event()
         self.astrometrics = astrometrics if astrometrics is not None else MagicMock()
         self.driver = driver
         self.mount_driver = mount_driver
@@ -307,6 +309,7 @@ def test_abort_motion_delegates_to_mount_driver(mocker: MockerFixture) -> None:
 
     assert ops.abort_motion(manager) is True
     mount_driver.abort_motion.assert_called_once()
+    assert manager.motion_stop.is_set(), "abort must also stop a centering loop"
 
 
 def test_pulse_delegates_to_mount_driver(mocker: MockerFixture) -> None:

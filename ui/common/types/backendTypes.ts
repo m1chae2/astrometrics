@@ -572,6 +572,10 @@ export interface AlignmentSessionSummary {
   polarErrorArcsec?: number | null;
   polarAltErrorArcsec?: number | null;
   polarAzErrorArcsec?: number | null;
+  /** Average right ascension of the night's solves, wrapped at 0/360 degrees. */
+  meanRaDeg?: number | null;
+  /** Average declination of the night's solves. */
+  meanDecDeg?: number | null;
 }
 
 /**

@@ -196,7 +196,8 @@ class TargetImagingExecutor:
                     # Capture Sequence
                     # Initiate background job and wait for its
                     # completion via JobService
-                    job_id = await self._imaging_service.capture_sequence(
+                    job_id = await asyncio.to_thread(
+                        self._imaging_service.capture_sequence,
                         target_id=seq["target_name"],
                         exposure_seconds=exposure,
                         count=count,

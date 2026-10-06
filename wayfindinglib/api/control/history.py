@@ -3,7 +3,8 @@
 Description: Answers questions about recorded observing nights (the
 capture, guiding and sky-coverage analyses, findings that recur, Ekos
 session records, guiding runs and the pointing model), reports how the
-session in progress is going, matches each light frame to the guide error
+session in progress is going, lists the plate-solve alignment attempts
+of each night, matches each light frame to the guide error
 during its exposure, and works out the performance limits of the active
 equipment. Only `save_ekos_session_context` writes. The analyses live in
 `tasks.control_tasks.night_analysis` and `night_history`.
@@ -33,6 +34,7 @@ HistoryKind = Literal[
     "ekos_sessions",
     "guiding_runs",
     "pointing_model",
+    "alignment",
 ]
 """The kinds of question `HistoryControl.query` answers."""
 
@@ -66,13 +68,16 @@ class HistoryControl(ControlChild):
             `session_id`, otherwise one summary row per recent night),
             ``"sky_coverage"`` (all nights; slow), ``"recurring_issues"``,
             ``"ekos_sessions"`` (a list, or one session with
-            `ekos_file_id`), ``"guiding_runs"`` or ``"pointing_model"``
-            (needs `session_id`).
+            `ekos_file_id`), ``"guiding_runs"``, ``"pointing_model"``
+            (needs `session_id`), or ``"alignment"`` (the plate solves that
+            checked the mount's pointing: one summary per night, with the
+            night's mean pointing, or one night's attempts with
+            `session_id`).
         session_id : `str`, optional
             An observing night, named for the local date on which it began,
             for example ``"2026-09-24"``. Used by ``capture``,
-            ``guiding``, ``ekos_sessions``, ``guiding_runs`` and
-            ``pointing_model``.
+            ``guiding``, ``ekos_sessions``, ``guiding_runs``,
+            ``pointing_model`` and ``alignment``.
         ekos_file_id : `str`, optional
             One Ekos session's id. Used only by ``ekos_sessions``.
         include : `list` [`str`], optional

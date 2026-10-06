@@ -37,6 +37,7 @@ KINDS = (
     "ekos_sessions",
     "guiding_runs",
     "pointing_model",
+    "alignment",
 )
 """The kinds of question `build_night_history` answers."""
 
@@ -48,6 +49,7 @@ KIND_ARGUMENTS = {
     "ekos_sessions": ("session_id", "ekos_file_id", "include"),
     "guiding_runs": ("session_id",),
     "pointing_model": ("session_id",),
+    "alignment": ("session_id",),
 }
 """The optional arguments each kind uses. Any other one is refused."""
 
@@ -357,9 +359,10 @@ def build_night_history(
     Notes
     -----
     The helpers also raise: `NotFoundError` when nothing is recorded for
-    the night or Ekos session asked about, `InvalidArgumentError` when a
-    required argument is missing, `ConflictError` for ``"sky_coverage"``
-    when no telescope and camera are active, and `ConfigurationError` for
+    the night, Ekos session or alignment night asked about,
+    `InvalidArgumentError` when a required argument is missing,
+    `ConflictError` for ``"sky_coverage"`` when no telescope and camera
+    are active, and `ConfigurationError` for
     ``"pointing_model"`` when no observer location is known.
     """
     if kind not in KINDS:
@@ -417,6 +420,12 @@ def _answer(
         return {"kind": kind, "total": len(runs), "shown": len(shown), "runs": to_plain(shown)}
     if kind == "ekos_sessions":
         return _ekos(context, session_id, ekos_file_id, include, limit)
+    if kind == "alignment":
+        from wayfindinglib.tasks.control_tasks import alignment_history
+
+        if session_id:
+            return alignment_history.alignment_night(context, session_id)
+        return alignment_history.alignment_nights(context, limit)
     return _pointing_model(context, session_id)
 
 

@@ -262,8 +262,8 @@ class _SimulatedCameraController:
         """
         return True
 
-    def get_guide_image(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Return None: the simulator has no real guide-camera image data.
+    def get_last_image(self, device: object) -> None:
+        """Return None: the simulator has no real camera image data.
 
         Returns
         -------

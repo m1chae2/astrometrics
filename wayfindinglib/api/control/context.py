@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from typing import TYPE_CHECKING, Any
 
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
@@ -103,6 +104,8 @@ class ControlContext:
         self._weather_driver: WeatherDriver | None = None
         self._remote_transfer_driver: RemoteTransferDriver | None = None
         self._indi_diagnostics: IndiDiagnostics | None = None
+        self.motion_stop = threading.Event()
+        """Set by `control.mount.abort_motion` to stop a centering loop."""
 
     # -- Shared handles --------------------------------------------------
 

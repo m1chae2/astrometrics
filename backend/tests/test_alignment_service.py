@@ -1,60 +1,46 @@
-"""Purpose: Unit tests for AlignmentService's iterative alignment loop.
+"""Purpose: Unit tests for the backend's thin AlignmentService.
 
-Description: Verifies get_attempts()'s alias-keyed dict shape, the
-solving/aligned/warning/failed status transitions _alignment_loop produces, and
--- the reason this file exists -- that the loop calls real `control.mount`
-methods with a `SkyPosition` in degrees, the unit the plate solve gives, at the
-mount command boundary. A bare MagicMock() observatory double would silently
-accept a call to a nonexistent method, so mount interaction tests use an
-autospec'd mock that raises AttributeError like the real class would.
+Description: The centering loop itself is `control.mount.slew(center=True)`
+in the wayfinding library, tested in
+`wayfindinglib/tasks/control_tasks/test/test_centering.py`. Here the
+backend only starts and stops that call on a thread, lists the recorded
+attempts in their camelCase form, lists the nights through
+`control.history.query(kind="alignment")`, and parses the coordinate
+strings of the ``telescope:alignment_start`` call.
 """
 
-import math
-from types import SimpleNamespace
+import threading
+from typing import Any
 from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
 from astrometricslib import InvalidArgumentError
-from backend.services.observatory.alignment_service import AlignmentService
-from wayfindinglib import ObservatoryControl
+from backend.services.observatory.alignment_service import CENTERING_MAX_ITERATIONS, AlignmentService
+from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.mount import MountControl
-from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
 
-class _StubImagingService:
-    """Returns a fixed fake image path for every capture."""
+class _Logs:
+    """A stand-in log database holding two recorded attempts."""
 
-    def capture_light_frame(self, exposure, iso, gain):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return {"path": "/fake/alignment.fits"}
+    def get_alignment_logs(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return the attempts, newest first.
 
-
-class _EmptyCaptureImagingService:
-    """Simulates a capture that fails to produce an image path."""
-
-    def capture_light_frame(self, exposure, iso, gain):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return {}
-
-
-class _StubStarIdentifier:
-    """Returns a fixed solved RA/Dec (decimal degrees) via a fake WCS."""
-
-    def __init__(self, solved_ra_deg: float, solved_dec_deg: float):  # ruff: ignore[missing-return-type-special-method]
-        self._wcs = SimpleNamespace(wcs=SimpleNamespace(crval=[solved_ra_deg, solved_dec_deg]))
-
-    def process_image(self, image_path, attempt_plate_solving=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return None, self._wcs
-
-
-class _FailingStarIdentifier:
-    """Always fails to solve."""
-
-    def process_image(self, image_path, attempt_plate_solving=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return None, None
+        Returns
+        -------
+        logs : `list` [`dict` [`str`, `Any`]]
+            Two rows, the newer one with an old status name.
+        """
+        return [
+            {"status": "synced", "delta_ra_arcsec": 3.0, "mount_ra": 11.0, "timestamp": 200.0},
+            {"status": "warning", "delta_ra_arcsec": 1.5, "delta_dec_arcsec": -2.5, "timestamp": 100.0},
+        ]
 
 
 def _autospec_control() -> MagicMock:
-    """Build an autospec'd `ObservatoryControl` with an autospec'd `mount`.
+    """Build an autospec'd `ObservatoryControl` with autospec'd children.
 
     Returns
     -------
@@ -64,309 +50,63 @@ def _autospec_control() -> MagicMock:
     """
     observatory = create_autospec(ObservatoryControl, instance=True)
     observatory.mount = create_autospec(MountControl, instance=True)
+    observatory.history = create_autospec(HistoryControl, instance=True)
     return observatory
 
 
-def _make_service(observatory=None, imaging_service=None, star_identifier=None) -> AlignmentService:  # ruff: ignore[missing-type-function-argument]
-    """Build an AlignmentService with settle_time zeroed for fast tests.
+def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
+    """The recorded attempts come back camelCase, oldest first."""
+    service = AlignmentService(observatory_api=_autospec_control(), logger_interface=_Logs())
 
-    Returns
-    -------
-    service : `AlignmentService`
-        A service instance ready for direct ``_alignment_loop`` calls.
-    """
-    service = AlignmentService(
-        observatory_api=(observatory if observatory is not None else _autospec_control()),
-        imaging_service=imaging_service,
-        star_identifier=star_identifier,
-    )
-    service.settle_time = 0.0
-    return service
+    attempts = service.get_attempts()
+
+    assert [attempt["timestamp"] for attempt in attempts] == [100.0, 200.0]
+    assert attempts[0]["deltaRaArcsec"] == pytest.approx(1.5)
+    assert attempts[0]["deltaDecArcsec"] == pytest.approx(-2.5)
+    assert attempts[1]["status"] == "aligned"
 
 
-def test_get_attempts_returns_alias_keyed_dicts() -> None:
-    """Verify get_attempts() serializes with the camelCase wire aliases."""
-    service = _make_service()
-    service.alignment_attempts = [
-        AlignmentAttempt(status="aligned", deltaRaArcsec=1.5, deltaDecArcsec=-2.5),
-    ]
-    assert service.get_attempts() == [
-        {
-            "status": "aligned",
-            "deltaRaArcsec": 1.5,
-            "deltaDecArcsec": -2.5,
-            "ra": None,
-            "dec": None,
-            "pointingErrorArcsec": None,
-            "timestamp": None,
-            "targetName": None,
-            "sessionId": None,
-        }
-    ]
+def test_list_sessions_reads_the_alignment_history() -> None:
+    """The nights come from `control.history.query(kind="alignment")`."""
+    observatory = _autospec_control()
+    observatory.history.query.return_value = {"sessions": [{"sessionId": "2026-09-25"}]}
+    service = AlignmentService(observatory_api=observatory)
+
+    assert service.list_sessions() == [{"sessionId": "2026-09-25"}]
+    observatory.history.query.assert_called_once_with(kind="alignment", limit=50, register_job=False)
 
 
-def test_clear_attempts_empties_the_list() -> None:
-    """Verify clear_attempts() resets the attempt history."""
-    service = _make_service()
-    service.alignment_attempts = [AlignmentAttempt(status="solving")]
-    service.clear_attempts()
-    assert service.alignment_attempts == []
+def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
+    """The centering call runs on a thread, and cancel stops the mount."""
+    observatory = _autospec_control()
+    released = threading.Event()
+    observatory.mount.slew.side_effect = lambda *args, **kwargs: released.wait(timeout=5.0)
+    observatory.mount.abort_motion.side_effect = lambda: released.set()
+    service = AlignmentService(observatory_api=observatory, logger_interface=_Logs())
 
-
-def test_is_active_reflects_internal_flag() -> None:
-    """Verify is_active() mirrors the private _alignment_active flag."""
-    service = _make_service()
-    assert service.is_active() is False
-    service._alignment_active = True
+    assert service.start_alignment(target_ra=370.0, target_dec=20.0) is True
     assert service.is_active() is True
-
-
-def test_solve_image_without_star_identifier_fails() -> None:
-    """Verify solve_image() fails cleanly when unconfigured."""
-    service = _make_service(star_identifier=None)
-    result = service.solve_image("/some/image.fits")
-    assert result.success is False
-    assert "StarIdentifier not configured" in result.error
-
-
-def test_solve_image_returns_wcs_center_on_success() -> None:
-    """Verify solve_image() reports the WCS CRVAL as the solved center."""
-    service = _make_service(star_identifier=_StubStarIdentifier(180.0, 45.0))
-    result = service.solve_image("/some/image.fits")
-    assert result.success is True
-    assert result.ra == pytest.approx(180.0)
-    assert result.dec == pytest.approx(45.0)
-
-
-def test_solve_image_fails_when_solver_returns_no_wcs() -> None:
-    """Verify solve_image() reports failure when the solver finds nothing."""
-    service = _make_service(star_identifier=_FailingStarIdentifier())
-    result = service.solve_image("/some/image.fits")
-    assert result.success is False
-
-
-def test_alignment_loop_no_imaging_service_records_one_failed_attempt() -> None:
-    """Verify a missing ImagingService fails fast without retrying."""
-    service = _make_service(imaging_service=None, star_identifier=_StubStarIdentifier(10.0, 20.0))
-    service._alignment_loop(target_ra=10.0, target_dec=20.0)
-    attempts = service.get_attempts()
-    assert len(attempts) == 1
-    assert attempts[0]["status"] == "failed"
-
-
-def test_alignment_loop_capture_failure_retries_to_max_attempts() -> None:
-    """Verify a capture that never returns a path retries 10 times."""
-    service = _make_service(
-        imaging_service=_EmptyCaptureImagingService(),
-        star_identifier=_StubStarIdentifier(10.0, 20.0),
-    )
-    service._alignment_loop(target_ra=10.0, target_dec=20.0)
-    attempts = service.get_attempts()
-    assert len(attempts) == 10
-    assert all(attempt["status"] == "failed" for attempt in attempts)
-
-
-def test_alignment_loop_solve_failure_records_failed_status() -> None:
-    """Verify a solver that never finds a WCS records failed attempts."""
-    service = _make_service(
-        imaging_service=_StubImagingService(),
-        star_identifier=_FailingStarIdentifier(),
-    )
-    service._alignment_loop(target_ra=10.0, target_dec=20.0)
-    attempts = service.get_attempts()
-    assert len(attempts) == 10
-    assert all(attempt["status"] == "failed" for attempt in attempts)
-
-
-def test_alignment_loop_within_threshold_reports_aligned_and_stops() -> None:
-    """Verify a solve within accuracy_threshold reports aligned and breaks."""
-    target_ra, target_dec = 180.0, 45.0
-    # 1 arcsec off in each axis -- well within the 30" default threshold.
-    solved_ra = target_ra + (1.0 / 3600.0)
-    solved_dec = target_dec + (1.0 / 3600.0)
-
-    observatory = _autospec_control()
-    service = _make_service(
-        observatory=observatory,
-        imaging_service=_StubImagingService(),
-        star_identifier=_StubStarIdentifier(solved_ra, solved_dec),
-    )
-    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
-
-    attempts = service.get_attempts()
-    assert len(attempts) == 1
-    assert attempts[0]["status"] == "aligned"
-    assert service.is_active() is False
-    # Aligned on the first attempt means no sync/re-slew was ever issued.
-    observatory.mount.sync.assert_not_called()
-    observatory.mount.slew.assert_not_called()
-
-
-def test_alignment_loop_computes_arcsec_delta_without_hours_factor() -> None:
-    """Verify the reported arcsec delta has no hours-to-degrees factor.
-
-    Both solve_result.ra and target_ra are already decimal degrees at
-    this point in the pipeline, so no *15 hours-to-degrees factor
-    belongs in this calculation (see module docstring). The RA delta is
-    a distance on the sky, so it is scaled by cos(dec).
-    """
-    target_ra, target_dec = 100.0, 20.0
-    solved_ra = target_ra + 0.01  # 0.01 deg = 36 arcsec
-    solved_dec = target_dec + 0.02  # 0.02 deg = 72 arcsec
-
-    service = _make_service(
-        imaging_service=_StubImagingService(),
-        star_identifier=_StubStarIdentifier(solved_ra, solved_dec),
-    )
-    service.accuracy_threshold = 1.0  # force out of range so the loop records the delta and stops fast
-    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
-
-    first_attempt = service.get_attempts()[0]
-    # 0.01 deg of RA is 36 arcsec of coordinate difference, or 36 * cos(20 deg)
-    # arcsec of distance on the sky.
-    assert first_attempt["deltaRaArcsec"] == pytest.approx(36.0 * math.cos(math.radians(target_dec)))
-    assert first_attempt["deltaDecArcsec"] == pytest.approx(72.0)
-
-
-@pytest.mark.parametrize(
-    ("target_ra", "solved_ra", "expected_delta_deg"),
-    [
-        (359.995, 0.005, 0.01),  # solution just east of 0h: wraps forward
-        (0.005, 359.995, -0.01),  # solution just west of 0h: wraps backward
-    ],
-)
-def test_alignment_loop_wraps_ra_across_zero_hours(
-    target_ra: float, solved_ra: float, expected_delta_deg: float
-) -> None:
-    """Verify an RA delta across 0h/24h is small, not about 360 degrees."""
-    target_dec = 0.0
-    service = _make_service(
-        imaging_service=_StubImagingService(),
-        star_identifier=_StubStarIdentifier(solved_ra, target_dec),
-    )
-    service.accuracy_threshold = 1.0
-    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
-
-    first_attempt = service.get_attempts()[0]
-    assert first_attempt["deltaRaArcsec"] == pytest.approx(expected_delta_deg * 3600.0)
-
-
-def test_alignment_loop_shrinks_ra_delta_near_the_pole() -> None:
-    """Verify one degree of RA at high declination is a short sky distance."""
-    target_ra, target_dec = 10.0, 80.0
-    solved_ra = target_ra + 1.0  # 1 degree of RA at dec 80 is ~0.17 degrees of sky
-    service = _make_service(
-        imaging_service=_StubImagingService(),
-        star_identifier=_StubStarIdentifier(solved_ra, target_dec),
-    )
-    service.accuracy_threshold = 1.0
-    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
-
-    first_attempt = service.get_attempts()[0]
-    assert first_attempt["deltaRaArcsec"] == pytest.approx(3600.0 * math.cos(math.radians(80.0)))
-
-
-def test_alignment_loop_out_of_range_syncs_and_reslews_in_hours() -> None:
-    """Verify sync/re-slew use `control.mount`'s real methods, in degrees.
-
-    This is the regression test for the bug this module's docstring
-    describes: the loop used to call a nonexistent slew_telescope()
-    method and pass RA in decimal degrees where the mount driver
-    expected hours. `SkyPosition` carries degrees, and the library
-    converts to hours at the driver. An autospec'd mock (not a bare
-    MagicMock) is required here -- a bare MagicMock would silently accept
-    slew_telescope() too.
-    """
-    target_ra, target_dec = 150.0, 30.0
-    solved_ra = target_ra + 1.0  # 1 degree off -- far outside the default threshold
-    solved_dec = target_dec + 1.0
-
-    observatory = _autospec_control()
-    observatory.mount.sync.return_value = True
-    observatory.mount.slew.return_value = True
-
-    service = _make_service(
-        observatory=observatory,
-        imaging_service=_StubImagingService(),
-        star_identifier=_StubStarIdentifier(solved_ra, solved_dec),
-    )
-    # Stop after exactly one attempt: the loop only re-checks the stop
-    # flag between attempts, so setting it during the capture call
-    # still lets this attempt's sync/slew calls run to completion.
-    original_capture = service._imaging_service.capture_light_frame
-
-    def _capture_then_stop(*args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-private-function]
-        service._stop_flag.set()
-        return original_capture(*args, **kwargs)
-
-    service._imaging_service.capture_light_frame = _capture_then_stop
-
-    service._alignment_loop(target_ra=target_ra, target_dec=target_dec)
-
-    attempts = service.get_attempts()
-    assert len(attempts) == 1
-    assert attempts[0]["status"] == "warning"
-
-    observatory.mount.sync.assert_called_once()
-    (synced,) = observatory.mount.sync.call_args.args
-    assert synced.ra_deg == pytest.approx(solved_ra)
-    assert synced.ra_hours == pytest.approx(solved_ra / 15.0)
-    assert synced.dec_deg == pytest.approx(solved_dec)
-
-    observatory.mount.slew.assert_called_once()
-    (slewed,) = observatory.mount.slew.call_args.args
-    assert slewed.ra_deg == pytest.approx(target_ra)
-    assert slewed.dec_deg == pytest.approx(target_dec)
-
-
-def test_start_alignment_rejects_concurrent_start() -> None:
-    """Verify start_alignment() refuses to start a second concurrent run."""
-    service = _make_service(
-        imaging_service=_EmptyCaptureImagingService(),
-        star_identifier=_StubStarIdentifier(10.0, 20.0),
-    )
-    service._alignment_active = True
     assert service.start_alignment(target_ra=10.0, target_dec=20.0) is False
+    assert service.get_attempts()[-1]["status"] == "solving"
 
-
-def test_start_then_cancel_alignment_stops_the_background_thread() -> None:
-    """Verify start_alignment()/cancel_alignment() drive a real thread.
-
-    Uses a capture stub that blocks until released, so the background
-    thread is guaranteed to still be mid-attempt when cancel_alignment()
-    is called -- otherwise this test would race against the thread
-    finishing on its own.
-    """
-    import threading
-
-    release_capture = threading.Event()
-
-    class _BlockingImagingService:
-        def capture_light_frame(self, exposure, iso, gain):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-            release_capture.wait(timeout=5.0)
-            return {}
-
-    service = _make_service(
-        imaging_service=_BlockingImagingService(),
-        star_identifier=_StubStarIdentifier(10.0, 20.0),
-    )
-
-    assert service.start_alignment(target_ra=10.0, target_dec=20.0) is True
-    assert service.is_active() is True
-
-    release_capture.set()
     assert service.cancel_alignment() is True
     assert service.is_active() is False
+    (position,), options = observatory.mount.slew.call_args
+    assert position == SkyPosition(ra_deg=10.0, dec_deg=20.0)
+    assert options == {"center": True, "max_iterations": CENTERING_MAX_ITERATIONS}
+
+
+def test_cancel_without_a_run_reports_false() -> None:
+    """Cancelling when nothing runs changes nothing."""
+    observatory = _autospec_control()
+    service = AlignmentService(observatory_api=observatory)
+
+    assert service.cancel_alignment() is False
+    observatory.mount.abort_motion.assert_not_called()
 
 
 def test_rpc_start_alignment_parses_coordinate_strings_to_degrees() -> None:
-    """Verify the telescope:alignment_start RPC wrapper parses to degrees.
-
-    AlignmentService.start_alignment() expects decimal degrees (see its
-    docstring); the RPC layer is where raw sexagesimal strings from the
-    frontend get converted, via the same parse_coordinate_string used
-    elsewhere in the backend.
-    """
+    """The ``telescope:alignment_start`` wrapper turns strings into degrees."""
     from backend.routers.rpc_router import _start_alignment
 
     with pytest.MonkeyPatch.context() as monkeypatch:
@@ -378,14 +118,13 @@ def test_rpc_start_alignment_parses_coordinate_strings_to_degrees() -> None:
         result = _start_alignment(target_ra="12h 00m 00s", target_dec="+45d 00m 00s")
 
     assert result is True
-    mock_alignment_service.start_alignment.assert_called_once()
     ra_deg, dec_deg = mock_alignment_service.start_alignment.call_args.args
     assert ra_deg == pytest.approx(180.0, abs=1e-4)
     assert dec_deg == pytest.approx(45.0, abs=1e-4)
 
 
 def test_rpc_start_alignment_raises_on_unparseable_coordinates() -> None:
-    """Verify the RPC wrapper surfaces a parse failure rather than starting."""
+    """The wrapper reports a parse failure instead of starting."""
     from backend.routers.rpc_router import _start_alignment
 
     with pytest.MonkeyPatch.context() as monkeypatch:

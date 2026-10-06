@@ -65,6 +65,7 @@ if TYPE_CHECKING:
         VisibilityReport,
         VisibilitySpan,
     )
+    from wayfindinglib.models.session.capture_result import CaptureResult
     from wayfindinglib.models.session.observation_session import (
         ObservationSession,
         ObservationSessionSummary,
@@ -95,6 +96,7 @@ _LAZY_EXPORTS = {
     "GuidingStatus": "wayfindinglib.models.control_status",
     "SafetyStatus": "wayfindinglib.models.control_status",
     "EquipmentStatus": "wayfindinglib.models.control_status",
+    "CaptureResult": "wayfindinglib.models.session.capture_result",
     # Models that `planning` and `execution` take and return.
     "VisibilityReport": "wayfindinglib.models.planning.visibility",
     "ObjectVisibility": "wayfindinglib.models.planning.visibility",

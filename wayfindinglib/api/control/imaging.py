@@ -1,17 +1,19 @@
 """Purpose: `control.imaging`, the main camera, filter wheel and focuser.
 
-Description: Takes exposures with the main camera, turns the filter
-wheel, moves the focuser, and fits a focus curve. `status` reads the
+Description: Takes exposures with the main camera (with a filter change
+and dithering between frames), turns the filter wheel, moves the
+focuser, and fits a focus curve. `status` reads the
 filter names, the focuser position and the saved focus model. A capture
 or filter change needs `CAPTURE_ORCHESTRATION` to be `AUTHORITATIVE`; a
 focuser move needs `AUTOFOCUS`.
 """
 
-from typing import Any
-
+from astrometricslib import background_job, get_current_job, registered_job
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import ImagingStatus
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
+from wayfindinglib.models.planning.observation_package import DitherConfig
+from wayfindinglib.models.session.capture_result import CaptureResult
 from wayfindinglib.models.session.correction_result import FocusCorrection, FocusCurvePoint
 
 __all__ = ["ImagingControl"]
@@ -50,22 +52,72 @@ class ImagingControl(ControlChild):
             status.focus_model = self._context.active_focus_model()
         return status
 
-    def capture_image(self, exposure_seconds: float) -> Any:
-        """Take one exposure with the main camera.
+    @background_job("capture", grace_period_seconds=5.0)
+    def capture_image(
+        self,
+        exposure_seconds: float,
+        count: int = 1,
+        filter_name: str | None = None,
+        dither: bool | DitherConfig = False,
+        delay_seconds: float = 0.0,
+        register_job: bool = True,
+    ) -> CaptureResult:
+        """Take one or more exposures with the main camera.
+
+        Turns the filter wheel first when `filter_name` is given, then
+        takes the exposures one after another. With `dither`, the
+        pointing shifts slightly between frames (one guide pulse on each
+        axis), so a fixed sensor defect lands on different sky in each
+        frame. Each frame waits for its exposure plus a short readout.
 
         Parameters
         ----------
         exposure_seconds : `float`
-            Exposure length in seconds.
+            Length of each exposure, in seconds.
+        count : `int`, optional
+            Number of exposures. Defaults to 1.
+        filter_name : `str`, optional
+            Filter to turn to first, by name or a name the wheel can match.
+            `None` leaves the wheel where it is.
+        dither : `bool` or `DitherConfig`, optional
+            `True` dithers by 3 pixels every 3 frames. A `DitherConfig`
+            sets the size and how often. Needs an active telescope and
+            camera, and `AUTOGUIDING` to be `AUTHORITATIVE`.
+        delay_seconds : `float`, optional
+            Pause between exposures, for example to let the mount settle.
+        register_job : `bool`, optional
+            Record the run as a ``capture`` job with its progress. A call
+            made inside a running job reports to that job instead.
 
         Returns
         -------
-        result : `Any`
-            The camera driver's exposure result.
-        """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
+        result : `CaptureResult`
+            How many frames were taken, with which filter, and how many
+            dithers.
 
-        return hardware_operations.capture_image(self._context, exposure_seconds)
+        Notes
+        -----
+        The capture raises `InvalidArgumentError` if `exposure_seconds` or
+        `count` is not above zero or `delay_seconds` is negative, and
+        `HardwareError` if the camera does not start an exposure or the
+        filter wheel does not turn.
+        """
+        from wayfindinglib.tasks.control_tasks.imaging_capture import capture_frames
+
+        with registered_job(
+            enabled=register_job and get_current_job() is None,
+            job_type="capture",
+            target_id=filter_name or "capture",
+            package_logger_name="wayfindinglib",
+        ):
+            return capture_frames(
+                self._context,
+                exposure_seconds,
+                count=count,
+                filter_name=filter_name,
+                dither=dither,
+                delay_seconds=delay_seconds,
+            )
 
     def set_filter(self, filter_name: str) -> bool:
         """Turn the filter wheel to a filter.

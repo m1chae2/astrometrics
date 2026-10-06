@@ -77,8 +77,8 @@ class IndiCameraDriver(CameraDriver):
         """Start an exposure on this camera.
 
         For ``role="main"`` this triggers capture
-        (`IndiInterface.capture_image`), but retrieval is not
-        implemented yet -- see `get_last_image`.
+        (`IndiInterface.capture_image`); `get_last_image` reads the frame
+        once it has arrived.
 
         Returns
         -------
@@ -90,24 +90,17 @@ class IndiCameraDriver(CameraDriver):
         return await asyncio.to_thread(self._session.capture_image, exposure_seconds)
 
     async def get_last_image(self) -> Any:
-        """Retrieve the last image blob captured by this camera.
+        """Retrieve the last image this camera sent.
 
         Returns
         -------
-        image : `Any`
-            The driver's raw last-image blob.
-
-        Raises
-        ------
-        NotImplementedError
-            Raised for ``role="main"`` -- `IndiInterface` has no
-            main-image retrieval today; do not fabricate one.
+        image : `bytes` or `None`
+            The frame's raw data (usually a FITS file in memory), or
+            `None` if the camera has sent no frame yet.
         """
         if self._role == "guide":
             return await asyncio.to_thread(self._session.get_guide_image)
-        raise NotImplementedError(
-            "IndiCameraDriver.get_last_image: main-image retrieval is not implemented on IndiInterface"
-        )
+        return await asyncio.to_thread(self._session.get_main_image)
 
     async def get_sensor_temperature_c(self) -> float | None:
         """Return this camera's sensor temperature.

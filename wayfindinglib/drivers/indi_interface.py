@@ -1941,7 +1941,18 @@ class IndiInterface(IndiClient):
             there is no guide camera or no frame yet.
         """
         device = self._find_guide_camera_device()
-        return self.camera_controller.get_guide_image(device)
+        return self.camera_controller.get_last_image(device)
+
+    def get_main_image(self) -> bytes | None:
+        """Retrieve the last image frame from the main camera, as raw bytes.
+
+        Returns
+        -------
+        data : `bytes` or `None`
+            The last main camera frame's raw data (usually a FITS file in
+            memory), or `None` if there is no main camera or no frame yet.
+        """
+        return self.camera_controller.get_last_image(self._find_main_camera_device())
 
     def _find_main_camera_device(self):  # ruff: ignore[missing-return-type-private-function]
         """Heuristic to find the main imaging camera.

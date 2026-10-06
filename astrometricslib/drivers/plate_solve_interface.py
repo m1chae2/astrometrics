@@ -156,19 +156,24 @@ def _call_with_transient_retry(
             return solve_call()
         except Exception as solve_error:
             if not _is_transient_network_error(solve_error):
-                logger.warning(f"{description} failed: {solve_error}")
+                logger.warning("%s failed: %s", description, solve_error)
                 return None
             if attempt_number == ONLINE_SOLVE_ATTEMPT_LIMIT:
                 logger.warning(
-                    f"{description} failed after {ONLINE_SOLVE_ATTEMPT_LIMIT} attempts "
-                    f"(last error: {solve_error})."
+                    "%s failed after %s attempts (last error: %s).",
+                    description,
+                    ONLINE_SOLVE_ATTEMPT_LIMIT,
+                    solve_error,
                 )
                 return None
             backoff_seconds = ONLINE_SOLVE_RETRY_BACKOFF_SECONDS * (2 ** (attempt_number - 1))
             logger.warning(
-                f"{description} hit a transient network error on attempt "
-                f"{attempt_number}/{ONLINE_SOLVE_ATTEMPT_LIMIT} ({solve_error}); "
-                f"retrying in {backoff_seconds:.0f}s."
+                "%s hit a transient network error on attempt %s/%s (%s); retrying in %.0fs.",
+                description,
+                attempt_number,
+                ONLINE_SOLVE_ATTEMPT_LIMIT,
+                solve_error,
+                backoff_seconds,
             )
             time.sleep(backoff_seconds)
     return None
@@ -241,9 +246,10 @@ class PlateSolver:
         source_count_too_low = sources is not None and len(sources) < MINIMUM_SOURCES_FOR_LOCAL_SOLVE
         if source_count_too_low:
             logger.info(
-                f"Only {len(sources)} source(s) detected (fewer than "
-                f"{MINIMUM_SOURCES_FOR_LOCAL_SOLVE}); skipping the local solver and going "
-                "straight to the online path."
+                "Only %s source(s) detected (fewer than %s); skipping the local solver and going "
+                "straight to the online path.",
+                len(sources),
+                MINIMUM_SOURCES_FOR_LOCAL_SOLVE,
             )
         elif image_path:
             header = self._solve_locally(image_path, **kwargs)
@@ -329,7 +335,10 @@ class PlateSolver:
                     s_low = float(kwargs["scale_lower"]) * 0.8
                     s_high = float(kwargs["scale_upper"]) * 1.2
                     logger.info(
-                        f"Using relaxed scale constraints: {s_low:.2f} - {s_high:.2f} {kwargs['scale_units']}"
+                        "Using relaxed scale constraints: %.2f - %.2f %s",
+                        s_low,
+                        s_high,
+                        kwargs["scale_units"],
                     )
                     hinted_command.extend(["--scale-units", kwargs["scale_units"]])
                     hinted_command.extend(["--scale-low", str(s_low)])
@@ -372,9 +381,11 @@ class PlateSolver:
                 hinted_exhausted_its_budget = hinted_elapsed >= timeout * HINTED_SOLVE_NEAR_TIMEOUT_FRACTION
                 if applied_hints and hinted_exhausted_its_budget:
                     logger.info(
-                        f"Hinted local solve failed after using {hinted_elapsed:.0f}s of its "
-                        f"{timeout}s budget; skipping the blind retry rather than spending "
-                        "another full timeout on a near-certain repeat failure."
+                        "Hinted local solve failed after using %.0fs of its %ss budget; skipping "
+                        "the blind retry rather than spending another full timeout on a "
+                        "near-certain repeat failure.",
+                        hinted_elapsed,
+                        timeout,
                     )
                 elif applied_hints:
                     logger.info("Hinted local solve failed; retrying blind (no scale or position hints).")
@@ -384,7 +395,7 @@ class PlateSolver:
                         logger.info("Blind local solve succeeded where the hinted solve did not.")
                         return header
             except Exception as e:
-                logger.warning(f"Local solve failed: {e}")
+                logger.warning("Local solve failed: %s", e)
 
         return None
 
@@ -407,10 +418,10 @@ class PlateSolver:
         header : `astropy.io.fits.Header` or `None`
             The map metadata if it worked, or None.
         """
-        logger.info(f"Executing: {' '.join(command)}")
+        logger.info("Executing: %s", " ".join(command))
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
-            logger.warning(f"solve-field returned error code {result.returncode}")
+            logger.warning("solve-field returned error code %s", result.returncode)
 
         # solve-field signals success by writing the .new file; a
         # zero exit status alone does not mean the field was solved.
@@ -476,7 +487,7 @@ class PlateSolver:
                     fits.PrimaryHDU(data=flattened, header=hdul[0].header).writeto(
                         upload_path, overwrite=True
                     )
-                    logger.info(f"Flattened {image_data.shape} colour stack to 2D for the online solve.")
+                    logger.info("Flattened %s colour stack to 2D for the online solve.", image_data.shape)
         except Exception as flatten_error:
             # Falling back to the original path keeps behaviour no worse
             # than before if the frame cannot be read or rewritten.

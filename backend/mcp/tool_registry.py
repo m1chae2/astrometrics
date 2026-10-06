@@ -158,7 +158,7 @@ class ToolRegistry:
 
         audit_logger = logging.getLogger("mcp.audit")
         arg_summary = list(arguments.keys()) if isinstance(arguments, dict) else type(arguments).__name__
-        audit_logger.info(f"Tool invoked: {name} | Args: {arg_summary}")
+        audit_logger.info("Tool invoked: %s | Args: %s", name, arg_summary)
 
         # Sanitize arguments: the LLM occasionally produces a string
         # instead of a dict.
@@ -166,8 +166,10 @@ class ToolRegistry:
             import logging
 
             logging.getLogger(__name__).warning(
-                f"Tool '{name}' received non-dict arguments ({type(arguments).__name__}: {arguments!r}). "
-                f"Defaulting to empty dict."
+                "Tool '%s' received non-dict arguments (%s: %r). Defaulting to empty dict.",
+                name,
+                type(arguments).__name__,
+                arguments,
             )
             arguments = {}
 

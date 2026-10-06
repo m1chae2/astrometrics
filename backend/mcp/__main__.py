@@ -25,6 +25,8 @@ from backend.mcp.tool_registry import get_astrometrics, registry
 configure_logging("mcp_backend", level=logging.INFO)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+logger = logging.getLogger(__name__)
+
 app = Server("astrometrics-backend", instructions=GAP_REPORT_GUIDANCE)
 
 # Offer only the tools the manifest allows for the chosen profile
@@ -105,7 +107,7 @@ async def read_resource(uri: str) -> str:  # ruff: ignore[unused-async] -- await
                     ]
                     return json.dumps(unread_notifications)
             except Exception as e:
-                logging.error(f"Error reading notifications file: {e}")
+                logger.error("Error reading notifications file: %s", e)
                 return "[]"
         return "[]"
 

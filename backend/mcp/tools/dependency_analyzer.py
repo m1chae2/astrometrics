@@ -60,7 +60,7 @@ def parse_imports_from_file(file_path: str, repo_root: str) -> list[str]:
                     if mod:
                         imports.append(mod)
     except Exception as e:
-        logger.warning(f"Failed to parse imports for {file_path}: {e}")
+        logger.warning("Failed to parse imports for %s: %s", file_path, e)
 
     return imports
 

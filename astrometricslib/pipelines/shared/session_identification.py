@@ -54,9 +54,9 @@ def _write_wcs_to_header(path: str, wcs: WCS) -> None:
                     continue
                 hdul[0].header[card.keyword] = (card.value, card.comment)
             hdul.flush()
-        logger.info(f"Updated FITS file {path} header with solved WCS keywords.")
+        logger.info("Updated FITS file %s header with solved WCS keywords.", path)
     except Exception as wcs_error:
-        logger.warning(f"Failed to update FITS file header with WCS: {wcs_error}")
+        logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
 
 
 def resolve_frame_wcs(
@@ -133,7 +133,7 @@ def resolve_frame_wcs(
         solve_timeout=solve_timeout,
     )
     if header is None:
-        logger.warning(f"Plate solve failed for {image.path}; no WCS available.")
+        logger.warning("Plate solve failed for %s; no WCS available.", image.path)
         return None, False, True
 
     with warnings.catch_warnings():
@@ -361,9 +361,11 @@ def _reverify_wcs_solution(
 
     matched_before = _catalog_matched_count(stellar_objects)
     logger.warning(
-        f"Reused header WCS for {reference_image.path} identified only "
-        f"{matched_before}/{len(stellar_objects)} stars against a catalog; "
-        "discarding it and plate-solving this frame fresh."
+        "Reused header WCS for %s identified only %s/%s stars against a catalog; discarding it and "
+        "plate-solving this frame fresh.",
+        reference_image.path,
+        matched_before,
+        len(stellar_objects),
     )
     # write_back=False: the header is only corrected below, once the
     # fresh solve has actually proven better. Overwriting first would
@@ -393,14 +395,18 @@ def _reverify_wcs_solution(
 
     if matched_after <= matched_before:
         logger.info(
-            f"Fresh plate solve for {reference_image.path} did not improve catalog "
-            f"matches ({matched_before} -> {matched_after}); keeping the header WCS."
+            "Fresh plate solve for %s did not improve catalog matches (%s -> %s); keeping the header WCS.",
+            reference_image.path,
+            matched_before,
+            matched_after,
         )
         return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
 
     logger.info(
-        f"Fresh plate solve for {reference_image.path} improved catalog matches "
-        f"{matched_before} -> {matched_after}; using it instead of the header WCS."
+        "Fresh plate solve for %s improved catalog matches %s -> %s; using it instead of the header WCS.",
+        reference_image.path,
+        matched_before,
+        matched_after,
     )
     if write_back:
         _write_wcs_to_header(reference_image.path, fresh_wcs)

@@ -356,7 +356,7 @@ class VariabilityAnalyzer:
 
         # 1. Reference Frame: Deep Detection (Sequential)
         reference_path = image_paths[0]
-        logger.info(f"[1/{len(image_paths)}] Processing Reference {os.path.basename(reference_path)}...")
+        logger.info("[1/%s] Processing Reference %s...", len(image_paths), os.path.basename(reference_path))
 
         with fits.open(reference_path, memmap=False) as fits_handle:
             reference_data = collapse_to_2d(fits_handle[0].data.astype(float))
@@ -397,11 +397,11 @@ class VariabilityAnalyzer:
         ]
 
         for config in detection_configs:
-            logger.info(f"  Attempting detection with FWHM={config['fwhm']}, Sigma={config['sigma']}...")
+            logger.info("  Attempting detection with FWHM=%s, Sigma=%s...", config["fwhm"], config["sigma"])
             detector = SourceDetector(threshold_sigma=config["sigma"], fwhm=config["fwhm"])
             reference_stars_detected = detector.detect(reference_data)
             if reference_stars_detected and len(reference_stars_detected) > 10:
-                logger.info(f"  Success! Found {len(reference_stars_detected)} stars.")
+                logger.info("  Success! Found %s stars.", len(reference_stars_detected))
                 break
 
         if not reference_stars_detected:
@@ -480,8 +480,10 @@ class VariabilityAnalyzer:
                 reference_stars_minimal.append((seed_star.id, x_ref, y_ref))
             if seed_stars_without_signal:
                 logger.info(
-                    f"  {seed_stars_without_signal} of {len(seed_stars)} seed stars had no detectable "
-                    "signal above background on the reference frame; excluded from per-frame tracking."
+                    "  %s of %s seed stars had no detectable signal above background on the "
+                    "reference frame; excluded from per-frame tracking.",
+                    seed_stars_without_signal,
+                    len(seed_stars),
                 )
         else:
             for i, star_data in enumerate(reference_stars_detected[:max_stars]):
@@ -508,15 +510,16 @@ class VariabilityAnalyzer:
                 self.stellar_objects.append(new_star)
                 reference_stars_minimal.append((new_star.id, x_ref, y_ref))
 
-        logger.info(f"  Initialized {len(self.stellar_objects)} reference stars.")
+        logger.info("  Initialized %s reference stars.", len(self.stellar_objects))
 
         if len(image_paths) > 1:
             # Default to a limit of 75% CPU cores unless the caller
             # specifies otherwise
             max_workers = max_workers if max_workers is not None else max(1, int(os.cpu_count() * 0.75))
             logger.info(
-                f"Starting parallel processing for {len(image_paths) - 1} frames "
-                f"using {max_workers} workers..."
+                "Starting parallel processing for %s frames using %s workers...",
+                len(image_paths) - 1,
+                max_workers,
             )
             worker_arguments = [
                 (path, reference_stars_minimal, reference_top_refs_minimal, saturation_threshold_adu)
@@ -744,22 +747,19 @@ class VariabilityAnalyzer:
             faintest = min(candidate[3] for candidate in selected)
             brightest = max(candidate[3] for candidate in selected)
             logger.info(
-                f"  Normalization ensemble: {len(reference_ids)} of {total_star_count} stars "
-                f"selected on coverage/saturation, flux {faintest:.4g}-{brightest:.4g}"
-                # "is not None", not truthiness: relaxing all the way to
-                # 0.0 is the most severe step and the one most worth
-                # reporting, but it is falsy, so a plain truth test
-                # reported the worst case as no relaxation at all.
-                + (
-                    f" (coverage requirement relaxed to {relaxed_coverage:.0%})"
-                    if relaxed_coverage is not None
-                    else ""
-                )
+                "  Normalization ensemble: %s of %s stars selected on coverage/saturation, flux %.4g-%.4g%s",
+                len(reference_ids),
+                total_star_count,
+                faintest,
+                brightest,
+                f" (coverage requirement relaxed to {relaxed_coverage:.0%})"
+                if relaxed_coverage is not None
+                else "",
             )
         else:
             logger.warning(
-                f"  Normalization ensemble: no star of {total_star_count} met the coverage and "
-                "saturation requirements."
+                "  Normalization ensemble: no star of %s met the coverage and saturation requirements.",
+                total_star_count,
             )
         return selected, reference_ids
 
@@ -839,9 +839,12 @@ class VariabilityAnalyzer:
         if selected and frame_count and len(frame_flux_data) < frame_count:
             coverages = sorted(candidate[1] for candidate in selected)
             logger.info(
-                f"  Ensemble spans {len(frame_flux_data)} of {frame_count} frames from "
-                f"{len(reference_ids)} stars; member coverage min={coverages[0]:.2f} "
-                f"median={coverages[len(coverages) // 2]:.2f}."
+                "  Ensemble spans %s of %s frames from %s stars; member coverage min=%.2f median=%.2f.",
+                len(frame_flux_data),
+                frame_count,
+                len(reference_ids),
+                coverages[0],
+                coverages[len(coverages) // 2],
             )
 
         # Fallback: If our strict selection rules resulted in a group of
@@ -865,15 +868,19 @@ class VariabilityAnalyzer:
                 if candidate[2] <= MAXIMUM_ENSEMBLE_SATURATED_FRACTION
             }
             logger.warning(
-                f"  Normalization ensemble only covered {len(frame_flux_data)}/{total_frame_count} "
-                f"frames; widening to {len(widened_ids)} unsaturated stars."
+                "  Normalization ensemble only covered %s/%s frames; widening to %s unsaturated stars.",
+                len(frame_flux_data),
+                total_frame_count,
+                len(widened_ids),
             )
             frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(widened_ids)
 
             if len(frame_flux_data) < min_required_frames:
                 logger.warning(
-                    f"  Still only {len(frame_flux_data)}/{total_frame_count} frames covered; "
-                    "falling back to all detected stars with positive flux."
+                    "  Still only %s/%s frames covered; falling back to all detected stars with "
+                    "positive flux.",
+                    len(frame_flux_data),
+                    total_frame_count,
                 )
                 all_ids = {s.id for s in self.stellar_objects}
                 frame_flux_data, frame_excluded_star_ids = self._collect_ensemble_frame_fluxes(all_ids)
@@ -922,7 +929,7 @@ class VariabilityAnalyzer:
                     path = self.timestamp_to_path.get(timestamp, "Unknown")
                     if path not in self.rejected_files:
                         self.rejected_files.append(path)
-                        logger.info(f"  [REJECTED] Global Frame Outlier: {os.path.basename(path)}")
+                        logger.info("  [REJECTED] Global Frame Outlier: %s", os.path.basename(path))
         else:
             self.frame_reference_flux = raw_normalization_factors
 

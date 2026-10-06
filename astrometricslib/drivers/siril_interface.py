@@ -865,7 +865,7 @@ class ImageProcessing:
                 continue
             restored_kinds.add(kind)
             if job_logger:
-                job_logger.info(f"Reusing cached master {kind} frame (fingerprint {fingerprint[:12]}).")
+                job_logger.info("Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
             # Also emitted on this module's own logger, which propagates
             # to the "astrometricslib" package logger that carries the
             # database handler. `process_target`'s job_logger sets
@@ -979,7 +979,7 @@ class ImageProcessing:
                         os.unlink(partial_path)
                 continue
             if job_logger:
-                job_logger.info(f"Cached master {kind} frame (fingerprint {fingerprint[:12]}).")
+                job_logger.info("Cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
 
     def build_directories(
         self,
@@ -1355,7 +1355,7 @@ class ImageProcessing:
             args = [*parts, "-p", "-r", command_pipe, "-w", output_pipe]
 
         if job_logger:
-            job_logger.info(f"Executing: {' '.join(args)}")
+            job_logger.info("Executing: %s", " ".join(args))
         # start_new_session=True makes this process the leader of its
         # own process group, so the whole sandboxed tree
         # (flatpak/bwrap/siril) can be killed together via os.killpg
@@ -1430,20 +1430,20 @@ class ImageProcessing:
                         result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
                     except queue.Empty:
                         if job_logger:
-                            job_logger.error(f"Timed out waiting for Siril to finish command: {cmd!r}")
+                            job_logger.error("Timed out waiting for Siril to finish command: %r", cmd)
                         break
 
                     if "status: error" in result_line:
                         if job_logger:
                             job_logger.error(
-                                f"Siril reported an error after command {cmd!r}: {result_line.strip()}"
+                                "Siril reported an error after command %r: %s", cmd, result_line.strip()
                             )
                         break
                 pipe.write("exit\n")
                 pipe.flush()
         except Exception as e:
             if job_logger:
-                job_logger.error(f"Pipe write error: {e}")
+                job_logger.error("Pipe write error: %s", e)
 
     def read_output(
         self,
@@ -1626,7 +1626,7 @@ class ImageProcessing:
                 return None
         except Exception as e:
             if job_logger:
-                job_logger.error(f"Pipe read error: {e}")
+                job_logger.error("Pipe read error: %s", e)
             return None
 
     def process_target(
@@ -1746,7 +1746,7 @@ class ImageProcessing:
             db_handler = DbLogHandler(self.job_repository, job_id=job_id)
             job_logger.addHandler(db_handler)
 
-        job_logger.info(f"JOB START: {id}")
+        job_logger.info("JOB START: %s", id)
 
         try:
             # Stacks and the files made with them go to the stacks path, which
@@ -1802,8 +1802,9 @@ class ImageProcessing:
             # defect found only by reading Siril's own logs.
             self.last_run_diagnostics["debayer_applied"] = uses_color_filter_array
             job_logger.info(
-                f"Sensor type detected as {'color (CFA)' if uses_color_filter_array else 'monochrome'}; "
-                f"{'applying' if uses_color_filter_array else 'skipping'} CFA/debayer calibration flags."
+                "Sensor type detected as %s; %s CFA/debayer calibration flags.",
+                "color (CFA)" if uses_color_filter_array else "monochrome",
+                "applying" if uses_color_filter_array else "skipping",
             )
 
             # rejection_sigma passed by the caller is an explicit
@@ -1842,8 +1843,11 @@ class ImageProcessing:
             filter_wfwhm, filter_wfwhm_loosened = resolve_filter_wfwhm_with_floor(num_lights, filter_wfwhm)
             if filter_wfwhm_loosened:
                 job_logger.info(
-                    f"filter_wfwhm loosened from {requested_filter_wfwhm!r} to {filter_wfwhm!r} "
-                    f"to keep at least the minimum-surviving-frames floor with {num_lights} input frames."
+                    "filter_wfwhm loosened from %r to %r to keep at least the "
+                    "minimum-surviving-frames floor with %s input frames.",
+                    requested_filter_wfwhm,
+                    filter_wfwhm,
+                    num_lights,
                 )
 
             self.last_run_diagnostics.update({
@@ -1904,7 +1908,7 @@ class ImageProcessing:
                                     logger.debug("Failed to parse/record Siril progress line: %s", exc)
                 except Exception as e:
                     if job_logger:
-                        job_logger.error(f"Error in Siril stdout reader thread: {e}")
+                        job_logger.error("Error in Siril stdout reader thread: %s", e)
 
             log_reader_thread = threading.Thread(target=read_siril_stdout, daemon=True)
             log_reader_thread.start()
@@ -2264,15 +2268,15 @@ class ImageProcessing:
                             hdul[0].header.add_comment(
                                 f"Total exposure time summed from {len(image_files)} frames."
                             )
-                        job_logger.info(f"Updated stacked header: EXPTIME={total_exp}s")
+                        job_logger.info("Updated stacked header: EXPTIME=%ss", total_exp)
                 except Exception as e:
-                    job_logger.error(f"Failed to update stacked header EXPTIME: {e}")
+                    job_logger.error("Failed to update stacked header EXPTIME: %s", e)
 
             # Wait for log reader thread to finish reading all output
             log_reader_thread.join(timeout=10)
             return res
-        except Exception as fatal:
-            job_logger.error(f"FATAL: {fatal}", exc_info=True)
+        except Exception:
+            job_logger.exception("FATAL: Siril processing stopped with an unexpected error")
             return None
         finally:
             self.cleanup_subprocesses()
@@ -2293,10 +2297,10 @@ class ImageProcessing:
             if res and library_dest and target_folder and os.path.exists(target_folder):
                 try:
                     shutil.rmtree(target_folder)
-                    job_logger.info(f"Removed temporary work directory: {target_folder}")
+                    job_logger.info("Removed temporary work directory: %s", target_folder)
                 except Exception as cleanup_error:
                     job_logger.warning(
-                        f"Failed to remove temporary work directory {target_folder}: {cleanup_error}"
+                        "Failed to remove temporary work directory %s: %s", target_folder, cleanup_error
                     )
             elif target_folder and os.path.exists(target_folder):
                 # Keeping the whole directory to preserve diagnostics was

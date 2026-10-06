@@ -41,7 +41,9 @@ class TargetImagingExecutor:
         sequence["timing"] = timing_point
         sequence["status"] = "queued"
         self._queue.append(sequence)
-        logger.info(f"Added sequence {sequence['id']} to execution queue. Total queued: {len(self._queue)}")
+        logger.info(
+            "Added sequence %s to execution queue. Total queued: %s", sequence["id"], len(self._queue)
+        )
 
     def remove_from_queue(self, sequence_id: str) -> bool:
         """Remove a sequence from the queue by ID.
@@ -56,7 +58,7 @@ class TargetImagingExecutor:
         self._queue = [s for s in self._queue if s["id"] != sequence_id]
         removed = len(self._queue) < initial_len
         if removed:
-            logger.info(f"Removed sequence {sequence_id} from queue.")
+            logger.info("Removed sequence %s from queue.", sequence_id)
         return removed
 
     def modify_queue_item(self, sequence_id: str, sequence: dict[str, Any]) -> bool:
@@ -81,7 +83,7 @@ class TargetImagingExecutor:
                     sequence["timing"] = item.get("timing", {"mode": "soonest"})
 
                 self._queue[i] = sequence
-                logger.info(f"Modified sequence {sequence_id} in queue.")
+                logger.info("Modified sequence %s in queue.", sequence_id)
                 return True
         return False
 
@@ -114,7 +116,7 @@ class TargetImagingExecutor:
                 new_queue.append(item)
 
         self._queue = new_queue
-        logger.info(f"Reordered execution queue. New sequence: {[item['id'] for item in self._queue]}")
+        logger.info("Reordered execution queue. New sequence: %s", [item["id"] for item in self._queue])
         return True
 
     def get_queue(self) -> list[dict[str, Any]]:
@@ -160,7 +162,7 @@ class TargetImagingExecutor:
                     self._queue.pop(0)
                     continue
 
-                logger.info(f"Processing sequence {seq['id']} for {seq['target_name']}")
+                logger.info("Processing sequence %s for %s", seq["id"], seq["target_name"])
                 seq["status"] = "active"
 
                 # 2. Slew to Target
@@ -169,7 +171,7 @@ class TargetImagingExecutor:
                 dec = target.get("dec")
 
                 if ra and dec:
-                    logger.info(f"Slewing to RA: {ra}, DEC: {dec}")
+                    logger.info("Slewing to RA: %s, DEC: %s", ra, dec)
                     # Simulate Slew Wait
                     await asyncio.sleep(5)
 
@@ -187,7 +189,7 @@ class TargetImagingExecutor:
 
                     # Set Filter
                     if filter_name:
-                        logger.info(f"Setting Filter: {filter_name}")
+                        logger.info("Setting Filter: %s", filter_name)
                         self._telescope_service.set_filter(filter_name)
                         await asyncio.sleep(3)  # Wait for wheel
 
@@ -206,19 +208,19 @@ class TargetImagingExecutor:
                     job = await self._imaging_service.job_service.wait_for_job(job_id)
 
                     if job.status == "failed":
-                        logger.error(f"Capture sequence failed for {seq['target_name']}: {job.message}")
+                        logger.error("Capture sequence failed for %s: %s", seq["target_name"], job.message)
                         break
 
-                    logger.info(f"Capture sequence completed for {seq['target_name']}")
+                    logger.info("Capture sequence completed for %s", seq["target_name"])
 
                 # 4. Mark Complete
                 if self._is_running:
                     seq["status"] = "completed"
-                    logger.info(f"Sequence {seq['id']} completed.")
+                    logger.info("Sequence %s completed.", seq["id"])
                     self._queue.pop(0)
 
-        except Exception as e:
-            logger.error(f"Imaging Loop Crashed: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Imaging Loop Crashed")
         finally:
             self._is_running = False
             logger.info("Imaging Loop Ended.")

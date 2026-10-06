@@ -270,7 +270,7 @@ def _detect_sources_in_one_frame(
             frame_header = hdul[0].header
             frame_data = hdul[0].data
     except Exception as read_error:
-        logger.warning(f"Failed to read frame '{frame_path}' for asteroid detection: {read_error}")
+        logger.warning("Failed to read frame '%s' for asteroid detection: %s", frame_path, read_error)
         return "read_failed", []
     if frame_data is None:
         return "read_failed", []

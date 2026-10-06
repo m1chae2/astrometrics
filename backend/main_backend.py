@@ -396,11 +396,11 @@ async def authorize_websocket(websocket: WebSocket) -> bool:
     """
     origin = websocket.headers.get("origin")
     if not session_auth.is_origin_allowed(origin, origins):
-        logger.warning(f"Rejected WebSocket handshake from disallowed origin: {origin!r}")
+        logger.warning("Rejected WebSocket handshake from disallowed origin: %r", origin)
         await websocket.close(code=4403)
         return False
     if not session_auth.is_token_valid(websocket.query_params.get("token")):
-        logger.warning(f"Rejected WebSocket handshake with missing/invalid token (origin {origin!r})")
+        logger.warning("Rejected WebSocket handshake with missing/invalid token (origin %r)", origin)
         await websocket.close(code=4401)
         return False
     return True
@@ -1011,7 +1011,7 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
                 # therefore every other request) for its duration.
                 await asyncio.to_thread(container.telescope_service.get_status)
         except Exception as e:
-            logger.error(f"Error in periodic telemetry loop: {e}")
+            logger.error("Error in periodic telemetry loop: %s", e)
         await asyncio.sleep(2.0)
 
 
@@ -1128,7 +1128,7 @@ async def websocket_events(websocket: WebSocket):  # ruff: ignore[missing-return
         event = {"type": "UI_EVENT", "action": "system_state_update", "payload": state}
         await websocket.send_text(json.dumps(event))
     except Exception as e:
-        logger.error(f"Failed to send initial system state on websocket connection: {e}")
+        logger.error("Failed to send initial system state on websocket connection: %s", e)
 
     try:
         while True:
@@ -1147,7 +1147,7 @@ def main():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """
     host = os.environ.get("ASTROMETRICS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("ASTROMETRICS_PORT", "5000"))
-    logger.info(f"Starting Astrometrics backend on {host}:{port}")
+    logger.info("Starting Astrometrics backend on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port, access_log=False)
 
 

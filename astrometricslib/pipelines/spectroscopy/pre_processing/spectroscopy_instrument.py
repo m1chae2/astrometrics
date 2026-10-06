@@ -59,7 +59,7 @@ class SpectroscopyInstrument:
         # Grating spacing (d) is already in config as d_mm
         sin_theta = lambda_c_mm / c.d_mm
         if abs(sin_theta) >= 1:
-            logger.warning(f"sin(theta) out of range ({sin_theta}). Check grating lines/mm.")
+            logger.warning("sin(theta) out of range (%s). Check grating lines/mm.", sin_theta)
             self.theta = 0.0
         else:
             self.theta = np.arcsin(sin_theta)

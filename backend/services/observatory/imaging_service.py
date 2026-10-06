@@ -101,7 +101,7 @@ class ImagingService:
         delay_seconds: float = 0.0,
     ):
         """Run the capture background task as an internal worker."""
-        logger.info(f"Starting background capture {job_id}: {count}x{exposure_seconds}s {image_type}")
+        logger.info("Starting background capture %s: %sx%ss %s", job_id, count, exposure_seconds, image_type)
         self.job_service.update_job(job_id, status="running", progress=0, status_message="Initializing...")
 
         try:
@@ -117,7 +117,7 @@ class ImagingService:
                 except (ValueError, HardwareError) as filter_error:
                     # Capturing in whatever filter happened to be in place
                     # would silently mislabel the frames, so fail instead.
-                    logger.error(f"Job {job_id}: Could not select filter {filter_name}: {filter_error}")
+                    logger.error("Job %s: Could not select filter %s: %s", job_id, filter_name, filter_error)
                     self.job_service.update_job(
                         job_id, status="failed", status_message=f"Could not select filter {filter_name}"
                     )
@@ -129,11 +129,11 @@ class ImagingService:
                     job_id, progress=progress, status_message=f"Capturing frame {i + 1}/{count}"
                 )
 
-                logger.info(f"Job {job_id}: Capturing frame {i + 1}/{count}")
+                logger.info("Job %s: Capturing frame %s/%s", job_id, i + 1, count)
 
                 success = self._observatory.imaging.capture_image(exposure_seconds)
                 if not success:
-                    logger.error(f"Job {job_id}: Failed to start capture for frame {i + 1}")
+                    logger.error("Job %s: Failed to start capture for frame %s", job_id, i + 1)
                     self.job_service.update_job(
                         job_id, status="failed", status_message=f"Failed at frame {i + 1}"
                     )
@@ -153,7 +153,7 @@ class ImagingService:
                 job_id, status="completed", progress=100, status_message="Finished successfully."
             )
         except Exception as e:
-            logger.error(f"Error in capture sequence {job_id}: {e}")
+            logger.error("Error in capture sequence %s: %s", job_id, e)
             self.job_service.update_job(job_id, status="failed", status_message=str(e))
 
     def get_active_capture_jobs(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -185,7 +185,7 @@ class ImagingService:
             If the underlying INDI camera fails to capture the
             frame.
         """
-        logger.info(f"Capturing single light frame for alignment: {exposure}s, ISO={iso}")
+        logger.info("Capturing single light frame for alignment: %ss, ISO=%s", exposure, iso)
         success = self._observatory.imaging.capture_image(exposure)
         if not success:
             raise HardwareError("Underlying INDI camera failed to capture frame")

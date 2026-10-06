@@ -1007,7 +1007,7 @@ def sync_all_remote_folders(
             job_id = None
             job_logger = None
             log_capture.close()
-            _logging.getLogger(__name__).warning(f"Could not register job in astrometrics_log.db: {job_err}")
+            _logging.getLogger(__name__).warning("Could not register job in astrometrics_log.db: %s", job_err)
 
     def update_job(status: str | None = None, progress_current: int | None = None, **fields: Any) -> None:
         if not (logger_if and job_id):
@@ -1027,7 +1027,7 @@ def sync_all_remote_folders(
                 job.completed_at = datetime.now().isoformat()
             logger_if.upsert_job(job)
         except Exception as update_err:
-            _logging.getLogger(__name__).debug(f"Failed to record job status update: {update_err}")
+            _logging.getLogger(__name__).debug("Failed to record job status update: %s", update_err)
 
     succeeded: list[str] = []
     failed: list[tuple[str, str]] = []

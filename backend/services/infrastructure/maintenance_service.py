@@ -39,7 +39,7 @@ class MaintenanceService:
             target=self._run_maintenance_loop, daemon=True, name="MaintenanceThread"
         )
         self._thread.start()
-        logger.info(f"MaintenanceService started with pruning threshold of {self.pruning_days} days.")
+        logger.info("MaintenanceService started with pruning threshold of %s days.", self.pruning_days)
 
     def stop(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Stop the background maintenance thread."""
@@ -58,7 +58,7 @@ class MaintenanceService:
             try:
                 self.perform_cleanup()
             except Exception as e:
-                logger.error(f"Error during maintenance cleanup: {e}")
+                logger.error("Error during maintenance cleanup: %s", e)
 
             # Wait for next interval or stop signal
             # We sleep in small chunks to be responsive to stop event
@@ -74,7 +74,7 @@ class MaintenanceService:
         # 1. Prune old jobs and logs
         removed_count = self.job_service.prune_old_jobs(self.pruning_days)
         if removed_count > 0:
-            logger.info(f"Pruned {removed_count} jobs older than {self.pruning_days} days.")
+            logger.info("Pruned %s jobs older than %s days.", removed_count, self.pruning_days)
 
         # Add future maintenance tasks here (e.g. temporary file cleanup)
 

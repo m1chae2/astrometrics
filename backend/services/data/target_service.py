@@ -202,7 +202,7 @@ class TargetService:
         try:
             self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         except Exception as e:
-            logger.warning(f"Failed to refresh images for {target.id}: {e}")
+            logger.warning("Failed to refresh images for %s: %s", target.id, e)
 
     def update_target(self, target_id: str, updates: dict) -> Target | None:
         """Update specific attributes on a target by ID.
@@ -313,8 +313,8 @@ class TargetService:
         try:
             self.astrometrics.targets.save()
         except Exception as e:
-            logger.error(f"Failed to save target {target.id}: {e}")
-            raise e
+            logger.error("Failed to save target %s: %s", target.id, e)
+            raise
 
     def read_saved_target(self, target_id: str) -> Target | None:
         """Read one target's saved record straight from storage.
@@ -337,8 +337,8 @@ class TargetService:
         try:
             self.astrometrics.targets.save()
         except Exception as e:
-            logger.error(f"Failed to save targets: {e}")
-            raise e
+            logger.error("Failed to save targets: %s", e)
+            raise
 
     def get_frame_header(self, target_id: str, frame_path: str) -> list[dict[str, str]]:
         """Read full FITS headers for a specified frame record.
@@ -374,7 +374,7 @@ class TargetService:
         The target is identified by its ID string.
         """
         logger.info(
-            f"Starting single-target reindex for target '{target_id}' (prune_missing={prune_missing})"
+            "Starting single-target reindex for target '%s' (prune_missing=%s)", target_id, prune_missing
         )
         target = self.astrometrics.targets.get(target_id)
         if target:
@@ -382,7 +382,10 @@ class TargetService:
             self.astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
             new_count = len(target.frames)
             logger.info(
-                f"Reindex complete for target '{target_id}'. Frames before: {old_count}, after: {new_count}"
+                "Reindex complete for target '%s'. Frames before: %s, after: %s",
+                target_id,
+                old_count,
+                new_count,
             )
 
     def get_planetarium_targets(self) -> list[dict]:

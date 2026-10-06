@@ -68,7 +68,7 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
             data = json.loads(row["data_json"])
             targets.append(Target.model_validate(data))
     except Exception as e:
-        logger.error(f"Error loading targets from SQLite: {e}")
+        logger.error("Error loading targets from SQLite: %s", e)
     finally:
         conn.close()
 
@@ -117,8 +117,8 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
         )
         conn.commit()
     except Exception as e:
-        logger.error(f"Error saving target to SQLite: {e}")
-        raise e
+        logger.error("Error saving target to SQLite: %s", e)
+        raise
     finally:
         conn.close()
     return db_path

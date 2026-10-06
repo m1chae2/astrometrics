@@ -75,12 +75,13 @@ def resilient_service(
 
             if circuit_open:
                 if time.time() - last_failure_time > cooldown_seconds:
-                    logger.info(f"Circuit for '{func.__name__}' is half-open. Attempting execution.")
+                    logger.info("Circuit for '%s' is half-open. Attempting execution.", func.__name__)
                     circuit_open = False
                 else:
                     logger.warning(
-                        f"Circuit for '{func.__name__}' is OPEN. Returning fallback. "
-                        f"Cooldown remaining: {int(cooldown_seconds - (time.time() - last_failure_time))}s"
+                        "Circuit for '%s' is OPEN. Returning fallback. Cooldown remaining: %ss",
+                        func.__name__,
+                        int(cooldown_seconds - (time.time() - last_failure_time)),
                     )
                     return get_fallback(*args)
 
@@ -88,19 +89,21 @@ def resilient_service(
                 result = await func(*args, **kwargs)
                 failures = 0
                 return result
-            except exceptions as e:
+            except exceptions:
                 failures += 1
                 last_failure_time = time.time()
-                logger.error(
-                    f"Resilience hit in async service method '{func.__name__}' "
-                    f"(Failures: {failures}/{max_failures}): {e}",
-                    exc_info=True,
+                logger.exception(
+                    "Resilience hit in async service method '%s' (Failures: %s/%s)",
+                    func.__name__,
+                    failures,
+                    max_failures,
                 )
                 if failures >= max_failures:
                     circuit_open = True
                     logger.critical(
-                        f"Circuit for async service method '{func.__name__}' is OPEN. "
-                        f"Tripping breaker for {cooldown_seconds}s."
+                        "Circuit for async service method '%s' is OPEN. Tripping breaker for %ss.",
+                        func.__name__,
+                        cooldown_seconds,
                     )
                 return get_fallback(*args)
 
@@ -110,12 +113,13 @@ def resilient_service(
 
             if circuit_open:
                 if time.time() - last_failure_time > cooldown_seconds:
-                    logger.info(f"Circuit for '{func.__name__}' is half-open. Attempting execution.")
+                    logger.info("Circuit for '%s' is half-open. Attempting execution.", func.__name__)
                     circuit_open = False
                 else:
                     logger.warning(
-                        f"Circuit for '{func.__name__}' is OPEN. Returning fallback. "
-                        f"Cooldown remaining: {int(cooldown_seconds - (time.time() - last_failure_time))}s"
+                        "Circuit for '%s' is OPEN. Returning fallback. Cooldown remaining: %ss",
+                        func.__name__,
+                        int(cooldown_seconds - (time.time() - last_failure_time)),
                     )
                     return get_fallback(*args)
 
@@ -123,19 +127,21 @@ def resilient_service(
                 result = func(*args, **kwargs)
                 failures = 0
                 return result
-            except exceptions as e:
+            except exceptions:
                 failures += 1
                 last_failure_time = time.time()
-                logger.error(
-                    f"Resilience hit in service method '{func.__name__}' "
-                    f"(Failures: {failures}/{max_failures}): {e}",
-                    exc_info=True,
+                logger.exception(
+                    "Resilience hit in service method '%s' (Failures: %s/%s)",
+                    func.__name__,
+                    failures,
+                    max_failures,
                 )
                 if failures >= max_failures:
                     circuit_open = True
                     logger.critical(
-                        f"Circuit for service method '{func.__name__}' is OPEN. "
-                        f"Tripping breaker for {cooldown_seconds}s."
+                        "Circuit for service method '%s' is OPEN. Tripping breaker for %ss.",
+                        func.__name__,
+                        cooldown_seconds,
                     )
                 return get_fallback(*args)
 

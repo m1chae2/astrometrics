@@ -70,7 +70,7 @@ class EphemerisCrossMatcher:
                 position_error=120 * u.arcsec,
             )
         except Exception as query_error:
-            logger.warning(f"SkyBoT cone-search query failed: {query_error}")
+            logger.warning("SkyBoT cone-search query failed: %s", query_error)
             return None
 
         if field_table is None or len(field_table) == 0:

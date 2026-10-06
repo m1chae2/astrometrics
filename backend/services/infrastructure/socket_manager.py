@@ -27,13 +27,13 @@ class SocketManager:
         if not self._loop:
             self._loop = asyncio.get_running_loop()
         self.active_connections.append(websocket)
-        logger.info(f"Client connected. Active connections: {len(self.active_connections)}")
+        logger.info("Client connected. Active connections: %s", len(self.active_connections))
 
     def disconnect(self, websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Remove `websocket` from the active connection list."""
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            logger.info(f"Client disconnected. Active connections: {len(self.active_connections)}")
+            logger.info("Client disconnected. Active connections: %s", len(self.active_connections))
 
     async def broadcast(self, message: dict):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Broadcast a JSON message to all connected clients."""
@@ -44,7 +44,7 @@ class SocketManager:
             try:
                 await connection.send_text(payload)
             except Exception as e:
-                logger.warning(f"Failed to send to client: {e}")
+                logger.warning("Failed to send to client: %s", e)
                 dead_connections.append(connection)
 
         # Cleanup dead connections

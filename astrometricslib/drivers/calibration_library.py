@@ -207,7 +207,7 @@ class CalibrationLibrary(BaseModel):
                         calibration_info = json.load(file_obj)
                         self.deserialize(calibration_info)
         except Exception as e:
-            logger.error(f"Could not load calibration_frames.json: {e}")
+            logger.error("Could not load calibration_frames.json: %s", e)
 
     def save_library(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Save calibration library."""
@@ -221,7 +221,7 @@ class CalibrationLibrary(BaseModel):
                 with open(file_path, "w", encoding="utf8") as file_obj:
                     json.dump(self.serialize(), file_obj, indent=4)
         except Exception as e:
-            logger.error(f"Could not save calibration_frames.json: {e}")
+            logger.error("Could not save calibration_frames.json: %s", e)
 
     def serialize(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Serialize this calibration library to a plain dict.
@@ -438,7 +438,7 @@ class CalibrationLibrary(BaseModel):
                     if image_file not in self.dark_frames[camera][iso_speed][exposure_time]:
                         self.dark_frames[camera][iso_speed][exposure_time].append(image_file)
         except Exception as e:
-            logger.error(f"Error adding dark frame {image_file}: {e}")
+            logger.error("Error adding dark frame %s: %s", image_file, e)
 
     def add_bias_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a bias frame to the library."""
@@ -461,7 +461,7 @@ class CalibrationLibrary(BaseModel):
                     if image_file not in self.bias_frames[camera][iso_speed]:
                         self.bias_frames[camera][iso_speed].append(image_file)
         except Exception as e:
-            logger.error(f"Error adding bias frame {image_file}: {e}")
+            logger.error("Error adding bias frame %s: %s", image_file, e)
 
     def add_flat_frame(self, image_file, telescope="Unknown"):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a flat frame to the library."""
@@ -494,7 +494,7 @@ class CalibrationLibrary(BaseModel):
                     if image_file not in self.flat_frames[telescope][camera][filter_val][iso_speed]:
                         self.flat_frames[telescope][camera][filter_val][iso_speed].append(image_file)
         except Exception as e:
-            logger.error(f"Error adding flat frame {image_file}: {e}")
+            logger.error("Error adding flat frame %s: %s", image_file, e)
 
     def check_for_calibration_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
         self,

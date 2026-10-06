@@ -240,9 +240,12 @@ def identify_spectral_stars_via_registration(
 
     if len(spectral_positions) < _MIN_CONTROL_POINTS or len(reference_positions) < _MIN_CONTROL_POINTS:
         logger.info(
-            "Not enough positioned stars to register the spectral field against a reference "
-            f"field ({len(spectral_positions)} spectral, {len(reference_positions)} reference; "
-            f"need >= {_MIN_CONTROL_POINTS} each) -- leaving spectroscopy stars unidentified."
+            "Not enough positioned stars to register the spectral field against a reference field "
+            "(%s spectral, %s reference; need >= %s each) -- leaving spectroscopy stars "
+            "unidentified.",
+            len(spectral_positions),
+            len(reference_positions),
+            _MIN_CONTROL_POINTS,
         )
         return 0
 
@@ -263,8 +266,12 @@ def identify_spectral_stars_via_registration(
             max_match_distance_px,
         )
         logger.info(
-            f"Spectral field registration matched {matched_count} / {len(spectral_objs)} spectroscopy "
-            f"stars via translation-only offset (dx={offset[0]:.2f}, dy={offset[1]:.2f}) px."
+            "Spectral field registration matched %s / %s spectroscopy stars via translation-only "
+            "offset (dx=%.2f, dy=%.2f) px.",
+            matched_count,
+            len(spectral_objs),
+            offset[0],
+            offset[1],
         )
         return matched_count
 
@@ -278,16 +285,19 @@ def identify_spectral_stars_via_registration(
     try:
         transform, _ = astroalign.find_transform(source_points, target_points)
     except (astroalign.MaxIterError, ValueError) as e:
-        logger.warning(f"Could not register spectral field against reference star field: {e}")
+        logger.warning("Could not register spectral field against reference star field: %s", e)
         return 0
 
     matched_count = _apply_matches(
         spectral_objs, reference_objs, transform(source_points), target_points, max_match_distance_px
     )
     logger.info(
-        f"Spectral field registration matched {matched_count} / {len(spectral_objs)} "
-        "spectroscopy stars to catalog-identified reference stars "
-        f"(rotation={np.degrees(transform.rotation):.3f} deg, scale={transform.scale:.4f})."
+        "Spectral field registration matched %s / %s spectroscopy stars to catalog-identified "
+        "reference stars (rotation=%.3f deg, scale=%.4f).",
+        matched_count,
+        len(spectral_objs),
+        np.degrees(transform.rotation),
+        transform.scale,
     )
     return matched_count
 
@@ -403,8 +413,10 @@ def identify_spectral_stars_via_solution(
             spectral_stellar_objects, detections, used_detections, reference_by_id, placed, offset
         )
     logger.info(
-        f"Spectral field identified {matched_count} / {len(detections)} detections from the plate "
-        f"solution ({how})."
+        "Spectral field identified %s / %s detections from the plate solution (%s).",
+        matched_count,
+        len(detections),
+        how,
     )
     return matched_count
 

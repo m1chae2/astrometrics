@@ -55,15 +55,16 @@ def run_pipeline(target_id: str = "M 13") -> None:
         if frame.camera == "ZWO ASI 533MM Pro"
         and frame.filter in (FilterType.L, FilterType.LUMINANCE, "L", "Luminance")
     ]
-    logger.info(f"{len(l_frames)} Luminance frames for photometry.")
+    logger.info("%s Luminance frames for photometry.", len(l_frames))
 
     logger.info("Running astrometry analysis...")
     astrometry_result = astrometrics.processing.process_target(target, stages=["astrometry"]).results[
         "astrometry"
     ]
     logger.info(
-        f"Astrometry solved: {astrometry_result.get('wcs') is not None}; "
-        f"{len(astrometry_result.get('stellar_objects', []))} stars identified."
+        "Astrometry solved: %s; %s stars identified.",
+        astrometry_result.get("wcs") is not None,
+        len(astrometry_result.get("stellar_objects", [])),
     )
 
     logger.info("Running photometry analysis...")
@@ -72,7 +73,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
         stages=["photometry"],
         photometry={"filter_type": "L", "frames": l_frames, "use_astrometry_seed": True},
     ).results["photometry"]
-    logger.info(f"Photometry status: {photometry_result.get('status')}")
+    logger.info("Photometry status: %s", photometry_result.get("status"))
 
     logger.info("Running spectroscopy analysis...")
     spectroscopy_result = astrometrics.processing.process_target(target, stages=["spectroscopy"]).results[
@@ -81,7 +82,7 @@ def run_pipeline(target_id: str = "M 13") -> None:
     spectral_stars = spectroscopy_result.get("stellar_objects", [])
     matched = sum(1 for star in spectral_stars if star.id.endswith("::spectroscopy"))
     logger.info(
-        f"Spectroscopy: {len(spectral_stars)} stars extracted, {matched} registered against astrometry."
+        "Spectroscopy: %s stars extracted, %s registered against astrometry.", len(spectral_stars), matched
     )
     logger.info("Done.")
 

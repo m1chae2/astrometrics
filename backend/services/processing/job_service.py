@@ -182,9 +182,9 @@ class JobService:
             if path.exists():
                 try:
                     os.remove(str(path))
-                    logger.info(f"Deleted log file for job {job_id}: {path}")
+                    logger.info("Deleted log file for job %s: %s", job_id, path)
                 except Exception as e:
-                    logger.error(f"Error removing log file {path}: {e}")
+                    logger.error("Error removing log file %s: %s", path, e)
 
         return self.repository.delete_job(job_id)
 

@@ -8,6 +8,8 @@ from typing import Any
 from astrometricslib import NotFoundError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
+logger = logging.getLogger(__name__)
+
 # Define stable log directory relative to this file
 LOG_DIR = None  # Will be initialized from config
 
@@ -144,7 +146,7 @@ class ImageProcessingService(BaseBackgroundService):
             self.siril.launch_siril_gui(path)
             return True
         except Exception as e:
-            logging.error(f"Failed to launch Siril for {target_id}: {e}")
+            logger.error("Failed to launch Siril for %s: %s", target_id, e)
             return False
 
     def process_target(self, target_id: str, image_files: list) -> dict:
@@ -165,9 +167,10 @@ class ImageProcessingService(BaseBackgroundService):
                     # Check if first item is a path string
                     first = image_files[0] if image_files else None
                     if isinstance(first, str):
-                        logging.info(
-                            f"Rehydrating metadata for {len(image_files)} paths using "
-                            f"Target {target_id} frames list"
+                        logger.info(
+                            "Rehydrating metadata for %s paths using Target %s frames list",
+                            len(image_files),
+                            target_id,
                         )
                         path_map = {f.path: f.model_dump(by_alias=True) for f in target.frames}
                         rehydrated = [path_map[p] for p in image_files if p in path_map]
@@ -177,7 +180,7 @@ class ImageProcessingService(BaseBackgroundService):
                         # Already models, convert to dicts for processors
                         image_files = [f.model_dump(by_alias=True) for f in image_files]
             except Exception as e:
-                logging.warning(f"Failed to rehydrate metadata for target {target_id}: {e}")
+                logger.warning("Failed to rehydrate metadata for target %s: %s", target_id, e)
 
         # Create a unique log path for this job
         safe_target_id = target_id.replace(" ", "_")
@@ -238,19 +241,21 @@ def _log_what_the_saved_record_names(
     """
     saved = target_service.read_saved_target(target_id)
     if saved is None:
-        logger.error(f"The saved record for {target_id} could not be read back after the save.")
+        logger.error("The saved record for %s could not be read back after the save.", target_id)
         return
     recorded_stacks = {saved.stacking.stacked_image, saved.spectral_stacking.stacked_image}
     recorded_stacks.update(result.stacked_image for result in saved.stacking.stacks_by_configuration.values())
     if final_path not in recorded_stacks:
         logger.error(
-            f"The stack was made at {final_path}, but the saved record for {target_id} does not "
-            f"name it (it names {saved.stacking.stacked_image or 'no stack'}). The viewer will "
-            "not show this stack until the record is repaired."
+            "The stack was made at %s, but the saved record for %s does not name it (it names %s). "
+            "The viewer will not show this stack until the record is repaired.",
+            final_path,
+            target_id,
+            saved.stacking.stacked_image or "no stack",
         )
         return
     picture = saved.stacking.processed_image or saved.spectral_stacking.processed_image
-    logger.info(f"The saved record for {target_id} names the stack. Processed image: {picture or 'none'}.")
+    logger.info("The saved record for %s names the stack. Processed image: %s.", target_id, picture or "none")
 
 
 def start_siril_processing_task(
@@ -297,7 +302,7 @@ def start_siril_processing_task(
     with capture_job_logs(
         job_id=job_id, log_file_path=log_file_path, logger_interface=job_repository
     ) as logger:
-        logger.info(f"Starting new processing task for {target_id} (Job: {job_id})")
+        logger.info("Starting new processing task for %s (Job: %s)", target_id, job_id)
 
         # The stacking stage works on the target's own frame records, so
         # the frames the viewer sent (as paths or as dicts) are matched back
@@ -326,7 +331,7 @@ def start_siril_processing_task(
                 )
             final_path = stack_result.stacked_path
         except ProcessingError as error:
-            logger.error(f"Stacking {target_id} made no stack: {error}")
+            logger.error("Stacking %s made no stack: %s", target_id, error)
             final_path = None
 
         if notification_service:
@@ -342,7 +347,7 @@ def start_siril_processing_task(
         # The stack call saved the target with its stack, quality summary
         # and processed picture; this checks what the saved record names.
         if final_path:
-            logger.info(f"Saved target {target_id} with stacked image: {final_path}")
+            logger.info("Saved target %s with stacked image: %s", target_id, final_path)
             _log_what_the_saved_record_names(target_service, target_id, final_path, logger)
 
         return final_path

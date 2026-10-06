@@ -85,9 +85,9 @@ class StellarMateInterface(RemoteTransferDriver):
         """
         if self._last_connection_status != is_online:
             if is_online:
-                logger.info(f"Remote Host '{self.host_alias}' is now ONLINE.")
+                logger.info("Remote Host '%s' is now ONLINE.", self.host_alias)
             else:
-                logger.debug(f"Remote Host '{self.host_alias}' is now OFFLINE.")
+                logger.debug("Remote Host '%s' is now OFFLINE.", self.host_alias)
             self._last_connection_status = is_online
 
     def _run_command(self, cmd_list: list[str]) -> str:
@@ -192,11 +192,11 @@ class StellarMateInterface(RemoteTransferDriver):
 
             if is_conn_error:
                 if self._last_connection_status is not False:
-                    logger.debug(f"SSH Connection Failed: {e.stderr.strip()}")
+                    logger.debug("SSH Connection Failed: %s", e.stderr.strip())
                 self._update_connection_status(False)
             else:
-                logger.error(f"Command failed: {cmd_list}")
-                logger.error(f"Stderr: {e.stderr}")
+                logger.error("Command failed: %s", cmd_list)
+                logger.error("Stderr: %s", e.stderr)
                 self._update_connection_status(True)
 
             raise ExternalServiceError(f"SSH/Command Failed: {e.stderr}") from e
@@ -231,7 +231,7 @@ class StellarMateInterface(RemoteTransferDriver):
             return dirs
         except Exception as e:
             if self._last_connection_status is not False:
-                logger.error(f"Failed to list remote targets: {e}")
+                logger.error("Failed to list remote targets: %s", e)
             return []
 
     def resolve_remote_folder_name(self, folder_name: str) -> str:
@@ -298,7 +298,7 @@ class StellarMateInterface(RemoteTransferDriver):
             return files
         except Exception as e:
             if self._last_connection_status is not False:
-                logger.error(f"Failed to list files in {folder_name}: {e}")
+                logger.error("Failed to list files in %s: %s", folder_name, e)
             return []
 
     def list_remote_files_with_sizes(self, folder_name: str) -> list[tuple[str, int]]:
@@ -339,7 +339,7 @@ class StellarMateInterface(RemoteTransferDriver):
             return files_with_sizes
         except Exception as e:
             if self._last_connection_status is not False:
-                logger.error(f"Failed to list files with sizes in {folder_name}: {e}")
+                logger.error("Failed to list files with sizes in %s: %s", folder_name, e)
             return []
 
     def get_remote_folder_count(self, folder_name: str) -> int:
@@ -364,7 +364,7 @@ class StellarMateInterface(RemoteTransferDriver):
             return int(output)
         except Exception as e:
             if self._last_connection_status is not False:
-                logger.error(f"Failed to count files in {folder_name}: {e}")
+                logger.error("Failed to count files in %s: %s", folder_name, e)
             return 0
 
     def download_target_folder(
@@ -498,7 +498,7 @@ class StellarMateInterface(RemoteTransferDriver):
             f"{self.host_alias}:{remote_path}",
             local_path,
         ]
-        logger.info(f"Starting rsync download: {self.host_alias}:{remote_path} -> {local_path}")
+        logger.info("Starting rsync download: %s:%s -> %s", self.host_alias, remote_path, local_path)
         try:
             process = subprocess.Popen(
                 rsync_cmd,
@@ -519,16 +519,16 @@ class StellarMateInterface(RemoteTransferDriver):
                         if log_callback:
                             log_callback(f"Downloading: {line}")
 
-                    logger.debug(f"rsync: {line}")
+                    logger.debug("rsync: %s", line)
 
             return_code = process.wait()
             if return_code == 0:
-                logger.info(f"rsync completed successfully for {description}")
+                logger.info("rsync completed successfully for %s", description)
                 return True
-            logger.error(f"rsync failed with code {return_code} for {description}.")
+            logger.error("rsync failed with code %s for %s.", return_code, description)
             return False
         except Exception as e:
-            logger.error(f"rsync execution error for {description}: {e}")
+            logger.error("rsync execution error for %s: %s", description, e)
             return False
 
     def _list_remote_files_with_sizes(self, find_command: str) -> dict[str, int]:
@@ -553,7 +553,7 @@ class StellarMateInterface(RemoteTransferDriver):
             output = self._run_command(["ssh", self.host_alias, find_command])
         except Exception as e:
             if self._last_connection_status is not False:
-                logger.error(f"Failed to list remote files: {e}")
+                logger.error("Failed to list remote files: %s", e)
             return {}
         sizes_by_path: dict[str, int] = {}
         for line in output.split("\n"):
@@ -625,7 +625,7 @@ class StellarMateInterface(RemoteTransferDriver):
             if os.path.isfile(local_path) and os.path.getsize(local_path) == remote_size:
                 local_paths.append(local_path)
             else:
-                logger.warning(f"{description} {remote_file} is not present and current after the sync")
+                logger.warning("%s %s is not present and current after the sync", description, remote_file)
         return local_paths
 
     def _remote_guide_log_sizes(self) -> dict[str, int]:

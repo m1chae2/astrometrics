@@ -114,8 +114,8 @@ def save_observation_session(app_config=None, session=None) -> str:  # ruff: ign
         )
         conn.commit()
     except Exception as e:
-        logger.error(f"Error saving ObservationSession to SQLite: {e}")
-        raise e
+        logger.error("Error saving ObservationSession to SQLite: %s", e)
+        raise
     finally:
         conn.close()
     return db_path
@@ -322,8 +322,8 @@ def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  
         )
         conn.commit()
     except Exception as e:
-        logger.error(f"Error saving {table_name} record to SQLite: {e}")
-        raise e
+        logger.error("Error saving %s record to SQLite: %s", table_name, e)
+        raise
     finally:
         conn.close()
     return db_path

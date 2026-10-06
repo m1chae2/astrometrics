@@ -69,9 +69,11 @@ def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
         solved_coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
         target.ra = solved_coord.ra.to_string(unit=u.hour, sep=" ", precision=2)
         target.dec = solved_coord.dec.to_string(unit=u.deg, sep=" ", precision=2)
-        logger.info(f"Updated Target {target.id} RA/Dec from plate solver: RA={target.ra}, DEC={target.dec}")
+        logger.info(
+            "Updated Target %s RA/Dec from plate solver: RA=%s, DEC=%s", target.id, target.ra, target.dec
+        )
     except Exception as wcs_error:
-        logger.warning(f"Failed to extract center coordinate from WCS for target {target.id}: {wcs_error}")
+        logger.warning("Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error)
 
 
 def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
@@ -93,9 +95,9 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
                     continue
                 hdul[0].header[card.keyword] = (card.value, card.comment)
             hdul.flush()
-        logger.info(f"Updated FITS file {path} header with solved WCS keywords.")
+        logger.info("Updated FITS file %s header with solved WCS keywords.", path)
     except Exception as wcs_error:
-        logger.warning(f"Failed to update FITS file header with WCS: {wcs_error}")
+        logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
 
 
 class AstrometryPipelineAdapter(AnalysisPipeline):

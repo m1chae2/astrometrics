@@ -293,7 +293,7 @@ class IndiInterface(IndiClient):
                 if name and name.strip():
                     self.deviceMap[name] = device
             except Exception as e:
-                logger.debug(f"Failed to query device name on newDevice: {e}")
+                logger.debug("Failed to query device name on newDevice: %s", e)
 
     def removeDevice(self, device: Any) -> None:
         """Handle a removed INDI device.
@@ -311,7 +311,7 @@ class IndiInterface(IndiClient):
                 if name in self.deviceMap:
                     self.deviceMap.pop(name, None)
             except Exception as e:
-                logger.debug(f"Failed to query device name on removeDevice: {e}")
+                logger.debug("Failed to query device name on removeDevice: %s", e)
 
     def _sync_config(self):  # ruff: ignore[missing-return-type-private-function]
         """Sync local state (hostname) from config."""
@@ -394,7 +394,7 @@ class IndiInterface(IndiClient):
                 if name and name.strip():
                     self.deviceMap[name] = self.getDevice(name)
             except Exception as e:
-                logger.debug(f"Failed to resolve device name in connect_to_server: {e}")
+                logger.debug("Failed to resolve device name in connect_to_server: %s", e)
 
         return self
 
@@ -910,7 +910,7 @@ class IndiInterface(IndiClient):
                 if match:
                     return float(match.group(1))
         except Exception as exptime_err:
-            logger.debug(f"Failed to read EXPTIME from FITS_HEADER: {exptime_err}")
+            logger.debug("Failed to read EXPTIME from FITS_HEADER: %s", exptime_err)
         return None
 
     def _handle_exposure_update(self, val: float, is_busy: bool, fits_exptime: float | None = None) -> None:
@@ -999,7 +999,7 @@ class IndiInterface(IndiClient):
             if fits_header:
                 self._extract_target_from_text_property(fits_header)
         except Exception as header_error:
-            logger.debug(f"Failed to read camera FITS_HEADER: {header_error}")
+            logger.debug("Failed to read camera FITS_HEADER: %s", header_error)
 
     def _extract_target_from_text_property(self, text_vector: Any) -> None:
         """Extract celestial target name from FITS_HEADER or target text.
@@ -1035,7 +1035,7 @@ class IndiInterface(IndiClient):
                         self.status["TARGET_NAME"] = clean_name
                         return
         except Exception as extract_error:
-            logger.debug(f"Failed to extract target from text property: {extract_error}")
+            logger.debug("Failed to extract target from text property: %s", extract_error)
 
     def get_coordinates(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Get the coordinates the telescope is pointing at."""
@@ -1300,7 +1300,7 @@ class IndiInterface(IndiClient):
                         self._pre_sync_ra = None
                         self._pre_sync_dec = None
         except Exception as switch_error:
-            logger.debug(f"Error checking external switch property: {switch_error}")
+            logger.debug("Error checking external switch property: %s", switch_error)
 
     def newNumber(self, number_vector: Any) -> None:
         """Handle a number property update from the INDI server.
@@ -1526,7 +1526,7 @@ class IndiInterface(IndiClient):
                     self._handle_exposure_update(val, is_busy, fits_exptime)
 
         except Exception as pulse_error:
-            logger.debug(f"Error handling property update in newNumber: {pulse_error}")
+            logger.debug("Error handling property update in newNumber: %s", pulse_error)
 
     def newText(self, text_vector: Any) -> None:
         """Handle a text property update from the INDI server.
@@ -1544,7 +1544,7 @@ class IndiInterface(IndiClient):
             if property_name in ("FITS_HEADER", "OBJECT_INFO", "TARGET_NAME", "OBJECT_NAME"):
                 self._extract_target_from_text_property(text_vector)
         except Exception as text_error:
-            logger.debug(f"Error checking external text property: {text_error}")
+            logger.debug("Error checking external text property: %s", text_error)
 
     def get_device_names(self) -> list[str]:
         """List the names of the INDI devices the client knows about.
@@ -1567,7 +1567,7 @@ class IndiInterface(IndiClient):
             try:
                 name = device.getDeviceName()
             except Exception as error:
-                logger.debug(f"Failed to read an INDI device name: {error}")
+                logger.debug("Failed to read an INDI device name: %s", error)
                 continue
             if name and name.strip():
                 names.append(name)

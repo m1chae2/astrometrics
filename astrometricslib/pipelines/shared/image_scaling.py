@@ -436,7 +436,7 @@ class ImageScaler:
                     if vmax is None:
                         vmax = calc_vmax
                 except Exception as e:
-                    logger.warning(f"Error calculating percentiles for scaling: {e}")
+                    logger.warning("Error calculating percentiles for scaling: %s", e)
 
             # Fallback to absolute min/max if stretch is off or failed
             if vmin is None:

@@ -89,7 +89,7 @@ def test_unsolvable_field_is_attempted_only_once():  # ruff: ignore[missing-retu
 
     def solve_call():  # ruff: ignore[missing-return-type-private-function]
         attempts.append(1)
-        raise Exception("could not solve field")
+        raise RuntimeError("could not solve field")
 
     result = _call_with_transient_retry(solve_call, description="Online image solve")
 

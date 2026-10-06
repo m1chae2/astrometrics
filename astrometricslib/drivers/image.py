@@ -84,7 +84,7 @@ class AstrometricsImage:
 
             return header
         except Exception as e:
-            logger.debug(f"Failed to read FITS header {self.path}: {e}")
+            logger.debug("Failed to read FITS header %s: %s", self.path, e)
             return None
 
     def _load_header(self) -> None:
@@ -101,7 +101,7 @@ class AstrometricsImage:
             return
 
         if not os.path.exists(self.path):
-            logger.error(f"FITS file not found: {self.path}")
+            logger.error("FITS file not found: %s", self.path)
             raise NotFoundError(f"Image not found at {self.path}")
 
         try:
@@ -131,10 +131,10 @@ class AstrometricsImage:
                 try:
                     self._wcs = WCS(self._header, naxis=2)
                 except Exception:
-                    logger.debug(f"Could not initialize WCS for {self.path}: {wcs_err}")
+                    logger.debug("Could not initialize WCS for %s: %s", self.path, wcs_err)
                     self._wcs = None
         except Exception as e:
-            logger.error(f"Failed to load FITS header {self.path}: {e}")
+            logger.error("Failed to load FITS header %s: %s", self.path, e)
             raise
 
     def _load_data(self):  # ruff: ignore[missing-return-type-private-function]
@@ -150,7 +150,7 @@ class AstrometricsImage:
                 try:
                     raw_data = hdu.data
                 except Exception as read_err:
-                    logger.warning(f"FITS data array corrupted or truncated in {self.path}: {read_err}")
+                    logger.warning("FITS data array corrupted or truncated in %s: %s", self.path, read_err)
                     raw_data = None
 
                 if raw_data is not None:
@@ -158,7 +158,7 @@ class AstrometricsImage:
                 else:
                     self._data = np.zeros((0, 0))
         except Exception as e:
-            logger.error(f"Failed to load FITS data {self.path}: {e}")
+            logger.error("Failed to load FITS data %s: %s", self.path, e)
             self._data = np.zeros((0, 0))
 
     @property
@@ -212,7 +212,7 @@ class AstrometricsImage:
             t = Time(date_str)
             return float(t.unix)
         except Exception as e:
-            logger.debug(f"Failed to parse DATE-OBS '{date_str}': {e}")
+            logger.debug("Failed to parse DATE-OBS '%s': %s", date_str, e)
             return None
 
     @property

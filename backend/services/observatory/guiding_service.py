@@ -90,8 +90,9 @@ class GuidingService:
             time.sleep(0.5)
         else:
             logger.error(
-                f"Cannot start guiding: Telescope is not tracking after {max_retries} attempts "
-                f"(Status: {tracking_status})"
+                "Cannot start guiding: Telescope is not tracking after %s attempts (Status: %s)",
+                max_retries,
+                tracking_status,
             )
             return False
 
@@ -106,7 +107,7 @@ class GuidingService:
 
         self._guide_thread = threading.Thread(target=self._guiding_loop, daemon=True)
         self._guide_thread.start()
-        logger.info(f"Started guiding loop: Exp={exposure}s, Gain={gain}")
+        logger.info("Started guiding loop: Exp=%ss, Gain=%s", exposure, gain)
         return True
 
     def clear_history(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -212,11 +213,11 @@ class GuidingService:
                             ]
                             self._logger_interface.record_guiding_samples(records)
                         except Exception as log_err:
-                            logger.debug(f"Failed to record PHD2 guiding samples: {log_err}")
+                            logger.debug("Failed to record PHD2 guiding samples: %s", log_err)
 
                     return
             except Exception as phd2_err:
-                logger.debug(f"PHD2 telemetry poll skipped: {phd2_err}")
+                logger.debug("PHD2 telemetry poll skipped: %s", phd2_err)
 
         # 2. Fall back to INDI timed guide pulse queue
         try:
@@ -313,11 +314,11 @@ class GuidingService:
                     ]
                     self._logger_interface.record_guiding_samples(records)
                 except Exception as log_err:
-                    logger.debug(f"Failed to record INDI guiding samples: {log_err}")
+                    logger.debug("Failed to record INDI guiding samples: %s", log_err)
         except Exception as e:
             # Handle uninitialized C++ SWIG client in test simulators
             # gracefully
-            logger.debug(f"Passive guiding telemetry polling skipped or failed: {e}")
+            logger.debug("Passive guiding telemetry polling skipped or failed: %s", e)
 
     def get_status(self) -> dict:
         """Report the current guiding status.
@@ -369,13 +370,14 @@ class GuidingService:
                     self._tracking_fail_count += 1
                     if self._tracking_fail_count >= 3:
                         logger.warning(
-                            f"Guiding loop stopped: Telescope tracking status lost ({current_tracking})."
+                            "Guiding loop stopped: Telescope tracking status lost (%s).", current_tracking
                         )
                         break
                     else:
                         logger.debug(
-                            f"Tracking status transient: {current_tracking}. "
-                            f"retry {self._tracking_fail_count}/3"
+                            "Tracking status transient: %s. retry %s/3",
+                            current_tracking,
+                            self._tracking_fail_count,
                         )
                         time.sleep(1)
                         continue
@@ -470,7 +472,7 @@ class GuidingService:
                     self._history.pop(0)
 
             except Exception as e:
-                logger.error(f"Guiding loop error: {e}")
+                logger.error("Guiding loop error: %s", e)
                 time.sleep(1)
 
         self._is_guiding = False

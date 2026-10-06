@@ -112,8 +112,13 @@ def _drop_unresolved_stars(
         resolved.append(stellar_object)
 
     logger.info(
-        f"[{target_id}] {pipeline_name} star identification: {catalog_matched} catalog-matched, "
-        f"{position_only} position-only (no catalog match), {unresolved} dropped (no sky position at all)"
+        "[%s] %s star identification: %s catalog-matched, %s position-only (no catalog match), %s "
+        "dropped (no sky position at all)",
+        target_id,
+        pipeline_name,
+        catalog_matched,
+        position_only,
+        unresolved,
     )
     return resolved, StarIdentificationBreakdown(catalog_matched, position_only, unresolved)
 
@@ -231,8 +236,11 @@ def _reconcile_position_only_star_ids(
 
     if reused_count:
         logger.info(
-            f"[{target_id}] Reconciled {reused_count} position-only star id(s) onto existing "
-            f"catalog rows within {CATALOG_MATCH_RADIUS_ARCSEC:g} arcsec, instead of minting new ones."
+            "[%s] Reconciled %s position-only star id(s) onto existing catalog rows within %g "
+            "arcsec, instead of minting new ones.",
+            target_id,
+            reused_count,
+            CATALOG_MATCH_RADIUS_ARCSEC,
         )
     return stellar_objects
 
@@ -443,10 +451,13 @@ def _reconcile_identified_star_ids(
 
     if reused_count or renamed_count:
         logger.info(
-            f"[{target_id}] Matched {reused_count + renamed_count} star(s) to a saved row under another "
-            f"catalog's name within {SAME_STAR_POSITION_TOLERANCE_ARCSEC:g} arcsec "
-            f"({reused_count} reused the saved name, {renamed_count} renamed the saved row), "
-            "instead of saving a second row."
+            "[%s] Matched %s star(s) to a saved row under another catalog's name within %g arcsec "
+            "(%s reused the saved name, %s renamed the saved row), instead of saving a second row.",
+            target_id,
+            reused_count + renamed_count,
+            SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+            reused_count,
+            renamed_count,
         )
     return stellar_objects
 

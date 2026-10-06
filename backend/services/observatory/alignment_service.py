@@ -79,7 +79,7 @@ class AlignmentService:
                         )
                     )
             except Exception as exc:
-                logger.debug(f"Failed loading alignment attempts from SQLite: {exc}")
+                logger.debug("Failed loading alignment attempts from SQLite: %s", exc)
 
         return [attempt.model_dump(by_alias=True) for attempt in self.alignment_attempts]
 
@@ -118,7 +118,7 @@ class AlignmentService:
                         "timestamp": row.get("timestamp"),
                     }
             except Exception as exc:
-                logger.debug(f"Error fetching polar alignment fallback: {exc}")
+                logger.debug("Error fetching polar alignment fallback: %s", exc)
 
         return {
             "status": "idle",
@@ -171,7 +171,7 @@ class AlignmentService:
                     })
                 return sessions
             except Exception as exc:
-                logger.debug(f"Error listing alignment sessions: {exc}")
+                logger.debug("Error listing alignment sessions: %s", exc)
         return []
 
     def get_session_data(self, session_id: str) -> dict[str, Any]:
@@ -213,7 +213,7 @@ class AlignmentService:
                     attempts.extend(target_attempts)
                 except Exception as target_telemetry_err:
                     logger.debug(
-                        f"Error loading target telemetry for session {session_id}: {target_telemetry_err}"
+                        "Error loading target telemetry for session %s: %s", session_id, target_telemetry_err
                     )
 
             if session_id in ("all", "*", None):
@@ -240,7 +240,7 @@ class AlignmentService:
                 "polarAlignment": polar_status,
             }
         except Exception as exc:
-            logger.debug(f"Error loading session {session_id} alignment data: {exc}")
+            logger.debug("Error loading session %s alignment data: %s", session_id, exc)
             return {"alignmentAttempts": [], "polarAlignment": None}
 
     def get_cumulative_tracking_data(self, limit: int = 10000) -> dict[str, Any]:
@@ -346,9 +346,9 @@ class AlignmentService:
                             }
                             self._logger_interface.record_alignment_attempt(record_payload)
                         except Exception as log_err:
-                            logger.debug(f"Failed to record alignment attempt in SQLite: {log_err}")
+                            logger.debug("Failed to record alignment attempt in SQLite: %s", log_err)
             except Exception as exc:
-                logger.debug(f"Error polling external syncs: {exc}")
+                logger.debug("Error polling external syncs: %s", exc)
 
         # Poll polar alignment updates
         if hasattr(driver, "drain_polar_alignment"):
@@ -357,7 +357,7 @@ class AlignmentService:
                 if polar_record and self._logger_interface:
                     self._logger_interface.record_polar_alignment(polar_record)
             except Exception as p_err:
-                logger.debug(f"Error polling polar alignment: {p_err}")
+                logger.debug("Error polling polar alignment: %s", p_err)
 
     def solve_image(self, image_path: str) -> AlignmentResult:
         """Solves the given image using identifyStars (Astrometry.
@@ -387,7 +387,7 @@ class AlignmentService:
             return AlignmentResult(success=True, ra=ra, dec=dec)
 
         except Exception as e:
-            logger.error(f"Plate solving error: {e}")
+            logger.error("Plate solving error: %s", e)
             return AlignmentResult(success=False, error=str(e))
 
     def _alignment_loop(self, target_ra: float, target_dec: float):  # ruff: ignore[missing-return-type-private-function]
@@ -411,7 +411,7 @@ class AlignmentService:
                 time.sleep(self.settle_time)
 
                 # Capture alignment image
-                logger.info(f"Capturing alignment image (attempt {attempt_count})")
+                logger.info("Capturing alignment image (attempt %s)", attempt_count)
 
                 if not self._imaging_service:
                     logger.error("ImagingService not initialized in AlignmentService")
@@ -434,7 +434,7 @@ class AlignmentService:
                 solve_result = self.solve_image(image_result["path"])
 
                 if not solve_result.success:
-                    logger.error(f"Plate solve failed: {solve_result.error}")
+                    logger.error("Plate solve failed: %s", solve_result.error)
                     solving_attempt.status = "failed"
                     continue
 
@@ -458,7 +458,7 @@ class AlignmentService:
 
                 if error_magnitude < self.accuracy_threshold:
                     # Success!
-                    logger.info(f"Alignment successful! Error: {error_magnitude:.2f} arcsec")
+                    logger.info("Alignment successful! Error: %.2f arcsec", error_magnitude)
                     solving_attempt.status = "aligned"
                     self._alignment_active = False
                     break
@@ -472,18 +472,18 @@ class AlignmentService:
                 # Sync telescope to solved coordinates. Both the solve and
                 # SkyPosition use degrees.
                 logger.info(
-                    f"Syncing to solved coordinates: RA={solve_result.ra} deg, DEC={solve_result.dec}"
+                    "Syncing to solved coordinates: RA=%s deg, DEC=%s", solve_result.ra, solve_result.dec
                 )
                 self._observatory.mount.sync(
                     SkyPosition(ra_deg=solve_result.ra % 360.0, dec_deg=solve_result.dec)
                 )
 
                 # Re-slew to target
-                logger.info(f"Re-slewing to target: RA={target_ra} deg, DEC={target_dec}")
+                logger.info("Re-slewing to target: RA=%s deg, DEC=%s", target_ra, target_dec)
                 self._observatory.mount.slew(SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec))
 
             except Exception as e:
-                logger.error(f"Alignment attempt {attempt_count} failed: {e}")
+                logger.error("Alignment attempt %s failed: %s", attempt_count, e)
                 solving_attempt.status = "failed"
 
         if attempt_count >= max_attempts:
@@ -526,7 +526,7 @@ class AlignmentService:
         )
         self._alignment_thread.start()
 
-        logger.info(f"Started alignment for RA={target_ra}, DEC={target_dec}")
+        logger.info("Started alignment for RA=%s, DEC=%s", target_ra, target_dec)
         return True
 
     def cancel_alignment(self) -> bool:

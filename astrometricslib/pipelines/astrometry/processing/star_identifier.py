@@ -170,9 +170,11 @@ def _record_gaia_failure(context: str) -> None:
         if not _gaia_circuit_open and _gaia_consecutive_failures >= GAIA_CONSECUTIVE_FAILURE_LIMIT:
             _gaia_circuit_open = True
             logger.warning(
-                f"Gaia remote queries disabled for the rest of this process after "
-                f"{_gaia_consecutive_failures} consecutive failures (last: {context}). "
-                "Locally cached Gaia data is still used; SIMBAD identification is unaffected."
+                "Gaia remote queries disabled for the rest of this process after %s consecutive "
+                "failures (last: %s). Locally cached Gaia data is still used; SIMBAD "
+                "identification is unaffected.",
+                _gaia_consecutive_failures,
+                context,
             )
 
 
@@ -575,7 +577,7 @@ class StarIdentifier:
             )
             blob_width = None
         if blob_width is not None:
-            logger.debug(f"Sizing the detection kernel from the measured blob width: {blob_width:.2f}px")
+            logger.debug("Sizing the detection kernel from the measured blob width: %.2fpx", blob_width)
             self.detector.fwhm = blob_width
 
         sources = self.detector.detect(data)
@@ -611,7 +613,7 @@ class StarIdentifier:
         if focal_len and focal_len > 0 and pixel_size and pixel_size > 0:
             try:
                 calculated_scale = 206.265 * float(pixel_size) / float(focal_len)
-                logger.info(f"Calculated expected pixel scale: {calculated_scale:.3f} arcsec/pixel")
+                logger.info("Calculated expected pixel scale: %.3f arcsec/pixel", calculated_scale)
                 return calculated_scale * 0.95, calculated_scale * 1.05
             except ValueError, TypeError:
                 logger.warning("Could not calculate pixel scale from metadata.")
@@ -679,7 +681,7 @@ class StarIdentifier:
         # 2. Detect Stars
         logger.info("Detecting stars...")
         sources, unique_sources = self.detect_stars(data, is_color_frame=is_color_frame)
-        logger.debug(f"Detected {len(sources)} sources, {len(unique_sources)} unique.")
+        logger.debug("Detected %s sources, %s unique.", len(sources), len(unique_sources))
         self.sources_detected = len(unique_sources)
         self.catalog_match_separations_arcsec = []
 
@@ -707,8 +709,9 @@ class StarIdentifier:
         if isinstance(identification_limit, int) and identification_limit > 0:
             if len(unique_sources) > identification_limit:
                 logger.info(
-                    f"Identifying the brightest {identification_limit} of "
-                    f"{len(unique_sources)} detected sources, per the configured limit."
+                    "Identifying the brightest %s of %s detected sources, per the configured limit.",
+                    identification_limit,
+                    len(unique_sources),
                 )
             unique_sources = unique_sources[:identification_limit]
 
@@ -728,9 +731,11 @@ class StarIdentifier:
             # silently disable a solve that would otherwise succeed.
             self.solve_attempted = len(solver_sources) >= 4
             if not self.solve_attempted:
-                logger.info(f"Skipping plate solve: only {len(solver_sources)} sources detected.")
+                logger.info("Skipping plate solve: only %s sources detected.", len(solver_sources))
             else:
-                logger.info(f"Solving field with {len(solver_sources)} of {len(unique_sources)} sources...")
+                logger.info(
+                    "Solving field with %s of %s sources...", len(solver_sources), len(unique_sources)
+                )
                 h, w = data.shape
 
                 # Determine scale hints dynamically. We
@@ -806,11 +811,13 @@ class StarIdentifier:
                 radius_deg = max(fov_x, fov_y) / 2.0 * 1.1  # 10% buffer
                 radius_deg = min(radius_deg, 1.0)  # Cap at 1 degree
             except Exception as e:
-                logger.warning(f"Failed to calculate FOV from WCS: {e}")
+                logger.warning("Failed to calculate FOV from WCS: %s", e)
 
         logger.info(
-            f"Querying SIMBAD bulk region at {ra_center:.4f}, {dec_center:.4f} "
-            f"with {radius_deg:.3f} degree radius..."
+            "Querying SIMBAD bulk region at %.4f, %.4f with %.3f degree radius...",
+            ra_center,
+            dec_center,
+            radius_deg,
         )
         try:
             coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
@@ -822,14 +829,14 @@ class StarIdentifier:
                 row_limit=5000,  # Prevent massive result sets
             )
         except Exception as e:
-            logger.error(f"SIMBAD query failed: {e}")
+            logger.error("SIMBAD query failed: %s", e)
             return None, None
 
         if result_table is None or len(result_table) == 0:
             logger.info("No SIMBAD results for this region.")
             return None, None
 
-        logger.info(f"  Found {len(result_table)} potential matches in SIMBAD.")
+        logger.info("  Found %s potential matches in SIMBAD.", len(result_table))
 
         # Exclude non-stellar SIMBAD entries (galaxies, nebulae,
         # clusters, etc). A detected point source can never
@@ -846,7 +853,7 @@ class StarIdentifier:
             )
             return None, None
 
-        logger.info(f"SIMBAD table columns: {result_table.colnames}")
+        logger.info("SIMBAD table columns: %s", result_table.colnames)
         logger.info("Creating SkyCoord for SIMBAD matches...")
         try:
             # Use actual column names from SIMBAD response
@@ -864,7 +871,7 @@ class StarIdentifier:
 
             simbad_coords = SkyCoord(ra=ra_vals, dec=dec_vals)
         except Exception as e:
-            logger.error(f"SkyCoord creation failed: {e}")
+            logger.error("SkyCoord creation failed: %s", e)
             return None, None
 
         return result_table, simbad_coords
@@ -913,10 +920,10 @@ class StarIdentifier:
 
         try:
             if catalog_store.is_region_cached(config, region_key):
-                logger.debug(f"Gaia region '{region_key}' already cached.")
+                logger.debug("Gaia region '%s' already cached.", region_key)
                 return 0
         except Exception as e:
-            logger.warning(f"Error checking cached_regions: {e}")
+            logger.warning("Error checking cached_regions: %s", e)
 
         # Use the same safety switch as the main search. We still check the
         # local database above, we just skip the internet download part if the
@@ -930,8 +937,10 @@ class StarIdentifier:
             return 0
 
         logger.info(
-            f"Seeding Gaia DR3 cache for field ({ra_center:.4f}, {dec_center:.4f}), "
-            f"radius={radius_deg:.3f}°..."
+            "Seeding Gaia DR3 cache for field (%.4f, %.4f), radius=%.3f°...",
+            ra_center,
+            dec_center,
+            radius_deg,
         )
         query = (
             "SELECT source_id, ra, dec, phot_g_mean_mag, designation "
@@ -948,12 +957,12 @@ class StarIdentifier:
             result_table: Table = _run_with_daemon_thread_timeout(_run_query, timeout_seconds=45)
         except ExternalServiceError:
             logger.warning(
-                f"Gaia bulk seed query timed out after 45s for field ({ra_center:.4f}, {dec_center:.4f})."
+                "Gaia bulk seed query timed out after 45s for field (%.4f, %.4f).", ra_center, dec_center
             )
             _record_gaia_failure("bulk seed timed out after 45s")
             return 0
         except Exception as e:
-            logger.warning(f"Gaia bulk seed query failed: {e}")
+            logger.warning("Gaia bulk seed query failed: %s", e)
             _record_gaia_failure(f"bulk seed failed: {e}")
             return 0
 
@@ -976,12 +985,14 @@ class StarIdentifier:
             catalog_store.insert_gaia_sources(config, to_insert)
             catalog_store.mark_region_cached(config, region_key, ra_center, dec_center, radius_deg)
             logger.info(
-                f"Successfully cached {len(to_insert)} Gaia DR3 sources for field "
-                f"({ra_center:.4f}, {dec_center:.4f})."
+                "Successfully cached %s Gaia DR3 sources for field (%.4f, %.4f).",
+                len(to_insert),
+                ra_center,
+                dec_center,
             )
             return len(to_insert)
         except Exception as e:
-            logger.warning(f"Failed to record Gaia DR3 sources to cache: {e}")
+            logger.warning("Failed to record Gaia DR3 sources to cache: %s", e)
             return 0
 
     @staticmethod
@@ -1034,7 +1045,7 @@ class StarIdentifier:
             logger.info("No Gaia results for this region.")
             return None, None
 
-        logger.info(f"  Found {len(result_table)} Gaia sources in field.")
+        logger.info("  Found %s Gaia sources in field.", len(result_table))
 
         StarIdentifier._cache_gaia_results(config, result_table)
 
@@ -1072,7 +1083,9 @@ class StarIdentifier:
 
             if cached_rows and len(cached_rows) >= 5:
                 logger.info(
-                    f"Loaded {len(cached_rows)} Gaia DR3 sources from local SQLite cache ({cache_db_path})."
+                    "Loaded %s Gaia DR3 sources from local SQLite cache (%s).",
+                    len(cached_rows),
+                    cache_db_path,
                 )
                 source_ids = [r[0] for r in cached_rows]
                 ras = [r[1] for r in cached_rows]
@@ -1087,7 +1100,7 @@ class StarIdentifier:
                 gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
                 return result_table, gaia_coords
         except Exception as e:
-            logger.warning(f"Failed checking local Gaia SQLite cache: {e}")
+            logger.warning("Failed checking local Gaia SQLite cache: %s", e)
 
         return None
 
@@ -1105,8 +1118,10 @@ class StarIdentifier:
 
         # If cache miss, auto-download from remote TAP server
         logger.info(
-            f"Querying Gaia DR3 bulk region at {ra_center:.4f}, {dec_center:.4f} "
-            f"with {radius_deg:.3f} degree radius..."
+            "Querying Gaia DR3 bulk region at %.4f, %.4f with %.3f degree radius...",
+            ra_center,
+            dec_center,
+            radius_deg,
         )
         # Gaia's TAP client (unlike Simbad) exposes no configurable
         # timeout, so a stalled connection blocks indefinitely -- wrap the
@@ -1148,7 +1163,7 @@ class StarIdentifier:
             _record_gaia_failure("cone search timed out after 30s")
             return None
         except Exception as e:
-            logger.error(f"Gaia query failed: {e}")
+            logger.error("Gaia query failed: %s", e)
             _record_gaia_failure(f"cone search failed: {e}")
             return None
 
@@ -1183,9 +1198,9 @@ class StarIdentifier:
                     to_insert.append((sid, r_val, d_val, m_val, des))
 
                 catalog_store.insert_gaia_sources(config, to_insert)
-                logger.info(f"Cached {len(to_insert)} Gaia DR3 sources locally in {cache_db_path}.")
+                logger.info("Cached %s Gaia DR3 sources locally in %s.", len(to_insert), cache_db_path)
         except Exception as cache_err:
-            logger.warning(f"Failed to cache Gaia sources locally: {cache_err}")
+            logger.warning("Failed to cache Gaia sources locally: %s", cache_err)
 
     @staticmethod
     def _gaia_coords_from_table(result_table: Any) -> SkyCoord | None:
@@ -1217,7 +1232,7 @@ class StarIdentifier:
                 dec=dec_vals * u.deg,
             )
         except Exception as e:
-            logger.error(f"Gaia SkyCoord creation failed: {e}")
+            logger.error("Gaia SkyCoord creation failed: %s", e)
             return None
 
     def identify_stars_with_wcs(
@@ -1257,7 +1272,7 @@ class StarIdentifier:
         if not stellar_objects:
             return stellar_objects
 
-        logger.info(f"Starting SIMBAD identification for {len(stellar_objects)} sources...")
+        logger.info("Starting SIMBAD identification for %s sources...", len(stellar_objects))
 
         try:
             ra_center = wcs.wcs.crval[0]
@@ -1326,7 +1341,7 @@ class StarIdentifier:
                 ra, dec = wcs.wcs_pix2world(x, y, 0)
                 sky_positions[id(stellar_object)] = (float(ra), float(dec))
             except Exception as e:
-                logger.error(f"Failed to project pixel ({x}, {y}) to sky: {e}")
+                logger.error("Failed to project pixel (%s, %s) to sky: %s", x, y, e)
 
         query_radius_deg = None
         if sky_positions:
@@ -1381,13 +1396,14 @@ class StarIdentifier:
         unmatched_after_simbad: list[StellarObject] = []
 
         logger.info(
-            f"Matching {len(stellar_objects)} detected stars against "
-            f"{len(simbad_coords) if simbad_coords is not None else 0} SIMBAD entries..."
+            "Matching %s detected stars against %s SIMBAD entries...",
+            len(stellar_objects),
+            len(simbad_coords) if simbad_coords is not None else 0,
         )
         for stellar_object in stellar_objects:
             position = sky_positions.get(id(stellar_object))
             if position is None:
-                logger.warning(f"Star {stellar_object.name} missing centroid in star_data; skipping.")
+                logger.warning("Star %s missing centroid in star_data; skipping.", stellar_object.name)
                 unmatched_after_simbad.append(stellar_object)
                 continue
             ra, dec = position
@@ -1412,7 +1428,7 @@ class StarIdentifier:
                     stellar_object.catalog_match_quality = assess_match_quality(
                         "simbad", separation_arcsec, is_ambiguous=is_ambiguous
                     )
-                    logger.info(f"  SIMBAD match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
+                    logger.info("  SIMBAD match: %s at (%.4f, %.4f)", stellar_object.name, ra, dec)
                     continue
 
             # SIMBAD had no match — record sky position and defer to Gaia.
@@ -1422,8 +1438,10 @@ class StarIdentifier:
 
         simbad_match_count = len(stellar_objects) - len(unmatched_after_simbad)
         logger.info(
-            f"SIMBAD matched {simbad_match_count} / {len(stellar_objects)} stars; "
-            f"{len(unmatched_after_simbad)} deferred to Gaia DR3 fallback."
+            "SIMBAD matched %s / %s stars; %s deferred to Gaia DR3 fallback.",
+            simbad_match_count,
+            len(stellar_objects),
+            len(unmatched_after_simbad),
         )
 
         return unmatched_after_simbad
@@ -1469,7 +1487,9 @@ class StarIdentifier:
         still_unmatched: list[StellarObject] = []
         if gaia_table is not None and gaia_coords is not None:
             logger.info(
-                f"Matching {len(unmatched_after_simbad)} stars against {len(gaia_coords)} Gaia DR3 sources..."
+                "Matching %s stars against %s Gaia DR3 sources...",
+                len(unmatched_after_simbad),
+                len(gaia_coords),
             )
             for stellar_object in unmatched_after_simbad:
                 ra, dec = sky_positions.get(id(stellar_object), (None, None))
@@ -1493,7 +1513,7 @@ class StarIdentifier:
                     # brightest_unresolved_entry_index, SIMBAD-only), so
                     # is_ambiguous is always False here, not unknown.
                     stellar_object.catalog_match_quality = assess_match_quality("gaia", separation_arcsec)
-                    logger.info(f"  Gaia match: {stellar_object.name} at ({ra:.4f}, {dec:.4f})")
+                    logger.info("  Gaia match: %s at (%.4f, %.4f)", stellar_object.name, ra, dec)
                 else:
                     still_unmatched.append(stellar_object)
         else:
@@ -1501,8 +1521,9 @@ class StarIdentifier:
 
         gaia_match_count = len(unmatched_after_simbad) - len(still_unmatched)
         logger.info(
-            f"Gaia matched {gaia_match_count} additional stars; "
-            f"{len(still_unmatched)} will receive position-based IDs."
+            "Gaia matched %s additional stars; %s will receive position-based IDs.",
+            gaia_match_count,
+            len(still_unmatched),
         )
 
         return still_unmatched
@@ -1583,7 +1604,7 @@ class StarIdentifier:
 
             if x is None or y is None:
                 logger.warning(
-                    f"Star {stellar_object.name} is missing centroid coordinates in star_data: {star}"
+                    "Star %s is missing centroid coordinates in star_data: %s", stellar_object.name, star
                 )
                 continue
 
@@ -1636,7 +1657,7 @@ class StarIdentifier:
                 float(matched_position.dec.deg),
             )
         except Exception as e:
-            logger.warning(f"Failed to match hint coordinates against SIMBAD results: {e}")
+            logger.warning("Failed to match hint coordinates against SIMBAD results: %s", e)
 
     def _choose_center_catalog_entry(
         self,
@@ -1920,8 +1941,12 @@ class StarIdentifier:
         stellar_object.is_catalog_identified = True
         magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified: {stellar_object.name} ({stellar_object.spectral_type}, mag: {magnitude_text}) "
-            f"at {ra:.4f}, {dec:.4f}"
+            "  Identified: %s (%s, mag: %s) at %.4f, %.4f",
+            stellar_object.name,
+            stellar_object.spectral_type,
+            magnitude_text,
+            ra,
+            dec,
         )
 
     def _apply_gaia_match(self, stellar_object: StellarObject, match: Any, ra: float, dec: float):  # ruff: ignore[missing-return-type-private-function]
@@ -1952,5 +1977,5 @@ class StarIdentifier:
         stellar_object.is_catalog_identified = True
         magnitude_text = f"{magnitude:.2f}" if magnitude is not None else "unknown"
         logger.info(
-            f"  Identified (Gaia): {stellar_object.name} (mag: {magnitude_text}) at {ra:.4f}, {dec:.4f}"
+            "  Identified (Gaia): %s (mag: %s) at %.4f, %.4f", stellar_object.name, magnitude_text, ra, dec
         )

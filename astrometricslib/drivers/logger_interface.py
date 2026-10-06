@@ -230,8 +230,8 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error initializing job database at {self.db_path}: {e}")
-            raise e
+            logger.error("Error initializing job database at %s: %s", self.db_path, e)
+            raise
 
     def upsert_job(self, job: ProcessingJob):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Insert or update a job record.
@@ -321,8 +321,8 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error upserting job {job.id}: {e}")
-            raise e
+            logger.error("Error upserting job %s: %s", job.id, e)
+            raise
 
     def get_job(self, job_id: str) -> ProcessingJob | None:
         """Retrieve a specific job by ID.
@@ -350,7 +350,7 @@ class LoggerInterface:
                 return self._row_to_job(row)
             return None
         except Exception as e:
-            logger.error(f"Error retrieving job {job_id}: {e}")
+            logger.error("Error retrieving job %s: %s", job_id, e)
             return None
 
     def get_jobs_by_target(
@@ -402,7 +402,7 @@ class LoggerInterface:
 
             return [self._row_to_job(row) for row in rows]
         except Exception as e:
-            logger.error(f"Error retrieving jobs for target {target_id}: {e}")
+            logger.error("Error retrieving jobs for target %s: %s", target_id, e)
             return []
 
     def delete_job(self, job_id: str) -> bool:
@@ -432,7 +432,7 @@ class LoggerInterface:
             conn.close()
             return deleted
         except Exception as e:
-            logger.error(f"Error deleting job {job_id}: {e}")
+            logger.error("Error deleting job %s: %s", job_id, e)
             return False
 
     def get_jobs_older_than(self, days: int) -> list[ProcessingJob]:
@@ -469,7 +469,7 @@ class LoggerInterface:
 
             return [self._row_to_job(row) for row in rows]
         except Exception as e:
-            logger.error(f"Error retrieving old jobs: {e}")
+            logger.error("Error retrieving old jobs: %s", e)
             return []
 
     def get_recent_jobs(self, limit: int = 50, job_type: str | None = None) -> list[ProcessingJob]:
@@ -510,7 +510,7 @@ class LoggerInterface:
 
             return [self._row_to_job(row) for row in rows]
         except Exception as e:
-            logger.error(f"Error retrieving recent jobs: {e}")
+            logger.error("Error retrieving recent jobs: %s", e)
             return []
 
     def _row_to_job(self, row: sqlite3.Row) -> ProcessingJob:
@@ -648,7 +648,7 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error logging agent interaction: {e}")
+            logger.error("Error logging agent interaction: %s", e)
 
     def get_session_interactions(self, session_id: str) -> list[dict]:
         """Retrieve all interactions for a specific session.
@@ -675,7 +675,7 @@ class LoggerInterface:
             conn.close()
             return [dict(r) for r in rows]
         except Exception as e:
-            logger.error(f"Error retrieving interactions for session {session_id}: {e}")
+            logger.error("Error retrieving interactions for session %s: %s", session_id, e)
             return []
 
     def add_knowledge(  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -709,7 +709,7 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error adding agent knowledge: {e}")
+            logger.error("Error adding agent knowledge: %s", e)
 
     # --- Log Entry Methods ---
 
@@ -787,7 +787,7 @@ class LoggerInterface:
             conn.close()
             return [dict(r) for r in rows]
         except Exception as e:
-            logger.error(f"Error retrieving log entries for job {job_id}: {e}")
+            logger.error("Error retrieving log entries for job %s: %s", job_id, e)
             return []
 
     def query_jobs(
@@ -831,7 +831,7 @@ class LoggerInterface:
             conn.close()
             return [self._row_to_job(row) for row in rows]
         except Exception as e:
-            logger.error(f"Error querying jobs: {e}")
+            logger.error("Error querying jobs: %s", e)
             return []
 
     def get_recent_log_entries_for_job(self, job_id: str, limit: int = 50) -> tuple[list[dict], int]:
@@ -861,7 +861,7 @@ class LoggerInterface:
             conn.close()
             return [dict(row) for row in reversed(rows)], total
         except Exception as e:
-            logger.error(f"Error reading recent log entries for job {job_id}: {e}")
+            logger.error("Error reading recent log entries for job %s: %s", job_id, e)
             return [], 0
 
     def get_relevant_knowledge(self, limit: int = 5) -> list[dict]:
@@ -910,7 +910,7 @@ class LoggerInterface:
             conn.close()
             return [dict(r) for r in rows]
         except Exception as e:
-            logger.error(f"Error retrieving agent knowledge: {e}")
+            logger.error("Error retrieving agent knowledge: %s", e)
             return []
 
     def record_alignment_attempt(self, attempt: dict[str, Any]) -> None:
@@ -937,7 +937,7 @@ class LoggerInterface:
             # Reject mount driver tracking-loop heartbeat echoes
             # (< 0.5 arcsec or stationary Dec with tiny RA)
             if pointing_error is not None and pointing_error < 0.5 and not attempt.get("force_record"):
-                logger.debug(f"Ignoring spurious alignment tracking echo ({pointing_error:.3f} arcsec)")
+                logger.debug("Ignoring spurious alignment tracking echo (%.3f arcsec)", pointing_error)
                 conn.close()
                 return
 
@@ -965,7 +965,7 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error recording alignment attempt: {e}")
+            logger.error("Error recording alignment attempt: %s", e)
 
     def cleanup_spurious_alignment_logs(self, max_threshold_arcsec: float = 0.5) -> int:
         """Purge sub-arcsecond tracking loop echo records from alignment_logs.
@@ -996,10 +996,12 @@ class LoggerInterface:
             deleted_count = cursor.rowcount
             conn.commit()
             conn.close()
-            logger.info(f'Purged {deleted_count} spurious alignment log echoes (< {max_threshold_arcsec}")')
+            logger.info(
+                'Purged %s spurious alignment log echoes (< %s")', deleted_count, max_threshold_arcsec
+            )
             return deleted_count
         except Exception as e:
-            logger.error(f"Error cleaning up spurious alignment logs: {e}")
+            logger.error("Error cleaning up spurious alignment logs: %s", e)
             return 0
 
     @staticmethod
@@ -1062,7 +1064,7 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error recording guiding samples: {e}")
+            logger.error("Error recording guiding samples: %s", e)
 
     def replace_guiding_samples(self, samples: list[dict[str, Any]]) -> int:
         """Record guiding samples, replacing any earlier copy of the same log.
@@ -1154,7 +1156,7 @@ class LoggerInterface:
             conn.close()
             return rows
         except Exception as e:
-            logger.error(f"Error fetching alignment logs: {e}")
+            logger.error("Error fetching alignment logs: %s", e)
             return []
 
     def get_guiding_logs(
@@ -1219,7 +1221,7 @@ class LoggerInterface:
             conn.close()
             return rows
         except Exception as e:
-            logger.error(f"Error fetching guiding logs: {e}")
+            logger.error("Error fetching guiding logs: %s", e)
             return []
 
     def record_polar_alignment(self, data: dict[str, Any]) -> None:
@@ -1261,7 +1263,7 @@ class LoggerInterface:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.error(f"Error recording polar alignment: {e}")
+            logger.error("Error recording polar alignment: %s", e)
 
     def get_polar_alignment_logs(
         self, session_id: str | None = None, limit: int = 10
@@ -1308,7 +1310,7 @@ class LoggerInterface:
             conn.close()
             return rows
         except Exception as e:
-            logger.error(f"Error fetching polar alignment logs: {e}")
+            logger.error("Error fetching polar alignment logs: %s", e)
             return []
 
     def get_alignment_sessions(self) -> list[dict[str, Any]]:
@@ -1395,7 +1397,7 @@ class LoggerInterface:
             conn.close()
             return sessions
         except Exception as e:
-            logger.error(f"Error fetching alignment sessions: {e}")
+            logger.error("Error fetching alignment sessions: %s", e)
             return []
 
     def get_session_alignment_attempts(
@@ -1443,7 +1445,7 @@ class LoggerInterface:
             conn.close()
             return rows
         except Exception as e:
-            logger.error(f"Error fetching session alignment attempts: {e}")
+            logger.error("Error fetching session alignment attempts: %s", e)
             return []
 
     def get_session_target_telemetry(self, session_id: str | None = None) -> list[dict[str, Any]]:
@@ -1592,7 +1594,7 @@ class LoggerInterface:
 
             return attempts
         except Exception as e:
-            logger.error(f"Error fetching session target telemetry: {e}")
+            logger.error("Error fetching session target telemetry: %s", e)
             return []
 
 

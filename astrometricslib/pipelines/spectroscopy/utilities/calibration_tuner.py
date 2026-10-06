@@ -92,7 +92,7 @@ class SpectroscopyCalibrationTuner:
         calibration_summary : `Dict[str, Any]`
             A report of what settings we calculated and how accurate they are.
         """
-        logger.info(f"Starting spectroscopy calibration tuning for {image_path}...")
+        logger.info("Starting spectroscopy calibration tuning for %s...", image_path)
         image = AstrometricsImage(image_path)
 
         if camera_name is None:
@@ -105,12 +105,12 @@ class SpectroscopyCalibrationTuner:
         spec_pipeline = SpectroscopyPipeline(config=spec_config)
 
         star_pos = self._resolve_calibration_star_position(image_path, star_pos)
-        logger.info(f"Target star identified at position: {star_pos}")
+        logger.info("Target star identified at position: %s", star_pos)
 
         detected_angle, smoothed = self._extract_smoothed_spectrum(spec_pipeline, image, star_pos)
 
         dips = self._detect_absorption_dips(smoothed)
-        logger.info(f"Detected {len(dips)} candidate absorption dips at indices: {dips}")
+        logger.info("Detected %s candidate absorption dips at indices: %s", len(dips), dips)
 
         # We know Vega (the target) should have dark lines at exactly the
         # Hydrogen Balmer series wavelengths.
@@ -413,7 +413,7 @@ class SpectroscopyCalibrationTuner:
                     dips = [int(i) for i in peak_indices if 5 <= i < len(smoothed) - 5]
                     min_depth -= 0.002
             except Exception as norm_err:
-                logger.debug(f"Continuum baseline normalization fallback failed: {norm_err}")
+                logger.debug("Continuum baseline normalization fallback failed: %s", norm_err)
 
         if len(dips) < 3:
             raise ProcessingError(
@@ -524,9 +524,13 @@ class SpectroscopyCalibrationTuner:
         new_params = {section_name: section_params}
 
         logger.info(
-            f"Saving tuned parameters for {camera_name}: grating_distance = {tuned_grating_distance_mm} mm, "
-            f"start = {tuned_x0} px, use_flare_mask_extraction = {use_flare_mask_extraction}, "
-            f"max_extraction_length_px = {max_extraction_length_px}"
+            "Saving tuned parameters for %s: grating_distance = %s mm, start = %s px, "
+            "use_flare_mask_extraction = %s, max_extraction_length_px = %s",
+            camera_name,
+            tuned_grating_distance_mm,
+            tuned_x0,
+            use_flare_mask_extraction,
+            max_extraction_length_px,
         )
         self.config.update_config(new_params)
 

@@ -384,7 +384,7 @@ class ProvenanceStore:
             conn.commit()
         except Exception as error:
             logger.error("Error initializing provenance database at %s: %s", self.db_path, error)
-            raise error
+            raise
         finally:
             conn.close()
         for entity_description in _SEEDED_ENTITY_DESCRIPTIONS:

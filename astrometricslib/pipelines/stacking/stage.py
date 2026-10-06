@@ -213,9 +213,10 @@ def stack_frames(
     target_frames, excluded_by_gain = find_dominant_gain_subset(target_frames)
     if excluded_by_gain:
         logger.warning(
-            f"Excluding {len(excluded_by_gain)} frame(s) with a minority gain setting from "
-            f"the stack for target '{target.id}': "
-            f"{[f.path for f in excluded_by_gain]}"
+            "Excluding %s frame(s) with a minority gain setting from the stack for target '%s': %s",
+            len(excluded_by_gain),
+            target.id,
+            [f.path for f in excluded_by_gain],
         )
         excluded_frames.extend(
             ExcludedFrame(path=f.path, reason="minority gain setting") for f in excluded_by_gain
@@ -265,7 +266,7 @@ def stack_frames(
             for path, reason in quarantine_report.reasons_by_path().items()
         )
         for note in quarantine_report.notes:
-            logger.info(f"Quarantine check for target '{target.id}': {note}")
+            logger.info("Quarantine check for target '%s': %s", target.id, note)
         if not target_frames:
             raise ProcessingError("Target has no frames available to stack after quarantining bad frames.")
 
@@ -317,13 +318,14 @@ def stack_frames(
         )
         if background_split:
             logger.warning(
-                f"Background-homogeneity split detected for target '{target.id}': {background_split}"
+                "Background-homogeneity split detected for target '%s': %s", target.id, background_split
             )
         if excluded_by_background:
             logger.warning(
-                f"Excluding {len(excluded_by_background)} frame(s) from a different sky condition "
-                f"from the stack for target '{target.id}': "
-                f"{[f.path for f in excluded_by_background]}"
+                "Excluding %s frame(s) from a different sky condition from the stack for target '%s': %s",
+                len(excluded_by_background),
+                target.id,
+                [f.path for f in excluded_by_background],
             )
             excluded_frames.extend(
                 ExcludedFrame(path=f.path, reason="background-homogeneity split")

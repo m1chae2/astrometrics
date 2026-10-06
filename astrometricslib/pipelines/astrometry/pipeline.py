@@ -146,7 +146,7 @@ class AstrometryPipeline:
             The loaded image.
         """
         if isinstance(image_or_path, str):
-            logger.info(f"Loading image from path: {image_or_path}")
+            logger.info("Loading image from path: %s", image_or_path)
             return AstrometricsImage(image_or_path)
         return image_or_path
 
@@ -180,7 +180,7 @@ class AstrometryPipeline:
                         dec_hint = float(target_dec)
             except Exception as e:
                 logger.warning(
-                    f"Could not parse target coordinate strings '{target_ra}', '{target_dec}': {e}"
+                    "Could not parse target coordinate strings '%s', '%s': %s", target_ra, target_dec, e
                 )
 
         if ra_hint is None or dec_hint is None:
@@ -203,9 +203,9 @@ class AstrometryPipeline:
                         ra_hint = float(header_ra)
                         dec_hint = float(header_dec)
 
-                    logger.info(f"Found FITS header coordinate hints: {ra_hint}, {dec_hint}")
+                    logger.info("Found FITS header coordinate hints: %s, %s", ra_hint, dec_hint)
                 except Exception as e:
-                    logger.warning(f"Could not parse FITS header coordinates: {e}")
+                    logger.warning("Could not parse FITS header coordinates: %s", e)
 
         return ra_hint, dec_hint
 
@@ -280,7 +280,7 @@ class AstrometryPipeline:
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
             except Exception as e:
-                logger.warning(f"WCS target conversion failed: {e}")
+                logger.warning("WCS target conversion failed: %s", e)
 
         if not extraction_center and (target_ra is not None and target_dec is not None) and wcs:
             try:
@@ -291,7 +291,7 @@ class AstrometryPipeline:
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
             except Exception as e:
-                logger.warning(f"WCS RA/Dec coordinate conversion failed: {e}")
+                logger.warning("WCS RA/Dec coordinate conversion failed: %s", e)
 
         return extraction_center
 
@@ -329,11 +329,12 @@ class AstrometryPipeline:
                     # gives weird or incorrect size data.
                     extraction_radius_px = int(max(15, min(200, derived_radius)))
                     logger.info(
-                        f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
-                        f"{extraction_radius_px} pixels"
+                        "Derived extended extraction radius from SIMBAD (%s arcmin): %s pixels",
+                        majaxis,
+                        extraction_radius_px,
                     )
             except Exception as e:
-                logger.warning(f"Failed to derive extraction radius from WCS/SIMBAD: {e}")
+                logger.warning("Failed to derive extraction radius from WCS/SIMBAD: %s", e)
         return extraction_radius_px
 
     def build_extended_source_hint(
@@ -399,8 +400,9 @@ class AstrometryPipeline:
             return None
 
         logger.info(
-            f"Primary target '{object_name}' detected as an extended source ({otype}). "
-            "Resolving pixel coordinates..."
+            "Primary target '%s' detected as an extended source (%s). Resolving pixel coordinates...",
+            object_name,
+            otype,
         )
 
         # 3. Convert the object's real sky coordinates (from the
@@ -409,8 +411,9 @@ class AstrometryPipeline:
 
         if not extraction_center:
             logger.warning(
-                f"Failed to resolve coordinates for extended source target '{object_name}'; "
-                f"skipping extended-target enrichment."
+                "Failed to resolve coordinates for extended source target '%s'; skipping "
+                "extended-target enrichment.",
+                object_name,
             )
             return None
 
@@ -423,7 +426,7 @@ class AstrometryPipeline:
             extraction_center=extraction_center,
             extraction_radius_px=extraction_radius_px,
         )
-        logger.info(f"Recorded extended-source hint for '{object_name}'.")
+        logger.info("Recorded extended-source hint for '%s'.", object_name)
         return extended_source_hint
 
     def _seed_gaia_cache_from_wcs(self, image: AstrometricsImage, wcs: Any) -> None:
@@ -446,7 +449,7 @@ class AstrometryPipeline:
             ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
             self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
         except Exception as e:
-            logger.warning(f"Automatic Gaia cache seeding skipped: {e}")
+            logger.warning("Automatic Gaia cache seeding skipped: %s", e)
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.
@@ -518,6 +521,6 @@ class AstrometryPipeline:
 
                 return otype in extended_otypes, coord, otype, majaxis
         except Exception as e:
-            logger.warning(f"SIMBAD query failed for object '{object_name}': {e}")
+            logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
 
         return False, None, None, None

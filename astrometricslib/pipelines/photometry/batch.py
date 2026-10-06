@@ -135,14 +135,17 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
         )
         if wcs is None:
             logger.warning(
-                f"Session {session.id} plate solve failed ({reference_path}); "
-                "skipping cross-session star matching for this session."
+                "Session %s plate solve failed (%s); skipping cross-session star matching for this session.",
+                session.id,
+                reference_path,
             )
         return wcs
     except Exception as solve_error:
         logger.warning(
-            f"Session {session.id} plate solve failed ({reference_path}); "
-            f"skipping cross-session star matching for this session: {solve_error}"
+            "Session %s plate solve failed (%s); skipping cross-session star matching for this session: %s",
+            session.id,
+            reference_path,
+            solve_error,
         )
         return None
 
@@ -594,5 +597,5 @@ def search_periods_and_save(
 
     if searched:
         catalog_access.merge_and_record("stellar_catalog", searched, _add_period_results_to_saved_star)
-    logger.info(f"[{target.id}] Searched {len(searched)} star(s) for repeating patterns.")
+    logger.info("[%s] Searched %s star(s) for repeating patterns.", target.id, len(searched))
     return len(searched)

@@ -747,7 +747,7 @@ class SpectroscopyPipeline:
                     extraction_radius=hint.extraction_radius_px,
                 )
             except Exception as e:
-                logger.warning(f"Failed to build extended target StellarObject from hint: {e}")
+                logger.warning("Failed to build extended target StellarObject from hint: %s", e)
 
         # Filter before slicing to `limit`: a spurious trail detection
         # sitting near the top of the brightness-sorted list would
@@ -925,15 +925,20 @@ class SpectroscopyPipeline:
         global_angle, contrast_sigma, best_star_pos, roi_half_width_px = best_measurement
         if contrast_sigma < DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA:
             logger.warning(
-                f"No star showed a clear dispersion streak (best contrast {contrast_sigma:.1f} sigma "
-                f"< {DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA:.1f}); keeping the configured angle "
-                f"{self.config.dispersion_angle_degrees:.2f} degrees"
+                "No star showed a clear dispersion streak (best contrast %.1f sigma < %.1f); "
+                "keeping the configured angle %.2f degrees",
+                contrast_sigma,
+                DISPERSION_ANGLE_MINIMUM_TRAIL_CONTRAST_SIGMA,
+                self.config.dispersion_angle_degrees,
             )
             return
         logger.info(
-            f"Globally resolved grating dispersion angle: {global_angle:.2f} degrees "
-            f"(from the star at {best_star_pos}, contrast {contrast_sigma:.1f} sigma, "
-            f"angle-detection half-width {roi_half_width_px:.1f}px)"
+            "Globally resolved grating dispersion angle: %.2f degrees (from the star at %s, "
+            "contrast %.1f sigma, angle-detection half-width %.1fpx)",
+            global_angle,
+            best_star_pos,
+            contrast_sigma,
+            roi_half_width_px,
         )
         self.config.dispersion_angle_degrees = global_angle
         self.instrument.config.dispersion_angle_degrees = global_angle
@@ -1751,7 +1756,7 @@ class SpectroscopyPipeline:
             # must equal +arctan(slope) (no negation) to reproduce
             # this same measured slope when fed back through it.
             angle = np.degrees(np.arctan(slope))
-        logger.debug(f"Auto-detected angle for star at {star_pos}: {angle:.2f} degrees")
+        logger.debug("Auto-detected angle for star at %s: %.2f degrees", star_pos, angle)
         return float(angle), contrast_sigma
 
     def detect_dispersion_angle(

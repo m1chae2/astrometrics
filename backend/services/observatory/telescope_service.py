@@ -92,7 +92,7 @@ class TelescopeService:
         try:
             data = self.wayfinder.control.mount.status()
         except Exception as e:
-            logger.warning(f"Failed to query telescope status (telescope may be offline): {e}")
+            logger.warning("Failed to query telescope status (telescope may be offline): %s", e)
             data = {
                 "ra": "00 00 00",
                 "dec": "+00 00 00",
@@ -112,7 +112,7 @@ class TelescopeService:
             try:
                 self._guiding_service.poll_external_telemetry()
             except Exception as e:
-                logger.debug(f"Failed to poll external guiding telemetry: {e}")
+                logger.debug("Failed to poll external guiding telemetry: %s", e)
             guiding_status = self._guiding_service.get_status()
             data["guidingHistory"] = guiding_status.get("history", [])
 
@@ -124,7 +124,7 @@ class TelescopeService:
                 )
                 self._alignment_service.poll_external_syncs(driver)
             except Exception as e:
-                logger.debug(f"Failed to poll external syncs: {e}")
+                logger.debug("Failed to poll external syncs: %s", e)
             data["alignmentAttempts"] = self._alignment_service.get_attempts()
             data["alignmentActive"] = self._alignment_service.is_active()
             if hasattr(self._alignment_service, "get_polar_alignment"):

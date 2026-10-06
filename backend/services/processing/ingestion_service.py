@@ -343,7 +343,7 @@ class IngestionService(BaseBackgroundService):
         if worker_logger.handlers:
             worker_logger.info(message)
         else:
-            logger.info(f"[Job {job_id}] {message}")
+            logger.info("[Job %s] %s", job_id, message)
 
     def _run_ingestion(self, job_id, target_id, payload, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
         """Background worker for frame ingestion.
@@ -588,7 +588,7 @@ class IngestionService(BaseBackgroundService):
                     self._calibration_library.refresh_flat_frames()
                     self._calibration_library.save_library()
             except Exception as e:
-                logger.warning(f"Failed to refresh calibration library in ingestion job: {e}")
+                logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
 
             # 2. Update Targets
 

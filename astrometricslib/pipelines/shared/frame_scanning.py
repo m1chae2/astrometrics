@@ -282,7 +282,7 @@ def create_frame_record_from_fits(path: str, camera: str | None = None, config: 
             record.camera, record.focal_length_mm, path, config.get_observatory_setups(), config
         ).telescope_name
     except Exception as e:
-        logger.warning(f"Failed to parse FITS header for {filename}: {e}")
+        logger.warning("Failed to parse FITS header for %s: %s", filename, e)
 
     return record
 
@@ -445,7 +445,7 @@ def _read_header_or_none(file_path: str) -> Any:
     try:
         return read_header(file_path)
     except Exception as error:
-        logger.warning(f"Could not read the header of {file_path}: {error}")
+        logger.warning("Could not read the header of %s: %s", file_path, error)
         return None
 
 
@@ -542,6 +542,6 @@ def classify_and_sort_fits_files(
                 if added_paths is not None and is_new_file:
                     added_paths.append(destination_file)
         except Exception as e:
-            logger.error(f"Error classifying frame {file}: {e}")
+            logger.error("Error classifying frame %s: %s", file, e)
 
     return processed_count

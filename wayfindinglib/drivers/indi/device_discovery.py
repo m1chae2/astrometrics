@@ -42,7 +42,7 @@ class DeviceDiscovery:
                 if name and name.strip() and name not in client.deviceMap:
                     client.deviceMap[name] = client.getDevice(name)
             except Exception as e:
-                logger.debug(f"Failed to query device name during refresh: {e}")
+                logger.debug("Failed to query device name during refresh: %s", e)
 
     def find_device_with_property(self, property_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Search connected devices for one with the specified property.
@@ -223,7 +223,7 @@ class DeviceDiscovery:
             sizes = {element.name: element.value for element in ccd_info}
             return int(sizes.get("CCD_MAX_X", 0) * sizes.get("CCD_MAX_Y", 0))
         except Exception as info_error:
-            logger.debug(f"Failed to read CCD_INFO: {info_error}")
+            logger.debug("Failed to read CCD_INFO: %s", info_error)
             return 0
 
     def find_guide_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

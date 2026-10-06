@@ -166,9 +166,9 @@ class SourceDetector:
                 )
                 background_map = bkg.background
                 std = bkg.background_rms_median
-                logger.debug(f"Source detection: 2D background (box={box_size}px), median_rms={std:.2f}")
+                logger.debug("Source detection: 2D background (box=%spx), median_rms=%.2f", box_size, std)
             except Exception as e:
-                logger.warning(f"Background2D failed, falling back to global scalar: {e}")
+                logger.warning("Background2D failed, falling back to global scalar: %s", e)
                 background_map = None
         else:
             background_map = None
@@ -186,7 +186,7 @@ class SourceDetector:
             mean, median, std = sigma_clipped_stats(stats_data, sigma=3.0, mask=stats_mask)
             background_map = median
             logger.debug(
-                f"Source detection: global background, mean={mean:.2f}, median={median:.2f}, std={std:.2f}"
+                "Source detection: global background, mean=%.2f, median=%.2f, std=%.2f", mean, median, std
             )
 
         # 2. Initialize finder. roundness_range is tightened from

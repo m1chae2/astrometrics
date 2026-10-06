@@ -256,7 +256,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
             If no image files were given (outside photometry mode), or
             if the filter is not one the analysis supports.
         """
-        job_logger.info(f"[{target_id}] Background analysis worker started for {target_id} (Job: {job_id})")
+        job_logger.info(
+            "[%s] Background analysis worker started for %s (Job: %s)", target_id, target_id, job_id
+        )
 
         paths = []
         if isinstance(image_files, list):
@@ -294,7 +296,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 else:
                     paths.append(str(item))
 
-        job_logger.info(f"[{target_id}] Analysis task for {target_id} found {len(paths)} files")
+        job_logger.info("[%s] Analysis task for %s found %s files", target_id, target_id, len(paths))
 
         if not paths and type != "photometry":
             raise InvalidArgumentError(
@@ -354,17 +356,19 @@ class AnalysisOrchestrator(BaseBackgroundService):
                     ]:
                         fallback_is_spec = True
                         job_logger.info(
-                            f"[{target_id}] Auto-detected spectroscopy from FITS header FILTER: {fit_filter}"
+                            "[%s] Auto-detected spectroscopy from FITS header FILTER: %s",
+                            target_id,
+                            fit_filter,
                         )
             except Exception as e:
-                job_logger.warning(f"[{target_id}] Could not read FITS header for auto-detection: {e}")
+                job_logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
 
             if not fallback_is_spec:
                 first_file = os.path.basename(unmatched_paths[0]).upper()
                 if "SPECTRUM" in first_file or "_SPEC" in first_file or "SPECTROSCOPY" in first_file:
                     fallback_is_spec = True
                     job_logger.info(
-                        f"[{target_id}] Auto-detected spectroscopy from filename: {unmatched_paths[0]}"
+                        "[%s] Auto-detected spectroscopy from filename: %s", target_id, unmatched_paths[0]
                     )
 
         spec_paths = matched_spec_paths + (unmatched_paths if fallback_is_spec else [])
@@ -372,8 +376,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         if spec_paths and light_paths:
             job_logger.info(
-                f"[{target_id}] Analysis batch spans both frame types: "
-                f"{len(light_paths)} light/luminance, {len(spec_paths)} spectroscopy."
+                "[%s] Analysis batch spans both frame types: %s light/luminance, %s spectroscopy.",
+                target_id,
+                len(light_paths),
+                len(spec_paths),
             )
             spectroscopy_result = self._run_spectroscopy_analysis(
                 job_id, target_id, spec_paths, pipeline, filter_type or "SPEC", logger=job_logger
@@ -433,7 +439,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             `"spectraExtracted"`, and `"status"`.
         """
         log = logger or logging
-        log.info(f"[{target_id}] Running spectroscopy analysis via Target.analyze_target")
+        log.info("[%s] Running spectroscopy analysis via Target.analyze_target", target_id)
 
         results = {
             "targetId": target_id,
@@ -483,7 +489,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         ]
         paths = [path for path in paths if path not in master_paths]
         for master_path in master_paths:
-            log.info(f"[{target_id}] Analyzing the master stacked spectral image: {master_path}")
+            log.info("[%s] Analyzing the master stacked spectral image: %s", target_id, master_path)
             with self.astrometrics.processing.acquire_analysis_slot():
                 master_result = self.astrometrics.processing.process_target(
                     target,
@@ -500,10 +506,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
             try:
                 self._target_service.save_targets()
             except Exception as save_error:
-                log.error(f"[{target_id}] Failed to record target after master stack analysis: {save_error}")
+                log.error(
+                    "[%s] Failed to record target after master stack analysis: %s", target_id, save_error
+                )
             log.info(
-                f"[{target_id}] Master stack analysis complete. "
-                f"{results['spectraExtracted']} spectra extracted from {results['starsProcessed']} stars."
+                "[%s] Master stack analysis complete. %s spectra extracted from %s stars.",
+                target_id,
+                results["spectraExtracted"],
+                results["starsProcessed"],
             )
             return results
 
@@ -517,8 +527,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
         unmatched_paths = [path for path in paths if path not in path_to_frame]
         if unmatched_paths:
             log.warning(
-                f"[{target_id}] {len(unmatched_paths)} path(s) have no matching FrameRecord on "
-                f"the target and will be skipped: {unmatched_paths}"
+                "[%s] %s path(s) have no matching FrameRecord on the target and will be skipped: %s",
+                target_id,
+                len(unmatched_paths),
+                unmatched_paths,
             )
 
         with self.astrometrics.processing.acquire_analysis_slot():
@@ -536,7 +548,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             results["spectraExtracted"] += stars_processed
 
         for path, error_message in summary.failed:
-            log.error(f"[{target_id}] Failed to process {path} for spectroscopy: {error_message}")
+            log.error("[%s] Failed to process %s for spectroscopy: %s", target_id, path, error_message)
 
         # target.quality.spectroscopy is now built and attached
         # by run_spectroscopy_by_session itself.
@@ -544,11 +556,13 @@ class AnalysisOrchestrator(BaseBackgroundService):
         try:
             self._target_service.save_targets()
         except Exception as save_error:
-            log.error(f"[{target_id}] Failed to record target after spectroscopy analysis: {save_error}")
+            log.error("[%s] Failed to record target after spectroscopy analysis: %s", target_id, save_error)
 
         log.info(
-            f"[{target_id}] Spectroscopy analysis complete. "
-            f"{results['spectraExtracted']} spectra extracted from {results['starsProcessed']} stars."
+            "[%s] Spectroscopy analysis complete. %s spectra extracted from %s stars.",
+            target_id,
+            results["spectraExtracted"],
+            results["starsProcessed"],
         )
 
         if self._notification_service:
@@ -574,7 +588,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             `ProcessingPipelines.process_target`.
         """
         log = logger or logging
-        log.info(f"[{target_id}] Running the photometry stage of processing.process_target")
+        log.info("[%s] Running the photometry stage of processing.process_target", target_id)
 
         # Resolve the Target domain object
         target = self._target_service.get_targets(target_id)
@@ -600,14 +614,15 @@ class AnalysisOrchestrator(BaseBackgroundService):
             self._update_job_progress(job_id, target_id, 2, 2, filter_type=filter_type)
 
             log.info(
-                f"[{target_id}] Photometry analysis complete. "
-                f"{res.get('framesProcessed', 0)} frames processed."
+                "[%s] Photometry analysis complete. %s frames processed.",
+                target_id,
+                res.get("framesProcessed", 0),
             )
 
             try:
                 self._target_service.save_targets()
             except Exception as save_error:
-                log.error(f"[{target_id}] Failed to record target after photometry analysis: {save_error}")
+                log.error("[%s] Failed to record target after photometry analysis: %s", target_id, save_error)
 
             if self._notification_service:
                 msg = (
@@ -618,5 +633,5 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
             return res
         except Exception as e:
-            log.error(f"[{target_id}] Failed to process photometry: {e}")
-            raise e
+            log.error("[%s] Failed to process photometry: %s", target_id, e)
+            raise

@@ -44,6 +44,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.drivers.fits_access import read_data, write_image
+from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.shared.quality.saturation import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     find_saturation_plateau_ceiling,
@@ -461,7 +462,7 @@ def saturated_pixel_mask(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `images` is empty.
     """
     mask = None
@@ -472,7 +473,7 @@ def saturated_pixel_mask(
             saturated = saturated.any(axis=tuple(range(saturated.ndim - 2)))
         mask = saturated if mask is None else (mask | saturated)
     if mask is None:
-        raise ValueError("At least one image is needed.")
+        raise InvalidArgumentError("At least one image is needed.")
     return mask
 
 
@@ -592,14 +593,16 @@ def combine_exposure_group_images(
 
     Raises
     ------
-    ValueError
-        If the lists do not line up, an exposure is not positive, or a
-        group's noise cannot be measured.
+    InvalidArgumentError
+        If the lists do not line up, or an exposure or frame noise is not
+        positive.
+    ProcessingError
+        If a group's background noise cannot be measured.
     """
     if not images or len(images) != len(exposures_seconds):
-        raise ValueError("Each group needs one image and one exposure length.")
+        raise InvalidArgumentError("Each group needs one image and one exposure length.")
     if any(exposure <= 0 for exposure in exposures_seconds):
-        raise ValueError("Exposure lengths must be positive.")
+        raise InvalidArgumentError("Exposure lengths must be positive.")
     if frame_counts is None:
         frame_counts = [1] * len(images)
 
@@ -612,7 +615,7 @@ def combine_exposure_group_images(
         if len(frame_noises) != len(images) or any(
             not np.isfinite(noise) or noise <= 0 for noise in frame_noises
         ):
-            raise ValueError("Each group needs one positive frame noise.")
+            raise InvalidArgumentError("Each group needs one positive frame noise.")
         weights = [
             count * exposure**2 / noise**2
             for count, exposure, noise in zip(frame_counts, exposures_seconds, frame_noises, strict=True)
@@ -621,7 +624,7 @@ def combine_exposure_group_images(
         for index, image in enumerate(per_second):
             noise = estimate_background_noise(image)
             if not np.isfinite(noise) or noise <= 0:
-                raise ValueError(f"The background noise of exposure group {index} cannot be measured.")
+                raise ProcessingError(f"The background noise of exposure group {index} cannot be measured.")
             weights.append(1.0 / noise**2)
 
     # Each group is saturated above its own ceiling, which is not the same
@@ -629,12 +632,12 @@ def combine_exposure_group_images(
     usable_masks = [np.asarray(raw) < estimate_saturation_mask_level(raw, saturation_level) for raw in images]
     if covered_masks is not None:
         if len(covered_masks) != len(images):
-            raise ValueError("Each group needs one covered mask.")
+            raise InvalidArgumentError("Each group needs one covered mask.")
         usable_masks = [usable & covered for usable, covered in zip(usable_masks, covered_masks, strict=True)]
     trusted_masks = list(usable_masks)
     if frame_noises is not None and frame_zero_fractions is not None:
         if len(frame_zero_fractions) != len(images):
-            raise ValueError("Each group needs one zero fraction.")
+            raise InvalidArgumentError("Each group needs one zero fraction.")
         for index, (raw, zero_fraction) in enumerate(zip(images, frame_zero_fractions, strict=True)):
             if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION:
                 floor = CLIPPING_FLOOR_SIGMAS * frame_noises[index] / FULL_SCALE_COUNTS

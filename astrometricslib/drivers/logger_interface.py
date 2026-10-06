@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
@@ -1085,7 +1086,7 @@ class LoggerInterface:
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             Raised if the samples do not all have one ``source``.
         sqlite3.Error
             Raised if the database cannot be written. Unlike the other
@@ -1097,11 +1098,13 @@ class LoggerInterface:
             return 0
         sources = {sample.get("source", "unverified") for sample in samples}
         if len(sources) != 1:
-            raise ValueError(f"replace_guiding_samples needs a single source, got {sorted(sources)}")
+            raise InvalidArgumentError(
+                f"replace_guiding_samples needs a single source, got {sorted(sources)}"
+            )
         (source,) = sources
         timestamps = [sample.get("timestamp", sample.get("time")) for sample in samples]
         if any(timestamp is None for timestamp in timestamps):
-            raise ValueError("replace_guiding_samples needs a timestamp on every sample")
+            raise InvalidArgumentError("replace_guiding_samples needs a timestamp on every sample")
         try:
             connection = self._connect()
             cursor = connection.cursor()

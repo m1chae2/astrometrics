@@ -409,7 +409,7 @@ class ObservationPlanning:
                 try:
                     ra = parse_coordinate_string(target.ra, True)
                     dec = parse_coordinate_string(target.dec, False)
-                except TypeError, ValueError:
+                except InvalidArgumentError:
                     ra = dec = None
                 targets.append({
                     "id": target.id,

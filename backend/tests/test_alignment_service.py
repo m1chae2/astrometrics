@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, create_autospec
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from backend.services.observatory.alignment_service import AlignmentService
 from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.control.mount import MountControl
@@ -392,7 +393,7 @@ def test_rpc_start_alignment_raises_on_unparseable_coordinates() -> None:
         mock_container = MagicMock(alignment_service=mock_alignment_service)
         monkeypatch.setattr("backend.routers.rpc_router.container", mock_container)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InvalidArgumentError):
             _start_alignment(target_ra="", target_dec="+45d 00m 00s")
 
     mock_alignment_service.start_alignment.assert_not_called()

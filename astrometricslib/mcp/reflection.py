@@ -13,6 +13,8 @@ import typing
 from collections.abc import Callable
 from typing import Any, Union
 
+from astrometricslib.foundation.errors import NotFoundError
+
 
 def parse_docstring_params(doc: str) -> dict[str, str]:
     """Parse Google and NumPy style docstrings for parameter descriptions.
@@ -415,7 +417,7 @@ def register_astrometrics_tools(
                                         await asyncio.to_thread(targets_api.list)
                                     resolved = targets_api.get(param_v)
                                     if not resolved:
-                                        raise ValueError(f"No target with id {param_v!r} in the library.")
+                                        raise NotFoundError(f"No target with id {param_v!r} in the library.")
                                     kwargs[param_k] = resolved
 
                     # Fill the server-supplied parameters and convert

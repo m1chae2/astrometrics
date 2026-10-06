@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.storage.local_database import connect_db, safe_json_dumps
 from astrometricslib.foundation.storage.process_locks import file_lock
 
@@ -162,7 +163,7 @@ class Butler(AbstractButler):
         try:
             return self._specs[dataset_type]
         except KeyError:
-            raise ValueError(f"Unknown dataset type: {dataset_type}") from None
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}") from None
 
     def _ensure_table(self, cursor, spec: DatasetSpec) -> None:  # ruff: ignore[missing-type-function-argument]
         extra_columns_sql = "".join(
@@ -308,7 +309,7 @@ class Butler(AbstractButler):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If `columns` is empty, or `columns`/`like`/`between` name
             anything outside ``id``/``data_json``/this dataset's
             registered extra columns.
@@ -317,12 +318,12 @@ class Butler(AbstractButler):
         allowed_columns = {"id", "data_json", *spec.extra_column_types.keys()}
 
         if not columns:
-            raise ValueError("list_projected requires at least one column")
+            raise InvalidArgumentError("list_projected requires at least one column")
         unknown = [
             column for column in (*columns, *(like or {}), *(between or {})) if column not in allowed_columns
         ]
         if unknown:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"list_projected: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
                 f"expected one of {sorted(allowed_columns)}"
             )

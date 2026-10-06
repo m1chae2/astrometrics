@@ -31,6 +31,7 @@ from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.plate_solve_interface import PlateSolver
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
@@ -255,7 +256,7 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
 
     Raises
     ------
-    TimeoutError
+    ExternalServiceError
         If the function has not finished within `timeout_seconds`.
     """
     result_queue: queue.Queue = queue.Queue(maxsize=1)
@@ -273,7 +274,7 @@ def _run_with_daemon_thread_timeout(query_function: Callable[[], Any], timeout_s
     try:
         succeeded, payload = result_queue.get(timeout=timeout_seconds)
     except queue.Empty:
-        raise TimeoutError(f"Timed out after {timeout_seconds}s") from None
+        raise ExternalServiceError(f"Timed out after {timeout_seconds}s") from None
 
     if succeeded:
         return payload
@@ -945,7 +946,7 @@ class StarIdentifier:
 
         try:
             result_table: Table = _run_with_daemon_thread_timeout(_run_query, timeout_seconds=45)
-        except TimeoutError:
+        except ExternalServiceError:
             logger.warning(
                 f"Gaia bulk seed query timed out after 45s for field ({ra_center:.4f}, {dec_center:.4f})."
             )
@@ -1142,7 +1143,7 @@ class StarIdentifier:
 
         try:
             result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=30)
-        except TimeoutError:
+        except ExternalServiceError:
             logger.error("Gaia query timed out after 30s.")
             _record_gaia_failure("cone search timed out after 30s")
             return None

@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.pipelines.stacking.post_processing import stack_comparison as sc
 
 SIZE = 512
@@ -69,7 +70,7 @@ def test_a_bright_star_does_not_change_the_flatness() -> None:
 
 def test_a_blank_stack_cannot_be_measured() -> None:
     """An all-zero stack has no sky, so measuring it raises."""
-    with pytest.raises(ValueError, match="no measurable sky"):
+    with pytest.raises(ProcessingError, match="no measurable sky"):
         sc.measure_stack_array(np.zeros((SIZE, SIZE)))
 
 

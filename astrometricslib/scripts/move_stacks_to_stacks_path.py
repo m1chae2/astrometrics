@@ -48,6 +48,7 @@ import sys
 from pathlib import Path
 
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 # The files that make up a stack at the top of a target folder.
 _STACK_FAMILY = re.compile(
@@ -201,14 +202,14 @@ def rewrite_database(db_path: str, table: str, column: str, moves: dict[str, str
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `table` or `column` is not a plain name.
     """
     # Table and column names cannot be bound as query parameters, so they are
     # checked to be plain identifiers before they go into the SQL text.
     for identifier in (table, column):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
-            raise ValueError(f"Not a plain table or column name: {identifier!r}")
+            raise InvalidArgumentError(f"Not a plain table or column name: {identifier!r}")
     select = f'SELECT rowid, "{column}" FROM "{table}" WHERE "{column}" LIKE ?'  # ruff: ignore[hardcoded-sql-expression]
     update = f'UPDATE "{table}" SET "{column}" = ? WHERE rowid = ?'  # ruff: ignore[hardcoded-sql-expression]
     connection = sqlite3.connect(db_path)
@@ -248,12 +249,12 @@ def count_remaining(db_path: str, table: str, column: str, moves: dict[str, str]
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `table` or `column` is not a plain name.
     """
     for identifier in (table, column):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
-            raise ValueError(f"Not a plain table or column name: {identifier!r}")
+            raise InvalidArgumentError(f"Not a plain table or column name: {identifier!r}")
     select = f'SELECT "{column}" FROM "{table}" WHERE "{column}" LIKE ?'  # ruff: ignore[hardcoded-sql-expression]
     pattern = (
         re.compile("|".join(re.escape(old) for old in sorted(moves, key=len, reverse=True)))

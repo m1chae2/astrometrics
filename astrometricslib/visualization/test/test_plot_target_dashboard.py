@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.stellar_source import SpectroscopyResult
 from astrometricslib.visualization.helpers import (
@@ -44,14 +45,14 @@ def test_plot_stellar_photometry_renders_light_curve():  # ruff: ignore[missing-
 
 
 def test_plot_stellar_photometry_raises_on_missing_light_curve():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify plot_stellar_photometry raises ValueError.
+    """Verify plot_stellar_photometry raises InvalidArgumentError.
 
     Tests error handling for missing photometry data.
     """
     mock_star = MagicMock()
     mock_star.photometry = None
 
-    with pytest.raises(ValueError, match="no photometry attribute"):
+    with pytest.raises(InvalidArgumentError, match="no photometry attribute"):
         plot_stellar_photometry(mock_star)
 
 
@@ -75,19 +76,19 @@ def test_plot_stellar_spectroscopy_renders_spectrum():  # ruff: ignore[missing-r
 
 
 def test_plot_stellar_spectroscopy_raises_on_missing_spectrum():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify plot_stellar_spectroscopy raises ValueError.
+    """Verify plot_stellar_spectroscopy raises InvalidArgumentError.
 
     Tests error handling for missing spectrum data.
     """
     mock_star = MagicMock()
     mock_star.spectroscopy = None
 
-    with pytest.raises(ValueError, match="no processed spectrum data"):
+    with pytest.raises(InvalidArgumentError, match="no processed spectrum data"):
         plot_stellar_spectroscopy(mock_star)
 
 
 def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify plot_target_dashboard raises ValueError.
+    """Verify plot_target_dashboard raises InvalidArgumentError.
 
     Tests target validation when stacked image is missing.
     """
@@ -96,12 +97,12 @@ def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignor
     mock_target.stacking.stacked_image = None
     mock_astrometrics = MagicMock()
 
-    with pytest.raises(ValueError, match="has no stacked_image"):
+    with pytest.raises(InvalidArgumentError, match="has no stacked_image"):
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
 
 
 def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify plot_target_dashboard raises ValueError.
+    """Verify plot_target_dashboard raises InvalidArgumentError.
 
     Tests star list validation when no catalog stars are present.
     """
@@ -117,7 +118,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
     mock_astrometrics = MagicMock()
     mock_astrometrics.stars.query.return_value.objects = [mock_star_synthetic]
 
-    with pytest.raises(ValueError, match="No catalog-identified stars found"):
+    with pytest.raises(InvalidArgumentError, match="No catalog-identified stars found"):
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
 
 
@@ -226,7 +227,7 @@ def test_plot_stellar_analysis_renders_both_panels():  # ruff: ignore[missing-re
 
 
 def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify plot_stellar_analysis raises ValueError on empty star.
+    """Verify plot_stellar_analysis raises InvalidArgumentError on empty star.
 
     Tests error handling when neither photometry nor spectroscopy is present.
     """
@@ -234,7 +235,7 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
     mock_star.photometry = None
     mock_star.spectroscopy = None
 
-    with pytest.raises(ValueError, match="neither photometry nor spectrum"):
+    with pytest.raises(InvalidArgumentError, match="neither photometry nor spectrum"):
         plot_stellar_analysis(mock_star)
 
 

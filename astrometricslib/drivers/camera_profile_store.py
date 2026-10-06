@@ -17,6 +17,7 @@ import logging
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.errors import ConfigurationError
 from astrometricslib.models.camera_profile import (
     CameraProfile,
     ProvenancedValue,
@@ -105,9 +106,10 @@ def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile,
 
     Raises
     ------
-    ValueError
-        If the config does not hold exactly one generic fallback profile,
-        or if two profiles claim the same camera name.
+    ConfigurationError
+        If a camera section is not a valid profile, if the config does
+        not hold exactly one generic fallback profile, or if two profiles
+        claim the same camera name.
     """
     profiles = []
     for section_name in config.app_config.sections():
@@ -119,12 +121,18 @@ def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile,
             # size, grating geometry) without ever becoming a profile --
             # only a section with model-level facts is one.
             continue
-        profiles.append(_build_camera_profile(section_name, section))
+        try:
+            profiles.append(_build_camera_profile(section_name, section))
+        except ValueError as error:  # a number that does not parse, or the model's own checks
+            raise ConfigurationError(
+                f"The camera section [{section_name}] is not a valid profile: {error}",
+                details={"section": section_name},
+            ) from error
     profiles = tuple(profiles)
 
     fallback_count = sum(1 for profile in profiles if profile.is_generic_fallback)
     if fallback_count != 1:
-        raise ValueError(
+        raise ConfigurationError(
             f"the configuration must hold exactly one generic fallback camera profile, found {fallback_count}"
         )
 
@@ -136,7 +144,7 @@ def _load_profiles_from_config(config: AppConfiguration) -> tuple[CameraProfile,
             normalized_name = normalize_camera_name(name)
             owner = owner_by_normalized_name.setdefault(normalized_name, profile.camera_name)
             if owner != profile.camera_name:
-                raise ValueError(
+                raise ConfigurationError(
                     f"the name {name!r} is claimed by both {owner!r} and {profile.camera_name!r}"
                 )
     return profiles

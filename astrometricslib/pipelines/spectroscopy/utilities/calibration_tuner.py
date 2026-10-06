@@ -15,6 +15,7 @@ from scipy.optimize import minimize
 from scipy.signal import find_peaks
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
 from astrometricslib.pipelines.spectroscopy.pipeline import (
     SpectroscopyPipeline,
@@ -325,7 +326,7 @@ class SpectroscopyCalibrationTuner:
 
         Raises
         ------
-        ValueError
+        ProcessingError
             If no star position was given and none could be detected.
         """
         if star_pos is not None:
@@ -339,7 +340,7 @@ class SpectroscopyCalibrationTuner:
         astrometry = AstrometryPipeline(app_config=self.config)
         context = astrometry.prepare_image(image_path, attempt_plate_solving=False)
         if not context.stellar_objects:
-            raise ValueError("No stars detected in the calibration frame.")
+            raise ProcessingError("No stars detected in the calibration frame.")
         # The brightest source in a stacked calibration frame is our target
         star_x, star_y = _read_xy_source_position(context.stellar_objects[0].star_data)
         return (float(star_x), float(star_y))
@@ -390,7 +391,7 @@ class SpectroscopyCalibrationTuner:
 
         Raises
         ------
-        ValueError
+        ProcessingError
             If fewer than 3 dips could be found even after the fallback.
         """
         min_depth = 0.01
@@ -415,7 +416,7 @@ class SpectroscopyCalibrationTuner:
                 logger.debug(f"Continuum baseline normalization fallback failed: {norm_err}")
 
         if len(dips) < 3:
-            raise ValueError(
+            raise ProcessingError(
                 f"Could not identify at least 3 absorption features. Found dips at indices: {dips}"
             )
 
@@ -445,7 +446,7 @@ class SpectroscopyCalibrationTuner:
 
         Raises
         ------
-        ValueError
+        ProcessingError
             If no combination fit within an acceptable RMS error.
         """
         best_rms = float("inf")
@@ -487,7 +488,7 @@ class SpectroscopyCalibrationTuner:
                     best_combo = combo
 
         if best_grating_distance_mm is None or best_rms > 10.0:
-            raise ValueError(
+            raise ProcessingError(
                 "Failed to fit physical parameters to dips with acceptable "
                 f"accuracy (best RMS = {best_rms} nm)"
             )

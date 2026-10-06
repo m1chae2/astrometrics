@@ -12,6 +12,7 @@ from astropy.wcs import WCS
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +87,14 @@ class AstrometricsImage:
             logger.debug(f"Failed to read FITS header {self.path}: {e}")
             return None
 
-    def _load_header(self):  # ruff: ignore[missing-return-type-private-function]
+    def _load_header(self) -> None:
         """Load the FITS header into `self._header` if not already loaded.
 
         Raises
         ------
-        FileNotFoundError
+        NotFoundError
             Raised if `self.path` does not exist on disk.
-        ValueError
+        StorageError
             Raised if the FITS file at `self.path` contains no HDUs.
         """
         if self._header is not None:
@@ -101,7 +102,7 @@ class AstrometricsImage:
 
         if not os.path.exists(self.path):
             logger.error(f"FITS file not found: {self.path}")
-            raise FileNotFoundError(f"Image not found at {self.path}")
+            raise NotFoundError(f"Image not found at {self.path}")
 
         try:
             fixed_header = self._read_header_with_fixes()
@@ -115,7 +116,7 @@ class AstrometricsImage:
                         hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
                         self._header = hdu.header.copy()
                     else:
-                        raise ValueError(f"FITS file {self.path} is empty")
+                        raise StorageError(f"FITS file {self.path} is empty")
 
             try:
                 self._wcs = WCS(self._header)

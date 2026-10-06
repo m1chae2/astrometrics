@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.drivers.logger_interface import LoggerInterface
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 
 @pytest.fixture
@@ -336,7 +337,7 @@ def test_replacing_guiding_samples_raises_when_the_database_cannot_be_written(tm
 
 def test_replacing_guiding_samples_rejects_mixed_sources(temp_logger_db: LoggerInterface) -> None:
     """Verify a batch must come from one source."""
-    with pytest.raises(ValueError, match="single source"):
+    with pytest.raises(InvalidArgumentError, match="single source"):
         temp_logger_db.replace_guiding_samples([
             {"timestamp": 1.0, "source": "a"},
             {"timestamp": 2.0, "source": "b"},

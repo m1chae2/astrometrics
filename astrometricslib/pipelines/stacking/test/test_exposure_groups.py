@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     CLIPPED_FRAME_ZERO_FRACTION,
     FULL_SCALE_COUNTS,
@@ -250,20 +251,20 @@ def test_the_saturation_threshold_sits_below_full_scale() -> None:
 
 
 def test_combining_rejects_input_that_does_not_line_up() -> None:
-    """Empty input, mismatched lists and bad exposures raise `ValueError`."""
+    """Empty input, mismatched lists and bad exposures are refused."""
     image = np.random.default_rng(7).normal(0.2, 0.01, (20, 20))
 
-    with pytest.raises(ValueError, match="one image and one exposure"):
+    with pytest.raises(InvalidArgumentError, match="one image and one exposure"):
         combine_exposure_group_images([], [])
-    with pytest.raises(ValueError, match="one image and one exposure"):
+    with pytest.raises(InvalidArgumentError, match="one image and one exposure"):
         combine_exposure_group_images([image, image], [1.0])
-    with pytest.raises(ValueError, match="positive"):
+    with pytest.raises(InvalidArgumentError, match="positive"):
         combine_exposure_group_images([image], [0.0])
 
 
 def test_combining_rejects_an_image_with_no_measurable_noise() -> None:
     """A perfectly flat image has no noise to weight by, which is an error."""
-    with pytest.raises(ValueError, match="noise"):
+    with pytest.raises(ProcessingError, match="noise"):
         combine_exposure_group_images([np.full((20, 20), 0.3)], [1.0])
 
 
@@ -393,12 +394,12 @@ def test_frame_noise_weights_are_frames_times_exposure_squared() -> None:
 
 
 def test_frame_noises_must_be_one_positive_number_per_group() -> None:
-    """A wrong count or a non-positive noise raises `ValueError`."""
+    """A wrong count or a non-positive noise raises `InvalidArgumentError`."""
     image = np.random.default_rng(9).normal(0.2, 0.01, (20, 20))
 
-    with pytest.raises(ValueError, match="frame noise"):
+    with pytest.raises(InvalidArgumentError, match="frame noise"):
         combine_exposure_group_images([image, image], [1.0, 2.0], frame_noises=[1.0])
-    with pytest.raises(ValueError, match="frame noise"):
+    with pytest.raises(InvalidArgumentError, match="frame noise"):
         combine_exposure_group_images([image], [1.0], frame_noises=[0.0])
 
 
@@ -618,7 +619,7 @@ def test_zero_fractions_must_line_up_with_the_groups() -> None:
     """A list of the wrong length is an error, not a silent mismatch."""
     image = np.random.default_rng(32).normal(0.2, 0.01, (20, 20))
 
-    with pytest.raises(ValueError, match="zero fraction"):
+    with pytest.raises(InvalidArgumentError, match="zero fraction"):
         combine_exposure_group_images(
             [image, image], [1.0, 2.0], frame_noises=[1.0, 1.0], frame_zero_fractions=[0.0]
         )
@@ -725,5 +726,5 @@ def test_the_saturated_mask_of_a_colour_stack_is_two_dimensional() -> None:
 
 def test_the_saturated_mask_needs_an_image() -> None:
     """With no images there is nothing to mark."""
-    with pytest.raises(ValueError, match="At least one image"):
+    with pytest.raises(InvalidArgumentError, match="At least one image"):
         saturated_pixel_mask([])

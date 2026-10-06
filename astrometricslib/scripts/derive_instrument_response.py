@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from astrometricslib import Astrometrics
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
@@ -80,7 +81,7 @@ def select_standard_star(
 
     Raises
     ------
-    ValueError
+    ProcessingError
         If no source lies within ``maximum_offset_px`` of the frame centre
         and no position was given.
     """
@@ -105,7 +106,7 @@ def select_standard_star(
             best_star, best_offset = star, offset
 
     if best_star is None or best_offset > maximum_offset_px:
-        raise ValueError(
+        raise ProcessingError(
             f"No detected source lies within {maximum_offset_px:.0f} px of the frame centre "
             f"(nearest: {best_offset:.0f} px). Pass the star's pixel position with --star-position X Y."
         )
@@ -178,7 +179,7 @@ def run_derivation(argv: list[str] | None = None) -> int:
             context.image.data.shape,
             tuple(arguments.star_position) if arguments.star_position else None,
         )
-    except ValueError as selection_error:
+    except ProcessingError as selection_error:
         print(selection_error)
         return 1
     star_x = star.star_data.get("x_centroid", star.star_data.get("xcentroid"))

@@ -11,6 +11,7 @@ from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 from astropy.table import QTable
 
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.target import FrameRecord, Target
@@ -103,7 +104,7 @@ def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[miss
     """Test that we stop and complain if the target hasn't been stacked yet."""
     target = Target(id="NoStackTarget", frames=[])
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
-    with pytest.raises(ValueError, match="stacked_image"):
+    with pytest.raises(ConflictError, match="stacked_image"):
         pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
 

@@ -6,6 +6,7 @@ values, and input-validation boundaries.
 
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
 
 
@@ -42,5 +43,5 @@ def test_chauvenet_sigma_single_frame_is_valid():  # ruff: ignore[missing-return
 @pytest.mark.parametrize("invalid_n", [0, -1, -10])
 def test_chauvenet_sigma_rejects_non_positive_frame_counts(invalid_n):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verifies non-positive frame counts raise rather than misbehave."""
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         chauvenet_sigma(invalid_n)

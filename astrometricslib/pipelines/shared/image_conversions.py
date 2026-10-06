@@ -13,7 +13,7 @@ from typing import Any
 from PIL import Image
 
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.errors import NotFoundError, ProcessingError
 from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
 from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
@@ -153,7 +153,7 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
 
     Raises
     ------
-    ValueError
+    NotFoundError
         If it can't find an image with those settings.
     """
 
@@ -197,7 +197,10 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
             safe_index = max(0, min(index, len(matches) - 1))
             return matches[safe_index].path
 
-    raise ValueError(f"No frame found for ISO={iso} Exposure={exposure} Index={index}")
+    raise NotFoundError(
+        f"No frame found for ISO={iso} Exposure={exposure} Index={index}",
+        details={"target": getattr(target, "id", None), "iso": iso, "exposure": exposure, "index": index},
+    )
 
 
 def render_data_url(
@@ -255,7 +258,7 @@ def render_data_url(
         raise ProcessingError(f"Failed to convert FITS to PNG: {error}", details={"path": path}) from error
     try:
         headers = [FitsHeaderEntry(**card) for card in get_fits_header(path)]
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, NotFoundError) as error:
         logger.warning("Could not read the header of %s while drawing it: %s", path, error)
         headers = []
     return RenderedImage(
@@ -359,11 +362,11 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
 
     Raises
     ------
-    FileNotFoundError
+    NotFoundError
         If the file doesn't exist.
     """
     if not os.path.exists(path):
-        raise FileNotFoundError(f"File not found: {path}")
+        raise NotFoundError(f"File not found: {path}")
 
     from astropy.io import fits
 

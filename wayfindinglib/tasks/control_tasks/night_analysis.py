@@ -19,6 +19,7 @@ import logging
 import statistics
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib import ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 
 if TYPE_CHECKING:
@@ -185,7 +186,7 @@ def performance_envelope(
 
     try:
         sensor_limits = performance_envelope_tasks.sensor_limits_for_camera(camera.name, context.config)
-    except ValueError as error:
+    except ConfigurationError as error:
         logger.warning("No usable camera profiles, so no saturation limits: %s", error)
         sensor_limits = None
 

@@ -14,6 +14,7 @@ refused so the plain shift is kept.
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
     MINIMUM_ALIGNMENT_CORRELATION,
     NEGLIGIBLE_SHIFT_PIXELS,
@@ -82,7 +83,7 @@ def test_a_field_with_different_noise_still_lines_up() -> None:
 
 def test_images_of_different_shape_are_rejected() -> None:
     """Aligning stacks that are not the same size is a caller error."""
-    with pytest.raises(ValueError, match="same shape"):
+    with pytest.raises(InvalidArgumentError, match="same shape"):
         measure_alignment(np.zeros((10, 10)), np.zeros((12, 10)))
 
 

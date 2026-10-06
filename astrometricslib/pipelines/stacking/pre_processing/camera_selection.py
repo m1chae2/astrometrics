@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib.foundation.errors import ConflictError
 
 __all__ = ["choose_camera_frames", "ensure_single_camera", "split_frames_by_camera"]
 
@@ -89,13 +90,13 @@ def ensure_single_camera(frames: Sequence[Any]) -> None:
 
     Raises
     ------
-    ValueError
+    ConflictError
         If the frames come from more than one camera. The message names the
         cameras and how many frames each took.
     """
     frames_by_camera = split_frames_by_camera(frames)
     if len(frames_by_camera) > 1:
-        raise ValueError(
+        raise ConflictError(
             "These frames come from more than one camera, and frames from different cameras "
             f"cannot be stacked together: {describe_cameras(frames_by_camera)}. "
             "Choose the frames of one camera."

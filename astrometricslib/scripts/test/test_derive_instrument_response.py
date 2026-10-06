@@ -9,6 +9,7 @@ the caller gives.
 
 import pytest
 
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.scripts.derive_instrument_response import select_standard_star
 
@@ -37,13 +38,13 @@ def test_both_spellings_of_the_centroid_keys_are_read() -> None:
 
 def test_a_source_far_from_the_centre_is_refused_with_a_hint() -> None:
     """When only far-off sources exist, the script asks for a position."""
-    with pytest.raises(ValueError, match="--star-position"):
+    with pytest.raises(ProcessingError, match="--star-position"):
         select_standard_star([_star("wrong", 1528.0, 1527.0)], IMAGE_SHAPE)
 
 
 def test_with_no_sources_the_script_asks_for_a_position() -> None:
     """An empty detection list gives the same request, not a crash."""
-    with pytest.raises(ValueError, match="--star-position"):
+    with pytest.raises(ProcessingError, match="--star-position"):
         select_standard_star([], IMAGE_SHAPE)
 
 

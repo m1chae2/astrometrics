@@ -11,6 +11,8 @@ import math
 
 from scipy.special import erfcinv
 
+from astrometricslib.foundation.errors import InvalidArgumentError
+
 
 def chauvenet_sigma(n_frames: int) -> float:
     """Calculate the pixel rejection limit for a certain number of images.
@@ -31,11 +33,11 @@ def chauvenet_sigma(n_frames: int) -> float:
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the number of frames is less than 1.
     """
     if n_frames < 1:
-        raise ValueError(f"n_frames must be at least 1, got {n_frames}")
+        raise InvalidArgumentError(f"n_frames must be at least 1, got {n_frames}")
 
     # Calculate the tail probability threshold for rejection (1 / 2N)
     # Then map that probability to the corresponding standard deviation

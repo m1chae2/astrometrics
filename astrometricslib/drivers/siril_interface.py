@@ -26,6 +26,7 @@ from astrometricslib.drivers.siril_output_parsing import (
     parse_registration_totals,
     parse_stacked_image_count,
 )
+from astrometricslib.foundation.errors import ExternalServiceError
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -501,11 +502,9 @@ def _open_pipe_or_die(
 
     Raises
     ------
-    RuntimeError
-        If `process` exits before the open completes.
-    TimeoutError
-        If `process` is still running but the open does not complete
-        within `timeout` seconds.
+    ExternalServiceError
+        If `process` exits before the open completes, or if it is still
+        running but the open does not complete within `timeout` seconds.
     """
     outcome: dict[str, Any] = {}
 
@@ -527,12 +526,12 @@ def _open_pipe_or_die(
             # going to open the other end of `path`.
             opener.join(timeout=0.5)
             if opener.is_alive():
-                raise RuntimeError(
+                raise ExternalServiceError(
                     f"Siril exited (return code {process.returncode}) before opening {path!r}."
                 )
             break
         if time.monotonic() > deadline:
-            raise TimeoutError(f"Timed out waiting for Siril to open {path!r}.")
+            raise ExternalServiceError(f"Timed out waiting for Siril to open {path!r}.")
         opener.join(timeout=0.2)
 
     if "error" in outcome:

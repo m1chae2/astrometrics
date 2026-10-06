@@ -18,6 +18,7 @@ from astropy.modeling.models import Gaussian2D
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.models.target import FrameRecord, Target
@@ -319,11 +320,11 @@ def test_target_stack_frames_homogeneous_validation() -> None:
     """Verifies that stacking.
 
     validates that only homogeneous frame types are stacked,.
-    and raises a ValueError if frames are mixed or missing.
+    and raises a ConflictError if frames are mixed or missing.
     """
     # 1. Test empty frames
     target = Target(id="EmptyTarget")
-    with pytest.raises(ValueError, match=r"Target has no frames available to stack\."):
+    with pytest.raises(ConflictError, match=r"Target has no frames available to stack\."):
         stacking_stage.stack_frames(target)
 
     # 2. Test mixed frames (SPEC + standard LIGHT)
@@ -335,7 +336,7 @@ def test_target_stack_frames_homogeneous_validation() -> None:
         ],
     )
     with pytest.raises(
-        ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
+        ConflictError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
     ):
         stacking_stage.stack_frames(target_mixed)
 

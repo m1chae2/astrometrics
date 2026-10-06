@@ -213,7 +213,7 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
     try:
         ra_deg = parse_coordinate_string(target.ra, is_ra=True)
         dec_deg = parse_coordinate_string(target.dec, is_ra=False)
-    except ValueError as error:
+    except InvalidArgumentError as error:
         raise InvalidArgumentError(
             f"Target '{target.id}' has invalid coordinate format: {error!s}"
         ) from error

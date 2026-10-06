@@ -19,6 +19,7 @@ from astrometricslib.drivers.camera_profile_store import (
     resolve_camera_profile,
 )
 from astrometricslib.foundation.config import _TomlSectionedConfig
+from astrometricslib.foundation.errors import ConfigurationError
 
 EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parents[2] / "astrometrics.config.example.toml"
 
@@ -184,7 +185,15 @@ def test_the_nikon_threshold_is_known_to_sit_above_its_ceiling() -> None:
 def test_a_config_without_a_generic_fallback_is_rejected() -> None:
     """Check that the config must say what to do with an unlisted camera."""
     config = _config_from_text(write_profile("Camera One"))
-    with pytest.raises(ValueError, match="exactly one generic fallback"):
+    with pytest.raises(ConfigurationError, match="exactly one generic fallback"):
+        load_camera_profiles(config)
+
+
+def test_a_camera_section_that_is_not_a_valid_profile_is_a_configuration_error() -> None:
+    """A section whose numbers do not parse is reported as a config error."""
+    broken = write_profile("Camera One").replace("value = 65535.0", 'value = "lots"')
+    config = _config_from_text(write_profile("Fallback", generic=True) + broken)
+    with pytest.raises(ConfigurationError, match="not a valid profile"):
         load_camera_profiles(config)
 
 
@@ -192,7 +201,7 @@ def test_a_config_with_two_generic_fallbacks_is_rejected() -> None:
     """Check that there cannot be two competing fallbacks."""
     text = write_profile("Fallback A", generic=True) + write_profile("Fallback B", generic=True)
     config = _config_from_text(text)
-    with pytest.raises(ValueError, match="exactly one generic fallback"):
+    with pytest.raises(ConfigurationError, match="exactly one generic fallback"):
         load_camera_profiles(config)
 
 
@@ -204,7 +213,7 @@ def test_two_profiles_claiming_the_same_name_are_rejected() -> None:
         + write_profile("Camera Two", aliases=("shared-name",))
     )
     config = _config_from_text(text)
-    with pytest.raises(ValueError, match="claimed by both"):
+    with pytest.raises(ConfigurationError, match="claimed by both"):
         load_camera_profiles(config)
 
 

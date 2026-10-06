@@ -240,10 +240,7 @@ class Visualization:
         if by_settings:
             if iso is None or exposure is None:
                 raise InvalidArgumentError("Give both iso and exposure.")
-            try:
-                found = image_conversions.get_frame(resolved, iso, exposure, index)
-            except ValueError as error:
-                raise NotFoundError(str(error), details={"target": resolved.id}) from error
+            found = image_conversions.get_frame(resolved, iso, exposure, index)
             if not os.path.exists(found):
                 raise NotFoundError(f"Frame not found: {found}", details={"path": found})
             return resolved, found
@@ -367,10 +364,11 @@ class Visualization:
         selected = self._resolve_star(selected_star) if selected_star is not None else None
         try:
             return self._plot_target(kind, resolved, selected, limit, size)
-        except ValueError as error:
+        except InvalidArgumentError as error:
             # The drawing code refuses a target that lacks what the chart
             # needs, such as a stack or a focuser temperature.
-            raise InvalidArgumentError(str(error), details={"target": resolved.id, "kind": kind}) from error
+            error.details.update({"target": resolved.id, "kind": kind})
+            raise
 
     def _plot_target(
         self,

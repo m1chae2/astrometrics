@@ -12,6 +12,7 @@ import numpy as np
 from matplotlib.patches import Circle
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 from .interaction_handler import InteractionHandler
 from .layers import (
@@ -299,12 +300,12 @@ def plot_stellar_photometry(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the star has no photometry attribute or data.
     """
     photometry = getattr(star, "photometry", None)
     if photometry is None:
-        raise ValueError("Provided stellar object has no photometry attribute or data.")
+        raise InvalidArgumentError("Provided stellar object has no photometry attribute or data.")
 
     if ax is None:
         plt.style.use("dark_background")
@@ -353,7 +354,7 @@ def plot_stellar_spectroscopy(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the star has no processed spectrum data.
     """
     spectrum_data = _extract_spectrum_data(star)
@@ -361,7 +362,7 @@ def plot_stellar_spectroscopy(
     intensities = spectrum_data.get("intensities")
 
     if wavelengths is None or intensities is None:
-        raise ValueError("Provided stellar object has no processed spectrum data.")
+        raise InvalidArgumentError("Provided stellar object has no processed spectrum data.")
 
     if ax is None:
         plt.style.use("dark_background")
@@ -411,7 +412,7 @@ def plot_stellar_analysis(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If neither light curve nor spectrum data is available.
     """
     has_photo = getattr(star, "photometry", None) is not None
@@ -421,7 +422,7 @@ def plot_stellar_analysis(
     has_spec = spec_data.get("wavelengths_angstrom") is not None and spec_data.get("intensities") is not None
 
     if not has_photo and not has_spec:
-        raise ValueError("Provided stellar object has neither photometry nor spectrum data.")
+        raise InvalidArgumentError("Provided stellar object has neither photometry nor spectrum data.")
 
     if has_photo and has_spec:
         plt.style.use("dark_background")
@@ -484,11 +485,11 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If stacked image or catalog stars are missing.
     """
     if not getattr(getattr(target, "stacking", None), "stacked_image", None):
-        raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
+        raise InvalidArgumentError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
     target_id = getattr(target, "id", "")
     # Only this target's stars are read from the database, not the whole
@@ -507,7 +508,7 @@ def _load_target_stars(target: Any, stars: Any, limit: int) -> tuple[list, list,
     )[:limit]
 
     if not astrometry_stars:
-        raise ValueError(f"No catalog-identified stars found for target {target_id!r}.")
+        raise InvalidArgumentError(f"No catalog-identified stars found for target {target_id!r}.")
 
     spectral_stars = [
         obj
@@ -701,13 +702,13 @@ def plot_asteroid_detection(target: Any, figsize: tuple[int, int] = (10, 10)) ->
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the target has no `stacked_image`.
     """
     from .layers import TrackOverlay
 
     if not getattr(getattr(target, "stacking", None), "stacked_image", None):
-        raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
+        raise InvalidArgumentError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_image.")
 
     # Close any figures left open by a previous call before creating this
     # one, so repeated calls don't accumulate Figures in pyplot's global
@@ -835,12 +836,14 @@ def plot_target_spectroscopy(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the target has no stacked spectral image, or no extracted
         spectrum has an extraction box.
     """
     if not getattr(getattr(target, "spectral_stacking", None), "stacked_image", None):
-        raise ValueError(f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_spectral_target.")
+        raise InvalidArgumentError(
+            f"Target {getattr(target, 'id', 'unknown')!r} has no stacked_spectral_target."
+        )
 
     _, spectral_stars, _ = _load_target_stars(target, stars, limit)
     # The extraction boxes live in the spectral stack's pixel grid, so only
@@ -850,7 +853,7 @@ def plot_target_spectroscopy(
         key=_magnitude_sort_key,
     )[:limit]
     if not spectral_stars:
-        raise ValueError(f"No extracted spectra with extraction boxes for target {target.id!r}.")
+        raise InvalidArgumentError(f"No extracted spectra with extraction boxes for target {target.id!r}.")
 
     # Close any figures left open by a previous call before creating this
     # one, so repeated calls don't accumulate Figures in pyplot's global

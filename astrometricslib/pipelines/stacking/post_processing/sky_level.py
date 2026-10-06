@@ -35,6 +35,7 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.pipelines.shared.image_scaling import (
     AUTOSTRETCH_SHADOWS_CLIP_SIGMA,
     measure_sky,
@@ -204,7 +205,7 @@ def choose_sky_level_for_file(path: str) -> SkyLevelChoice:
     """
     try:
         data = AstrometricsImage(path).data
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
         logger.debug("Could not read '%s' to choose a sky level: %s", path, error)
         return SkyLevelChoice(FALLBACK_SKY_LEVEL, None, "the image could not be read")
     return choose_sky_level(data)

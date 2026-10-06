@@ -30,6 +30,8 @@ from scipy.ndimage import shift as shift_image
 from scipy.spatial import cKDTree
 from skimage.registration import phase_cross_correlation
 
+from astrometricslib.foundation.errors import InvalidArgumentError
+
 # Structure wider than this many pixels (background gradients, nebulosity) is
 # removed before the offset is measured, so stars decide it. Stars in these
 # stacks have a FWHM of about 3 px (2.8-3.8 px, see
@@ -599,11 +601,11 @@ def measure_alignment(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If the two images do not have the same shape.
     """
     if np.shape(reference) != np.shape(image):
-        raise ValueError("The images to align must have the same shape.")
+        raise InvalidArgumentError("The images to align must have the same shape.")
     reference_plane = _to_plane(reference)
     image_plane = _to_plane(image)
     if crop_fraction is not None:
@@ -792,7 +794,7 @@ def align_images_to_reference(
                 crop_fraction=crop_fraction,
                 prefer_star_position=prefer_star_position,
             )
-        except ValueError:
+        except InvalidArgumentError:
             # Group stacks of different pixel dimensions (different
             # binning/ROI/camera setup) can't be aligned at all. Treat this
             # exactly like an untrusted correlation -- leave the image out

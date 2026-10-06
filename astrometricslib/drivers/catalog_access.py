@@ -17,6 +17,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.storage.butler import Butler as _GenericButler
 from astrometricslib.foundation.storage.butler import DatasetSpec
 
@@ -668,7 +669,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If a data type it doesn't recognize is requested.
         """
         if dataset_type == "target_catalog":
@@ -698,7 +699,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
             return AstrometricsImage(path)
         else:
-            raise ValueError(f"Unknown dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
 
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
         """Save data to the database or hard drive.
@@ -714,7 +715,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If an unsupported data type is being saved.
         """
         if dataset_type == "target_catalog":
@@ -724,7 +725,7 @@ class CatalogAccess(AbstractCatalogAccess):
         elif dataset_type == "stellar_catalog":
             self._generic.put_all("stellar_catalog", obj)
         else:
-            raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Write operation not supported on dataset type: {dataset_type}")
         self._bump_dataset_version("target_catalog" if dataset_type == "target_record" else dataset_type)
 
     def merge_and_record(
@@ -751,11 +752,11 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If the dataset type isn't supported for merging.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
-            raise ValueError(f"merge_and_record is not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
         self._generic.merge_and_record(dataset_type, objects, merge_function)
         self._bump_dataset_version(dataset_type)
@@ -772,11 +773,11 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If the dataset type isn't supported for deleting.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
-            raise ValueError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
 
         self._generic.delete_by_ids(dataset_type, ids)
         self._bump_dataset_version(dataset_type)
@@ -1081,7 +1082,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If it doesn't know how to build a path for that data type.
         """
         if selector.get("path"):
@@ -1099,4 +1100,6 @@ class CatalogAccess(AbstractCatalogAccess):
             # Just fallback to frames root lights mapping
             return os.path.join(self.config.get_frames_path(), role.lower() + "s", target)
         else:
-            raise ValueError(f"Local path resolution not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(
+                f"Local path resolution not supported for dataset type: {dataset_type}"
+            )

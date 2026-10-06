@@ -3,6 +3,7 @@
 import pytest
 from pydantic import BaseModel
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.storage.butler import Butler, DatasetSpec
 
 
@@ -218,7 +219,7 @@ def test_list_projected_rejects_an_unregistered_column(tmp_path):  # ruff: ignor
     """
     butler = _make_indexed_butler(tmp_path)
 
-    with pytest.raises(ValueError, match="unknown column"):
+    with pytest.raises(InvalidArgumentError, match="unknown column"):
         butler.list_projected("widget", ["id", "; DROP TABLE widgets"])
 
 
@@ -226,7 +227,7 @@ def test_list_projected_requires_at_least_one_column(tmp_path):  # ruff: ignore[
     """Verify an empty column list raises rather than selecting nothing."""
     butler = _make_indexed_butler(tmp_path)
 
-    with pytest.raises(ValueError, match="at least one column"):
+    with pytest.raises(InvalidArgumentError, match="at least one column"):
         butler.list_projected("widget", [])
 
 
@@ -281,7 +282,7 @@ def test_list_projected_rejects_an_unregistered_like_column(tmp_path):  # ruff: 
     """Verify like= keys are validated the same way columns are."""
     butler = _make_indexed_butler(tmp_path)
 
-    with pytest.raises(ValueError, match="unknown column"):
+    with pytest.raises(InvalidArgumentError, match="unknown column"):
         butler.list_projected("widget", ["id"], like={"nonexistent_column": "x"})
 
 
@@ -323,7 +324,7 @@ def test_list_projected_rejects_an_unregistered_between_column(tmp_path):  # ruf
     """Verify between= names are validated like columns and like keys."""
     butler = _make_indexed_butler(tmp_path)
 
-    with pytest.raises(ValueError, match="unknown column"):
+    with pytest.raises(InvalidArgumentError, match="unknown column"):
         butler.list_projected("widget", ["id"], between={"1=1; --": (0.0, 1.0)})
 
 

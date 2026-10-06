@@ -10,6 +10,7 @@ import hashlib
 import os
 from typing import Any
 
+from astrometricslib.foundation.errors import ConfigurationError
 from astrometricslib.models.target import Target
 
 
@@ -475,7 +476,7 @@ def add_data(api, target_id: str, image_file: Any, camera: str | None = None) ->
 
     Raises
     ------
-    RuntimeError
+    ConfigurationError
         If the image processing system is turned off.
     """
     target = get_target(api, target_id)
@@ -490,7 +491,7 @@ def add_data(api, target_id: str, image_file: Any, camera: str | None = None) ->
         files = []
 
     if not api._image_service:
-        raise RuntimeError("Image service is not available in standalone mode.")
+        raise ConfigurationError("Image service is not available in standalone mode.")
 
     for f in files:
         path = f.get("path") if isinstance(f, dict) else f

@@ -11,6 +11,7 @@ from typing import Any
 from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.drivers.job_logging import get_current_job
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import ConflictError, ProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +104,13 @@ def stack_frames(
 
     Raises
     ------
-    ValueError
-        If the target has no usable frames to stack, either at the
-        start or after filtering out mismatched frames, or if the frames
-        come from more than one camera.
+    ConflictError
+        If the target has no frames to stack, or mixes spectral and
+        standard imaging frames. `ensure_single_camera` raises it too
+        when the frames come from more than one camera.
+    ProcessingError
+        If no usable frames are left after filtering out mismatched or
+        bad frames.
     """
     if frames_to_stack is not None:
         target_frames = frames_to_stack
@@ -136,7 +140,7 @@ def stack_frames(
         ]
 
     if not target_frames:
-        raise ValueError("Target has no frames available to stack.")
+        raise ConflictError("Target has no frames available to stack.")
 
     # Frames from different cameras cannot be stacked together. Without this
     # check the gain filter below would keep whichever camera had more frames.
@@ -153,7 +157,7 @@ def stack_frames(
     has_spectral = any(frame_is_spectral(f) for f in target_frames)
     has_standard = any(not frame_is_spectral(f) for f in target_frames)
     if has_spectral and has_standard:
-        raise ValueError(
+        raise ConflictError(
             "Target contains a mixed set of spectral ('SPEC') and standard imaging frames. "
             "Stacking mixed frame types is not permitted."
         )
@@ -217,7 +221,7 @@ def stack_frames(
             ExcludedFrame(path=f.path, reason="minority gain setting") for f in excluded_by_gain
         )
     if not target_frames:
-        raise ValueError("Target has no frames available to stack after gain-homogeneity filtering.")
+        raise ProcessingError("Target has no frames available to stack after gain-homogeneity filtering.")
 
     # A frame an earlier run moved into `_excluded` can still be listed on the
     # target, if that run's save of the target did not last. Count it as set
@@ -241,7 +245,7 @@ def stack_frames(
             for frame in already_set_aside
         )
     if not target_frames:
-        raise ValueError("Target has no frames available to stack after leaving out set-aside frames.")
+        raise ProcessingError("Target has no frames available to stack after leaving out set-aside frames.")
 
     # Move frames with clouds or trailed stars out of the target's folder.
     # The background check below only catches one sudden jump in sky
@@ -263,7 +267,7 @@ def stack_frames(
         for note in quarantine_report.notes:
             logger.info(f"Quarantine check for target '{target.id}': {note}")
         if not target_frames:
-            raise ValueError("Target has no frames available to stack after quarantining bad frames.")
+            raise ProcessingError("Target has no frames available to stack after quarantining bad frames.")
 
     # Check for sudden changes in the sky background (like clouds moving in).
     # Standard calibration and pixel rejection aren't enough to catch these
@@ -326,7 +330,7 @@ def stack_frames(
                 for f in excluded_by_background
             )
         if not target_frames:
-            raise ValueError(
+            raise ProcessingError(
                 "Target has no frames available to stack after background-homogeneity filtering."
             )
 

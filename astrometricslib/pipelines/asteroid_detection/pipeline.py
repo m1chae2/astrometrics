@@ -20,6 +20,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
@@ -372,11 +373,11 @@ class AsteroidDetectionPipeline:
 
         Raises
         ------
-        ValueError
+        ConflictError
             If `stacked_image_path` is empty.
         """
         if not stacked_image_path:
-            raise ValueError(
+            raise ConflictError(
                 f"Target '{target_id}' has no stacked_image; run analyze_target(type='astrometry') first."
             )
 

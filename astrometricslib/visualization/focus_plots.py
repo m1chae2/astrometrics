@@ -21,6 +21,8 @@ import matplotlib.dates as matplotlib_dates
 import matplotlib.pyplot as plt
 import numpy as np
 
+from astrometricslib.foundation.errors import InvalidArgumentError
+
 # The fewest frames with a star-image width that are worth fitting a line
 # through, and the smallest temperature change that makes the slope
 # meaningful. With fewer frames, or with the temperature almost unchanged,
@@ -112,13 +114,13 @@ def plot_focus_vs_temperature(target: Any, figsize: tuple[int, int] = (14, 9)) -
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If no light frame of the target has a focuser temperature.
     """
     samples = _collect_focus_samples(target)
     temperature = samples["temperature_c"]
     if temperature.size == 0:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Target {getattr(target, 'id', 'unknown')!r} has no frames with a focuser temperature."
         )
     position = samples["position"]

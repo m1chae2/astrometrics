@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.visualization.helpers import plot_asteroid_detection
 
@@ -42,7 +43,7 @@ def test_plot_asteroid_detection_raises_on_missing_stacked_image():  # ruff: ign
         asteroid_detection=SimpleNamespace(candidates=[]),
     )
 
-    with pytest.raises(ValueError, match="has no stacked_image"):
+    with pytest.raises(InvalidArgumentError, match="has no stacked_image"):
         plot_asteroid_detection(target)
 
 

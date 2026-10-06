@@ -353,7 +353,7 @@ def _object_coordinates(sky_object: Target | StellarObject) -> tuple[float, floa
             parse_coordinate_string(str(sky_object.ra), is_ra=True),
             parse_coordinate_string(str(sky_object.dec), is_ra=False),
         )
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, InvalidArgumentError) as error:  # float() or the coordinate parser
         logger.debug("Skipping %s, which has no usable position: %s", sky_object.id, error)
         return None
 

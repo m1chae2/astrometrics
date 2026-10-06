@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.pipelines.shared.image_scaling import (
     measure_sky,
     midtones_balance_for,
@@ -167,7 +168,7 @@ def choose_bright_object_stretch_for_file(path: str) -> BrightObjectStretch | No
     """
     try:
         data = AstrometricsImage(path).data
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
         logger.debug("Could not read '%s' to look for a bright object: %s", path, error)
         return None
     return choose_bright_object_stretch(data)

@@ -18,6 +18,7 @@ so there is only ever one copy to update on a deliberate change.
 
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
 
@@ -105,7 +106,7 @@ def test_an_unknown_analysis_mode_is_rejected_by_name():  # ruff: ignore[missing
     The split replaces the `match` statement with a lookup table, and the
     lookup has to fail the same way the `match` did.
     """
-    with pytest.raises(ValueError, match="Unknown analysis type: not_a_real_mode"):
+    with pytest.raises(InvalidArgumentError, match="Unknown analysis type: not_a_real_mode"):
         tasks.analyze_target(
             Target(id="UnknownModeTarget"),
             pipeline_type="not_a_real_mode",

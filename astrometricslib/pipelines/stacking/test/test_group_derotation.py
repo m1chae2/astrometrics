@@ -10,6 +10,7 @@ can be trusted.
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.stacking.processing.group_derotation import (
     NEGLIGIBLE_ROTATION_DEGREES,
     derotate_groups_to_common_tilt,
@@ -167,5 +168,5 @@ def test_nothing_is_rotated_when_no_group_can_be_trusted(monkeypatch) -> None:  
 
 def test_mismatched_image_and_path_counts_are_rejected() -> None:
     """Each image needs exactly one path to re-measure its tilt from."""
-    with pytest.raises(ValueError, match="one path"):
+    with pytest.raises(InvalidArgumentError, match="one path"):
         derotate_groups_to_common_tilt([np.zeros((10, 10))], ["a.fits", "b.fits"], "ZWO ASI 533MM Pro")

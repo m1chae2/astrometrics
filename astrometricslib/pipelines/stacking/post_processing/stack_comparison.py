@@ -26,6 +26,7 @@ import numpy as np
 from skimage.registration import phase_cross_correlation
 
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 
@@ -202,14 +203,14 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
 
     Raises
     ------
-    ValueError
+    ProcessingError
         If the image has no usable sky (blank or too small).
     """
     image = np.asarray(collapse_to_2d(np.asarray(data, dtype=np.float64)))
     sky = float(np.nanmedian(image))
     robust_sigma = _MAD_TO_SIGMA * float(np.nanmedian(np.abs(image - sky)))
     if not np.isfinite(sky) or sky <= 0 or robust_sigma <= 0:
-        raise ValueError("The stack has no measurable sky.")
+        raise ProcessingError("The stack has no measurable sky.")
 
     sky_pixels = (image[:, 1:] < sky + NOISE_STAR_SIGMA * robust_sigma) & (
         image[:, :-1] < sky + NOISE_STAR_SIGMA * robust_sigma
@@ -220,7 +221,7 @@ def measure_stack_array(data: np.ndarray, path: str = "") -> StackMeasurements:
     block = FLATNESS_BLOCK_PIXELS
     rows, columns = (image.shape[0] // block) * block, (image.shape[1] // block) * block
     if rows == 0 or columns == 0:
-        raise ValueError("The stack is smaller than one flatness block.")
+        raise ProcessingError("The stack is smaller than one flatness block.")
     blocks = image[:rows, :columns].reshape(rows // block, block, columns // block, block)
     block_medians = np.median(blocks, axis=(1, 3))
     centre = float(np.median(block_medians))

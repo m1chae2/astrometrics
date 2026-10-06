@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.visualization.focus_plots import (
     MINIMUM_FRAMES_FOR_WIDTH_TREND,
@@ -59,7 +60,7 @@ def make_frames(count: int, width_slope_px_per_c: float | None = None) -> list[F
 def test_a_target_with_no_focuser_temperature_is_rejected() -> None:
     """A target whose frames carry no focuser temperature cannot be plotted."""
     target = SimpleNamespace(id="Vega", frames=[FrameRecord(path="/fake/a.fits")])
-    with pytest.raises(ValueError, match="no frames with a focuser temperature"):
+    with pytest.raises(InvalidArgumentError, match="no frames with a focuser temperature"):
         plot_focus_vs_temperature(target)
 
 

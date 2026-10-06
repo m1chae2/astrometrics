@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,7 @@ def _read_frame(path: str) -> np.ndarray | None:
     """
     try:
         data = np.asarray(AstrometricsImage(path).data, dtype=np.float64)
-    except (OSError, ValueError, KeyError) as error:
+    except (OSError, ValueError, KeyError, NotFoundError, StorageError) as error:
         logger.debug("Could not read calibration frame '%s': %s", path, error)
         return None
     if data.ndim == 3 and data.shape[0] == 1:

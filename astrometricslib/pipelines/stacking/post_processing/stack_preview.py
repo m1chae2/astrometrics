@@ -57,6 +57,7 @@ from astrometricslib.drivers.fits_access import read_data, read_header, write_im
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.errors import NotFoundError, StorageError
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -482,7 +483,7 @@ def _is_usable_image(path: str) -> bool:
     """
     try:
         data = AstrometricsImage(path).data
-    except OSError, ValueError, KeyError:
+    except OSError, ValueError, KeyError, NotFoundError, StorageError:
         return False
     finite = np.isfinite(data)
     if finite.mean() < _MINIMUM_FINITE_FRACTION:

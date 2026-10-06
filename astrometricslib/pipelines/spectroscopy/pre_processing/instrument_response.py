@@ -27,6 +27,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     blur_sigma_in_samples,
@@ -262,15 +263,16 @@ def derive_instrument_response(
 
     Raises
     ------
-    ValueError
-        If the reference type is not bundled or too few samples fall in
-        the fitting range.
+    InvalidArgumentError
+        If the reference type is not bundled.
+    ProcessingError
+        If too few samples fall in the fitting range.
     """
     from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
 
     templates = _get_reference_templates()
     if reference_type not in templates:
-        raise ValueError(f"No bundled reference spectrum for {reference_type!r}.")
+        raise InvalidArgumentError(f"No bundled reference spectrum for {reference_type!r}.")
     template_wavelength, template_flux = templates[reference_type]
     smoothed_template = gaussian_filter1d(
         template_flux,
@@ -290,7 +292,7 @@ def derive_instrument_response(
     for line in _LINES_TO_SKIP_ANGSTROM:
         usable &= np.abs(wavelength_angstrom - line) > _LINE_SKIP_HALF_WIDTH_ANGSTROM
     if usable.sum() < 50:
-        raise ValueError("Too few usable samples to fit an instrument response.")
+        raise ProcessingError("Too few usable samples to fit an instrument response.")
 
     ratio = intensity[usable] / np.interp(wavelength_angstrom[usable], template_wavelength, smoothed_template)
     scaled = (wavelength_angstrom[usable] - _WAVELENGTH_CENTER_ANGSTROM) / _WAVELENGTH_SCALE_ANGSTROM

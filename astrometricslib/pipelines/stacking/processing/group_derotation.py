@@ -29,6 +29,7 @@ import numpy as np
 from scipy.ndimage import rotate as rotate_image
 from scipy.ndimage import shift as shift_image
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
 
 logger = logging.getLogger(__name__)
@@ -183,11 +184,11 @@ def derotate_groups_to_common_tilt(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `images` and `image_paths` are not the same length.
     """
     if len(images) != len(image_paths):
-        raise ValueError("Each image needs one path to re-measure its trail tilt from.")
+        raise InvalidArgumentError("Each image needs one path to re-measure its trail tilt from.")
 
     positions = [find_zero_order_position(np.asarray(image, dtype=float)) for image in images]
     measurements: list[tuple[float, float] | None] = []

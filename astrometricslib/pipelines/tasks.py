@@ -39,6 +39,7 @@ import time
 from typing import Any
 
 from astrometricslib.drivers.job_logging import registered_job
+from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult
 from astrometricslib.models.target import FrameRecord, Target
@@ -254,7 +255,7 @@ def analyze_target(
 
     Raises
     ------
-    ValueError
+    ConflictError
         If you ask for an unknown pipeline type, or if we don't have
         the right images needed to run it.
     """
@@ -290,7 +291,7 @@ def analyze_target(
             elif target.frames:
                 path = target.frames[0].path
             else:
-                raise ValueError(
+                raise ConflictError(
                     f"No frames or stacked image available for {pipeline_type} analysis"
                     f" on target {target.id}."
                 )
@@ -312,7 +313,7 @@ def _run_analysis_pipeline_match(
 ) -> dict[str, Any]:
     runner = PIPELINE_RUNNERS.get(pipeline_type)
     if runner is None:
-        raise ValueError(f"Unknown analysis type: {pipeline_type}")
+        raise InvalidArgumentError(f"Unknown analysis type: {pipeline_type}")
     return runner(target, frames, filter_type, catalog_access, path, **kwargs)
 
 
@@ -569,7 +570,7 @@ def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
 
     Raises
     ------
-    ValueError
+    ProcessingError
         If astrometry analysis failed to produce a result.
     """
     print(f"[{target.id}] Running Astrometry Analysis...")
@@ -577,7 +578,7 @@ def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
         target, pipeline_type="astrometry", catalog_access=astrometrics.catalog_access
     )
     if astrometry_results is None:
-        raise ValueError("Astrometry analysis failed.")
+        raise ProcessingError("Astrometry analysis failed.")
     print(
         f"[{target.id}] Astrometry Analysis complete. "
         f"Resolved WCS: {astrometry_results.get('wcs') is not None}"
@@ -624,7 +625,7 @@ def _run_spectroscopy_stage(
 
     Raises
     ------
-    ValueError
+    ProcessingError
         If spectroscopy analysis failed to produce a result.
     """
     if not spectral_frames:
@@ -637,5 +638,5 @@ def _run_spectroscopy_stage(
             target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
         )
     if spectroscopy_results is None:
-        raise ValueError("Spectroscopy analysis failed.")
+        raise ProcessingError("Spectroscopy analysis failed.")
     print(f"[{target.id}] Spectroscopy Analysis complete.")

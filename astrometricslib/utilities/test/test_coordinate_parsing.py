@@ -6,6 +6,7 @@ decimal degrees, and the error behavior for empty or unparseable input.
 
 import pytest
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 
 
@@ -28,28 +29,28 @@ def test_parse_dec_with_symbol_delimiters():  # ruff: ignore[missing-return-type
 
 
 def test_parse_empty_string_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify an empty coordinate string raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify an empty coordinate string raises."""
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string("", is_ra=True)
 
 
 def test_parse_whitespace_only_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a whitespace-only coordinate string raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify a whitespace-only coordinate string raises."""
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string("   ", is_ra=True)
 
 
 def test_parse_non_string_raises_value_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a non-string input raises ValueError, not AttributeError."""
-    with pytest.raises(ValueError):
+    """Verify a non-string input raises, not AttributeError."""
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string(123, is_ra=True)  # type: ignore[arg-type]
 
 
 def test_parse_declination_out_of_range_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a declination outside -90 to 90 degrees raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify a declination outside -90 to 90 degrees raises."""
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string("91", is_ra=False)
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string("-91", is_ra=False)
 
 
@@ -60,8 +61,8 @@ def test_parse_declination_at_boundary_is_valid():  # ruff: ignore[missing-retur
 
 
 def test_parse_unit_marker_only_string_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a string of only a unit marker (no value) raises ValueError."""
-    with pytest.raises(ValueError):
+    """Verify a string of only a unit marker (no value) raises."""
+    with pytest.raises(InvalidArgumentError):
         parse_coordinate_string("h", is_ra=True)
 
 

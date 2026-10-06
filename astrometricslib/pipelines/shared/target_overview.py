@@ -17,6 +17,7 @@ import os
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.utilities.observing_night import observing_night_id
 
@@ -385,7 +386,7 @@ def summary_rows(
                     parse_coordinate_string(target.ra, True),
                     parse_coordinate_string(target.dec, False),
                 )
-            except TypeError, ValueError:
+            except InvalidArgumentError:
                 continue
             if separation > radius_deg:
                 continue

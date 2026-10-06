@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.pre_processing.camera_selection import (
@@ -59,7 +60,7 @@ def test_frames_with_no_camera_recorded_are_not_counted() -> None:
 
 def test_frames_from_two_cameras_are_refused_with_the_counts() -> None:
     """The error names each camera and how many frames it took."""
-    with pytest.raises(ValueError, match="more than one camera") as error:
+    with pytest.raises(ConflictError, match="more than one camera") as error:
         ensure_single_camera(make_frames(NIKON, NIKON, NIKON, ASI, ASI))
 
     assert f"'{NIKON}' (3 frames)" in str(error.value)
@@ -103,5 +104,5 @@ def test_the_stacking_stage_refuses_mixed_cameras() -> None:
         ],
     )
 
-    with pytest.raises(ValueError, match="more than one camera"):
+    with pytest.raises(ConflictError, match="more than one camera"):
         stacking_tasks.stack_frames(target)

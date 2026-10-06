@@ -24,6 +24,7 @@ import numpy as np
 from scipy import ndimage
 
 from astrometricslib.drivers.fits_access import read_data
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -331,12 +332,12 @@ def check_raw_frames(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If neither `paths` nor `folder` is given.
     """
     if paths is None:
         if folder is None:
-            raise ValueError("Give either paths or a folder of FITS frames.")
+            raise InvalidArgumentError("Give either paths or a folder of FITS frames.")
         paths = sorted(glob.glob(os.path.join(folder, "*.fits")))
         if last_count:
             paths = paths[-last_count:]

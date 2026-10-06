@@ -5,12 +5,15 @@ deprecated headers. Reading a file must never change it.
 """
 
 import os
+from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 from astropy.time import Time
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import NotFoundError
 
 
 def _make_deprecated_header_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
@@ -86,3 +89,9 @@ def test_header_access_opens_deprecated_file_once(tmp_path, mocker):  # ruff: ig
     _ = image.header
 
     assert spy.call_count == 1
+
+
+def test_a_missing_file_raises_not_found(tmp_path: Path) -> None:
+    """Reading the header of a file that is not there raises NotFoundError."""
+    with pytest.raises(NotFoundError, match="Image not found"):
+        _ = AstrometricsImage(str(tmp_path / "missing.fits")).header

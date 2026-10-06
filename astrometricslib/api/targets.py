@@ -430,19 +430,15 @@ class TargetCatalog:
         frame_path : `str`
             The path of the matching frame.
 
-        Raises
-        ------
-        NotFoundError
-            If the target does not exist or no frame matches.
+        Notes
+        -----
+        Raises `NotFoundError` if the target does not exist or no frame
+        matches.
         """
-        from astrometricslib.foundation.errors import NotFoundError
         from astrometricslib.pipelines.shared import image_conversions
 
         resolved = resolve_target(self, target)
-        try:
-            return image_conversions.get_frame(resolved, iso, exposure, index)
-        except ValueError as error:
-            raise NotFoundError(str(error), details={"target": resolved.id}) from error
+        return image_conversions.get_frame(resolved, iso, exposure, index)
 
     def delete_images(self, paths: builtins.list[str], target: str | Target | None = None) -> dict:
         """Delete files from disk, and from a target's frame list if given.

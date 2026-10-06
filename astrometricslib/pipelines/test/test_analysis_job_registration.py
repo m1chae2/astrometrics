@@ -18,6 +18,7 @@ import pytest
 
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
 
@@ -239,7 +240,7 @@ def test_a_missing_image_path_fails_the_job_before_running_anything(isolated_job
         lambda *args, **kwargs: called.append(1) or {"status": "ok"},
     )
 
-    with pytest.raises(ValueError, match="No frames or stacked image available"):
+    with pytest.raises(ConflictError, match="No frames or stacked image available"):
         tasks.analyze_target(Target(id="NoImageTarget"), pipeline_type="astrometry")
 
     assert called == []

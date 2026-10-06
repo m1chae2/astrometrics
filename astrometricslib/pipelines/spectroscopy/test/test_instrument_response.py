@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from scipy.ndimage import gaussian_filter1d
 
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     apply_instrument_response,
     derive_instrument_response,
@@ -72,7 +73,7 @@ def test_the_response_is_not_applied_outside_its_valid_range():  # ruff: ignore[
 def test_an_unknown_reference_type_is_rejected():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify asking for a reference that is not bundled is an error."""
     wavelength, flux = _blurred("A0V")
-    with pytest.raises(ValueError):
+    with pytest.raises(InvalidArgumentError):
         derive_instrument_response(wavelength, flux, "Z9Z", "TestCam", "x")
 
 

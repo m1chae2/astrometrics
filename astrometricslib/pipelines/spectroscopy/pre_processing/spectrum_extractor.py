@@ -85,6 +85,7 @@ from astropy.modeling import fitting, models
 from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import InvalidArgumentError
 
 logger = logging.getLogger(__name__)
 
@@ -203,11 +204,11 @@ def fit_cross_section_gaussian(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If `data` is not a 2-D array.
     """
     if data.ndim != 2:
-        raise ValueError(f"Cross-section fitting needs a 2-D image, got {data.ndim} dimensions.")
+        raise InvalidArgumentError(f"Cross-section fitting needs a 2-D image, got {data.ndim} dimensions.")
 
     if HAS_C_EXTENSION and _fit_cross_section_c is not None:
         # The C path reads float64 pixels directly out of the array

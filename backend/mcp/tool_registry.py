@@ -861,31 +861,6 @@ DEFAULT_STATUS_SECTIONS = tuple(name for name in APP_STATUS_SECTIONS if name != 
 """What `tool_app_status` reports when no section is asked for.
 ``indi_properties`` is left out because it needs a device name."""
 
-MOUNT_DEVICE_KEYWORDS = (
-    "mount",
-    "telescope",
-    "gti",
-    "adventurer",
-    "eq",
-    "lx200",
-    "celestron",
-    "ioptron",
-    "skywatcher",
-)
-"""Words that mark an INDI device as the mount, in lower case."""
-
-MOUNT_PROPERTIES = (
-    "TELESCOPE_PIER_SIDE",
-    "TELESCOPE_TRACK_STATE",
-    "TELESCOPE_TRACK_MODE",
-    "TELESCOPE_PARK",
-    "EQUATORIAL_EOD_COORD",
-    "HORIZONTAL_COORD",
-    "TELESCOPE_SLEW_RATE",
-    "HEMISPHERE",
-)
-"""The few mount properties worth reporting with the telescope status."""
-
 GUIDING_SAMPLES_REPORTED = 20
 """How many of the newest guide samples the guiding section lists."""
 
@@ -1082,18 +1057,14 @@ async def _system_health() -> dict[str, Any]:
 async def _telescope_status() -> dict[str, Any]:
     """Report the live telescope state the app shows in its header.
 
-    The pointing, tracking, temperatures, focuser and filter come from the
-    backend, which holds the hardware connection. Pier side is not in that
-    status, so it is read from the mount's INDI properties.
+    The backend's status already holds the pointing, tracking, pier side,
+    park state, tracking rate, temperatures, focuser and filter, as
+    `control.mount.status` reads them.
 
     Returns
     -------
     telescope : `dict` [`str`, `Any`]
-        The status without its guiding history, plus ``mount_indi`` with
-        the pier side and tracking switches when the mount device is found.
-        If the INDI devices cannot be read, ``mount_indi`` holds
-        ``{"error": ErrorInfo}`` and the rest of the status still comes
-        back.
+        The status without its guiding and alignment history.
 
     Raises
     ------
@@ -1103,78 +1074,7 @@ async def _telescope_status() -> dict[str, Any]:
     status = _unwrap(await execute_rpc("telescope:status", {}))
     if not isinstance(status, dict):
         raise ExternalServiceError("The backend did not send a telescope status.")
-    answer = {
-        key: value for key, value in status.items() if key not in ("guidingHistory", "alignmentAttempts")
-    }
-    try:
-        devices = _unwrap(await execute_rpc("telescope:indi_devices", {}))
-        mount = next(
-            (name for name in (devices if isinstance(devices, list) else []) if _looks_like_a_mount(name)),
-            None,
-        )
-        if mount is not None:
-            properties = await _indi_properties(mount, list(MOUNT_PROPERTIES))
-            answer["mount_indi"] = {"device": mount, **_describe_switches(properties["properties"])}
-    except AstrometricsError as exc:
-        # The mount's switches add detail; the status is useful without them.
-        logger.warning("Could not read the mount's INDI properties: %s", exc.message)
-        answer["mount_indi"] = {"error": to_error_info(exc).model_dump(by_alias=True)}
-    return answer
-
-
-def _looks_like_a_mount(device_name: str) -> bool:
-    """Say whether an INDI device name looks like a telescope mount.
-
-    Returns
-    -------
-    is_mount : `bool`
-        `True` if the name contains a mount keyword.
-    """
-    lowered = device_name.lower()
-    return any(keyword in lowered for keyword in MOUNT_DEVICE_KEYWORDS)
-
-
-def _describe_switches(properties: dict[str, Any]) -> dict[str, Any]:
-    """Boil mount properties down to the values a person reads.
-
-    Parameters
-    ----------
-    properties : `dict` [`str`, `Any`]
-        Property name to its INDI record.
-
-    Returns
-    -------
-    summary : `dict` [`str`, `Any`]
-        ``pier_side``, ``tracking``, ``parked`` and ``track_mode`` where
-        the mount reports them, and the raw elements of the rest.
-    """
-
-    def on(name: str) -> list[str]:
-        """List the switch elements that are on in one property.
-
-        Returns
-        -------
-        names : `list` [`str`]
-            The element names set to ``On``.
-        """
-        record = properties.get(name) or {}
-        return [element for element, value in (record.get("elements") or {}).items() if value == "On"]
-
-    summary: dict[str, Any] = {}
-    if "TELESCOPE_PIER_SIDE" in properties:
-        side = on("TELESCOPE_PIER_SIDE")
-        summary["pier_side"] = side[0].removeprefix("PIER_") if side else None
-    if "TELESCOPE_TRACK_STATE" in properties:
-        summary["tracking"] = "TRACK_ON" in on("TELESCOPE_TRACK_STATE")
-    if "TELESCOPE_PARK" in properties:
-        summary["parked"] = "PARK" in on("TELESCOPE_PARK")
-    if "TELESCOPE_TRACK_MODE" in properties:
-        mode = on("TELESCOPE_TRACK_MODE")
-        summary["track_mode"] = mode[0].removeprefix("TRACK_") if mode else None
-    for name in ("EQUATORIAL_EOD_COORD", "HORIZONTAL_COORD"):
-        if name in properties:
-            summary[name.lower()] = (properties[name] or {}).get("elements")
-    return summary
+    return {key: value for key, value in status.items() if key not in ("guidingHistory", "alignmentAttempts")}
 
 
 async def _guiding_status() -> dict[str, Any]:

@@ -28,8 +28,9 @@ class MountControl(ControlChild):
         Parameters
         ----------
         include : `list` [`str`], optional
-            Device reads to make: ``mount`` (position, tracking,
-            connection, ambient temperature and humidity), ``filter``
+            Device reads to make: ``mount`` (position, tracking, pier
+            side, park state, tracking rate, connection, ambient
+            temperature and humidity), ``filter``
             (current filter), ``focuser`` (position) and ``camera``
             (sensor temperature). All of them when omitted.
 
@@ -37,7 +38,9 @@ class MountControl(ControlChild):
         -------
         status : `dict` [`str`, `Any`]
             ``ra``, ``dec``, ``altitude``, ``azimuth``, ``trackingStatus``,
-            ``connectionStatus``, ``targetName``, ``temperature``,
+            ``connectionStatus``, ``targetName``, ``pierSide`` (``EAST`` or
+            ``WEST``), ``parked``, ``trackMode`` (such as ``SIDEREAL``),
+            ``temperature``,
             ``humidity``, ``cameraStatus``, ``filter``, ``focuserPosition``
             and ``cameraTemperature``, for the sections read.
         """

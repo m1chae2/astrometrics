@@ -93,6 +93,9 @@ class IndiMountDriver(MountDriver):
             trackingStatus=status.tracking_status,
             connectionStatus=status.connection_status,
             targetName=status.target_name,
+            pierSide=status.pier_side,
+            parked=status.parked,
+            trackMode=status.track_mode,
         )
 
     async def slew(self, ra: float, dec: float) -> bool:

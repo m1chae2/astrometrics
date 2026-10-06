@@ -65,6 +65,9 @@ class TelescopeStatus(BaseModel):
     camera_temperature: str = Field("-", alias="cameraTemperature")
     camera_status: str = Field("Idle", alias="cameraStatus")
     target_name: str | None = Field(default=None, alias="targetName")
+    pier_side: str | None = Field(default=None, alias="pierSide")
+    parked: bool | None = Field(default=None, alias="parked")
+    track_mode: str | None = Field(default=None, alias="trackMode")
 
 
 # Maps an INDI property type constant to the name of the per-type
@@ -500,6 +503,9 @@ class IndiInterface(IndiClient):
             "CAMERA_TEMPERATURE": "-",
             "CAMERA_STATUS": "Idle",
             "TARGET_NAME": None,
+            "PIER_SIDE": None,
+            "PARKED": None,
+            "TRACK_MODE": None,
         }
 
     def connect_to_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -563,6 +569,7 @@ class IndiInterface(IndiClient):
                 # Get telescope status
                 telescope_track_state = device_telescope.getSwitch("TELESCOPE_TRACK_STATE")
                 parking_status = device_telescope.getSwitch("TELESCOPE_PARK")
+                self.status.update(self._read_mount_switches(device_telescope))
 
                 if parking_status and parking_status[0].getState() == PyIndi.ISS_ON:
                     tracking_status = "Parked"
@@ -622,6 +629,45 @@ class IndiInterface(IndiClient):
         self.status["CONNECTION_STATUS"] = connection_status
 
         return device_telescope
+
+    def _read_mount_switches(self, device_telescope: Any) -> dict[str, Any]:
+        """Read the mount's pier side, park switch and tracking rate.
+
+        Parameters
+        ----------
+        device_telescope : `PyIndi.BaseDevice`
+            The mount device.
+
+        Returns
+        -------
+        switches : `dict` [`str`, `Any`]
+            ``PIER_SIDE`` (``"EAST"`` or ``"WEST"``), ``PARKED`` (`bool`)
+            and ``TRACK_MODE`` (such as ``"SIDEREAL"``). A value is `None`
+            when the mount does not report that switch.
+        """
+
+        def switched_on(property_name: str) -> list[str] | None:
+            """List the element names that are on in one switch property.
+
+            Returns
+            -------
+            names : `list` [`str`] or `None`
+                The names of the elements that are on, or `None` if the
+                mount has no such property.
+            """
+            switch = device_telescope.getSwitch(property_name)
+            if not switch:
+                return None
+            return [element.getName() for element in switch if element.getState() == PyIndi.ISS_ON]
+
+        pier = switched_on("TELESCOPE_PIER_SIDE")
+        park = switched_on("TELESCOPE_PARK")
+        mode = switched_on("TELESCOPE_TRACK_MODE")
+        return {
+            "PIER_SIDE": pier[0].removeprefix("PIER_") if pier else None,
+            "PARKED": ("PARK" in park) if park is not None else None,
+            "TRACK_MODE": mode[0].removeprefix("TRACK_") if mode else None,
+        }
 
     def _find_telescope_device(self):  # ruff: ignore[missing-return-type-private-function]
         """Heuristic to find the telescope device.
@@ -1169,6 +1215,9 @@ class IndiInterface(IndiClient):
             camera_temperature=self.status.get("CAMERA_TEMPERATURE", "-"),
             camera_status=self.status.get("CAMERA_STATUS", "Idle"),
             target_name=self.status.get("TARGET_NAME"),
+            pier_side=self.status.get("PIER_SIDE"),
+            parked=self.status.get("PARKED"),
+            track_mode=self.status.get("TRACK_MODE"),
         )
 
     def set_filterwheel_position(self, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

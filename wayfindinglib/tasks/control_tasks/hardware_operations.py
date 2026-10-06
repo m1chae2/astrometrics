@@ -110,7 +110,8 @@ def mount_status(context: ControlContext, include: list[str] | None = None) -> d
     status : `dict` [`str`, `Any`]
         ``mount``: ``ra``, ``dec``, ``altitude``, ``azimuth``,
         ``trackingStatus``, ``connectionStatus``, ``targetName``,
-        ``temperature``, ``humidity`` and ``cameraStatus``. ``filter``:
+        ``pierSide``, ``parked``, ``trackMode``, ``temperature``,
+        ``humidity`` and ``cameraStatus``. ``filter``:
         ``filter``. ``focuser``: ``focuserPosition``. ``camera``:
         ``cameraTemperature``. An unknown section name is refused with
         `InvalidArgumentError`.
@@ -131,6 +132,9 @@ def mount_status(context: ControlContext, include: list[str] | None = None) -> d
             "connectionStatus": mount.connection_status,
             "cameraStatus": raw_status.get("CAMERA_STATUS", "Idle"),
             "targetName": mount.target_name,
+            "pierSide": mount.pier_side,
+            "parked": mount.parked,
+            "trackMode": mount.track_mode,
         })
     if "filter" in sections:
         filter_name = _run_sync(context.filter_wheel_driver.get_current_filter())

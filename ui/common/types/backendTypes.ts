@@ -132,6 +132,9 @@ export interface TelescopeStatus {
   cameraTemperature?: string;
   cameraStatus?: string;
   targetName?: string | null;
+  pierSide?: string | null;
+  parked?: boolean | null;
+  trackMode?: string | null;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }

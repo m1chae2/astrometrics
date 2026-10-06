@@ -31,6 +31,13 @@ class MountStatus(BaseModel):
     tracking_status: str = Field(..., alias="trackingStatus")
     connection_status: str = Field("Disconnected", alias="connectionStatus")
     target_name: str | None = Field(default=None, alias="targetName")
+    pier_side: str | None = Field(
+        default=None, alias="pierSide", description="``EAST`` or ``WEST``, or `None` if not reported."
+    )
+    parked: bool | None = Field(default=None, alias="parked", description="Whether the mount is parked.")
+    track_mode: str | None = Field(
+        default=None, alias="trackMode", description="The tracking rate, such as ``SIDEREAL``."
+    )
 
 
 class MountDriver(ProtocolDriver):

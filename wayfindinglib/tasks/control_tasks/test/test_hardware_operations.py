@@ -121,6 +121,9 @@ class _FakeMountStatus:
         tracking_status: str = "Tracking",
         connection_status: str = "Connected",
         target_name: str | None = None,
+        pier_side: str | None = "WEST",
+        parked: bool | None = False,
+        track_mode: str | None = "SIDEREAL",
     ) -> None:
         """Hold the mount status fields."""
         self.ra = ra
@@ -130,6 +133,9 @@ class _FakeMountStatus:
         self.tracking_status = tracking_status
         self.connection_status = connection_status
         self.target_name = target_name
+        self.pier_side = pier_side
+        self.parked = parked
+        self.track_mode = track_mode
 
 
 def _manager_for_status_reassembly(
@@ -190,6 +196,9 @@ def test_mount_status_reassembles_the_four_driver_reads(mocker: MockerFixture) -
         "cameraTemperature": "-10.0°C",
         "cameraStatus": "Idle",
         "targetName": None,
+        "pierSide": "WEST",
+        "parked": False,
+        "trackMode": "SIDEREAL",
     }
 
 

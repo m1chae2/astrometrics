@@ -649,4 +649,5 @@ class SimulatorIndiInterface(IndiInterface):
             focuser_position=self.get_focuser_position(),
             filter=str(self.filter_wheel_position),
             guiding_history=[],
+            parked=self.status.get("TRACKING_STATUS") == "Parked",
         )

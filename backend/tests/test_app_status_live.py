@@ -2,8 +2,8 @@
 
 Description: The backend holds the hardware connection, so these parts of
 `app_status` ask it through the RPC call. The tests replace that call with
-canned answers and check the layers are unwrapped, the mount's pier side is
-read from its INDI properties, guide samples are trimmed, a missing device
+canned answers and check the layers are unwrapped, the mount's pier side
+comes with the telescope status, guide samples are trimmed, a missing device
 or unknown section is refused, and a failed section is reported as data.
 """
 
@@ -13,7 +13,7 @@ import pytest
 
 from astrometricslib import HardwareError, InvalidArgumentError
 from backend.mcp import tool_registry
-from backend.mcp.tool_registry import _describe_switches, _unwrap, tool_app_controls, tool_app_status
+from backend.mcp.tool_registry import _unwrap, tool_app_controls, tool_app_status
 
 MOUNT_PROPERTIES = {
     "TELESCOPE_PIER_SIDE": {"state": "Idle", "elements": {"PIER_WEST": "On", "PIER_EAST": "Off"}},
@@ -49,6 +49,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
         "telescope:status": {
             "ra": "12 00 00",
             "trackingStatus": "Parked",
+            "pierSide": "WEST",
+            "parked": True,
             "connectionStatus": "Connected",
             "focuserPosition": 29863,
             "guidingHistory": [{"time": 1}],
@@ -91,24 +93,15 @@ def test_the_layers_around_an_answer_are_removed() -> None:
     assert _unwrap([1, 2]) == [1, 2]
 
 
-def test_mount_switches_are_read_as_plain_values() -> None:
-    """The pier side, tracking and park switches become readable fields."""
-    summary = _describe_switches(MOUNT_PROPERTIES)
-    assert summary["pier_side"] == "WEST"
-    assert summary["tracking"] is False
-    assert summary["parked"] is True
-    assert summary["track_mode"] == "SIDEREAL"
-    assert summary["equatorial_eod_coord"] == {"RA": 12.4, "DEC": 84.9}
-
-
 def test_telescope_status_includes_the_pier_side_and_drops_the_history(fake_backend: list) -> None:
-    """The header values come back with the mount's own pier side."""
+    """The header values come back with the pier side the backend reports."""
     answer = asyncio.run(tool_app_status(["telescope"]))["telescope"]
     assert answer["trackingStatus"] == "Parked"
     assert answer["focuserPosition"] == 29863
+    assert answer["pierSide"] == "WEST"
+    assert answer["parked"] is True
     assert "guidingHistory" not in answer
-    assert answer["mount_indi"]["device"] == "Star Adventurer GTi"
-    assert answer["mount_indi"]["pier_side"] == "WEST"
+    assert [method for method, _ in fake_backend] == ["telescope:status"]
 
 
 def test_guiding_lists_only_the_newest_samples_with_plain_keys(fake_backend: list) -> None:

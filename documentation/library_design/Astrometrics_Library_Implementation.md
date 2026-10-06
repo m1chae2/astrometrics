@@ -18,7 +18,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 
 | Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Det. | Shared by All |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1. Public API**<br>*(calls L2)* | `run_stacking` | `run_astrometry` | `run_photometry` | `run_spectroscopy` | `detect_asteroids` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
+| **1. Public API**<br>*(calls L2)* | `stack` | `process_target`<br>`stages=["astrometry"]` | `process_target`<br>`stages=["photometry"]` | `process_target`<br>`stages=["spectroscopy"]` | `process_target`<br>`stages=["asteroids"]` | **Astrometrics facade**<br>`api/`<br>`mcp/` |
 | **2. Public Helpers**<br>*(calls L3)* | `stack_frames_with_timeout`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **pipelines/**<br>`tasks`<br>`pipeline_base`<br>`runners` |
 | **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
 | **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **drivers/**<br>`catalog_access`<br>`fits_access` |

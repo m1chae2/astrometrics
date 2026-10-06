@@ -132,7 +132,7 @@ def time_one_slot_count(
         "from astrometricslib import Astrometrics;"
         "a = Astrometrics();"
         "t0 = time.monotonic();"
-        f"s = a.process_all_targets(target_ids={target_ids!r}, camera_name={camera_name!r},"
+        f"s = a.processing.process_target({target_ids!r}, camera_id={camera_name!r},"
         f" focal_length_mm={focal_length_mm!r});"
         "print('BENCHMARK_RESULT ' + json.dumps({"
         "'wall_seconds': round(time.monotonic() - t0, 1),"

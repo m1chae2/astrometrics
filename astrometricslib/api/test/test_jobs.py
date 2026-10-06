@@ -15,6 +15,7 @@ import pytest
 from astrometricslib.api.jobs import MAXIMUM_JOBS, MAXIMUM_LOG_LINES, MAXIMUM_TEXT_LENGTH, Jobs
 from astrometricslib.drivers.logger_interface import LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.provenance import Activity
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
@@ -172,26 +173,29 @@ def test_lineage_lists_the_runs_for_a_target(database: Path, jobs: Jobs) -> None
 
 
 @pytest.mark.parametrize(
-    ("arguments", "message"),
+    ("arguments", "error", "message"),
     [
-        ({"job_id": "missing"}, "No job with id"),
-        ({"detail": "everything"}, "detail must be one of"),
-        ({"detail": "log_tail"}, "needs a job_id"),
-        ({"detail": "result"}, "needs a job_id"),
-        ({"detail": "lineage"}, "needs a target_id"),
-        ({"detail": "lineage", "job_id": "missing"}, "needs a target_id"),
+        ({"job_id": "missing"}, NotFoundError, "No job with id"),
+        ({"detail": "everything"}, InvalidArgumentError, "detail must be one of"),
+        ({"detail": "log_tail"}, InvalidArgumentError, "needs a job_id"),
+        ({"detail": "result"}, InvalidArgumentError, "needs a job_id"),
+        ({"detail": "lineage"}, InvalidArgumentError, "needs a target_id"),
+        ({"detail": "lineage", "job_id": "missing"}, InvalidArgumentError, "needs a target_id"),
     ],
 )
-def test_problems_come_back_as_errors(jobs: Jobs, arguments: dict, message: str) -> None:
-    """A bad request returns an error message instead of raising."""
-    assert message in jobs.query(**arguments)["error"]
+def test_problems_raise_an_error_category(jobs: Jobs, arguments: dict, error: type, message: str) -> None:
+    """A bad request raises the matching error category and a clear message."""
+    with pytest.raises(error, match=message):
+        jobs.query(**arguments)
 
 
-def test_missing_database_is_reported_and_not_created(tmp_path: Path) -> None:
-    """With no logs database, the answer says so and no file appears."""
+def test_missing_database_is_an_empty_list_and_is_not_created(tmp_path: Path) -> None:
+    """With no logs database, no jobs are listed and no file appears."""
     path = tmp_path / "absent.db"
-    answer = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query()
-    assert "does not exist" in answer["error"]
+    jobs = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None)
+    assert jobs.query()["jobs"] == []
+    with pytest.raises(NotFoundError, match="does not exist"):
+        jobs.query(job_id="job-a")
     assert not path.exists()
 
 

@@ -135,14 +135,14 @@ def run_analysis() -> None:
 
             start_time = time.time()
             try:
-                stacked_path = astrometrics.processing.run_stacking(
+                stacked_path = astrometrics.processing.stack(
                     target,
-                    frames_to_stack=target_frames,
+                    frames=target_frames,
                     rejection_sigma=(sigma_low, sigma_high),
                     filter_wfwhm=filter_wfwhm,
                     stack_weight="wfwhm",
                     generate_rejmap=True,
-                )
+                ).stacked_path
             except Exception as stack_err:
                 row["error"] = str(stack_err)
                 row["elapsed_s"] = time.time() - start_time
@@ -158,10 +158,11 @@ def run_analysis() -> None:
                 results.append(row)
                 continue
 
-            row["stacked_fwhm"] = astrometrics.processing.diagnostics.measure_stack_fwhm(stacked_path)
-            row["rejected_fraction"] = astrometrics.processing.diagnostics.measure_stack_rejected_fraction(
-                stacked_path
+            quality = astrometrics.processing.diagnostics.stack_quality(
+                stacked_path, include=["fwhm", "rejected_fraction"]
             )
+            row["stacked_fwhm"] = quality.fwhm_px
+            row["rejected_fraction"] = quality.rejected_fraction
             print(
                 f"Result: FWHM={row['stacked_fwhm']}, rejected_fraction={row['rejected_fraction']}, "
                 f"elapsed={row['elapsed_s']:.1f}s"

@@ -62,7 +62,7 @@ class TargetCatalog:
     A target is a place on the sky that the observatory images. It anchors
     all the data about that place: the raw frames, the stacks, and the
     analysis results. Use `get` for a `Target` to work with, and `query`
-    for short descriptions that a person or an AI client reads. A method
+    for short descriptions that a person reads. A method
     that takes a target accepts its id or the `Target`; an id that names no
     target raises `NotFoundError`.
 

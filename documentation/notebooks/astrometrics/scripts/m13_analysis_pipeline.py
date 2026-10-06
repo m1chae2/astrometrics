@@ -58,23 +58,26 @@ def run_pipeline(target_id: str = "M 13") -> None:
     logger.info(f"{len(l_frames)} Luminance frames for photometry.")
 
     logger.info("Running astrometry analysis...")
-    astrometry_result = astrometrics.processing.run_astrometry(target)
+    astrometry_result = astrometrics.processing.process_target(target, stages=["astrometry"]).results[
+        "astrometry"
+    ]
     logger.info(
         f"Astrometry solved: {astrometry_result.get('wcs') is not None}; "
         f"{len(astrometry_result.get('stellar_objects', []))} stars identified."
     )
 
     logger.info("Running photometry analysis...")
-    photometry_result = astrometrics.processing.run_photometry(
+    photometry_result = astrometrics.processing.process_target(
         target,
-        filter_type="L",
-        frames=l_frames,
-        use_astrometry_seed=True,
-    )
+        stages=["photometry"],
+        photometry={"filter_type": "L", "frames": l_frames, "use_astrometry_seed": True},
+    ).results["photometry"]
     logger.info(f"Photometry status: {photometry_result.get('status')}")
 
     logger.info("Running spectroscopy analysis...")
-    spectroscopy_result = astrometrics.processing.run_spectroscopy(target)
+    spectroscopy_result = astrometrics.processing.process_target(target, stages=["spectroscopy"]).results[
+        "spectroscopy"
+    ]
     spectral_stars = spectroscopy_result.get("stellar_objects", [])
     matched = sum(1 for star in spectral_stars if star.id.endswith("::spectroscopy"))
     logger.info(

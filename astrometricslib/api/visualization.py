@@ -126,7 +126,7 @@ class Visualization:
             the end of the name, such as ``"013"``. It must match one frame.
         kind : `str`, optional
             ``"image"`` (default): a PNG with a description of the
-            brightness range and crop, which an AI client receives as an
+            brightness range and crop, for a client that shows it as an
             image. ``"data_url"``: the picture as a data URL with its
             brightness range and FITS header, as the app's viewer shows it;
             a stretched stack uses the preview the stacking stage saved.

@@ -41,6 +41,7 @@ from astropy.stats import sigma_clipped_stats
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -215,14 +216,15 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
 
         start_time = time.time()
         try:
-            stacked_path = astrometrics.processing.run_stacking(
+            stacked_path = astrometrics.processing.stack(
                 target,
-                frames_to_stack=spec_frames,
+                frames=spec_frames,
+                kind="spectral",
                 rejection_sigma=SWEEP_SIGMA,
                 filter_wfwhm=filter_wfwhm,
                 stack_weight="wfwhm",
                 generate_rejmap=True,
-            )
+            ).stacked_path
         except Exception as stack_err:
             row["error"] = str(stack_err)
             row["elapsed_s"] = time.time() - start_time
@@ -239,9 +241,9 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.processing.diagnostics.measure_stack_rejected_fraction(
-            stacked_path
-        )
+        row["rejected_fraction"] = astrometrics.processing.diagnostics.stack_quality(
+            stacked_path, include=["rejected_fraction"]
+        ).rejected_fraction
         print(
             f"Result: zero_order_fwhm={row['zero_order_fwhm']}, "
             f"rejected_fraction={row['rejected_fraction']}, elapsed={row['elapsed_s']:.1f}s"
@@ -355,14 +357,12 @@ def run_analysis() -> None:
         print(output[-4000:])
         raise SystemExit(1)
 
-    seq_frames = astrometrics.processing.diagnostics.parse_stack_registration_seq(
-        os.path.join(process_dir, "light_source.seq")
-    )
+    seq_frames = parse_seq_file(os.path.join(process_dir, "light_source.seq"))
     lst_paths = sorted(
         glob.glob(os.path.join(process_dir, "cache", "light_source*.lst")),
         key=lambda p: int(os.path.splitext(os.path.basename(p))[0].replace("light_source", "")),
     )
-    zero_order_stars = [astrometrics.processing.diagnostics.parse_stack_zero_order_star(p) for p in lst_paths]
+    zero_order_stars = [parse_zero_order_star(p) for p in lst_paths]
 
     if len(seq_frames) != len(spec_frames) or len(zero_order_stars) != len(spec_frames):
         print(

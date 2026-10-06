@@ -19,7 +19,6 @@ Astrometrics Library (`astrometricslib`)
    :skip: AnalysisResult
    :skip: AppConfiguration
    :skip: AsteroidDetectionCandidate
-   :skip: AstrometryPipeline
    :skip: AstrometryPipelineQualityMetrics
    :skip: AstrometryQualitySummary
    :skip: BatchRunSummary
@@ -65,5 +64,3 @@ Astrometrics Library (`astrometricslib`)
    :skip: derive_target_sessions
    :skip: get_configuration
    :skip: parse_coordinate_string
-   :skip: resolve_worker_counts
-   :skip: run_parallel_batch

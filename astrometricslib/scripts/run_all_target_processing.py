@@ -370,8 +370,9 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # erase real frame history rather than fail loudly.
     # Which cameras to process, and which targets each one gets, come from the
     # setups in the config file. Ids are passed explicitly to every pass:
-    # omitting them makes `process_all_targets` walk the entire catalog, which
-    # would silently ignore a --target selection and reprocess everything.
+    # omitting them makes `process_target(None, ...)` walk the entire
+    # catalog, which would silently ignore a --target selection and
+    # reprocess everything.
     camera_names = camera_pass_order(
         astrometrics.config.get_observatory_setups(),
         astrometrics.config.get_primary_camera_name(),
@@ -452,24 +453,24 @@ def run_full_processing(argv: list[str] | None = None) -> None:
                 print(f"No targets assigned to {camera_name} in this selection; skipping this pass.")
                 continue
             # The full camera name is passed rather than a partial match:
-            # `process_all_targets` matches it as a case-insensitive substring
+            # `process_target` matches it as a case-insensitive substring
             # against each frame's camera, so a partial string risks matching
             # more than one camera.
-            summary = astrometrics.process_all_targets(
-                target_ids=camera_target_ids,
-                camera_name=camera_name,
+            summary = astrometrics.processing.process_target(
+                camera_target_ids,
+                camera_id=camera_name,
                 focal_length_mm=focal_length_mm,
             )
             _print_pass_summary(f"{camera_name}{optic_label}", summary)
 
 
-# This guard is REQUIRED, not stylistic boilerplate: `process_all_targets`
-# runs its targets across a `ProcessPoolExecutor`, and Python 3.14 on Linux
-# defaults to the "forkserver" start method, which re-imports this module
-# inside every worker process. Without the guard, each worker re-executes
-# the whole script body, tries to start its own worker pool, and the run
-# dies immediately with "An attempt has been made to start a new process
-# before the current process has finished its bootstrapping phase."
+# This guard is REQUIRED, not stylistic boilerplate: `process_target`, given
+# several targets, runs them across a `ProcessPoolExecutor`, and Python 3.14
+# on Linux defaults to the "forkserver" start method, which re-imports this
+# module inside every worker process. Without the guard, each worker
+# re-executes the whole script body, tries to start its own worker pool, and
+# the run dies immediately with "An attempt has been made to start a new
+# process before the current process has finished its bootstrapping phase."
 # The script really is imported -- by multiprocessing itself.
 if __name__ == "__main__":
     run_full_processing()

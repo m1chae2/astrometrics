@@ -123,8 +123,9 @@ class FakeAstrometrics:
         )
         self.config = FakeConfig(setups)
         self.calls: list[dict[str, Any]] = []
+        self.processing = SimpleNamespace(process_target=self.process_target)
 
-    def process_all_targets(self, **keywords: Any) -> SimpleNamespace:
+    def process_target(self, target: list[str] | None, **keywords: Any) -> SimpleNamespace:
         """Record one pass and pretend it succeeded.
 
         Returns
@@ -132,7 +133,7 @@ class FakeAstrometrics:
         summary : `types.SimpleNamespace`
             An empty pass summary.
         """
-        self.calls.append(keywords)
+        self.calls.append({"target": target, **keywords})
         return SimpleNamespace(results={}, succeeded=[], skipped=[], failed=[])
 
 
@@ -186,7 +187,7 @@ def test_a_real_run_processes_each_camera_with_its_own_targets(
 
     script.run_full_processing(["--skip-reindex"])
 
-    assert [(call["camera_name"], call["target_ids"]) for call in fake.calls] == [
+    assert [(call["camera_id"], call["target"]) for call in fake.calls] == [
         (ASI, ["Both", "AsiOnly"]),
         (NIKON, ["NikonOnly"]),
     ]

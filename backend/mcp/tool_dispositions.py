@@ -849,8 +849,8 @@ DECISIONS = {
     ),
     "target_query": ToolDecision(
         "keep",
-        "Built 2026-10-04. Targets as short rows or one grouped record; replaces target_get, target_list, "
-        "target_list_camera_names and target_camera_index.",
+        "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each "
+        "target's frames per camera; replaces target_get and target_list.",
     ),
     "planning_find_sources": ToolDecision(
         "keep",

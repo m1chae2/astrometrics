@@ -8,8 +8,7 @@ data (the provenance, or lineage).
 
 This module gives read-only access to both. It opens the logs database
 read-only and never creates or changes a table, so a caller can look at the
-history without any chance of altering it. The MCP server offers it to an AI
-client as the tool ``jobs_query``.
+history without any chance of altering it.
 """
 
 from datetime import datetime
@@ -20,12 +19,16 @@ from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.logger_interface import LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.utilities.pipeline_models import ProcessingJob
 
 __all__ = ["Jobs"]
 
 DETAILS = ("summary", "log_tail", "result", "lineage")
 """The kinds of answer `Jobs.query` can give."""
+
+LINEAGE_NEEDS_A_TARGET = "detail='lineage' needs a target_id, or a job_id of a job that has one."
+"""The message for a lineage question that names no target."""
 
 ACTIVE_STATUSES = ("started", "running")
 """Job statuses that mean the job has not finished."""
@@ -211,23 +214,39 @@ class Jobs:
         Returns
         -------
         answer : `dict` [`str`, `Any`]
-            The answer for the chosen detail. A problem, such as an unknown
-            job or a missing logs database, comes back under ``"error"``
-            instead of being raised.
+            The answer for the chosen detail. With no logs database yet, a
+            job list is empty.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If the detail is unknown, or a detail lacks the job or target
+            it needs.
+        NotFoundError
+            If the job does not exist, or there is no logs database yet for
+            a question about one job or one target.
         """
         if detail not in DETAILS:
-            return {"error": f"detail must be one of: {', '.join(DETAILS)}."}
+            raise InvalidArgumentError(
+                f"detail must be one of: {', '.join(DETAILS)}.", details={"detail": detail}
+            )
+        if detail in ("log_tail", "result") and not job_id:
+            raise InvalidArgumentError(f"detail={detail!r} needs a job_id.")
+        if detail == "lineage" and not (target_id or job_id):
+            raise InvalidArgumentError(
+                "detail='lineage' needs a target_id, or a job_id of a job that has one."
+            )
         limit = max(1, min(int(limit), MAXIMUM_JOBS))
         lines = max(1, min(int(lines), MAXIMUM_LOG_LINES))
         if not Path(self._database_path).is_file():
-            return {"error": "The logs database does not exist yet, so no jobs are recorded."}
+            if detail == "summary" and not job_id:
+                return {"detail": "summary", "count": 0, "jobs": [], "note": UNTRUSTED_TEXT_NOTE}
+            raise NotFoundError("The logs database does not exist yet, so no jobs are recorded.")
         logger_interface = LoggerInterface(self._database_path, read_only=True)
 
         if detail == "lineage":
             return self._lineage(logger_interface, job_id, target_id, limit)
         if detail in ("log_tail", "result"):
-            if not job_id:
-                return {"error": f"detail={detail!r} needs a job_id."}
             return self._one_job(logger_interface, job_id, detail, lines)
         if job_id:
             return self._one_job(logger_interface, job_id, "summary", lines)
@@ -258,12 +277,16 @@ class Jobs:
         Returns
         -------
         answer : `dict` [`str`, `Any`]
-            The job's summary plus the extra the detail asks for, or an
-            error if there is no such job.
+            The job's summary plus the extra the detail asks for.
+
+        Raises
+        ------
+        NotFoundError
+            If there is no such job.
         """
         job = logger_interface.get_job(job_id)
         if job is None:
-            return {"error": f"No job with id {job_id!r}."}
+            raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
         answer: dict[str, Any] = {"detail": detail, "job": self._summarize(job), "note": UNTRUSTED_TEXT_NOTE}
         if detail == "log_tail":
             entries, total = logger_interface.get_recent_log_entries_for_job(job_id, lines)
@@ -297,13 +320,20 @@ class Jobs:
         Returns
         -------
         answer : `dict` [`str`, `Any`]
-            The runs, newest first, or an error if no target can be found.
+            The runs, newest first.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If no target is given and the job names none.
         """
         if not target_id and job_id:
             job = logger_interface.get_job(job_id)
             target_id = job.target_id if job else None
         if not target_id:
-            return {"error": "detail='lineage' needs a target_id, or a job_id of a job that has one."}
+            raise InvalidArgumentError(
+                "detail='lineage' needs a target_id, or a job_id of a job that has one."
+            )
         activities = ProvenanceStore(self._database_path, read_only=True).get_lineage(target_id)
         runs = [
             {

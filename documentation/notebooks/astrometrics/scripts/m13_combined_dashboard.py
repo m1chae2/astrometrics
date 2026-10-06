@@ -19,7 +19,7 @@ target = astrometrics.targets.get("M 57")
 if not target:
     raise ValueError("Target 'M 57' not found in library.")
 
-# astrometrics.visualization.plot_target_dashboard(target, limit=30)
-astrometrics.visualization.plot_spectroscopy(target)
+# astrometrics.visualization.plot("dashboard", target, limit=30)
+astrometrics.visualization.plot("spectroscopy", target)
 
 plt.show()

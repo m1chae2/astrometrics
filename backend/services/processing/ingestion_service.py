@@ -8,7 +8,7 @@ captured frames associated with targets.
 import logging
 import os
 
-from astrometricslib import Target
+from astrometricslib import ConfigurationError, NotFoundError, Target
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
@@ -171,13 +171,20 @@ class IngestionService(BaseBackgroundService):
         status : `dict`
             A dict with ``"status"``, ``"progress"``, and ``"logs"``
             keys.
+
+        Raises
+        ------
+        ConfigurationError
+            If no job service is set up, so no job can be looked up.
+        NotFoundError
+            If there is no job with id ``job_id``.
         """
         if not self._job_service:
-            return {"status": "failed", "progress": "0%", "logs": []}
+            raise ConfigurationError("The job service is not set up, so ingestion jobs cannot be looked up.")
 
         job = self._job_service.get_job(job_id)
         if not job:
-            return {"status": "failed", "progress": "0%", "logs": []}
+            raise NotFoundError(f"There is no ingestion job {job_id}.", details={"job_id": job_id})
 
         # We can fetch job log tail using image_processing_service
         logs = self._image_processing_service.fetch_job_log_tail(job_id, 100)

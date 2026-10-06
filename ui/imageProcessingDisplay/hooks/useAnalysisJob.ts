@@ -118,7 +118,7 @@ export function useAnalysisJob(
                 // Store this as the latest analyzed target for other views
                 localStorage.setItem('latestAnalysisTargetId', selectedTarget);
                 onLogRef.current?.(`[${new Date().toLocaleTimeString()}] Analysis complete for ${selectedTarget}.`);
-            } else if (!results || results.status === 'failed' || results.status === 'error') {
+            } else if (!results || results.status === 'failed') {
                 const msg = results?.error || results?.message || 'Analysis failed';
                 onLogRef.current?.(`[${new Date().toLocaleTimeString()}] ERROR: ${msg}`);
             }

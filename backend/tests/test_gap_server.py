@@ -17,6 +17,7 @@ from backend.mcp.gaps import __main__ as gap_server
 from backend.mcp.gaps import review
 from backend.mcp.gaps.gap_store import (
     MAXIMUM_TEXT_LENGTH,
+    GapReportError,
     GapStore,
     validate_report,
 )
@@ -86,7 +87,7 @@ def test_a_repeat_of_a_built_gap_is_a_new_report(store: GapStore) -> None:
 )
 def test_bad_reports_are_refused_with_a_reason(change: dict, message: str) -> None:
     """Each kind of bad input gets a plain message."""
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises(GapReportError, match=message):
         validate_report(dict(VALID_REPORT, **change), categories=("stars", "targets"))
 
 
@@ -104,7 +105,7 @@ def test_list_filters_and_limits(store: GapStore) -> None:
     assert [gap["tier"] for gap in store.list_gaps(tier="ui")] == ["ui"]
     assert store.list_gaps(status="built") == []
     assert len(store.list_gaps(limit=1)) == 1
-    with pytest.raises(ValueError, match="status must be"):
+    with pytest.raises(GapReportError, match="status must be"):
         store.list_gaps(status="maybe")
 
 
@@ -124,8 +125,18 @@ def test_the_server_tools_report_and_list(monkeypatch: pytest.MonkeyPatch, store
     assert "Stop here" in result["message"]
     listed = gap_server.handle_call("list_capability_gaps", {})
     assert listed["gaps"][0]["goal"] == VALID_REPORT["goal"]
-    assert "error" in gap_server.handle_call("report_capability_gap", {"tier": "ui"})
-    assert "error" in gap_server.handle_call("delete_everything", {})
+    with pytest.raises(GapReportError, match="Missing required"):
+        gap_server.handle_call("report_capability_gap", {"tier": "ui"})
+    with pytest.raises(GapReportError, match="Unknown tool"):
+        gap_server.handle_call("delete_everything", {})
+
+
+def test_a_refused_call_is_an_mcp_error_result(monkeypatch: pytest.MonkeyPatch, store: GapStore) -> None:
+    """A bad report comes back flagged isError with code invalid_argument."""
+    monkeypatch.setattr(gap_server, "store", store)
+    result = asyncio.run(gap_server.call_tool("report_capability_gap", {"tier": "ui"}))
+    assert result.isError is True
+    assert result.content[0].text.startswith("invalid_argument: Missing required")
 
 
 def test_the_server_has_no_tool_that_changes_a_status() -> None:

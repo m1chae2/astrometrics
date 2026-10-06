@@ -3,16 +3,17 @@
 Description: The backend holds the hardware connection, so these parts of
 `app_status` ask it through the RPC call. The tests replace that call with
 canned answers and check the layers are unwrapped, the mount's pier side is
-read from its INDI properties, guide samples are trimmed, and an unknown
-device is reported as an error.
+read from its INDI properties, guide samples are trimmed, a missing device
+or unknown section is refused, and a failed section is reported as data.
 """
 
 import asyncio
 
 import pytest
 
+from astrometricslib import HardwareError, InvalidArgumentError
 from backend.mcp import tool_registry
-from backend.mcp.tool_registry import _describe_switches, _unwrap, tool_app_status
+from backend.mcp.tool_registry import _describe_switches, _unwrap, tool_app_controls, tool_app_status
 
 MOUNT_PROPERTIES = {
     "TELESCOPE_PIER_SIDE": {"state": "Idle", "elements": {"PIER_WEST": "On", "PIER_EAST": "Off"}},
@@ -24,17 +25,14 @@ MOUNT_PROPERTIES = {
 
 
 def wrapped(payload: object) -> dict:
-    """Wrap a payload the way the HTTP proxy and the router do.
+    """Wrap a payload the way some services wrap their own answers.
 
     Returns
     -------
     response : `dict`
-        Three layers of success and data around the payload.
+        Two layers of success and data around the payload.
     """
-    return {
-        "status": "success",
-        "data": {"status": "success", "data": {"status": "success", "data": payload}},
-    }
+    return {"status": "success", "data": {"status": "success", "data": payload}}
 
 
 @pytest.fixture
@@ -65,6 +63,7 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
             ],
         },
         "system:health": {"resources": {"system_ram_usage_percent": 40}, "indi": {"status": "Disconnected"}},
+        "guiding:broken": HardwareError("Guide camera offline."),
     }
 
     async def fake_execute_rpc(method: str, params: dict | None = None) -> dict:
@@ -77,16 +76,19 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
         """
         await asyncio.sleep(0)
         calls.append((method, params or {}))
-        return wrapped(answers[method])
+        answer = answers[method]
+        if isinstance(answer, Exception):
+            raise answer
+        return wrapped(answer)
 
     monkeypatch.setattr(tool_registry, "execute_rpc", fake_execute_rpc)
     return calls
 
 
 def test_the_layers_around_an_answer_are_removed() -> None:
-    """Three layers of success and data come off, and errors stay errors."""
+    """The layers of success and data come off."""
     assert _unwrap(wrapped({"a": 1})) == {"a": 1}
-    assert _unwrap({"status": "error", "message": "boom"}) == {"error": "boom"}
+    assert _unwrap([1, 2]) == [1, 2]
 
 
 def test_mount_switches_are_read_as_plain_values() -> None:
@@ -126,10 +128,55 @@ def test_connections_and_system_are_read_from_the_health_answer(fake_backend: li
 
 
 def test_indi_properties_need_a_device_and_can_be_filtered(fake_backend: list) -> None:
-    """A missing device is an error; a filter keeps the named ones."""
-    assert "error" in asyncio.run(tool_app_status(["indi_properties"]))["indi_properties"]
+    """A missing device is refused; a filter keeps the named ones."""
+    with pytest.raises(InvalidArgumentError, match="needs a device"):
+        asyncio.run(tool_app_status(["indi_properties"]))
     answer = asyncio.run(
         tool_app_status(["indi_properties"], device="Star Adventurer GTi", property_names=["TELESCOPE_PARK"])
     )["indi_properties"]
     assert list(answer["properties"]) == ["TELESCOPE_PARK"]
     assert answer["properties_total"] == 5
+
+
+def test_an_unknown_section_is_refused(fake_backend: list) -> None:
+    """Asking for a section that does not exist raises InvalidArgumentError."""
+    with pytest.raises(InvalidArgumentError, match="Unknown section"):
+        asyncio.run(tool_app_status(["weather"]))
+
+
+def test_a_failed_section_is_reported_as_error_info(
+    fake_backend: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed section holds an ErrorInfo; the others still answer."""
+    original = tool_registry.execute_rpc
+
+    async def broken_guiding(method: str, params: dict | None = None) -> object:
+        """Fail the guiding call and answer the rest from the canned table.
+
+        Returns
+        -------
+        response : `object`
+            The canned answer.
+        """
+        return await original("guiding:broken" if method == "guiding:status" else method, params)
+
+    monkeypatch.setattr(tool_registry, "execute_rpc", broken_guiding)
+    answer = asyncio.run(tool_app_status(["guiding", "system"]))
+
+    assert answer["guiding"]["error"]["code"] == "hardware"
+    assert answer["guiding"]["error"]["message"] == "Guide camera offline."
+    assert answer["system"] == {"system_ram_usage_percent": 40}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"action": "navigate"}, "needs mode"),
+        ({"action": "notify", "title": "Hi"}, "needs title and body"),
+        ({"action": "pause"}, "action must be one of"),
+    ],
+)
+def test_app_controls_refuses_bad_arguments(arguments: dict, message: str) -> None:
+    """A bad action or a missing argument raises InvalidArgumentError."""
+    with pytest.raises(InvalidArgumentError, match=message):
+        asyncio.run(tool_app_controls(**arguments))

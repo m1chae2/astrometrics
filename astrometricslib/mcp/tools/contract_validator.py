@@ -10,6 +10,7 @@ import ast
 import os
 from typing import Any
 
+from astrometricslib.foundation.errors import NotFoundError
 from astrometricslib.mcp.tool_registry import registry
 
 
@@ -42,13 +43,13 @@ def _extract_pydantic_models(filepath: str) -> list[dict[str, Any]]:
     models : `list` [`dict`]
         One dict per `BaseModel` subclass found, with keys
         ``"class_name"``, ``"file"``, ``"line"``, ``"bases"``, and
-        ``"fields"``; empty if `filepath` fails to parse.
+        ``"fields"``; empty if `filepath` cannot be read or parsed.
     """
     try:
         with open(filepath, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source, filename=filepath)
-    except SyntaxError, UnicodeDecodeError:
+    except OSError, SyntaxError, UnicodeDecodeError:
         return []
 
     models = []
@@ -163,39 +164,42 @@ async def typegen_contract_validator(  # ruff: ignore[unused-async] -- awaited
         ``"status"``, ``"total_files_scanned"``,
         ``"total_pydantic_models_found"``, ``"models"``,
         ``"serialization_warnings"``, ``"warnings_count"``, and
-        ``"verdict"``. On error, includes ``"status"`` and
-        ``"message"``.
+        ``"verdict"``.
+
+    Raises
+    ------
+    NotFoundError
+        If `scan_path` is not a folder.
     """
     if scan_path is None:
         scan_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     if not os.path.isdir(scan_path):
-        return {"status": "error", "message": f"Scan path not found: {scan_path}"}
+        raise NotFoundError(
+            f"The folder to scan does not exist: {scan_path}", details={"scan_path": scan_path}
+        )
 
-    try:
-        python_files = _find_python_files(scan_path)
-        all_models = []
-        for filepath in python_files:
-            all_models.extend(_extract_pydantic_models(filepath))
+    python_files = _find_python_files(scan_path)
+    all_models = []
+    for filepath in python_files:
+        all_models.extend(_extract_pydantic_models(filepath))
 
-        warnings = _check_field_annotations(all_models)
+    warnings = _check_field_annotations(all_models)
 
-        return {
-            "status": "success",
-            "total_files_scanned": len(python_files),
-            "total_pydantic_models_found": len(all_models),
-            "models": [
-                {
-                    "class": m["class_name"],
-                    "file": m["file"],
-                    "line": m["line"],
-                    "field_count": len(m["fields"]),
-                }
-                for m in all_models
-            ],
-            "serialization_warnings": warnings,
-            "warnings_count": len(warnings),
-            "verdict": "PASS" if len(warnings) == 0 else "WARNINGS_FOUND",
-        }
-    except Exception as e:
-        return {"status": "error", "message": f"Contract validation failed: {e!s}"}
+    return {
+        "status": "success",
+        "total_files_scanned": len(python_files),
+        "total_pydantic_models_found": len(all_models),
+        "models": [
+            {
+                "class": m["class_name"],
+                "file": m["file"],
+                "line": m["line"],
+                "field_count": len(m["fields"]),
+            }
+            for m in all_models
+        ],
+        "serialization_warnings": warnings,
+        "warnings_count": len(warnings),
+        "verdict": "PASS" if len(warnings) == 0 else "WARNINGS_FOUND",
+    }

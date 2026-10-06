@@ -19,7 +19,7 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 
 from backend.mcp.gaps.gap_store import (
     MAXIMUM_LISTED_GAPS,
@@ -27,6 +27,7 @@ from backend.mcp.gaps.gap_store import (
     MAXIMUM_TOOLS_TRIED,
     STATUSES,
     TIERS,
+    GapReportError,
     GapStore,
     validate_report,
 )
@@ -136,29 +137,32 @@ def handle_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     Returns
     -------
     result : `dict` [`str`, `Any`]
-        The answer, or ``{"error": message}`` when the call is refused.
+        The answer.
+
+    Raises
+    ------
+    GapReportError
+        If the tool is unknown. `validate_report` and
+        `GapStore.list_gaps` raise it too, for a bad argument.
     """
-    try:
-        if name == "report_capability_gap":
-            saved = store.add_gap(validate_report(arguments, tuple(CATEGORIES)))
-            note = "Already reported; counted again." if saved["duplicate"] else "Saved."
-            return {
-                **saved,
-                "message": f"{note} Stop here and tell the person you cannot do this with the current tools.",
-            }
-        if name == "list_capability_gaps":
-            return {
-                "gaps": store.list_gaps(
-                    arguments.get("status"), arguments.get("tier"), arguments.get("limit", 20)
-                )
-            }
-    except ValueError as error:
-        return {"error": str(error)}
-    return {"error": f"Unknown tool {name}."}
+    if name == "report_capability_gap":
+        saved = store.add_gap(validate_report(arguments, tuple(CATEGORIES)))
+        note = "Already reported; counted again." if saved["duplicate"] else "Saved."
+        return {
+            **saved,
+            "message": f"{note} Stop here and tell the person you cannot do this with the current tools.",
+        }
+    if name == "list_capability_gaps":
+        return {
+            "gaps": store.list_gaps(
+                arguments.get("status"), arguments.get("tier"), arguments.get("limit", 20)
+            )
+        }
+    raise GapReportError(f"Unknown tool {name}.")
 
 
 @app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # ruff: ignore[unused-async] -- awaited by mcp Server
+async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:  # ruff: ignore[unused-async] -- awaited by mcp Server
     """Run a gap tool and return its answer as JSON text.
 
     Parameters
@@ -170,10 +174,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # ruff: i
 
     Returns
     -------
-    content : `list` [`TextContent`]
-        The result as indented JSON.
+    content : `list` [`TextContent`] or `~mcp.types.CallToolResult`
+        The result as indented JSON. A refused call comes back as an MCP
+        error result (``isError``) whose text is ``code: message``, the
+        same shape the other servers use.
     """
-    result = handle_call(name, arguments if isinstance(arguments, dict) else {})
+    try:
+        result = handle_call(name, arguments if isinstance(arguments, dict) else {})
+    except GapReportError as error:
+        text = f"{error.code}: {error}"
+        return CallToolResult(content=[TextContent(type="text", text=text)], isError=True)
     return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 

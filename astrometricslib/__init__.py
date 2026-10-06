@@ -50,6 +50,7 @@ from astrometricslib.foundation.errors import (
     PermissionDeniedError,
     ProcessingError,
     StorageError,
+    error_from_info,
     to_error_info,
 )
 from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
@@ -387,6 +388,7 @@ __all__ = [
     "connect_db",
     "derive_field_centers",
     "derive_target_sessions",
+    "error_from_info",
     "export_target_lineage_as_prov_xml",
     "file_lock",
     "frame_is_spectral",

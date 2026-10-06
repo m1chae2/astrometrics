@@ -10,6 +10,8 @@ from typing import Any
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from astrometricslib import NotFoundError
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,11 +24,13 @@ class RPCRequest(BaseModel):
     id: int | str | None = Field(None, description="Request identifier")
 
 
-class RPCMethodNotFoundError(Exception):
+class RPCMethodNotFoundError(NotFoundError):
     """Raised when a JSON-RPC method name matches no registered handler.
 
     This is a dedicated class so the router can tell "no such method" apart
-    from a `KeyError` that a service raises while it runs.
+    from a `KeyError` that a service raises while it runs. It is a
+    `NotFoundError`, so a caller outside the router, such as the MCP proxy,
+    reports it as ``not_found``.
     """
 
 

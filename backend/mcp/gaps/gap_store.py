@@ -91,6 +91,23 @@ CREATE INDEX IF NOT EXISTS idx_capability_gaps_key ON capability_gaps (duplicate
 """
 
 
+class GapReportError(Exception):
+    """A gap report or a list request has a bad value.
+
+    This plays the part of astrometricslib's `InvalidArgumentError` and has
+    the same ``code``. The gap server does not import astrometricslib, so
+    that it starts quickly and keeps working when the rest of the app is
+    down. Like the shared categories, it does not inherit from `ValueError`.
+
+    Attributes
+    ----------
+    code : `str`
+        Always ``"invalid_argument"``.
+    """
+
+    code = "invalid_argument"
+
+
 def validate_report(report: dict[str, Any], categories: tuple[str, ...] = ()) -> dict[str, Any]:
     """Check a gap report and return a clean copy.
 
@@ -110,28 +127,28 @@ def validate_report(report: dict[str, Any], categories: tuple[str, ...] = ()) ->
 
     Raises
     ------
-    ValueError
+    GapReportError
         If a required field is missing, a value has the wrong type, a text
         field is too long, or the tier or category is not allowed. The
         message says what to fix.
     """
     if not isinstance(report, dict):
-        raise ValueError("The report must be a JSON object.")
+        raise GapReportError("The report must be a JSON object.")
     missing = [name for name in REQUIRED_FIELDS if not report.get(name)]
     if missing:
-        raise ValueError(f"Missing required field(s): {', '.join(missing)}.")
+        raise GapReportError(f"Missing required field(s): {', '.join(missing)}.")
     if report["tier"] not in TIERS:
-        raise ValueError(f"tier must be one of: {', '.join(TIERS)}.")
+        raise GapReportError(f"tier must be one of: {', '.join(TIERS)}.")
     category = report.get("category", "") or ""
     if category and categories and category not in categories:
-        raise ValueError(f"category must be one of: {', '.join(categories)}.")
+        raise GapReportError(f"category must be one of: {', '.join(categories)}.")
     tools_tried = report["tools_tried"]
     if not isinstance(tools_tried, list) or len(tools_tried) > MAXIMUM_TOOLS_TRIED:
-        raise ValueError(f"tools_tried must be a list of at most {MAXIMUM_TOOLS_TRIED} attempts.")
+        raise GapReportError(f"tools_tried must be a list of at most {MAXIMUM_TOOLS_TRIED} attempts.")
     clean_attempts = []
     for attempt in tools_tried:
         if not isinstance(attempt, dict) or not str(attempt.get("tool", "")).strip():
-            raise ValueError("Each tools_tried item needs a 'tool' name and a 'result'.")
+            raise GapReportError("Each tools_tried item needs a 'tool' name and a 'result'.")
         clean_attempts.append({
             "tool": str(attempt["tool"]).strip(),
             "result": str(attempt.get("result", "")),
@@ -142,12 +159,12 @@ def validate_report(report: dict[str, Any], categories: tuple[str, ...] = ()) ->
         if value is None:
             value = ""
         if not isinstance(value, str):
-            raise ValueError(f"{name} must be text.")
+            raise GapReportError(f"{name} must be text.")
         if len(value) > MAXIMUM_TEXT_LENGTH:
-            raise ValueError(f"{name} is longer than {MAXIMUM_TEXT_LENGTH} characters.")
+            raise GapReportError(f"{name} is longer than {MAXIMUM_TEXT_LENGTH} characters.")
         clean[name] = value.strip()
     if sum(len(attempt["result"]) for attempt in clean_attempts) > MAXIMUM_TEXT_LENGTH * 2:
-        raise ValueError("The tool results in tools_tried are too long. Quote only the key lines.")
+        raise GapReportError("The tool results in tools_tried are too long. Quote only the key lines.")
     return clean
 
 
@@ -298,13 +315,13 @@ class GapStore:
 
         Raises
         ------
-        ValueError
+        GapReportError
             If ``status`` or ``tier`` is not an allowed value.
         """
         if status is not None and status not in STATUSES:
-            raise ValueError(f"status must be one of: {', '.join(STATUSES)}.")
+            raise GapReportError(f"status must be one of: {', '.join(STATUSES)}.")
         if tier is not None and tier not in TIERS:
-            raise ValueError(f"tier must be one of: {', '.join(TIERS)}.")
+            raise GapReportError(f"tier must be one of: {', '.join(TIERS)}.")
         limit = max(1, min(int(limit), MAXIMUM_LISTED_GAPS))
         with self._connect() as connection:
             rows = connection.execute(
@@ -350,11 +367,11 @@ class GapStore:
 
         Raises
         ------
-        ValueError
+        GapReportError
             If ``status`` is not allowed.
         """
         if status not in STATUSES:
-            raise ValueError(f"status must be one of: {', '.join(STATUSES)}.")
+            raise GapReportError(f"status must be one of: {', '.join(STATUSES)}.")
         now = datetime.now(UTC).isoformat(timespec="seconds")
         with self._connect() as connection:
             cursor = connection.execute(

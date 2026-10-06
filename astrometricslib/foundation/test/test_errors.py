@@ -16,6 +16,7 @@ from astrometricslib.foundation.errors import (
     PermissionDeniedError,
     ProcessingError,
     StorageError,
+    error_from_info,
     to_error_info,
 )
 
@@ -91,6 +92,26 @@ def test_to_error_info_hides_the_text_of_a_bug(exc: BaseException) -> None:
     assert "disk" not in info.message
     assert "req42" in info.message
     assert info.rpc_code == -32603
+
+
+@pytest.mark.parametrize("category", CATEGORIES)
+def test_error_from_info_rebuilds_the_same_category(category: type[AstrometricsError]) -> None:
+    """`error_from_info` undoes `to_error_info` for every category."""
+    original = category("Something went wrong.", details={"target": "M31"}, retryable=True)
+
+    rebuilt = error_from_info(to_error_info(original))
+
+    assert type(rebuilt) is category
+    assert rebuilt.message == "Something went wrong."
+    assert rebuilt.details == {"target": "M31"}
+    assert rebuilt.retryable is True
+
+
+def test_error_from_info_gives_internal_for_an_unknown_code() -> None:
+    """An unknown code rebuilds as a plain `AstrometricsError`."""
+    rebuilt = error_from_info(ErrorInfo(code="made_up", message="x"))
+    assert type(rebuilt) is AstrometricsError
+    assert rebuilt.code == "internal"
 
 
 def test_error_info_serializes_with_camel_case_keys() -> None:

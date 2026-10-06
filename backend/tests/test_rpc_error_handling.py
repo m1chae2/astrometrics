@@ -9,6 +9,7 @@ Description: These tests cover three behaviors of the RPC layer:
 * The MCP RPC proxy can run a method in-process and serialize the result.
 """
 
+import asyncio
 import json
 import math
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib import ConflictError, HardwareError, NotFoundError
+from astrometricslib import ConflictError, HardwareError, NotFoundError, PermissionDeniedError
 from astrometricslib.foundation.logging import ContextFilter  # ruff: ignore[banned-api]
 from backend.mcp import tool_registry
 from backend.routers import rpc_router
@@ -174,7 +175,91 @@ async def test_the_mcp_proxy_runs_a_method_in_process(
     monkeypatch.setattr(tool_registry, "get_container", lambda: SimpleNamespace(initialized=True))
 
     reply = await tool_registry.execute_rpc("test:numbers", {})
-    assert reply == {"status": "success", "data": {"n": 3}}
+    assert reply == {"n": 3}
+
+
+@pytest.mark.anyio
+async def test_the_mcp_proxy_raises_a_failed_method_in_process(
+    monkeypatch: pytest.MonkeyPatch, registered_methods: dict
+) -> None:
+    """An in-process method's error passes through `execute_rpc` as is."""
+
+    def handler() -> None:
+        """Raise an expected error.
+
+        Raises
+        ------
+        NotFoundError
+            Always.
+        """
+        raise NotFoundError("No target 'M 99'.")
+
+    registered_methods["test:missing"] = handler
+    monkeypatch.setattr(tool_registry, "get_container", lambda: SimpleNamespace(initialized=True))
+
+    with pytest.raises(NotFoundError, match="M 99"):
+        await tool_registry.execute_rpc("test:missing", {})
+    with pytest.raises(NotFoundError):
+        await tool_registry.execute_rpc("nothing:here", {})
+
+
+@pytest.mark.anyio
+async def test_the_mcp_proxy_raises_the_category_the_backend_sent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Over HTTP, the backend's error record is raised as its category."""
+
+    async def fake_post(endpoint: str, payload: dict | None = None, timeout: float = 120.0) -> dict:
+        """Answer the way the RPC route does for a failed call.
+
+        Returns
+        -------
+        reply : `dict`
+            A JSON-RPC error reply.
+        """
+        await asyncio.sleep(0)
+        return {
+            "jsonrpc": "2.0",
+            "id": "mcp-proxy",
+            "error": {
+                "code": -32002,
+                "message": "Device in use.",
+                "data": {"code": "conflict", "message": "Device in use.", "details": {"device": "mount"}},
+            },
+        }
+
+    monkeypatch.setattr(tool_registry, "get_container", lambda: None)
+    monkeypatch.setattr("backend.mcp.mcp_http.post_to_backend", fake_post)
+
+    with pytest.raises(ConflictError, match="Device in use") as caught:
+        await tool_registry.execute_rpc("telescope:slew", {})
+    assert caught.value.details == {"device": "mount"}
+
+
+@pytest.mark.anyio
+async def test_the_mcp_proxy_unwraps_a_successful_http_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Over HTTP, the router's success envelope comes off the result."""
+
+    async def fake_post(endpoint: str, payload: dict | None = None, timeout: float = 120.0) -> dict:
+        """Answer the way the RPC route does for a successful call.
+
+        Returns
+        -------
+        reply : `dict`
+            A JSON-RPC success reply.
+        """
+        await asyncio.sleep(0)
+        return {"jsonrpc": "2.0", "id": "mcp-proxy", "result": {"status": "success", "data": [1, 2]}}
+
+    monkeypatch.setattr(tool_registry, "get_container", lambda: None)
+    monkeypatch.setattr("backend.mcp.mcp_http.post_to_backend", fake_post)
+
+    assert await tool_registry.execute_rpc("target:list", {}) == [1, 2]
+
+
+@pytest.mark.anyio
+async def test_backend_call_rpc_refuses_a_destructive_method() -> None:
+    """A delete-style method is refused with PermissionDeniedError."""
+    with pytest.raises(PermissionDeniedError):
+        await tool_registry.tool_backend_call_rpc("target:delete", {"target_id": "M31"})
 
 
 @pytest.mark.anyio

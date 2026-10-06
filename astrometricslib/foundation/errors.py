@@ -235,3 +235,42 @@ def to_error_info(exc: BaseException, request_id: str | None = None) -> ErrorInf
         message=f"An internal error occurred.{reference}",
         request_id=request_id,
     )
+
+
+def error_from_info(info: ErrorInfo) -> AstrometricsError:
+    """Rebuild an error from an `ErrorInfo` that came over the wire.
+
+    A client of the backend, such as an MCP server that calls the RPC
+    route over HTTP, uses this to raise the same category the backend
+    raised. The inverse is `to_error_info`.
+
+    Parameters
+    ----------
+    info : `ErrorInfo`
+        The error record.
+
+    Returns
+    -------
+    error : `AstrometricsError`
+        An instance of the category whose ``code`` matches, carrying the
+        same message, details, and retry flag. An unknown code gives a
+        plain `AstrometricsError`, whose code is ``internal``.
+    """
+    category = _CATEGORY_BY_CODE.get(info.code, AstrometricsError)
+    return category(info.message, details=info.details, retryable=info.retryable)
+
+
+_CATEGORY_BY_CODE: dict[str, type[AstrometricsError]] = {
+    category.code: category
+    for category in (
+        InvalidArgumentError,
+        NotFoundError,
+        ConflictError,
+        PermissionDeniedError,
+        ConfigurationError,
+        StorageError,
+        HardwareError,
+        ExternalServiceError,
+        ProcessingError,
+    )
+}

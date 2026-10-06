@@ -7,12 +7,24 @@ external MCP server process. REQ: AGENT-1.1, AGENT-3.1
 import inspect
 import json
 import logging
+from collections.abc import Awaitable
 from pathlib import Path
 from typing import Any
 
 from mcp.types import TextContent, Tool
 
-from astrometricslib import ErrorInfo, log_context, new_request_id, to_error_info
+from astrometricslib import (
+    AstrometricsError,
+    ConfigurationError,
+    ErrorInfo,
+    ExternalServiceError,
+    InvalidArgumentError,
+    PermissionDeniedError,
+    error_from_info,
+    log_context,
+    new_request_id,
+    to_error_info,
+)
 from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
 from astrometricslib.mcp.tool_errors import error_content
 from backend.services.infrastructure.agent_code_policy import check_agent_code
@@ -192,10 +204,6 @@ class ToolRegistry:
             if isinstance(result, list) and len(result) > 0 and isinstance(result[0], TextContent):
                 return result
 
-            # Enrich error dictionaries with actionable remediation hints
-            if isinstance(result, dict) and result.get("status") == "error":
-                result = self._enrich_error_remediation(name, result)
-
             # Token budget safeguard: truncate oversized lists/payloads
             result_str = json.dumps(result, indent=2)
             max_bytes = 40000  # Cap output to ~10k tokens to prevent context blowout
@@ -214,73 +222,54 @@ class ToolRegistry:
             else:
                 logger.exception("Tool %s failed (%s)", name, info.code)
             info.details["tool"] = name
-            info.details["remediation"] = self._get_generic_remediation(name, str(exc))
+            info.details["remediation"] = self._remediation(name, info.message)
             return error_content(info)
 
-    def _enrich_error_remediation(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
-        """Attach actionable recovery hints to tool error envelopes.
+    def _remediation(self, tool_name: str, message: str) -> dict[str, Any]:
+        """Suggest how an agent can recover from a failed tool call.
 
         Parameters
         ----------
         tool_name : `str`
-            Name of the executing tool.
-        result : `dict[str, Any]`
-            The raw error result payload.
+            Name of the tool that failed.
+        message : `str`
+            The error message the agent sees.
 
         Returns
         -------
-        enriched : `dict[str, Any]`
-            Error dictionary augmented with remediation tips.
+        remediation : `dict[str, Any]`
+            A ``suggestion`` and a tool to call next. The hint is specific
+            when the message names a known problem (a missing target, a
+            disconnected device, a filter, bad syntax), and generic
+            otherwise.
         """
-        msg = str(result.get("message", "")).lower()
-        remediation: dict[str, Any] = {}
-
+        msg = message.lower()
         if "target" in msg and "not found" in msg:
-            remediation = {
+            return {
                 "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
                 "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
             }
-        elif "disconnected" in msg or "not connected" in msg or "indi" in msg:
-            remediation = {
+        if "disconnected" in msg or "not connected" in msg or "indi" in msg:
+            return {
                 "suggestion": "Hardware driver is currently offline or disconnected.",
                 "recommended_tool": (
                     "call_mcp_tool('wayfindinglib-core', 'observatory_equipment_connect', {})"
                 ),
             }
-        elif "filter" in msg:
-            remediation = {
+        if "filter" in msg:
+            return {
                 "suggestion": "Requested filter wheel slot is unknown or unconfigured.",
                 "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_imaging_status', {})",
             }
-        elif "syntax" in msg or "unexpected" in msg:
-            remediation = {
+        if "syntax" in msg or "unexpected" in msg:
+            return {
                 "suggestion": "Check input arguments against parameter schema or query inspect_api.",
                 "recommended_tool": (
                     "call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {'target': '...'})"
                 ),
             }
-
-        if remediation:
-            result["remediation"] = remediation
-        return result
-
-    def _get_generic_remediation(self, tool_name: str, err_str: str) -> dict[str, Any]:
-        """Return fallback recovery guidance for uncaught exceptions.
-
-        Parameters
-        ----------
-        tool_name : `str`
-            Name of the executing tool.
-        err_str : `str`
-            The exception string message.
-
-        Returns
-        -------
-        remediation : `dict[str, Any]`
-            Remediation dictionary with suggestion and inspection command.
-        """
         return {
-            "suggestion": (f"Tool '{tool_name}' encountered an unhandled exception: {err_str}"),
+            "suggestion": f"Tool '{tool_name}' failed: {message}",
             "inspect_tool": (
                 f"call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {{'target': '{tool_name}'}})"
             ),
@@ -324,13 +313,12 @@ def get_astrometrics():  # ruff: ignore[missing-return-type-undocumented-public-
         return None
 
 
-async def execute_rpc(method: str, params: dict | None = None) -> dict:
+async def execute_rpc(method: str, params: dict | None = None) -> Any:
     """Execute an RPC method through the in-process or HTTP backend.
 
     If the backend container is available, delegates directly to
     `RPCHandlerRegistry` to run the logic in-process. Otherwise,
     sends a JSON-RPC 2.0 POST request to the backend listener.
-
 
     Parameters
     ----------
@@ -342,9 +330,22 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
 
     Returns
     -------
-    result : `dict`
-        On success, includes ``"status"`` and ``"data"``. On
-        failure, includes ``"status"`` and ``"message"``.
+    data : `Any`
+        The method's result, converted to JSON-safe values.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the backend over HTTP sends an answer that is not a JSON-RPC
+        reply, or an error without an error record.
+
+    Notes
+    -----
+    A failed call raises. In-process, the service's own error passes
+    through unchanged. Over HTTP, the error record the backend sent is
+    raised again as the same category (see `error_from_info`), and
+    `post_to_backend` raises `ExternalServiceError` when the backend
+    cannot be reached.
     """
     if params is None:
         params = {}
@@ -354,32 +355,29 @@ async def execute_rpc(method: str, params: dict | None = None) -> dict:
         from backend.routers.rpc_router import rpc_registry
         from backend.services.rpc_protocol import serialize_rpc_result
 
-        request_id = new_request_id()
-        try:
-            with log_context(request_id=request_id, method=method):
-                res = await rpc_registry.execute(method, params)
-            serialized_result = serialize_rpc_result(res)
-            return {"status": "success", "data": serialized_result}
-        except Exception as exc:
-            info = to_error_info(exc, request_id)
-            logger.warning("RPC %s failed (%s): %s", method, info.code, info.message)
-            return {"status": "error", "message": info.message, "error": info.model_dump(by_alias=True)}
-    else:
-        from backend.mcp.mcp_http import post_to_backend
+        with log_context(request_id=new_request_id(), method=method):
+            res = await rpc_registry.execute(method, params)
+        return serialize_rpc_result(res)
 
-        payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": "mcp-proxy"}
-        res = await post_to_backend("/api/rpc", payload)
-        if not isinstance(res, dict):
-            return {"status": "error", "message": f"Malformed response: {res!r}"}
-        if res.get("status") == "error":
-            return {"status": "error", "message": str(res.get("error", "Backend communication error"))}
-        if "error" in res:
-            error_val = res["error"]
-            if isinstance(error_val, dict):
-                msg = error_val.get("message", "Unknown RPC error")
-                return {"status": "error", "message": msg, "error": error_val.get("data")}
-            return {"status": "error", "message": str(error_val)}
-        return {"status": "success", "data": res.get("result")}
+    from backend.mcp.mcp_http import post_to_backend
+
+    payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": "mcp-proxy"}
+    reply = await post_to_backend("/api/rpc", payload)
+    if not isinstance(reply, dict):
+        raise ExternalServiceError(f"The backend sent a malformed answer to {method}.")
+    error = reply.get("error")
+    if error is not None:
+        data = error.get("data") if isinstance(error, dict) else None
+        if isinstance(data, dict) and "code" in data and "message" in data:
+            backend_error = error_from_info(ErrorInfo.model_validate(data))
+            raise backend_error
+        message = error.get("message") if isinstance(error, dict) else error
+        raise ExternalServiceError(f"The backend reported an error for {method}: {message}")
+    result = reply.get("result")
+    # The router wraps every result as {"status": "success", "data": ...}.
+    if isinstance(result, dict) and result.get("status") == "success" and "data" in result:
+        return result["data"]
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -424,8 +422,16 @@ async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = Non
     Returns
     -------
     result : `dict[str, Any]`
-        Standardized RPC response containing execution status, returned data,
-        or error details with elapsed time in milliseconds.
+        ``status`` (``"success"``), the ``method``, the returned
+        ``data``, and the elapsed time in milliseconds.
+
+    Raises
+    ------
+    PermissionDeniedError
+        If the method deletes data or runs code.
+    AstrometricsError
+        Whatever error the call raised. Its details then also hold
+        ``elapsed_ms``, so a slow failure can be told from a fast one.
     """
     import time
 
@@ -433,19 +439,17 @@ async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = Non
     if method.startswith("terminal:"):
         refusal = "Terminal methods run code and are only available through electron_run_python."
     if refusal:
-        return {"status": "error", "method": method, "elapsed_ms": 0.0, "data": None, "message": refusal}
+        raise PermissionDeniedError(refusal, details={"method": method})
 
     start_time = time.perf_counter()
-    res = await execute_rpc(method, params or {})
+    try:
+        data = await execute_rpc(method, params or {})
+    except AstrometricsError as exc:
+        exc.details.setdefault("elapsed_ms", round((time.perf_counter() - start_time) * 1000, 2))
+        raise
     elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-    return {
-        "status": res.get("status", "error"),
-        "method": method,
-        "elapsed_ms": elapsed_ms,
-        "data": res.get("data"),
-        "message": res.get("message"),
-    }
+    return {"status": "success", "method": method, "elapsed_ms": elapsed_ms, "data": data}
 
 
 @registry.register(
@@ -467,18 +471,25 @@ async def tool_backend_health_check() -> dict[str, Any]:
     container_inst = get_container()
     container_active = bool(container_inst and container_inst.initialized)
 
-    # Probe backend JSON-RPC via execute_rpc with lightweight target:list
-    probe_res = await execute_rpc("target:list", {})
+    # Probe backend JSON-RPC via execute_rpc with lightweight target:list.
+    # A failed probe is the answer of a health check, not its failure.
+    details = "Backend responding normally"
+    try:
+        await execute_rpc("target:list", {})
+        is_online = True
+    except Exception as exc:  # health probe: any failure means degraded
+        info = to_error_info(exc, new_request_id())
+        logger.warning("Backend health probe failed (%s): %s", info.code, info.message, exc_info=exc)
+        is_online = False
+        details = info.message
     elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
-
-    is_online = probe_res.get("status") == "success"
 
     return {
         "status": "healthy" if is_online else "degraded",
         "backend_online": is_online,
         "in_process_container": container_active,
         "latency_ms": elapsed_ms,
-        "details": probe_res.get("message") if not is_online else "Backend responding normally",
+        "details": details,
     }
 
 
@@ -547,6 +558,11 @@ async def tool_ui_pause_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-as
     -------
     result : `dict[str, Any]`
         Dictionary containing operation status and paused state.
+
+    Raises
+    ------
+    ExternalServiceError
+        If ``pkill`` cannot be run.
     """
     import shutil
     import subprocess
@@ -555,9 +571,9 @@ async def tool_ui_pause_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-as
     try:
         subprocess.run([pkill_path, "-STOP", "-f", "siril-cli"], check=False)
         subprocess.run([pkill_path, "-STOP", "-f", "solve-field"], check=False)
-        return {"status": "success", "paused": True}
-    except Exception as err:
-        return {"status": "error", "message": str(err)}
+    except (OSError, subprocess.SubprocessError) as err:
+        raise ExternalServiceError(f"Could not pause the pipelines: {err}") from err
+    return {"status": "success", "paused": True}
 
 
 @registry.register(
@@ -572,6 +588,11 @@ async def tool_ui_resume_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-a
     -------
     result : `dict[str, Any]`
         Dictionary containing operation status and resumed state.
+
+    Raises
+    ------
+    ExternalServiceError
+        If ``pkill`` cannot be run.
     """
     import shutil
     import subprocess
@@ -580,9 +601,9 @@ async def tool_ui_resume_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-a
     try:
         subprocess.run([pkill_path, "-CONT", "-f", "siril-cli"], check=False)
         subprocess.run([pkill_path, "-CONT", "-f", "solve-field"], check=False)
-        return {"status": "success", "resumed": True}
-    except Exception as err:
-        return {"status": "error", "message": str(err)}
+    except (OSError, subprocess.SubprocessError) as err:
+        raise ExternalServiceError(f"Could not resume the pipelines: {err}") from err
+    return {"status": "success", "resumed": True}
 
 
 @registry.register(
@@ -613,14 +634,17 @@ async def tool_electron_run_python(code: str) -> dict[str, Any]:
         Execution envelope containing status, stdout, stderr, result,
         plots, execution time in milliseconds, and active workspace
         manifest.
+
+    Raises
+    ------
+    PermissionDeniedError
+        If the code does something agents may not do, such as delete
+        files.
     """
     refusal = check_agent_code(code)
     if refusal:
-        return {"status": "error", "message": refusal}
-    res = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
-    if res.get("status") == "success" and "data" in res:
-        return res["data"]
-    return res
+        raise PermissionDeniedError(refusal)
+    return await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
 
 
 @registry.register(
@@ -637,10 +661,8 @@ async def tool_terminal_get_workspace() -> dict[str, Any]:
         List of variable descriptors with name, type, shape, and
         byte size.
     """
-    res = await execute_rpc("terminal:get_workspace", {})
-    if res.get("status") == "success" and "data" in res:
-        return {"status": "success", "variables": res["data"]}
-    return res
+    variables = await execute_rpc("terminal:get_workspace", {})
+    return {"status": "success", "variables": variables}
 
 
 @registry.register(
@@ -674,10 +696,8 @@ async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
         Method signatures and numpydoc summaries.
     """
     code = f"result = inspect_api({target})"
-    res = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
-    if res.get("status") == "success" and "data" in res:
-        return res["data"].get("result", res["data"])
-    return res
+    data = await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
+    return data.get("result", data) if isinstance(data, dict) else data
 
 
 @registry.register(
@@ -782,10 +802,7 @@ async def tool_docs_get(topic_id: str) -> dict[str, Any]:
     result : `dict[str, Any]`
         Documentation topic content and title.
     """
-    res = await execute_rpc("docs:get_topic", {"topic_id": topic_id})
-    if res.get("status") == "success" and "data" in res:
-        return res["data"]
-    return res
+    return await execute_rpc("docs:get_topic", {"topic_id": topic_id})
 
 
 @registry.register(
@@ -815,15 +832,8 @@ async def tool_ui_editor_sync(code: str | None = None) -> dict[str, Any]:
         Current or updated editor code status.
     """
     if code is not None:
-        res = await execute_rpc("ui:editor_set", {"code_content": code})
-        if res.get("status") == "success" and "data" in res:
-            return res["data"]
-        return res
-
-    res = await execute_rpc("ui:editor_get", {})
-    if res.get("status") == "success" and "data" in res:
-        return res["data"]
-    return res
+        return await execute_rpc("ui:editor_set", {"code_content": code})
+    return await execute_rpc("ui:editor_get", {})
 
 
 # ---------------------------------------------------------------------------
@@ -937,41 +947,56 @@ async def tool_app_status(
     Returns
     -------
     status : `dict` [`str`, `Any`]
-        One key per section asked for, ``unavailable`` for what the app
-        cannot say, or ``{"error": ...}`` for an unknown section.
+        One key per section asked for, and ``unavailable`` for what the
+        app cannot say. A section that could not be read holds
+        ``{"error": ErrorInfo}`` instead, so the other sections still
+        come back.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If a section is unknown, or ``indi_properties`` is asked for
+        without a device.
     """
     sections = list(include) if include else list(DEFAULT_STATUS_SECTIONS)
     unknown = [name for name in sections if name not in APP_STATUS_SECTIONS]
     if unknown:
-        return {"error": f"Unknown section(s) {unknown}. Choose from {list(APP_STATUS_SECTIONS)}."}
+        raise InvalidArgumentError(
+            f"Unknown section(s) {unknown}. Choose from {list(APP_STATUS_SECTIONS)}.",
+            details={"unknown": unknown},
+        )
+    if "indi_properties" in sections and not device:
+        raise InvalidArgumentError(
+            "The indi_properties section needs a device name; list them with the indi_devices section."
+        )
 
     answer: dict[str, Any] = {}
     unavailable: list[str] = []
     if "health" in sections:
         answer["health"] = await tool_backend_health_check()
     if "connections" in sections or "system" in sections:
-        health = await execute_rpc("system:health", {})
-        data = _unwrap(health)
-        if not isinstance(data, dict) or "indi" not in data:
-            note = health.get("message", "the backend did not answer")
+        health = await _read_section("system", _system_health())
+        if "indi" not in health:  # the section failed; report the error in both
             for section in ("connections", "system"):
                 if section in sections:
-                    answer[section] = {"error": note}
+                    answer[section] = health
         else:
             if "connections" in sections:
-                answer["connections"] = {"indi": data.get("indi")}
+                answer["connections"] = {"indi": health.get("indi")}
             if "system" in sections:
-                answer["system"] = data.get("resources")
+                answer["system"] = health.get("resources")
     if "active_jobs" in sections:
-        answer["active_jobs"] = await _active_jobs()
+        answer["active_jobs"] = await _read_section("active_jobs", _active_jobs())
     if "telescope" in sections:
-        answer["telescope"] = await _telescope_status()
+        answer["telescope"] = await _read_section("telescope", _telescope_status())
     if "guiding" in sections:
-        answer["guiding"] = await _guiding_status()
+        answer["guiding"] = await _read_section("guiding", _guiding_status())
     if "indi_devices" in sections:
-        answer["indi_devices"] = await _indi_devices()
+        answer["indi_devices"] = await _read_section("indi_devices", _indi_devices())
     if "indi_properties" in sections:
-        answer["indi_properties"] = await _indi_properties(device, property_names)
+        answer["indi_properties"] = await _read_section(
+            "indi_properties", _indi_properties(device, property_names)
+        )
     if "view" in sections:
         unavailable.append(
             "view: the backend does not keep track of which view the window shows, so the current view "
@@ -982,12 +1007,38 @@ async def tool_app_status(
     return answer
 
 
+async def _read_section(name: str, work: Awaitable[Any]) -> Any:
+    """Read one section of `tool_app_status`, keeping a failure as data.
+
+    The sections are independent, so one that fails must not hide the
+    others. The failure is logged once, with its traceback.
+
+    Parameters
+    ----------
+    name : `str`
+        The section's name, for the log.
+    work : `Awaitable`
+        The coroutine that reads the section.
+
+    Returns
+    -------
+    section : `Any`
+        What the coroutine returned, or ``{"error": ErrorInfo}`` if it
+        raised.
+    """
+    try:
+        return await work
+    except Exception as exc:  # one failed section must not stop the rest
+        info = to_error_info(exc, new_request_id())
+        logger.warning("app_status section %s failed (%s): %s", name, info.code, info.message, exc_info=exc)
+        return {"error": info.model_dump(by_alias=True)}
+
+
 def _unwrap(response: Any) -> Any:
     """Strip the success and data layers around a backend answer.
 
-    A backend call comes back wrapped by the HTTP proxy, by the RPC router
-    and sometimes by the service itself, so the real answer can be two or
-    three levels down.
+    Some services wrap their own answer as ``{"status": "success",
+    "data": ...}``, so the real answer can be a level or two down.
 
     Parameters
     ----------
@@ -997,14 +1048,31 @@ def _unwrap(response: Any) -> Any:
     Returns
     -------
     payload : `Any`
-        The innermost value, or the response itself if it was an error.
+        The innermost value.
     """
     value = response
     while isinstance(value, dict) and value.get("status") == "success" and "data" in value:
         value = value["data"]
-    if isinstance(value, dict) and value.get("status") == "error":
-        return {"error": value.get("message", "the backend reported an error")}
     return value
+
+
+async def _system_health() -> dict[str, Any]:
+    """Read the backend's health answer, which holds connections and resources.
+
+    Returns
+    -------
+    health : `dict` [`str`, `Any`]
+        The answer, with an ``indi`` connection entry and ``resources``.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the answer has no ``indi`` entry.
+    """
+    data = _unwrap(await execute_rpc("system:health", {}))
+    if not isinstance(data, dict) or "indi" not in data:
+        raise ExternalServiceError("The backend's health answer did not include the connections.")
+    return data
 
 
 async def _telescope_status() -> dict[str, Any]:
@@ -1019,21 +1087,34 @@ async def _telescope_status() -> dict[str, Any]:
     telescope : `dict` [`str`, `Any`]
         The status without its guiding history, plus ``mount_indi`` with
         the pier side and tracking switches when the mount device is found.
+        If the INDI devices cannot be read, ``mount_indi`` holds
+        ``{"error": ErrorInfo}`` and the rest of the status still comes
+        back.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the backend sends no telescope status.
     """
     status = _unwrap(await execute_rpc("telescope:status", {}))
-    if not isinstance(status, dict) or "error" in status:
-        return status if isinstance(status, dict) else {"error": "the backend did not answer"}
+    if not isinstance(status, dict):
+        raise ExternalServiceError("The backend did not send a telescope status.")
     answer = {
         key: value for key, value in status.items() if key not in ("guidingHistory", "alignmentAttempts")
     }
-    devices = _unwrap(await execute_rpc("telescope:indi_devices", {}))
-    mount = next(
-        (name for name in (devices if isinstance(devices, list) else []) if _looks_like_a_mount(name)), None
-    )
-    if mount is not None:
-        properties = await _indi_properties(mount, list(MOUNT_PROPERTIES))
-        if isinstance(properties, dict) and "properties" in properties:
+    try:
+        devices = _unwrap(await execute_rpc("telescope:indi_devices", {}))
+        mount = next(
+            (name for name in (devices if isinstance(devices, list) else []) if _looks_like_a_mount(name)),
+            None,
+        )
+        if mount is not None:
+            properties = await _indi_properties(mount, list(MOUNT_PROPERTIES))
             answer["mount_indi"] = {"device": mount, **_describe_switches(properties["properties"])}
+    except AstrometricsError as exc:
+        # The mount's switches add detail; the status is useful without them.
+        logger.warning("Could not read the mount's INDI properties: %s", exc.message)
+        answer["mount_indi"] = {"error": to_error_info(exc).model_dump(by_alias=True)}
     return answer
 
 
@@ -1100,10 +1181,15 @@ async def _guiding_status() -> dict[str, Any]:
     guiding : `dict` [`str`, `Any`]
         ``is_guiding``, the running ``stats`` (RMS in arcseconds), and the
         newest `GUIDING_SAMPLES_REPORTED` samples.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the backend sends no guiding status.
     """
     status = _unwrap(await execute_rpc("guiding:status", {}))
-    if not isinstance(status, dict) or "error" in status:
-        return status if isinstance(status, dict) else {"error": "the backend did not answer"}
+    if not isinstance(status, dict):
+        raise ExternalServiceError("The backend did not send a guiding status.")
     history = status.get("history") or []
     return {
         **{key: value for key, value in status.items() if key != "history"},
@@ -1120,18 +1206,18 @@ async def _indi_devices() -> Any:
 
     Returns
     -------
-    devices : `list` [`str`] or `dict`
-        The device names, or an error.
+    devices : `list` [`str`]
+        The device names.
     """
     return _unwrap(await execute_rpc("telescope:indi_devices", {}))
 
 
-async def _indi_properties(device: str | None, property_names: list[str] | None) -> dict[str, Any]:
+async def _indi_properties(device: str, property_names: list[str] | None) -> dict[str, Any]:
     """Read the properties of one INDI device. Nothing is changed.
 
     Parameters
     ----------
-    device : `str`, optional
+    device : `str`
         The device name.
     property_names : `list` [`str`], optional
         Only these properties.
@@ -1140,13 +1226,16 @@ async def _indi_properties(device: str | None, property_names: list[str] | None)
     -------
     answer : `dict` [`str`, `Any`]
         ``device``, ``properties`` (each with its label, state, type and
-        elements) and how many exist, or ``{"error": ...}``.
+        elements) and how many exist.
+
+    Raises
+    ------
+    ExternalServiceError
+        If the backend sends no property list.
     """
-    if not device:
-        return {"error": "Give a device name; list them with the indi_devices section."}
     properties = _unwrap(await execute_rpc("telescope:indi_properties", {"device_name": device}))
-    if not isinstance(properties, dict) or "error" in properties:
-        return properties if isinstance(properties, dict) else {"error": "the backend did not answer"}
+    if not isinstance(properties, dict):
+        raise ExternalServiceError(f"The backend did not send the properties of {device}.")
     total = len(properties)
     if property_names:
         wanted = set(property_names)
@@ -1169,13 +1258,18 @@ async def _active_jobs() -> dict[str, Any]:
     Returns
     -------
     jobs : `dict` [`str`, `Any`]
-        The result of the job history query for active jobs, or an error.
+        The result of the job history query for active jobs.
+
+    Raises
+    ------
+    ConfigurationError
+        If astrometricslib cannot be imported.
     """
     import asyncio
 
     astrometrics = get_astrometrics()
     if astrometrics is None:
-        return {"error": "astrometricslib is not available."}
+        raise ConfigurationError("astrometricslib is not available.")
     return await asyncio.to_thread(astrometrics.jobs.query, active_only=True, limit=20)
 
 
@@ -1235,15 +1329,22 @@ async def tool_app_controls(
     Returns
     -------
     result : `dict` [`str`, `Any`]
-        What was dispatched, or ``{"error": ...}`` when the action is not
-        one of `APP_CONTROL_ACTIONS` or a needed argument is missing.
+        What was dispatched.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the action is not one of `APP_CONTROL_ACTIONS`, or a needed
+        argument is missing.
     """
     if action == "navigate":
         if not mode:
-            return {"error": "action='navigate' needs mode."}
+            raise InvalidArgumentError("action='navigate' needs mode.")
         return await tool_ui_navigate_mode(mode, target)
     if action == "notify":
         if not title or not body:
-            return {"error": "action='notify' needs title and body."}
+            raise InvalidArgumentError("action='notify' needs title and body.")
         return await tool_ui_show_notification(title, body, urgency)
-    return {"error": f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs is not offered."}
+    raise InvalidArgumentError(
+        f"action must be one of {list(APP_CONTROL_ACTIONS)}. Pausing jobs is not offered."
+    )

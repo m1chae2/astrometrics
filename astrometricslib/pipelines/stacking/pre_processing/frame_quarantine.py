@@ -35,12 +35,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.excluded_frames import SetAsideFrame
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     QUARANTINE_EXCLUSION_REASON_PREFIX,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +321,7 @@ def _measure_frames(
     def safe_measure(frame: Any) -> dict[str, Any] | None:
         try:
             measurement = measure(frame.path)
-        except Exception as error:
+        except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
             logger.debug("Cannot measure '%s' for the quarantine check: %s", frame.path, error)
             return None
         measurement.pop("_stars", None)

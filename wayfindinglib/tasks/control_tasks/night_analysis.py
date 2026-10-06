@@ -16,10 +16,11 @@ library's frame records are read once and shared through a
 from __future__ import annotations
 
 import logging
+import sqlite3
 import statistics
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import ConfigurationError
+from astrometricslib import FITS_READ_ERRORS, AstrometricsError, ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 
 if TYPE_CHECKING:
@@ -74,7 +75,7 @@ def capture_library(
                 ),
                 capture_analysis_tasks.collect_stack_saturation_verdicts(astrometrics),
             )
-        except Exception as error:
+        except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as error:
             logger.warning("Could not read this equipment's frames from the frame library: %s", error)
             library_cache[key] = ([], [])
     return library_cache[key]

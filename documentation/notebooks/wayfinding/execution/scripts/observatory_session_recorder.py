@@ -11,7 +11,6 @@ script remains usable standalone without a prior planning step.
 """
 
 import argparse
-import sys
 import threading
 from datetime import UTC, datetime
 
@@ -63,7 +62,13 @@ def _ensure_session(wayfinder: Wayfinder, session_id: str) -> ObservationSession
 
 
 def run_observation_session_recorder() -> None:
-    """Connect to PHD2 and INDI, recording a session until interrupted."""
+    """Connect to PHD2 and INDI, recording a session until interrupted.
+
+    Raises
+    ------
+    SystemExit
+        With code 1 if the recording fails.
+    """
     parser = argparse.ArgumentParser(description="Astrometrics Passive Observation Session Recorder")
     parser.add_argument("--phd2-host", type=str, default="localhost", help="PHD2 event-server hostname.")
     parser.add_argument("--phd2-port", type=int, default=DEFAULT_PHD2_PORT, help="PHD2 event-server port.")
@@ -130,8 +135,10 @@ def run_observation_session_recorder() -> None:
         print(f"Weather snapshots recorded: {len(session.weather_samples)}")
 
     except Exception as err:
+        # This is the top of the script. The error is shown and the script
+        # exits with a failure code, keeping the original error attached.
         print(f"Error: Observation session recording failed: {err}")
-        sys.exit(1)
+        raise SystemExit(1) from err
 
 
 if __name__ == "__main__":

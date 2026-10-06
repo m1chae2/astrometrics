@@ -5,9 +5,10 @@ date.
 """
 
 import logging
+import sqlite3
 import sys
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import FITS_READ_ERRORS, Astrometrics, AstrometricsError, configure_logging
 
 
 def run_batch_processing() -> None:
@@ -47,7 +48,7 @@ def run_batch_processing() -> None:
             astrometrics.targets.reindex_frames(target, prune_missing=True)
             success_count += 1
             astrometrics.targets.save()
-        except Exception as err:
+        except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as err:
             print(f"\n[ERROR] Failed to process target '{target.id}': {err}")
             failed_targets.append((target.id, str(err)))
             # Continue to next target

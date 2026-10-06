@@ -15,6 +15,7 @@ from astropy.time import Time
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, EphemerisMatch
 from astrometricslib.models.moving_object_config import MovingObjectConfig
+from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,8 @@ class EphemerisCrossMatcher:
                 location=self.config.mpc_observatory_code,
                 position_error=120 * u.arcsec,
             )
-        except Exception as query_error:
+        except (RuntimeError, *ONLINE_QUERY_ERRORS) as query_error:
+            # astroquery raises RuntimeError when the service reports an error.
             logger.warning("SkyBoT cone-search query failed: %s", query_error)
             return None
 

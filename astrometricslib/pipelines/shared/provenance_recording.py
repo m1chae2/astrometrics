@@ -15,10 +15,12 @@ storage itself.
 
 import hashlib
 import logging
+import sqlite3
 from typing import Any
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.provenance import (
     Activity,
     ActivityDescription,
@@ -343,7 +345,7 @@ def record_pipeline_run(
 
         summary.provenance_activity_id = job_id
         summary.upstream_entity_id = upstream_entity_id
-    except Exception as error:
+    except (AstrometricsError, sqlite3.Error, OSError, ValueError) as error:
         logger.warning("Could not record provenance for job %r (%s): %s", job_id, pipeline_name, error)
 
 

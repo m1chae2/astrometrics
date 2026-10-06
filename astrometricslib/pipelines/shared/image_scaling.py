@@ -9,6 +9,8 @@ import logging
 
 import numpy as np
 
+from astrometricslib.utilities.exceptions import DATA_ERRORS
+
 logger = logging.getLogger(__name__)
 
 # How many MAD-derived sigmas below the median the black point is set, in
@@ -435,7 +437,7 @@ class ImageScaler:
                         vmin = calc_vmin
                     if vmax is None:
                         vmax = calc_vmax
-                except Exception as e:
+                except DATA_ERRORS as e:
                     logger.warning("Error calculating percentiles for scaling: %s", e)
 
             # Fallback to absolute min/max if stretch is off or failed

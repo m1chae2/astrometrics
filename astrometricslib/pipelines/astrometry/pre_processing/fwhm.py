@@ -33,6 +33,7 @@ from scipy import optimize
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -432,7 +433,7 @@ def measure_blob_width_from_data(
             width = _blob_width_from_properties(properties)
             if np.isfinite(width) and width > 0:
                 widths.append(width)
-        except Exception as exc:
+        except DATA_ERRORS as exc:
             logger.debug("Skipping blob width measurement for one star cutout: %s", exc)
             continue
 

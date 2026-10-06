@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
+    AstrometricsError,
     ConfigurationError,
     ConflictError,
     HardwareError,
@@ -33,6 +34,7 @@ from astrometricslib import (
     PermissionDeniedError,
 )
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.observatorylib.site_location import configured_observer_location
@@ -738,7 +740,7 @@ def observer_location(context: ControlContext) -> dict[str, float] | None:
     """
     try:
         mount_location = _run_sync(context.mount_driver.get_observer_location())
-    except Exception as mount_error:
+    except (AstrometricsError, OSError, *INDI_ERRORS) as mount_error:
         logger.info("Mount did not report an observer location (%s); trying the configuration.", mount_error)
         mount_location = None
     if mount_location:

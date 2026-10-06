@@ -15,7 +15,7 @@ import os
 import sys
 import time
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 
 SIGMA_GRID: list[tuple[float, float]] = [(2.0, 2.0), (2.5, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 4.0)]
 FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -143,7 +143,7 @@ def run_analysis() -> None:
                     stack_weight="wfwhm",
                     generate_rejmap=True,
                 ).stacked_path
-            except Exception as stack_err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as stack_err:
                 row["error"] = str(stack_err)
                 row["elapsed_s"] = time.time() - start_time
                 print(f"Stacking failed for {label}: {stack_err}")

@@ -16,6 +16,7 @@ from photutils.background import Background2D, MedianBackground
 from photutils.detection import DAOStarFinder
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ class SourceDetector:
                 background_map = bkg.background
                 std = bkg.background_rms_median
                 logger.debug("Source detection: 2D background (box=%spx), median_rms=%.2f", box_size, std)
-            except Exception as e:
+            except DATA_ERRORS as e:
                 logger.warning("Background2D failed, falling back to global scalar: %s", e)
                 background_map = None
         else:

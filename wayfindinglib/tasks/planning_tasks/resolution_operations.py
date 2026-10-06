@@ -6,7 +6,14 @@ SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
 
 from typing import Any
 
-from astrometricslib import ExternalServiceError, NotFoundError, ProcessingError, StellarObject, Target
+from astrometricslib import (
+    ONLINE_QUERY_ERRORS,
+    ExternalServiceError,
+    NotFoundError,
+    ProcessingError,
+    StellarObject,
+    Target,
+)
 from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     format_target_coordinates,
     read_simbad_field,
@@ -295,5 +302,6 @@ def _query_visual_magnitude(object_name: str) -> float | None:
             return None
         value = read_simbad_field(table[0], "V")
         return None if value is None else float(value)
-    except Exception:
+    except (*ONLINE_QUERY_ERRORS, KeyError, TypeError):
+        # The magnitude is optional; without a reply it is left unknown.
         return None

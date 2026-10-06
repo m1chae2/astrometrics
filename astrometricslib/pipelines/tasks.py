@@ -171,6 +171,10 @@ def stack_frames_with_timeout(
         try:
             outcome["path"] = _stack_with_job_tracking(target, frames_to_stack)
         except Exception as stacking_error:
+            # This runs in its own thread, so any error is kept here and
+            # raised again in the calling thread below. The traceback is
+            # logged at debug level in case that never happens (a timeout).
+            logger.debug("[%s] Stacking thread raised an error.", target.id, exc_info=True)
             outcome["error"] = stacking_error
 
     siril_interface.reset_siril_lock_wait_seconds()

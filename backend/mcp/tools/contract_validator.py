@@ -4,10 +4,13 @@ Enables instant programmatic verification of API schemas across stack
 boundaries. # REQ: AGENT-3.1
 """
 
+import logging
 import os
 from typing import Any
 
 from backend.mcp.tool_registry import registry
+
+logger = logging.getLogger(__name__)
 
 
 @registry.register(
@@ -101,4 +104,7 @@ async def typegen_contract_validator() -> dict[str, Any]:
             "output_file": output_path,
         }
     except Exception as e:
+        # This is an MCP tool, so it is the last place that can catch an
+        # error. The traceback is logged and the caller gets an error reply.
+        logger.exception("Typegen validation encountered an error")
         return {"status": "error", "message": f"Typegen validation encountered an error: {e}"}

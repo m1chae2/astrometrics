@@ -12,10 +12,12 @@ notices it.
 
 import logging
 import os
+import sqlite3
 from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.drivers.logger_interface import LoggerInterface
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import (
     rollback_archive,
     staging_folder_stack_path,
@@ -135,6 +137,6 @@ def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJ
         return recover_interrupted_jobs(
             str(configuration.get_logs_db_path()), str(configuration.get_stacks_path())
         )
-    except Exception as recovery_error:
+    except (AstrometricsError, sqlite3.Error, OSError) as recovery_error:
         logger.warning("Could not close interrupted jobs: %s", recovery_error)
         return []

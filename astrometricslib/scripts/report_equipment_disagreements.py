@@ -21,7 +21,7 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import FITS_READ_ERRORS, Astrometrics, configure_logging
 from astrometricslib.drivers.fits_access import read_header
 from astrometricslib.foundation.observatory_setups import ObservatorySetups
 from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
@@ -109,7 +109,7 @@ def find_iso_disagreements(targets: list[Any]) -> collections.Counter[tuple[str,
                 continue
             try:
                 header = read_header(frame.path)
-            except Exception as header_error:
+            except FITS_READ_ERRORS as header_error:
                 logger.debug("Skipping unreadable frame %s: %s", frame.path, header_error)
                 continue
             header_value = iso_or_gain_text(header)

@@ -12,7 +12,7 @@ from astropy.time import Time
 from astrometricslib import ConflictError
 
 from .property_wait import wait_for_switch_state
-from .pyindi_compatibility import PyIndi
+from .pyindi_compatibility import INDI_ERRORS, PyIndi
 
 logger = logging.getLogger(__name__)
 
@@ -548,6 +548,6 @@ class MountController:
             if found:
                 self.client.sendNewSwitch(coordinate_set_switch)
                 return True
-        except Exception as coord_mode_error:
+        except INDI_ERRORS as coord_mode_error:
             logger.warning("Failed to set coord mode %s: %s", mode, coord_mode_error)
         return False

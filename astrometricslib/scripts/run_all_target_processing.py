@@ -18,8 +18,11 @@ automatic worker-pool restart on a process crash).
 import argparse
 import logging
 import os
+import sqlite3
 import sys
 from typing import Any
+
+from astrometricslib import FITS_READ_ERRORS, AstrometricsError
 
 # Disable opening Siril GUI when stacking completes -- must be set
 # before astrometricslib is imported, since a batch run across every
@@ -143,7 +146,7 @@ def _reindex_targets(astrometrics: Astrometrics, targets: list) -> None:
         try:
             astrometrics.targets.reindex_frames(target, refresh_headers=True)
             reindexed_target_count += 1
-        except Exception as reindex_error:
+        except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as reindex_error:
             print(f"  [{target.id}] Reindex failed, continuing with stored frames: {reindex_error}")
     astrometrics.targets.save()
     print(f"Reindexed {reindexed_target_count} of {len(targets)} target(s).")

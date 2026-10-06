@@ -1062,7 +1062,9 @@ class CatalogAccess(AbstractCatalogAccess):
         try:
             path = self.get_local_path(dataset_type, selector)
             return os.path.exists(path)
-        except Exception:
+        except InvalidArgumentError, AttributeError, TypeError:
+            # The data type has no known path, or the selector's target is
+            # not text.
             return False
 
     def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:

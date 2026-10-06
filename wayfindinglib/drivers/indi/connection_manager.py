@@ -51,7 +51,9 @@ class ConnectionManager:
             sock.close()
             self.last_responsive_value = len(data) > 0
             return self.last_responsive_value
-        except Exception:
+        except OSError:
+            # OSError covers a refused connection, a timeout, and an
+            # unknown host name.
             self.last_responsive_value = False
             return False
 

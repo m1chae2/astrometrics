@@ -106,7 +106,7 @@ def resolve_worker_counts(
                 available_ram_bytes = virtual_memory_info.available
             if total_ram_bytes is None:
                 total_ram_bytes = virtual_memory_info.total
-    except Exception as memory_query_error:
+    except (OSError, psutil.Error) as memory_query_error:
         logger.debug("Failed to query system memory via psutil: %s", memory_query_error)
         # Conservative fallback assumption if memory stats cannot be queried
         available_ram_bytes = available_ram_bytes or (8 * 1024 * 1024 * 1024)

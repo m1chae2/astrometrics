@@ -36,6 +36,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _read_exposure_seconds,
     compute_frame_airmass,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -1132,7 +1133,8 @@ class VariabilityAnalyzer:
                         star.photometry.fluxes_detrended = [float(f) for f in fluxes_detrended]
                     else:
                         star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
-                except Exception:
+                except DATA_ERRORS:
+                    # A fit that fails leaves the light curve as it was.
                     star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
             else:
                 star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]

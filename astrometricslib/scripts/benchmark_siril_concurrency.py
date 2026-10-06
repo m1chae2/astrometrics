@@ -157,7 +157,7 @@ def time_one_slot_count(
                     ["/usr/bin/pgrep", "-x", "-c", "siril"], capture_output=True, text=True
                 )
                 peak_siril = max(peak_siril, int(running.stdout.strip() or 0))
-            except Exception as sampling_error:
+            except (OSError, subprocess.SubprocessError, ValueError) as sampling_error:
                 logger.debug("Siril process sample failed: %s", sampling_error)
                 continue
 

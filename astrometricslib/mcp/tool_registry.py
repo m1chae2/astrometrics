@@ -177,18 +177,21 @@ class ToolRegistry:
 
         try:
             import jsonschema
-
-            jsonschema.validate(instance=arguments, schema=input_schema)
         except ImportError:
-            pass
-        except Exception as e:
-            return error_content(
-                ErrorInfo(
-                    code="invalid_argument",
-                    message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
-                    request_id=request_id,
+            # Checking the arguments is optional; it needs the jsonschema
+            # package, which is not always installed.
+            jsonschema = None
+        if jsonschema is not None:
+            try:
+                jsonschema.validate(instance=arguments, schema=input_schema)
+            except (jsonschema.ValidationError, jsonschema.SchemaError) as e:
+                return error_content(
+                    ErrorInfo(
+                        code="invalid_argument",
+                        message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
+                        request_id=request_id,
+                    )
                 )
-            )
 
         # MCP Path Sandboxing validation. The check refuses the call if it
         # cannot decide: a tool that takes a path must never run on a path

@@ -152,7 +152,8 @@ class SystemStatusService:
                         self._nvidia_available = False
                         self._cached_vram = "Not Available (Non-NVIDIA or driver missing)"
                         resources["vram_status"] = self._cached_vram
-                except Exception:
+                except OSError, subprocess.SubprocessError:
+                    # nvidia-smi is missing or did not answer in time.
                     self._nvidia_available = False
                     self._cached_vram = "Not Available (Non-NVIDIA or driver missing)"
                     resources["vram_status"] = self._cached_vram

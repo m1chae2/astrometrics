@@ -8,6 +8,8 @@ type-specific signals. This module centralizes those heuristics.
 
 import logging
 
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,7 +43,7 @@ class DeviceDiscovery:
                 name = device.getDeviceName()
                 if name and name.strip() and name not in client.deviceMap:
                     client.deviceMap[name] = client.getDevice(name)
-            except Exception as e:
+            except INDI_ERRORS as e:
                 logger.debug("Failed to query device name during refresh: %s", e)
 
     def find_device_with_property(self, property_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -222,7 +224,7 @@ class DeviceDiscovery:
                 return 0
             sizes = {element.name: element.value for element in ccd_info}
             return int(sizes.get("CCD_MAX_X", 0) * sizes.get("CCD_MAX_Y", 0))
-        except Exception as info_error:
+        except INDI_ERRORS as info_error:
             logger.debug("Failed to read CCD_INFO: %s", info_error)
             return 0
 

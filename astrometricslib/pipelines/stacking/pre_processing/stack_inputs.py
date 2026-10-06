@@ -35,6 +35,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import AstrometricsError
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -295,7 +298,7 @@ def build_stack_inputs_record(
             "frames": sorted(_file_state(getattr(frame, "path", "")) for frame in frames),
             "calibration": _calibration_files(frames, library),
         }
-    except Exception as error:
+    except (AstrometricsError, *FITS_READ_ERRORS) as error:
         logger.warning("Could not record the inputs of a stack, so it will not be skipped: %s", error)
         return None
 

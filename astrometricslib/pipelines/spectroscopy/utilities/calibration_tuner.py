@@ -29,6 +29,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.spectroscopy_models import SpectroscopyConfig
 
 logger = logging.getLogger(__name__)
@@ -412,7 +413,7 @@ class SpectroscopyCalibrationTuner:
                     peak_indices, _ = find_peaks(-norm_spectrum, prominence=min_depth, wlen=31, distance=6)
                     dips = [int(i) for i in peak_indices if 5 <= i < len(smoothed) - 5]
                     min_depth -= 0.002
-            except Exception as norm_err:
+            except DATA_ERRORS as norm_err:
                 logger.debug("Continuum baseline normalization fallback failed: %s", norm_err)
 
         if len(dips) < 3:

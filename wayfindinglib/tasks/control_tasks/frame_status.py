@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from astrometricslib import AstrometricsError
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
 
 if TYPE_CHECKING:
@@ -104,7 +105,9 @@ def build_frame_status(context: ControlContext, target_id: str) -> dict[str, Any
         remote_files = {
             os.path.basename(name): size for name, size in driver.list_remote_files_with_sizes(remote_folder)
         }
-    except Exception as error:
+    except (AstrometricsError, OSError, ValueError, KeyError) as error:
+        # The telescope computer could not be reached or its folder is not
+        # known. The local frames are still listed.
         status["telescope_error"] = str(error)
     status["remote_folder"] = remote_folder
 

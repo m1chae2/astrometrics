@@ -28,11 +28,12 @@ import bisect
 import collections
 import logging
 import os
+import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import observing_night_id
+from astrometricslib import AstrometricsError, observing_night_id
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.phd2.guide_log_parser import parse_guide_log_file
 from wayfindinglib.models.equipment_and_site.equipment_fingerprint import build_equipment_fingerprint
@@ -420,7 +421,7 @@ def ingest_ekos_logs(context: ControlContext, destination_dir: str, download: bo
     frame_lookup = None
     try:
         frame_lookup = build_frame_lookup(context.astrometrics)
-    except Exception as error:
+    except (AstrometricsError, sqlite3.Error, OSError) as error:
         logger.warning("Could not read the frame library to name imaging equipment: %s", error)
 
     if download:

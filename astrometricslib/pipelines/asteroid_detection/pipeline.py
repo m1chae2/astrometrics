@@ -20,6 +20,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 from astropy.wcs.utils import proj_plane_pixel_scales
 from scipy.spatial import cKDTree
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import (
@@ -269,7 +270,7 @@ def _detect_sources_in_one_frame(
         with fits.open(frame_path, memmap=False) as hdul:
             frame_header = hdul[0].header
             frame_data = hdul[0].data
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.warning("Failed to read frame '%s' for asteroid detection: %s", frame_path, read_error)
         return "read_failed", []
     if frame_data is None:

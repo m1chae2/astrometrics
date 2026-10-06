@@ -24,7 +24,8 @@ def convert_png_to_ico(png_path, ico_path):  # ruff: ignore[missing-type-functio
         img = Image.open(png_path)
         img.save(ico_path, format="ICO")
         print(f"Successfully converted {png_path} to {ico_path}")
-    except Exception as e:
+    except (OSError, ValueError) as e:
+        # PIL raises OSError for a file it cannot read or write.
         print(f"Error converting icon: {e}")
         sys.exit(1)
 

@@ -27,12 +27,15 @@ exercisable with no Execution package present (§2.5.9, "Safety Runs
 Without Execution").
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
 from wayfindinglib.tasks.control_tasks.enclosure_control import mount_within_clearance
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +70,9 @@ def _attempt(action: Callable[[], bool]) -> bool:
     try:
         return bool(action())
     except Exception:
+        # A safety step must never stop the steps after it, so any error is
+        # caught here. The traceback is logged and the step counts as failed.
+        logger.exception("Safe-state step %s failed", getattr(action, "__name__", action))
         return False
 
 

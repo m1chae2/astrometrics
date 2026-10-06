@@ -180,21 +180,23 @@ class ToolRegistry:
         # REQ: AGENT-3.1 - Strict argument validation
         try:
             import jsonschema
-
-            jsonschema.validate(instance=arguments, schema=input_schema)
         except ImportError:
             import logging
 
             logging.getLogger(__name__).warning(
                 "jsonschema library not found. Skipping strict argument validation."
             )
-        except Exception as e:
-            return error_content(
-                ErrorInfo(
-                    code="invalid_argument",
-                    message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
+            jsonschema = None
+        if jsonschema is not None:
+            try:
+                jsonschema.validate(instance=arguments, schema=input_schema)
+            except (jsonschema.ValidationError, jsonschema.SchemaError) as e:
+                return error_content(
+                    ErrorInfo(
+                        code="invalid_argument",
+                        message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
+                    )
                 )
-            )
 
         try:
             if inspect.iscoroutinefunction(func):

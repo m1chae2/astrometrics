@@ -8,8 +8,10 @@ cross-session mechanics live in `batch.py` -- this file is the thin
 """
 
 import logging
+import sqlite3
 from typing import Any
 
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
@@ -27,6 +29,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -340,7 +343,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # that a failure here can never cost a photometry result.
         try:
             search_periods_and_save(all_stellar_objects, target, catalog_access)
-        except Exception as search_error:
+        except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 
         frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(

@@ -201,6 +201,6 @@ def test_cache_hit_is_reported_to_the_job_log(tmp_path):  # ruff: ignore[missing
     job_logger = MagicMock()
     processor.restore_cached_calibration_masters(second_run, job_logger=job_logger)
 
-    # The logger gets a %-style message and its values; fill them in to read it.
+    # The logger gets a %-style message and its values; fill them in.
     messages = [call.args[0] % call.args[1:] for call in job_logger.info.call_args_list]
     assert any("Reusing cached master bias" in message for message in messages)

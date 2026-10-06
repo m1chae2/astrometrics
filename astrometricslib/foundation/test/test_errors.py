@@ -89,6 +89,23 @@ def test_to_error_info_hides_the_text_of_a_bug(exc: BaseException) -> None:
     assert info.rpc_code == -32603
 
 
+def test_to_error_info_reports_a_validation_error_as_invalid_argument() -> None:
+    """A pydantic `ValidationError` is a bad caller value, not a bug."""
+    from pydantic import BaseModel, ValidationError
+
+    class Point(BaseModel):
+        """A model with one required number."""
+
+        x: float
+
+    with pytest.raises(ValidationError) as caught:
+        Point(x="not a number")
+    info = to_error_info(caught.value, request_id="req7")
+    assert info.code == "invalid_argument"
+    assert info.details["problems"][0]["location"] == "x"
+    assert info.request_id == "req7"
+
+
 @pytest.mark.parametrize("category", CATEGORIES)
 def test_error_from_info_rebuilds_the_same_category(category: type[AstrometricsError]) -> None:
     """`error_from_info` undoes `to_error_info` for every category."""

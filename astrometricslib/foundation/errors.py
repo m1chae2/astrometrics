@@ -18,7 +18,7 @@ points to the traceback in the log.
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic.alias_generators import to_camel
 
 #: JSON-RPC 2.0 error code for each error code. The codes between -32000
@@ -201,8 +201,11 @@ class ErrorInfo(BaseModel):
 def to_error_info(exc: BaseException, request_id: str | None = None) -> ErrorInfo:
     """Convert any exception to an `ErrorInfo`.
 
-    An `AstrometricsError` keeps its own code, message, and details. Every
-    other exception, a bare `ValueError` included, is a bug. It gets the code
+    An `AstrometricsError` keeps its own code, message, and details. A
+    pydantic `ValidationError` means the caller sent a value that does not fit
+    a model, so it is reported as ``invalid_argument`` with the validation
+    problems in the details. Every other exception, a bare `ValueError`
+    included, is a bug. It gets the code
     ``internal`` and a generic message, so no internal detail leaks to the
     caller.
 
@@ -224,6 +227,17 @@ def to_error_info(exc: BaseException, request_id: str | None = None) -> ErrorInf
             message=exc.message,
             details=exc.details,
             retryable=exc.retryable,
+            request_id=request_id,
+        )
+    if isinstance(exc, ValidationError):
+        problems = [
+            {"location": ".".join(str(part) for part in item["loc"]), "problem": item["msg"]}
+            for item in exc.errors(include_url=False, include_context=False, include_input=False)
+        ]
+        return ErrorInfo(
+            code="invalid_argument",
+            message="A value does not fit the expected format.",
+            details={"problems": problems},
             request_id=request_id,
         )
     reference = f" Reference: {request_id}." if request_id else ""

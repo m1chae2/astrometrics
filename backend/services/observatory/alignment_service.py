@@ -2,12 +2,14 @@
 
 import logging
 import math
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import AstrometricsError, InvalidArgumentError
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 from wayfindinglib import MountPointingModel, ObservatoryControl, SkyPosition
 from wayfindinglib.models.session.telemetry import AlignmentAttempt
 
@@ -78,7 +80,7 @@ class AlignmentService:
                             target_name=log.get("target_name"),
                         )
                     )
-            except Exception as exc:
+            except (sqlite3.Error, ValueError) as exc:
                 logger.debug("Failed loading alignment attempts from SQLite: %s", exc)
 
         return [attempt.model_dump(by_alias=True) for attempt in self.alignment_attempts]
@@ -117,7 +119,7 @@ class AlignmentService:
                         "paaPoints": row.get("paa_points", []),
                         "timestamp": row.get("timestamp"),
                     }
-            except Exception as exc:
+            except sqlite3.Error as exc:
                 logger.debug("Error fetching polar alignment fallback: %s", exc)
 
         return {
@@ -149,7 +151,7 @@ class AlignmentService:
                     session_target_counts = self._observatory.astrometrics.targets.query(detail="nights")[
                         "nights"
                     ]
-                except Exception as target_count_err:
+                except (AstrometricsError, KeyError, sqlite3.Error) as target_count_err:
                     logger.debug("Error computing session target counts: %s", target_count_err)
                     session_target_counts = {}
 
@@ -170,7 +172,7 @@ class AlignmentService:
                         "polarAzErrorArcsec": s.get("polar_az_error_arcsec"),
                     })
                 return sessions
-            except Exception as exc:
+            except (sqlite3.Error, ValueError, TypeError) as exc:
                 logger.debug("Error listing alignment sessions: %s", exc)
         return []
 
@@ -211,7 +213,7 @@ class AlignmentService:
                 try:
                     target_attempts = self._logger_interface.get_session_target_telemetry(session_id)
                     attempts.extend(target_attempts)
-                except Exception as target_telemetry_err:
+                except sqlite3.Error as target_telemetry_err:
                     logger.debug(
                         "Error loading target telemetry for session %s: %s", session_id, target_telemetry_err
                     )
@@ -239,7 +241,7 @@ class AlignmentService:
                 "alignmentAttempts": attempts,
                 "polarAlignment": polar_status,
             }
-        except Exception as exc:
+        except (sqlite3.Error, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)
             return {"alignmentAttempts": [], "polarAlignment": None}
 
@@ -345,9 +347,9 @@ class AlignmentService:
                                 "target_name": target_name,
                             }
                             self._logger_interface.record_alignment_attempt(record_payload)
-                        except Exception as log_err:
+                        except sqlite3.Error as log_err:
                             logger.debug("Failed to record alignment attempt in SQLite: %s", log_err)
-            except Exception as exc:
+            except (sqlite3.Error, ValueError) as exc:
                 logger.debug("Error polling external syncs: %s", exc)
 
         # Poll polar alignment updates
@@ -356,7 +358,7 @@ class AlignmentService:
                 polar_record = driver.drain_polar_alignment()
                 if polar_record and self._logger_interface:
                     self._logger_interface.record_polar_alignment(polar_record)
-            except Exception as p_err:
+            except sqlite3.Error as p_err:
                 logger.debug("Error polling polar alignment: %s", p_err)
 
     def solve_image(self, image_path: str) -> AlignmentResult:
@@ -386,8 +388,8 @@ class AlignmentService:
 
             return AlignmentResult(success=True, ra=ra, dec=dec)
 
-        except Exception as e:
-            logger.error("Plate solving error: %s", e)
+        except (AstrometricsError, OSError, *DATA_ERRORS) as e:
+            logger.warning("Plate solving error: %s", e)
             return AlignmentResult(success=False, error=str(e))
 
     def _alignment_loop(self, target_ra: float, target_dec: float):  # ruff: ignore[missing-return-type-private-function]
@@ -482,8 +484,8 @@ class AlignmentService:
                 logger.info("Re-slewing to target: RA=%s deg, DEC=%s", target_ra, target_dec)
                 self._observatory.mount.slew(SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec))
 
-            except Exception as e:
-                logger.error("Alignment attempt %s failed: %s", attempt_count, e)
+            except Exception:
+                logger.exception("Alignment attempt %s failed", attempt_count)
                 solving_attempt.status = "failed"
 
         if attempt_count >= max_attempts:

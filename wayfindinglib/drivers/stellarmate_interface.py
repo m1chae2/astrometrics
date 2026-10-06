@@ -211,7 +211,7 @@ class StellarMateInterface(RemoteTransferDriver):
         try:
             self._run_command(["ssh", self.host_alias, "echo", "connected"])
             return True
-        except Exception:
+        except ExternalServiceError, OSError:
             return False
 
     def list_remote_targets(self) -> list[str]:
@@ -228,9 +228,9 @@ class StellarMateInterface(RemoteTransferDriver):
             output = self._run_command(["ssh", self.host_alias, cmd])
             dirs = [d.rstrip("/") for d in output.split("\n") if d.strip()]
             return dirs
-        except Exception as e:
+        except ExternalServiceError, OSError:
             if self._last_connection_status is not False:
-                logger.error("Failed to list remote targets: %s", e)
+                logger.exception("Failed to list remote targets")
             return []
 
     def resolve_remote_folder_name(self, folder_name: str) -> str:
@@ -295,9 +295,9 @@ class StellarMateInterface(RemoteTransferDriver):
             output = self._run_command(["ssh", self.host_alias, cmd])
             files = [f.strip() for f in output.split("\n") if f.strip()]
             return files
-        except Exception as e:
+        except ExternalServiceError, OSError:
             if self._last_connection_status is not False:
-                logger.error("Failed to list files in %s: %s", folder_name, e)
+                logger.exception("Failed to list files in %s", folder_name)
             return []
 
     def list_remote_files_with_sizes(self, folder_name: str) -> list[tuple[str, int]]:
@@ -336,9 +336,9 @@ class StellarMateInterface(RemoteTransferDriver):
                 if relative_path.strip() and size_text.strip().isdigit():
                     files_with_sizes.append((relative_path.strip(), int(size_text.strip())))
             return files_with_sizes
-        except Exception as e:
+        except ExternalServiceError, OSError, ValueError:
             if self._last_connection_status is not False:
-                logger.error("Failed to list files with sizes in %s: %s", folder_name, e)
+                logger.exception("Failed to list files with sizes in %s", folder_name)
             return []
 
     def get_remote_folder_count(self, folder_name: str) -> int:
@@ -361,9 +361,9 @@ class StellarMateInterface(RemoteTransferDriver):
             cmd = f"find '{remote_path}' -type f \\( -name '*.fits' -o -name '*.fit' \\) | wc -l"
             output = self._run_command(["ssh", self.host_alias, cmd])
             return int(output)
-        except Exception as e:
+        except ExternalServiceError, OSError, ValueError:
             if self._last_connection_status is not False:
-                logger.error("Failed to count files in %s: %s", folder_name, e)
+                logger.exception("Failed to count files in %s", folder_name)
             return 0
 
     def download_target_folder(
@@ -526,8 +526,8 @@ class StellarMateInterface(RemoteTransferDriver):
                 return True
             logger.error("rsync failed with code %s for %s.", return_code, description)
             return False
-        except Exception as e:
-            logger.error("rsync execution error for %s: %s", description, e)
+        except OSError, subprocess.SubprocessError:
+            logger.exception("rsync execution error for %s", description)
             return False
 
     def _list_remote_files_with_sizes(self, find_command: str) -> dict[str, int]:
@@ -550,9 +550,9 @@ class StellarMateInterface(RemoteTransferDriver):
         """
         try:
             output = self._run_command(["ssh", self.host_alias, find_command])
-        except Exception as e:
+        except ExternalServiceError, OSError:
             if self._last_connection_status is not False:
-                logger.error("Failed to list remote files: %s", e)
+                logger.exception("Failed to list remote files")
             return {}
         sizes_by_path: dict[str, int] = {}
         for line in output.split("\n"):

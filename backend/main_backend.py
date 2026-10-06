@@ -372,7 +372,7 @@ try:
     if os.path.isdir(_mpl_img_path):
         app.mount("/_images", StaticFiles(directory=_mpl_img_path), name="mpl_images")
         app.mount("/figure/_images", StaticFiles(directory=_mpl_img_path), name="mpl_figure_images")
-except Exception as e:
+except (ImportError, OSError, RuntimeError) as e:
     logger.warning("Failed to mount Matplotlib WebAgg static assets: %s", e)
 
 
@@ -436,7 +436,7 @@ def _detect_lan_ip() -> str:
     try:
         s.connect(("1.1.1.1", 80))
         return str(s.getsockname()[0])
-    except Exception:
+    except OSError:
         return "127.0.0.1"
     finally:
         s.close()
@@ -975,14 +975,16 @@ async def figure_websocket_endpoint(websocket: WebSocket, figure_id: int):  # ru
                     pass
                 else:
                     mgr.handle_json(msg)
-            except Exception as exc:
-                logger.debug("Error processing figure WS message: %s", exc)
+            except Exception:
+                # One bad message must not close the figure's connection,
+                # so every error is logged with its traceback and skipped.
+                logger.exception("Error processing figure WebSocket message")
     except WebSocketDisconnect:
         logger.info("Figure %d client disconnected", figure_id)
     finally:
         try:
             mgr.remove_web_socket(adapter)
-        except Exception as exc:
+        except (KeyError, ValueError) as exc:
             logger.debug("Failed removing web socket adapter: %s", exc)
 
 
@@ -1010,8 +1012,8 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
                 # a slow hardware query from blocking this event loop (and
                 # therefore every other request) for its duration.
                 await asyncio.to_thread(container.telescope_service.get_status)
-        except Exception as e:
-            logger.error("Error in periodic telemetry loop: %s", e)
+        except Exception:
+            logger.exception("Error in periodic telemetry loop")
         await asyncio.sleep(2.0)
 
 
@@ -1063,17 +1065,17 @@ def _warm_sky_catalog() -> None:
         try:
             container.wayfinder.planning.get_sources(0.0, 0.0, 0.01)
             logger.info("Sky catalog warmed in %.1fs", time.monotonic() - started_at)
-        except Exception as warm_error:
-            logger.warning("Sky catalog warm-up failed; first Planetarium load will be slow: %s", warm_error)
+        except Exception:
+            # Warm-up runs in the background; a failure only makes the first
+            # request slower, so it is logged and the server keeps going.
+            logger.exception("Sky catalog warm-up failed; first Planetarium load will be slow")
 
     def warm_earth_orientation() -> None:
         """Load astropy's Earth-orientation table."""
         try:
             _warm_earth_orientation_data()
-        except Exception as warm_error:
-            logger.warning(
-                "Earth-orientation warm-up failed; the first star click will be slow: %s", warm_error
-            )
+        except Exception:
+            logger.exception("Earth-orientation warm-up failed; the first star click will be slow")
 
     def warm_stellar_summaries() -> None:
         """Fill the stellar catalog summary cache."""
@@ -1081,10 +1083,8 @@ def _warm_sky_catalog() -> None:
             stellar_started_at = time.monotonic()
             container.stellar_service.warm_catalog_summary_cache()
             logger.info("Stellar catalog summary warmed in %.1fs", time.monotonic() - stellar_started_at)
-        except Exception as warm_error:
-            logger.warning(
-                "Stellar summary warm-up failed; first Astronomy Manager load will be slow: %s", warm_error
-            )
+        except Exception:
+            logger.exception("Stellar summary warm-up failed; first Astronomy Manager load will be slow")
 
     try:
         steps = [
@@ -1127,8 +1127,8 @@ async def websocket_events(websocket: WebSocket):  # ruff: ignore[missing-return
         state = container.astrometrics_service.get_state()
         event = {"type": "UI_EVENT", "action": "system_state_update", "payload": state}
         await websocket.send_text(json.dumps(event))
-    except Exception as e:
-        logger.error("Failed to send initial system state on websocket connection: %s", e)
+    except Exception:
+        logger.exception("Failed to send initial system state on websocket connection")
 
     try:
         while True:

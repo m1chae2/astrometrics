@@ -10,9 +10,10 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, collapse_to_2d
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +80,11 @@ class AstrometricsImage:
             if "DATE-OBS" in header and "MJD-OBS" not in header:
                 try:
                     header["MJD-OBS"] = (Time(header["DATE-OBS"]).mjd, "MJD of observation")
-                except Exception as exc:
+                except (ValueError, TypeError) as exc:
                     logger.debug("Could not derive MJD-OBS from DATE-OBS: %s", exc)
 
             return header
-        except Exception as e:
+        except FITS_READ_ERRORS as e:
             logger.debug("Failed to read FITS header %s: %s", self.path, e)
             return None
 
@@ -96,6 +97,10 @@ class AstrometricsImage:
             Raised if `self.path` does not exist on disk.
         StorageError
             Raised if the FITS file at `self.path` contains no HDUs.
+        FITS_READ_ERRORS
+            Any of the errors in `fits_access.FITS_READ_ERRORS`, re-raised
+            after logging, if the file cannot be read or its header is
+            damaged.
         """
         if self._header is not None:
             return
@@ -120,7 +125,7 @@ class AstrometricsImage:
 
             try:
                 self._wcs = WCS(self._header)
-            except Exception as wcs_err:
+            except DATA_ERRORS as wcs_err:
                 # A solved colour stack carries NAXIS=3 (channel, y, x)
                 # alongside a 2-axis WCS, and astropy refuses that
                 # combination outright. Retrying at naxis=2 selects the
@@ -130,11 +135,11 @@ class AstrometricsImage:
                 # despite having been solved successfully.
                 try:
                     self._wcs = WCS(self._header, naxis=2)
-                except Exception:
+                except DATA_ERRORS:
                     logger.debug("Could not initialize WCS for %s: %s", self.path, wcs_err)
                     self._wcs = None
-        except Exception as e:
-            logger.error("Failed to load FITS header %s: %s", self.path, e)
+        except FITS_READ_ERRORS:
+            logger.exception("Failed to load FITS header %s", self.path)
             raise
 
     def _load_data(self):  # ruff: ignore[missing-return-type-private-function]
@@ -149,7 +154,7 @@ class AstrometricsImage:
                 hdu = hdul[1] if hdul[0].data is None and len(hdul) > 1 else hdul[0]
                 try:
                     raw_data = hdu.data
-                except Exception as read_err:
+                except FITS_READ_ERRORS as read_err:
                     logger.warning("FITS data array corrupted or truncated in %s: %s", self.path, read_err)
                     raw_data = None
 
@@ -157,8 +162,8 @@ class AstrometricsImage:
                     self._data = collapse_to_2d(raw_data.astype(float))
                 else:
                     self._data = np.zeros((0, 0))
-        except Exception as e:
-            logger.error("Failed to load FITS data %s: %s", self.path, e)
+        except FITS_READ_ERRORS:
+            logger.exception("Failed to load FITS data %s", self.path)
             self._data = np.zeros((0, 0))
 
     @property
@@ -211,7 +216,7 @@ class AstrometricsImage:
         try:
             t = Time(date_str)
             return float(t.unix)
-        except Exception as e:
+        except (ValueError, TypeError) as e:
             logger.debug("Failed to parse DATE-OBS '%s': %s", date_str, e)
             return None
 
@@ -272,7 +277,7 @@ class AstrometricsImage:
             try:
                 res = self.wcs.wcs_world2pix(ra, dec, 0)
                 return float(res[0]), float(res[1])
-            except Exception:
+            except DATA_ERRORS:
                 return None
         return None
 
@@ -296,6 +301,6 @@ class AstrometricsImage:
             try:
                 res = self.wcs.wcs_pix2world(x, y, 0)
                 return float(res[0]), float(res[1])
-            except Exception:
+            except DATA_ERRORS:
                 return None
         return None

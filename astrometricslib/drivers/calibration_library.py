@@ -12,6 +12,7 @@ from astropy.io import fits
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.utilities.iso_text import iso_or_gain_values_match
 
 logger = logging.getLogger(__name__)
@@ -206,8 +207,8 @@ class CalibrationLibrary(BaseModel):
                     with open(file_path, encoding="utf8") as file_obj:
                         calibration_info = json.load(file_obj)
                         self.deserialize(calibration_info)
-        except Exception as e:
-            logger.error("Could not load calibration_frames.json: %s", e)
+        except OSError, ValueError, KeyError, TypeError:
+            logger.exception("Could not load calibration_frames.json")
 
     def save_library(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Save calibration library."""
@@ -220,8 +221,8 @@ class CalibrationLibrary(BaseModel):
                 os.makedirs(os.path.dirname(file_path), exist_ok=True)
                 with open(file_path, "w", encoding="utf8") as file_obj:
                     json.dump(self.serialize(), file_obj, indent=4)
-        except Exception as e:
-            logger.error("Could not save calibration_frames.json: %s", e)
+        except OSError, ValueError, TypeError:
+            logger.exception("Could not save calibration_frames.json")
 
     def serialize(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Serialize this calibration library to a plain dict.
@@ -437,8 +438,8 @@ class CalibrationLibrary(BaseModel):
 
                     if image_file not in self.dark_frames[camera][iso_speed][exposure_time]:
                         self.dark_frames[camera][iso_speed][exposure_time].append(image_file)
-        except Exception as e:
-            logger.error("Error adding dark frame %s: %s", image_file, e)
+        except FITS_READ_ERRORS:
+            logger.exception("Error adding dark frame %s", image_file)
 
     def add_bias_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a bias frame to the library."""
@@ -460,8 +461,8 @@ class CalibrationLibrary(BaseModel):
                         self.bias_frames[camera][iso_speed] = []
                     if image_file not in self.bias_frames[camera][iso_speed]:
                         self.bias_frames[camera][iso_speed].append(image_file)
-        except Exception as e:
-            logger.error("Error adding bias frame %s: %s", image_file, e)
+        except FITS_READ_ERRORS:
+            logger.exception("Error adding bias frame %s", image_file)
 
     def add_flat_frame(self, image_file, telescope="Unknown"):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Add a flat frame to the library."""
@@ -493,8 +494,8 @@ class CalibrationLibrary(BaseModel):
 
                     if image_file not in self.flat_frames[telescope][camera][filter_val][iso_speed]:
                         self.flat_frames[telescope][camera][filter_val][iso_speed].append(image_file)
-        except Exception as e:
-            logger.error("Error adding flat frame %s: %s", image_file, e)
+        except FITS_READ_ERRORS:
+            logger.exception("Error adding flat frame %s", image_file)
 
     def check_for_calibration_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
         self,
@@ -529,14 +530,14 @@ class CalibrationLibrary(BaseModel):
         has_all_frames : `bool`
             `True` if at least one dark, bias, and flat frame each
             exist for the given parameters; `False` otherwise
-            (including if the lookup itself raises).
+            (including if a stored exposure or setting cannot be read).
         """
         try:
             darks = self.get_dark_frames(camera=camera, exposure=exposure)
             biases = self.get_bias_frames(camera=camera)
             flats = self.get_flat_frames(telescope=telescope, camera=camera, filter_type=filter_type)
             return bool(darks and biases and flats)
-        except Exception:
+        except ValueError, TypeError, KeyError:
             return False
 
     def _find_camera_key(self, frame_dict: dict[str, Any], camera: str) -> str | None:

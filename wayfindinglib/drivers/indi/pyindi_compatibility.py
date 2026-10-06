@@ -6,6 +6,9 @@ separately from this project's Python dependencies (see
 Documentation builds, CI test runs, and developer machines without INDI
 installed must still be able to import every module under
 ``wayfindinglib.drivers.indi``.
+
+It also names ``INDI_ERRORS``, the errors a call into ``PyIndi`` can raise
+when a device reports something unexpected.
 """
 
 
@@ -101,3 +104,12 @@ try:
     import PyIndi  # type: ignore[import-untyped, missing-import]
 except ImportError:
     PyIndi = PyIndiStub()
+
+#: The errors a call into ``PyIndi`` can raise when a device reports
+#: something odd. SWIG, the tool that builds the binding, turns a C++ error
+#: into ``RuntimeError`` and a wrong argument type into ``TypeError``. A
+#: property that is missing or shorter than expected gives ``TypeError``
+#: (from ``None``) or ``IndexError``, and a text value that is not a number
+#: gives ``ValueError``. Code that talks to a device catches this tuple
+#: instead of every exception, so a real bug still shows up.
+INDI_ERRORS: tuple[type[Exception], ...] = (RuntimeError, TypeError, ValueError, IndexError)

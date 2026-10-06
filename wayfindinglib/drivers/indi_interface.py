@@ -27,7 +27,7 @@ from .indi.enclosure_controller import EnclosureController
 from .indi.filter_wheel_controller import FilterWheelController
 from .indi.focuser_controller import FocuserController
 from .indi.mount_controller import MountController
-from .indi.pyindi_compatibility import PyIndi
+from .indi.pyindi_compatibility import INDI_ERRORS, PyIndi
 from .indi.switch_controller import SwitchController
 from .indi.weather_controller import WeatherController
 
@@ -292,7 +292,7 @@ class IndiInterface(IndiClient):
                 name = device.getDeviceName()
                 if name and name.strip():
                     self.deviceMap[name] = device
-            except Exception as e:
+            except INDI_ERRORS as e:
                 logger.debug("Failed to query device name on newDevice: %s", e)
 
     def removeDevice(self, device: Any) -> None:
@@ -310,7 +310,7 @@ class IndiInterface(IndiClient):
                 name = device.getDeviceName()
                 if name in self.deviceMap:
                     self.deviceMap.pop(name, None)
-            except Exception as e:
+            except INDI_ERRORS as e:
                 logger.debug("Failed to query device name on removeDevice: %s", e)
 
     def _sync_config(self):  # ruff: ignore[missing-return-type-private-function]
@@ -393,7 +393,7 @@ class IndiInterface(IndiClient):
                 name = device.getDeviceName()
                 if name and name.strip():
                     self.deviceMap[name] = self.getDevice(name)
-            except Exception as e:
+            except INDI_ERRORS as e:
                 logger.debug("Failed to resolve device name in connect_to_server: %s", e)
 
         return self
@@ -530,7 +530,7 @@ class IndiInterface(IndiClient):
                     if connect_switch and connect_switch[0].getState() != PyIndi.ISS_ON:
                         connect_switch[0].setState(PyIndi.ISS_ON)
                         self.sendNewSwitch(connect_switch)
-                except Exception as connect_error:
+                except INDI_ERRORS as connect_error:
                     # Ignore connection errors for individual devices,
                     # keep trying others
                     logger.warning("Error connecting device '%s': %s", device_name, connect_error)
@@ -909,7 +909,7 @@ class IndiInterface(IndiClient):
                 match = re.search(r"EXPTIME\s*=\s*([\d\.]+)", raw_text, re.IGNORECASE)
                 if match:
                     return float(match.group(1))
-        except Exception as exptime_err:
+        except INDI_ERRORS as exptime_err:
             logger.debug("Failed to read EXPTIME from FITS_HEADER: %s", exptime_err)
         return None
 
@@ -998,7 +998,7 @@ class IndiInterface(IndiClient):
             fits_header = camera.getText("FITS_HEADER")
             if fits_header:
                 self._extract_target_from_text_property(fits_header)
-        except Exception as header_error:
+        except INDI_ERRORS as header_error:
             logger.debug("Failed to read camera FITS_HEADER: %s", header_error)
 
     def _extract_target_from_text_property(self, text_vector: Any) -> None:
@@ -1034,7 +1034,7 @@ class IndiInterface(IndiClient):
                     if clean_name and clean_name.upper() not in ("UNKNOWN", "-", "NONE"):
                         self.status["TARGET_NAME"] = clean_name
                         return
-        except Exception as extract_error:
+        except INDI_ERRORS as extract_error:
             logger.debug("Failed to extract target from text property: %s", extract_error)
 
     def get_coordinates(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -1059,7 +1059,7 @@ class IndiInterface(IndiClient):
                 # simulators), calculate them if possible
                 try:
                     self._calculate_horizontal_coordinates(telescope, telescope_coordinates)
-                except Exception as coord_error:
+                except (*INDI_ERRORS, u.UnitsError) as coord_error:
                     logger.warning("Error calculating horizontal coordinates: %s", coord_error)
 
         if "RA" not in self.status:
@@ -1299,7 +1299,7 @@ class IndiInterface(IndiClient):
                         self._sync_mode_active = False
                         self._pre_sync_ra = None
                         self._pre_sync_dec = None
-        except Exception as switch_error:
+        except INDI_ERRORS as switch_error:
             logger.debug("Error checking external switch property: %s", switch_error)
 
     def newNumber(self, number_vector: Any) -> None:
@@ -1525,8 +1525,11 @@ class IndiInterface(IndiClient):
                     fits_exptime = self._extract_exptime_from_camera(camera) if camera else None
                     self._handle_exposure_update(val, is_busy, fits_exptime)
 
-        except Exception as pulse_error:
-            logger.debug("Error handling property update in newNumber: %s", pulse_error)
+        except Exception:
+            # PyIndi calls this from its own thread. An error that escaped
+            # into the C++ library would stop the client, so every error is
+            # logged here with its traceback and the update is dropped.
+            logger.exception("Error handling property update in newNumber")
 
     def newText(self, text_vector: Any) -> None:
         """Handle a text property update from the INDI server.
@@ -1543,7 +1546,7 @@ class IndiInterface(IndiClient):
             property_name = text_vector.getName()
             if property_name in ("FITS_HEADER", "OBJECT_INFO", "TARGET_NAME", "OBJECT_NAME"):
                 self._extract_target_from_text_property(text_vector)
-        except Exception as text_error:
+        except INDI_ERRORS as text_error:
             logger.debug("Error checking external text property: %s", text_error)
 
     def get_device_names(self) -> list[str]:
@@ -1566,7 +1569,7 @@ class IndiInterface(IndiClient):
         for device in self.getDevices() or []:
             try:
                 name = device.getDeviceName()
-            except Exception as error:
+            except INDI_ERRORS as error:
                 logger.debug("Failed to read an INDI device name: %s", error)
                 continue
             if name and name.strip():
@@ -1651,12 +1654,12 @@ class IndiInterface(IndiClient):
                                 elif state == PyIndi.IPS_ALERT:
                                     state_str = "Alert"
                                 elements[vector[i].name] = state_str
-                except Exception as element_error:
+                except INDI_ERRORS as element_error:
                     property_info["error"] = str(element_error)
 
                 property_info["elements"] = elements
                 result[property_name] = property_info
-            except Exception as property_error:
+            except INDI_ERRORS as property_error:
                 logger.warning("Error processing property: %s", property_error)
 
         return result
@@ -1707,7 +1710,7 @@ class IndiInterface(IndiClient):
                 if found:
                     self.sendNewSwitch(property_vector)
                     return True
-        except Exception as property_error:
+        except INDI_ERRORS as property_error:
             logger.warning("Error setting property %s: %s", property_name, property_error)
 
         return False
@@ -1722,7 +1725,7 @@ class IndiInterface(IndiClient):
         """
         try:
             self.mount_controller.set_tracking(telescope_device, False)
-        except Exception as tracking_error:
+        except INDI_ERRORS as tracking_error:
             logger.warning("Error enforcing default tracking: %s", tracking_error)
 
     def unpark(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

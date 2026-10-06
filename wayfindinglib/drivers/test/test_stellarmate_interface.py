@@ -59,14 +59,29 @@ def test_run_command_fails_fast_within_offline_cooldown():  # ruff: ignore[missi
 def test_check_connection_returns_false_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify check_connection() returns False rather than raising."""
     driver = StellarMateInterface(host_alias="test-host")
-    with patch.object(driver, "_run_command", side_effect=RuntimeError("unreachable")):
+    with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.check_connection() is False
+
+
+def test_check_connection_does_not_hide_a_bug() -> None:
+    """Verify an error that is not a connection failure reaches the caller.
+
+    Only a failed command (``ExternalServiceError``) or a missing ``ssh``
+    program (``OSError``) means "not connected". A coding mistake must
+    show up instead of reading as an offline host.
+    """
+    driver = StellarMateInterface(host_alias="test-host")
+    with (
+        patch.object(driver, "_run_command", side_effect=AttributeError("a coding mistake")),
+        pytest.raises(AttributeError),
+    ):
+        driver.check_connection()
 
 
 def test_list_remote_targets_returns_empty_list_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify list_remote_targets() degrades to an empty list on failure."""
     driver = StellarMateInterface(host_alias="test-host")
-    with patch.object(driver, "_run_command", side_effect=RuntimeError("unreachable")):
+    with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.list_remote_targets() == []
 
 
@@ -154,7 +169,7 @@ def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder():  # ruff: ig
 def test_listing_is_empty_when_the_host_cannot_be_reached():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify an unreachable telescope computer gives an empty list."""
     driver = _make_driver()
-    with patch.object(driver, "_run_command", side_effect=RuntimeError("unreachable")):
+    with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.list_remote_guide_logs() == []
         assert driver.list_remote_ekos_analyze_logs() == []
 

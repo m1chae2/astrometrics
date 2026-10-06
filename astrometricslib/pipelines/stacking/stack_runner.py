@@ -23,7 +23,9 @@ import os
 import shutil
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.stacking_engine import StackingEngine, StackSettings
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -414,7 +416,7 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
     exposure = next((value for value in map(frame_exposure_seconds, frames) if value is not None), 0.0)
     try:
         saturation = measure_group_saturation(frames)
-    except Exception as measurement_error:  # a measurement must not cost the stack
+    except (*FITS_READ_ERRORS, *DATA_ERRORS) as measurement_error:  # a measurement must not cost the stack
         logger.warning("Could not measure saturation for '%s': %s", stacked_path, measurement_error)
         saturation = []
     diagnostics["exposure_group_summaries"] = [
@@ -684,7 +686,8 @@ def _stack_exposure_groups(
     for index, (group, _, diagnostics) in enumerate(results):
         try:
             saturation = measure_group_saturation(group.frames)
-        except Exception as measurement_error:  # a measurement must not cost the stack
+        except (*FITS_READ_ERRORS, *DATA_ERRORS) as measurement_error:
+            # A measurement must not cost the stack.
             logger.warning("Could not measure saturation for '%s': %s", target_id, measurement_error)
             saturation = []
         saturation_by_group.append(saturation)
@@ -770,7 +773,7 @@ def _measure_combined_fwhm(combined: Any, used_images: list[Any]) -> float | Non
     try:
         plane = collapse_to_2d(np.asarray(combined, dtype=float))
         fwhm = measure_fwhm_from_data(plane, excluded_mask=saturated_pixel_mask(used_images))
-    except Exception as measurement_error:
+    except DATA_ERRORS as measurement_error:
         logger.warning("Could not measure the star width of the combined stack: %s", measurement_error)
         return None
     return None if fwhm is None else float(fwhm)

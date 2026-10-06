@@ -6,6 +6,7 @@ light-frame sync thread.
 """
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 _syncing: dict[str, object] = {}
 
 
-def start_sync(object_id: str, target):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def start_sync(object_id: str, target: Any) -> dict[str, bool]:
     """Start `target`'s light-frame sync thread and track it.
 
     Parameters
@@ -32,11 +33,7 @@ def start_sync(object_id: str, target):  # ruff: ignore[missing-type-function-ar
     result : `dict`
         Dict with ``"started"`` set to `True`.
     """
-    thread = target.sync_light_frames()
-    try:
-        _syncing[object_id] = thread
-    except Exception as exc:
-        logger.debug("Failed to register sync thread for '%s': %s", object_id, exc)
+    _syncing[object_id] = target.sync_light_frames()
     return {"started": True}
 
 
@@ -52,16 +49,12 @@ def is_syncing(object_id: str) -> bool:
         `True` if a tracked sync thread for `object_id` exists and
         is still running, `False` otherwise.
     """
-    try:
-        thread = _syncing.get(object_id)
-        if not thread:
-            return False
-        alive = thread.is_alive()
-        if not alive:
-            try:
-                del _syncing[object_id]
-            except Exception as exc:
-                logger.debug("Failed to prune finished sync thread for '%s': %s", object_id, exc)
-        return alive
-    except Exception:
+    thread = _syncing.get(object_id)
+    if not thread:
         return False
+    alive = thread.is_alive()
+    if not alive:
+        # pop() with a default does nothing if another caller already
+        # removed the entry.
+        _syncing.pop(object_id, None)
+    return alive

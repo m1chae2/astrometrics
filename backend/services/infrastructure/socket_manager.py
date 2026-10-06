@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
@@ -12,12 +12,13 @@ logger = logging.getLogger(__name__)
 class SocketManager:
     """Manage active websocket connections and broadcast events."""
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
+        """Start with no clients and keep the event loop, if there is one."""
         self.active_connections: list[WebSocket] = []
         self._loop = None
         try:
             self._loop = asyncio.get_event_loop()
-        except Exception as exc:
+        except RuntimeError as exc:
             logger.debug("No event loop available at construction time: %s", exc)
 
     async def connect(self, websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -35,7 +36,7 @@ class SocketManager:
             self.active_connections.remove(websocket)
             logger.info("Client disconnected. Active connections: %s", len(self.active_connections))
 
-    async def broadcast(self, message: dict):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    async def broadcast(self, message: dict) -> None:
         """Broadcast a JSON message to all connected clients."""
         payload = json.dumps(message)
         dead_connections = []
@@ -43,7 +44,8 @@ class SocketManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(payload)
-            except Exception as e:
+            except (WebSocketDisconnect, RuntimeError, OSError) as e:
+                # The client went away or the socket is already closed.
                 logger.warning("Failed to send to client: %s", e)
                 dead_connections.append(connection)
 

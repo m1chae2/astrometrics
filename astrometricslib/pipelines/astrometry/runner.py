@@ -9,6 +9,8 @@ import logging
 import os
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
@@ -25,6 +27,7 @@ from astrometricslib.pipelines.shared.star_recording import (
     record_pipeline_stars,
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,7 @@ def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
             # measured/computed value comparison.
             if resolved_ra_deg == 0.0 and resolved_dec_deg == 0.0:
                 is_zero = True
-        except Exception:
+        except InvalidArgumentError:
             is_zero = True
 
     if not (is_ra_empty or is_dec_empty or is_zero):
@@ -72,7 +75,7 @@ def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
         logger.info(
             "Updated Target %s RA/Dec from plate solver: RA=%s, DEC=%s", target.id, target.ra, target.dec
         )
-    except Exception as wcs_error:
+    except DATA_ERRORS as wcs_error:
         logger.warning("Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error)
 
 
@@ -96,7 +99,7 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
                 hdul[0].header[card.keyword] = (card.value, card.comment)
             hdul.flush()
         logger.info("Updated FITS file %s header with solved WCS keywords.", path)
-    except Exception as wcs_error:
+    except FITS_READ_ERRORS as wcs_error:
         logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
 
 

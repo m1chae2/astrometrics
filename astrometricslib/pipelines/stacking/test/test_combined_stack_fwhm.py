@@ -62,7 +62,7 @@ def test_a_failed_measurement_gives_no_width_instead_of_an_error() -> None:
     """The measurement is advisory: a failure leaves the width unknown."""
     combined, images = make_group_images()
 
-    with patch(MEASURE, side_effect=RuntimeError("no stars")):
+    with patch(MEASURE, side_effect=ValueError("no stars")):
         assert stack_runner._measure_combined_fwhm(combined, images) is None
 
 

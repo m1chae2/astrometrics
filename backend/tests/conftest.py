@@ -25,6 +25,10 @@ sys.modules["astroquery"] = mock_astroquery
 sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.gaia"] = mock_astroquery.gaia
+# Code catches astroquery's own TimeoutError, so the stand-in must be a
+# real exception class rather than a mock attribute.
+mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
+sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 import pytest
 from fastapi.testclient import TestClient

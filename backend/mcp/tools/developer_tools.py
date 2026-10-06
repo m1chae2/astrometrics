@@ -64,7 +64,7 @@ async def verify_syntax(  # ruff: ignore[unused-async] -- awaited by ToolRegistr
                 "offset": e.offset,
                 "text": e.text.strip() if e.text else None,
             })
-        except Exception as e:
+        except (OSError, ValueError) as e:
             errors.append({"path": path, "error": f"Failed to read file: {e}"})
 
     return {
@@ -144,7 +144,7 @@ async def run_tests(  # ruff: ignore[unused-async] -- awaited by ToolRegistry.ex
         }
     except subprocess.TimeoutExpired:
         return {"status": "error", "message": "Test execution timed out."}
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return {"status": "error", "message": f"Execution failed: {e!s}"}
 
 
@@ -257,7 +257,7 @@ async def audit_imports(  # ruff: ignore[unused-async] -- awaited by ToolRegistr
             try:
                 with open(file_path, encoding="utf-8") as f:
                     tree = ast.parse(f.read(), filename=file_path)
-            except Exception as e:
+            except (OSError, SyntaxError, ValueError) as e:
                 violations.append({"file": file_path, "error": f"Failed to parse AST: {e}"})
                 continue
 

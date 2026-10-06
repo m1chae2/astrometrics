@@ -2,10 +2,11 @@
 
 import logging
 import os
+import sqlite3
 import time
 from typing import Any
 
-from astrometricslib import NotFoundError
+from astrometricslib import AstrometricsError, NotFoundError
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
 logger = logging.getLogger(__name__)
@@ -145,8 +146,8 @@ class ImageProcessingService(BaseBackgroundService):
         try:
             self.siril.launch_siril_gui(path)
             return True
-        except Exception as e:
-            logger.error("Failed to launch Siril for %s: %s", target_id, e)
+        except AstrometricsError, OSError, ValueError:
+            logger.exception("Failed to launch Siril for %s", target_id)
             return False
 
     def process_target(self, target_id: str, image_files: list) -> dict:
@@ -179,7 +180,7 @@ class ImageProcessingService(BaseBackgroundService):
                     elif hasattr(first, "model_dump"):
                         # Already models, convert to dicts for processors
                         image_files = [f.model_dump(by_alias=True) for f in image_files]
-            except Exception as e:
+            except (AstrometricsError, sqlite3.Error) as e:
                 logger.warning("Failed to rehydrate metadata for target %s: %s", target_id, e)
 
         # Create a unique log path for this job

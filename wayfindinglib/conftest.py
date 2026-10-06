@@ -24,3 +24,7 @@ mock_astroquery = MagicMock()
 sys.modules.setdefault("astroquery", mock_astroquery)
 sys.modules.setdefault("astroquery.simbad", mock_astroquery.simbad)
 sys.modules.setdefault("astroquery.astrometry_net", mock_astroquery.astrometry_net)
+# Code catches astroquery's own TimeoutError, so the stand-in must be a
+# real exception class rather than a mock attribute.
+mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
+sys.modules.setdefault("astroquery.exceptions", mock_astroquery.exceptions)

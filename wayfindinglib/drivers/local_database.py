@@ -20,6 +20,7 @@ from astrometricslib import connect_db as _connect_db
 from astrometricslib import safe_json_dumps as _safe_json_dumps
 
 if TYPE_CHECKING:
+    from astrometricslib import AppConfiguration
     from wayfindinglib.observationlib.observation_session import ObservationSession
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,9 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def save_observation_session(app_config=None, session=None) -> str:  # ruff: ignore[missing-type-function-argument]
+def save_observation_session(
+    app_config: AppConfiguration | None = None, session: ObservationSession | None = None
+) -> str:
     """Save a single ObservationSession to wayfindinglib's SQLite database.
 
     Parameters
@@ -113,8 +116,8 @@ def save_observation_session(app_config=None, session=None) -> str:  # ruff: ign
             ),
         )
         conn.commit()
-    except Exception as e:
-        logger.error("Error saving ObservationSession to SQLite: %s", e)
+    except Exception:
+        logger.exception("Error saving ObservationSession to SQLite")
         raise
     finally:
         conn.close()
@@ -288,7 +291,7 @@ def _ensure_generic_table(conn: sqlite3.Connection, table_name: str) -> None:
     conn.commit()
 
 
-def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  # ruff: ignore[missing-type-function-argument]
+def save_model(app_config: AppConfiguration | None, table_name: str, model_id: str, model: Any) -> str:
     """Record a Pydantic model to its own table under the given id.
 
     Parameters
@@ -321,8 +324,8 @@ def save_model(app_config, table_name: str, model_id: str, model: Any) -> str:  
             (model_id, _safe_json_dumps(model.model_dump(mode="json", by_alias=True))),
         )
         conn.commit()
-    except Exception as e:
-        logger.error("Error saving %s record to SQLite: %s", table_name, e)
+    except Exception:
+        logger.exception("Error saving %s record to SQLite", table_name)
         raise
     finally:
         conn.close()

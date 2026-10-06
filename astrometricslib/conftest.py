@@ -122,6 +122,10 @@ sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.imcce"] = mock_astroquery.imcce
 sys.modules["astroquery.gaia"] = mock_astroquery.gaia
+# Code catches astroquery's own TimeoutError, so the stand-in must be a
+# real exception class rather than a mock attribute.
+mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
+sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 
 def pytest_configure(config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

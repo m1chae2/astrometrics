@@ -97,8 +97,11 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
             from wayfindinglib.drivers.indi_interface import IndiInterface
 
             session = IndiInterface(config=config)
-    except Exception as build_error:
-        logger.error("INDI worker failed to build its session: %s", build_error)
+    except Exception:
+        # This is the top of the worker process, so any error has to stop
+        # here. The traceback is logged, and the loop below still runs so
+        # every request gets back a clear "no session" error.
+        logger.exception("INDI worker failed to build its session")
 
     serve_requests(session, command_queue, result_queue, parent_pid)
 
@@ -156,6 +159,9 @@ def serve_requests(session: Any, command_queue: Queue, result_queue: Queue, pare
             # The raw exception may not itself be picklable (PyIndi can
             # raise SWIG/C++-originated exception types) -- send plain
             # strings instead and let the client reconstruct a RuntimeError.
+            # This loop must not die, so the error is logged here and sent
+            # back to the caller, which raises it on its own side.
+            logger.exception("INDI worker call %s failed", method_name)
             error_tuple = (type(call_error).__name__, str(call_error), traceback.format_exc())
             result_queue.put((request_id, None, error_tuple))
 

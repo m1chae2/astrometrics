@@ -16,6 +16,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,10 @@ def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict
         result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
         result["status"] = "success"
     except Exception as processing_error:
+        # This runs in a worker process, so it is the last place that can
+        # catch an error from one frame. The traceback is logged and the
+        # frame is recorded as failed, so the rest of the batch goes on.
+        logger.exception("Spectroscopy analysis failed for frame %s", path)
         result["error"] = str(processing_error)
 
     return result
@@ -311,7 +316,7 @@ def _project_session_stars_to_frame_pixels(
                 dec=float(star.declination) * astropy_units.deg,
             )
             x, y = wcs.world_to_pixel(coord)
-        except Exception as exc:
+        except DATA_ERRORS as exc:
             logger.debug("Skipping star projection for one identified star: %s", exc)
             continue
 
@@ -423,6 +428,10 @@ def _process_single_spectroscopy_frame_worker_v2(
 
         result["status"] = "success"
     except Exception as processing_error:
+        # This runs in a worker process, so it is the last place that can
+        # catch an error from one frame. The traceback is logged and the
+        # frame is recorded as failed, so the rest of the batch goes on.
+        logger.exception("Spectroscopy analysis failed for frame %s", path)
         result["error"] = str(processing_error)
 
     return result

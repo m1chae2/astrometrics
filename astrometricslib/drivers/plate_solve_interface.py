@@ -18,6 +18,9 @@ from typing import Any
 
 from astropy.io import fits
 from astroquery.astrometry_net import AstrometryNet
+from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
+
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,21 @@ _TRANSIENT_NETWORK_ERROR_TYPES: tuple[type[BaseException], ...] = (
     http.client.IncompleteRead,
     http.client.RemoteDisconnected,
     socket.gaierror,
+)
+
+# The errors an online solve call can raise. ``OSError`` covers the network
+# errors (requests' errors are ``OSError`` too). ``http.client.HTTPException``
+# covers a reply the server cut off. astroquery raises ``RuntimeError`` and
+# ``ValueError`` for a failed or rejected job, and its own ``TimeoutError``
+# when a solve job runs too long. ``KeyError`` comes from a reply that is
+# missing a field.
+_ONLINE_SOLVE_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    http.client.HTTPException,
+    RuntimeError,
+    ValueError,
+    KeyError,
+    AstroqueryTimeoutError,
 )
 
 # Fewest detected stars worth handing to the local solver at all. A quad
@@ -154,7 +172,7 @@ def _call_with_transient_retry(
         try:
             _plate_solve_attempts += 1
             return solve_call()
-        except Exception as solve_error:
+        except _ONLINE_SOLVE_ERRORS as solve_error:
             if not _is_transient_network_error(solve_error):
                 logger.warning("%s failed: %s", description, solve_error)
                 return None
@@ -268,7 +286,7 @@ class PlateSolver:
 
         return None
 
-    def _solve_locally(self, image_path: str, **kwargs) -> fits.Header | None:  # ruff: ignore[missing-type-kwargs]
+    def _solve_locally(self, image_path: str, **kwargs: Any) -> fits.Header | None:
         """Try to solve the image using the program installed on this computer.
 
         Returns
@@ -394,7 +412,7 @@ class PlateSolver:
                     if header is not None:
                         logger.info("Blind local solve succeeded where the hinted solve did not.")
                         return header
-            except Exception as e:
+            except (subprocess.SubprocessError, *FITS_READ_ERRORS) as e:
                 logger.warning("Local solve failed: %s", e)
 
         return None
@@ -455,7 +473,7 @@ class PlateSolver:
             description="Online source solve",
         )
 
-    def _solve_online_image(self, image_path: str, **kwargs) -> fits.Header | None:  # ruff: ignore[missing-type-kwargs]
+    def _solve_online_image(self, image_path: str, **kwargs: Any) -> fits.Header | None:
         """Try to solve by uploading the whole image to the internet.
 
         Returns
@@ -488,7 +506,7 @@ class PlateSolver:
                         upload_path, overwrite=True
                     )
                     logger.info("Flattened %s colour stack to 2D for the online solve.", image_data.shape)
-        except Exception as flatten_error:
+        except FITS_READ_ERRORS as flatten_error:
             # Falling back to the original path keeps behaviour no worse
             # than before if the frame cannot be read or rewritten.
             logger.debug("Could not prepare image for online solve: %s", flatten_error)

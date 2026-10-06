@@ -9,7 +9,8 @@ is everything that knows what a target or a stellar object actually is.
 import json
 import logging
 import os
-from typing import Any
+import sqlite3
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib.foundation.storage.local_database import connect_db as _connect_db
 from astrometricslib.foundation.storage.local_database import safe_json_dumps as _safe_json_dumps
@@ -19,10 +20,14 @@ __all__ = [
     "save_target",
 ]
 
+if TYPE_CHECKING:
+    from astrometricslib.foundation.config import AppConfiguration
+    from astrometricslib.models.target import Target
+
 logger = logging.getLogger(__name__)
 
 
-def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
+def load_targets(app_config: AppConfiguration | None = None) -> list[Any]:
     """Load targets from the SQLite database.
 
     Parameters
@@ -67,15 +72,17 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
         for row in rows:
             data = json.loads(row["data_json"])
             targets.append(Target.model_validate(data))
-    except Exception as e:
-        logger.error("Error loading targets from SQLite: %s", e)
+    except sqlite3.Error, ValueError:
+        # ValueError covers bad JSON and a stored target that no longer
+        # passes validation. The targets read so far are still returned.
+        logger.exception("Error loading targets from SQLite")
     finally:
         conn.close()
 
     return targets
 
 
-def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-type-function-argument]
+def save_target(app_config: AppConfiguration | None = None, target: Target | None = None) -> str:
     """Save a single target to the SQLite database.
 
     Parameters
@@ -116,8 +123,8 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
             (target.id, target.common_name, target.ra, target.dec, _safe_json_dumps(target.serialize())),
         )
         conn.commit()
-    except Exception as e:
-        logger.error("Error saving target to SQLite: %s", e)
+    except Exception:
+        logger.exception("Error saving target to SQLite")
         raise
     finally:
         conn.close()

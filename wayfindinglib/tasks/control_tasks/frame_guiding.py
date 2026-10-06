@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import FrameSelection, select_library_frames
+from astrometricslib import FrameSelection, NotFoundError, select_library_frames
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
@@ -184,12 +184,19 @@ def link_frames_to_guiding(
     -------
     report : `dict` [`str`, `Any`]
         ``frames`` (one row per frame) and ``group`` (the median error and
-        the frames well above it), or ``{"error": ...}``.
+        the frames well above it).
+
+    Raises
+    ------
+    NotFoundError
+        If no target has the id `target_id`.
     """
     limit = max(1, min(int(limit), MAXIMUM_FRAMES))
     target = context.astrometrics.targets.get(target_id, refresh=True)
     if target is None:
-        return {"error": f"No target with id {target_id!r} in the library."}
+        raise NotFoundError(
+            f"No target with id {target_id!r} in the library.", details={"target_id": target_id}
+        )
     lights = [frame for frame in target.frames if str(frame.role).upper() == "LIGHT"]
     chosen = select_library_frames(lights, selection)
     chosen = [frame for frame in chosen if frame.timestamp is not None]

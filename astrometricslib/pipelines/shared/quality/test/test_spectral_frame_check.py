@@ -4,6 +4,8 @@ A made-up frame is used: flat noisy sky, a bright zero-order star, and a
 vertical streak running down from it with a known width and brightness.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -125,3 +127,23 @@ def test_the_summary_groups_by_exposure_and_by_pier_side() -> None:
     assert summary["by_exposure"]["5"]["spectrum_has_saturated_pixels"] == 1
     assert summary["by_pier_side"]["EAST"]["median_tilt_degrees"] == pytest.approx(4.1)
     assert summary["by_pier_side"]["WEST"]["largest_tilt_degrees"] == pytest.approx(1.2)
+
+
+def test_a_frame_without_a_zero_order_star_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a frame with no clear zero order raises `ProcessingError`.
+
+    It used to return ``{"error": ...}``, which a caller could mistake for
+    a measurement.
+    """
+    from astropy.io import fits
+
+    from astrometricslib.foundation.errors import ProcessingError
+    from astrometricslib.pipelines.shared.quality import spectral_frame_check
+    from astrometricslib.pipelines.stacking.processing import group_alignment
+
+    path = tmp_path / "flat.fits"
+    fits.PrimaryHDU(np.full((64, 64), SKY, dtype=np.float32)).writeto(path)
+    monkeypatch.setattr(group_alignment, "find_zero_order_position", lambda plane: None)
+
+    with pytest.raises(ProcessingError, match="zero-order"):
+        spectral_frame_check.measure_spectral_frame_file(str(path), "camera", 5.0, GEOMETRY)

@@ -369,17 +369,20 @@ def plan_target_download(context: ControlContext, target_id: str) -> dict[str, A
 
     Raises
     ------
-    ValueError
+    NotFoundError
         If no remote target folder matches `target_id`.
     """
-    from astrometricslib import get_configuration
+    from astrometricslib import NotFoundError, get_configuration
 
     driver = context.remote_transfer_driver
     folders = list_remote_target_folders(context)
     matching = matching_remote_folder(context, target_id, folders)
     if matching is None:
         shown = ", ".join(sorted(folders)[:15]) or "none found (is the telescope computer reachable?)"
-        raise ValueError(f"No remote target folder matches {target_id!r}. Remote target folders: {shown}.")
+        raise NotFoundError(
+            f"No remote target folder matches {target_id!r}. Remote target folders: {shown}.",
+            details={"target_id": target_id},
+        )
 
     config = get_configuration()
     frames_path = str(config.get_frames_path())
@@ -500,24 +503,23 @@ def sync_target_frames(context: ControlContext, target_id: str, dry_run: bool = 
     -------
     result : `dict` [`str`, `Any`]
         The plan from `plan_target_download` plus ``dry_run``, and for a
-        real run ``success`` and ``transferred``. A problem comes back
-        under ``error``.
-    """
-    from astrometricslib import StorageNotMountedError, get_configuration, require_mounted_storage
+        real run ``success`` and ``transferred``.
 
-    try:
-        plan = plan_target_download(context, target_id)
-    except ValueError as error:
-        return {"error": str(error)}
+    Notes
+    -----
+    `plan_target_download` raises `NotFoundError` when no remote target
+    folder matches `target_id`, and a real run raises
+    `StorageNotMountedError` when the frames drive is not mounted.
+    """
+    from astrometricslib import get_configuration, require_mounted_storage
+
+    plan = plan_target_download(context, target_id)
     result: dict[str, Any] = {"dry_run": dry_run, **plan}
     if dry_run:
         return result
     if plan["to_transfer"] == 0:
         return {**result, "success": True, "transferred": 0, "message": "Nothing new to transfer."}
-    try:
-        require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
-    except StorageNotMountedError as error:
-        return {**result, "success": False, "transferred": 0, "error": str(error)}
+    require_mounted_storage(os.path.join(str(get_configuration().get_frames_path()), "lights"))
     from astrometricslib import get_current_job
 
     job = get_current_job()
@@ -609,14 +611,21 @@ def sync_remote_logs(
     -------
     result : `dict` [`str`, `Any`]
         The plan from `plan_log_sync` plus ``dry_run`` and, for a real run,
-        ``ingested`` (what was read and stored). A problem comes back
-        under ``error``.
+        ``ingested`` (what was read and stored).
+
+    Raises
+    ------
+    ExternalServiceError
+        If the telescope computer cannot be reached.
     """
+    from astrometricslib import ExternalServiceError
     from wayfindinglib.tasks.control_tasks import ekos_log_ingestion
 
     destination_dir = destination_dir or context.ekos_log_directory()
     if not check_remote_connection(context):
-        return {"error": "The telescope computer cannot be reached, so no logs can be listed or fetched."}
+        raise ExternalServiceError(
+            "The telescope computer cannot be reached, so no logs can be listed or fetched."
+        )
     result: dict[str, Any] = {"dry_run": dry_run, **plan_log_sync(context, destination_dir)}
     if dry_run:
         return result

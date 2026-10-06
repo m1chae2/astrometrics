@@ -10,6 +10,9 @@ import os
 import types
 from pathlib import Path
 
+import pytest
+
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.tasks.control_tasks import live_session_status_task as task
 
 _ANALYZE = """\
@@ -122,8 +125,6 @@ def test_asked_sections_of_the_record_come_back_under_details(tmp_path: Path) ->
 
 
 def test_an_unknown_section_is_refused_before_any_file_is_read(tmp_path: Path) -> None:
-    """A made-up section name gives an error that lists the real ones."""
-    answer = task.get_live_session_status(None, str(tmp_path), refresh=False, include=["bogus"])
-
-    assert isinstance(answer, dict)
-    assert "autofocus_runs" in answer["error"]
+    """A made-up section name raises an error that lists the real ones."""
+    with pytest.raises(InvalidArgumentError, match="autofocus_runs"):
+        task.get_live_session_status(None, str(tmp_path), refresh=False, include=["bogus"])

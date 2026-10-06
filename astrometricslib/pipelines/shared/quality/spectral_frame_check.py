@@ -20,6 +20,8 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
+from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
+
 SATURATION_ADU = 65000
 """Pixels at or above this value count as saturated (16-bit frames). The
 same level the raw frame check uses."""
@@ -271,8 +273,12 @@ def measure_spectral_frame_file(
     -------
     measurements : `dict` [`str`, `Any`]
         See `analyze_spectral_frame`, plus ``zero_order_xy``,
-        ``tilt_degrees`` and ``trail_contrast``. When no zero order can be
-        found the reply says so under ``error`` and measures nothing else.
+        ``tilt_degrees`` and ``trail_contrast``.
+
+    Raises
+    ------
+    ProcessingError
+        No single clear zero-order star is near the centre of the frame.
     """
     from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
     from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
@@ -281,7 +287,9 @@ def measure_spectral_frame_file(
     data = np.asarray(collapse_to_2d(np.asarray(read_data(path), dtype=np.float64)))
     position = find_zero_order_position(data)
     if position is None:
-        return {"error": "No single clear zero-order star near the centre of the frame."}
+        raise ProcessingError(
+            "No single clear zero-order star near the centre of the frame.", details={"path": path}
+        )
     measured = analyze_spectral_frame(
         data,
         position,
@@ -452,7 +460,7 @@ def check_spectral_frames(
                     predict_exposure_seconds,
                 )
             )
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, AstrometricsError) as error:
             row["error"] = str(error)
         rows.append(row)
     return SpectralFrameCheckReport(

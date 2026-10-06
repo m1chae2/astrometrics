@@ -100,3 +100,20 @@ def test_zero_order_saturation_fraction_zero_for_unsaturated_normalised_stack():
     result = pipeline._process_single_star(image, (500.0, 500.0), auto_detect_angle=False)
 
     assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_a_trail_with_no_usable_samples_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a star with no usable spectrum samples raises `ProcessingError`.
+
+    It used to return ``{"error": ...}`` in place of a result.
+    """
+    from astrometricslib.foundation.errors import ProcessingError
+    from astrometricslib.pipelines.spectroscopy import pipeline as pipeline_module
+
+    monkeypatch.setattr(
+        pipeline_module, "keep_usable_samples", lambda wavelengths, *_args: np.zeros(len(wavelengths), bool)
+    )
+    image = MockAstrometricsImage(data=np.full((1000, 1000), 500.0))
+
+    with pytest.raises(ProcessingError, match="camera's range"):
+        _build_pipeline()._process_single_star(image, (500.0, 500.0), auto_detect_angle=False)

@@ -13,6 +13,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.drivers.ekos.analyze_log_parser import parse_ekos_analyze_log
 from wayfindinglib.drivers.ekos.kstars_log_parser import parse_dither_events
 from wayfindinglib.models.session.live_session_status import LiveSessionStatus
@@ -97,13 +98,17 @@ def get_live_session_status(
 
     Returns
     -------
-    status : `LiveSessionStatus`, `dict` or `None`
-        The session's status; ``{"error": ...}`` if `include` names an
-        unknown section; `None` if no readable analyze log exists.
+    status : `LiveSessionStatus` or `None`
+        The session's status; `None` if no readable analyze log exists.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `include` names an unknown section.
     """
     unknown = [name for name in (include or []) if name not in EKOS_SECTIONS]
     if unknown:
-        return {"error": f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."}
+        raise InvalidArgumentError(f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}.")
     if refresh:
         driver = context.remote_transfer_driver
         for method_name in ("download_ekos_analyze_logs", "download_kstars_logs"):

@@ -14,6 +14,7 @@ from unittest.mock import ANY, Mock, patch
 
 import pytest
 
+from astrometricslib import ExternalServiceError, NotFoundError
 from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as remote_operations
 
 
@@ -594,9 +595,11 @@ def test_plan_target_download_counts_new_and_held_files(tmp_path: Path) -> None:
 def test_plan_refuses_a_name_that_is_not_a_remote_target_folder() -> None:
     """A made-up name cannot reach the shell or create a target."""
     observatory, driver = _sync_observatory(["M_13", "Bias"], "x; rm -rf /", [])
-    with patch("astrometricslib.get_configuration", return_value=_patched_config()):
-        result = remote_operations.sync_target_frames(observatory, "x; rm -rf /", dry_run=False)
-    assert "No remote target folder matches" in result["error"]
+    with (
+        patch("astrometricslib.get_configuration", return_value=_patched_config()),
+        pytest.raises(NotFoundError, match="No remote target folder matches"),
+    ):
+        remote_operations.sync_target_frames(observatory, "x; rm -rf /", dry_run=False)
     driver.list_remote_files_with_sizes.assert_not_called()
     driver.download_target_folder.assert_not_called()
 
@@ -654,10 +657,9 @@ def test_real_run_refuses_when_the_drive_is_not_mounted(tmp_path: Path) -> None:
         patch(
             "astrometricslib.require_mounted_storage", side_effect=StorageNotMountedError("Mount /mnt/nas")
         ),
+        pytest.raises(StorageNotMountedError, match="Mount /mnt/nas"),
     ):
-        result = remote_operations.sync_target_frames(observatory, "M 13", dry_run=False)
-    assert result["success"] is False
-    assert "Mount /mnt/nas" in result["error"]
+        remote_operations.sync_target_frames(observatory, "M 13", dry_run=False)
     driver.download_target_folder.assert_not_called()
 
 
@@ -760,11 +762,10 @@ def test_log_sync_real_run_ingests_with_download(tmp_path: Path) -> None:
 
 
 def test_log_sync_refuses_when_the_telescope_computer_is_unreachable(tmp_path: Path) -> None:
-    """With no connection, the tool reports it and does nothing."""
+    """With no connection, the tool raises and does nothing."""
     observatory = _LogObservatory(tmp_path, reachable=False)
-    with _log_patches(observatory):
-        result = remote_operations.sync_remote_logs(observatory, dry_run=False)
-    assert "cannot be reached" in result["error"]
+    with _log_patches(observatory), pytest.raises(ExternalServiceError, match="cannot be reached"):
+        remote_operations.sync_remote_logs(observatory, dry_run=False)
     assert observatory.ingested == []
 
 

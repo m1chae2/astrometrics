@@ -217,9 +217,11 @@ class RemoteControl(ControlChild):
             folder or chosen files: ``success`` and ``target``. Calibration:
             ``success`` and the counts. A target: the plan (``remote_folder``,
             ``remote_files``, ``already_held``, ``to_transfer``, ``examples``)
-            and, for a real run, ``success`` and ``transferred``. A problem
-            comes back under ``error``. An argument that the chosen case
-            does not use is refused with `InvalidArgumentError`.
+            and, for a real run, ``success`` and ``transferred``. An
+            argument that the chosen case does not use is refused with
+            `InvalidArgumentError`. A target with no remote folder raises
+            `NotFoundError`, and a real run with the frames drive not
+            mounted raises `StorageNotMountedError`.
         """
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
 
@@ -286,7 +288,8 @@ class RemoteControl(ControlChild):
         result : `dict` [`str`, `Any`]
             The plan (how many logs exist and are new) and, for a real run,
             ``ingested`` (what was stored). Without downloading, only what
-            was stored. A problem comes back under ``error``.
+            was stored. An unreachable observatory computer raises
+            `ExternalServiceError`.
 
         Raises
         ------

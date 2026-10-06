@@ -11,7 +11,14 @@ equipment. Only `save_ekos_session_context` writes. The analyses live in
 
 from typing import Any, Literal
 
-from astrometricslib import InvalidArgumentError, Target, background_job, get_current_job, registered_job
+from astrometricslib import (
+    InvalidArgumentError,
+    NotFoundError,
+    Target,
+    background_job,
+    get_current_job,
+    registered_job,
+)
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
@@ -85,9 +92,10 @@ class HistoryControl(ControlChild):
         Returns
         -------
         reply : `dict` [`str`, `Any`]
-            The answer, or ``{"error": ...}``. If it had to be cut to fit,
-            ``truncated`` is true. An unknown `kind`, or an argument that
-            `kind` does not use, is refused with `InvalidArgumentError`.
+            The answer. If it had to be cut to fit, ``truncated`` is true.
+            An unknown `kind`, or an argument that `kind` does not use, is
+            refused with `InvalidArgumentError`. A night or Ekos session
+            with nothing recorded raises `NotFoundError`.
         """
         from wayfindinglib.tasks.control_tasks import night_history
 
@@ -142,8 +150,12 @@ class HistoryControl(ControlChild):
         Returns
         -------
         status : `dict`
-            See `LiveSessionStatus`. Only an ``"error"`` key if no readable
-            analyze log exists.
+            See `LiveSessionStatus`.
+
+        Raises
+        ------
+        NotFoundError
+            If no readable Ekos analyze log exists.
         """
         from wayfindinglib.tasks.control_tasks import live_session_status_task
         from wayfindinglib.tasks.control_tasks.night_history import fit_to_budget
@@ -159,9 +171,10 @@ class HistoryControl(ControlChild):
             limit=limit,
         )
         if status is None:
-            return {"error": f"No readable Ekos analyze log found in {destination_dir}."}
-        if isinstance(status, dict):
-            return status
+            raise NotFoundError(
+                f"No readable Ekos analyze log found in {destination_dir}.",
+                details={"destination_dir": destination_dir},
+            )
         return fit_to_budget(status.model_dump(mode="json"))
 
     def frame_guiding(
@@ -212,7 +225,8 @@ class HistoryControl(ControlChild):
         -------
         report : `dict`
             ``frames`` (one row per frame) and ``group`` (the median error
-            and the frames well above it), or ``{"error": ...}``.
+            and the frames well above it). An unknown target raises
+            `NotFoundError`.
 
         Raises
         ------

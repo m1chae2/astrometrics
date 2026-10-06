@@ -293,16 +293,14 @@ class TestRunAsBackgroundJob:
         assert stored.output_metrics["result"] == {"stackedImage": "Vega_Stacked.fits"}
 
     def test_failing_work_marks_the_job_failed_and_reports_the_error(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a quick failure is surfaced, not swallowed."""
+        """Verify a quick failure is raised to the caller, not swallowed."""
         from astrometricslib.drivers.job_logging import run_as_background_job
 
         def _broken_work(job: object) -> None:
             raise RuntimeError("stacking blew up")
 
-        outcome = run_as_background_job("stacking", "Vega", _broken_work, grace_period_seconds=2.0)
-
-        assert outcome["status"] == "failed"
-        assert "stacking blew up" in outcome["error"]
+        with pytest.raises(RuntimeError, match="stacking blew up"):
+            run_as_background_job("stacking", "Vega", _broken_work, grace_period_seconds=2.0)
 
     def test_pre_and_post_snapshots_are_stashed_in_output_metrics(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
         """Verify a snapshot_fn's before/after results land in output_metrics.

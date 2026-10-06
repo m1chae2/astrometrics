@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.tasks.control_tasks import night_analysis
 
 if TYPE_CHECKING:
@@ -344,15 +344,23 @@ def build_night_history(
     Returns
     -------
     reply : `dict` [`str`, `Any`]
-        The answer under a key named for the kind, or ``{"error": ...}``.
-        Always under ``MAXIMUM_REPLY_CHARACTERS``; if it had to be cut,
-        ``truncated`` is set.
+        The answer under a key named for the kind. Always under
+        ``MAXIMUM_REPLY_CHARACTERS``; if it had to be cut, ``truncated``
+        is set.
 
     Raises
     ------
     InvalidArgumentError
         If `kind` is unknown, or an argument is given that `kind` does not
         use.
+
+    Notes
+    -----
+    The helpers also raise: `NotFoundError` when nothing is recorded for
+    the night or Ekos session asked about, `InvalidArgumentError` when a
+    required argument is missing, `ConflictError` for ``"sky_coverage"``
+    when no telescope and camera are active, and `ConfigurationError` for
+    ``"pointing_model"`` when no observer location is known.
     """
     if kind not in KINDS:
         raise InvalidArgumentError(f"kind must be one of: {', '.join(KINDS)}.")
@@ -386,14 +394,19 @@ def _answer(
     Returns
     -------
     reply : `dict` [`str`, `Any`]
-        The answer, or ``{"error": ...}``.
+        The answer.
+
+    Raises
+    ------
+    ConflictError
+        If ``kind="sky_coverage"`` and no telescope and camera are active.
     """
     if kind in ("capture", "guiding"):
         return _capture_or_guiding(context, kind, session_id, limit)
     if kind == "sky_coverage":
         analysis = night_analysis.sky_coverage_analysis(context)
         if analysis is None:
-            return {"error": "No telescope and camera are active, so the sky coverage cannot be analysed."}
+            raise ConflictError("No telescope and camera are active, so the sky coverage cannot be analysed.")
         return {"kind": kind, "analysis": to_plain(analysis)}
     if kind == "recurring_issues":
         issues = night_analysis.recurring_issues(context, latest_nights=limit)
@@ -428,6 +441,11 @@ def _capture_or_guiding(
     -------
     reply : `dict` [`str`, `Any`]
         The analysis or the summary rows.
+
+    Raises
+    ------
+    NotFoundError
+        If nothing is recorded for `session_id`.
     """
     if session_id:
         analyze = (
@@ -437,7 +455,10 @@ def _capture_or_guiding(
         )
         analysis = analyze(context, session_id)
         if analysis is None:
-            return {"error": f"Nothing is recorded for the {kind} analysis of night {session_id!r}."}
+            raise NotFoundError(
+                f"Nothing is recorded for the {kind} analysis of night {session_id!r}.",
+                details={"session_id": session_id},
+            )
         return {"kind": kind, "session_id": session_id, "analysis": to_plain(analysis)}
     summarize = (
         night_analysis.capture_night_summaries
@@ -478,15 +499,23 @@ def _ekos(
     Raises
     ------
     InvalidArgumentError
-        If `include` is given without `ekos_file_id`.
+        If `include` is given without `ekos_file_id`, or names an unknown
+        section.
+    NotFoundError
+        If no Ekos session has the id `ekos_file_id`.
     """
     if ekos_file_id:
         record = night_analysis.ekos_session_record(context, ekos_file_id)
         if record is None:
-            return {"error": f"No Ekos session with id {ekos_file_id!r}. List the sessions to find an id."}
+            raise NotFoundError(
+                f"No Ekos session with id {ekos_file_id!r}. List the sessions to find an id.",
+                details={"ekos_file_id": ekos_file_id},
+            )
         unknown = [name for name in (include or []) if name not in EKOS_SECTIONS]
         if unknown:
-            return {"error": f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."}
+            raise InvalidArgumentError(
+                f"Unknown section(s) {unknown}. Choose from: {', '.join(EKOS_SECTIONS)}."
+            )
         if not include:
             return {"kind": "ekos_sessions", "session": {"overview": ekos_overview(record)}}
         return {"kind": "ekos_sessions", "session": ekos_sections(record, include, limit)}
@@ -513,18 +542,25 @@ def _pointing_model(context: ControlContext, session_id: str | None) -> dict[str
     Returns
     -------
     reply : `dict` [`str`, `Any`]
-        The fitted model, or an error.
+        The fitted model.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `session_id` is not given.
+    ConfigurationError
+        If no observer location is known.
     """
     if not session_id:
-        return {
-            "error": "kind='pointing_model' needs a session_id, because a model that mixes "
+        raise InvalidArgumentError(
+            "kind='pointing_model' needs a session_id, because a model that mixes "
             "several nights is not meaningful."
-        }
+        )
     if context.observer_location() is None:
-        return {
-            "error": "No observer location is known, so the fit would have to guess the latitude. Set "
+        raise ConfigurationError(
+            "No observer location is known, so the fit would have to guess the latitude. Set "
             "Observatory.Location in the configuration, or connect the mount, then ask again."
-        }
+        )
     from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
     model = pointing_log_ingestion.compute_pointing_model(context, context.logger_interface, session_id)

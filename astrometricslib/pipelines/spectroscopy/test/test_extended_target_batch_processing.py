@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import EXTENDED_TARGET_SPECTRAL_TYPE
@@ -102,13 +103,13 @@ def test_the_extended_targets_aperture_is_never_shrunk_by_a_nearby_star(
     ) -> dict:
         """Record the per-star radius/override this star was processed with.
 
-        Returns
-        -------
-        result : `dict`
-            Always an error dict, so nothing downstream is attempted.
+        Raises
+        ------
+        ProcessingError
+            Always, so nothing downstream is attempted.
         """
         calls.append((f"{pos[0]:.0f}_{pos[1]:.0f}", extraction_radius, reject_narrow_contaminants))
-        return {"error": "not extracted -- this test only checks how extraction was requested"}
+        raise ProcessingError("not extracted -- this test only checks how extraction was requested")
 
     monkeypatch.setattr(SpectroscopyPipeline, "_process_single_star", record_call)
     nebula = _extended_target(700.0, 700.0, extraction_radius=60)

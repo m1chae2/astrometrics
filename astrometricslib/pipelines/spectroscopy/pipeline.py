@@ -11,6 +11,7 @@ import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.saturation import (
@@ -986,14 +987,18 @@ class SpectroscopyPipeline:
                     self.instrument.expected_length_px,
                     int(self.config.extraction_radius),
                 )
-            result = self._process_single_star(
-                image,
-                pos,
-                auto_detect_angle=auto_detect_angle,
-                extraction_radius=extraction_radius,
-                reject_narrow_contaminants=True if is_extended else None,
-            )
-            if "error" not in result:
+            try:
+                result = self._process_single_star(
+                    image,
+                    pos,
+                    auto_detect_angle=auto_detect_angle,
+                    extraction_radius=extraction_radius,
+                    reject_narrow_contaminants=True if is_extended else None,
+                )
+            except ProcessingError as error:
+                # One star without a usable spectrum does not stop the rest.
+                logger.info("Skipped the star at %s: %s", pos, error)
+            else:
                 # Attach the original star object if possible for reference
                 result["star_source"] = star
                 neighbor_stars = [
@@ -1233,6 +1238,12 @@ class SpectroscopyPipeline:
             A dictionary containing the color data (wavelengths and
             intensities)
             and other math details about the extraction.
+
+        Raises
+        ------
+        ProcessingError
+            The instrument model gives a spectrum of zero length, or no part
+            of the trail is on the image and inside the camera's range.
         """
         radius = (
             int(extraction_radius) if extraction_radius is not None else int(self.config.extraction_radius)
@@ -1277,9 +1288,9 @@ class SpectroscopyPipeline:
         wavelengths = np.asarray(wavelengths, dtype=float)
         intensities = np.asarray(intensities, dtype=float)
         if wavelengths.size == 0:
-            return {
-                "error": "The instrument model asked for a spectrum of zero length; check the camera config."
-            }
+            raise ProcessingError(
+                "The instrument model asked for a spectrum of zero length; check the camera config."
+            )
         requested_wavelength_range_nm = [float(np.nanmin(wavelengths)), float(np.nanmax(wavelengths))]
         # The geometry the plain dispersion-line extraction used, kept so the
         # neighbour-wing stage can place every sample on the image again. The
@@ -1292,7 +1303,10 @@ class SpectroscopyPipeline:
             self.config.camera.sensor_max_wavelength,
         )
         if not usable.any():
-            return {"error": "No part of the spectrum trail is on the image and inside the camera's range."}
+            raise ProcessingError(
+                "No part of the spectrum trail is on the image and inside the camera's range.",
+                details={"position": [float(pos[0]), float(pos[1])]},
+            )
         valid_fraction = float(usable.mean())
         wavelengths = wavelengths[usable]
         intensities = intensities[usable]

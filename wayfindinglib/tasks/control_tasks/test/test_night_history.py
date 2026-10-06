@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import ConfigurationError, ConflictError, InvalidArgumentError, NotFoundError
 from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.tasks.control_tasks import night_analysis, night_history, pointing_log_ingestion
 from wayfindinglib.tasks.control_tasks.night_history import (
@@ -129,8 +129,10 @@ class _Observatory:
         Returns
         -------
         result : `Any`
-            The canned answer.
+            The canned answer, or `None` when no profile is active.
         """
+        if self.location is None:
+            return None
         return _Analysis(flagged=False, recommendations=["sky"])
 
     def guiding_runs(self, context: Any, session_id: str | None = None) -> list[dict]:
@@ -309,8 +311,9 @@ def test_night_analysis_and_summary_choose_the_right_method(observatory: _Observ
 
 
 def test_night_with_nothing_recorded_is_an_error(observatory: _Observatory) -> None:
-    """A night with no data says so."""
-    assert "Nothing is recorded" in build_night_history(observatory, "capture", session_id="none")["error"]
+    """A night with no data raises `NotFoundError`."""
+    with pytest.raises(NotFoundError, match="Nothing is recorded"):
+        build_night_history(observatory, "capture", session_id="none")
 
 
 def test_guiding_runs_are_the_newest_and_fit_the_budget(observatory: _Observatory) -> None:
@@ -341,20 +344,20 @@ def test_ekos_session_overview_and_sections(observatory: _Observatory) -> None:
 
 
 def test_ekos_errors_name_the_problem(observatory: _Observatory) -> None:
-    """An unknown session or section is reported."""
-    assert "No Ekos session" in build_night_history(observatory, "ekos_sessions", ekos_file_id="x")["error"]
-    unknown = build_night_history(observatory, "ekos_sessions", ekos_file_id="known", include=["nope"])
-    assert "Unknown section" in unknown["error"]
+    """An unknown session or section raises the matching error."""
+    with pytest.raises(NotFoundError, match="No Ekos session"):
+        build_night_history(observatory, "ekos_sessions", ekos_file_id="x")
+    with pytest.raises(InvalidArgumentError, match="Unknown section"):
+        build_night_history(observatory, "ekos_sessions", ekos_file_id="known", include=["nope"])
 
 
 def test_pointing_model_needs_a_night_and_a_location(observatory: _Observatory) -> None:
     """The fit refuses to mix nights or to guess the latitude."""
-    assert "needs a session_id" in build_night_history(observatory, "pointing_model")["error"]
+    with pytest.raises(InvalidArgumentError, match="needs a session_id"):
+        build_night_history(observatory, "pointing_model")
     observatory.location = None
-    assert (
-        "observer location"
-        in build_night_history(observatory, "pointing_model", session_id="2026-10-02")["error"]
-    )
+    with pytest.raises(ConfigurationError, match="observer location"):
+        build_night_history(observatory, "pointing_model", session_id="2026-10-02")
     observatory.location = {"latitude": 45.0}
     reply = build_night_history(observatory, "pointing_model", session_id="2026-10-02")
     assert reply["model"]["flagged"] is False
@@ -383,3 +386,10 @@ def test_the_mcp_server_offers_the_tool(name: str) -> None:
     schema = registry.tools[name]["tool_def"].inputSchema
     assert schema["required"] == ["kind"]
     assert set(schema["properties"]) == {"kind", "session_id", "ekos_file_id", "include", "limit"}
+
+
+def test_sky_coverage_without_an_active_profile_is_a_conflict(observatory: _Observatory) -> None:
+    """With no telescope and camera active, sky coverage is a conflict."""
+    observatory.location = None
+    with pytest.raises(ConflictError, match="No telescope and camera"):
+        build_night_history(observatory, "sky_coverage")

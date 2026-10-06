@@ -573,10 +573,10 @@ def run_as_background_job(
     -------
     outcome : `dict`
         `{"jobId": ..., "result": ...}` if the work finished within
-        `grace_period_seconds`, `{"status": "failed", "jobId": ...,
-        "error": ...}` if it failed that quickly, or `{"status":
-        "running", "jobId": ..., "logFilePath": ...}` if it is still
-        going.
+        `grace_period_seconds`, or `{"status": "running", "jobId": ...,
+        "logFilePath": ...}` if it is still going. If `work_fn` fails
+        within `grace_period_seconds`, its exception is raised here again,
+        and the job record is marked failed as well.
     """
     job_created = threading.Event()
     job_finished = threading.Event()
@@ -602,8 +602,8 @@ def run_as_background_job(
                 pre_quality = _snapshot("pre")
                 try:
                     result = work_fn(job)
-                except Exception as work_error:
-                    outcome["error"] = repr(work_error)
+                except BaseException as work_error:
+                    outcome["error"] = work_error
                     raise
                 outcome["result"] = result
                 metrics: dict[str, Any] = {"result": _to_plain(result)}
@@ -612,14 +612,14 @@ def run_as_background_job(
                 # The work may already have decided the job failed (stacking
                 # that makes no image); do not turn that into a success.
                 job.mark(job.terminal_status or "completed", 100, output_metrics=metrics)
-        except Exception as background_error:
-            # `registered_job` already marked the job failed and re-raises
-            # by contract, for callers that run it synchronously and want
-            # the exception back. Nobody is waiting to catch it here in a
-            # daemon thread -- `outcome["error"]` above already has it, so
-            # letting it propagate further would only spam the process's
-            # default unhandled-thread-exception log for every job failure.
-            logger.debug("Background job '%s' failed: %s", job_type, background_error)
+        except Exception:
+            # This thread is the job runner, a boundary. `registered_job`
+            # already marked the job failed and re-raises by contract, for
+            # callers that run it synchronously and want the exception
+            # back. Nobody is waiting to catch it here -- `outcome["error"]`
+            # above already has it for a caller still waiting, so letting
+            # it propagate would only add a second unhandled-thread log.
+            logger.debug("Background job '%s' failed.", job_type, exc_info=True)
         finally:
             job_finished.set()
 
@@ -633,7 +633,7 @@ def run_as_background_job(
 
     if job_finished.wait(timeout=grace_period_seconds):
         if "error" in outcome:
-            return {"status": "failed", "jobId": job_info.get("job_id"), "error": outcome["error"]}
+            raise outcome["error"]
         return {"jobId": job_info.get("job_id"), "result": outcome["result"]}
 
     return {

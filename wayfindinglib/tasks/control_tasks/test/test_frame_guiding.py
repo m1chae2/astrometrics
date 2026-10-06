@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib import FrameRecord, FrameSelection, Target
+from astrometricslib import FrameRecord, FrameSelection, NotFoundError, Target
 from wayfindinglib.tasks.control_tasks.frame_guiding import link_frames_to_guiding
 
 
@@ -129,10 +129,10 @@ def test_a_frame_far_above_the_group_is_flagged() -> None:
 
 
 def test_an_unknown_target_is_an_error() -> None:
-    """A target that is not in the library gives an error, not a crash."""
+    """A target that is not in the library raises `NotFoundError`."""
     library = SimpleNamespace(targets=SimpleNamespace(get=lambda _id, refresh=False: None))
-    report = link_frames_to_guiding(_control([], library), "Nope", FrameSelection(), 10)
-    assert "No target" in report["error"]
+    with pytest.raises(NotFoundError, match="No target"):
+        link_frames_to_guiding(_control([], library), "Nope", FrameSelection(), 10)
 
 
 def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:

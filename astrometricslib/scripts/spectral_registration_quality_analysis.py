@@ -39,7 +39,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 
@@ -175,7 +175,7 @@ def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  #
         _, median, _ = sigma_clipped_stats(cutout, sigma=3.0)
         fwhm = float(data_properties(cutout - median).fwhm.value)
         return fwhm if np.isfinite(fwhm) and fwhm > 0 else None
-    except Exception:
+    except DATA_ERRORS:
         return None
 
 
@@ -225,7 +225,7 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
                 stack_weight="wfwhm",
                 generate_rejmap=True,
             ).stacked_path
-        except Exception as stack_err:
+        except (AstrometricsError, OSError, *DATA_ERRORS) as stack_err:
             row["error"] = str(stack_err)
             row["elapsed_s"] = time.time() - start_time
             print(f"Stacking failed for {label}: {stack_err}")

@@ -213,7 +213,7 @@ class HandoffService:
                         "status": status.strip("() "),
                     })
             return devices
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             logger.warning("Failed to list paired devices: %s", exc)
             return []
 
@@ -296,7 +296,7 @@ class HandoffService:
                         check=False,
                     )
                     delivered_channels.append("gsconnect_ring")
-            except Exception as exc:
+            except (OSError, subprocess.SubprocessError) as exc:
                 logger.warning("Failed to dispatch GSConnect alert: %s", exc)
 
         return {

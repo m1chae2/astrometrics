@@ -49,7 +49,7 @@ class MaintenanceService:
             self._thread = None
         logger.info("MaintenanceService stopped.")
 
-    def _run_maintenance_loop(self):  # ruff: ignore[missing-return-type-private-function]
+    def _run_maintenance_loop(self) -> None:
         """Periodically runs maintenance tasks."""
         # Initial run after a short delay
         time.sleep(10)
@@ -57,8 +57,10 @@ class MaintenanceService:
         while not self._stop_event.is_set():
             try:
                 self.perform_cleanup()
-            except Exception as e:
-                logger.error("Error during maintenance cleanup: %s", e)
+            except Exception:
+                # This loop runs for the life of the app and must not die.
+                # The traceback is logged and the next pass tries again.
+                logger.exception("Error during maintenance cleanup")
 
             # Wait for next interval or stop signal
             # We sleep in small chunks to be responsive to stop event

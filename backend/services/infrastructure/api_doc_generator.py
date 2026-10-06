@@ -64,7 +64,10 @@ def format_method_markdown(
     """
     try:
         sig = str(inspect.signature(method))
-    except Exception:
+    except ValueError, TypeError, NameError:
+        # Some built-in callables have no signature to read. NameError
+        # comes from a type hint that names a type only imported for type
+        # checking.
         sig = "(...)"
 
     doc = format_docstring(inspect.getdoc(method))
@@ -119,7 +122,7 @@ def format_class_markdown(
         for m_name, m_func in methods:
             try:
                 sig = str(inspect.signature(m_func))
-            except Exception:
+            except ValueError, TypeError, NameError:
                 sig = "(...)"
             raw_doc = inspect.getdoc(m_func) or ""
             summary = raw_doc.split("\n")[0] if raw_doc else "No description provided."

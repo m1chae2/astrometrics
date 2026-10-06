@@ -86,6 +86,7 @@ from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,7 @@ def fit_cross_section_gaussian(
             c_res = _fit_cross_section_c(c_input, center, perpendicular_vector, float(search_radius))
             if c_res is not None:
                 return c_res
-        except Exception as exc:
+        except DATA_ERRORS as exc:
             logger.debug("C extension cross-section fit failed, falling back to Python: %s", exc)
 
     return _fit_cross_section_gaussian_python(data, center, perpendicular_vector, search_radius)
@@ -294,7 +295,8 @@ def _fit_cross_section_gaussian_python(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             fitted_model = fitter(gaussian_model, offsets_array, background_subtracted)
-    except Exception:
+    except (RuntimeError, *DATA_ERRORS):
+        # RuntimeError covers astropy's NonFiniteValueError (NaN in the data).
         return None
 
     center_offset = float(fitted_model.mean.value)

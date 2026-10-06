@@ -33,7 +33,7 @@ import logging
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics, configure_logging
+from astrometricslib import FITS_READ_ERRORS, Astrometrics, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def find_frames_missing_focal_length(targets: list, cutoff_date: datetime.date) 
             try:
                 if fits.getheader(frame.path).get("FOCALLEN") is not None:
                     continue
-            except Exception as header_error:
+            except FITS_READ_ERRORS as header_error:
                 logger.debug("Skipping unreadable frame %s: %s", frame.path, header_error)
                 continue
             candidates.append({
@@ -172,7 +172,7 @@ def apply_focal_length(path: str, focal_length_mm: float) -> bool:
             )
             hdul.flush()
         return True
-    except Exception as write_error:
+    except FITS_READ_ERRORS as write_error:
         logger.warning("Could not write FOCALLEN into %s: %s", path, write_error)
         return False
 

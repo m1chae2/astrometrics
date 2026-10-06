@@ -52,6 +52,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
     analyze_spectrum,
 )
 from astrometricslib.utilities import SpectroscopyConfig
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -746,7 +747,7 @@ class SpectroscopyPipeline:
                     otype=hint.otype,
                     extraction_radius=hint.extraction_radius_px,
                 )
-            except Exception as e:
+            except (ProcessingError, *DATA_ERRORS) as e:
                 logger.warning("Failed to build extended target StellarObject from hint: %s", e)
 
         # Filter before slicing to `limit`: a spurious trail detection
@@ -1729,7 +1730,8 @@ class SpectroscopyPipeline:
                 fitted_slope, fitted_intercept = np.polyfit(
                     band_middles, band_centres, 1, w=np.sqrt(band_signals)
                 )
-            except Exception:
+            except DATA_ERRORS:
+                # A fit that does not converge gives no trail.
                 return 0.0, 0.0
             fitted_slope = float(np.clip(fitted_slope, -maximum_slope, maximum_slope))
             middle = float(along_coordinates.mean())

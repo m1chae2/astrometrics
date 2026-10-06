@@ -134,7 +134,9 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
     signature = inspect.signature(func)
     try:
         type_hints = typing.get_type_hints(func)
-    except Exception:
+    except NameError, TypeError, AttributeError:
+        # A hint that names a type this module cannot see cannot be
+        # resolved. The schema then falls back to the plain signature.
         type_hints = {}
 
     docstring = inspect.getdoc(func) or ""
@@ -385,7 +387,7 @@ def register_astrometrics_tools(
 
             try:
                 type_hints = typing.get_type_hints(method)
-            except Exception:
+            except NameError, TypeError, AttributeError:
                 type_hints = {}
 
             # Create closure for invocation with domain model identifier

@@ -5,6 +5,7 @@ maps it to the sky, and identifies all the stars. It's smart enough to
 re-use existing map data if the image already has it, saving a lot of time.
 """
 
+import configparser
 import logging
 import os
 import warnings
@@ -14,6 +15,7 @@ from typing import Any
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
@@ -55,7 +57,7 @@ def _write_wcs_to_header(path: str, wcs: WCS) -> None:
                 hdul[0].header[card.keyword] = (card.value, card.comment)
             hdul.flush()
         logger.info("Updated FITS file %s header with solved WCS keywords.", path)
-    except Exception as wcs_error:
+    except FITS_READ_ERRORS as wcs_error:
         logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
 
 
@@ -314,10 +316,13 @@ def _detect_and_limit_session_sources(
     # reading configuration first. Matches process_image's precedence.
     identification_limit = max_detections
     if identification_limit is None:
-        try:
-            identification_limit = star_identifier.config.get_maximum_identified_stars()
-        except Exception:
-            identification_limit = None
+        # A stand-in identifier (as in tests) may have no configuration.
+        configuration = getattr(star_identifier, "config", None)
+        if configuration is not None:
+            try:
+                identification_limit = configuration.get_maximum_identified_stars()
+            except configparser.Error:
+                identification_limit = None
     if isinstance(identification_limit, int) and identification_limit > 0:
         unique_sources = unique_sources[:identification_limit]
 

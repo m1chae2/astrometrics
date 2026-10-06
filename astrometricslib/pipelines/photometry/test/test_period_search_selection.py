@@ -154,7 +154,9 @@ def test_results_are_saved_without_disturbing_the_rest_of_the_row(catalog_access
         assert row.target_ids == ["M 13"]
 
 
-def test_one_stars_failed_search_does_not_stop_the_others(catalog_access, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_one_stars_failed_search_does_not_stop_the_others(
+    catalog_access: CatalogAccess, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a search that raises is skipped and the rest are saved."""
     stars = [_star("HD 1", mean_flux=50.0, arcseconds_from_center=2.0), _star("HD 2", mean_flux=40.0)]
     catalog_access.merge_and_record("stellar_catalog", stars, lambda _existing, updated: updated)
@@ -162,7 +164,7 @@ def test_one_stars_failed_search_does_not_stop_the_others(catalog_access, monkey
 
     def flaky_search(self: VariabilityAnalyzer, star: StellarObject) -> object:
         if star.id == "HD 1":
-            raise RuntimeError("the search broke")
+            raise ValueError("the search broke")
         return real_search(self, star)
 
     monkeypatch.setattr(VariabilityAnalyzer, "run_lomb_scargle_periodogram", flaky_search)

@@ -37,7 +37,7 @@ class AstrometricsService:
         self._loop = None
         try:
             self._loop = asyncio.get_event_loop()
-        except Exception as exc:
+        except RuntimeError as exc:
             logger.debug("No event loop available at construction time: %s", exc)
 
         # Unified System State
@@ -126,7 +126,7 @@ class AstrometricsService:
         if not self._loop:
             try:
                 self._loop = asyncio.get_running_loop()
-            except Exception as exc:
+            except RuntimeError as exc:
                 logger.debug("No running event loop available: %s", exc)
 
         if self._loop and self._loop.is_running():

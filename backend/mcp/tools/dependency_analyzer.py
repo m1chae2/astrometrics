@@ -59,7 +59,7 @@ def parse_imports_from_file(file_path: str, repo_root: str) -> list[str]:
                             pass
                     if mod:
                         imports.append(mod)
-    except Exception as e:
+    except (OSError, SyntaxError, ValueError) as e:
         logger.warning("Failed to parse imports for %s: %s", file_path, e)
 
     return imports
@@ -186,4 +186,7 @@ async def import_cycle_analyzer() -> dict[str, Any]:
             "modules_scanned": len(dependency_graph),
         }
     except Exception as e:
+        # This is an MCP tool, so it is the last place that can catch an
+        # error. The traceback is logged and the caller gets an error reply.
+        logger.exception("Dependency analysis failed")
         return {"status": "error", "message": f"Dependency analysis failed: {e}"}

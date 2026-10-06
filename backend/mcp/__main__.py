@@ -106,8 +106,11 @@ async def read_resource(uri: str) -> str:  # ruff: ignore[unused-async] -- await
                         notification for notification in data if not notification.get("read")
                     ]
                     return json.dumps(unread_notifications)
-            except Exception as e:
-                logger.error("Error reading notifications file: %s", e)
+            except OSError, ValueError, AttributeError, TypeError:
+                # OSError: the file cannot be read. ValueError: it is not
+                # valid JSON. AttributeError and TypeError: the JSON is not
+                # a list of notification objects.
+                logger.exception("Error reading notifications file")
                 return "[]"
         return "[]"
 

@@ -15,9 +15,12 @@ import math
 from typing import Any
 
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +143,7 @@ def _solve_session_wcs(session: Any, target: Target) -> Any | None:
                 reference_path,
             )
         return wcs
-    except Exception as solve_error:
+    except (AstrometricsError, *FITS_READ_ERRORS, *DATA_ERRORS) as solve_error:
         logger.warning(
             "Session %s plate solve failed (%s); skipping cross-session star matching for this session: %s",
             session.id,
@@ -589,7 +592,7 @@ def search_periods_and_save(
         try:
             periodogram = analyzer.run_lomb_scargle_periodogram(star)
             transit_candidate = analyzer.run_bls_transit_search(star)
-        except Exception as search_error:
+        except (AstrometricsError, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Period search failed for %s: %s", target.id, star.id, search_error)
             continue
         if periodogram is not None or transit_candidate is not None:

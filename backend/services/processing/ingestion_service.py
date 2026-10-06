@@ -9,6 +9,7 @@ import logging
 import os
 
 from astrometricslib import (
+    FITS_READ_ERRORS,
     AstrometricsError,
     ConfigurationError,
     ExternalServiceError,
@@ -500,7 +501,7 @@ class IngestionService(BaseBackgroundService):
                             rf, files=folder_selected_files, log_callback=calibration_log_callback
                         )
                         downloaded_paths.append(os.path.join(config.get_frames_path(), "lights", rf))
-                    except Exception as e:
+                    except (AstrometricsError, OSError) as e:
                         self._log(job_id, f"Failed to download {rf}: {e}")
 
                 source_dirs = downloaded_paths
@@ -587,7 +588,7 @@ class IngestionService(BaseBackgroundService):
                     self._calibration_library.refresh_bias_frames()
                     self._calibration_library.refresh_flat_frames()
                     self._calibration_library.save_library()
-            except Exception as e:
+            except (AstrometricsError, *FITS_READ_ERRORS) as e:
                 logger.warning("Failed to refresh calibration library in ingestion job: %s", e)
 
             # 2. Update Targets

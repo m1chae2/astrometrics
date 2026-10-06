@@ -91,7 +91,7 @@ class ImagingService:
 
         return job_id
 
-    async def _run_capture(  # ruff: ignore[missing-return-type-private-function]
+    async def _run_capture(
         self,
         job_id: str,
         exposure_seconds: float,
@@ -99,7 +99,7 @@ class ImagingService:
         image_type: str,
         filter_name: str | None = None,
         delay_seconds: float = 0.0,
-    ):
+    ) -> None:
         """Run the capture background task as an internal worker."""
         logger.info("Starting background capture %s: %sx%ss %s", job_id, count, exposure_seconds, image_type)
         self.job_service.update_job(job_id, status="running", progress=0, status_message="Initializing...")
@@ -153,7 +153,9 @@ class ImagingService:
                 job_id, status="completed", progress=100, status_message="Finished successfully."
             )
         except Exception as e:
-            logger.error("Error in capture sequence %s: %s", job_id, e)
+            # This is the top of a background job. The traceback is logged
+            # and the job is marked failed, so the error is not lost.
+            logger.exception("Error in capture sequence %s", job_id)
             self.job_service.update_job(job_id, status="failed", status_message=str(e))
 
     def get_active_capture_jobs(self):  # ruff: ignore[missing-return-type-undocumented-public-function]

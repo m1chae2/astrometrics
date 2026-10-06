@@ -405,29 +405,29 @@ def get_last_captured_image(config: Any, stretch: bool = True) -> RenderedImage 
     latest_path: str | None = None
     latest_mtime: float = -1.0
 
-    try:
-        stack = [frames_path]
-        while stack:
-            current_dir = stack.pop()
-            try:
-                with os.scandir(current_dir) as entries:
-                    for entry in entries:
-                        try:
-                            if entry.is_dir(follow_symlinks=False):
-                                stack.append(entry.path)
-                            elif entry.is_file(follow_symlinks=False):
-                                name_lower = entry.name.lower()
-                                if name_lower.endswith((".fits", ".fit", ".fts")):
-                                    mtime = entry.stat().st_mtime
-                                    if mtime > latest_mtime:
-                                        latest_mtime = mtime
-                                        latest_path = entry.path
-                        except OSError:
-                            continue
-            except OSError:
-                continue
-    except Exception as scan_error:
-        logger.warning("Error scanning frames directory for last image: %s", scan_error)
+    # Each folder and file is checked on its own, so one that cannot be
+    # read (OSError) is skipped and the scan goes on.
+    stack = [frames_path]
+    while stack:
+        current_dir = stack.pop()
+        try:
+            with os.scandir(current_dir) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            name_lower = entry.name.lower()
+                            if name_lower.endswith((".fits", ".fit", ".fts")):
+                                mtime = entry.stat().st_mtime
+                                if mtime > latest_mtime:
+                                    latest_mtime = mtime
+                                    latest_path = entry.path
+                    except OSError:
+                        continue
+        except OSError as scan_error:
+            logger.debug("Error scanning %s for the last image: %s", current_dir, scan_error)
+            continue
 
     if not latest_path:
         return None
@@ -468,7 +468,7 @@ def delete_images(
                 deleted_files.append(path)
             else:
                 deleted_files.append(path)
-        except Exception as error:
+        except OSError as error:
             failed_files.append({"path": path, "reason": str(error)})
 
     if target_catalog and target_id:

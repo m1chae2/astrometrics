@@ -173,13 +173,12 @@ class BaseBackgroundService:
                 if future.done():
                     if future.cancelled():
                         status = "cancelled"
+                    elif future.exception() is not None:
+                        # exception() returns the job's error without
+                        # raising it. It does not wait, since the job is done.
+                        status = "failed"
                     else:
-                        try:
-                            # result() shouldn't block if done() is true
-                            res = future.result(timeout=0)
-                            status = "finished" if res else "failed"
-                        except Exception:
-                            status = "failed"
+                        status = "finished" if future.result() else "failed"
                 else:
                     status = "started"
 
@@ -267,5 +266,5 @@ class BaseBackgroundService:
 
                 # One last drain
                 yield from f.readlines()
-        except Exception as e:
+        except (OSError, ValueError) as e:
             yield f"Error reading log: {e!s}\n"

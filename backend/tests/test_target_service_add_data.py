@@ -24,7 +24,7 @@ def test_add_target_data_rejects_a_non_path() -> None:
 
 
 def test_add_target_data_lets_the_library_place_a_finished_picture() -> None:
-    """A picture goes to the library, which reports it as the processed image."""
+    """A picture goes to the library, which names it the processed image."""
     service = TargetService.__new__(TargetService)
     service.astrometrics = MagicMock()
     service.astrometrics.targets.reindex_frames.return_value = ReindexReport(processed_image="/m31.png")

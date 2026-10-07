@@ -141,7 +141,7 @@ def test_reindex_frames_with_paths_adds_each_file_and_saves(monkeypatch: pytest.
 def test_reindex_frames_makes_a_finished_picture_the_processed_image(
     monkeypatch: pytest.MonkeyPatch, picture: str
 ) -> None:
-    """Verify a .jpg, .png or .tiff becomes the processed image, not a frame."""
+    """Verify a .jpg, .png or .tiff is the processed image, not a frame."""
     catalog = _make_catalog()
     target = Target(id="M13")
     add_frame = MagicMock(side_effect=lambda t, path, *rest: FrameRecord(path=path))

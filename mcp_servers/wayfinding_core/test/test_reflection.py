@@ -22,7 +22,7 @@ def test_the_wayfinder_sub_apis_are_reflected(registry: ToolRegistry) -> None:
 
 
 def test_history_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`observatory_history_query` needs a kind and takes the documented arguments."""
+    """`observatory_history_query` needs a kind; the rest are optional."""
     schema = registry.tools["observatory_history_query"]["tool_def"].inputSchema
     assert schema["required"] == ["kind"]
     assert set(schema["properties"]) == {"kind", "session_id", "ekos_file_id", "include", "limit"}

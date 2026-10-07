@@ -1,11 +1,11 @@
 # Wayfinding MCP server
 
-This folder exposes the Wayfinder interface (observatory control, planning, execution) as an MCP (Model Context Protocol) server, so an AI agent can call the library's tools directly. It reuses the registry and reflection engine in `astrometricslib/mcp/`.
+This folder exposes the Wayfinder interface (observatory control, planning, execution) as an MCP (Model Context Protocol) server, so an AI agent can call the library's tools directly. It reuses the registry and reflection engine in `mcp_servers/common/`. Run it with `python -m mcp_servers.wayfinding_core`.
 
 ## What each file is for
 
 - `__main__.py` — the server executable.
-- `tool_registry.py` — registers every public method of the three Wayfinder branches as a tool.
+- `definition.py` — registers every public method of the three Wayfinder branches as a tool.
 - `tool_manifest.json` — the reviewed list of tools with a class, category and disposition for each. The server offers a client only the tools this file allows. See the next section.
 
 ## Which tools the server offers
@@ -14,7 +14,7 @@ When the server starts, it removes every tool that the manifest does not allow f
 
 The rules fail closed. A tool that is missing from the manifest is not offered, so a new public method stays hidden until someone reviews it. A missing manifest withholds every tool. A tool can also carry an `interim_block`, which hides a read-only tool until a known problem is fixed.
 
-Do not edit `tool_manifest.json` by hand. The script `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `wayfindinglib/mcp/test/test_wayfinding_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. The script `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `test/test_profile.py` fails if a registered tool has no manifest entry.
 
 ## What a client sends
 
@@ -24,7 +24,7 @@ A client sends JSON, and the tools pass it to the Wayfinder methods unchanged. T
 - `position` and `destination` (a sky position): a dictionary `{"ra_deg", "dec_deg"}`. A dictionary that is not a position raises `InvalidArgumentError` that names the expected keys.
 - `get_visibility` takes `objects` as names or ids (looked up in the library and then in SIMBAD, an online star database) or `{"id", "ra_deg", "dec_deg"}` dictionaries, and `time` and `end_time` as `"now"` or ISO 8601 strings. An offset such as `-06:00` is honored, and a string with no offset means UTC.
 
-A slow method (marked `@background_job`) is called with `register_job=True` and records its own job; see `astrometricslib/mcp/README.md`. `observatory_remote_sync_frames` for one target therefore records a `remote_sync` job too.
+A slow method (marked `@background_job`) is called with `register_job=True` and records its own job; see `mcp_servers/README.md`. `observatory_remote_sync_frames` for one target therefore records a `remote_sync` job too.
 
 For exact behavior, read the code. The code is the source of truth.
 
@@ -48,6 +48,6 @@ These tools answer the questions that come up during and after a night of imagin
 - `processing_remake_preview` makes a target's preview picture again (GraXpert, Siril stretch, Cosmic Clarity, star toning) from the stack that is already there, so a changed post-processing setting shows up without a restack. `denoise`, `denoise_strength` and `star_toning` apply to that run only and are never written to the configuration. By default the old pictures are copied into a `_previous_preview` folder beside the stack first (one earlier set is kept) and are put back if the run fails. The reply lists the steps that ran and says whether the stack file was left unchanged. Class `process`; it writes only the preview JPEG, the processed FITS and the target's processed-image pointer. The code is `pipelines/stacking/post_processing/preview_remake.py`; the overrides are `PreviewSettings` in `stack_preview.py`.
 - `processing_stack` stacks a target the way the app's Stack button does. `kind` is `imaging` or `spectral` (they are never mixed), and `filter_name`, `first_file`, `last_file`, `since` and `until` choose the frames. `plan_only` lists the chosen frames without stacking. Its class is `process`: it runs the app's own stage, so bad frames are set aside (never deleted), one previous stack is kept, and the target is saved. `frames` stacks an exact list of frames instead.
 - `processing_stack_summary` gives one short answer for a target's stack. `observatory_remote_frame_status` counts a target's frames on the telescope, on the drive and in the library. `jobs_query` marks a job idle for over an hour as `looks_stale`.
-- The `observatory_` tools follow the topic groups of `Wayfinder.control`: `observatory_mount_*`, `observatory_imaging_*`, `observatory_guiding_*`, `observatory_remote_*`, `observatory_history_*`, `observatory_safety_*` and `observatory_equipment_*`. `tool_registry.py` reflects each group under its own prefix, so `control.mount.park` becomes `observatory_mount_park`. Each group with readable state has one `*_status` tool, whose `include` argument picks the sections of the reply. The mount's `position` and `destination` arguments take a `{"ra_deg": ..., "dec_deg": ...}` dictionary.
+- The `observatory_` tools follow the topic groups of `Wayfinder.control`: `observatory_mount_*`, `observatory_imaging_*`, `observatory_guiding_*`, `observatory_remote_*`, `observatory_history_*`, `observatory_safety_*` and `observatory_equipment_*`. `definition.py` reflects each group under its own prefix, so `control.mount.park` becomes `observatory_mount_park`. Each group with readable state has one `*_status` tool, whose `include` argument picks the sections of the reply. The mount's `position` and `destination` arguments take a `{"ra_deg": ..., "dec_deg": ...}` dictionary.
 - `planning_get_visibility` (wayfindinglib) says where objects are at one moment: altitude, azimuth, rise, set and transit, and with `include=["meridian"]` the hour angle and flip status. With an `end_time` it builds a night table for up to 30 objects: horizon clearance (with blocked sky ranges such as trees), meridian crossings, and the Sun and Moon. Without `objects` it covers every library target, highest first.
 - The other planning tools follow `Wayfinder.planning`: `planning_get_advisory` (`kind` is `quality` or `calibration`), `planning_calculate_panels` and `planning_create_mosaic`, `planning_create_plan` (`kind` is `sequence`, `package`, `empty_session` or `scheduled_session`), `planning_edit_queue`, `planning_get_plan` and `planning_deep_catalog_status`. The ones that write are not offered to the AI.

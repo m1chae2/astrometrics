@@ -60,8 +60,8 @@ MANIFEST_FILE_NAME = "tool_manifest_draft.json"
 REVIEW_FILE_NAME = "tool_manifest_review.md"
 
 PYTHON_SERVER_MODULES = {
-    "astrometricslib-core": "astrometricslib.mcp.tool_registry",
-    "wayfindinglib-core": "wayfindinglib.mcp.tool_registry",
+    "astrometricslib-core": "mcp_servers.astrometrics_core.definition",
+    "wayfindinglib-core": "mcp_servers.wayfinding_core.definition",
     "astrometrics-backend": "backend.mcp.tool_registry",
 }
 """MCP server name -> module that builds its tool registry."""
@@ -71,8 +71,8 @@ UI_SERVER_SOURCE = PROJECT_ROOT / "ui" / "mcp" / "src" / "index.ts"
 """The UI server is written in TypeScript, so its tool list is read as text."""
 
 RUNTIME_MANIFEST_PATHS = {
-    "astrometricslib-core": PROJECT_ROOT / "astrometricslib" / "mcp" / "tool_manifest.json",
-    "wayfindinglib-core": PROJECT_ROOT / "wayfindinglib" / "mcp" / "tool_manifest.json",
+    "astrometricslib-core": PROJECT_ROOT / "mcp_servers" / "astrometrics_core" / "tool_manifest.json",
+    "wayfindinglib-core": PROJECT_ROOT / "mcp_servers" / "wayfinding_core" / "tool_manifest.json",
     "astrometrics-backend": PROJECT_ROOT / "backend" / "mcp" / "tool_manifest.json",
     "astrometrics-ui": PROJECT_ROOT / "ui" / "mcp" / "tool_manifest.json",
 }
@@ -520,15 +520,19 @@ def collect_python_server_tools(server: str, module_name: str) -> list[ToolRecor
     server : `str`
         MCP server name, used to label the records.
     module_name : `str`
-        Module that builds the server's tool registry. Importing it
-        registers the tools, as when the server starts.
+        Module that builds the server's tool registry. Its
+        ``build_registry()`` is called if it has one; otherwise importing
+        it registers the tools in its ``registry``, as when the server
+        starts.
 
     Returns
     -------
     records : `list` [`ToolRecord`]
         One record per tool, sorted by name, with a drafted class.
     """
-    registry = importlib.import_module(module_name).registry
+    module = importlib.import_module(module_name)
+    build_registry = getattr(module, "build_registry", None)
+    registry = build_registry() if build_registry is not None else module.registry
     records = []
     for name, entry in sorted(registry.tools.items()):
         tool_definition = entry["tool_def"]

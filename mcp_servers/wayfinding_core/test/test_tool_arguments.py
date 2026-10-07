@@ -1,4 +1,4 @@
-"""Purpose: Tests for how the wayfindinglib-core tools take a client's arguments.
+"""Purpose: Tests for how wayfindinglib-core tools take client arguments.
 
 Description: The tools pass a client's JSON arguments to the `Wayfinder`
 methods as they are. These tests check that a coordinate dictionary and an

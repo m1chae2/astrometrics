@@ -1,4 +1,4 @@
-"""Purpose: Unit tests for the reflection engine that turns methods into MCP tools.
+"""Purpose: Unit tests for the engine that turns methods into MCP tools.
 
 Description: Checks that docstrings and type hints become valid JSON schemas
 and that reflected tools run, using small fake APIs. The tests of the real
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import background_job
+from astrometricslib import background_job, get_configuration, registered_job
 from mcp_servers.common.reflection import (
     generate_tool_schema,
     parse_docstring_params,
@@ -91,16 +91,14 @@ async def test_a_background_job_method_records_its_own_job(
     The method records its own job, so the tool's reply carries that job's
     id next to the real result of a fast call.
     """
-    from astrometricslib.drivers.job_logging import registered_job
-    from astrometricslib.foundation import config as config_loader
-    from astrometricslib.foundation.config import AppConfiguration
-
-    library_path = tmp_path / "library"
-    library_path.mkdir()
-    configuration = AppConfiguration()
-    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    configuration = get_configuration()
+    stacks_path = tmp_path / "stacks"
+    stacks_path.mkdir()
     monkeypatch.setattr(configuration, "get_logs_path", lambda: tmp_path)
-    monkeypatch.setattr(config_loader, "get_configuration", lambda: configuration)
+    monkeypatch.setattr(
+        configuration, "get_logs_db_path", lambda: str(tmp_path / "astrometrics_log.db")
+    )
+    monkeypatch.setattr(configuration, "get_stacks_path", lambda: stacks_path)
     received = {}
 
     class FakeApi:

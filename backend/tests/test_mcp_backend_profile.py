@@ -9,7 +9,7 @@ only the four reviewed backend tools.
 import json
 from pathlib import Path
 
-from astrometricslib.mcp.profile import load_manifest
+from mcp_servers.common.profile import load_manifest
 from backend.mcp.tool_inventory import collect_ui_server_tools
 from backend.mcp.tool_registry import ToolRegistry, registry
 

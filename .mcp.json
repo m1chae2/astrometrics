@@ -4,7 +4,7 @@
       "command": "$CLAUDE_PROJECT_DIR/.venv/bin/python",
       "args": [
         "-m",
-        "astrometricslib.mcp"
+        "mcp_servers.astrometrics_core"
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {
@@ -16,7 +16,7 @@
       "command": "$CLAUDE_PROJECT_DIR/.venv/bin/python",
       "args": [
         "-m",
-        "wayfindinglib.mcp"
+        "mcp_servers.wayfinding_core"
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {

@@ -25,12 +25,12 @@ ALLOWED_FILES: dict[str, str] = {
     "backend/main_backend.py": "program entry point",
     "backend/mcp/__main__.py": "program entry point",
     "backend/mcp/gaps/__main__.py": "program entry point that imports only the standard library",
-    "astrometricslib/mcp/__main__.py": "program entry point",
-    "wayfindinglib/mcp/__main__.py": "program entry point",
+    "mcp_servers/astrometrics_core/__main__.py": "program entry point",
+    "mcp_servers/wayfinding_core/__main__.py": "program entry point",
 }
 
 #: Source folders to scan. Tests and notebooks may configure logging freely.
-SCANNED_FOLDERS = ("astrometricslib", "wayfindinglib", "backend")
+SCANNED_FOLDERS = ("astrometricslib", "wayfindinglib", "backend", "mcp_servers")
 
 
 def _is_exempt(path: Path) -> bool:

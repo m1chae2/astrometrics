@@ -92,14 +92,14 @@ class ServerSpec:
 SERVERS = (
     ServerSpec(
         "astrometricslib-core",
-        python_module="astrometricslib.mcp",
-        manifest="astrometricslib/mcp/tool_manifest.json",
+        python_module="mcp_servers.astrometrics_core",
+        manifest="mcp_servers/astrometrics_core/tool_manifest.json",
         developer_profile=DEVELOPER,
     ),
     ServerSpec(
         "wayfindinglib-core",
-        python_module="wayfindinglib.mcp",
-        manifest="wayfindinglib/mcp/tool_manifest.json",
+        python_module="mcp_servers.wayfinding_core",
+        manifest="mcp_servers/wayfinding_core/tool_manifest.json",
     ),
     ServerSpec(
         "astrometrics-backend",
@@ -154,7 +154,7 @@ def investigator_tools(spec: ServerSpec, root: Path = PROJECT_ROOT) -> list[str]
         Sorted tool names. Uses the same rule the server applies when it
         starts, so a withheld tool is never listed.
     """
-    from astrometricslib.mcp.profile import withheld_reason
+    from mcp_servers.common.profile import withheld_reason
 
     if not spec.manifest:
         return sorted(spec.fixed_tools)

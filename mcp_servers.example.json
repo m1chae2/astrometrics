@@ -4,7 +4,7 @@
       "command": "/path/to/astrometrics/.venv/bin/python",
       "args": [
         "-m",
-        "astrometricslib.mcp"
+        "mcp_servers.astrometrics_core"
       ],
       "cwd": "/path/to/astrometrics",
       "env": {
@@ -16,7 +16,7 @@
       "command": "/path/to/astrometrics/.venv/bin/python",
       "args": [
         "-m",
-        "wayfindinglib.mcp"
+        "mcp_servers.wayfinding_core"
       ],
       "cwd": "/path/to/astrometrics",
       "env": {

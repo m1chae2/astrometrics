@@ -1,1 +1,5 @@
-"""Purpose: Code every Python MCP server shares: the tool registry, reflection, profiles, errors and the server loop."""
+"""Purpose: Code that every Python MCP server shares.
+
+Description: The tool registry, reflection, profiles, tool errors and the
+server loop.
+"""

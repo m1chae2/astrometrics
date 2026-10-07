@@ -25,8 +25,8 @@ from astrometricslib import (
     new_request_id,
     to_error_info,
 )
-from astrometricslib.mcp.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
-from astrometricslib.mcp.tool_errors import error_content
+from mcp_servers.common.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
+from mcp_servers.common.tool_errors import error_content
 from backend.services.infrastructure.agent_code_policy import check_agent_code
 from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
 
@@ -57,7 +57,7 @@ class ToolRegistry:
         """Remove the tools a profile may not use.
 
         This is the same rule the library servers use (see
-        `astrometricslib.mcp.profile`). A removed tool is not listed, and
+        `mcp_servers.common.profile`). A removed tool is not listed, and
         a call to it gets the "Unknown tool" error. The in-app agent uses
         the full registry, so only the MCP server entry point calls this.
 

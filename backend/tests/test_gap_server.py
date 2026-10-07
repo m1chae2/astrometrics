@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.mcp.profile import GAP_REPORT_GUIDANCE, refusal_message
+from mcp_servers.common.profile import GAP_REPORT_GUIDANCE, refusal_message
 from backend.mcp.gaps import __main__ as gap_server
 from backend.mcp.gaps import review
 from backend.mcp.gaps.gap_store import (

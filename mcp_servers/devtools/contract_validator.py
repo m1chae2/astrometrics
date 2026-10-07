@@ -213,7 +213,9 @@ def register(registry: ToolRegistry) -> None:
             "properties": {
                 "scan_path": {
                     "type": "string",
-                    "description": "Root directory to scan. Defaults to the high-level interface package root.",
+                    "description": (
+                        "Root directory to scan. Defaults to the high-level interface package root."
+                    ),
                 }
             },
             "required": [],

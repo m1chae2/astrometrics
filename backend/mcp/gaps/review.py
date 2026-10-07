@@ -84,8 +84,8 @@ def format_detail(gap: dict[str, Any]) -> str:
 
 
 MANIFEST_PATHS = (
-    "astrometricslib/mcp/tool_manifest.json",
-    "wayfindinglib/mcp/tool_manifest.json",
+    "mcp_servers/astrometrics_core/tool_manifest.json",
+    "mcp_servers/wayfinding_core/tool_manifest.json",
     "backend/mcp/tool_manifest.json",
     "ui/mcp/tool_manifest.json",
 )

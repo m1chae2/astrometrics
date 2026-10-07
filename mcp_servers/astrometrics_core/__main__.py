@@ -14,7 +14,7 @@ from mcp_servers.common.server import run_server
 
 
 def prepare() -> None:
-    """Watch the configuration file and close jobs a stopped server left open."""
+    """Watch the config file and close jobs a stopped server left open."""
     get_configuration().watch_for_changes()
     close_interrupted_jobs()
 

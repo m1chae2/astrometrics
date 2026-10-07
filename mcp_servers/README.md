@@ -1,15 +1,18 @@
-# MCP server
+# MCP servers
 
-This folder exposes astrometricslib's API layer as an MCP (Model Context Protocol) server, so an AI agent can call the library's tools directly instead of only reading its source.
+This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries know nothing about MCP.
 
-## What each file is for
+## What each folder is for
 
-- `__main__.py` — the server executable; entry point when this package is run as an MCP server.
-- `reflection.py` — dynamically inspects the `astrometricslib.api` classes at startup to discover which methods are available to expose as tools, rather than hand-listing them. Methods whose names start with `delete` are skipped on purpose (`WITHHELD_METHOD_PREFIXES`), so an AI client cannot delete catalog records; deleting is done in the app, which asks the person first.
-- `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below.
-- `tool_manifest.json` — the reviewed list of tools with a class, category and disposition for each. The profile rules read it.
-- `tool_registry.py` — builds the MCP tool registry from what `reflection.py` discovers, and dispatches an incoming tool call to the right method.
-- `tools/contract_validator.py` — a tool that validates a pydantic model's serialization contract (its field names, aliases, and JSON shape), used to catch a model that would not survive a round trip through the MCP protocol.
+- `common/` — code every server shares.
+  - `reflection.py` — reads the public methods of a facade such as `Astrometrics` at startup and turns each one into a tool, so tools are not listed by hand. Methods whose names start with `delete` are skipped on purpose (`WITHHELD_METHOD_PREFIXES`), so an AI client cannot delete catalog records; deleting is done in the app, which asks the person first.
+  - `tool_registry.py` — holds a server's tools and sends an incoming tool call to the right method.
+  - `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below.
+  - `tool_errors.py` — turns an error raised by a tool into a reply the client can read.
+  - `server.py` — the loop that serves one client over standard input and output.
+- `astrometrics_core/` — the `astrometricslib-core` server. Run it with `python -m mcp_servers.astrometrics_core`. `definition.py` builds its registry from `Astrometrics`, and `tool_manifest.json` is the reviewed list of its tools with a class, category and disposition for each.
+- `wayfinding_core/` — the `wayfindinglib-core` server, built from `Wayfinder` in the same way. Run it with `python -m mcp_servers.wayfinding_core`. Its own README describes its tools.
+- `devtools/contract_validator.py` — a tool that checks a pydantic model's serialization contract (its field names, aliases, and JSON shape). It catches a model that would not survive a round trip through the MCP protocol. The `astrometricslib-core` server offers it.
 
 ## Which tools the server offers
 
@@ -23,7 +26,7 @@ The rules fail closed:
 
 Tools marked `merge` stay available until the tool that replaces them exists. Once it exists, they are marked `merged`: they are no longer offered, and a call to one says which tool replaced it.
 
-Do not edit `tool_manifest.json` by hand. `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `test/test_mcp_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
 
 ## How a tool call reaches a method
 
@@ -33,7 +36,7 @@ A client sends only JSON: names, ids, numbers, dictionaries and plain strings. `
 2. A time argument (`time`, `since`, `until`) takes an ISO 8601 string, which the method converts.
 3. A sky position takes a `{"ra_deg": ..., "dec_deg": ...}` dictionary, which the method converts.
 
-`reflection.py` adds one argument itself. A method marked with `@background_job` is slow, so the server calls it with `register_job=True` in a background thread (`run_as_background_job` in `drivers/job_logging.py`). The method records its own job in the logs database. If the call finishes within the method's grace period, the reply is `{"jobId", "result"}`; otherwise it is the job id to poll. The job's `output_metrics["result"]` holds the result once the work ends. `processing_stack` and `processing_process_target` include the quality summaries in their result (`quality_summary` and `quality`), so a poller can read how the new stack or analysis turned out.
+`reflection.py` adds one argument itself. A method marked with `@background_job` is slow, so the server calls it with `register_job=True` in a background thread (`run_as_background_job` from `astrometricslib`). The method records its own job in the logs database. If the call finishes within the method's grace period, the reply is `{"jobId", "result"}`; otherwise it is the job id to poll. The job's `output_metrics["result"]` holds the result once the work ends. `processing_stack` and `processing_process_target` include the quality summaries in their result (`quality_summary` and `quality`), so a poller can read how the new stack or analysis turned out.
 
 For exact behavior, read the code — the code is always the source of truth.
 

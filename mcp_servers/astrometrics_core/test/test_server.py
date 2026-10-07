@@ -80,7 +80,7 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
 
 
 def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`diagnostics_frame_quality` takes the documented arguments, none required."""
+    """`diagnostics_frame_quality` takes the documented, optional arguments."""
     schema = registry.tools["diagnostics_frame_quality"]["tool_def"].inputSchema
     assert set(schema["properties"]) == {
         "target",

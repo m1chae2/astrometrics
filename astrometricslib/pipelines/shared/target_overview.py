@@ -96,6 +96,7 @@ def summarize_target(target: Any) -> dict[str, Any]:
     return {
         "id": target.id,
         "common_name": target.common_name or None,
+        "object_type": target.object_type.value,
         "ra": target.ra,
         "dec": target.dec,
         "light_frames": len(lights),
@@ -339,6 +340,7 @@ def summary_rows(
     camera_id: str | None,
     region: tuple[float, float, float] | None,
     include_empty: bool,
+    object_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build the summary rows of the targets that pass every filter.
 
@@ -358,6 +360,8 @@ def summary_rows(
         degrees. Rows inside it get ``separation_deg``.
     include_empty : `bool`
         Also keep targets with no frames.
+    object_type : `str` or `None`, optional
+        Keep targets of this kind (a `TargetObjectType` value).
 
     Returns
     -------
@@ -373,6 +377,8 @@ def summary_rows(
         if text and text.lower() not in f"{target.id} {target.common_name}".lower():
             continue
         if not include_empty and not target.frames:
+            continue
+        if object_type is not None and target.object_type != object_type:
             continue
         row = summarize_target(target)
         if camera_id and not any(camera_id.lower() in name.lower() for name in row["cameras"]):

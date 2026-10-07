@@ -9,7 +9,7 @@ happens elsewhere to keep the code organized and avoid import errors.
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
@@ -32,6 +32,7 @@ __all__ = [
     "ImageType",
     "RenderedImage",
     "Target",
+    "TargetObjectType",
     "TargetQualitySummaries",
     "TargetStackingResult",
     "ViewableImage",
@@ -257,6 +258,22 @@ class TargetQualitySummaries(BaseModel):
     spectroscopy: SpectroscopyQualitySummary | None = Field(default=None, alias="spectroscopy")
 
 
+class TargetObjectType(StrEnum):
+    """The kind of sky object a target is, read from its name.
+
+    See `astrometricslib.pipelines.shared.target_classification` for the
+    rules. `STAR` is every name that fits no other kind.
+    """
+
+    SOLAR_SYSTEM = "solar_system"
+    MESSIER = "messier"
+    NGC = "ngc"
+    IC = "ic"
+    COMET = "comet"
+    CALIBRATION = "calibration"
+    STAR = "star"
+
+
 class Target(BaseModel):
     """The main record for an astronomical target (like a galaxy or nebula).
 
@@ -382,6 +399,18 @@ class Target(BaseModel):
             migrated["quality"] = quality
 
         return migrated
+
+    @computed_field(alias="objectType")
+    @property
+    def object_type(self) -> TargetObjectType:
+        """The kind of sky object this is, read from the target's id.
+
+        A planet, the Sun or the Moon; a Messier, NGC or IC number; a comet
+        or asteroid; a calibration folder; or otherwise a star.
+        """
+        from astrometricslib.pipelines.shared.target_classification import classify_target_name
+
+        return classify_target_name(self.id)
 
     def serialize(self) -> dict[str, Any]:
         """Package the target's data into a basic dictionary format.

@@ -73,6 +73,7 @@ from astrometricslib.models.target import (
     RenderedImage,
     StackConfigurationResult,
     Target,
+    TargetObjectType,
     TargetQualitySummaries,
     TargetStackingResult,
 )
@@ -297,6 +298,7 @@ def render_types() -> str:
     interfaces = [
         generate_enum(FilterType, "FilterType"),
         generate_enum(ImageType, "ImageType"),
+        generate_enum(TargetObjectType, "TargetObjectType"),
         generate_interface(ErrorInfo, "ErrorInfo"),
         generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),

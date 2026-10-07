@@ -18,8 +18,21 @@ import {
     sortTargets,
 } from '../common/hooks/targetListFiltering';
 import type { TargetCameraIndex } from '../common/services/backendApi';
+import { TargetObjectType } from '../common/types/backendTypes';
 
 const processed = { stacking: { processedImage: 'a.png' } };
+
+/**
+ * Builds a list entry with the kind the library would give its name.
+ *
+ * @param {string} id - The target id.
+ * @param {TargetObjectType} objectType - The library's `objectType` for it.
+ * @param {boolean} [withImage=true] - Whether it has a processed image.
+ * @return {object} The entry.
+ */
+const entry = (id: string, objectType: TargetObjectType, withImage = true) =>
+    withImage ? { id, objectType, ...processed } : { id, objectType };
+const T = TargetObjectType;
 const cameraIndex: TargetCameraIndex = {
     cameras: [{ name: 'ZWO', targetCount: 2 }],
     targets: {
@@ -31,47 +44,47 @@ const cameraIndex: TargetCameraIndex = {
 
 describe('matchesCatalog', () => {
     it('separates Messier from NGC and IC objects', () => {
-        expect(matchesCatalog({ id: 'M 31', ...processed }, CATALOG_MESSIER)).toBe(true);
-        expect(matchesCatalog({ id: 'NGC 6823', ...processed }, CATALOG_MESSIER)).toBe(false);
-        expect(matchesCatalog({ id: 'IC 434', ...processed }, CATALOG_NGC_IC)).toBe(true);
-        expect(matchesCatalog({ id: 'Vega', ...processed }, CATALOG_NGC_IC)).toBe(false);
+        expect(matchesCatalog(entry('M 31', T.MESSIER), CATALOG_MESSIER)).toBe(true);
+        expect(matchesCatalog(entry('NGC 6823', T.NGC), CATALOG_MESSIER)).toBe(false);
+        expect(matchesCatalog(entry('IC 434', T.IC), CATALOG_NGC_IC)).toBe(true);
+        expect(matchesCatalog(entry('NGC 6823', T.NGC), CATALOG_NGC_IC)).toBe(true);
+        expect(matchesCatalog(entry('Vega', T.STAR), CATALOG_NGC_IC)).toBe(false);
     });
 
-    it('lists named targets such as Vega only under All Targets', () => {
-        expect(matchesCatalog({ id: 'Vega', ...processed }, CATALOG_ALL)).toBe(true);
-        expect(matchesCatalog({ id: 'Vega', ...processed }, CATALOG_MESSIER)).toBe(false);
+    it('lists named targets such as Vega only under All Targets and Stars', () => {
+        expect(matchesCatalog(entry('Vega', T.STAR), CATALOG_ALL)).toBe(true);
+        expect(matchesCatalog(entry('Vega', T.STAR), CATALOG_MESSIER)).toBe(false);
     });
 
     it('hides targets without a processed image except under No Image', () => {
-        expect(matchesCatalog({ id: 'M 1' }, CATALOG_ALL)).toBe(false);
-        expect(matchesCatalog({ id: 'M 1' }, CATALOG_NO_IMAGE)).toBe(true);
-        expect(matchesCatalog({ id: 'M 31', ...processed }, CATALOG_NO_IMAGE)).toBe(false);
+        expect(matchesCatalog(entry('M 1', T.MESSIER, false), CATALOG_ALL)).toBe(false);
+        expect(matchesCatalog(entry('M 1', T.MESSIER, false), CATALOG_NO_IMAGE)).toBe(true);
+        expect(matchesCatalog(entry('M 31', T.MESSIER), CATALOG_NO_IMAGE)).toBe(false);
     });
 });
 
 describe('Stars and Planets catalogs', () => {
-    const named = (id: string) => ({ id, ...processed });
-
-    it('lists the planets, Sun and Moon under Planets only', () => {
-        for (const id of ['Jupiter', 'Mars', 'Moon', 'Sun']) {
-            expect(matchesCatalog(named(id), CATALOG_PLANETS)).toBe(true);
-            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(false);
-        }
-        expect(matchesCatalog(named('Vega'), CATALOG_PLANETS)).toBe(false);
+    it('lists solar-system bodies under Planets only', () => {
+        expect(matchesCatalog(entry('Jupiter', T.SOLAR_SYSTEM), CATALOG_PLANETS)).toBe(true);
+        expect(matchesCatalog(entry('Jupiter', T.SOLAR_SYSTEM), CATALOG_STARS)).toBe(false);
+        expect(matchesCatalog(entry('Vega', T.STAR), CATALOG_PLANETS)).toBe(false);
     });
 
-    it('lists single stars under Stars but not deep-sky, comet or calibration targets', () => {
-        for (const id of ['Vega', 'Altair', 'Alcor']) {
-            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(true);
+    it('lists only the star kind under Stars', () => {
+        expect(matchesCatalog(entry('Vega', T.STAR), CATALOG_STARS)).toBe(true);
+        for (const kind of [T.MESSIER, T.NGC, T.IC, T.COMET, T.CALIBRATION]) {
+            expect(matchesCatalog(entry('x', kind), CATALOG_STARS)).toBe(false);
         }
-        for (const id of ['M 31', 'NGC 7000', 'IC 434', 'C 2022 E3 ZTF', 'Bias', 'Dark', 'M 52 - Bubble Nebula']) {
-            expect(matchesCatalog(named(id), CATALOG_STARS)).toBe(false);
-        }
+    });
+
+    it('lists nothing under a kind-based catalog when the kind is missing', () => {
+        expect(matchesCatalog({ id: 'Vega', ...processed }, CATALOG_STARS)).toBe(false);
+        expect(matchesCatalog({ id: 'Vega', ...processed }, CATALOG_ALL)).toBe(true);
     });
 
     it('still hides targets without a processed image', () => {
-        expect(matchesCatalog({ id: 'Sirius' }, CATALOG_STARS)).toBe(false);
-        expect(matchesCatalog({ id: 'Venus' }, CATALOG_PLANETS)).toBe(false);
+        expect(matchesCatalog(entry('Sirius', T.STAR, false), CATALOG_STARS)).toBe(false);
+        expect(matchesCatalog(entry('Venus', T.SOLAR_SYSTEM, false), CATALOG_PLANETS)).toBe(false);
     });
 });
 

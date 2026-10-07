@@ -16,7 +16,7 @@ from astrometricslib.drivers.job_logging import background_job, registered_job
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange
-from astrometricslib.models.target import Target
+from astrometricslib.models.target import Target, TargetObjectType
 from astrometricslib.pipelines.shared.api_arguments import (
     check_choice,
     reject_unused_arguments,
@@ -44,6 +44,7 @@ _QUERY_ARGUMENTS = {
         "ra_deg",
         "dec_deg",
         "radius_deg",
+        "object_type",
         "sort",
         "include_empty",
         "limit",
@@ -481,6 +482,8 @@ class TargetCatalog:
         ra_deg: float | None = None,
         dec_deg: float | None = None,
         radius_deg: float | None = None,
+        object_type: Literal["solar_system", "messier", "ngc", "ic", "comet", "calibration", "star"]
+        | None = None,
         detail: Literal["summary", "full", "cameras", "nights", "camera_index"] = "summary",
         include_frames: int = 0,
         sort: Literal["newest", "name", "separation"] = "newest",
@@ -498,8 +501,8 @@ class TargetCatalog:
         Arguments used by each detail (any other argument is refused):
 
         - ``"summary"``: ``target_id``, ``text``, ``camera_id``, ``ra_deg``,
-          ``dec_deg``, ``radius_deg``, ``sort``, ``include_empty``,
-          ``limit``, ``offset``.
+          ``dec_deg``, ``radius_deg``, ``object_type``, ``sort``,
+          ``include_empty``, ``limit``, ``offset``.
         - ``"full"``: ``target_id`` (needed) and ``include_frames``.
         - ``"cameras"``, ``"nights"`` and ``"camera_index"``: none.
 
@@ -521,6 +524,12 @@ class TargetCatalog:
             Declination of the centre of a region search, in degrees.
         radius_deg : `float`, optional
             Radius of the region search, in degrees.
+        object_type : `str`, optional
+            Keep targets of this kind, read from their names (see
+            `Target.object_type`): ``"solar_system"``, ``"messier"``,
+            ``"ngc"``, ``"ic"``, ``"comet"``, ``"calibration"`` or
+            ``"star"`` (any other name). Each row carries its
+            ``object_type``.
         detail : `str`, optional
             ``"summary"`` (default): one row per target. ``"full"``: one
             target's record with grouped frames, stack paths and flags, and
@@ -563,6 +572,8 @@ class TargetCatalog:
 
         check_choice("detail", detail, QUERY_DETAILS)
         check_choice("sort", sort, ("newest", "name", "separation"))
+        if object_type is not None:
+            check_choice("object_type", object_type, tuple(kind.value for kind in TargetObjectType))
         reject_unused_arguments(
             detail,
             _QUERY_ARGUMENTS,
@@ -573,6 +584,7 @@ class TargetCatalog:
                 "ra_deg": ra_deg is not None,
                 "dec_deg": dec_deg is not None,
                 "radius_deg": radius_deg is not None,
+                "object_type": object_type is not None,
                 "include_frames": include_frames != 0,
                 "sort": sort != "newest",
                 "include_empty": include_empty,
@@ -616,7 +628,9 @@ class TargetCatalog:
             )
 
         region = (ra_deg, dec_deg, radius_deg) if radius_deg is not None else None
-        rows = target_overview.summary_rows(targets, target_id, text, camera_id, region, include_empty)
+        rows = target_overview.summary_rows(
+            targets, target_id, text, camera_id, region, include_empty, object_type
+        )
         if sort == "name":
             rows.sort(key=lambda row: row["id"].lower())
         elif sort == "separation":

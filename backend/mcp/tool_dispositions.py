@@ -222,7 +222,7 @@ PROPOSED_TOOLS = (
             "target_list",
         ),
         (
-            "target_id, text, camera_id, or region{ra_deg, dec_deg, radius_deg}",
+            "target_id, text, camera_id, object_type, or region{ra_deg, dec_deg, radius_deg}",
             "detail: summary | full | cameras | nights | camera_index",
             "include_frames, sort, include_empty, limit, offset",
         ),

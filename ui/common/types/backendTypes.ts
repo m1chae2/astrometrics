@@ -34,6 +34,22 @@ export enum ImageType {
 }
 
 /**
+ * The kind of sky object a target is, read from its name.
+ *
+ * See `astrometricslib.pipelines.shared.target_classification` for the
+ * rules. `STAR` is every name that fits no other kind.
+ */
+export enum TargetObjectType {
+  SOLAR_SYSTEM = "solar_system",
+  MESSIER = "messier",
+  NGC = "ngc",
+  IC = "ic",
+  COMET = "comet",
+  CALIBRATION = "calibration",
+  STAR = "star"
+}
+
+/**
  * The serializable form of an error.
  *
  * Every adapter sends this shape: the JSON-RPC ``error.data`` field, an MCP
@@ -214,6 +230,8 @@ export interface TargetObject {
   exposureTime?: number;
   numberOfStars?: number;
   frames?: FrameRecord[];
+  /** The kind of sky object this is, read from the target's id. */
+  objectType?: TargetObjectType;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }

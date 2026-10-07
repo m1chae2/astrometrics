@@ -93,6 +93,18 @@ def test_filters_by_text_camera_and_region(catalog: TargetCatalog) -> None:
     assert near[0]["separation_deg"] < 0.2
 
 
+def test_filters_by_object_type(catalog: TargetCatalog) -> None:
+    """Each row names its kind, and object_type keeps only that kind."""
+    assert [row["object_type"] for row in catalog.query().targets] == ["messier", "messier"]
+    assert catalog.query(object_type="ngc").total_matching == 0
+    answer = catalog.query(object_type="calibration", include_empty=True)
+    assert [row["id"] for row in answer.targets] == ["Bias"]
+    with pytest.raises(InvalidArgumentError):
+        catalog.query(object_type="galaxy")
+    with pytest.raises(InvalidArgumentError):
+        catalog.query(detail="nights", object_type="messier")
+
+
 def test_a_region_search_can_put_the_nearest_target_first(catalog: TargetCatalog) -> None:
     """Sorting by separation lists the target nearest the centre first."""
     near = catalog.query(ra_deg=283.9, dec_deg=32.6, radius_deg=180.0, sort="separation").targets

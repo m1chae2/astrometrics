@@ -4,6 +4,7 @@
  */
 
 import type { TargetCameraIndex } from '../services/backendApi';
+import { TargetObjectType } from '../types/backendTypes';
 
 /** The catalog choices every target list offers. */
 export const CATALOG_ALL = 'All Targets';
@@ -25,6 +26,8 @@ export type SortChoice = typeof SORT_ALPHABETICAL | typeof SORT_NEWEST;
 export interface TargetListEntry {
     id?: string;
     name?: string;
+    /** The kind of sky object, read from the name by the library (`Target.object_type`). */
+    objectType?: TargetObjectType | `${TargetObjectType}`;
     stacking?: { processedImage?: string; stackedImage?: string };
 }
 
@@ -58,48 +61,20 @@ export const hasProcessedImage = (target: TargetListEntry): boolean => {
     return typeof imagePath === 'string' && imagePath.trim() !== '';
 };
 
-const SOLAR_SYSTEM_BODIES = new Set([
-    'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto',
-]);
-
-/** Folders that hold calibration frames, which are never sky targets. */
-const CALIBRATION_NAMES = new Set(['bias', 'dark', 'flat', 'calibration']);
-
-/**
- * Tells whether a name is a planet, the Sun or the Moon.
- *
- * @param {string} name - A cleaned target name.
- * @return {boolean} True for a solar-system body.
- */
-const isSolarSystemBody = (name: string): boolean =>
-    SOLAR_SYSTEM_BODIES.has(name.toLowerCase());
-
-/**
- * Tells whether a name is a Messier, NGC or IC number.
- *
- * @param {string} name - A cleaned target name.
- * @return {boolean} True for a deep-sky catalog designation.
- */
-const isDeepSkyDesignation = (name: string): boolean =>
-    /^M(?=[\s\d]|$)/i.test(name) || /^(?:NGC|IC)(?=[\s\d]|$)/i.test(name);
-
-/**
- * Tells whether a name is a comet or asteroid designation such as "C 2022 E3 ZTF".
- *
- * @param {string} name - A cleaned target name.
- * @return {boolean} True for a comet or asteroid designation.
- */
-const isCometDesignation = (name: string): boolean =>
-    /^[CPDXAI]\s?\/?\s?\d{4}\b/i.test(name);
+/** The library's object kinds each name-based catalog choice shows. */
+const CATALOG_OBJECT_TYPES: Record<string, ReadonlyArray<string>> = {
+    [CATALOG_PLANETS]: [TargetObjectType.SOLAR_SYSTEM],
+    [CATALOG_STARS]: [TargetObjectType.STAR],
+    [CATALOG_MESSIER]: [TargetObjectType.MESSIER],
+    [CATALOG_NGC_IC]: [TargetObjectType.NGC, TargetObjectType.IC],
+};
 
 /**
  * Tells whether a target belongs to the chosen catalog.
  *
  * Targets without a processed image are hidden in every catalog except
- * "No Image", which shows only those. Targets carry no object-type field, so
- * "Planets" and "Stars" go by name: "Planets" is the planets, Sun and Moon,
- * and "Stars" is any other target that is not a Messier, NGC or IC number, a
- * comet designation, or a calibration folder.
+ * "No Image", which shows only those. The other catalogs go by the
+ * target's `objectType`, which the library reads from the name.
  *
  * @param {TargetListEntry} target - The target.
  * @param {string} catalog - One of the CATALOG_* choices.
@@ -109,21 +84,8 @@ export const matchesCatalog = (target: TargetListEntry, catalog: string): boolea
     const isProcessed = hasProcessedImage(target);
     if (catalog === CATALOG_NO_IMAGE) return !isProcessed;
     if (!isProcessed) return false;
-    const name = cleanTargetName(String(target.name ?? target.id ?? ''));
-    if (catalog === CATALOG_PLANETS) return isSolarSystemBody(name);
-    if (catalog === CATALOG_STARS) {
-        return (
-            !isSolarSystemBody(name) &&
-            !isDeepSkyDesignation(name) &&
-            !isCometDesignation(name) &&
-            !CALIBRATION_NAMES.has(name.toLowerCase())
-        );
-    }
-    if (catalog === CATALOG_MESSIER) return /^M(?=[\s\d]|$)/i.test(name);
-    if (catalog === CATALOG_NGC_IC) {
-        return /^NGC(?=[\s\d]|$)/i.test(name) || /^IC(?=[\s\d]|$)/i.test(name);
-    }
-    return true;
+    const kinds = CATALOG_OBJECT_TYPES[catalog];
+    return kinds === undefined || kinds.includes(String(target.objectType ?? ''));
 };
 
 /**

@@ -71,8 +71,10 @@ class HistoryControl(ControlChild):
             `ekos_file_id`), ``"guiding_runs"``, ``"pointing_model"``
             (needs `session_id`), or ``"alignment"`` (the plate solves that
             checked the mount's pointing: one summary per night, with the
-            night's mean pointing, or one night's attempts with
-            `session_id`).
+            night's mean pointing and tracking jitter, or, with
+            `session_id`, one night's attempts and the same attempts
+            grouped into one `AlignmentTargetSession` per target, with
+            jitter and drift rates).
         session_id : `str`, optional
             An observing night, named for the local date on which it began,
             for example ``"2026-09-24"``. Used by ``capture``,

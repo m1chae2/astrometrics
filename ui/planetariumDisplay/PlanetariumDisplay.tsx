@@ -85,8 +85,8 @@ export const PlanetariumDisplay: React.FC = () => {
     availableSessions,
     selectedSessionId,
     setSelectedSessionId,
-    activeAlignmentAttempts,
-    activeCumulativeTrackingAttempts,
+    activeAlignmentTargets,
+    activeCumulativeAlignmentTargets,
     activePolarAlignment,
   } = useAlignmentSessionData(telemetry);
 
@@ -577,8 +577,8 @@ export const PlanetariumDisplay: React.FC = () => {
         constellationLines={constellationLines}
         showTelescope={showTelescope}
         showTrackingRisk={showTrackingRisk}
-        alignmentAttempts={activeAlignmentAttempts}
-        cumulativeTrackingAttempts={activeCumulativeTrackingAttempts}
+        alignmentTargets={activeAlignmentTargets}
+        cumulativeAlignmentTargets={activeCumulativeAlignmentTargets}
         polarAlignment={activePolarAlignment}
         selectedSessionId={selectedSessionId}
         simulationDate={isLiveTime ? undefined : currentDate}

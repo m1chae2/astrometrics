@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { emitToast } from '../utils/emitToast';
-import { AlignmentAttempt, PolarAlignmentStatus } from '../types/backendTypes';
+import { AlignmentAttempt, AlignmentTargetSession, PolarAlignmentStatus } from '../types/backendTypes';
 import { useAstrometrics } from '../context/AstrometricsContext';
 
 /** Represents the telemetry data returned from the telescope. */
@@ -25,6 +25,8 @@ export interface TelescopeTelemetry {
     guidingHistory: any[];
     /** List of alignment attempts. */
     alignmentAttempts: AlignmentAttempt[];
+    /** The same attempts grouped by target, with tracking statistics from the library. */
+    alignmentTargets: AlignmentTargetSession[];
     /** Whether an alignment run is currently in progress. */
     alignmentActive: boolean;
     /** Current polar alignment assistant status. */
@@ -64,6 +66,7 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
         filter: '',
         guidingHistory: [],
         alignmentAttempts: [],
+        alignmentTargets: [],
         alignmentActive: false,
         polarAlignment: null,
     });
@@ -107,6 +110,7 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
             filter: activeFilter,
             guidingHistory: guideHist,
             alignmentAttempts: telescope.alignmentAttempts ?? [],
+            alignmentTargets: telescope.alignmentTargets ?? [],
             alignmentActive: telescope.alignmentActive ?? false,
             polarAlignment: telescope.polarAlignment ?? null,
             cameraTemperature: telescope.cameraTemperature ?? undefined,

@@ -63,6 +63,7 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
     assert len(data["alignmentAttempts"]) == 2
     assert data["alignmentAttempts"][0]["targetName"] == "Deneb"
     assert data["alignmentAttempts"][1]["targetName"] == "Vega"
+    assert [target["targetName"] for target in data["alignmentTargets"]] == ["Deneb", "Vega"]
     assert data["polarAlignment"] is not None
     assert data["polarAlignment"]["totalErrorArcsec"] == pytest.approx(42.0)
 

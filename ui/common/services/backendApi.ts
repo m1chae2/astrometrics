@@ -27,6 +27,7 @@ import {
     AlignmentAttempt,
     PolarAlignmentStatus,
     AlignmentSessionSummary,
+    AlignmentTargetSession,
     ObjectVisibility
 } from '../types/backendTypes';
 
@@ -204,8 +205,8 @@ export interface ActionRegistry {
     "telescope:alignment_start": { payload: { target_ra: string; target_dec: string }; response: boolean };
     "telescope:alignment_stop": { payload: Record<string, never>; response: boolean };
     "telescope:list_alignment_sessions": { payload: Record<string, never>; response: AlignmentSessionSummary[] };
-    "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
-    "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
     "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
     "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
     "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };

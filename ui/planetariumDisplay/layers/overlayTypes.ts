@@ -4,7 +4,7 @@
  */
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
-import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
+import { AlignmentTargetSession, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
 /**
  * Interface representing the read-only projection, coordinates, and view configuration
@@ -43,8 +43,8 @@ export interface ProjectionContext {
   showTelescope?: boolean;
   /** Show alignment pointing vectors and polar alignment overlay. */
   showAlignment?: boolean;
-  /** Plate-solve alignment attempts to project onto the celestial sphere. */
-  alignmentAttempts?: AlignmentAttempt[];
+  /** Plate solves grouped by target, with tracking statistics from the library. */
+  alignmentTargets?: AlignmentTargetSession[];
   /** Polar Alignment Assistant (PAA) status and coordinates. */
   polarAlignment?: PolarAlignmentStatus | null;
   /** Selected historical session identifier being reviewed. */
@@ -57,8 +57,8 @@ export interface ProjectionContext {
   plateScaleArcsecPerPx?: number;
   /** Show mount tracking mechanical risk heatmap. */
   showTrackingRisk?: boolean;
-  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
-  cumulativeTrackingAttempts?: AlignmentAttempt[];
+  /** Plate solves of every recorded night, grouped by target by the library. */
+  cumulativeAlignmentTargets?: AlignmentTargetSession[];
 }
 
 /**

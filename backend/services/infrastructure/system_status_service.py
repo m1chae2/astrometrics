@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from wayfindinglib import AlignmentTargetSession
 from wayfindinglib.models.session.telemetry import IndiStatus, PolarAlignmentStatus
 
 
@@ -27,6 +28,7 @@ class TelescopePulse(BaseModel):
     focuser_position: int = Field(0, alias="focuserPosition")
     guiding_history: list[dict[str, Any]] = Field(default_factory=list, alias="guidingHistory")
     alignment_attempts: list[Any] = Field(default_factory=list, alias="alignmentAttempts")
+    alignment_targets: list[AlignmentTargetSession] = Field(default_factory=list, alias="alignmentTargets")
     alignment_active: bool = Field(default=False, alias="alignmentActive")
     polar_alignment: PolarAlignmentStatus | None = Field(default=None, alias="polarAlignment")
     camera_temperature: str | None = Field(default=None, alias="cameraTemperature")
@@ -88,6 +90,7 @@ class SystemStatusService:
             focuserPosition=tele.get("focuserPosition", 0),
             guidingHistory=tele.get("guidingHistory", tele.get("guiding_history", [])),
             alignmentAttempts=tele.get("alignmentAttempts", tele.get("alignment_attempts", [])),
+            alignmentTargets=tele.get("alignmentTargets", []),
             alignmentActive=tele.get("alignmentActive", tele.get("alignment_active", False)),
             cameraTemperature=tele.get("cameraTemperature", tele.get("camera_temperature")),
             cameraStatus=tele.get("cameraStatus", tele.get("camera_status")),

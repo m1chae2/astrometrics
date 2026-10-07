@@ -3,7 +3,7 @@
  *
  * Verifies that the mount tracking risk overlay samples altitudes up to 90.0 degrees (Zenith),
  * ensuring seamless coverage of the celestial dome without leaving an unrendered hole,
- * and verifies that cumulative multi-session tracking attempts are ingested and rendered.
+ * and verifies that the library's cumulative per-target sessions are rendered.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -56,7 +56,7 @@ describe('TrackingRiskOverlay', () => {
       lst: 310,
       width: 1600,
       height: 900,
-      alignmentAttempts: [],
+      alignmentTargets: [],
       getRaDec: vi.fn((alt: number, _az: number) => {
         sampledAltitudes.push(alt);
         return { ra: 310, dec: 39.7392 };
@@ -77,10 +77,10 @@ describe('TrackingRiskOverlay', () => {
   });
 
   /**
-   * Tests that TrackingRiskOverlay prefers cumulativeTrackingAttempts across sessions
+   * Tests that TrackingRiskOverlay prefers cumulativeAlignmentTargets across sessions
    * and renders the multi-session legend badge title.
    */
-  it('prefers cumulativeTrackingAttempts and displays multi-session legend title', () => {
+  it('prefers cumulativeAlignmentTargets and displays multi-session legend title', () => {
     const overlay = new TrackingRiskOverlay();
     const fillTextMock = vi.fn();
     const mockContext = {
@@ -102,17 +102,14 @@ describe('TrackingRiskOverlay', () => {
       lst: 310,
       width: 1600,
       height: 900,
-      alignmentAttempts: [
-        // Single session attempt (should be superseded by cumulative)
-        { status: 'aligned', ra: 100, dec: 20, deltaRaArcsec: 0.1, deltaDecArcsec: 0.1, timestamp: 1000 },
+      alignmentTargets: [
+        // Live target (should be superseded by the cumulative targets)
+        { id: 'live', targetName: 'Sync #1', meanRaDeg: 100, meanDecDeg: 20, frameCount: 1, rmsTotalArcsec: 0 },
       ],
-      cumulativeTrackingAttempts: [
-        // Multi-session target 1: Deneb
-        { status: 'aligned', targetName: 'Deneb', ra: 310.4, dec: 45.3, deltaRaArcsec: 0.2, deltaDecArcsec: 0.1, timestamp: 1000 },
-        { status: 'aligned', targetName: 'Deneb', ra: 310.4, dec: 45.3, deltaRaArcsec: 0.3, deltaDecArcsec: -0.2, timestamp: 1005 },
-        // Multi-session target 2: Vega
-        { status: 'aligned', targetName: 'Vega', ra: 279.2, dec: 38.8, deltaRaArcsec: 0.8, deltaDecArcsec: 0.7, timestamp: 2000 },
-        { status: 'aligned', targetName: 'Vega', ra: 279.2, dec: 38.8, deltaRaArcsec: 0.9, deltaDecArcsec: -0.6, timestamp: 2005 },
+      cumulativeAlignmentTargets: [
+        // Two targets, two solves each, grouped by the library
+        { id: 'a', targetName: 'Deneb', meanRaDeg: 310.4, meanDecDeg: 45.3, frameCount: 2, rmsTotalArcsec: 0.2 },
+        { id: 'b', targetName: 'Vega', meanRaDeg: 279.2, meanDecDeg: 38.8, frameCount: 2, rmsTotalArcsec: 0.7 },
       ],
       getRaDec: vi.fn(() => ({ ra: 310, dec: 39.7392 })),
       projectCoords: vi.fn(() => ({

@@ -5,8 +5,8 @@
  */
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
-import { AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
-import { clusterAlignmentAttempts, formatDuration } from '../utils/alignmentClustering';
+import { PolarAlignmentStatus } from '../../common/types/backendTypes';
+import { formatDuration } from '../utils/durationFormat';
 import { pixelsPerDegree } from '../utils/projectionMath';
 import { ALIGNMENT_RETICLE_RADIUS_PX as RETICLE_RADIUS_PX, ALIGNMENT_ARROW_HEAD_PX as ARROW_HEAD_PX } from './constants';
 
@@ -90,8 +90,7 @@ export class AlignmentOverlay implements PlanetariumOverlay {
     context: CanvasRenderingContext2D,
     projectionContext: ProjectionContext
   ): void {
-    const rawAttempts: AlignmentAttempt[] = projectionContext.alignmentAttempts || [];
-    const clusters = clusterAlignmentAttempts(rawAttempts);
+    const clusters = projectionContext.alignmentTargets || [];
     if (clusters.length === 0) return;
 
     // Track projected screen points for sequential path connection between session centroids
@@ -106,13 +105,13 @@ export class AlignmentOverlay implements PlanetariumOverlay {
     const fovHeightPx = Math.max(24, fovHeightDeg * scale);
 
     clusters.forEach((cluster, index) => {
-      const screenPt = projectionContext.projectCoords(cluster.centroidRa, cluster.centroidDec);
+      const screenPt = projectionContext.projectCoords(cluster.meanRaDeg, cluster.meanDecDeg);
       if (!screenPt.visible) return;
 
       projectedPath.push({ x: screenPt.x, y: screenPt.y });
 
-      const isMultiFrame = cluster.totalFrames > 1;
-      const displayErr = isMultiFrame ? cluster.rmsTotal : cluster.initialErrorArcsec;
+      const isMultiFrame = cluster.frameCount > 1;
+      const displayErr = isMultiFrame ? cluster.rmsTotalArcsec : cluster.initialErrorArcsec;
       const color = getErrorColor(displayErr, isMultiFrame ? 'aligned' : 'warning');
 
       if (isMultiFrame) {
@@ -170,9 +169,9 @@ export class AlignmentOverlay implements PlanetariumOverlay {
 
       // --- Draw Initial Slew Error Vector Arrow if significant (> 30") ---
       if (cluster.initialErrorArcsec > 30.0) {
-        const first = cluster.rawAttempts[0];
-        const dRa = first.deltaRaArcsec || 0;
-        const dDec = first.deltaDecArcsec || 0;
+        const first = cluster.attempts?.[0];
+        const dRa = first?.deltaRaArcsec || 0;
+        const dDec = first?.deltaDecArcsec || 0;
         const lengthPx = Math.min(55, Math.max(16, Math.sqrt(cluster.initialErrorArcsec) * 2.8));
         const angle = Math.atan2(-dDec, dRa);
 
@@ -204,7 +203,7 @@ export class AlignmentOverlay implements PlanetariumOverlay {
 
       // --- Draw Single Consolidated Session Badge ---
       const labelText = isMultiFrame
-        ? `${cluster.targetName} (${cluster.totalFrames} frames · ${formatDuration(cluster.elapsedSeconds)} · ${formatError(cluster.rmsTotal)} RMS)`
+        ? `${cluster.targetName} (${cluster.frameCount} frames · ${formatDuration(cluster.elapsedSeconds)} · ${formatError(cluster.rmsTotalArcsec)} RMS)`
         : `${cluster.targetName} (${formatError(cluster.initialErrorArcsec)})`;
 
       context.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';

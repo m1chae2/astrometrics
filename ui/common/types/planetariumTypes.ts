@@ -38,8 +38,8 @@ export interface PlanetariumSource {
   fieldOfView?: string;
   /** Associated alignment attempt metadata when type === 'alignment'. */
   alignmentAttempt?: import('./backendTypes').AlignmentAttempt;
-  /** Clustered alignment session telemetry when type === 'alignment'. */
-  alignmentSession?: import('../../planetariumDisplay/utils/alignmentClustering').ClusteredAlignmentSession;
+  /** The library's per-target alignment session when type === 'alignment'. */
+  alignmentSession?: import('./backendTypes').AlignmentTargetSession;
 }
 
 /**

@@ -519,6 +519,7 @@ export interface TelescopePulse {
   focuserPosition?: number;
   guidingHistory?: Record<string, any>[];
   alignmentAttempts?: any[];
+  alignmentTargets?: AlignmentTargetSession[];
   alignmentActive?: boolean;
   polarAlignment?: PolarAlignmentStatus | null;
   cameraTemperature?: string | null;
@@ -605,6 +606,54 @@ export interface AlignmentSessionSummary {
   meanRaDeg?: number | null;
   /** Average declination of the night's solves. */
   meanDecDeg?: number | null;
+  /** Tracking jitter over the night's targets, weighted by their solve counts. */
+  rmsJitterArcsec?: number | null;
+}
+
+/**
+ * One plate solve in a target's run, timed from the run's first solve.
+ */
+export interface AlignmentTrackPoint {
+  elapsedSeconds: number;
+  deltaRaArcsec: number;
+  deltaDecArcsec: number;
+  totalErrorArcsec: number;
+  timestamp: number;
+}
+
+/**
+ * The plate solves on one target, with their tracking statistics.
+ *
+ * Solves are grouped by target name, or, without a name, by being within
+ * half a degree of each other. A group can hold several runs: a gap of
+ * more than two hours starts a new run.
+ *
+ * Jitter is the root-mean-square (RMS) scatter of the solves around the
+ * run's own average offset, so a deliberate framing offset is not counted
+ * as tracking error. Drift is the slope of a straight-line fit of the
+ * offsets against time.
+ */
+export interface AlignmentTargetSession {
+  id: string;
+  targetName: string;
+  /** Average right ascension, wrapped at 0/360 degrees. */
+  meanRaDeg: number;
+  meanDecDeg: number;
+  frameCount: number;
+  /** Pointing error of the first solve, after the slew. */
+  initialErrorArcsec: number;
+  rmsRaArcsec: number;
+  rmsDecArcsec: number;
+  /** Tracking jitter: RMS scatter around each run's mean offset. */
+  rmsTotalArcsec: number;
+  driftRaArcsecPerMin: number;
+  driftDecArcsecPerMin: number;
+  startTime?: number | null;
+  endTime?: number | null;
+  /** Time spent tracking, summed over runs (gaps excluded). */
+  elapsedSeconds: number;
+  timeSeries?: AlignmentTrackPoint[];
+  attempts?: AlignmentAttempt[];
 }
 
 /**

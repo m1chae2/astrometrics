@@ -139,7 +139,7 @@ def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
     )
     service.poll_external_syncs()
 
-    attempts = service.get_attempts()
+    attempts = service.get_attempts()["alignmentAttempts"]
     assert len(attempts) == 1
     assert attempts[0]["status"] == "aligned"
     assert attempts[0]["deltaRaArcsec"] == pytest.approx(12.5)

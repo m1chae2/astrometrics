@@ -16,7 +16,13 @@ import time
 from typing import Any
 
 from astrometricslib import InvalidArgumentError
-from wayfindinglib import AlignmentAttempt, MountPointingModel, ObservatoryControl, SkyPosition
+from wayfindinglib import (
+    AlignmentAttempt,
+    AlignmentTargetSession,
+    MountPointingModel,
+    ObservatoryControl,
+    SkyPosition,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +54,8 @@ class AlignmentService:
         self._alignment_thread: threading.Thread | None = None
         self._run_started_at: float | None = None
 
-    def get_attempts(self) -> list[dict]:
-        """List the alignment attempts for the app's live status.
+    def get_attempts(self) -> dict[str, list[dict]]:
+        """List the live alignment attempts, and the same grouped by target.
 
         Since a centering run was started, these are the attempts recorded
         from then on, with a ``solving`` entry while it runs. Before any
@@ -57,12 +63,14 @@ class AlignmentService:
 
         Returns
         -------
-        attempts : `list` [`dict`]
-            One dict per attempt with coordinate and delta keys, oldest
-            first.
+        live : `dict` [`str`, `list` [`dict`]]
+            ``alignmentAttempts``: one dict per attempt, oldest first.
+            ``alignmentTargets``: the same attempts grouped into one
+            `AlignmentTargetSession` per target, with jitter and drift
+            rates, worked out by the library.
         """
         if not self._logger_interface:
-            return []
+            return {"alignmentAttempts": [], "alignmentTargets": []}
         rows = list(reversed(self._logger_interface.get_alignment_logs(limit=RECENT_ATTEMPTS_SHOWN)))
         if self._run_started_at is not None:
             rows = [row for row in rows if (row.get("timestamp") or 0) >= self._run_started_at]
@@ -79,9 +87,13 @@ class AlignmentService:
             )
             for row in rows
         ]
+        targets = AlignmentTargetSession.from_attempts(attempts)
         if self.is_active():
             attempts.append(AlignmentAttempt(status="solving"))
-        return [attempt.model_dump(by_alias=True) for attempt in attempts]
+        return {
+            "alignmentAttempts": [attempt.model_dump(by_alias=True) for attempt in attempts],
+            "alignmentTargets": [target.model_dump(mode="json", by_alias=True) for target in targets],
+        }
 
     def get_polar_alignment(self) -> dict[str, Any]:
         """Get current or latest polar alignment assistant status.
@@ -150,17 +162,20 @@ class AlignmentService:
         Returns
         -------
         data : `dict` [`str`, `Any`]
-            Dictionary containing attempts and polarAlignment.
+            ``alignmentAttempts`` (a status the model does not know reads
+            as ``aligned``), ``alignmentTargets`` (the attempts grouped by
+            target, with jitter and drift rates, from
+            `AlignmentTargetSession.from_attempts`) and ``polarAlignment``.
         """
         if not self._logger_interface:
-            return {"alignmentAttempts": [], "polarAlignment": None}
+            return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
 
         try:
             raw_attempts = self._logger_interface.get_session_alignment_attempts(session_id)
             attempts = []
             for row in raw_attempts:
                 attempts.append({
-                    "status": row.get("status", "aligned"),
+                    "status": row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
                     "deltaRaArcsec": row.get("delta_ra_arcsec"),
                     "deltaDecArcsec": row.get("delta_dec_arcsec"),
                     "ra": row.get("mount_ra"),
@@ -200,13 +215,17 @@ class AlignmentService:
                     "timestamp": p.get("timestamp"),
                 }
 
+            targets = AlignmentTargetSession.from_attempts([
+                AlignmentAttempt.model_validate(attempt) for attempt in attempts
+            ])
             return {
                 "alignmentAttempts": attempts,
+                "alignmentTargets": [target.model_dump(mode="json", by_alias=True) for target in targets],
                 "polarAlignment": polar_status,
             }
         except (sqlite3.Error, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)
-            return {"alignmentAttempts": [], "polarAlignment": None}
+            return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
 
     def get_cumulative_tracking_data(self, limit: int = 10000) -> dict[str, Any]:
         """Fetch cumulative tracking attempts across all recorded sessions.

@@ -12,7 +12,7 @@
 import React, { useMemo } from 'react';
 import { PlanetariumSource, ObserverLocation } from '../../common/types/planetariumTypes';
 import { safeParse, formatRA, formatDec } from '../utils/coordinateUtils';
-import { formatDuration } from '../utils/alignmentClustering';
+import { formatDuration } from '../utils/durationFormat';
 import { computeChartMaxBound, computeRingStep } from '../utils/chartScale';
 
 interface Props {
@@ -41,12 +41,12 @@ export const AlignmentPointCard: React.FC<Props> = ({
   const session = source.alignmentSession;
   const attempt = source.alignmentAttempt;
 
-  const isMultiFrame = session != null && session.totalFrames > 1;
+  const isMultiFrame = session != null && session.frameCount > 1;
 
   const dRa = attempt?.deltaRaArcsec ?? 0;
   const dDec = attempt?.deltaDecArcsec ?? 0;
   const totalError = isMultiFrame
-    ? session.rmsTotal
+    ? session.rmsTotalArcsec
     : (attempt?.pointingErrorArcsec ?? Math.hypot(dRa, dDec));
 
   const raNum = safeParse(source.ra);
@@ -69,8 +69,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
   // --- 2D Polar Bulls-Eye Computations ---
   // Dynamically auto-scale to actual jitter amplitude (e.g. 0.06" or 1.5")
   const polarData = useMemo(() => {
-    if (!session || session.timeSeries.length === 0) return null;
-    const pts = session.timeSeries;
+    const pts = session?.timeSeries ?? [];
+    if (!session || pts.length === 0) return null;
 
     // For multi-frame tracking sessions, calculate the mean pointing offset
     // so we can display residual tracking jitter/dispersion around (0, 0)
@@ -78,8 +78,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
     let meanDec = 0;
     if (pts.length > 1) {
       pts.forEach((p) => {
-        meanRa += p.deltaRa;
-        meanDec += p.deltaDec;
+        meanRa += p.deltaRaArcsec;
+        meanDec += p.deltaDecArcsec;
       });
       meanRa /= pts.length;
       meanDec /= pts.length;
@@ -87,8 +87,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
 
     let peakError = 0.01;
     pts.forEach((p) => {
-      const relRa = pts.length > 1 ? p.deltaRa - meanRa : p.deltaRa;
-      const relDec = pts.length > 1 ? p.deltaDec - meanDec : p.deltaDec;
+      const relRa = pts.length > 1 ? p.deltaRaArcsec - meanRa : p.deltaRaArcsec;
+      const relDec = pts.length > 1 ? p.deltaDecArcsec - meanDec : p.deltaDecArcsec;
       peakError = Math.max(peakError, Math.abs(relRa), Math.abs(relDec));
     });
 
@@ -109,12 +109,12 @@ export const AlignmentPointCard: React.FC<Props> = ({
     }
 
     // Calculate 1-sigma ellipse dimensions (rmsRa, rmsDec)
-    const ellipseRx = Math.max(4, session.rmsRa * scale);
-    const ellipseRy = Math.max(4, session.rmsDec * scale);
+    const ellipseRx = Math.max(4, session.rmsRaArcsec * scale);
+    const ellipseRy = Math.max(4, session.rmsDecArcsec * scale);
 
     const projectedPoints = pts.map((p, idx) => {
-      const relRa = pts.length > 1 ? p.deltaRa - meanRa : p.deltaRa;
-      const relDec = pts.length > 1 ? p.deltaDec - meanDec : p.deltaDec;
+      const relRa = pts.length > 1 ? p.deltaRaArcsec - meanRa : p.deltaRaArcsec;
+      const relDec = pts.length > 1 ? p.deltaDecArcsec - meanDec : p.deltaDecArcsec;
       const x = center + relRa * scale;
       const y = center - relDec * scale; // Inverted Y for Dec
       const alpha = 0.4 + 0.6 * (idx / Math.max(1, pts.length - 1));
@@ -126,8 +126,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
 
   // --- Time-Series Tracking Chart Computations ---
   const timeData = useMemo(() => {
-    if (!session || session.timeSeries.length < 2) return null;
-    const pts = session.timeSeries;
+    const pts = session?.timeSeries ?? [];
+    if (!session || pts.length < 2) return null;
 
     const width = 280;
     const height = 90;
@@ -139,16 +139,16 @@ export const AlignmentPointCard: React.FC<Props> = ({
     let meanRa = 0;
     let meanDec = 0;
     pts.forEach((p) => {
-      meanRa += p.deltaRa;
-      meanDec += p.deltaDec;
+      meanRa += p.deltaRaArcsec;
+      meanDec += p.deltaDecArcsec;
     });
     meanRa /= pts.length;
     meanDec /= pts.length;
 
     let peakVal = 0.01;
     pts.forEach((p) => {
-      const relRa = p.deltaRa - meanRa;
-      const relDec = p.deltaDec - meanDec;
+      const relRa = p.deltaRaArcsec - meanRa;
+      const relDec = p.deltaDecArcsec - meanDec;
       peakVal = Math.max(peakVal, Math.abs(relRa), Math.abs(relDec));
     });
 
@@ -158,8 +158,8 @@ export const AlignmentPointCard: React.FC<Props> = ({
     const toY = (val: number) => height / 2 - (val / maxVal) * (height / 2 - padY);
 
     // Construct SVG paths using relative jitter centered at 0
-    const raPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSec).toFixed(1)} ${toY(p.deltaRa - meanRa).toFixed(1)}`, '');
-    const decPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSec).toFixed(1)} ${toY(p.deltaDec - meanDec).toFixed(1)}`, '');
+    const raPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSeconds).toFixed(1)} ${toY(p.deltaRaArcsec - meanRa).toFixed(1)}`, '');
+    const decPath = pts.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${toX(p.elapsedSeconds).toFixed(1)} ${toY(p.deltaDecArcsec - meanDec).toFixed(1)}`, '');
 
     return {
       width,
@@ -187,7 +187,7 @@ export const AlignmentPointCard: React.FC<Props> = ({
           <div className="planetarium-info-card__title-group">
             <h3 className="planetarium-info-card__title planetarium-info-card__title--compact">{titleText}</h3>
             <div className="planetarium-info-card__subtitle">
-              <span>{isMultiFrame ? `${session?.totalFrames} Frames Session` : 'Plate Solve Sync'}</span>
+              <span>{isMultiFrame ? `${session?.frameCount} Frames Session` : 'Plate Solve Sync'}</span>
               <span className="planetarium-info-card__divider">&bull;</span>
               <span className={statusBadge}>{totalError <= 30 ? 'ALIGNED' : 'TRACKING'}</span>
             </div>
@@ -296,13 +296,13 @@ export const AlignmentPointCard: React.FC<Props> = ({
                 <tr>
                   <td>Tracking Dispersion (RMS)</td>
                   <td className={errorClassFor(totalError)}>
-                    {session.rmsTotal.toFixed(2)}&Prime;
+                    {session.rmsTotalArcsec.toFixed(2)}&Prime;
                   </td>
                 </tr>
                 <tr>
                   <td>&Delta;RA / &Delta;Dec RMS</td>
                   <td>
-                    {session.rmsRa.toFixed(2)}&Prime; / {session.rmsDec.toFixed(2)}&Prime;
+                    {session.rmsRaArcsec.toFixed(2)}&Prime; / {session.rmsDecArcsec.toFixed(2)}&Prime;
                   </td>
                 </tr>
                 <tr>
@@ -315,16 +315,16 @@ export const AlignmentPointCard: React.FC<Props> = ({
                 </tr>
                 <tr>
                   <td>Total Sub-Frames</td>
-                  <td>{session.totalFrames} frames</td>
+                  <td>{session.frameCount} frames</td>
                 </tr>
                 <tr>
                   <td>Total Exposure Time</td>
                   <td>{formatDuration(session.elapsedSeconds)}</td>
                 </tr>
-                {Math.abs(session.driftSlopeDecArcsecPerMin) > 0.001 && (
+                {Math.abs(session.driftDecArcsecPerMin) > 0.001 && (
                   <tr>
                     <td>Polar Drift Rate (Dec)</td>
-                    <td>{session.driftSlopeDecArcsecPerMin > 0 ? `+${session.driftSlopeDecArcsecPerMin.toFixed(2)}` : session.driftSlopeDecArcsecPerMin.toFixed(2)}&Prime;/min</td>
+                    <td>{session.driftDecArcsecPerMin > 0 ? `+${session.driftDecArcsecPerMin.toFixed(2)}` : session.driftDecArcsecPerMin.toFixed(2)}&Prime;/min</td>
                   </tr>
                 )}
               </>

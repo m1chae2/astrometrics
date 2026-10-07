@@ -15,7 +15,6 @@ import { getAltAz, projectAltAz, pixelsPerDegree } from './projectionMath';
 import { shouldOccludeBelowHorizon, parseTargetFovDegrees } from '../layers/overlayShared';
 import { isDisplayableStar, computeLimitingMagnitude } from '../layers/StarOverlay';
 import { TARGET_RETICLE_MIN_PX } from '../layers/TargetOverlay';
-import { clusterAlignmentAttempts } from './alignmentClustering';
 import { ALIGNMENT_HIT_RADIUS_PX, STAR_HIT_RADIUS_PX, TARGET_HIT_MARGIN_PX } from '../layers/constants';
 
 /**
@@ -48,8 +47,8 @@ export interface HitTestParams {
   observerLat: number;
   /** Whether the alignment overlay is visible. */
   showAlignment?: boolean;
-  /** Plate-solve alignment attempts to hit test against. */
-  alignmentAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Plate solves grouped by target (from the library) to hit test against. */
+  alignmentTargets?: import('../../common/types/backendTypes').AlignmentTargetSession[];
 }
 
 /**
@@ -70,18 +69,18 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
     clickX, clickY,
     sources, targets,
     showStars, showCatalog, showEnvironment,
-    showAlignment = true, alignmentAttempts = [],
+    showAlignment = true, alignmentTargets = [],
     canvasWidth, canvasHeight, fov, centerAlt, centerAz, lst, observerLat,
   } = params;
 
   // 1. Highest priority: Hit test alignment sync points / sessions if alignment layer is showing
-  if (showAlignment && alignmentAttempts.length > 0) {
-    const clusters = clusterAlignmentAttempts(alignmentAttempts);
+  if (showAlignment && alignmentTargets.length > 0) {
+    const clusters = alignmentTargets;
     let nearestAlignment: PlanetariumSource | null = null;
     let minAlignDist = ALIGNMENT_HIT_RADIUS_PX;
 
     clusters.forEach((cluster) => {
-      const { alt, az } = getAltAz(cluster.centroidRa, cluster.centroidDec, lst, observerLat);
+      const { alt, az } = getAltAz(cluster.meanRaDeg, cluster.meanDecDeg, lst, observerLat);
       if (shouldOccludeBelowHorizon(showEnvironment, centerAlt, fov, alt)) return;
       const point = projectAltAz(alt, az, centerAlt, centerAz, fov, canvasWidth, canvasHeight);
       if (!point.visible) return;
@@ -92,15 +91,15 @@ export function findNearestSource(params: HitTestParams): PlanetariumSource | nu
         const nameStr = cluster.targetName.startsWith('Sync') ? cluster.targetName : `Sync: ${cluster.targetName}`;
         nearestAlignment = {
           id: cluster.id,
-          ra: cluster.centroidRa,
-          dec: cluster.centroidDec,
+          ra: cluster.meanRaDeg,
+          dec: cluster.meanDecDeg,
           name: nameStr,
           hasSpectra: false,
           hasPhotometry: false,
           type: 'alignment',
           altitude: alt,
           azimuth: az,
-          alignmentAttempt: cluster.rawAttempts[0],
+          alignmentAttempt: cluster.attempts?.[0],
           alignmentSession: cluster,
         };
       }

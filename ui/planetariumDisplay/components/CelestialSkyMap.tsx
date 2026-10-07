@@ -63,10 +63,10 @@ interface Props {
   showAlignment?: boolean;
   /** Show mount tracking mechanical risk heatmap overlay. */
   showTrackingRisk?: boolean;
-  /** Plate-solve alignment attempts to project onto the celestial sphere. */
-  alignmentAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
-  /** Cumulative tracking and alignment attempts across all recorded observing sessions. */
-  cumulativeTrackingAttempts?: import('../../common/types/backendTypes').AlignmentAttempt[];
+  /** Plate solves grouped by target (from the library) to project onto the celestial sphere. */
+  alignmentTargets?: import('../../common/types/backendTypes').AlignmentTargetSession[];
+  /** Plate solves of every recorded night, grouped by target by the library. */
+  cumulativeAlignmentTargets?: import('../../common/types/backendTypes').AlignmentTargetSession[];
   /** Polar Alignment Assistant (PAA) status and coordinates. */
   polarAlignment?: import('../../common/types/backendTypes').PolarAlignmentStatus | null;
   /** Selected historical session identifier being reviewed. */
@@ -172,8 +172,8 @@ export const CelestialSkyMap: React.FC<Props> = ({
   showTelescope,
   showAlignment = true,
   showTrackingRisk = false,
-  alignmentAttempts,
-  cumulativeTrackingAttempts,
+  alignmentTargets,
+  cumulativeAlignmentTargets,
   polarAlignment,
   selectedSessionId,
   simulationDate,
@@ -599,8 +599,8 @@ export const CelestialSkyMap: React.FC<Props> = ({
         telescopeDec: telescopeDecRef.current,
         showAlignment,
         showTrackingRisk,
-        alignmentAttempts,
-        cumulativeTrackingAttempts,
+        alignmentTargets,
+        cumulativeAlignmentTargets,
         polarAlignment,
         selectedSessionId,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
@@ -652,7 +652,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     sources, targets, showStars, showFOV,
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
-    showAlignment, showTrackingRisk, alignmentAttempts, cumulativeTrackingAttempts, polarAlignment, selectedSessionId,
+    showAlignment, showTrackingRisk, alignmentTargets, cumulativeAlignmentTargets, polarAlignment, selectedSessionId,
     simulationDate,
     trackingMode, observerLat, observerLon, overlays
   ]);
@@ -666,7 +666,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
-      showAlignment, alignmentAttempts,
+      showAlignment, alignmentTargets,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,
@@ -690,7 +690,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
       clickX: e.clientX - rect.left,
       clickY: e.clientY - rect.top,
       sources, targets, showStars, showCatalog, showEnvironment,
-      showAlignment, alignmentAttempts,
+      showAlignment, alignmentTargets,
       canvasWidth: rect.width, canvasHeight: rect.height,
       fov: localFOVRef.current,
       centerAlt: centerAltRef.current,

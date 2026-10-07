@@ -2,8 +2,9 @@
 
 Description: The alignment history lists one summary per night, built on
 the log database's `get_alignment_sessions`, with the night's mean
-pointing, or one night's attempts. The mean right ascension must wrap at
-0h/24h. The tests use a stand-in log database.
+pointing and tracking jitter, or one night's attempts grouped by target.
+The mean right ascension must wrap at 0h/24h. The tests use a stand-in
+log database.
 """
 
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from typing import Any
 import pytest
 
 from astrometricslib import NotFoundError
-from wayfindinglib.tasks.control_tasks import alignment_history, night_history
+from wayfindinglib.tasks.control_tasks import night_history
 
 
 class _Logs:
@@ -94,18 +95,6 @@ def _context() -> SimpleNamespace:
     return SimpleNamespace(logger_interface=_Logs(), astrometrics=SimpleNamespace(targets=targets))
 
 
-def test_the_mean_right_ascension_wraps_at_zero_hours() -> None:
-    """359 and 1 degrees average to 0, not 180."""
-    ra_deg, dec_deg = alignment_history.mean_position_deg([(359.0, 10.0), (1.0, 20.0)])
-    assert ra_deg == pytest.approx(0.0, abs=1e-9) or ra_deg == pytest.approx(360.0)
-    assert dec_deg == pytest.approx(15.0)
-
-
-def test_an_empty_night_has_no_mean_position() -> None:
-    """No solves give no mean."""
-    assert alignment_history.mean_position_deg([]) == (None, None)
-
-
 def test_nights_are_listed_with_their_mean_pointing_and_target_count() -> None:
     """Each night has the app's camelCase summary and its mean pointing."""
     reply = night_history.build_night_history(_context(), "alignment", limit=10)
@@ -119,6 +108,7 @@ def test_nights_are_listed_with_their_mean_pointing_and_target_count() -> None:
     assert newest["meanRaDeg"] % 360.0 == pytest.approx(0.0, abs=1e-9)
     assert older["meanRaDeg"] is None
     assert older["targetCount"] == 0
+    assert older["rmsJitterArcsec"] is None
 
 
 def test_one_night_lists_its_attempts_in_time_order() -> None:
@@ -128,6 +118,17 @@ def test_one_night_lists_its_attempts_in_time_order() -> None:
     assert [attempt["ra"] for attempt in reply["attempts"]] == [359.0, 1.0]
     assert [attempt["status"] for attempt in reply["attempts"]] == ["aligned", "aligned"]
     assert reply["polar_alignment"] is None
+
+
+def test_one_night_groups_its_attempts_by_target() -> None:
+    """Unnamed solves ten degrees apart are two targets, without attempts."""
+    reply = night_history.build_night_history(_context(), "alignment", session_id="2026-09-25")
+
+    targets = reply["targets"]
+    assert [target["frameCount"] for target in targets] == [1, 1]
+    assert [target["meanRaDeg"] for target in targets] == [pytest.approx(359.0), pytest.approx(1.0)]
+    assert [target["targetName"] for target in targets] == ["Sync #1", "Sync #2"]
+    assert all("attempts" not in target for target in targets)
 
 
 def test_a_night_with_no_attempts_is_not_found() -> None:

@@ -55,10 +55,12 @@ def _autospec_control() -> MagicMock:
 
 
 def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
-    """The recorded attempts come back camelCase, oldest first."""
+    """Attempts come back camelCase, oldest first; no position, no target."""
     service = AlignmentService(observatory_api=_autospec_control(), logger_interface=_Logs())
 
-    attempts = service.get_attempts()
+    live = service.get_attempts()
+    attempts = live["alignmentAttempts"]
+    assert live["alignmentTargets"] == []
 
     assert [attempt["timestamp"] for attempt in attempts] == [100.0, 200.0]
     assert attempts[0]["deltaRaArcsec"] == pytest.approx(1.5)
@@ -87,7 +89,7 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     assert service.start_alignment(target_ra=370.0, target_dec=20.0) is True
     assert service.is_active() is True
     assert service.start_alignment(target_ra=10.0, target_dec=20.0) is False
-    assert service.get_attempts()[-1]["status"] == "solving"
+    assert service.get_attempts()["alignmentAttempts"][-1]["status"] == "solving"
 
     assert service.cancel_alignment() is True
     assert service.is_active() is False

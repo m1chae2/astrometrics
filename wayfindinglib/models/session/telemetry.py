@@ -8,6 +8,8 @@ the incumbent guider, with identical fields, so downstream consumers
 are unaffected by the transition.
 """
 
+from __future__ import annotations
+
 import math
 from enum import StrEnum
 from typing import Any
@@ -126,6 +128,81 @@ class AlignmentSessionSummary(BaseModel):
     mean_dec_deg: float | None = Field(
         default=None, alias="meanDecDeg", description="Average declination of the night's solves."
     )
+    rms_jitter_arcsec: float | None = Field(
+        default=None,
+        alias="rmsJitterArcsec",
+        description="Tracking jitter over the night's targets, weighted by their solve counts.",
+    )
+
+
+class AlignmentTrackPoint(BaseModel):
+    """One plate solve in a target's run, timed from the run's first solve."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    elapsed_seconds: float = Field(..., alias="elapsedSeconds")
+    delta_ra_arcsec: float = Field(..., alias="deltaRaArcsec")
+    delta_dec_arcsec: float = Field(..., alias="deltaDecArcsec")
+    total_error_arcsec: float = Field(..., alias="totalErrorArcsec")
+    timestamp: float = Field(..., alias="timestamp")
+
+
+class AlignmentTargetSession(BaseModel):
+    """The plate solves on one target, with their tracking statistics.
+
+    Solves are grouped by target name, or, without a name, by being within
+    half a degree of each other. A group can hold several runs: a gap of
+    more than two hours starts a new run.
+
+    Jitter is the root-mean-square (RMS) scatter of the solves around the
+    run's own average offset, so a deliberate framing offset is not counted
+    as tracking error. Drift is the slope of a straight-line fit of the
+    offsets against time.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    id: str = Field(..., alias="id")
+    target_name: str = Field(..., alias="targetName")
+    mean_ra_deg: float = Field(
+        ..., alias="meanRaDeg", description="Average right ascension, wrapped at 0/360 degrees."
+    )
+    mean_dec_deg: float = Field(..., alias="meanDecDeg")
+    frame_count: int = Field(..., alias="frameCount")
+    initial_error_arcsec: float = Field(
+        ..., alias="initialErrorArcsec", description="Pointing error of the first solve, after the slew."
+    )
+    rms_ra_arcsec: float = Field(..., alias="rmsRaArcsec")
+    rms_dec_arcsec: float = Field(..., alias="rmsDecArcsec")
+    rms_total_arcsec: float = Field(
+        ..., alias="rmsTotalArcsec", description="Tracking jitter: RMS scatter around each run's mean offset."
+    )
+    drift_ra_arcsec_per_min: float = Field(..., alias="driftRaArcsecPerMin")
+    drift_dec_arcsec_per_min: float = Field(..., alias="driftDecArcsecPerMin")
+    start_time: float | None = Field(default=None, alias="startTime")
+    end_time: float | None = Field(default=None, alias="endTime")
+    elapsed_seconds: float = Field(
+        ..., alias="elapsedSeconds", description="Time spent tracking, summed over runs (gaps excluded)."
+    )
+    time_series: list[AlignmentTrackPoint] = Field(default_factory=list, alias="timeSeries")
+    attempts: list[AlignmentAttempt] = Field(default_factory=list, alias="attempts")
+
+    @classmethod
+    def from_attempts(cls, attempts: list[AlignmentAttempt]) -> list[AlignmentTargetSession]:
+        """Group plate solves into one session per target.
+
+        Parameters
+        ----------
+        attempts : `list` [`AlignmentAttempt`]
+            Solves in any order. Ones without a position are skipped, and
+            repeats of the same time and target are counted once.
+
+        Returns
+        -------
+        sessions : `list` [`AlignmentTargetSession`]
+            One per target, in the order the targets were first solved.
+        """
+        from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
+
+        return group_alignment_attempts(attempts)
 
 
 class IndiStatus(BaseModel):

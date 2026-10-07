@@ -125,7 +125,7 @@ class TelescopeService:
                 self._alignment_service.poll_external_syncs(driver)
             except AstrometricsError as e:
                 logger.debug("Failed to poll external syncs: %s", e)
-            data["alignmentAttempts"] = self._alignment_service.get_attempts()
+            data.update(self._alignment_service.get_attempts())
             data["alignmentActive"] = self._alignment_service.is_active()
             if hasattr(self._alignment_service, "get_polar_alignment"):
                 data["polarAlignment"] = self._alignment_service.get_polar_alignment()

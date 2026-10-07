@@ -11,14 +11,15 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { callBackend } from '../../common/services/backendApi';
-import { AlignmentSessionSummary, AlignmentAttempt, PolarAlignmentStatus } from '../../common/types/backendTypes';
+import { AlignmentSessionSummary, AlignmentTargetSession, PolarAlignmentStatus } from '../../common/types/backendTypes';
 
 /**
  * Telemetry fields this hook needs from live telescope status, kept minimal
  * so it doesn't have to import the whole telemetry shape.
  */
 export interface AlignmentSessionTelemetry {
-  alignmentAttempts?: AlignmentAttempt[];
+  /** Live plate solves grouped by target, as the library groups them. */
+  alignmentTargets?: AlignmentTargetSession[];
   polarAlignment?: PolarAlignmentStatus | null;
 }
 
@@ -29,10 +30,10 @@ export interface AlignmentSessionData {
   /** Currently selected historical session id, or null for live telemetry. */
   selectedSessionId: string | null;
   setSelectedSessionId: (id: string | null) => void;
-  /** Alignment attempts for the active view: historical session if selected, else live telemetry. */
-  activeAlignmentAttempts: AlignmentAttempt[];
-  /** All recorded historical sessions' attempts merged with live telemetry. */
-  activeCumulativeTrackingAttempts: AlignmentAttempt[];
+  /** Targets for the active view: historical session if selected, else live telemetry. */
+  activeAlignmentTargets: AlignmentTargetSession[];
+  /** Targets over every recorded night; the live targets until those have loaded. */
+  activeCumulativeAlignmentTargets: AlignmentTargetSession[];
   /** Polar alignment status for the active view: historical session if selected, else live telemetry. */
   activePolarAlignment: PolarAlignmentStatus | null;
 }
@@ -58,9 +59,9 @@ export const useAlignmentSessionData = (
 ): AlignmentSessionData => {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [availableSessions, setAvailableSessions] = useState<AlignmentSessionSummary[]>([]);
-  const [sessionAlignmentAttempts, setSessionAlignmentAttempts] = useState<AlignmentAttempt[] | null>(null);
+  const [sessionAlignmentTargets, setSessionAlignmentTargets] = useState<AlignmentTargetSession[] | null>(null);
   const [sessionPolarAlignment, setSessionPolarAlignment] = useState<PolarAlignmentStatus | null>(null);
-  const [cumulativeTrackingAttempts, setCumulativeTrackingAttempts] = useState<AlignmentAttempt[] | null>(null);
+  const [cumulativeAlignmentTargets, setCumulativeAlignmentTargets] = useState<AlignmentTargetSession[] | null>(null);
 
   const sessionsControllerRef = useRef<AbortController | null>(null);
   const trackingControllerRef = useRef<AbortController | null>(null);
@@ -91,8 +92,8 @@ export const useAlignmentSessionData = (
         { session_id: 'all' },
         { silent: true, signal: controller.signal }
       );
-      if (res && res.alignmentAttempts) {
-        setCumulativeTrackingAttempts(res.alignmentAttempts);
+      if (res && res.alignmentTargets) {
+        setCumulativeAlignmentTargets(res.alignmentTargets);
       }
     } catch (err) {
       if (!(err instanceof Error && err.name === 'AbortError')) {
@@ -112,7 +113,7 @@ export const useAlignmentSessionData = (
 
   useEffect(() => {
     if (!selectedSessionId) {
-      setSessionAlignmentAttempts(null);
+      setSessionAlignmentTargets(null);
       setSessionPolarAlignment(null);
       return;
     }
@@ -126,7 +127,7 @@ export const useAlignmentSessionData = (
           { signal: controller.signal }
         );
         if (active && res) {
-          setSessionAlignmentAttempts(res.alignmentAttempts || []);
+          setSessionAlignmentTargets(res.alignmentTargets || []);
           setSessionPolarAlignment(res.polarAlignment || null);
         }
       } catch (err) {
@@ -142,20 +143,17 @@ export const useAlignmentSessionData = (
     };
   }, [selectedSessionId]);
 
-  const activeAlignmentAttempts = useMemo(() => {
-    if (selectedSessionId && sessionAlignmentAttempts !== null) {
-      return sessionAlignmentAttempts;
+  const activeAlignmentTargets = useMemo(() => {
+    if (selectedSessionId && sessionAlignmentTargets !== null) {
+      return sessionAlignmentTargets;
     }
-    return telemetry?.alignmentAttempts ?? [];
-  }, [selectedSessionId, sessionAlignmentAttempts, telemetry?.alignmentAttempts]);
+    return telemetry?.alignmentTargets ?? [];
+  }, [selectedSessionId, sessionAlignmentTargets, telemetry?.alignmentTargets]);
 
-  const activeCumulativeTrackingAttempts = useMemo(() => {
-    const historical = cumulativeTrackingAttempts ?? [];
-    const live = telemetry?.alignmentAttempts ?? [];
-    if (live.length === 0) return historical;
-    if (historical.length === 0) return live;
-    return [...historical, ...live];
-  }, [cumulativeTrackingAttempts, telemetry?.alignmentAttempts]);
+  const activeCumulativeAlignmentTargets = useMemo(() => {
+    const historical = cumulativeAlignmentTargets ?? [];
+    return historical.length > 0 ? historical : telemetry?.alignmentTargets ?? [];
+  }, [cumulativeAlignmentTargets, telemetry?.alignmentTargets]);
 
   const activePolarAlignment = useMemo(() => {
     if (selectedSessionId && sessionPolarAlignment !== null) {
@@ -168,8 +166,8 @@ export const useAlignmentSessionData = (
     availableSessions,
     selectedSessionId,
     setSelectedSessionId,
-    activeAlignmentAttempts,
-    activeCumulativeTrackingAttempts,
+    activeAlignmentTargets,
+    activeCumulativeAlignmentTargets,
     activePolarAlignment,
   };
 };

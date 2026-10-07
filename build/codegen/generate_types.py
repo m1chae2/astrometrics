@@ -101,6 +101,8 @@ from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     AlignmentSessionSummary,
+    AlignmentTargetSession,
+    AlignmentTrackPoint,
     GuidingSample,
     GuidingSpectrumAnalysis,
     GuidingSpectrumPeak,
@@ -311,6 +313,8 @@ def render_types() -> str:
         generate_interface(AlignmentAttempt, "AlignmentAttempt"),
         generate_interface(PolarAlignmentStatus, "PolarAlignmentStatus"),
         generate_interface(AlignmentSessionSummary, "AlignmentSessionSummary"),
+        generate_interface(AlignmentTrackPoint, "AlignmentTrackPoint"),
+        generate_interface(AlignmentTargetSession, "AlignmentTargetSession"),
         generate_interface(MountPointingModel, "MountPointingModel"),
         generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
         generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),

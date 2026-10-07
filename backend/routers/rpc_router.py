@@ -157,11 +157,13 @@ def _get_session_alignment(session_id: str = "") -> dict:
     Returns
     -------
     data : `dict`
-        Dictionary containing alignmentAttempts and polarAlignment.
+        Dictionary containing alignmentAttempts, alignmentTargets (the
+        attempts grouped by target, with jitter and drift rates) and
+        polarAlignment.
     """
     if hasattr(container, "alignment_service") and container.alignment_service:
         return container.alignment_service.get_session_data(session_id)
-    return {"alignmentAttempts": [], "polarAlignment": None}
+    return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
 
 
 class RPCHandlerRegistry:

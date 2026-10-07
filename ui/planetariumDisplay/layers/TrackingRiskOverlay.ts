@@ -11,7 +11,6 @@
  */
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
-import { clusterAlignmentAttempts, ClusteredAlignmentSession } from '../utils/alignmentClustering';
 import {
   TRACKING_RISK_ALT_STEP_DEG,
   TRACKING_RISK_AZ_STEP_DEG,
@@ -156,14 +155,13 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
 
     const { lst, width, height } = projectionContext;
 
-    // Cluster raw plate-solve and tracking logs across cumulative sessions to extract empirical measured RMS
-    const rawAttempts =
-      projectionContext.cumulativeTrackingAttempts && projectionContext.cumulativeTrackingAttempts.length > 0
-        ? projectionContext.cumulativeTrackingAttempts
-        : projectionContext.alignmentAttempts || [];
-    const clusters: ClusteredAlignmentSession[] = clusterAlignmentAttempts(rawAttempts).filter(
-      (c) => c.totalFrames >= 2 && c.rmsTotal > 0
-    );
+    // The library groups the plate solves by target and measures their jitter
+    const groupedTargets =
+      projectionContext.cumulativeAlignmentTargets && projectionContext.cumulativeAlignmentTargets.length > 0
+        ? projectionContext.cumulativeAlignmentTargets
+        : projectionContext.alignmentTargets || [];
+    const solveCount = groupedTargets.reduce((sum, target) => sum + target.frameCount, 0);
+    const clusters = groupedTargets.filter((c) => c.frameCount >= 2 && c.rmsTotalArcsec > 0);
     const hasEmpiricalData = clusters.length > 0;
 
     context.save();
@@ -220,18 +218,18 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
             const distDeg = angularDistanceDeg(
               coord0.ra,
               coord0.dec,
-              session.centroidRa,
-              session.centroidDec
+              session.meanRaDeg,
+              session.meanDecDeg
             );
 
             if (distDeg < influenceRadiusDeg * 1.8) {
               // Frame count scaling: more sub-frames = higher statistical confidence
-              const confidence = Math.min(1.0, session.totalFrames / 30.0);
+              const confidence = Math.min(1.0, session.frameCount / 30.0);
               // Gaussian spatial decay: e^(-0.5 * (d / sigma)^2)
               const spatialWeight = Math.exp(-0.5 * ((distDeg / influenceRadiusDeg) ** 2)) * confidence;
 
               const empiricalScore = rmsToRiskScore(
-                session.rmsTotal,
+                session.rmsTotalArcsec,
                 projectionContext.plateScaleArcsecPerPx
               );
               weightedRiskSum += empiricalScore * spatialWeight;
@@ -266,7 +264,7 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
     context.strokeStyle = 'rgba(255, 255, 255, 0.14)';
     context.lineWidth = 1;
     const isMultiSession = Boolean(
-      projectionContext.cumulativeTrackingAttempts && projectionContext.cumulativeTrackingAttempts.length > 0
+      projectionContext.cumulativeAlignmentTargets && projectionContext.cumulativeAlignmentTargets.length > 0
     );
     const badgeW = isMultiSession ? 280 : 250;
     const badgeH = 54;
@@ -282,7 +280,7 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
     const badgeTitle = !hasEmpiricalData
       ? 'Mount Tracking Heatmap (Prior)'
       : isMultiSession
-        ? `Tracking Heatmap (${clusters.length} targets · ${rawAttempts.length} solves)`
+        ? `Tracking Heatmap (${clusters.length} targets · ${solveCount} solves)`
         : 'Mount Tracking Heatmap (Empirical)';
     context.fillText(badgeTitle, badgeX + 10, badgeY + 17);
 

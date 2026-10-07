@@ -9,8 +9,10 @@ through the log database's `get_alignment_sessions` and
 `get_session_alignment_attempts`, so "alignment session" has one
 definition.
 
-Without a night, it lists one summary per night. With a night, it lists
-that night's attempts and its latest polar alignment measurement.
+Without a night, it lists one summary per night, with the night's
+tracking jitter. With a night, it lists that night's attempts, the same
+attempts grouped into one `AlignmentTargetSession` per target (with
+jitter and drift rates), and its latest polar alignment measurement.
 
 The average pointing of a night is a circular mean of right ascension.
 A plain average of 359 and 1 degrees is 180 degrees, on the far side of
@@ -19,62 +21,54 @@ the sky; the circular mean is 0 degrees, which is right.
 
 from __future__ import annotations
 
-import math
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AstrometricsError, NotFoundError
+from wayfindinglib.analytics.alignment_sessions import (
+    group_alignment_attempts,
+    mean_position_deg,
+    pooled_jitter_arcsec,
+)
+from wayfindinglib.models.session.telemetry import AlignmentAttempt, AlignmentSessionSummary
 
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["ATTEMPT_STATUSES", "alignment_night", "alignment_nights", "mean_position_deg"]
+__all__ = ["ATTEMPT_STATUSES", "alignment_night", "alignment_nights"]
 
 ATTEMPT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
 """The statuses an `AlignmentAttempt` can have. An older record with any
 other status is shown as ``aligned``."""
 
 
-def mean_position_deg(positions: list[tuple[float, float]]) -> tuple[float | None, float | None]:
-    """Return the average sky position, wrapping right ascension at 0/360.
+def _attempt_models(rows: list[dict[str, Any]]) -> list[AlignmentAttempt]:
+    """Turn alignment log rows into `AlignmentAttempt` models.
 
     Parameters
     ----------
-    positions : `list` [`tuple` [`float`, `float`]]
-        Right ascension and declination pairs, in degrees.
+    rows : `list` [`dict` [`str`, `Any`]]
+        Alignment log rows, oldest first.
 
     Returns
     -------
-    ra_deg, dec_deg : `float` or `None`
-        The circular mean of right ascension (0 to 360) and the plain mean
-        of declination, or `None` for an empty list.
-    """
-    if not positions:
-        return None, None
-    sin_sum = sum(math.sin(math.radians(ra)) for ra, _ in positions)
-    cos_sum = sum(math.cos(math.radians(ra)) for ra, _ in positions)
-    ra_deg = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
-    dec_deg = sum(dec for _, dec in positions) / len(positions)
-    return ra_deg, dec_deg
-
-
-def _attempt_positions(attempts: list[dict[str, Any]]) -> list[tuple[float, float]]:
-    """Collect the mount positions recorded with a night's attempts.
-
-    Parameters
-    ----------
-    attempts : `list` [`dict` [`str`, `Any`]]
-        Alignment log rows.
-
-    Returns
-    -------
-    positions : `list` [`tuple` [`float`, `float`]]
-        Right ascension and declination in degrees, for rows that have both.
+    attempts : `list` [`AlignmentAttempt`]
+        One per row. A status the model does not know is shown as
+        ``aligned``.
     """
     return [
-        (float(row["mount_ra"]), float(row["mount_dec"]))
-        for row in attempts
-        if row.get("mount_ra") is not None and row.get("mount_dec") is not None
+        AlignmentAttempt(
+            status=row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
+            delta_ra_arcsec=row.get("delta_ra_arcsec"),
+            delta_dec_arcsec=row.get("delta_dec_arcsec"),
+            ra=row.get("mount_ra"),
+            dec=row.get("mount_dec"),
+            pointing_error_arcsec=row.get("pointing_error_arcsec"),
+            timestamp=row.get("timestamp"),
+            target_name=row.get("target_name"),
+            session_id=row.get("session_id"),
+        )
+        for row in rows
     ]
 
 
@@ -113,19 +107,18 @@ def alignment_nights(context: ControlContext, limit: int) -> dict[str, Any]:
         ``kind``, ``total``, ``shown`` and ``sessions``: each with
         ``sessionId``, ``sessionDate``, ``syncCount``, ``targetCount``,
         ``startTime``, ``endTime``, ``avgErrorArcsec``, the polar
-        alignment errors, and the mean pointing ``meanRaDeg`` and
-        ``meanDecDeg``.
+        alignment errors, the mean pointing ``meanRaDeg`` and
+        ``meanDecDeg``, and the tracking jitter ``rmsJitterArcsec``.
     """
-    from wayfindinglib.models.session.telemetry import AlignmentSessionSummary
-
     logs = context.logger_interface
     rows = logs.get_alignment_sessions()
     target_counts = _target_counts(context)
     sessions = []
     for row in rows[:limit]:
-        mean_ra, mean_dec = mean_position_deg(
-            _attempt_positions(logs.get_session_alignment_attempts(row["session_id"]))
-        )
+        attempts = _attempt_models(logs.get_session_alignment_attempts(row["session_id"]))
+        mean_ra, mean_dec = mean_position_deg([
+            (a.ra, a.dec) for a in attempts if a.ra is not None and a.dec is not None
+        ])
         summary = AlignmentSessionSummary(
             session_id=row["session_id"],
             session_date=row["session_date"],
@@ -139,13 +132,14 @@ def alignment_nights(context: ControlContext, limit: int) -> dict[str, Any]:
             polar_az_error_arcsec=row.get("polar_az_error_arcsec"),
             mean_ra_deg=mean_ra,
             mean_dec_deg=mean_dec,
+            rms_jitter_arcsec=pooled_jitter_arcsec(group_alignment_attempts(attempts)),
         )
         sessions.append(summary.model_dump(mode="json", by_alias=True))
     return {"kind": "alignment", "total": len(rows), "shown": len(sessions), "sessions": sessions}
 
 
 def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
-    """List one night's alignment attempts and its polar alignment.
+    """List one night's attempts, grouped by target, and its polar alignment.
 
     Parameters
     ----------
@@ -158,16 +152,16 @@ def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
     -------
     reply : `dict` [`str`, `Any`]
         ``kind``, ``session_id``, ``attempts`` (in time order, each an
-        `AlignmentAttempt` in its camelCase form) and ``polar_alignment``
-        (the latest measurement that night, or `None`).
+        `AlignmentAttempt` in its camelCase form), ``targets`` (one
+        `AlignmentTargetSession` per target, with jitter and drift rates)
+        and ``polar_alignment`` (the latest measurement that night, or
+        `None`).
 
     Raises
     ------
     NotFoundError
         If nothing is recorded for that night.
     """
-    from wayfindinglib.models.session.telemetry import AlignmentAttempt
-
     logs = context.logger_interface
     rows = logs.get_session_alignment_attempts(session_id)
     if not rows:
@@ -175,24 +169,15 @@ def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
             f"No alignment attempts are recorded for night {session_id!r}.",
             details={"session_id": session_id},
         )
-    attempts = [
-        AlignmentAttempt(
-            status=row.get("status") if row.get("status") in ATTEMPT_STATUSES else "aligned",
-            delta_ra_arcsec=row.get("delta_ra_arcsec"),
-            delta_dec_arcsec=row.get("delta_dec_arcsec"),
-            ra=row.get("mount_ra"),
-            dec=row.get("mount_dec"),
-            pointing_error_arcsec=row.get("pointing_error_arcsec"),
-            timestamp=row.get("timestamp"),
-            target_name=row.get("target_name"),
-            session_id=row.get("session_id"),
-        ).model_dump(mode="json", by_alias=True)
-        for row in rows
-    ]
+    attempts = _attempt_models(rows)
     polar = logs.get_polar_alignment_logs(session_id=session_id, limit=1)
     return {
         "kind": "alignment",
         "session_id": session_id,
-        "attempts": attempts,
+        "attempts": [a.model_dump(mode="json", by_alias=True) for a in attempts],
+        "targets": [
+            target.model_dump(mode="json", by_alias=True, exclude={"attempts"})
+            for target in group_alignment_attempts(attempts)
+        ],
         "polar_alignment": polar[0] if polar else None,
     }

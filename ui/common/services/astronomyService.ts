@@ -6,7 +6,7 @@
 
 import { callBackend } from './backendApi';
 import { reportError } from '../utils/reportError';
-import { Spectrum } from '../types/backendTypes';
+import { OverlayStar, Spectrum, TargetStarCount } from '../types/backendTypes';
 
 export interface AstronomyListOptions {
     targetId?: string;
@@ -83,12 +83,11 @@ export const fetchAstronomyList = (optionsOrTargetId?: string | AstronomyListOpt
     return getAstronomyList(optionsOrTargetId);
 };
 
-/** Whether a target has any star with spectra and/or photometry data, and how many stars it has. */
-export interface TargetDataAvailability {
-    hasSpectra: boolean;
-    hasPhotometry: boolean;
-    starCount: number;
-}
+/**
+ * Whether a target has any star with spectra and/or photometry data, and how many stars it has.
+ * The library's `TargetStarCount` model, generated into `backendTypes.ts`.
+ */
+export type TargetDataAvailability = TargetStarCount;
 
 /**
  * Fetches, per target, whether any of its stars have spectra or photometry data.
@@ -191,18 +190,11 @@ export async function analyzeStarPeriodicity(objectId: string): Promise<Spectrum
     }
 }
 
-export interface AstrometryOverlayStar {
-    id: string;
-    name: string;
-    x: number;
-    y: number;
-    spectralType?: string;
-    isCatalogIdentified: boolean;
-    referenceWidth?: number | null;
-    referenceHeight?: number | null;
-    /** Measured star radius in reference-image pixels, if available. */
-    radiusPx?: number | null;
-}
+/**
+ * One catalog star placed on a target's image, for the astrometry overlay.
+ * The library's `OverlayStar` model, generated into `backendTypes.ts`.
+ */
+export type AstrometryOverlayStar = OverlayStar;
 
 /**
  * Fetches identified stars and their pixel coordinates for astrometry overlay.

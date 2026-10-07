@@ -280,9 +280,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # sections 7 and 9. Each phase of the plan empties part of this list. Do not add to it.
 ".claude/hooks/guard_destructive.py" = ["print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
-"mcp_servers/gaps/__main__.py" = ["banned-api"]
-"mcp_servers/gaps/review.py" = ["print"]
-"mcp_servers/inventory/tool_inventory.py" = ["print"]
 "backend/services/infrastructure/indi_worker.py" = ["banned-api"]
 "backend/services/infrastructure/scripting_service.py" = ["print"]
 "backend/services/infrastructure/socket_manager.py" = ["blind-except"]
@@ -307,6 +304,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "documentation/notebooks/wayfinding/execution/scripts/observatory_session_recorder.py" = ["banned-api"]
 "documentation/notebooks/wayfinding/planning/mosaic_sequence_authoring.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/planning/observation_planning.ipynb" = ["print"]
+"mcp_servers/gaps/__main__.py" = ["banned-api"]
+"mcp_servers/gaps/review.py" = ["print"]
+"mcp_servers/inventory/tool_inventory.py" = ["print"]
 
 [tool.importlinter]
 root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]

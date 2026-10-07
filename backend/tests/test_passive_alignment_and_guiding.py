@@ -146,52 +146,6 @@ def test_alignment_service_polls_external_syncs(tmp_path: Path) -> None:
     assert attempts[0]["deltaDecArcsec"] == pytest.approx(-8.3)
 
 
-def test_guiding_service_uses_phd2_samples() -> None:
-    """Verify GuidingService prioritizes real GuideStep samples from PHD2."""
-    from backend.services.observatory.guiding_service import GuidingService
-    from wayfindinglib.models.session.telemetry import GuidingSample
-
-    phd2_mock = MagicMock()
-    sample = GuidingSample(
-        time=1700000000.0,
-        dra=0.25,
-        ddec=-0.15,
-        pulse_ra=45.0,
-        pulse_dec=30.0,
-        snr=28.5,
-        rms_ra=0.18,
-        rms_dec=0.14,
-    )
-    phd2_mock.drain_guiding_samples.return_value = [sample]
-
-    service = GuidingService(observatory_api=MagicMock(), phd2_service=phd2_mock)
-    service.poll_external_telemetry()
-
-    status = service.get_status()
-    assert len(status["history"]) == 1
-    assert status["history"][0]["dra"] == pytest.approx(0.25)
-    assert status["history"][0]["ddec"] == pytest.approx(-0.15)
-    assert status["history"][0]["snr"] == pytest.approx(28.5)
-    assert status["stats"]["rms_ra"] == pytest.approx(0.18)
-
-
-def test_guiding_service_does_not_inject_noise_when_idle() -> None:
-    """Verify that idle tracking does not inject fake noise."""
-    from backend.services.observatory.guiding_service import GuidingService
-
-    phd2_mock = MagicMock()
-    phd2_mock.drain_guiding_samples.return_value = []
-
-    observatory_mock = MagicMock()
-    observatory_mock.guiding.drain_external_pulses.return_value = []
-
-    service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
-    service.poll_external_telemetry()
-
-    status = service.get_status()
-    assert len(status["history"]) == 0
-
-
 def test_indi_interface_extracts_target_from_fits_header() -> None:
     """Verify that IndiInterface extracts target name from FITS_HEADER."""
     from wayfindinglib.drivers.indi_interface import IndiInterface
@@ -338,40 +292,6 @@ def test_alignment_service_persists_to_logger_interface() -> None:
     assert attempt["pointing_error_arcsec"] == pytest.approx(18.5)
 
 
-def test_guiding_service_persists_live_samples_to_logger_interface() -> None:
-    """Verify GuidingService persists live telemetry samples to SQLite."""
-    from backend.services.observatory.guiding_service import GuidingService
-    from wayfindinglib.models.session.telemetry import GuidingSample
-
-    phd2_mock = MagicMock()
-    sample = GuidingSample(
-        time=1700000000.0,
-        dra=0.35,
-        ddec=-0.25,
-        pulse_ra=40.0,
-        pulse_dec=-30.0,
-        snr=30.0,
-        rms_ra=0.15,
-        rms_dec=0.12,
-    )
-    phd2_mock.drain_guiding_samples.return_value = [sample]
-
-    logger_mock = MagicMock()
-    service = GuidingService(
-        observatory_api=MagicMock(),
-        phd2_service=phd2_mock,
-        logger_interface=logger_mock,
-    )
-    service.poll_external_telemetry()
-
-    assert logger_mock.record_guiding_samples.called
-    samples = logger_mock.record_guiding_samples.call_args[0][0]
-    assert len(samples) == 1
-    assert samples[0]["dra"] == pytest.approx(0.35)
-    assert samples[0]["ddec"] == pytest.approx(-0.25)
-    assert samples[0]["source"] == "phd2_live"
-
-
 def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) -> None:
     """Verify GuidingService ingests native PHD2 guide log files.
 
@@ -406,7 +326,7 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
     observatory._context.logger_interface = logger_mock
     observatory._context.butler = MagicMock()  # the refit saves the model; avoid disk I/O
 
-    service = GuidingService(observatory_api=observatory, logger_interface=logger_mock)
+    service = GuidingService(observatory_api=observatory)
     count = service.ingest_phd2_log_file(str(log_file), target_name="IC 1396")
 
     assert count == 1
@@ -421,7 +341,6 @@ def test_guiding_service_ingest_phd2_log_file(tmp_path: pytest.TempPathFactory) 
 
 def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
     """Verify timed guide pulses are coalesced and echoes are filtered."""
-    from backend.services.observatory.guiding_service import GuidingService
     from wayfindinglib.drivers.indi_interface import IndiInterface
 
     config_mock = MagicMock()
@@ -464,25 +383,15 @@ def test_indi_interface_pulse_coalescing_and_echo_filtering() -> None:
     interface.newNumber(prop_ns)
     assert len(interface._external_pulses) == 2
 
-    # 4. Process through GuidingService: should coalesce into ONE sample
-    phd2_mock = MagicMock()
-    phd2_mock.drain_guiding_samples.return_value = []
-    observatory_mock = MagicMock()
-    observatory_mock.guiding.drain_external_pulses.side_effect = interface.drain_external_pulses
-    observatory_mock.mount.status.return_value = {}
-    service = GuidingService(observatory_api=observatory_mock, phd2_service=phd2_mock)
-    service.poll_external_telemetry()
+    # 4. The internal guiding driver merges the two into ONE sample
+    from wayfindinglib.drivers.indi.guiding_driver import samples_from_pulses
 
-    status = service.get_status()
-    assert len(status["history"]) == 1
-    sample = status["history"][0]
-    assert sample["pulse_ra"] == pytest.approx(250.0)
-    assert sample["pulse_dec"] == pytest.approx(180.0)
-    assert sample["pulseRa"] == pytest.approx(250.0)
-    assert sample["pulseDec"] == pytest.approx(180.0)
-    assert sample["dra"] == pytest.approx(1.88, abs=0.25)
-    assert sample["ddec"] == pytest.approx(1.35, abs=0.25)
-    assert sample["snr"] is None
+    (sample,) = samples_from_pulses(interface.drain_external_pulses())
+    assert sample.pulse_ra == pytest.approx(250.0)
+    assert sample.pulse_dec == pytest.approx(180.0)
+    assert sample.dra == pytest.approx(1.88, abs=0.25)
+    assert sample.ddec == pytest.approx(1.35, abs=0.25)
+    assert sample.snr is None
 
 
 def test_indi_interface_polar_alignment_and_paa_points() -> None:
@@ -675,81 +584,3 @@ def test_sync_service_extract_fits_header_solves(tmp_path: Path) -> None:
     assert call_args["delta_dec_arcsec"] == pytest.approx(7.2, abs=0.1)
     # Delta RA: (180.005 - 180.0) * 3600 * cos(45 deg) = 12.72 arcsec
     assert call_args["delta_ra_arcsec"] == pytest.approx(12.73, abs=0.1)
-
-
-def test_guiding_service_labels_pulse_derived_samples_as_estimates_when_persisting() -> None:
-    """Verify INDI-pulse samples are stored as estimates, not measurements.
-
-    Their drift values are reconstructed from the pulse length alone, so
-    storing them unlabeled would let later analysis mistake a model's
-    output for a real guide-star measurement.
-    """
-    from backend.services.observatory.guiding_service import GuidingService
-
-    phd2_mock = MagicMock()
-    phd2_mock.drain_guiding_samples.return_value = []
-    observatory_mock = MagicMock()
-    observatory_mock.guiding.drain_external_pulses.return_value = [{"time": 1700000000.0, "pulse_w": 250.0}]
-    observatory_mock.mount.status.return_value = {}
-    logger_mock = MagicMock()
-
-    service = GuidingService(
-        observatory_api=observatory_mock, phd2_service=phd2_mock, logger_interface=logger_mock
-    )
-    service.poll_external_telemetry()
-
-    persisted = logger_mock.record_guiding_samples.call_args[0][0]
-    assert len(persisted) == 1
-    assert persisted[0]["source"] == "indi_pulse_estimate"
-
-
-def _poll_pulses(pulses: list[dict[str, float]]) -> list[dict[str, float]]:
-    """Run one passive INDI poll over some pulses and return what was stored.
-
-    Parameters
-    ----------
-    pulses : `list` [`dict`]
-        The guide pulses the mount reports.
-
-    Returns
-    -------
-    persisted : `list` [`dict`]
-        The samples handed to the logger.
-    """
-    from backend.services.observatory.guiding_service import GuidingService
-
-    phd2_mock = MagicMock()
-    phd2_mock.drain_guiding_samples.return_value = []
-    observatory_mock = MagicMock()
-    observatory_mock.guiding.drain_external_pulses.return_value = pulses
-    observatory_mock.mount.status.return_value = {}
-    logger_mock = MagicMock()
-    service = GuidingService(
-        observatory_api=observatory_mock, phd2_service=phd2_mock, logger_interface=logger_mock
-    )
-    service.poll_external_telemetry()
-    return logger_mock.record_guiding_samples.call_args[0][0]
-
-
-def test_pulse_estimates_are_the_pulse_length_times_the_guide_rate() -> None:
-    """Store exactly pulse length times 7.52 arcsec/s, with nothing added."""
-    # 250 ms west and 100 ms north at 7.52 arcsec/s.
-    persisted = _poll_pulses([{"time": 1700000000.0, "pulse_w": 250.0, "pulse_n": 100.0}])
-    assert persisted[0]["dra"] == pytest.approx(1.88)
-    assert persisted[0]["ddec"] == pytest.approx(0.752)
-
-
-def test_an_axis_with_no_pulse_has_zero_estimate() -> None:
-    """Do not invent a drift for an axis that received no pulse."""
-    persisted = _poll_pulses([{"time": 1700000000.0, "pulse_w": 250.0}])
-    assert persisted[0]["ddec"] == pytest.approx(0.0)
-
-
-def test_pulse_estimates_are_repeatable() -> None:
-    """Two polls over the same pulses store identical samples."""
-    pulses = [{"time": 1700000000.0, "pulse_e": 400.0, "pulse_s": 120.0}]
-    first = _poll_pulses(pulses)
-    second = _poll_pulses(pulses)
-    assert first == second
-    assert first[0]["dra"] == pytest.approx(-3.008)
-    assert first[0]["ddec"] == pytest.approx(-0.902)

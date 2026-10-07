@@ -184,6 +184,13 @@
       "merge_into": "",
       "interim_block": ""
     },
+    "observatory_guiding_run_loop": {
+      "tool_class": "actuate",
+      "category": "observatory-control",
+      "disposition": "drop",
+      "merge_into": "",
+      "interim_block": ""
+    },
     "observatory_guiding_save_calibration": {
       "tool_class": "change-data",
       "category": "observatory-config",

@@ -864,9 +864,8 @@ DEFAULT_STATUS_SECTIONS = tuple(name for name in APP_STATUS_SECTIONS if name != 
 GUIDING_SAMPLES_REPORTED = 20
 """How many of the newest guide samples the guiding section lists."""
 
-GUIDING_SAMPLE_KEYS = ("time", "dra", "ddec", "pulse_ra", "pulse_dec", "snr", "rms_ra", "rms_dec")
-"""The fields of a guide sample worth reporting. The backend repeats each in
-camelCase for the web page, which a client does not need."""
+GUIDING_SAMPLE_KEYS = ("time", "dra", "ddec", "pulseRa", "pulseDec", "snr", "rmsRa", "rmsDec")
+"""The fields of a guide sample worth reporting."""
 
 MAXIMUM_INDI_PROPERTIES = 80
 """Most INDI properties one device answer lists."""

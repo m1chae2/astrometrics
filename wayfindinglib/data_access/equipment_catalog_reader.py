@@ -126,6 +126,7 @@ def _build_telescope(config, telescope_name: str, section: dict[str, str]) -> Te
             mount_protocol=section.get("mount_protocol", "indi"),
             focuser_protocol=section.get("focuser_protocol", "indi"),
             filter_wheel_protocol=section.get("filter_wheel_protocol", "indi"),
+            guiding_protocol=section.get("guiding_protocol", "phd2"),
         )
     except (TypeError, ValueError) as exc:
         logger.warning("Skipping telescope '%s': %s", telescope_name, exc)
@@ -334,6 +335,7 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
         "mount_protocol": registry.build_mount_driver_registry,
         "focuser_protocol": registry.build_focuser_driver_registry,
         "filter_wheel_protocol": registry.build_filter_wheel_driver_registry,
+        "guiding_protocol": registry.build_guiding_driver_registry,
         "protocol": registry.build_camera_driver_registry,
     }
     valid_protocols = set(registry_by_field[field_name]())
@@ -371,6 +373,7 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
         _validate_protocol(
             "Telescope", telescope.name, "filter_wheel_protocol", telescope.filter_wheel_protocol
         )
+        _validate_protocol("Telescope", telescope.name, "guiding_protocol", telescope.guiding_protocol)
     for camera in cameras:
         _validate_protocol("Camera", camera.name, "protocol", camera.protocol)
 

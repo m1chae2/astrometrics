@@ -937,8 +937,8 @@ DECISIONS = {
     ),
     "observatory_guiding_status": ToolDecision(
         "keep",
-        "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale. "
-        "No device is needed.",
+        "Reads the saved guider calibration, the mount's periodic error model and the guide plate scale "
+        "(no device needed), and with include=['live'] the guiding going on now and its RMS error.",
         "observe",
     ),
     "observatory_safety_status": ToolDecision(
@@ -1010,6 +1010,12 @@ DECISIONS = {
         "drop", "Needs a cooling-policy object that MCP cannot send. Arithmetic on the caller's input."
     ),
     # ---- Not wanted by the user ----
+    "observatory_guiding_run_loop": ToolDecision(
+        "drop",
+        "Runs the guide loop until a stop event MCP cannot send is set; the backend runs it on a thread. "
+        "Sends guide pulses, which belongs to the dropped control side.",
+        "actuate",
+    ),
     "observatory_guiding_drain_external_pulses": ToolDecision(
         "drop",
         "Clears guide pulses when read. Belongs to the dropped control side. The user does not want it.",

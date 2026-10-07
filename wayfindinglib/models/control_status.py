@@ -18,7 +18,7 @@ from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCal
 from wayfindinglib.models.policy.commissioning import CommissioningRun
 from wayfindinglib.models.policy.delegation import DelegationPolicy
 from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRuleSet
-from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
+from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis, LiveGuidingStatus
 
 
 class ImagingStatus(BaseModel):
@@ -35,7 +35,7 @@ class ImagingStatus(BaseModel):
 
 
 class GuidingStatus(BaseModel):
-    """The saved guider models for the active equipment."""
+    """The saved guider models for the active equipment, and live guiding."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -48,6 +48,9 @@ class GuidingStatus(BaseModel):
     )
     plate_scale_arcsec_per_px: float | None = Field(
         default=None, description="Guide camera plate scale in arcseconds per pixel."
+    )
+    live: LiveGuidingStatus | None = Field(
+        default=None, description="The guiding going on now, with its RMS error and newest samples."
     )
 
 

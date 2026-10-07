@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
     from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
     from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
+    from wayfindinglib.drivers.protocols.guiding_driver import GuidingDriver
     from wayfindinglib.drivers.protocols.mount_driver import MountDriver
     from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
     from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
@@ -263,6 +264,22 @@ class ObservatoryControl:
     def weather_driver(self, weather_driver: WeatherDriver) -> None:
         """Set the weather sensor driver."""
         self._context.weather_driver = weather_driver
+
+    @property
+    def guiding_driver(self) -> GuidingDriver:
+        """The guiding driver, chosen by the telescope's guiding protocol.
+
+        Returns
+        -------
+        guiding_driver : `GuidingDriver`
+            The active guiding driver.
+        """
+        return self._context.guiding_driver
+
+    @guiding_driver.setter
+    def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
+        """Set the guiding driver."""
+        self._context.guiding_driver = guiding_driver
 
     @property
     def remote_transfer_driver(self) -> RemoteTransferDriver:

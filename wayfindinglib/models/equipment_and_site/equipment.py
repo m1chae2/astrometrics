@@ -76,6 +76,13 @@ class Telescope(BaseModel):
             "`focuser_protocol`."
         ),
     )
+    guiding_protocol: str = Field(
+        default="phd2",
+        description=(
+            "Which guider guides this telescope: 'phd2' (PHD2), 'internal' (KStars/Ekos "
+            "sends the mount its own guide pulses) or 'simulator' (a stand-in guide loop)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_altitude_envelope_ordering(self) -> Telescope:

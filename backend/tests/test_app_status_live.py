@@ -61,7 +61,8 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
             "is_guiding": False,
             "stats": {"rms_total": 1.9},
             "history": [
-                {"time": index, "dra": 0.1, "ddec": 0.2, "pulseRa": 5.0, "rms_ra": 1.0} for index in range(50)
+                {"time": index, "dra": 0.1, "ddec": 0.2, "pulseRa": 5.0, "starMass": 1.0}
+                for index in range(50)
             ],
         },
         "system:health": {"resources": {"system_ram_usage_percent": 40}, "indi": {"status": "Disconnected"}},
@@ -104,12 +105,13 @@ def test_telescope_status_includes_the_pier_side_and_drops_the_history(fake_back
     assert [method for method, _ in fake_backend] == ["telescope:status"]
 
 
-def test_guiding_lists_only_the_newest_samples_with_plain_keys(fake_backend: list) -> None:
-    """Twenty samples are kept and the camelCase copies are dropped."""
+def test_guiding_lists_only_the_newest_samples_with_the_reported_keys(fake_backend: list) -> None:
+    """Twenty samples are kept with only the fields worth reporting."""
     answer = asyncio.run(tool_app_status(["guiding"]))["guiding"]
     assert answer["samples_total"] == 50
     assert len(answer["recent_samples"]) == 20
-    assert "pulseRa" not in answer["recent_samples"][0]
+    assert answer["recent_samples"][0]["pulseRa"] == pytest.approx(5.0)
+    assert "starMass" not in answer["recent_samples"][0]
     assert answer["recent_samples"][-1]["time"] == 49
 
 

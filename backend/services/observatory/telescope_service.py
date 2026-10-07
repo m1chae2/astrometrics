@@ -107,15 +107,14 @@ class TelescopeService:
                 "focuserPosition": 0,
             }
 
-        # Poll external guiding telemetry to drain real-time pulses from
-        # KStars/Ekos/PHD2
+        # Reading the guiding status also takes in what PHD2 or KStars/Ekos
+        # measured since the last read.
         if self._guiding_service:
             try:
-                self._guiding_service.poll_external_telemetry()
+                data["guidingHistory"] = self._guiding_service.get_status().get("history", [])
             except AstrometricsError as e:
-                logger.debug("Failed to poll external guiding telemetry: %s", e)
-            guiding_status = self._guiding_service.get_status()
-            data["guidingHistory"] = guiding_status.get("history", [])
+                logger.debug("Failed to read the guiding status: %s", e)
+                data["guidingHistory"] = []
 
         # Inject real alignment attempt history if service is available
         if self._alignment_service:

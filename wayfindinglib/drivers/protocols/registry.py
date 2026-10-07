@@ -16,6 +16,7 @@ from wayfindinglib.drivers.protocols.camera_driver import CameraDriver
 from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
 from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
 from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
+from wayfindinglib.drivers.protocols.guiding_driver import GuidingDriver
 from wayfindinglib.drivers.protocols.mount_driver import MountDriver
 from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
 from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
@@ -113,6 +114,25 @@ def build_weather_driver_registry() -> dict[str, type[WeatherDriver]]:
     from wayfindinglib.drivers.indi.weather_driver import IndiWeatherDriver
 
     return {"indi": IndiWeatherDriver}
+
+
+def build_guiding_driver_registry() -> dict[str, type[GuidingDriver]]:
+    """Return the protocol-name -> `GuidingDriver` class registry.
+
+    Keyed by the active telescope's ``guiding_protocol``: ``"phd2"``
+    (PHD2 guides), ``"internal"`` (KStars/Ekos guides the mount itself)
+    or ``"simulator"`` (a stand-in guide loop).
+
+    Returns
+    -------
+    registry : `dict` [`str`, `type` [`GuidingDriver`]]
+        Maps a protocol name to its `GuidingDriver` subclass.
+    """
+    from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
+    from wayfindinglib.drivers.phd2.guiding_driver import Phd2GuidingDriver
+    from wayfindinglib.drivers.simulators.guiding_simulator import SimulatedGuidingDriver
+
+    return {"phd2": Phd2GuidingDriver, "internal": IndiGuidingDriver, "simulator": SimulatedGuidingDriver}
 
 
 def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriver]]:

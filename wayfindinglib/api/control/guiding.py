@@ -1,14 +1,18 @@
 """Purpose: `control.guiding`, the guide camera, pulses and guider models.
 
-Description: Sends guide pulses, takes guide exposures, and computes the
-pulse that corrects a measured drift. It runs the guider calibrations
-(the pulse-to-pixel calibration, the declination backlash probe and the
-guide exposure test) and refits the mount's periodic error model from
-recorded guiding samples. `status` reads the saved calibration, the
-saved periodic error model and the guide camera's plate scale. Pulses
-and guide exposures need `AUTOGUIDING` to be `AUTHORITATIVE`.
+Description: Sends guide pulses, takes guide exposures, computes the
+pulse that corrects a measured drift, follows the guiding going on now
+(its root-mean-square (RMS) error, through the guiding driver the
+``guiding_protocol`` setting picks) and runs this app's own guide loop.
+It runs the guider calibrations (the pulse-to-pixel calibration, the
+declination backlash probe and the guide exposure test) and refits the
+mount's periodic error model from recorded guiding samples. `status`
+reads the saved calibration, the saved periodic error model, the guide
+camera's plate scale and the live guiding. Pulses and guide exposures
+need `AUTOGUIDING` to be `AUTHORITATIVE`.
 """
 
+import threading
 from typing import Any
 
 from astrometricslib import ConfigurationError, ExternalServiceError
@@ -26,33 +30,43 @@ from wayfindinglib.tasks.control_tasks.calibration_routines import (
 
 __all__ = ["GuidingControl"]
 
-STATUS_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale")
+STATUS_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale", "live")
 """Sections `GuidingControl.status` can read."""
+
+SAVED_SECTIONS = ("calibration", "spectrum_analysis", "plate_scale")
+"""The sections `GuidingControl.status` reads when none are named. They
+need no device."""
 
 
 class GuidingControl(ControlChild):
     """Operate the guide camera and the guider's saved models."""
 
     def status(self, include: list[str] | None = None) -> GuidingStatus:
-        """Read the saved guider models for the active equipment.
+        """Read the saved guider models, and the guiding going on now.
 
         Parameters
         ----------
         include : `list` [`str`], optional
             Sections to read: ``calibration`` (the pulse-to-pixel
             calibration), ``spectrum_analysis`` (the mount's periodic error
-            and backlash model) and ``plate_scale`` (the guide camera's
-            arcseconds per pixel). All of them when omitted. None of them
-            needs a device.
+            and backlash model), ``plate_scale`` (the guide camera's
+            arcseconds per pixel) and ``live`` (whether guiding runs, its
+            root-mean-square (RMS) error and newest samples). The first
+            three when omitted; they need no device. ``live`` first reads
+            what the guider measured since the last read, through the
+            guiding driver the active telescope's ``guiding_protocol``
+            names, and records those samples in the log database.
 
         Returns
         -------
         status : `GuidingStatus`
             The sections read. The others stay `None`.
         """
-        from wayfindinglib.tasks.control_tasks import hardware_operations
+        from wayfindinglib.tasks.control_tasks import hardware_operations, live_guiding
 
-        sections = hardware_operations.check_sections(include, STATUS_SECTIONS)
+        sections = hardware_operations.check_sections(
+            include if include is not None else list(SAVED_SECTIONS), STATUS_SECTIONS
+        )
         status = GuidingStatus(sections=sections)
         if "calibration" in sections:
             status.calibration = self._context.active_guider_calibration()
@@ -60,7 +74,47 @@ class GuidingControl(ControlChild):
             status.spectrum_analysis = self._context.active_guiding_spectrum_analysis()
         if "plate_scale" in sections:
             status.plate_scale_arcsec_per_px = self._context.guider_plate_scale_arcsec_per_px()
+        if "live" in sections:
+            live_guiding.poll(self._context)
+            status.live = self._context.live_guiding.status()
         return status
+
+    def run_loop(
+        self,
+        stop: threading.Event,
+        exposure_seconds: float | None = None,
+        gain: float | None = None,
+    ) -> None:
+        """Run this app's guide loop until `stop` is set or tracking is lost.
+
+        Blocks, so run it on its own thread. Each cycle takes a guide
+        exposure, measures the guide error and sends the correction
+        pulses, through the guiding driver the active telescope's
+        ``guiding_protocol`` names. Only the ``simulator`` driver runs a
+        loop today: PHD2 runs its own, and the ``internal`` driver cannot
+        measure the guide star yet. `status(include=["live"])` shows the
+        progress.
+
+        Parameters
+        ----------
+        stop : `threading.Event`
+            Set it to end the loop after the current cycle.
+        exposure_seconds : `float`, optional
+            Guide exposure length. The last one used when omitted (1 s
+            at first).
+        gain : `float`, optional
+            Guide camera gain. The last one used when omitted.
+
+        Notes
+        -----
+        Raises `ConflictError` if the mount does not track when the loop
+        starts or the guider runs its own loop, and `ConfigurationError`
+        if the guiding driver cannot run this loop. Pulses and guide
+        exposures need `AUTOGUIDING` to be `AUTHORITATIVE`.
+        """
+        from wayfindinglib.tasks.control_tasks import live_guiding
+
+        live_guiding.run_loop(self._context, stop, exposure_seconds=exposure_seconds, gain=gain)
 
     def pulse(self, direction: str, duration_ms: float) -> bool:
         """Send one guide pulse to the mount.

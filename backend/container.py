@@ -172,10 +172,7 @@ class Container:
 
         from backend.services.observatory.guiding_service import GuidingService
 
-        self.guiding_service = GuidingService(
-            observatory_api=self.wayfinder.control,
-            logger_interface=self.job_repository,
-        )
+        self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
 
         # 5. Initialize Domain Services with proper DI
         self.telescope_service = TelescopeService(

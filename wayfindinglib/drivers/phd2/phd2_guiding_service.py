@@ -94,6 +94,16 @@ class PHD2GuidingService:
             self._samples.clear()
         return samples
 
+    def is_running(self) -> bool:
+        """Report whether the background PHD2 event-reading thread is alive.
+
+        Returns
+        -------
+        running : `bool`
+            `True` while the reader thread runs.
+        """
+        return self._thread is not None and self._thread.is_alive()
+
     def stop(self) -> None:
         """Stop the background PHD2 event-reading thread."""
         self._stop_event.set()

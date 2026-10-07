@@ -48,6 +48,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+PULSE_DIRECTIONS = {
+    "north": "N",
+    "south": "S",
+    "east": "E",
+    "west": "W",
+    "n": "N",
+    "s": "S",
+    "e": "E",
+    "w": "W",
+}
+"""Guide pulse directions as callers name them, to the driver's initial."""
+
 MOUNT_STATUS_SECTIONS = ("mount", "filter", "focuser", "camera")
 """Device reads `mount_status` can make. ``mount`` also brings the
 ambient temperature and humidity, which the same session read refreshes."""
@@ -486,7 +498,9 @@ def pulse(context: ControlContext, direction: str, duration_ms: float) -> bool:
     context : `ControlContext`
         Supplies the mount driver and the policy.
     direction : `str`
-        ``"north"``, ``"south"``, ``"east"`` or ``"west"``.
+        ``"north"``, ``"south"``, ``"east"`` or ``"west"`` (or the
+        initial, ``"N"``, ``"S"``, ``"E"``, ``"W"``). Sent to the mount
+        driver as the initial.
     duration_ms : `float`
         Pulse length in milliseconds.
 
@@ -494,9 +508,20 @@ def pulse(context: ControlContext, direction: str, duration_ms: float) -> bool:
     -------
     success : `bool`
         `True` if the pulse command was accepted.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If `direction` is not one of the four directions.
     """
     _require_authoritative(context, ObservatoryCapability.AUTOGUIDING)
-    return _run_sync(context.mount_driver.pulse_guide(direction, duration_ms))
+    axis = PULSE_DIRECTIONS.get(direction.strip().lower())
+    if axis is None:
+        raise InvalidArgumentError(
+            f"Unknown guide direction {direction!r}. Use north, south, east or west.",
+            details={"direction": direction},
+        )
+    return _run_sync(context.mount_driver.pulse_guide(axis, duration_ms))
 
 
 def capture_image(context: ControlContext, exposure_seconds: float) -> Any:

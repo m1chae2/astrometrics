@@ -54,6 +54,7 @@ class GuidingSample(BaseModel):
     snr: float | None = Field(None, alias="snr")
     rms_ra: float | None = Field(None, alias="rmsRa")
     rms_dec: float | None = Field(None, alias="rmsDec")
+    star_mass: float | None = Field(None, alias="starMass")
 
     @property
     def total_drift(self) -> float:
@@ -145,13 +146,17 @@ class GuidingStats(BaseModel):
     snr: float = Field(default=0.0, alias="snr")
 
 
-class GuidingStatus(BaseModel):
-    """Live feedback of guiding loop state and correction sample history."""
+class LiveGuidingStatus(BaseModel):
+    """The guiding now: whether it runs, its RMS and its newest samples.
+
+    RMS (root-mean-square) error is the usual measure of guiding accuracy,
+    in arcseconds.
+    """
 
     model_config = ConfigDict(populate_by_name=True)
     is_guiding: bool = Field(default=False, alias="is_guiding")
     stats: GuidingStats = Field(default_factory=GuidingStats, alias="stats")
-    history: list[dict[str, Any]] = Field(default_factory=list, alias="history")
+    history: list[GuidingSample] = Field(default_factory=list, alias="history")
     exposure: float = Field(default=1.0, alias="exposure")
     gain: float = Field(default=0.0, alias="gain")
 

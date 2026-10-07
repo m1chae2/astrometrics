@@ -322,6 +322,18 @@ def test_pulse_delegates_to_mount_driver(mocker: MockerFixture) -> None:
     mount_driver.pulse_guide.assert_called_once_with("N", 250.0)
 
 
+def test_pulse_turns_direction_names_into_the_drivers_initials(mocker: MockerFixture) -> None:
+    """Verify "west" reaches the driver as "W"; a bad direction is refused."""
+    mount_driver = mocker.Mock()
+    mount_driver.pulse_guide = mocker.AsyncMock(return_value=True)
+    manager = _FakeManager(mount_driver=mount_driver)
+
+    assert ops.pulse(manager, "west", 100.0) is True
+    mount_driver.pulse_guide.assert_called_once_with("W", 100.0)
+    with pytest.raises(InvalidArgumentError):
+        ops.pulse(manager, "up", 100.0)
+
+
 def test_pulse_raises_when_autoguiding_not_authoritative(mocker: MockerFixture) -> None:
     """Verify pulse is gated on AUTOGUIDING, not MOUNT_CONTROL."""
     mount_driver = mocker.Mock()

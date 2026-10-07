@@ -43,6 +43,7 @@ EXPECTED_EXPORTS = frozenset({
     "GuidingStatus",
     "HorizonZone",
     "ImagingStatus",
+    "LiveGuidingStatus",
     "MeridianStatus",
     "MosaicPanel",
     "MosaicPlan",
@@ -114,6 +115,7 @@ ROOT_DRIVERS = frozenset({
     "switch_driver",
     "weather_driver",
     "remote_transfer_driver",
+    "guiding_driver",
 })
 """The driver properties `control` keeps for injecting drivers."""
 
@@ -153,6 +155,7 @@ CHILDREN = {
         "save_calibration",
         "save_spectrum_analysis",
         "save_run",
+        "run_loop",
     },
     "remote": {"list", "check_connection", "frame_status", "sync_frames", "sync_logs"},
     "history": {

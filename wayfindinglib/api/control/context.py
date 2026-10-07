@@ -28,6 +28,7 @@ from wayfindinglib.data_access.delegation_policy_reader import get_delegation_po
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.session.correction_config import CorrectionConfig
+from wayfindinglib.tasks.control_tasks.live_guiding import LiveGuidingMonitor
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
     from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
     from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
+    from wayfindinglib.drivers.protocols.guiding_driver import GuidingDriver
     from wayfindinglib.drivers.protocols.mount_driver import MountDriver
     from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
     from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
@@ -91,6 +93,7 @@ class ControlContext:
         self.butler = butler or DiskButler(app_config=config)
         self.correction_config = correction_config or CorrectionConfig()
         self.safety_monitor = SafetyMonitor()
+        self.live_guiding = LiveGuidingMonitor()
         self._astrometrics = astrometrics
         self._logger_interface: LoggerInterface | None = None
         self._driver = driver
@@ -103,6 +106,7 @@ class ControlContext:
         self._switch_driver: SwitchDriver | None = None
         self._weather_driver: WeatherDriver | None = None
         self._remote_transfer_driver: RemoteTransferDriver | None = None
+        self._guiding_driver: GuidingDriver | None = None
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
         """Set by `control.mount.abort_motion` to stop a centering loop."""
@@ -392,6 +396,54 @@ class ControlContext:
     def remote_transfer_driver(self, remote_transfer_driver: RemoteTransferDriver) -> None:
         """Set the remote transfer driver."""
         self._remote_transfer_driver = remote_transfer_driver
+
+    @property
+    def guiding_driver(self) -> GuidingDriver:
+        """The guiding driver for the active telescope's `guiding_protocol`.
+
+        ``"phd2"`` reads PHD2's guide steps (and the mount's pulses when
+        PHD2 is quiet), ``"internal"`` reads the pulses KStars/Ekos sends
+        the mount, and ``"simulator"`` runs a stand-in guide loop.
+        ``"phd2"`` when no telescope is active.
+
+        Returns
+        -------
+        guiding_driver : `GuidingDriver`
+            The active guiding driver.
+
+        Raises
+        ------
+        ConfigurationError
+            If the protocol has no guiding driver.
+        """
+        if self._guiding_driver is None:
+            from astrometricslib import ConfigurationError
+            from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
+            from wayfindinglib.drivers.protocols.registry import build_guiding_driver_registry
+
+            telescope = self.active_telescope()
+            protocol = telescope.guiding_protocol if telescope else "phd2"
+            registry = build_guiding_driver_registry()
+            if protocol not in registry:
+                raise ConfigurationError(
+                    f"No guiding driver for guiding_protocol '{protocol}'. Choose from {sorted(registry)}."
+                )
+            pulses = IndiGuidingDriver(session=self.driver)
+            if protocol == "internal":
+                self._guiding_driver = pulses
+            elif protocol == "phd2":
+                from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+                from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
+
+                self._guiding_driver = registry[protocol](PHD2GuidingService(PHD2Client()), fallback=pulses)
+            else:
+                self._guiding_driver = registry[protocol](fallback=pulses)
+        return self._guiding_driver
+
+    @guiding_driver.setter
+    def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
+        """Set the guiding driver."""
+        self._guiding_driver = guiding_driver
 
     @property
     def indi_diagnostics(self) -> IndiDiagnostics | None:

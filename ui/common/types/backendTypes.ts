@@ -527,6 +527,7 @@ export interface GuidingSample {
   snr?: number | null;
   rmsRa?: number | null;
   rmsDec?: number | null;
+  starMass?: number | null;
 }
 
 /**
@@ -804,12 +805,15 @@ export interface GuidingStats {
 }
 
 /**
- * Live feedback of guiding loop state and correction sample history.
+ * The guiding now: whether it runs, its RMS and its newest samples.
+ *
+ * RMS (root-mean-square) error is the usual measure of guiding accuracy,
+ * in arcseconds.
  */
-export interface GuidingStatus {
+export interface LiveGuidingStatus {
   is_guiding?: boolean;
   stats?: GuidingStats;
-  history?: Record<string, any>[];
+  history?: GuidingSample[];
   exposure?: number;
   gain?: number;
 }

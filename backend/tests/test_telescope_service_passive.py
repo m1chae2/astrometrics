@@ -43,7 +43,7 @@ def test_infer_target_at_coordinates_ignores_missing_coordinates() -> None:
 
 
 def test_get_status_polls_external_guiding() -> None:
-    """Verify get_status polls external guiding telemetry."""
+    """Verify get_status reads the guiding status, taking in new samples."""
     from backend.services.observatory.telescope_service import TelescopeService
 
     guiding_service_mock = MagicMock()
@@ -60,6 +60,6 @@ def test_get_status_polls_external_guiding() -> None:
     service = TelescopeService(guiding_service=guiding_service_mock, wayfinder=wayfinder_mock)
     status = service.get_status()
 
-    guiding_service_mock.poll_external_telemetry.assert_called_once()
+    guiding_service_mock.get_status.assert_called_once()
     assert len(status["guidingHistory"]) == 1
     assert status["guidingHistory"][0]["dra"] == pytest.approx(0.1)

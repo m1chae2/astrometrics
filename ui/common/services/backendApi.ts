@@ -17,7 +17,7 @@ import {
     TelescopeStatus,
     SystemHealth,
     IntrospectionEndpoint,
-    GuidingStatus,
+    LiveGuidingStatus,
     RenderedImage,
     SequenceItem,
     SequencePlan,
@@ -211,7 +211,7 @@ export interface ActionRegistry {
     "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };
 
     // Guiding
-    "guiding:status": { payload: Record<string, never>; response: GuidingStatus };
+    "guiding:status": { payload: Record<string, never>; response: LiveGuidingStatus };
     "guiding:start": { payload: { exposure: number; gain: number }; response: boolean };
     "guiding:stop": { payload: Record<string, never>; response: boolean };
     "guiding:capture_frame": { payload: { exposure?: number; gain?: number }; response: boolean };

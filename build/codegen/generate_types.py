@@ -103,8 +103,8 @@ from wayfindinglib.models.session.telemetry import (
     GuidingSpectrumAnalysis,
     GuidingSpectrumPeak,
     GuidingStats,
-    GuidingStatus,
     IndiStatus,
+    LiveGuidingStatus,
     MountPointingModel,
     PolarAlignmentStatus,
 )
@@ -320,7 +320,7 @@ def render_types() -> str:
         generate_interface(IntrospectionMethod, "IntrospectionMethod"),
         generate_interface(IntrospectionEndpoint, "IntrospectionEndpoint"),
         generate_interface(GuidingStats, "GuidingStats"),
-        generate_interface(GuidingStatus, "GuidingStatus"),
+        generate_interface(LiveGuidingStatus, "LiveGuidingStatus"),
         generate_interface(RenderedImage, "RenderedImage"),
         generate_interface(SequenceItem, "SequenceItem"),
         generate_interface(SequencePlan, "SequencePlan"),

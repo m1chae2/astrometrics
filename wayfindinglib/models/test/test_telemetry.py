@@ -13,8 +13,8 @@ from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     GuidingSample,
     GuidingStats,
-    GuidingStatus,
     IndiStatus,
+    LiveGuidingStatus,
 )
 
 
@@ -47,8 +47,8 @@ def test_indi_status_defaults_to_unknown():  # ruff: ignore[missing-return-type-
 
 
 def test_guiding_status_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify GuidingStatus defaults to not guiding with zeroed stats."""
-    status = GuidingStatus()
+    """Verify LiveGuidingStatus defaults to not guiding with zeroed stats."""
+    status = LiveGuidingStatus()
     assert status.is_guiding is False
     assert status.stats == GuidingStats()
     assert status.history == []

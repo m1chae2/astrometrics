@@ -72,7 +72,7 @@ if TYPE_CHECKING:
         QueueRequest,
         StartTimeMode,
     )
-    from wayfindinglib.models.session.telemetry import MountPointingModel
+    from wayfindinglib.models.session.telemetry import LiveGuidingStatus, MountPointingModel
     from wayfindinglib.models.sky_position import SkyPosition
 
 try:
@@ -92,6 +92,7 @@ _LAZY_EXPORTS = {
     # Models that `control` takes and returns.
     "SkyPosition": "wayfindinglib.models.sky_position",
     "MountPointingModel": "wayfindinglib.models.session.telemetry",
+    "LiveGuidingStatus": "wayfindinglib.models.session.telemetry",
     "ImagingStatus": "wayfindinglib.models.control_status",
     "GuidingStatus": "wayfindinglib.models.control_status",
     "SafetyStatus": "wayfindinglib.models.control_status",

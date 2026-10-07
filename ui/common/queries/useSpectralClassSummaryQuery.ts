@@ -15,7 +15,7 @@ import { fetchSpectralClassSummary } from '../services/astronomyService';
  * Freshness after a real catalog change no longer depends on this
  * interval: App.tsx refetches immediately on the backend's `catalog:changed`
  * broadcast, which fires whenever the catalog actually changed (see
- * `StellarService._get_cached_catalog_summaries`). `refetchInterval` is
+ * `StellarService._cached_catalog_answer`). `refetchInterval` is
  * only the backup for a missed broadcast (e.g. the socket briefly
  * dropped), so it can be long.
  *

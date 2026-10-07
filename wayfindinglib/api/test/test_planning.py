@@ -355,8 +355,20 @@ def test_sky_browsing_methods_delegate_to_the_sky_engine(mocker: object, isolate
     planning.resolve_target_coordinates("M 81")
     fake_sky.resolve_target_coordinates.assert_called_once_with("M 81")
 
-    planning.get_sources(1.0, 2.0, 3.0, include=["online"])
-    fake_sky.get_sources.assert_called_once_with(1.0, 2.0, 3.0, True, False)
+    collect = mocker.patch("wayfindinglib.tasks.planning_tasks.sky_sources.collect_sky_sources")
+    planning.get_sources(1.0, 2.0, 3.0, include=["online"], limiting_magnitude=8.0)
+    collect.assert_called_once_with(
+        fake_sky,
+        1.0,
+        2.0,
+        3.0,
+        include_stars=False,
+        include_online=True,
+        limiting_magnitude=8.0,
+        include_stars_without_catalog_magnitude=True,
+    )
+    with pytest.raises(InvalidArgumentError, match="only apply"):
+        planning.get_sources(1.0, 2.0, 3.0, include=[], limiting_magnitude=8.0)
 
     planning.get_library_star_summaries(1.0, 2.0, 3.0)
     fake_sky.get_library_star_summaries.assert_called_once_with(1.0, 2.0, 3.0, None)

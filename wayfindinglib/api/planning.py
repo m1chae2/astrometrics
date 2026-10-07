@@ -58,6 +58,7 @@ from wayfindinglib.models.planning.observation_package import (
 from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
 from wayfindinglib.models.planning.sequence_plan import SequencePlan
+from wayfindinglib.models.planning.sky_source import SkySource
 from wayfindinglib.models.planning.visibility import HorizonZone, VisibilityReport
 from wayfindinglib.models.session.observation_session import (
     ObservationSession,
@@ -469,11 +470,15 @@ class ObservationPlanning:
         dec_deg: float,
         radius_deg: float,
         include: Sequence[str] = ("stars",),
-    ) -> list[Target | StellarObject]:
-        """Return targets, and optionally stars, within a radius of a point.
+        limiting_magnitude: float | None = None,
+        include_stars_without_catalog_magnitude: bool = True,
+    ) -> list[SkySource]:
+        """List the targets, and optionally stars, to draw in a sky region.
 
-        Loading every library star in full takes seconds on a large
-        library; read them with `get_library_star_summaries` instead.
+        Targets show their stacked image, or their longest LIGHT frame when
+        they have no stack. Stars are read from the library's indexed
+        summaries, so a wide region stays fast. Single-frame photometry
+        detections are never listed.
 
         Parameters
         ----------
@@ -485,17 +490,46 @@ class ObservationPlanning:
             Search radius, in degrees.
         include : `list` [`str`], optional
             ``"stars"`` adds the library's own stars; ``"online"`` adds
-            SIMBAD's objects. Defaults to ``["stars"]``; pass ``[]`` for
-            library targets only.
+            SIMBAD's objects that the library does not hold. Defaults to
+            ``["stars"]``; pass ``[]`` for library targets only.
+        limiting_magnitude : `float`, optional
+            Leave out stars whose catalog magnitude is fainter than this.
+            Targets are never left out. Needs ``"stars"`` or ``"online"``.
+        include_stars_without_catalog_magnitude : `bool`, optional
+            Keep stars that have no real catalog magnitude (missing, zero,
+            or an instrumental value from photometry). Defaults to `True`.
+            A wide map view passes `False`, because most library stars are
+            field detections that the magnitude limit cannot thin out.
+            Needs ``"stars"`` or ``"online"``.
 
         Returns
         -------
-        sources : `list` [`Target` or `StellarObject`]
-            The objects within the radius.
+        sources : `list` [`SkySource`]
+            Library targets, then library stars, then online objects.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If ``include`` names an unknown section, or a star limit is
+            given with no stars asked for.
         """
+        from wayfindinglib.tasks.planning_tasks import sky_sources
+
         sections = check_include(include, ("stars", "online"))
-        return self._sky_engine.get_sources(
-            ra_deg, dec_deg, radius_deg, "online" in sections, "stars" in sections
+        if not sections and (limiting_magnitude is not None or not include_stars_without_catalog_magnitude):
+            raise InvalidArgumentError(
+                "limiting_magnitude and include_stars_without_catalog_magnitude only apply when "
+                "include has 'stars' or 'online'."
+            )
+        return sky_sources.collect_sky_sources(
+            self._sky_engine,
+            ra_deg,
+            dec_deg,
+            radius_deg,
+            include_stars="stars" in sections,
+            include_online="online" in sections,
+            limiting_magnitude=limiting_magnitude,
+            include_stars_without_catalog_magnitude=include_stars_without_catalog_magnitude,
         )
 
     def get_library_star_summaries(
@@ -528,16 +562,36 @@ class ObservationPlanning:
         radius_deg: float,
         enabled_driver_names: list[str],
         magnitude_limit: float | None = None,
-    ) -> list[tuple[str, Any]]:
-        """Return matching stellar objects from enabled catalog drivers.
+    ) -> list[SkySource]:
+        """Ask the enabled online catalog drivers for the stars in a region.
+
+        Only the online catalogs are asked; the library is neither read nor
+        changed.
+
+        Parameters
+        ----------
+        ra_deg : `float`
+            Right ascension of the center, in degrees.
+        dec_deg : `float`
+            Declination of the center, in degrees.
+        radius_deg : `float`
+            Search radius, in degrees.
+        enabled_driver_names : `list` [`str`]
+            The drivers to ask, such as ``["deep_stars"]``.
+        magnitude_limit : `float`, optional
+            Faintest magnitude wanted. Drivers that can use it fetch fewer
+            stars.
 
         Returns
         -------
-        sources : `list` [`tuple` [`str`, `Any`]]
-            Each match paired with the driver name that found it.
+        sources : `list` [`SkySource`]
+            One source per star found, marked global, with
+            ``catalog_source`` naming the driver.
         """
-        return self._sky_engine.get_online_catalog_sources(
-            ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
+        from wayfindinglib.tasks.planning_tasks import sky_sources
+
+        return sky_sources.online_catalog_sources(
+            self._sky_engine, ra_deg, dec_deg, radius_deg, enabled_driver_names, magnitude_limit
         )
 
     def list_catalog_driver_metadata(self) -> list[dict[str, Any]]:

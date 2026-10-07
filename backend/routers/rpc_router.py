@@ -383,7 +383,7 @@ class RPCHandlerRegistry:
 
         # --- Planetarium ---
         self.register("planetarium:get_sources", ("stellar_service", "get_sources"))
-        self.register("planetarium:get_targets", ("target_service", "get_planetarium_targets"))
+        self.register("planetarium:get_targets", ("stellar_service", "get_planetarium_targets"))
         self.register("planetarium:get_visibility", ("stellar_service", "get_visibility"))
         self.register("planetarium:get_observer_location", ("telescope_service", "get_observer_location"))
         self.register("planetarium:get_catalog_sources", ("stellar_service", "get_online_catalog_sources"))

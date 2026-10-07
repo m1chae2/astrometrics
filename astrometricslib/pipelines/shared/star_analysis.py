@@ -6,9 +6,7 @@ star's own spectral type and how well it matched, the absorption features
 and emission lines that were found, and whether the brightness repeats. This
 module builds that same short summary from a `StellarObject`, so a client
 that cannot draw a plot can still read the result. It also holds the
-spectral-class grouping the Astronomy Manager's class browser uses. The
-backend's `stellar_service` keeps its own copy of that grouping, because it
-may import only the library's top-level names.
+spectral-class grouping the Astronomy Manager's class browser uses.
 
 The wording of each verdict follows the app's own tests: a feature or cycle
 is "detected" or "possible" by the false-alarm probability the pipeline

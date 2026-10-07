@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     )
     from wayfindinglib.models.planning.quality_advisory import TargetQualityAdvisory
     from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+    from wayfindinglib.models.planning.sky_source import SkySource
     from wayfindinglib.models.planning.visibility import (
         HorizonZone,
         MeridianStatus,
@@ -127,6 +128,7 @@ _LAZY_EXPORTS = {
     "QueueRequest": "wayfindinglib.models.session.observation_session",
     "StartTimeMode": "wayfindinglib.models.session.observation_session",
     "DeepCatalogStatus": "wayfindinglib.models.planning.deep_catalog",
+    "SkySource": "wayfindinglib.models.planning.sky_source",
     "DeepCatalogEstimate": "wayfindinglib.models.planning.deep_catalog",
     "SiteProfile": "wayfindinglib.models.equipment_and_site.site_profile",
     "Telescope": "wayfindinglib.models.equipment_and_site.equipment",

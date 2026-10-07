@@ -5,6 +5,7 @@ measure how their brightness changes over time, and analyze their light
 spectrums.
 """
 
+import math
 from datetime import datetime
 from typing import Any
 
@@ -38,7 +39,42 @@ __all__ = [
     "TargetFilesResponse",
     "TransitCandidate",
     "VariableCandidate",
+    "has_catalog_magnitude",
 ]
+
+BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+"""The brightest value a real catalog magnitude can have. Real apparent
+magnitudes stop near -1.5 (Sirius). Photometry stores instrumental magnitudes
+(about -10 to -17) in the same field, and those say nothing about how bright
+a star looks. Must match BRIGHTEST_CATALOG_MAGNITUDE in
+ui/planetariumDisplay/layers/StarOverlay.ts."""
+
+
+def has_catalog_magnitude(magnitude: object) -> bool:
+    """Tell whether a star's magnitude is a real catalog magnitude.
+
+    Parameters
+    ----------
+    magnitude : `object`
+        The star's raw magnitude field. It may be a number, `None`, or an
+        empty string.
+
+    Returns
+    -------
+    bool
+        `True` for a finite number at or above `BRIGHTEST_CATALOG_MAGNITUDE`
+        that is not exactly zero. `False` for a missing value (`None`,
+        ``""``), an instrumental (very negative) value, or zero. Zero is what
+        is saved for a star whose catalog gave no magnitude, so it means
+        "unknown", not "very bright".
+    """
+    return bool(
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= BRIGHTEST_CATALOG_MAGNITUDE
+        and magnitude != 0
+    )
 
 
 class PeriodogramResult(BaseModel):
@@ -429,6 +465,15 @@ class StellarObject(BaseModel):
     def has_spectra(self) -> bool:
         """Check if this star's light spectrum has been measured."""
         return bool(self.spectroscopy and self.spectroscopy.wavelengths_angstrom)
+
+    @computed_field(alias="hasCatalogMagnitude")
+    @property
+    def has_catalog_magnitude(self) -> bool:
+        """Check if the star's magnitude is a real catalog magnitude.
+
+        See the module function `has_catalog_magnitude` for the rule.
+        """
+        return has_catalog_magnitude(self.magnitude)
 
     @computed_field(alias="hasPhotometry")
     @property

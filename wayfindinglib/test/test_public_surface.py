@@ -58,6 +58,7 @@ EXPECTED_EXPORTS = frozenset({
     "SafetyStatus",
     "SequenceItem",
     "SequencePlan",
+    "SkySource",
     "SiteProfile",
     "SkyPosition",
     "StartTimeMode",

@@ -407,29 +407,3 @@ class TargetService:
                 old_count,
                 new_count,
             )
-
-    def get_planetarium_targets(self) -> list[dict]:
-        """Return all targets with coordinates and image paths for the sky.
-
-        Delegates serialization to the shared
-        _serialize_target_for_planetarium helper, which applies the
-        canonical coordinate parser and longest-exposure frame fallback.
-
-        Returns
-        -------
-        result : `list` of `dict`
-            Serialized planetarium payloads for targets with valid
-            coordinates.
-
-        REQ: PLN-2.2
-        """
-        from backend.services.data.stellar_service import _serialize_target_for_planetarium
-
-        targets = []
-        for target in self.get_targets():
-            if not target.ra or not target.dec:
-                continue
-            result = _serialize_target_for_planetarium(target)
-            if result:
-                targets.append(result)
-        return targets

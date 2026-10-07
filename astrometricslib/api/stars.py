@@ -75,10 +75,23 @@ class StellarCatalog:
         magnitude_min: float | None = None,
         magnitude_max: float | None = None,
         has_spectra: bool | None = None,
+        has_photometry: bool | None = None,
+        has_catalog_magnitude: bool | None = None,
         spectral_class: str | None = None,
+        search: str | None = None,
+        include_unresolved: bool = False,
         detail: Literal[
-            "exists", "ids", "summary", "analysis", "objects", "class_counts", "stats"
+            "exists",
+            "ids",
+            "summary",
+            "analysis",
+            "objects",
+            "overlay",
+            "class_counts",
+            "target_counts",
+            "stats",
         ] = "summary",
+        order: Literal["id", "useful", "match"] | None = None,
         limit: int | None = 50,
         offset: int = 0,
     ) -> StarQueryResult:
@@ -116,26 +129,55 @@ class StellarCatalog:
             Keep stars no fainter than this magnitude.
         has_spectra : `bool`, optional
             Keep only stars that do (or do not) have a recorded spectrum.
+        has_photometry : `bool`, optional
+            Keep only stars that do (or do not) have a light curve.
+        has_catalog_magnitude : `bool`, optional
+            Keep only stars whose magnitude is (or is not) a real catalog
+            magnitude. Zero, a missing value, and an instrumental magnitude
+            from photometry (below -2) are not catalog magnitudes.
         spectral_class : `str`, optional
             Keep only stars whose catalog spectral type is this class (O, B,
             A, F, G, K, M, C or W; a full type such as ``"G2V"`` uses its
             first letter).
+        search : `str`, optional
+            Keep only stars whose id or name contains this text, ignoring
+            case.
+        include_unresolved : `bool`, optional
+            Also return single-frame detections: the point sources that
+            photometry finds in one frame and saves with ids ending in
+            ``":Star_<n>"``. They are working records, not catalog stars, so
+            they are hidden by default.
         detail : `str`, optional
-            ``"summary"`` (default): id, name, position, magnitude, spectral
-            type, targets and data flags. ``"ids"``: only ids. ``"exists"``:
-            which of ``ids`` are in the library. ``"analysis"``: what the
-            analysis found for each star (the star's own spectral type and
-            how well it matched, the absorption features and emission lines,
-            and whether the brightness repeats), with no raw arrays; with
-            ``spectral_class`` the best-matched stars come first.
-            ``"objects"``: the full star records. ``"class_counts"``: how
-            many stars each spectral class has (no selector). ``"stats"``:
-            counts and coverage for the whole library (no selector).
+            ``"summary"`` (default): id, name, position, magnitude (and
+            whether it is a real catalog magnitude), spectral type, targets
+            and data flags. ``"ids"``: only ids. ``"exists"``: which of
+            ``ids`` are in the library. ``"analysis"``: what the analysis
+            found for each star (the star's own spectral type and how well
+            it matched, the absorption features and emission lines, and
+            whether the brightness repeats), with no raw arrays.
+            ``"objects"``: the full star records. ``"overlay"``: the stars of
+            ``target_id`` placed in pixels on the target's stacked image
+            (needs ``target_id``; takes no filter, ``order`` or
+            ``offset``). ``"class_counts"``: how many stars each spectral
+            class has. ``"target_counts"``: each target's star count and
+            whether its stars have spectra or photometry. ``"stats"``:
+            counts and coverage for the whole library, single-frame
+            detections included. The last three take no selector and no
+            filter.
+        order : `str`, optional
+            ``"id"``: by id. ``"useful"``: stars with spectra first, then
+            named stars, then stars with photometry, then brightest first.
+            ``"match"``: stars whose own spectrum best matches a reference
+            spectrum first; summary rows then carry
+            ``selfDeterminedSpectralTypeRms``. By default a ``name`` search
+            keeps the exact id match first, ``"analysis"`` with
+            ``spectral_class`` uses ``"match"``, and every other list is in
+            id order.
         limit : `int` or `None`, optional
-            How many stars to return. At most 2000 ids, 500 summaries, and
-            10 analysis or full records. Defaults to 50. A program that
-            needs every match passes `None`, which also lifts the cap on
-            the region radius and on the number of ``ids`` for
+            How many stars to return. At most 2000 ids, 500 summaries, 200
+            overlay stars, and 10 analysis or full records. Defaults to 50.
+            A program that needs every match passes `None`, which also lifts
+            the cap on the region radius and on the number of ``ids`` for
             ``"exists"``.
         offset : `int`, optional
             How many stars to skip, for paging.
@@ -148,6 +190,7 @@ class StellarCatalog:
         """
         from astrometricslib.pipelines.shared.star_catalog_queries import (
             QUERY_DETAILS,
+            QUERY_ORDERS,
             StarQuery,
             run_star_query,
         )
@@ -169,9 +212,15 @@ class StellarCatalog:
             tolerance_arcsec=tolerance_arcsec,
             magnitude_range=magnitude_range,
             has_spectra=has_spectra,
+            has_photometry=has_photometry,
+            has_catalog_magnitude=has_catalog_magnitude,
             spectral_class=spectral_class,
+            search=search,
+            include_unresolved=include_unresolved,
         )
-        return run_star_query(self.catalog_access, star_query, detail, limit, offset)
+        if order is not None:
+            check_choice("order", order, QUERY_ORDERS)
+        return run_star_query(self.catalog_access, star_query, detail, limit, offset, order)
 
     def find_or_create_by_position(
         self,

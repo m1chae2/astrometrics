@@ -16,11 +16,7 @@ from backend.services.data.stellar_service import StellarService
 
 
 class _Stars:
-    """A stand-in for the library's star catalog that fails on a full read.
-
-    Not a `Mock`: `StellarService` treats a `Mock` as "running in a test"
-    and takes a shortcut, which would hide the behaviour under test.
-    """
+    """A stand-in for the library's star catalog that fails on a full read."""
 
     def __init__(self, by_target: dict[str, list[StellarObject]] | None = None) -> None:
         """Set which stars each target owns and start recording calls."""
@@ -37,6 +33,7 @@ class _Stars:
         has_spectra: bool | None = None,
         detail: str = "summary",
         limit: int | None = 50,
+        include_unresolved: bool = False,
     ) -> SimpleNamespace:
         """Answer the star queries the service may make, and record them.
 
@@ -57,7 +54,7 @@ class _Stars:
         if detail == "ids" and has_spectra:
             return SimpleNamespace(ids=self.spectrum_ids)
         if detail == "objects" and target_id is not None:
-            self.calls.append(("query", target_id))
+            self.calls.append(("query", target_id, include_unresolved))
             return SimpleNamespace(objects=self.by_target.get(target_id, []))
         raise AssertionError("the whole star catalog was read")
 
@@ -104,16 +101,7 @@ def test_stars_of_one_target_are_read_from_that_target_only() -> None:
     found = _make_service(stars).get_stellar_objects("M 13")
 
     assert [star.id for star in found] == ["A", "B"]
-    assert stars.calls == [("query", "M 13")]
-
-
-def test_the_displayable_listing_for_a_target_hides_detection_stubs() -> None:
-    """The user-facing listing reads one target and drops per-frame stubs."""
-    stars = _Stars({"M 81": [StellarObject(id="Polaris"), StellarObject(id="M 81:2026-01-14:0:0:Star_60")]})
-
-    listed = _make_service(stars).get_displayable_stellar_objects("M 81")
-
-    assert [star.id for star in listed] == ["Polaris"]
+    assert stars.calls == [("query", "M 13", True)]
 
 
 def test_saving_does_not_read_or_rewrite_the_catalog() -> None:
@@ -162,18 +150,3 @@ def test_the_list_of_stars_with_spectra_comes_from_the_library() -> None:
     stars.spectrum_ids = ["Vega", "Deneb"]
 
     assert _make_service(stars).get_spectroscopy_list() == ["Vega", "Deneb"]
-
-
-def test_get_sources_with_the_global_catalog_checks_only_the_returned_ids() -> None:
-    """Telling local stars from SIMBAD's asks about just the ids returned."""
-    local_star = StellarObject(id="Local", ra=10.0, dec=20.0, magnitude=5.0)
-    global_star = StellarObject(id="Global", ra=10.1, dec=20.1, magnitude=6.0)
-    stars = _Stars()
-    stars.existing = {"Local", "Something Else In The Library"}
-
-    service = _make_service(stars, planning_sources=[local_star, global_star])
-    sources = service.get_sources(ra=10.0, dec=20.0, radius=1.0, include_catalog=True)
-
-    flags = {source["id"]: source["global"] for source in sources}
-    assert flags == {"Local": False, "Global": True}
-    assert stars.calls == [("exists", ["Global", "Local"])]

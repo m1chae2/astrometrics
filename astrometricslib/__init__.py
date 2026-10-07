@@ -72,10 +72,12 @@ from astrometricslib.foundation.storage import (
 )
 from astrometricslib.models.catalog_queries import (
     CalibrationQueryResult,
+    OverlayStar,
     ReindexReport,
     StarQueryResult,
     TargetQueryResult,
     TargetReindexChange,
+    TargetStarCount,
 )
 from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
@@ -339,6 +341,7 @@ __all__ = [
     "MovingObjectConfig",
     "NotFoundError",
     "NumpyEncoder",
+    "OverlayStar",
     "Parameter",
     "ParameterDescription",
     "PermissionDeniedError",
@@ -375,6 +378,7 @@ __all__ = [
     "TargetQueryResult",
     "TargetReindexChange",
     "TargetSessionContribution",
+    "TargetStarCount",
     "UsageDescription",
     "Used",
     "ValueDescription",

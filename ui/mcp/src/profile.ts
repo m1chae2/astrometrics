@@ -3,25 +3,26 @@
  *
  * Each MCP server has a manifest, `tool_manifest.json`, that gives every tool a class,
  * a category and a disposition. A profile is a rule for which classes and dispositions
- * a client may use. This file repeats the rules in `mcp_servers/common/profile.py`,
- * because this server is written in TypeScript. Keep the two files in step.
+ * a client may use. The rules themselves live in `mcp_servers/common/profile.py`. The
+ * constants here come from `profileRules.ts`, which a script writes from that Python file.
  *
  * The rules fail closed. A tool missing from the manifest is withheld. A missing or
  * unreadable manifest withholds every tool. An unknown profile name falls back to the
- * default profile, `investigator`, which is read-only.
+ * default profile, `investigator`, which cannot change anything except by bringing in
+ * new frames or stacking them.
  */
 
 import * as fs from "fs";
+import {
+  DEFAULT_PROFILE,
+  GAP_REPORT_GUIDANCE,
+  GAP_REPORT_REMINDER,
+  PROFILE_CLASSES,
+  PROFILE_ENVIRONMENT_VARIABLE,
+  SERVED_DISPOSITIONS,
+} from "./profileRules.js";
 
-export const PROFILE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_MCP_PROFILE";
-export const DEFAULT_PROFILE = "investigator";
-
-const PROFILE_CLASSES: Record<string, ReadonlySet<string>> = {
-  investigator: new Set(["observe", "compute", "ingest", "ui-control"]),
-  developer: new Set(["observe", "compute", "ingest", "ui-control", "develop"]),
-};
-
-const SERVED_DISPOSITIONS: ReadonlySet<string> = new Set(["keep", "merge"]);
+export { DEFAULT_PROFILE, GAP_REPORT_GUIDANCE, PROFILE_ENVIRONMENT_VARIABLE };
 
 /** One tool's entry in the manifest. */
 export interface ManifestEntry {
@@ -128,14 +129,6 @@ export function findWithheldTools(
   return withheld;
 }
 
-/** Instructions the server gives its client at the start of a session. Matches `GAP_REPORT_GUIDANCE` in Python. */
-export const GAP_REPORT_GUIDANCE =
-  "These tools look things up and calculate. The only write is bringing frames from the telescope into " +
-  "the library. If none of the tools you can use can do what you need, stop. Do not look " +
-  "for a workaround: do not chain tools to imitate a missing one, and do not ask for code to be run. " +
-  "Call report_capability_gap on the astrometrics-gaps server. Say what you tried, why it fell short, " +
-  "and what tool would help. Then tell the person you cannot do it with the current tools.";
-
 /**
  * ### Description
  * Writes the error for a call to a tool the client may not use.
@@ -146,8 +139,5 @@ export const GAP_REPORT_GUIDANCE =
  */
 export function refusalMessage(toolName: string, reason?: string): string {
   const detail = reason ? ` It is not available to you: ${reason}.` : "";
-  return (
-    `Unknown tool ${toolName}.${detail} If you need this ability, stop and file a report with ` +
-    "report_capability_gap on the astrometrics-gaps server. Do not look for a workaround."
-  );
+  return `Unknown tool ${toolName}.${detail} ${GAP_REPORT_REMINDER}`;
 }

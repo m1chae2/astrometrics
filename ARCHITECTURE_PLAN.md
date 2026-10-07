@@ -238,7 +238,7 @@ follow section 4, and no row adds a function beyond those listed there.
 |---|---|
 | `backend/services/observatory/target_imaging_planner.py` `create_sequence_plan` | `ObservationPlanning.create_sequence_plan`, then `create_plan` |
 | `backend/services/observatory/mosaic_service.py` `create_mosaic_targets` | `ObservationPlanning.create_mosaic_targets`, then `create_mosaic` |
-| `backend/services/data/stellar_service.py` spectral-class labels, aliases, summary, and by-class listing | `StellarCatalog.spectral_class_counts`, `StellarCatalog.query(spectral_class=...)` |
+| `backend/services/data/stellar_service.py` spectral-class labels, aliases, summary, and by-class listing | `StellarCatalog.query(detail="class_counts")`, `StellarCatalog.query(spectral_class=..., order="match")`. The backend copy also hid single-frame detections, so deleting it depends on moving that "displayable star" filter into `StellarCatalog.query` (`include_unresolved=False`, section 5.2). |
 | `backend/services/data/stellar_service.py` `get_visible_targets` | `ObservationPlanning.get_visibility` |
 | `backend/services/observatory/observatory_service.py` humidity safety rule | `control.safety.assess` |
 | `backend/services/observatory/telescope_service.py` `_infer_target_at_coordinates` (small-angle distance, 1° match) | `TargetCatalog.query(ra=..., dec=..., radius_deg=...)` |
@@ -271,7 +271,7 @@ follow section 4, and no row adds a function beyond those listed there.
 | `ui/common/hooks/targetListFiltering.ts` | Classifies targets by name (solar system body, Messier, NGC, IC, comet) | An `object_type` field on `Target` and a `TargetCatalog.query(object_type=...)` filter, built on `is_solar_system_target` |
 | `ui/common/fitsViewer/mtfStretchGL.ts` | Computes auto-stretch parameters with a different method from the library: background 0.05 instead of 0.25, standard deviation instead of the median absolute deviation | Stretch parameters as fields on the `ViewableImage` that `render_fits` returns. The UI keeps the GPU drawing. |
 | `ui/planetariumDisplay/hooks/useEquipmentConfiguration.ts`, `StarOverlay.ts`, `StellarAnalysisDetails.tsx` | Compute plate scale and field of view, and hold copied magnitude limits and minimum point counts | Fields from `control.equipment.status` and `StellarCatalog.query` (`has_catalog_magnitude`, `can_run_period_search`) |
-| `backend/main_backend.py` IERS setup and the AltAz warm-up | Configures offline Earth-rotation data (IERS) in four places | One library helper, called by both libraries and the backend |
+| `backend/main_backend.py` IERS setup and the AltAz warm-up | Configures offline Earth-rotation data (IERS) in four places | One library helper, called by both libraries and the backend: `configure_offline_iers` and `warm_earth_orientation_data` in `astrometricslib/foundation/astropy_setup.py` |
 
 ### 5.3 Logic that stays in the UI
 

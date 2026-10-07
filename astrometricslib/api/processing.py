@@ -949,9 +949,10 @@ class ProcessingPipelines:
         Returns
         -------
         result : `StackResult`
-            The frames chosen and, unless ``plan_only``, the stack's path
-            and flags. For the numbers behind the stack, read
-            `stack_summary`.
+            The frames chosen and, unless ``plan_only``, the stack's path,
+            flags and quality summary (``quality_summary``). To compare
+            it with the previous stack, use
+            `QualityDiagnostics.stack_quality`.
 
         Raises
         ------
@@ -1154,7 +1155,8 @@ class ProcessingPipelines:
         Returns
         -------
         result : `ProcessTargetResult` or `BatchRunSummary`
-            For one target, each stage's result keyed by stage name. For
+            For one target, each stage's result keyed by stage name, and
+            the target's quality summaries afterwards (``quality``). For
             several, which targets succeeded, failed or were skipped.
 
         Raises

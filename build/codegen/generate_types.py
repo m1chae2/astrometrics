@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -86,6 +87,7 @@ from backend.services.infrastructure.system_status_service import (
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
 from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+from wayfindinglib.models.planning.sky_source import SkySource
 from wayfindinglib.models.planning.visibility import (
     MeridianCrossing,
     MeridianStatus,
@@ -293,6 +295,8 @@ def render_types() -> str:
         generate_interface(StellarObject, "Spectrum"),
         generate_interface(StellarSessionMatch, "StellarSessionMatch"),
         generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
+        generate_interface(OverlayStar, "OverlayStar"),
+        generate_interface(TargetStarCount, "TargetStarCount"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),
@@ -334,6 +338,7 @@ def render_types() -> str:
         generate_interface(VisibilitySample, "VisibilitySample"),
         generate_interface(VisibilitySpan, "VisibilitySpan"),
         generate_interface(ObjectVisibility, "ObjectVisibility"),
+        generate_interface(SkySource, "SkySource"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),

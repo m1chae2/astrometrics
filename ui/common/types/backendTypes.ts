@@ -313,6 +313,34 @@ export interface CatalogMatchQuality {
 }
 
 /**
+ * One star placed on a target's image, for drawing labels over it.
+ *
+ * The positions are pixels of the target's reference image (its stacked
+ * image, or its processed image when there is no stack). The field names
+ * turn into the camelCase keys the app reads.
+ */
+export interface OverlayStar {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  spectralType?: string;
+  isCatalogIdentified?: boolean;
+  referenceWidth?: number | null;
+  referenceHeight?: number | null;
+  radiusPx?: number | null;
+}
+
+/**
+ * How many stars belong to one target, and what data they have.
+ */
+export interface TargetStarCount {
+  starCount?: number;
+  hasSpectra?: boolean;
+  hasPhotometry?: boolean;
+}
+
+/**
  * A star's own extracted spectrum, and what it suggests about the star.
  *
  * Bundles spectroscopy's results the same way `PhotometryResult` bundles
@@ -1009,6 +1037,40 @@ export interface ObjectVisibility {
   meridian?: MeridianStatus | null;
   /** Movement over the span. Filled when an end time is given. */
   span?: VisibilitySpan | null;
+}
+
+/**
+ * A star or target placed on the sky, ready for the Planetarium.
+ */
+export interface SkySource {
+  /** The star's or target's id. */
+  id: string;
+  /** Right ascension, in degrees. */
+  ra: number;
+  /** Declination, in degrees. */
+  dec: number;
+  /** The name to show. The id when there is no other name. */
+  name: string;
+  /** The common name, or the id. */
+  commonName: string;
+  /** A star's catalog spectral type. None for a target. */
+  spectralType?: string | null;
+  /** A star's magnitude. None when unknown. */
+  magnitude?: number | null;
+  /** True when the library holds a spectrum for it. */
+  hasSpectra?: boolean;
+  /** A star: true when it has a light curve. A target: true when it has a stacked or processed image. */
+  hasPhotometry?: boolean;
+  /** Whether this is a star or a target. */
+  type: any;
+  /** True when it came from an online catalog, not from the user's own library. */
+  global?: boolean;
+  /** The online catalog driver that found it, such as 'deep_stars'. None for the library. */
+  catalogSource?: string | null;
+  /** A target's stacked image, or its longest light frame when it has no stack. */
+  stackedImage?: string | null;
+  /** A target's field of view, as saved on the target. */
+  fieldOfView?: string | null;
 }
 
 /**

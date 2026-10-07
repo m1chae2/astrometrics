@@ -132,7 +132,7 @@ export const DEEP_STAR_MAX_MAGNITUDE = 16;
  * instrumental magnitudes from photometry (around -10 to -17), which say
  * nothing about how bright a star looks on the sky. Anything below this
  * floor is therefore treated as "no catalog magnitude". Must match
- * `_BRIGHTEST_CATALOG_MAGNITUDE` in backend/services/data/stellar_service.py.
+ * `BRIGHTEST_CATALOG_MAGNITUDE` in astrometricslib/models/stellar_source.py.
  */
 export const BRIGHTEST_CATALOG_MAGNITUDE = -2.0;
 

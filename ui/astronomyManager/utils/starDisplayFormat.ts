@@ -13,7 +13,7 @@ const POSITION_ONLY_STAR_ID_PATTERN = /^FIELD_J(-?\d+(?:\.\d+)?)([+-]\d+(?:\.\d+
 /**
  * A magnitude below this is an instrument reading, not a catalog magnitude. A magnitude of exactly 0
  * is also not one: it is what is saved when the catalog gave none.
- * Must match _BRIGHTEST_CATALOG_MAGNITUDE and _has_catalog_magnitude in backend/services/data/stellar_service.py.
+ * Must match BRIGHTEST_CATALOG_MAGNITUDE and has_catalog_magnitude in astrometricslib/models/stellar_source.py.
  */
 const BRIGHTEST_CATALOG_MAGNITUDE = -2;
 
@@ -306,7 +306,7 @@ export function formatSpectralMatchQuality(rms: number | null | undefined): stri
     return `${(rms * 100).toFixed(0)}% off`;
 }
 
-/** The catalog spectral classes the spectral-class browser shows, and R/N's fold into C. Mirrors the backend's _SPECTRAL_CLASS_LABELS/_SPECTRAL_CLASS_ALIASES in stellar_service.py. */
+/** The catalog spectral classes the spectral-class browser shows, and R/N's fold into C. Mirrors SPECTRAL_CLASS_LABELS/SPECTRAL_CLASS_ALIASES in astrometricslib/pipelines/shared/star_analysis.py. */
 const KNOWN_SPECTRAL_CLASSES = new Set(['O', 'B', 'A', 'F', 'G', 'K', 'M', 'C', 'W']);
 const SPECTRAL_CLASS_ALIASES: Record<string, string> = { R: 'C', N: 'C' };
 

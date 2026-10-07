@@ -1,14 +1,8 @@
 """Purpose: Event-driven guiding-log ingestion pipeline.
 
 Description: The fetch -> parse -> analyze -> persist chain for PHD2
-guide logs, per `Wayfinding_Library_Architecture.md` §2.5.1a's §6a
-extension. Before this module, the same four steps were manually and
-separately orchestrated across three backend services
-(`backend/services/infrastructure/sync_service.py`'s `sync_telescope_logs`
-downloads; `backend/services/observatory/guiding_service.py`'s
-`ingest_phd2_log_file`/`analyze_guiding_spectrum` parse, persist, and
-analyze) -- nothing chained them together, and no automatic evidence
-feed existed for the delegation promotion gates that need this data.
+guide logs. It keeps the four steps in one place, and feeds the
+delegation promotion gates that need guiding evidence.
 
 Two entry points, both usable from either an automatic trigger (an
 exposure-complete/new-guide-data signal, once one exists) or a manual
@@ -22,10 +16,6 @@ catch-up/backfill call:
   not a universal telescope-host concept) -- this function degrades to
   a no-op if the configured driver doesn't have them, rather than
   assuming every remote-transfer protocol supports guide-log retrieval.
-
-Rewiring `sync_service.py`/`guiding_service.py` to call these instead
-of running the same steps themselves is `Wayfinding_Library_Architecture.md`
-M9's backend-cleanup scope, paired with this milestone but not part of it.
 """
 
 from __future__ import annotations

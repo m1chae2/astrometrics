@@ -176,7 +176,7 @@ def test_download_remote_targets_local_path_skips_download() -> None:
 
     assert success is True
     driver.download_target_folder.assert_not_called()
-    mock_classify.assert_called_once_with(["/local/lights/M81"], "M 81", ANY, "Apertura 75Q")
+    mock_classify.assert_called_once_with(["/local/lights/M81"], "M 81", ANY, "Apertura 75Q", [])
     assert fake_astrometrics.saved is True
 
 

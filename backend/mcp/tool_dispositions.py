@@ -504,7 +504,7 @@ PROPOSED_TOOLS = (
             "session record per analyze file. It is safe to repeat and never deletes. It does not refit the "
             "stored guiding spectrum: that is observatory_guiding_refit_spectrum, which the user does not "
             "want an AI to trigger. dry_run compares remote and local files by name and size. The backend's "
-            "SyncService.sync_telescope_logs still repeats part of this; it should call this code."
+            "SyncService.sync_telescope_logs calls this code."
         ),
         built=True,
     ),

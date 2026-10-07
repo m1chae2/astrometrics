@@ -209,12 +209,7 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(
-            observatory_api=self.wayfinder.control,
-            config_service=self.config_service,
-            guiding_service=self.guiding_service,
-            logger_interface=self.job_repository,
-        )
+        self.sync_service = SyncService(observatory_api=self.wayfinder.control)
 
         from backend.services.observatory.imaging_service import ImagingService
 

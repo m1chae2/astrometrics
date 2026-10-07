@@ -17,7 +17,6 @@ from backend.routers import rpc_router
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService
 from backend.services.infrastructure.scripting_service import ScriptingService
-from backend.services.infrastructure.sync_service import SyncService
 from backend.services.processing.job_service import JobService
 
 
@@ -47,12 +46,6 @@ def test_a_registration_for_a_missing_service_is_a_configuration_error(
     monkeypatch.setattr(rpc_router, "container", SimpleNamespace())
     with pytest.raises(ConfigurationError, match="no_such_service"):
         asyncio.run(rpc_router.rpc_registry.execute("test:gone", {}))
-
-
-def test_an_unknown_calibration_sync_type_is_an_invalid_argument() -> None:
-    """Only bias, dark and flat frames can be synced."""
-    with pytest.raises(InvalidArgumentError, match="Invalid sync type"):
-        SyncService().start_sync_calibration("sky")
 
 
 def test_an_unknown_recipe_and_doc_topic_are_not_found() -> None:

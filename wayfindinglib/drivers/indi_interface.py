@@ -1211,7 +1211,7 @@ class IndiInterface(IndiClient):
             tracking_status=self.status.get("TRACKING_STATUS", "Unknown"),
             focuser_position=self.get_focuser_position(),
             filter=self.status.get("FILTER", "L"),
-            guiding_history=[],  # Handled by GuidingService
+            guiding_history=[],  # control.guiding.status(include=["live"]) reports guiding
             camera_temperature=self.status.get("CAMERA_TEMPERATURE", "-"),
             camera_status=self.status.get("CAMERA_STATUS", "Idle"),
             target_name=self.status.get("TARGET_NAME"),
@@ -1409,8 +1409,8 @@ class IndiInterface(IndiClient):
                     import time
 
                     # Dict keys below are a data contract with
-                    # backend/services/observatory/guiding_service.py
-                    # -- do not rename them.
+                    # wayfindinglib.analytics.guide_pulses (read by the
+                    # guiding drivers) -- do not rename them.
                     with self._external_pulses_lock:
                         self._external_pulses.append({
                             "time": time.time(),
@@ -1903,9 +1903,8 @@ class IndiInterface(IndiClient):
         pulses : `list` [`dict`]
             Each entry has ``"time"``, ``"pulse_n"``, ``"pulse_s"``,
             ``"pulse_w"``, and ``"pulse_e"`` keys -- this shape is a
-            data contract with
-            `backend/services/observatory/guiding_service.py`, do not
-            rename these keys.
+            data contract with `wayfindinglib.analytics.guide_pulses`,
+            which the guiding drivers use; do not rename these keys.
         """
         with self._external_pulses_lock:
             pulses = list(self._external_pulses)

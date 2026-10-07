@@ -1296,3 +1296,19 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(
 
     with pytest.raises(ConflictError, match="clearance"):
         control.safety.close_enclosure()
+
+
+def test_remote_list_keeps_only_the_folder_a_name_refers_to(control: ObservatoryControl) -> None:
+    """A folder kind with a name returns the one folder the copy would use."""
+    from unittest.mock import MagicMock
+
+    driver = MagicMock()
+    driver.list_remote_targets.return_value = ["M_42", "Dark", "NGC 7000"]
+    driver.resolve_remote_folder_name.side_effect = lambda name: (
+        name.replace(" ", "_") if name == "M 42" else name
+    )
+    control.remote_transfer_driver = driver
+
+    assert control.remote.list("folders", folder_name="M 42") == ["M_42"]
+    assert control.remote.list("calibration_folders", folder_name="dark") == ["Dark"]
+    assert control.remote.list("target_folders", folder_name="M 31") == []

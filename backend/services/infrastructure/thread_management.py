@@ -6,35 +6,12 @@ light-frame sync thread.
 """
 
 import logging
-from typing import Any
+import threading
 
 logger = logging.getLogger(__name__)
 
 # Simple module-level registry to track running sync threads.
-# Mirrors an attribute that previously lived on the high-level
-# interface instance.
-_syncing: dict[str, object] = {}
-
-
-def start_sync(object_id: str, target: Any) -> dict[str, bool]:
-    """Start `target`'s light-frame sync thread and track it.
-
-    Parameters
-    ----------
-    object_id : `str`
-        Identifier used to register the sync thread for later
-        status checks.
-    target : `Target`
-        Domain object providing a `sync_light_frames()` method that
-        starts and returns the sync thread.
-
-    Returns
-    -------
-    result : `dict`
-        Dict with ``"started"`` set to `True`.
-    """
-    _syncing[object_id] = target.sync_light_frames()
-    return {"started": True}
+_syncing: dict[str, threading.Thread] = {}
 
 
 def is_syncing(object_id: str) -> bool:

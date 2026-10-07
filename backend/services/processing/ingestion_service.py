@@ -14,7 +14,6 @@ from astrometricslib import (
     ConfigurationError,
     ExternalServiceError,
     NotFoundError,
-    Target,
 )
 from backend.services.infrastructure.base_service import BaseBackgroundService
 
@@ -47,36 +46,26 @@ class IngestionService(BaseBackgroundService):
         self._image_processing_service = image_processing_service
         self._wayfinder = wayfinder
 
-    def _resolve_remote_folder(self, target_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Find a matching remote folder for a given target name.
+    def _resolve_remote_folder(self, folder_name: str | None) -> str | None:
+        """Find the remote folder a target or folder name refers to.
 
-        Normalization: Lowercase, remove spaces and underscores.
+        Uses the library's name matching (`control.remote.list` with a
+        `folder_name`), so a copy and this lookup always agree.
+
+        Parameters
+        ----------
+        folder_name : `str` or `None`
+            The target or folder name.
 
         Returns
         -------
         folder : `str` or `None`
-            The matching remote folder name, or `None` if no match was
-            found.
+            The matching remote folder name, or `None` if none matches.
         """
-        if not target_name:
+        if not folder_name:
             return None
-
-        folders = self._wayfinder.control.remote.list("folders")
-
-        normalized_target = target_name.lower().replace(" ", "").replace("_", "")
-
-        # 1. Exact Match
-        if target_name in folders:
-            return target_name
-
-        # 2. Normalized Match
-        for folder in folders:
-            normalized_folder = folder.lower().replace(" ", "").replace("_", "")
-            if normalized_folder == normalized_target:
-                return folder
-
-        # 3. Contains Match (Fallback - be careful with this)
-        return None
+        matches = self._wayfinder.control.remote.list("folders", folder_name=folder_name)
+        return matches[0] if matches else None
 
     def scan_remote_targets(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Return list of folders in remote Pictures.
@@ -113,12 +102,10 @@ class IngestionService(BaseBackgroundService):
             Folders not found on the telescope are omitted.
         """
         files_by_folder: dict[str, list[str]] = {}
-        for folder_type in ["Dark", "Bias", "Flat"]:
-            remote_folder = self._resolve_remote_folder(folder_type)
-            if remote_folder:
-                files = self._wayfinder.control.remote.list("files", folder_name=remote_folder)
-                if files:
-                    files_by_folder[remote_folder] = files
+        for remote_folder in self._wayfinder.control.remote.list("calibration_folders"):
+            files = self._wayfinder.control.remote.list("files", folder_name=remote_folder)
+            if files:
+                files_by_folder[remote_folder] = files
         return files_by_folder
 
     def get_remote_stats(self, folder):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -432,20 +419,9 @@ class IngestionService(BaseBackgroundService):
                 # what this job finds always matches what the dialog
                 # showed the user before they clicked Start Ingestion.
                 calibration_files_by_folder = self._list_calibration_files()
-                dest_type_map = {"Dark": "darks", "Bias": "biases", "Flat": "flats"}
                 downloaded_paths = []
-
-                # Create dummy Target object for calibration
-                # downloads to respect strict domain layers
-                dummy_target = Target(id="Calibration")
-
-                for folder_type in ["Dark", "Bias", "Flat"]:
-                    remote_folder = self._resolve_remote_folder(folder_type)
-                    if remote_folder in calibration_files_by_folder:
-                        count = len(calibration_files_by_folder[remote_folder])
-                        self._log(job_id, f"Found {remote_folder} ({count} files)")
-                    else:
-                        self._log(job_id, f"Skipping {folder_type}: Not found on telescope.")
+                for remote_folder, folder_files in calibration_files_by_folder.items():
+                    self._log(job_id, f"Found {remote_folder} ({len(folder_files)} files)")
 
                 downloaded_folders = list(calibration_files_by_folder.keys())
                 if not downloaded_folders:
@@ -475,13 +451,12 @@ class IngestionService(BaseBackgroundService):
                 downloaded_count = 0
 
                 for rf in downloaded_folders:
-                    type_dir = dest_type_map.get(rf, rf.lower() + "s")
                     folder_selected_files = folder_selected_files_by_folder[rf]
                     if selected_files and not folder_selected_files:
                         self._log(job_id, f"Skipping {rf}: no files selected.")
                         continue
 
-                    self._log(job_id, f"Downloading {rf} into local subfolder {type_dir}...")
+                    self._log(job_id, f"Downloading {rf} into the calibration library...")
 
                     def calibration_log_callback(msg):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
                         nonlocal downloaded_count

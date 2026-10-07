@@ -166,7 +166,9 @@ def download_remote_targets(
 
     If `local_path` is provided, skips download and ingests files from
     the local directory instead -- the unified entry point both remote
-    downloads and local ingestion route through.
+    downloads and local ingestion route through. After sorting, the
+    pointing error of every new frame that holds a plate solve is
+    recorded as an alignment attempt (`frame_pointing`).
 
     Parameters
     ----------
@@ -311,9 +313,15 @@ def download_remote_targets(
         scan_list = [staging_dir]
 
     if success:
-        classify_and_sort_fits_files(scan_list, target_id, config, telescope_name)
+        from wayfindinglib.tasks.control_tasks.frame_pointing import record_frame_pointing_errors
+
+        added_paths: list[str] = []
+        classify_and_sort_fits_files(scan_list, target_id, config, telescope_name, added_paths)
         astrometrics.targets.reindex_frames(target, prune_missing=prune_missing)
         astrometrics.targets.save()
+        # After the copy: the new frames that hold a plate solve give the
+        # mount's pointing error, for control.history.query(kind="alignment").
+        record_frame_pointing_errors(context, added_paths)
         return True
     return success
 

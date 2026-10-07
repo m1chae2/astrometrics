@@ -111,25 +111,6 @@ class GuidingService:
         live = self._observatory.guiding.status(include=["live"]).live
         return live.model_dump(mode="json", by_alias=True)
 
-    def ingest_phd2_log_file(self, file_path: str, target_name: str | None = None) -> int:
-        """Store the samples of one PHD2 guide log and refit the mount model.
-
-        Parameters
-        ----------
-        file_path : `str`
-            Path to the PHD2 guide log text file.
-        target_name : `str`, optional
-            Target name stored with the samples.
-
-        Returns
-        -------
-        sample_count : `int`
-            The refit model's total sample count, or 0 if the file held no
-            samples.
-        """
-        analysis = self._observatory.guiding.refit_spectrum(file_path=file_path, target_name=target_name)
-        return analysis.sample_count if analysis else 0
-
     def analyze_guiding_spectrum(self, session_id: str | None = None) -> dict[str, Any]:
         """Refit the mount's periodic error model from recorded samples.
 

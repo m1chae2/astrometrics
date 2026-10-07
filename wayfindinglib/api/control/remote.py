@@ -82,9 +82,11 @@ class RemoteControl(ControlChild):
             match no library target) or ``"files"`` (the FITS files in
             one folder).
         folder_name : `str`, optional
-            The folder to list. Used, and needed, only by ``"files"``. It
-            must match a listed folder, so a made-up name never reaches
-            the remote shell.
+            For ``"files"`` (where it is needed), the folder to list. For
+            the folder kinds, keep only the folder this name refers to.
+            Either way the name is matched the way a copy matches it
+            (ignoring case, so ``"M 42"`` finds ``"M_42"``), so a made-up
+            name never reaches the remote shell.
         sizes : `bool`, optional
             Pair each file with its size in bytes. Used only by
             ``"files"``.
@@ -92,7 +94,8 @@ class RemoteControl(ControlChild):
         Returns
         -------
         names : `list` [`str`] or `list` [`tuple` [`str`, `int`]]
-            Folder names, file paths relative to the folder, or
+            Folder names (with `folder_name`, the one folder it matches,
+            or none), file paths relative to the folder, or
             ``(path, size_in_bytes)`` pairs.
 
         Raises
@@ -124,8 +127,12 @@ class RemoteControl(ControlChild):
         }
         if kind not in folder_lists:
             raise InvalidArgumentError(f"kind must be one of: {', '.join([*folder_lists, 'files'])}.")
-        _refuse(f"kind={kind!r}", folder_name=folder_name, sizes=sizes or None)
-        return folder_lists[kind](self._context)
+        _refuse(f"kind={kind!r}", sizes=sizes or None)
+        folders = folder_lists[kind](self._context)
+        if folder_name is None:
+            return folders
+        match = tasks.matching_remote_folder(self._context, folder_name, folders)
+        return [match] if match is not None else []
 
     def check_connection(self) -> bool:
         """Check that the observatory computer can be reached.

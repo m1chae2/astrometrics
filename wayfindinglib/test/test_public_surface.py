@@ -301,9 +301,9 @@ def test_sky_position_checks_its_ranges_and_converts_to_hours() -> None:
 @pytest.mark.parametrize(
     ("kind", "arguments", "message"),
     [
-        ("folders", {"folder_name": "M 81"}, "folder_name"),
+        ("folders", {"sizes": True}, "sizes"),
         ("target_folders", {"sizes": True}, "sizes"),
-        ("unassociated_folders", {"folder_name": "M 81", "sizes": True}, "folder_name, sizes"),
+        ("unassociated_folders", {"folder_name": "M 81", "sizes": True}, "sizes"),
         ("files", {}, "needs a folder_name"),
         ("everything", {}, "kind must be one of"),
     ],

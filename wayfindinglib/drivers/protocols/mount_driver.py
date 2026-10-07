@@ -7,6 +7,11 @@ against `IndiInterface`, generalized so a second protocol can implement
 the same surface. ST4 pulse-guiding lives here (not on the camera) per
 ASCOM's `ITelescope.PulseGuide` -- today's placement on the guide camera
 is a historical INDI-specific quirk, not a contract worth preserving.
+
+Every position a mount driver reads or takes is in the mount's
+current-epoch frame (JNow: the true equator and equinox of the date),
+which is what INDI's ``EQUATORIAL_EOD_COORD`` holds. `hardware_operations`
+converts to and from ICRS (J2000), the frame the rest of the app uses.
 """
 
 import abc
@@ -24,8 +29,12 @@ class MountStatus(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    ra: str = Field(..., alias="ra")
-    dec: str = Field(..., alias="dec")
+    ra: str = Field(
+        ..., alias="ra", description="Right Ascension in hours, in the current-epoch frame (JNow), as text."
+    )
+    dec: str = Field(
+        ..., alias="dec", description="Declination in degrees, in the current-epoch frame (JNow), as text."
+    )
     altitude: str = Field(..., alias="altitude")
     azimuth: str = Field(..., alias="azimuth")
     tracking_status: str = Field(..., alias="trackingStatus")
@@ -57,6 +66,13 @@ class MountDriver(ProtocolDriver):
     async def slew(self, ra: float, dec: float) -> bool:
         """Command the mount to slew to coordinates.
 
+        Parameters
+        ----------
+        ra : `float`
+            Right Ascension in hours, in the current-epoch frame (JNow).
+        dec : `float`
+            Declination in degrees, in the current-epoch frame (JNow).
+
         Returns
         -------
         success : `bool`
@@ -66,6 +82,13 @@ class MountDriver(ProtocolDriver):
     @abc.abstractmethod
     async def sync(self, ra: float, dec: float) -> bool:
         """Sync the mount's internal coordinates without slewing.
+
+        Parameters
+        ----------
+        ra : `float`
+            Right Ascension in hours, in the current-epoch frame (JNow).
+        dec : `float`
+            Declination in degrees, in the current-epoch frame (JNow).
 
         Returns
         -------

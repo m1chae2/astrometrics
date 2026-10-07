@@ -1117,10 +1117,19 @@ class IndiInterface(IndiClient):
         if "AZIMUTH" not in self.status:
             self.status["AZIMUTH"] = "Unknown"
 
-    def _calculate_horizontal_coordinates(self, telescope_device, equatorial_coords):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _calculate_horizontal_coordinates(self, telescope_device: Any, equatorial_coords: Any) -> None:
         """Calculate Alt/Az from RA/Dec, Location, and Time if valid.
 
         Updates self.status.
+
+        Parameters
+        ----------
+        telescope_device : `Any`
+            INDI device handle for the mount, read for its location.
+        equatorial_coords : `Any`
+            The mount's ``EQUATORIAL_EOD_COORD`` vector: Right Ascension
+            in hours and Declination in degrees, in the current-epoch
+            frame (JNow).
         """
         if not equatorial_coords:
             return
@@ -1145,10 +1154,13 @@ class IndiInterface(IndiClient):
         ra = equatorial_coords[0].value  # Hours
         dec = equatorial_coords[1].value  # Degrees
 
+        from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs
         from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
-        # RA in INDI is typically Hours; compute_altaz's contract is degrees.
-        alt_deg, az_deg = compute_altaz(ra * 15.0, dec, location, observation_time)
+        # INDI gives RA in hours, in the current-epoch frame; compute_altaz
+        # takes ICRS degrees.
+        icrs_ra_deg, icrs_dec_deg = current_epoch_to_icrs((ra * 15.0) % 360.0, dec, observation_time)
+        alt_deg, az_deg = compute_altaz(icrs_ra_deg, icrs_dec_deg, location, observation_time)
 
         self.status["ALTITUDE"] = self.coordinate_decimal_to_dms(alt_deg)
         self.status["AZIMUTH"] = self.coordinate_decimal_to_dms(az_deg)

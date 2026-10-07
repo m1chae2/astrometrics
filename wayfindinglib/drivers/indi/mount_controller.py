@@ -4,6 +4,7 @@ Handles slewing, parking, and tracking.
 """
 
 import logging
+from typing import Any
 
 import astropy.units as u
 from astropy.coordinates import EarthLocation
@@ -276,10 +277,20 @@ class MountController:
             )
         return self.config.get_min_altitude(), self.config.get_max_altitude(), True
 
-    def validate_altitude_limits(self, telescope, ra: float, dec: float):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Calculate and validates altitude for target coordinates.
+    def validate_altitude_limits(self, telescope: Any, ra: float, dec: float) -> None:
+        """Calculate and validate the altitude of a slew destination.
 
         REQ: OBS-1.1
+
+        Parameters
+        ----------
+        telescope : `Any`
+            INDI device handle for the mount.
+        ra : `float`
+            Destination Right Ascension in hours, in the current-epoch
+            frame (JNow) the mount takes.
+        dec : `float`
+            Destination Declination in degrees, in the same frame.
 
         Raises
         ------
@@ -303,11 +314,15 @@ class MountController:
         observation_time = Time.now()
         location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg, height=elevation * u.m)
 
+        from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs
         from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
-        # ra is in Hours (INDI convention); compute_altaz's contract
-        # is degrees.
-        target_altitude, _target_azimuth = compute_altaz(ra * 15.0, dec, location, observation_time)
+        # ra is in hours and in the current-epoch frame (INDI convention);
+        # compute_altaz takes ICRS degrees.
+        icrs_ra_deg, icrs_dec_deg = current_epoch_to_icrs((ra * 15.0) % 360.0, dec, observation_time)
+        target_altitude, _target_azimuth = compute_altaz(
+            icrs_ra_deg, icrs_dec_deg, location, observation_time
+        )
 
         if target_altitude < min_altitude or target_altitude > max_altitude:
             raise ConflictError(

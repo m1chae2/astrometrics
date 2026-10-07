@@ -43,7 +43,11 @@ class MountControl(ControlChild):
             ``WEST``), ``parked``, ``trackMode`` (such as ``SIDEREAL``),
             ``temperature``,
             ``humidity``, ``cameraStatus``, ``filter``, ``focuserPosition``
-            and ``cameraTemperature``, for the sections read.
+            and ``cameraTemperature``, for the sections read. ``ra`` and
+            ``dec`` are ICRS (J2000), like catalog stars and plate
+            solutions: the mount's own current-epoch (JNow) reading is
+            converted. They read like ``"5h 35m 17.30s"`` and
+            ``"-5° 23′ 28.0″"``.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
@@ -69,7 +73,9 @@ class MountControl(ControlChild):
         ----------
         destination : `str`, `Target` or `SkyPosition`
             A library target or its id (its plate-solved coordinates are
-            used), or a position ``{"ra_deg": ..., "dec_deg": ...}``.
+            used), or a position ``{"ra_deg": ..., "dec_deg": ...}``. All
+            positions are ICRS (J2000); the mount is sent the
+            current-epoch (JNow) equivalent.
         center : `bool`, optional
             Refine the pointing by plate solving after the slew. Needs
             `CAPTURE_ORCHESTRATION` and `PLATE_SOLVE_ALIGNMENT` as well as
@@ -118,7 +124,9 @@ class MountControl(ControlChild):
         Parameters
         ----------
         position : `SkyPosition` or `dict`
-            The solved position, or ``{"ra_deg": ..., "dec_deg": ...}``.
+            The solved position, or ``{"ra_deg": ..., "dec_deg": ...}``,
+            in ICRS (J2000). The mount is sent the current-epoch (JNow)
+            equivalent.
 
         Returns
         -------

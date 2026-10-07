@@ -24,6 +24,7 @@ from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from astropy.time import Time
 from pydantic import ValidationError
 
 from astrometricslib import (
@@ -35,6 +36,7 @@ from astrometricslib import (
     NotFoundError,
     PermissionDeniedError,
 )
+from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs, icrs_to_current_epoch
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
 from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
@@ -129,15 +131,26 @@ def mount_status(context: ControlContext, include: list[str] | None = None) -> d
         ``filter``. ``focuser``: ``focuserPosition``. ``camera``:
         ``cameraTemperature``. An unknown section name is refused with
         `InvalidArgumentError`.
+
+    Notes
+    -----
+    ``ra`` and ``dec`` are ICRS (J2000), the frame of catalog stars,
+    library targets and plate solutions, so they can be compared with
+    them directly. The mount itself reports the current-epoch frame
+    (JNow); `mount_position_to_icrs` converts it. ``ra`` reads like
+    ``"5h 35m 17.30s"`` and ``dec`` like ``"-5° 23′ 28.0″"``. A position
+    the mount does not know yet (such as ``"Unknown"``) is passed on as
+    it is.
     """
     sections = check_sections(include, MOUNT_STATUS_SECTIONS)
     data: dict[str, Any] = {}
     if "mount" in sections:
         mount = _run_sync(context.mount_driver.get_status())
         raw_status = getattr(context.driver, "status", {})
+        ra_text, dec_text = mount_position_to_icrs(mount.ra, mount.dec, Time.now())
         data.update({
-            "ra": mount.ra,
-            "dec": mount.dec,
+            "ra": ra_text,
+            "dec": dec_text,
             "altitude": mount.altitude,
             "azimuth": mount.azimuth,
             "temperature": raw_status.get("TEMPERATURE", "-"),
@@ -159,6 +172,138 @@ def mount_status(context: ControlContext, include: list[str] | None = None) -> d
         temperature_c = _run_sync(context.camera_driver.get_sensor_temperature_c())
         data["cameraTemperature"] = f"{temperature_c:.1f}°C" if temperature_c is not None else "-"
     return data
+
+
+def mount_position_to_icrs(ra_text: str, dec_text: str, obstime: Time) -> tuple[str, str]:
+    """Convert the position a mount reports from JNow to ICRS (J2000) text.
+
+    Mount drivers report the current-epoch frame (JNow: the true equator
+    and equinox of the date). Catalog stars, library targets and plate
+    solutions use ICRS, which differs by the precession since 2000 (about
+    0.36 degrees in 2026). Converting here lets everything downstream
+    compare the mount with the catalog in one frame.
+
+    Parameters
+    ----------
+    ra_text : `str`
+        The reported Right Ascension in hours, as a plain number or as
+        hours, minutes and seconds (``"5° 35′ 17.3″"`` or ``"5:35:17.3"``).
+    dec_text : `str`
+        The reported Declination in degrees, in the same forms.
+    obstime : `Time`
+        The time of the reading, which defines the current epoch.
+
+    Returns
+    -------
+    ra_text, dec_text : `tuple` [`str`, `str`]
+        The ICRS position as ``"5h 35m 17.30s"`` and ``"-5° 23′ 28.0″"``.
+        If either input cannot be read (for example ``"Unknown"``), both
+        are returned unchanged.
+    """
+    ra_hours = _parse_mount_coordinate(ra_text)
+    dec_deg = _parse_mount_coordinate(dec_text)
+    if ra_hours is None or dec_deg is None:
+        return ra_text, dec_text
+    icrs_ra_deg, icrs_dec_deg = current_epoch_to_icrs((ra_hours * 15.0) % 360.0, dec_deg, obstime)
+    return _format_ra_hours(icrs_ra_deg / 15.0), _format_dec_degrees(icrs_dec_deg)
+
+
+def _mount_frame_position(position: SkyPosition) -> tuple[float, float]:
+    """Convert an ICRS (J2000) position to the frame mount drivers take.
+
+    Parameters
+    ----------
+    position : `SkyPosition`
+        An ICRS position, as catalogs, targets and plate solutions give it.
+
+    Returns
+    -------
+    ra_hours, dec_deg : `tuple` [`float`, `float`]
+        The current-epoch (JNow) position: Right Ascension in hours and
+        Declination in degrees.
+    """
+    current_ra_deg, current_dec_deg = icrs_to_current_epoch(position.ra_deg, position.dec_deg, Time.now())
+    return current_ra_deg / 15.0, current_dec_deg
+
+
+def _parse_mount_coordinate(text: str | None) -> float | None:
+    """Read a mount coordinate given as a plain number or as sexagesimal text.
+
+    Parameters
+    ----------
+    text : `str` or `None`
+        Such as ``"5.5"``, ``"5:30:00"`` or ``"5° 30′ 0.0″"``.
+
+    Returns
+    -------
+    value : `float` or `None`
+        The value in the text's own unit (hours or degrees), or `None` if
+        it holds no number (for example ``"Unknown"`` or ``"-"``).
+    """
+    stripped = (text or "").strip()
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", stripped):
+        return float(stripped)
+    return _parse_dms_degrees(stripped)
+
+
+def _split_sexagesimal(value: float, decimals: int) -> tuple[int, int, float]:
+    """Split a positive value into whole units, minutes and rounded seconds.
+
+    Rounding is done on the total seconds first, so a value such as
+    59.999 seconds carries into the next minute instead of printing
+    ``60``.
+
+    Parameters
+    ----------
+    value : `float`
+        A positive value in hours or degrees.
+    decimals : `int`
+        Decimal places kept on the seconds.
+
+    Returns
+    -------
+    units, minutes, seconds : `tuple` [`int`, `int`, `float`]
+        The value split into its three parts.
+    """
+    total_seconds = round(value * 3600.0, decimals)
+    units, remainder = divmod(total_seconds, 3600.0)
+    minutes, seconds = divmod(remainder, 60.0)
+    return int(units), int(minutes), round(seconds, decimals)
+
+
+def _format_ra_hours(ra_hours: float) -> str:
+    """Write a Right Ascension in hours as ``"5h 35m 17.30s"``.
+
+    Parameters
+    ----------
+    ra_hours : `float`
+        Right Ascension in hours.
+
+    Returns
+    -------
+    text : `str`
+        The formatted value, with hours from 0 to 23.
+    """
+    hours, minutes, seconds = _split_sexagesimal(ra_hours % 24.0, 2)
+    return f"{hours % 24}h {minutes:02d}m {seconds:05.2f}s"
+
+
+def _format_dec_degrees(dec_deg: float) -> str:
+    """Write a Declination in degrees as ``"-5° 23′ 28.0″"``.
+
+    Parameters
+    ----------
+    dec_deg : `float`
+        Declination in degrees.
+
+    Returns
+    -------
+    text : `str`
+        The formatted value, always with a sign.
+    """
+    sign = "-" if dec_deg < 0 else "+"
+    degrees, minutes, seconds = _split_sexagesimal(abs(dec_deg), 1)
+    return f"{sign}{degrees}° {minutes:02d}′ {seconds:04.1f}″"
 
 
 def check_sections(include: list[str] | None, known: tuple[str, ...]) -> list[str]:
@@ -278,7 +423,8 @@ def slew(context: ControlContext, position: SkyPosition) -> bool:
     context : `ControlContext`
         Supplies the mount driver and the policy.
     position : `SkyPosition`
-        Where to point.
+        Where to point, in ICRS (J2000). It is converted to the mount's
+        current-epoch frame (JNow) before it is sent.
 
     Returns
     -------
@@ -286,7 +432,7 @@ def slew(context: ControlContext, position: SkyPosition) -> bool:
         `True` if the slew command was accepted.
     """
     _require_authoritative(context, ObservatoryCapability.MOUNT_CONTROL)
-    return _run_sync(context.mount_driver.slew(position.ra_hours, position.dec_deg))
+    return _run_sync(context.mount_driver.slew(*_mount_frame_position(position)))
 
 
 def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
@@ -301,7 +447,8 @@ def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
     context : `ControlContext`
         Supplies the mount driver and the policy.
     position : `SkyPosition`
-        The solved position.
+        The solved position, in ICRS (J2000). It is converted to the
+        mount's current-epoch frame (JNow) before it is sent.
 
     Returns
     -------
@@ -309,7 +456,7 @@ def sync_mount(context: ControlContext, position: SkyPosition) -> bool:
         `True` if the sync command was accepted.
     """
     _require_authoritative(context, ObservatoryCapability.PLATE_SOLVE_ALIGNMENT)
-    return _run_sync(context.mount_driver.sync(position.ra_hours, position.dec_deg))
+    return _run_sync(context.mount_driver.sync(*_mount_frame_position(position)))
 
 
 def park(context: ControlContext) -> bool:

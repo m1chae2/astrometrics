@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from astropy.time import Time
 from pytest_mock import MockerFixture
 
 from astrometricslib import (
@@ -21,6 +22,7 @@ from astrometricslib import (
     NotFoundError,
     PermissionDeniedError,
 )
+from wayfindinglib.astronomy.coordinate_transforms import icrs_to_current_epoch
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
@@ -30,6 +32,24 @@ from wayfindinglib.models.policy.delegation import (
 )
 from wayfindinglib.models.sky_position import SkyPosition
 from wayfindinglib.tasks.control_tasks import hardware_operations as ops
+
+
+def _assert_sent_in_current_epoch(driver_call: Any, ra_deg: float, dec_deg: float) -> None:
+    """Check a driver call got the current-epoch (JNow) form of a position.
+
+    Parameters
+    ----------
+    driver_call : `Any`
+        The mocked driver method (``slew`` or ``sync``), called once.
+    ra_deg, dec_deg : `float`
+        The ICRS position the caller asked for, in degrees.
+    """
+    expected_ra_deg, expected_dec_deg = icrs_to_current_epoch(ra_deg, dec_deg, Time.now())
+    (sent_ra_hours, sent_dec_deg), _keywords = driver_call.call_args
+    assert sent_ra_hours == pytest.approx(expected_ra_deg / 15.0, abs=1e-5)
+    assert sent_dec_deg == pytest.approx(expected_dec_deg, abs=1e-4)
+    # Precession since 2000 moves the position by roughly 0.3 degrees.
+    assert abs(sent_ra_hours * 15.0 - ra_deg) > 0.1
 
 
 def _authoritative_policy(*capabilities: ObservatoryCapability) -> DelegationPolicy:
@@ -184,9 +204,11 @@ def test_mount_status_reassembles_the_four_driver_reads(mocker: MockerFixture) -
 
     status = ops.mount_status(manager)
 
+    ra_text = status.pop("ra")
+    dec_text = status.pop("dec")
+    assert ra_text.endswith("s") and "h " in ra_text
+    assert dec_text.startswith("+") and dec_text.endswith("″")
     assert status == {
-        "ra": "10:00:00",
-        "dec": "+20:00:00",
         "altitude": "45:00:00",
         "azimuth": "180:00:00",
         "temperature": "15.0°C",
@@ -214,6 +236,49 @@ def test_mount_status_reads_only_the_sections_asked_for(mocker: MockerFixture) -
     manager.mount_driver.get_status.assert_not_called()
     with pytest.raises(InvalidArgumentError, match="Unknown section"):
         ops.mount_status(manager, include=["weather"])
+
+
+def test_mount_status_reports_the_mount_position_in_icrs(mocker: MockerFixture) -> None:
+    """Verify the mount's JNow reading comes back as the ICRS position.
+
+    The fake mount reports Betelgeuse's current-epoch position, the way
+    an INDI mount does; the status read must give the catalog (J2000)
+    position, about 0.36 degrees away.
+    """
+    catalog_ra_deg, catalog_dec_deg = 88.79294, 7.40706
+    current_ra_deg, current_dec_deg = icrs_to_current_epoch(catalog_ra_deg, catalog_dec_deg, Time.now())
+    manager = _manager_for_status_reassembly(mocker)
+    manager.mount_driver.get_status = mocker.AsyncMock(
+        return_value=_FakeMountStatus(ra=f"{current_ra_deg / 15.0:.8f}", dec=f"{current_dec_deg:.8f}")
+    )
+
+    status = ops.mount_status(manager, include=["mount"])
+
+    from astrometricslib import parse_coordinate_string
+
+    assert parse_coordinate_string(status["ra"], is_ra=True) == pytest.approx(catalog_ra_deg, abs=2e-4)
+    assert parse_coordinate_string(status["dec"], is_ra=False) == pytest.approx(catalog_dec_deg, abs=2e-4)
+
+
+def test_mount_position_to_icrs_reads_indi_text_and_passes_unknown_through() -> None:
+    """Verify INDI display text is read and an unknown position is kept."""
+    obstime = Time("2026-10-07T02:15:00", scale="utc")
+    current_ra_deg, current_dec_deg = icrs_to_current_epoch(101.28716, -16.71612, obstime)
+    ra_hours = current_ra_deg / 15.0
+    whole_hours, minutes = int(ra_hours), int((ra_hours % 1) * 60)
+    seconds = ((ra_hours * 60) % 1) * 60
+    whole_deg, dec_minutes = int(abs(current_dec_deg)), int((abs(current_dec_deg) % 1) * 60)
+    dec_seconds = ((abs(current_dec_deg) * 60) % 1) * 60
+
+    ra_text, dec_text = ops.mount_position_to_icrs(
+        f"{whole_hours}° {minutes}′ {seconds:.4f}″",
+        f"-{whole_deg}° {dec_minutes}′ {dec_seconds:.4f}″",
+        obstime,
+    )
+
+    assert ra_text == "6h 45m 08.92s"
+    assert dec_text == "-16° 42′ 58.0″"
+    assert ops.mount_position_to_icrs("Unknown", "Unknown", obstime) == ("Unknown", "Unknown")
 
 
 def test_resolve_destination_raises_for_unknown_target(mocker: MockerFixture) -> None:
@@ -257,13 +322,14 @@ def test_resolve_destination_accepts_a_position_or_its_dictionary() -> None:
 
 
 def test_slew_delegates_to_mount_driver(mocker: MockerFixture) -> None:
-    """Verify slew sends RA in hours and Dec in degrees to the mount driver."""
+    """Verify slew sends the JNow position, RA in hours and Dec in degrees."""
     mount_driver = mocker.Mock()
     mount_driver.slew = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
     assert ops.slew(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
-    mount_driver.slew.assert_called_once_with(10.0, 20.0)
+    mount_driver.slew.assert_called_once()
+    _assert_sent_in_current_epoch(mount_driver.slew, 150.0, 20.0)
 
 
 def test_slew_raises_when_mount_control_not_authoritative(mocker: MockerFixture) -> None:
@@ -349,13 +415,14 @@ def test_pulse_raises_when_autoguiding_not_authoritative(mocker: MockerFixture) 
 
 
 def test_sync_mount_delegates_to_mount_driver(mocker: MockerFixture) -> None:
-    """Verify sync_mount sends RA in hours and Dec in degrees."""
+    """Verify sync_mount sends the JNow position (RA hours, Dec degrees)."""
     mount_driver = mocker.Mock()
     mount_driver.sync = mocker.AsyncMock(return_value=True)
     manager = _FakeManager(mount_driver=mount_driver)
 
     assert ops.sync_mount(manager, SkyPosition(ra_deg=150.0, dec_deg=20.0)) is True
-    mount_driver.sync.assert_called_once_with(10.0, 20.0)
+    mount_driver.sync.assert_called_once()
+    _assert_sent_in_current_epoch(mount_driver.sync, 150.0, 20.0)
 
 
 def test_sync_mount_raises_when_alignment_not_authoritative(mocker: MockerFixture) -> None:

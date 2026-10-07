@@ -1,22 +1,22 @@
 """Purpose: `ObservationExecution`, the entry point for running a session.
 
 Description: `Wayfinder.execution` is an `ObservationExecution`. It
-advances a session's queue, runs the meridian flip, recovers from device
-faults and lost guide stars, records divergences and telemetry, and
-reconciles a session after the night. Callers never import
-`wayfindinglib.tasks.execution_tasks` directly.
+advances a session's queue (one cycle, or until it is done), runs the
+meridian flip, recovers from device faults and lost guide stars, records
+divergences and telemetry, and reconciles a session after the night.
+Callers never import `wayfindinglib.tasks.execution_tasks` directly.
 
 Execution is the one part of the library that uses both of the others:
-it runs what planning wrote, through the hardware `control` drives. The
-caller builds the bundles of steps that touch hardware
-(`SessionRunnerDependencies`, `MeridianFlipSteps`) and hands them in, the
-same way `control.safety.execute_safe_state` takes its steps. That
-wiring depends on what each queue entry needs, so this class does not
-build it.
+it runs what planning wrote, through the hardware `control` drives. A
+caller may hand in the bundles of steps that touch hardware
+(`SessionRunnerDependencies`, `MeridianFlipSteps`), the same way
+`control.safety.execute_safe_state` takes its steps. For an imaging
+queue, `advance_session` builds its steps from `control` itself.
 """
 
+import threading
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import AppConfiguration, Astrometrics, NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
@@ -37,6 +37,9 @@ from wayfindinglib.tasks.execution_tasks.session_runner import (
     abort_session,
     advance_session,
 )
+
+if TYPE_CHECKING:
+    from wayfindinglib.api.control import ObservatoryControl
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -60,6 +63,9 @@ class ObservationExecution:
     astrometrics : `Astrometrics`, optional
         The science library handle shared with the rest of the
         `Wayfinder`. Built over `config` on first use when omitted.
+    control : `ObservatoryControl`, optional
+        The `Wayfinder`'s hardware sub-API. `advance_session` uses it to
+        build the imaging steps when none are handed in.
     """
 
     def __init__(
@@ -68,8 +74,9 @@ class ObservationExecution:
         butler: DiskButler | None = None,
         *,
         astrometrics: Astrometrics | None = None,
+        control: ObservatoryControl | None = None,
     ) -> None:
-        """Store the configuration, storage and shared science handle."""
+        """Store the configuration, storage, science handle and control."""
         if config is None:
             if butler is not None:
                 config = butler.config
@@ -80,6 +87,7 @@ class ObservationExecution:
         self._config = config
         self._butler = butler or DiskButler(app_config=config)
         self._shared_astrometrics = astrometrics
+        self._control = control
 
     @property
     def _astrometrics(self) -> Astrometrics:
@@ -122,16 +130,66 @@ class ObservationExecution:
     # -- Queue advancement -------------------------------------------------
 
     def advance_session(
-        self, session: ObservationSession, deps: SessionRunnerDependencies
-    ) -> ObservationSession:
-        """Run one queue-advancement cycle against `session`.
+        self,
+        session: str | ObservationSession,
+        deps: SessionRunnerDependencies | None = None,
+        stop: threading.Event | None = None,
+    ) -> ObservationSession | None:
+        """Run a session's queue: one cycle, or cycle after cycle.
+
+        One cycle checks safety and the devices, picks the next entry whose
+        start time has come, sends (or only records, per the delegation
+        policy) its slew, captures its frames, and saves the session.
+
+        Parameters
+        ----------
+        session : `str` or `ObservationSession`
+            The session, by id or as a session.
+        deps : `SessionRunnerDependencies`, optional
+            The steps that touch hardware. When omitted, the imaging steps
+            are built from `control`: a safety assessment, a slew to the
+            entry's target and a capture of its exposures.
+        stop : `threading.Event`, optional
+            Given, keep running cycles until the queue has nothing left to
+            run, the session ends or is suspended, or `stop` is set. This
+            blocks, so run it on its own thread.
 
         Returns
         -------
-        session : `ObservationSession`
-            The session after one queue-advancement cycle.
+        session : `ObservationSession` or `None`
+            The session after the last cycle (`None` if `stop` was already
+            set).
+
+        Raises
+        ------
+        ConfigurationError
+            If `deps` is omitted and this object was built without
+            `control`.
         """
-        return advance_session(session, deps)
+        from wayfindinglib.tasks.execution_tasks.queue_runner import run_queue
+
+        if deps is None:
+            from astrometricslib import ConfigurationError
+            from wayfindinglib.tasks.execution_tasks.imaging_queue import imaging_dependencies
+
+            if self._control is None:
+                raise ConfigurationError("advance_session needs control to build the imaging steps.")
+            deps = imaging_dependencies(self._control, self._butler)
+        session_id = session if isinstance(session, str) else session.id
+
+        def advance_once() -> ObservationSession:
+            """Run one cycle on the latest saved copy of the session.
+
+            Returns
+            -------
+            session : `ObservationSession`
+                The advanced session.
+            """
+            return advance_session(self._session(session_id), deps)
+
+        if stop is None:
+            return advance_session(self._session(session), deps)
+        return run_queue(advance_once, stop)
 
     def abort_session(
         self, session: str | ObservationSession, reason: str, now: datetime | None = None

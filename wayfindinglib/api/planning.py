@@ -63,6 +63,7 @@ from wayfindinglib.models.session.observation_session import (
     ObservationSession,
     ObservationSessionSummary,
     QueuedObservationPackage,
+    QueueEntryStatus,
     QueueRequest,
     SessionStatus,
 )
@@ -95,6 +96,7 @@ PLAN_ARGUMENTS = {
     "package": (
         "target",
         "exposure_requests",
+        "plan_items",
         "dither_config",
         "minimum_altitude_deg",
         "priority",
@@ -108,8 +110,8 @@ PLAN_ARGUMENTS = {
 
 PLAN_REQUIRED_ARGUMENTS = {
     "sequence": ("target", "plan_items"),
-    "package": ("target", "exposure_requests"),
-    "empty_session": ("site_profile", "telescope", "camera_id", "night_id"),
+    "package": ("target",),
+    "empty_session": ("night_id",),
     "scheduled_session": ("requests", "site_profile", "telescope", "camera_id", "night_id"),
 }
 """The arguments each plan kind cannot do without."""
@@ -286,6 +288,47 @@ class ObservationPlanning:
         if session is None:
             raise NotFoundError(f"No observation session {session_id!r}.", details={"session_id": session_id})
         return session
+
+    def _session_equipment(
+        self, site_profile: SiteProfile | None, telescope: Telescope | None, camera_id: str | None
+    ) -> tuple[SiteProfile, Telescope, str]:
+        """Fill in a session's site, telescope and camera from the defaults.
+
+        Parameters
+        ----------
+        site_profile : `SiteProfile` or `None`
+            The site, or `None` for the recorded default site.
+        telescope : `Telescope` or `None`
+            The telescope, or `None` for the active one.
+        camera_id : `str` or `None`
+            The camera, or `None` for the active one.
+
+        Returns
+        -------
+        site_profile, telescope, camera_id : `SiteProfile`, `Telescope`, `str`
+            The equipment the session records.
+
+        Raises
+        ------
+        ConfigurationError
+            If no telescope or camera is given and none is active.
+        """
+        from astrometricslib import ConfigurationError
+        from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+        from wayfindinglib.data_access.site_profile_reader import get_or_seed_default_site_profile
+
+        if site_profile is None:
+            site_profile = get_or_seed_default_site_profile(self._butler, self._config)
+        if telescope is None or camera_id is None:
+            catalog = get_equipment_catalog(self._config)
+            telescope = telescope or catalog.active_telescope()
+            camera = catalog.active_camera()
+            camera_id = camera_id or (camera.id if camera else None)
+        if telescope is None or camera_id is None:
+            raise ConfigurationError(
+                "An observing session needs a telescope and a camera, and none is active."
+            )
+        return site_profile, telescope, camera_id
 
     # -- Sky browsing (name lookup and catalogs) ----------------------------
 
@@ -849,12 +892,14 @@ class ObservationPlanning:
             ``"sequence"``: a sequence plan for the app's sequencer queue,
             from `target` and `plan_items`. Nothing is stored.
             ``"package"``: a reusable imaging request for `target`, from
-            `exposure_requests` and the optional `dither_config`,
-            `minimum_altitude_deg`, `priority`,
-            `quality_weighting_enabled` and `notes`. Recorded.
+            `exposure_requests` (or the sequence items `plan_items`) and
+            the optional `dither_config`, `minimum_altitude_deg`,
+            `priority`, `quality_weighting_enabled` and `notes`. Recorded.
             ``"empty_session"``: an observing session with an empty queue
             for the night `night_id`, to fill by hand with `edit_queue`.
-            Uses `site_profile`, `telescope` and `camera_id`. Recorded.
+            Uses `site_profile`, `telescope` and `camera_id`, which
+            default to the recorded site and the active telescope and
+            camera. Recorded.
             ``"scheduled_session"``: an observing session for the night
             `night_id` with every package in `requests` placed
             automatically, using `site_profile`, `telescope` and
@@ -864,7 +909,8 @@ class ObservationPlanning:
             The target, by id or as a `Target`.
         plan_items : `list` [`dict`], optional
             Sequence items, each with ``count``, ``exposure`` (seconds)
-            and ``filter``.
+            and ``filter``, and for a package an optional frame ``type``
+            (``LIGHT`` by default).
         exposure_requests : `list` [`ExposureRequest`], optional
             The exposures a package asks for.
         dither_config : `DitherConfig`, optional
@@ -931,12 +977,18 @@ class ObservationPlanning:
 
             return build_sequence_plan(self._target(target).id, plan_items)
         if kind == "package":
+            from wayfindinglib.tasks.planning_tasks.planning_operations import exposure_requests_from_items
+
+            if (exposure_requests is None) == (plan_items is None):
+                raise InvalidArgumentError(
+                    "kind='package' needs exactly one of exposure_requests and plan_items."
+                )
             resolved = self._target(target)
             package = ObservationPackage(
                 id=str(uuid.uuid4()),
                 name=resolved.id,
                 target_id=resolved.id,
-                exposure_requests=exposure_requests,
+                exposure_requests=exposure_requests or exposure_requests_from_items(plan_items),
                 dither_config=dither_config,
                 minimum_altitude_deg=minimum_altitude_deg,
                 priority=priority or 0,
@@ -946,6 +998,7 @@ class ObservationPlanning:
             self._butler.put(package, "observation_package", {"id": package.id})
             return package
         if kind == "empty_session":
+            site_profile, telescope, camera_id = self._session_equipment(site_profile, telescope, camera_id)
             session = ObservationSession(
                 id=str(uuid.uuid4()),
                 night_date=_night_date(night_id),
@@ -1018,14 +1071,15 @@ class ObservationPlanning:
         session_id: str,
         add: list[QueueRequest | dict[str, Any]] | None = None,
         order: list[str] | None = None,
+        remove: list[str] | None = None,
     ) -> ObservationSession:
         """Change an observing session's queue by hand.
 
         Added entries freeze a copy of their package (exposures,
         dithering, altitude limit and priority), the same way automatic
         placement does, so a session built by hand and one placed
-        automatically run the same way. When both arguments are given,
-        `order` is applied first and the new entries go at the end.
+        automatically run the same way. The changes apply in this order:
+        `remove`, then `order`, then `add` (new entries go at the end).
 
         Parameters
         ----------
@@ -1035,7 +1089,10 @@ class ObservationPlanning:
             Recorded packages to append, each with its start mode and any
             start and end worked out by hand.
         order : `list` [`str`], optional
-            Every current entry id, in the new order.
+            Every entry id left after `remove`, in the new order.
+        remove : `list` [`str`], optional
+            Ids of entries to take out of the queue. An entry that is
+            running cannot be removed.
 
         Returns
         -------
@@ -1045,12 +1102,30 @@ class ObservationPlanning:
         Raises
         ------
         InvalidArgumentError
-            If neither `add` nor `order` is given, a request is malformed,
-            or `order` does not name exactly the entries in the queue.
+            If none of `add`, `order` and `remove` is given, a request is
+            malformed, or `order` does not name exactly the entries in the
+            queue.
+        NotFoundError
+            If `remove` names an entry that is not in the queue.
+        ConflictError
+            If `remove` names an entry that is running.
         """
-        if add is None and order is None:
-            raise InvalidArgumentError("Give add, order, or both.")
+        if add is None and order is None and remove is None:
+            raise InvalidArgumentError("Give add, order or remove.")
         session = self._session(session_id)
+        if remove:
+            from astrometricslib import ConflictError
+
+            entries_by_id = {entry.id: entry for entry in session.queue}
+            missing = [entry_id for entry_id in remove if entry_id not in entries_by_id]
+            if missing:
+                raise NotFoundError("Those entries are not in the queue.", details={"remove": missing})
+            running = [
+                entry_id for entry_id in remove if entries_by_id[entry_id].status == QueueEntryStatus.RUNNING
+            ]
+            if running:
+                raise ConflictError("A running entry cannot be removed.", details={"running": running})
+            session.queue = [entry for entry in session.queue if entry.id not in set(remove)]
         if order is not None:
             entries_by_id = {entry.id: entry for entry in session.queue}
             if sorted(order) != sorted(entries_by_id):

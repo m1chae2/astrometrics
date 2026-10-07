@@ -196,4 +196,6 @@ class Wayfinder:
         butler = DiskButler(app_config=self.config)
         self.control = ObservatoryControl(config=self.config, butler=butler, astrometrics=self.astrometrics)
         self.planning = ObservationPlanning(self.config, butler, astrometrics=self.astrometrics)
-        self.execution = ObservationExecution(self.config, butler, astrometrics=self.astrometrics)
+        self.execution = ObservationExecution(
+            self.config, butler, astrometrics=self.astrometrics, control=self.control
+        )

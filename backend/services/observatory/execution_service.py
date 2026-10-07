@@ -7,10 +7,10 @@ reconciles one after the night. Reading goes through
 
 Several `ObservationExecution` operations take bundles of steps that
 drive hardware (`SessionRunnerDependencies`, `MeridianFlipSteps`), which
-cannot cross a JSON-RPC call. `advance_session`, `execute_meridian_flip`,
-`recover_fault`, `recover_guide_star_loss` and `create_recorder` therefore
-belong with whatever owns the run loop, not with a request handler; see
-`target_imaging_executor`, which still runs its own queue.
+cannot cross a JSON-RPC call. `execute_meridian_flip`, `recover_fault`,
+`recover_guide_star_loss` and `create_recorder` therefore belong with
+whatever owns a run loop, not with a request handler. The sequencer's
+run loop is `advance_session`, started by `target_imaging_executor`.
 """
 
 import logging

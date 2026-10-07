@@ -1,238 +1,265 @@
-"""Execution queue and control loop for target imaging sequences."""
+"""Purpose: Serve the sequencer's queue from an observing session.
 
-import asyncio
+Description: The app's sequencer queue is the queue of one observing
+session in the wayfinding library. Adding a sequence records an
+observation package and queues it (`ObservationPlanning.edit_queue`);
+removing, reordering and changing entries edit the same queue; and
+starting the sequencer runs `ObservationExecution.advance_session` on a
+background thread until the queue is done. Each cycle checks safety,
+slews to the entry's target and captures its exposures.
+
+This service keeps only the session's id, the thread, and the change of
+shape between the session's entries and the sequences the app shows.
+"""
+
 import logging
+import threading
+import time
+from datetime import UTC, datetime
 from typing import Any
+
+from astrometricslib import observing_night_id
+from wayfindinglib import ObservationSession, QueueRequest, StartTimeMode, Wayfinder
 
 logger = logging.getLogger(__name__)
 
+SHOWN_STATUSES = {"PENDING": "queued", "RUNNING": "active"}
+"""Entry statuses the queue shows, and the word the app uses for each.
+Finished entries leave the queue, as they always have."""
+
 
 class TargetImagingExecutor:
-    """Manage the execution queue and drive the telescope control loop.
+    """Keep the sequencer's session and run its queue on a thread."""
 
-    REQ: BKD-2: Imaging Execution REQ: SR-2.1: The system SHALL capture
-    astronomical images via connected cameras.
-    """
+    def __init__(self, wayfinder: Wayfinder) -> None:
+        """Keep the Wayfinder whose planning and execution do the work.
 
-    def __init__(self, telescope_service=None, imaging_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self._queue: list[dict[str, Any]] = []
-        self._is_running = False
-        self._telescope_service = telescope_service
-        self._imaging_service = imaging_service
-        self._background_tasks: set = set()
+        Parameters
+        ----------
+        wayfinder : `Wayfinder`
+            The shared Wayfinder.
+        """
+        self._wayfinder = wayfinder
+        self._session_id: str | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def _session(self) -> ObservationSession:
+        """Return the sequencer's session, starting one for tonight if needed.
+
+        Returns
+        -------
+        session : `ObservationSession`
+            The session whose queue the sequencer shows.
+        """
+        if self._session_id is not None:
+            return self._wayfinder.planning.get_plan(self._session_id)
+        session = self._wayfinder.planning.create_plan(
+            "empty_session", night_id=observing_night_id(time.time())
+        )
+        self._session_id = session.id
+        return session
+
+    @staticmethod
+    def _request(package_id: str, timing: dict[str, Any] | None) -> QueueRequest:
+        """Turn the app's timing choice into a queue request.
+
+        Parameters
+        ----------
+        package_id : `str`
+            The recorded package to queue.
+        timing : `dict` [`str`, `Any`] or `None`
+            ``{"mode": "soonest"}`` or ``{"mode": "at", "time": ISO time}``.
+
+        Returns
+        -------
+        request : `QueueRequest`
+            A request that may start now, or at the given time.
+        """
+        timing = timing or {"mode": "soonest"}
+        if timing.get("mode") == "at" and timing.get("time"):
+            start = datetime.fromisoformat(str(timing["time"]).replace("Z", "+00:00"))
+            start = start if start.tzinfo else start.replace(tzinfo=UTC)
+            return QueueRequest(
+                package_id=package_id,
+                start_time_mode=StartTimeMode.FIXED,
+                requested_start_time=start,
+                computed_start_time=start,
+            )
+        return QueueRequest(
+            package_id=package_id,
+            start_time_mode=StartTimeMode.SOONEST,
+            computed_start_time=datetime.now(UTC),
+        )
+
+    def _queue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any] | None) -> str:
+        """Record a sequence as a package and add it to the queue.
+
+        Parameters
+        ----------
+        sequence : `dict` [`str`, `Any`]
+            The app's sequence: ``target_name`` and ``items``.
+        timing : `dict` [`str`, `Any`] or `None`
+            When it may start.
+
+        Returns
+        -------
+        entry_id : `str`
+            The new queue entry's id.
+        """
+        planning = self._wayfinder.planning
+        package = planning.create_plan(
+            "package", target=sequence["target_name"], plan_items=sequence["items"]
+        )
+        session = planning.edit_queue(self._session().id, add=[self._request(package.id, timing)])
+        return session.queue[-1].id
 
     def enqueue_sequence(self, sequence: dict[str, Any], timing: dict[str, Any]) -> dict[str, str]:
-        """Add one sequence to the queue for the sequencer:add RPC method.
+        """Add one sequence to the queue.
+
+        Parameters
+        ----------
+        sequence : `dict` [`str`, `Any`]
+            The app's sequence: ``target_name`` and ``items``.
+        timing : `dict` [`str`, `Any`]
+            ``{"mode": "soonest"}`` or ``{"mode": "at", "time": ISO time}``.
 
         Returns
         -------
         result : `dict`
-            Dict with ``"status"`` set to ``"queued"``.
+            ``{"status": "queued"}``.
         """
-        self._add_to_queue(sequence, timing)
+        entry_id = self._queue_sequence(sequence, timing)
+        logger.info("Queued sequence for %s as entry %s", sequence["target_name"], entry_id)
         return {"status": "queued"}
 
-    def _add_to_queue(self, sequence: dict[str, Any], timing_point: dict[str, Any]) -> None:
-        """Add a sequence to the execution queue.
-
-        REQ: BKD-2.1: The backend SHALL accept and queue imaging
-        sequences containing multiple frames.
-        """
-        sequence["timing"] = timing_point
-        sequence["status"] = "queued"
-        self._queue.append(sequence)
-        logger.info(
-            "Added sequence %s to execution queue. Total queued: %s", sequence["id"], len(self._queue)
-        )
-
     def remove_from_queue(self, sequence_id: str) -> bool:
-        """Remove a sequence from the queue by ID.
+        """Remove one entry from the queue.
 
         Returns
         -------
         removed : `bool`
-            `True` if a sequence with `sequence_id` was found and
-            removed, `False` otherwise.
+            `True` if the entry was in the queue and was removed.
         """
-        initial_len = len(self._queue)
-        self._queue = [s for s in self._queue if s["id"] != sequence_id]
-        removed = len(self._queue) < initial_len
-        if removed:
-            logger.info("Removed sequence %s from queue.", sequence_id)
-        return removed
+        if sequence_id not in {entry.id for entry in self._session().queue}:
+            return False
+        self._wayfinder.planning.edit_queue(self._session_id, remove=[sequence_id])
+        return True
 
     def modify_queue_item(self, sequence_id: str, sequence: dict[str, Any]) -> bool:
-        """Modify an existing sequence in the queue.
-
-        Retains the item's original position in the queue.
+        """Replace one entry with a changed sequence, in the same place.
 
         Returns
         -------
         modified : `bool`
-            `True` if a sequence with `sequence_id` was found and
-            replaced, `False` otherwise.
+            `True` if the entry was found and replaced. The new entry has
+            a new id.
         """
-        for i, item in enumerate(self._queue):
-            if item["id"] == sequence_id:
-                # Ensure the ID stays the same
-                sequence["id"] = sequence_id
-                # Inherit status and timing if not overridden
-                if "status" not in sequence:
-                    sequence["status"] = item.get("status", "queued")
-                if "timing" not in sequence:
-                    sequence["timing"] = item.get("timing", {"mode": "soonest"})
-
-                self._queue[i] = sequence
-                logger.info("Modified sequence %s in queue.", sequence_id)
-                return True
-        return False
+        queue = self._session().queue
+        ids = [entry.id for entry in queue]
+        if sequence_id not in ids:
+            return False
+        old = queue[ids.index(sequence_id)]
+        timing = sequence.get("timing") or (
+            {"mode": "at", "time": old.requested_start_time.isoformat()}
+            if old.start_time_mode == StartTimeMode.FIXED and old.requested_start_time
+            else {"mode": "soonest"}
+        )
+        new_id = self._queue_sequence(sequence, timing)
+        order = [new_id if entry_id == sequence_id else entry_id for entry_id in ids]
+        self._wayfinder.planning.edit_queue(self._session_id, remove=[sequence_id], order=order)
+        return True
 
     def reorder(self, sequence_ids: list[str]) -> bool:
-        """Reorder the execution queue to match the given sequence IDs.
+        """Put the named entries first, in order; the others follow after.
 
         Returns
         -------
         reordered : `bool`
-            `True` once the queue has been reordered; `False` if
-            `sequence_ids` is empty and no reordering was performed.
+            `False` if `sequence_ids` is empty.
         """
         if not sequence_ids:
             return False
-
-        current_map = {item["id"]: item for item in self._queue}
-
-        new_queue = []
-        seen_ids = set()
-
-        for seq_id in sequence_ids:
-            if seq_id in current_map:
-                new_queue.append(current_map[seq_id])
-                seen_ids.add(seq_id)
-
-        # Append any items not in the input list (safety)
-        for item in self._queue:
-            sid = item["id"]
-            if sid not in seen_ids:
-                new_queue.append(item)
-
-        self._queue = new_queue
-        logger.info("Reordered execution queue. New sequence: %s", [item["id"] for item in self._queue])
+        current = [entry.id for entry in self._session().queue]
+        named = [entry_id for entry_id in sequence_ids if entry_id in current]
+        order = named + [entry_id for entry_id in current if entry_id not in named]
+        self._wayfinder.planning.edit_queue(self._session_id, order=order)
         return True
 
     def get_queue(self) -> list[dict[str, Any]]:
-        """Return the current execution queue.
+        """Return the queue as the sequences the app shows.
 
         Returns
         -------
         queue : `list` [`dict`]
-            The list of currently queued imaging sequences.
+            One sequence per waiting or running entry: ``id``,
+            ``target_name``, ``items``, ``total_duration``, ``timing`` and
+            ``status``.
         """
-        return self._queue
+        if self._session_id is None:
+            return []
+        sequences = []
+        for entry in self._session().queue:
+            if entry.status.value not in SHOWN_STATUSES:
+                continue
+            items = [
+                {
+                    "count": request.count,
+                    "exposure": request.exposure_sec,
+                    "filter": request.filter.value,
+                    "duration": request.count * request.exposure_sec,
+                }
+                for request in entry.exposure_requests
+            ]
+            fixed = entry.start_time_mode == StartTimeMode.FIXED and entry.requested_start_time is not None
+            timing = (
+                {"mode": "at", "time": entry.requested_start_time.isoformat()}
+                if fixed
+                else {"mode": "soonest"}
+            )
+            sequences.append({
+                "id": entry.id,
+                "target_name": entry.target_id,
+                "items": items,
+                "total_duration": sum(item["duration"] for item in items),
+                "timing": timing,
+                "status": SHOWN_STATUSES[entry.status.value],
+            })
+        return sequences
 
-    async def begin_imaging(self) -> None:
-        """Start the imaging process by running the queue in background."""
-        if not self._queue:
-            logger.warning("Attempted to begin imaging with empty queue.")
+    def begin_imaging(self) -> None:
+        """Start running the queue on a background thread."""
+        if not self.get_queue():
+            logger.warning("Attempted to begin imaging with an empty queue.")
             return
-
-        if self._is_running:
+        if self._thread is not None and self._thread.is_alive():
             logger.warning("Imaging already in progress.")
             return
+        self._stop.clear()
+        session_id = self._session_id
 
-        self._is_running = True
-        logger.info("BEGIN IMAGING SEQUENCE initiated.")
-        task = asyncio.create_task(self._run_queue())
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        def run() -> None:
+            """Run the queue; the top of a background thread."""
+            try:
+                session = self._wayfinder.execution.advance_session(session_id, stop=self._stop)
+                if session is not None:
+                    logger.info("Sequencer stopped: %s %s", session.status, session.status_detail)
+            except Exception:  # the top of a background thread: log it, never lose it
+                logger.exception("Imaging loop crashed")
 
-    async def _run_queue(self):  # ruff: ignore[missing-return-type-private-function]
-        """Process the queue in an internal loop."""
-        if not self._telescope_service or not self._imaging_service:
-            logger.error("Missing required services (telescope/imaging) in TargetImagingExecutor")
-            self._is_running = False
-            return
+        self._thread = threading.Thread(target=run, name="sequencer", daemon=True)
+        self._thread.start()
+        logger.info("Imaging sequence started.")
 
-        try:
-            while self._queue and self._is_running:
-                # 1. Get Next Item
-                seq = self._queue[0]  # Peek
+    def pause_imaging(self) -> None:
+        """Stop running the queue after the current entry; keep the queue."""
+        self._stop.set()
+        logger.info("Imaging paused.")
 
-                # Check status
-                if seq.get("status") == "completed":
-                    self._queue.pop(0)
-                    continue
-
-                logger.info("Processing sequence %s for %s", seq["id"], seq["target_name"])
-                seq["status"] = "active"
-
-                # 2. Slew to Target
-                target = seq.get("target", {})
-                ra = target.get("ra")
-                dec = target.get("dec")
-
-                if ra and dec:
-                    logger.info("Slewing to RA: %s, DEC: %s", ra, dec)
-                    # Simulate Slew Wait
-                    await asyncio.sleep(5)
-
-                # 3. Operations (Filter, Exposure)
-                # seq['plan'] is list of {filter: 'L', exposure: 60, count: 10}
-                plan = seq.get("plan", [])
-
-                for step in plan:
-                    if not self._is_running:
-                        break
-
-                    filter_name = step.get("filter")
-                    exposure = float(step.get("exposure", 1))
-                    count = int(step.get("count", 1))
-
-                    # Set Filter
-                    if filter_name:
-                        logger.info("Setting Filter: %s", filter_name)
-                        self._telescope_service.set_filter(filter_name)
-                        await asyncio.sleep(3)  # Wait for wheel
-
-                    # Capture Sequence
-                    # Initiate background job and wait for its
-                    # completion via JobService
-                    job_id = await asyncio.to_thread(
-                        self._imaging_service.capture_sequence,
-                        target_id=seq["target_name"],
-                        exposure_seconds=exposure,
-                        count=count,
-                        image_type=step.get("type", "LIGHT"),
-                    )
-
-                    # Wait for job to complete
-
-                    job = await self._imaging_service.job_service.wait_for_job(job_id)
-
-                    if job.status == "failed":
-                        logger.error("Capture sequence failed for %s: %s", seq["target_name"], job.message)
-                        break
-
-                    logger.info("Capture sequence completed for %s", seq["target_name"])
-
-                # 4. Mark Complete
-                if self._is_running:
-                    seq["status"] = "completed"
-                    logger.info("Sequence %s completed.", seq["id"])
-                    self._queue.pop(0)
-
-        except Exception:
-            logger.exception("Imaging Loop Crashed")
-        finally:
-            self._is_running = False
-            logger.info("Imaging Loop Ended.")
-
-    def pause_imaging(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Stop the run loop after the current step; keep the queue intact."""
-        self._is_running = False
-        logger.info("Imaging Paused.")
-
-    def abort_imaging(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Stop the run loop and clear the execution queue."""
-        self._is_running = False
-        self._queue = []
-        logger.info("Imaging Aborted.")
+    def abort_imaging(self) -> None:
+        """Stop running the queue and skip every waiting entry."""
+        self._stop.set()
+        if self._session_id is not None:
+            self._wayfinder.execution.abort_session(self._session_id, "Aborted from the sequencer.")
+            self._session_id = None
+        logger.info("Imaging aborted.")

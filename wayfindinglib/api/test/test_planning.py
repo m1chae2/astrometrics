@@ -446,3 +446,70 @@ def test_planning_module_tree_imports_no_device_driver() -> None:
             offending_files.append(source_file.name)
 
     assert offending_files == []
+
+
+def test_a_package_can_be_built_from_sequence_items(isolated_butler: DiskButler) -> None:
+    """Sequence items become exposure requests; one source is needed."""
+    planning = _planning(isolated_butler, _target("M 81"))
+
+    package = planning.create_plan(
+        "package",
+        target="M 81",
+        plan_items=[
+            {"count": 3, "exposure": 60, "filter": "L"},
+            {"count": 2, "exposure": 30, "filter": "ha"},
+        ],
+    )
+
+    assert [
+        (request.count, request.exposure_sec, request.filter.value) for request in package.exposure_requests
+    ] == [
+        (3, 60.0, "Luminance"),
+        (2, 30.0, "Ha"),
+    ]
+    assert package.exposure_requests[0].frame_type == FrameType.LIGHT
+    with pytest.raises(InvalidArgumentError, match="exactly one"):
+        planning.create_plan("package", target="M 81")
+    with pytest.raises(InvalidArgumentError, match="Unknown filter"):
+        planning.create_plan(
+            "package", target="M 81", plan_items=[{"count": 1, "exposure": 1, "filter": "Z"}]
+        )
+
+
+def test_an_empty_session_defaults_to_the_site_and_active_equipment(
+    isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no equipment given, the site and the active rig are used."""
+    from types import SimpleNamespace
+
+    from astrometricslib import ConfigurationError
+    from wayfindinglib.data_access import equipment_catalog_reader
+
+    planning = _planning(isolated_butler)
+    catalog = SimpleNamespace(active_telescope=_telescope, active_camera=lambda: SimpleNamespace(id="c1"))
+    monkeypatch.setattr(equipment_catalog_reader, "get_equipment_catalog", lambda config: catalog)
+
+    session = planning.create_plan("empty_session", night_id="2026-08-10")
+
+    assert (session.telescope_id, session.camera_id, session.site_profile_id) == ("t1", "c1", "default")
+    empty = SimpleNamespace(active_telescope=lambda: None, active_camera=lambda: None)
+    monkeypatch.setattr(equipment_catalog_reader, "get_equipment_catalog", lambda config: empty)
+    with pytest.raises(ConfigurationError):
+        planning.create_plan("empty_session", night_id="2026-08-10")
+
+
+def test_edit_queue_removes_entries_and_refuses_unknown_ones(isolated_butler: DiskButler) -> None:
+    """Removal takes entries out; an unknown entry is not found."""
+    planning = _planning(isolated_butler, _target("M 81"))
+    session = planning.create_plan(
+        "empty_session", site_profile=_site(), telescope=_telescope(), camera_id="c1", night_id="2026-08-10"
+    )
+    package = _package(planning)
+    filled = planning.edit_queue(session.id, add=[{"package_id": package.id}, {"package_id": package.id}])
+    first, second = (entry.id for entry in filled.queue)
+
+    remaining = planning.edit_queue(session.id, remove=[first])
+
+    assert [entry.id for entry in remaining.queue] == [second]
+    with pytest.raises(NotFoundError):
+        planning.edit_queue(session.id, remove=[first])

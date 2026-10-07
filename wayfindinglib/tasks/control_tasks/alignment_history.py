@@ -35,14 +35,14 @@ from wayfindinglib.models.session.telemetry import AlignmentAttempt, AlignmentSe
 if TYPE_CHECKING:
     from wayfindinglib.api.control.context import ControlContext
 
-__all__ = ["ATTEMPT_STATUSES", "alignment_night", "alignment_nights"]
+__all__ = ["ATTEMPT_STATUSES", "alignment_night", "alignment_nights", "attempt_models"]
 
 ATTEMPT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
 """The statuses an `AlignmentAttempt` can have. An older record with any
 other status is shown as ``aligned``."""
 
 
-def _attempt_models(rows: list[dict[str, Any]]) -> list[AlignmentAttempt]:
+def attempt_models(rows: list[dict[str, Any]]) -> list[AlignmentAttempt]:
     """Turn alignment log rows into `AlignmentAttempt` models.
 
     Parameters
@@ -115,7 +115,7 @@ def alignment_nights(context: ControlContext, limit: int) -> dict[str, Any]:
     target_counts = _target_counts(context)
     sessions = []
     for row in rows[:limit]:
-        attempts = _attempt_models(logs.get_session_alignment_attempts(row["session_id"]))
+        attempts = attempt_models(logs.get_session_alignment_attempts(row["session_id"]))
         mean_ra, mean_dec = mean_position_deg([
             (a.ra, a.dec) for a in attempts if a.ra is not None and a.dec is not None
         ])
@@ -169,7 +169,7 @@ def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
             f"No alignment attempts are recorded for night {session_id!r}.",
             details={"session_id": session_id},
         )
-    attempts = _attempt_models(rows)
+    attempts = attempt_models(rows)
     polar = logs.get_polar_alignment_logs(session_id=session_id, limit=1)
     return {
         "kind": "alignment",

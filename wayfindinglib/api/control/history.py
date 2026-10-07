@@ -284,14 +284,22 @@ class HistoryControl(ControlChild):
         Returns
         -------
         envelope : `PerformanceEnvelope` or `None`
-            The limits, or `None` if no telescope and camera are active.
+            The limits, with ``tracking_risk``: a grid scoring how risky
+            each hour angle and declination is for tracking, from the
+            mount's geometry and the jitter measured in every recorded
+            plate solve, judged against this camera's plate scale. `None`
+            if no telescope and camera are active.
         """
-        from wayfindinglib.tasks.control_tasks import night_analysis
+        from wayfindinglib.tasks.control_tasks import night_analysis, performance_envelope_tasks
 
         contexts, runs = night_analysis.recorded_sessions(self._context)
-        return night_analysis.performance_envelope(
+        envelope = night_analysis.performance_envelope(
             self._context, blur_tolerance_fraction, before_night, contexts, runs, {}
         )
+        if envelope is None:
+            return None
+        risk = performance_envelope_tasks.tracking_risk_map(self._context)
+        return envelope.model_copy(update={"tracking_risk": risk})
 
     def save_ekos_session_context(self, context: EkosSessionContext) -> None:
         """Save one Ekos session record, replacing an earlier read of it.

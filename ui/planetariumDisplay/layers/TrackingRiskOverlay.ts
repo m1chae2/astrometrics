@@ -1,16 +1,16 @@
 /**
  * @module TrackingRiskOverlay
- * @fileoverview Visualizes mechanical mount tracking risk across the celestial sphere.
+ * @fileoverview Colors the sky by how risky it is for the mount's tracking.
  *
- * For a German Equatorial Mount (such as a Star Adventurer GTi) carrying a heavy
- * payload with an East-heavy counterweight bias:
- * - East of Meridian (HA < 0, 25° < Alt < 75°, -15° < Dec < 65°): Optimal tracking / firm gear preload (Green).
- * - West of Meridian (HA > 0): Gear-float / backlash risk under fixed East-heavy balance (Amber-Red).
- * - Near Pole (Dec > 65°): Cantilever thrust & Dec sleeve bushing stiction risk (Amber).
- * - Low Altitude (Alt < 20°): Atmospheric seeing degradation & high moment arm (Amber-Red).
+ * The backend scores the risk (the `trackingRisk` grid of the equipment's
+ * performance envelope): a grid over hour angle and declination, from 0
+ * (safe) to 1 (stars likely to trail), with the scores where the caution and
+ * high-risk colors start. This overlay only looks up each patch of sky in that
+ * grid and paints it green, amber or red.
  */
 
 import { PlanetariumOverlay, ProjectionContext } from './overlayTypes';
+import { TrackingRiskMap } from '../../common/types/backendTypes';
 import {
   TRACKING_RISK_ALT_STEP_DEG,
   TRACKING_RISK_AZ_STEP_DEG,
@@ -18,255 +18,123 @@ import {
 } from './constants';
 
 /**
- * Calculates mechanical tracking risk factor prior between 0.0 (optimal) and 1.0 (high risk).
+ * Reads a score from the grid, blending the four nearest grid points so the
+ * colors change smoothly.
  *
- * @param {number} haDeg - Hour Angle in degrees (-180 to +180, negative is East).
- * @param {number} decDeg - Declination in degrees (-90 to +90).
- * @param {number} altDeg - Altitude in degrees (0 to 90).
- * @returns {number} Prior risk score from 0.0 to 1.0.
+ * @param {TrackingRiskMap} riskMap - The grid from the backend.
+ * @param {number} haDeg - Hour angle in degrees (-180 to 180, west positive).
+ * @param {number} decDeg - Declination in degrees.
+ * @returns {number} The score, 0 to 1.
  */
-function computeMechanicalPriorRisk(haDeg: number, decDeg: number, altDeg: number): number {
-  if (altDeg < 0) return 1.0;
-
-  let risk = 0.05; // Base minimal mechanical risk (firm tracking, green)
-
-  // 1. East vs West Meridian Bias:
-  // With East-heavy balance, HA > 0 (West of meridian) has slight gear-float potential.
-  // Subtle prior increase that stays well within the green (safe) zone.
-  if (haDeg > 0) {
-    const westFactor = Math.min(1.0, haDeg / 75.0);
-    risk += 0.10 * westFactor;
-  }
-
-  // 2. High Declination:
-  // Near the celestial pole, RA motor error on sky is reduced by cos(Dec).
-  // Slight bushing stiction at extreme Dec (> 75°) adds mild prior.
-  if (decDeg > 75.0) {
-    const polarFactor = Math.min(1.0, (decDeg - 75.0) / 15.0);
-    risk += 0.08 * polarFactor;
-  }
-
-  // 3. Low Altitude (Seeing degradation below 20°):
-  // Atmospheric turbulence degrades FWHM below 20°, becoming high risk near the horizon.
-  if (altDeg < 20.0) {
-    const altFactor = (20.0 - altDeg) / 20.0;
-    risk += 0.40 * altFactor;
-  }
-
-  return Math.min(1.0, Math.max(0.0, risk));
+export function scoreAt(riskMap: TrackingRiskMap, haDeg: number, decDeg: number): number {
+  const { haDeg: has, decDeg: decs, scores } = riskMap;
+  const haStep = has[1] - has[0];
+  const decStep = decs[1] - decs[0];
+  const x = Math.min(has.length - 1, Math.max(0, (haDeg - has[0]) / haStep));
+  const y = Math.min(decs.length - 1, Math.max(0, (decDeg - decs[0]) / decStep));
+  const x0 = Math.min(has.length - 2, Math.floor(x));
+  const y0 = Math.min(decs.length - 2, Math.floor(y));
+  const fx = x - x0;
+  const fy = y - y0;
+  const bottom = scores[y0][x0] * (1 - fx) + scores[y0][x0 + 1] * fx;
+  const top = scores[y0 + 1][x0] * (1 - fx) + scores[y0 + 1][x0 + 1] * fx;
+  return bottom * (1 - fy) + top * fy;
 }
 
 /**
- * Calculates angular great-circle separation in degrees between two RA/Dec coordinates.
+ * Picks a see-through fill color for a score.
  *
- * @param {number} ra1 - First RA in degrees.
- * @param {number} dec1 - First Declination in degrees.
- * @param {number} ra2 - Second RA in degrees.
- * @param {number} dec2 - Second Declination in degrees.
- * @returns {number} Angular separation in degrees.
- */
-function angularDistanceDeg(ra1: number, dec1: number, ra2: number, dec2: number): number {
-  const d2r = Math.PI / 180.0;
-  const phi1 = dec1 * d2r;
-  const phi2 = dec2 * d2r;
-  const deltaPhi = (dec2 - dec1) * d2r;
-  const deltaLambda = (ra2 - ra1) * d2r;
-
-  const a =
-    Math.sin(deltaPhi / 2.0) ** 2 +
-    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2.0) ** 2;
-  const c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1.0 - a)));
-  return (c * 180.0) / Math.PI;
-}
-
-/**
- * Maps measured empirical tracking RMS in arcseconds into a normalized risk score (0.0 to 1.0).
- * Scales dynamically against the imaging system's plate scale (arcsec/pixel) when available.
- *
- * For long exposures (e.g. 5 minutes):
- * - rms <= 0.75 * plateScale: Sub-pixel guiding / optimal round stars (0.05 - 0.27 risk -> green)
- * - 0.75 * plateScale < rms <= 1.25 * plateScale: Acceptable / seeing-limited (0.28 - 0.57 risk -> yellow-green/amber)
- * - rms > 1.25 * plateScale: Star elongation / trailing risk (>= 0.58 risk -> red)
- *
- * Falls back to realistic amateur mount thresholds (1.2" / 2.0") when plate scale is not configured.
- *
- * @param {number} rmsArcsec - Measured total tracking RMS in arcseconds.
- * @param {number} [plateScaleArcsecPerPx] - Active equipment plate scale in arcsec/pixel.
- * @returns {number} Risk score from 0.0 to 1.0.
- */
-export function rmsToRiskScore(rmsArcsec: number, plateScaleArcsecPerPx?: number): number {
-  if (rmsArcsec <= 0.0) return 0.05;
-
-  const idealRms = plateScaleArcsecPerPx && plateScaleArcsecPerPx > 0
-    ? 0.75 * plateScaleArcsecPerPx
-    : 1.2;
-  const trailingThreshold = plateScaleArcsecPerPx && plateScaleArcsecPerPx > 0
-    ? 1.25 * plateScaleArcsecPerPx
-    : 2.0;
-
-  if (rmsArcsec <= idealRms) {
-    // 0.05 to 0.27 (Green zone: optimal for 5-minute exposures)
-    return 0.05 + 0.22 * (rmsArcsec / idealRms);
-  }
-
-  if (rmsArcsec <= trailingThreshold) {
-    // 0.28 to 0.57 (Amber/Yellow caution zone)
-    const factor = (rmsArcsec - idealRms) / (trailingThreshold - idealRms);
-    return 0.28 + 0.29 * factor;
-  }
-
-  // >= 0.58 (Red trailing zone)
-  const excess = (rmsArcsec - trailingThreshold) / trailingThreshold;
-  return Math.min(0.95, 0.58 + 0.37 * Math.min(1.0, Math.sqrt(excess)));
-}
-
-/**
- * Maps a risk score (0..1) to an RGBA fill color.
- *
- * @param {number} risk - Score from 0.0 to 1.0.
+ * @param {number} risk - Score from 0 to 1.
+ * @param {TrackingRiskMap} riskMap - Supplies where the caution and high colors start.
  * @returns {string} RGBA color string.
  */
-function getRiskColor(risk: number): string {
-  if (risk < 0.28) {
-    // Optimal: Subtle emerald green
+function getRiskColor(risk: number, riskMap: TrackingRiskMap): string {
+  const { cautionScore, highScore } = riskMap;
+  if (risk < cautionScore) {
     return `rgba(16, 185, 129, ${0.12 + risk * 0.15})`;
   }
-  if (risk < 0.58) {
-    // Caution: Amber / yellow
-    const t = (risk - 0.28) / 0.3;
+  if (risk < highScore) {
+    const t = (risk - cautionScore) / (highScore - cautionScore);
     return `rgba(245, 158, 11, ${0.16 + t * 0.16})`;
   }
-  // High Risk: Soft warning red/rose
-  const t = Math.min(1.0, (risk - 0.58) / 0.42);
+  const t = Math.min(1.0, (risk - highScore) / (1 - highScore));
   return `rgba(239, 68, 68, ${0.2 + t * 0.2})`;
 }
 
 /**
  * TrackingRiskOverlay Class
  *
- * Renders a discrete altitude/azimuth grid mesh tinted by mount mechanical tracking risk.
+ * Draws an altitude/azimuth mesh tinted by the backend's tracking-risk grid.
  */
 export class TrackingRiskOverlay implements PlanetariumOverlay {
   id = 'tracking_risk_overlay';
   name = 'Mount Tracking Risk';
 
+  /**
+   * Paints the risk mesh and a legend badge.
+   *
+   * @param {CanvasRenderingContext2D} context - Canvas to draw on.
+   * @param {ProjectionContext} projectionContext - View, projection and the risk grid.
+   */
   draw(context: CanvasRenderingContext2D, projectionContext: ProjectionContext): void {
     if (!projectionContext.showTrackingRisk) return;
 
-    const { lst, width, height } = projectionContext;
-
-    // The library groups the plate solves by target and measures their jitter
-    const groupedTargets =
-      projectionContext.cumulativeAlignmentTargets && projectionContext.cumulativeAlignmentTargets.length > 0
-        ? projectionContext.cumulativeAlignmentTargets
-        : projectionContext.alignmentTargets || [];
-    const solveCount = groupedTargets.reduce((sum, target) => sum + target.frameCount, 0);
-    const clusters = groupedTargets.filter((c) => c.frameCount >= 2 && c.rmsTotalArcsec > 0);
-    const hasEmpiricalData = clusters.length > 0;
+    const { lst, width, height, trackingRisk } = projectionContext;
 
     context.save();
 
-    // Sample in Horizontal (Alt / Az) space so the heatmap forms a stable,
-    // seamless dome over the horizon that never clips or shifts when panning
-    const altStep = TRACKING_RISK_ALT_STEP_DEG;
-    const azStep = TRACKING_RISK_AZ_STEP_DEG;
+    if (trackingRisk) {
+      // Sample in Horizontal (Alt / Az) space so the heatmap forms a stable,
+      // seamless dome over the horizon that never clips or shifts when panning
+      const altStep = TRACKING_RISK_ALT_STEP_DEG;
+      const azStep = TRACKING_RISK_AZ_STEP_DEG;
 
-    for (let alt = 5; alt <= 85; alt += altStep) {
-      for (let az = 0; az < 360; az += azStep) {
-        // Convert the 4 corners of the Alt/Az cell to RA/Dec to evaluate Hour Angle & Dec
-        const coord0 = projectionContext.getRaDec(alt, az);
-        const coordRight = projectionContext.getRaDec(alt, (az + azStep) % 360);
-        const coordTop = projectionContext.getRaDec(Math.min(90.0, alt + altStep), az);
-        const coordTopRight = projectionContext.getRaDec(Math.min(90.0, alt + altStep), (az + azStep) % 360);
+      for (let alt = 5; alt <= 85; alt += altStep) {
+        for (let az = 0; az < 360; az += azStep) {
+          const coord0 = projectionContext.getRaDec(alt, az);
+          const coordRight = projectionContext.getRaDec(alt, (az + azStep) % 360);
+          const coordTop = projectionContext.getRaDec(Math.min(90.0, alt + altStep), az);
+          const coordTopRight = projectionContext.getRaDec(Math.min(90.0, alt + altStep), (az + azStep) % 360);
 
-        // Project the 4 corners to screen coordinates
-        const p0 = projectionContext.projectCoords(coord0.ra, coord0.dec);
-        const pRight = projectionContext.projectCoords(coordRight.ra, coordRight.dec);
-        const pTop = projectionContext.projectCoords(coordTop.ra, coordTop.dec);
-        const pTopRight = projectionContext.projectCoords(coordTopRight.ra, coordTopRight.dec);
+          const p0 = projectionContext.projectCoords(coord0.ra, coord0.dec);
+          const pRight = projectionContext.projectCoords(coordRight.ra, coordRight.dec);
+          const pTop = projectionContext.projectCoords(coordTop.ra, coordTop.dec);
+          const pTopRight = projectionContext.projectCoords(coordTopRight.ra, coordTopRight.dec);
 
-        // If all 4 corners are off-screen outside margins, skip drawing this quad
-        const margin = TRACKING_RISK_OFFSCREEN_MARGIN_PX;
-        const allOffScreen =
-          (p0.x < -margin && pRight.x < -margin && pTop.x < -margin && pTopRight.x < -margin) ||
-          (p0.x > width + margin && pRight.x > width + margin && pTop.x > width + margin && pTopRight.x > width + margin) ||
-          (p0.y < -margin && pRight.y < -margin && pTop.y < -margin && pTopRight.y < -margin) ||
-          (p0.y > height + margin && pRight.y > height + margin && pTop.y > height + margin && pTopRight.y > height + margin);
+          // If all 4 corners are off-screen outside margins, skip drawing this quad
+          const margin = TRACKING_RISK_OFFSCREEN_MARGIN_PX;
+          const allOffScreen =
+            (p0.x < -margin && pRight.x < -margin && pTop.x < -margin && pTopRight.x < -margin) ||
+            (p0.x > width + margin && pRight.x > width + margin && pTop.x > width + margin && pTopRight.x > width + margin) ||
+            (p0.y < -margin && pRight.y < -margin && pTop.y < -margin && pTopRight.y < -margin) ||
+            (p0.y > height + margin && pRight.y > height + margin && pTop.y > height + margin && pTopRight.y > height + margin);
+          if (allOffScreen) continue;
 
-        if (allOffScreen) continue;
+          // Skip quads where points wrap around stereographic pole singularity
+          if (!p0.visible && !pRight.visible && !pTop.visible && !pTopRight.visible) continue;
 
-        // Skip quads where points wrap around stereographic pole singularity
-        if (!p0.visible && !pRight.visible && !pTop.visible && !pTopRight.visible) continue;
+          // Hour angle of the cell: HA = LST - RA, wrapped to -180..+180
+          let haDeg = (lst - coord0.ra) % 360;
+          if (haDeg > 180) haDeg -= 360;
+          if (haDeg < -180) haDeg += 360;
 
-        // Calculate Hour Angle at center of cell: HA = LST - RA (normalized to -180..+180)
-        let haDeg = (lst - coord0.ra) % 360;
-        if (haDeg > 180) haDeg -= 360;
-        if (haDeg < -180) haDeg += 360;
-
-        // 1. Theoretical prior mechanical risk
-        const priorRisk = computeMechanicalPriorRisk(haDeg, coord0.dec, alt);
-
-        // 2. Blend with empirical session tracking if nearby sessions exist
-        let finalRisk = priorRisk;
-
-        if (hasEmpiricalData) {
-          let totalWeight = 0;
-          let weightedRiskSum = 0;
-          const influenceRadiusDeg = 25.0; // 25° Gaussian influence radius across sky
-
-          for (const session of clusters) {
-            const distDeg = angularDistanceDeg(
-              coord0.ra,
-              coord0.dec,
-              session.meanRaDeg,
-              session.meanDecDeg
-            );
-
-            if (distDeg < influenceRadiusDeg * 1.8) {
-              // Frame count scaling: more sub-frames = higher statistical confidence
-              const confidence = Math.min(1.0, session.frameCount / 30.0);
-              // Gaussian spatial decay: e^(-0.5 * (d / sigma)^2)
-              const spatialWeight = Math.exp(-0.5 * ((distDeg / influenceRadiusDeg) ** 2)) * confidence;
-
-              const empiricalScore = rmsToRiskScore(
-                session.rmsTotalArcsec,
-                projectionContext.plateScaleArcsecPerPx
-              );
-              weightedRiskSum += empiricalScore * spatialWeight;
-              totalWeight += spatialWeight;
-            }
-          }
-
-          if (totalWeight > 0.001) {
-            const empiricalRisk = weightedRiskSum / totalWeight;
-            // Adaptive blending factor: up to 85% empirical weight when backed by dense session data
-            const blendFactor = Math.min(0.85, totalWeight);
-            finalRisk = priorRisk * (1.0 - blendFactor) + empiricalRisk * blendFactor;
-          }
+          context.fillStyle = getRiskColor(scoreAt(trackingRisk, haDeg, coord0.dec), trackingRisk);
+          context.beginPath();
+          context.moveTo(p0.x, p0.y);
+          context.lineTo(pRight.x, pRight.y);
+          context.lineTo(pTopRight.x, pTopRight.y);
+          context.lineTo(pTop.x, pTop.y);
+          context.closePath();
+          context.fill();
         }
-
-        const fillColor = getRiskColor(finalRisk);
-
-        // Fill quad cell
-        context.fillStyle = fillColor;
-        context.beginPath();
-        context.moveTo(p0.x, p0.y);
-        context.lineTo(pRight.x, pRight.y);
-        context.lineTo(pTopRight.x, pTopRight.y);
-        context.lineTo(pTop.x, pTop.y);
-        context.closePath();
-        context.fill();
       }
     }
 
-    // Render a diagnostic legend badge in bottom-right corner
+    // Legend badge in the bottom-right corner
     context.fillStyle = 'rgba(15, 23, 42, 0.88)';
     context.strokeStyle = 'rgba(255, 255, 255, 0.14)';
     context.lineWidth = 1;
-    const isMultiSession = Boolean(
-      projectionContext.cumulativeAlignmentTargets && projectionContext.cumulativeAlignmentTargets.length > 0
-    );
-    const badgeW = isMultiSession ? 280 : 250;
+    const badgeW = 280;
     const badgeH = 54;
     const badgeX = width - badgeW - 16;
     const badgeY = height - badgeH - 16;
@@ -277,31 +145,26 @@ export class TrackingRiskOverlay implements PlanetariumOverlay {
 
     context.fillStyle = '#bae6fd';
     context.font = 'bold 11px system-ui, sans-serif';
-    const badgeTitle = !hasEmpiricalData
-      ? 'Mount Tracking Heatmap (Prior)'
-      : isMultiSession
-        ? `Tracking Heatmap (${clusters.length} targets · ${solveCount} solves)`
-        : 'Mount Tracking Heatmap (Empirical)';
+    const measuredTargets = trackingRisk?.measuredTargetCount ?? 0;
+    const badgeTitle = !trackingRisk
+      ? 'Tracking Heatmap (no active telescope and camera)'
+      : measuredTargets > 0
+        ? `Tracking Heatmap (${measuredTargets} targets · ${trackingRisk.solveCount ?? 0} solves)`
+        : 'Mount Tracking Heatmap (Prior)';
     context.fillText(badgeTitle, badgeX + 10, badgeY + 17);
 
-    context.font = '10px system-ui, sans-serif';
-    // Green sample
-    context.fillStyle = 'rgba(16, 185, 129, 0.85)';
-    context.fillRect(badgeX + 10, badgeY + 28, 10, 10);
-    context.fillStyle = '#94a3b8';
-    const greenLabel = projectionContext.plateScaleArcsecPerPx && projectionContext.plateScaleArcsecPerPx > 0
-      ? `Sub-${(projectionContext.plateScaleArcsecPerPx * 0.5).toFixed(1)}" / Round`
-      : 'Sub-0.8" / Round';
-    context.fillText(greenLabel, badgeX + 24, badgeY + 37);
+    if (trackingRisk) {
+      context.font = '10px system-ui, sans-serif';
+      context.fillStyle = 'rgba(16, 185, 129, 0.85)';
+      context.fillRect(badgeX + 10, badgeY + 28, 10, 10);
+      context.fillStyle = '#94a3b8';
+      context.fillText(`≤${trackingRisk.idealRmsArcsec.toFixed(1)}" / Round`, badgeX + 24, badgeY + 37);
 
-    // Amber/Red sample
-    context.fillStyle = 'rgba(239, 68, 68, 0.85)';
-    context.fillRect(badgeX + 145, badgeY + 28, 10, 10);
-    context.fillStyle = '#94a3b8';
-    const redLabel = projectionContext.plateScaleArcsecPerPx && projectionContext.plateScaleArcsecPerPx > 0
-      ? `>${projectionContext.plateScaleArcsecPerPx.toFixed(1)}" / Trailing`
-      : '>1.5" / Trailing';
-    context.fillText(redLabel, badgeX + 159, badgeY + 37);
+      context.fillStyle = 'rgba(239, 68, 68, 0.85)';
+      context.fillRect(badgeX + 145, badgeY + 28, 10, 10);
+      context.fillStyle = '#94a3b8';
+      context.fillText(`>${trackingRisk.trailingRmsArcsec.toFixed(1)}" / Trailing`, badgeX + 159, badgeY + 37);
+    }
 
     context.restore();
   }

@@ -23,6 +23,7 @@ import { useObserverLocation } from './hooks/useObserverLocation';
 import { useOverlayToggles } from './hooks/useOverlayToggles';
 import { useEquipmentConfiguration } from './hooks/useEquipmentConfiguration';
 import { useAlignmentSessionData } from './hooks/useAlignmentSessionData';
+import { useTrackingRiskMap } from './hooks/useTrackingRiskMap';
 import { useSourceMerging } from './hooks/useSourceMerging';
 import { EquipmentConfigPanel } from './components/EquipmentConfigPanel';
 import { PlanetariumSource } from '../common/types/planetariumTypes';
@@ -86,9 +87,9 @@ export const PlanetariumDisplay: React.FC = () => {
     selectedSessionId,
     setSelectedSessionId,
     activeAlignmentTargets,
-    activeCumulativeAlignmentTargets,
     activePolarAlignment,
   } = useAlignmentSessionData(telemetry);
+  const { trackingRisk } = useTrackingRiskMap(showTrackingRisk);
 
   const [viewerCenter, setViewerCenter] = useState<{ ra: number; dec: number } | null>(null);
   const [currentFOV, setCurrentFOV] = useState<number>(90.0);
@@ -578,7 +579,7 @@ export const PlanetariumDisplay: React.FC = () => {
         showTelescope={showTelescope}
         showTrackingRisk={showTrackingRisk}
         alignmentTargets={activeAlignmentTargets}
-        cumulativeAlignmentTargets={activeCumulativeAlignmentTargets}
+        trackingRisk={trackingRisk}
         polarAlignment={activePolarAlignment}
         selectedSessionId={selectedSessionId}
         simulationDate={isLiveTime ? undefined : currentDate}

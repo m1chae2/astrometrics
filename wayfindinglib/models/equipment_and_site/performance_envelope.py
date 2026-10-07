@@ -82,6 +82,57 @@ class PerformanceThreshold(BaseModel):
     sample_count: int | None = Field(default=None, alias="sampleCount")
 
 
+class TrackingRiskMap(BaseModel):
+    """How risky each part of the sky is for the mount's tracking.
+
+    A grid of scores from 0 (safe) to 1 (likely to trail) over hour angle
+    (HA, west of the meridian positive) and declination. It is fixed to the
+    mount, so it holds all night. Scores combine a geometric prior (west of
+    the meridian, near the pole, low altitude) with the tracking jitter
+    measured on earlier targets near each point (see
+    `wayfindinglib.analytics.tracking_risk`).
+
+    Attributes
+    ----------
+    latitude_deg : `float`
+        Observer latitude the altitudes were worked out for.
+    ha_deg : `list` [`float`]
+        Grid hour angles, -180 to 180 degrees, evenly spaced.
+    dec_deg : `list` [`float`]
+        Grid declinations, -90 to 90 degrees, evenly spaced.
+    scores : `list` [`list` [`float`]]
+        ``scores[i][j]`` is the score at ``dec_deg[i]`` and ``ha_deg[j]``.
+    caution_score : `float`
+        Scores from here up are a caution.
+    high_score : `float`
+        Scores from here up are a high risk.
+    ideal_rms_arcsec : `float`
+        Jitter up to this keeps stars round (0.75 pixel).
+    trailing_rms_arcsec : `float`
+        Jitter above this trails stars (1.25 pixels).
+    plate_scale_arcsec_per_px : `float` or `None`
+        The camera plate scale the jitter limits came from, if known.
+    measured_target_count : `int`
+        Earlier targets whose measured jitter shaped the scores.
+    solve_count : `int`
+        Plate solves those targets were measured from.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    latitude_deg: float = Field(alias="latitudeDeg")
+    ha_deg: list[float] = Field(alias="haDeg")
+    dec_deg: list[float] = Field(alias="decDeg")
+    scores: list[list[float]]
+    caution_score: float = Field(alias="cautionScore")
+    high_score: float = Field(alias="highScore")
+    ideal_rms_arcsec: float = Field(alias="idealRmsArcsec")
+    trailing_rms_arcsec: float = Field(alias="trailingRmsArcsec")
+    plate_scale_arcsec_per_px: float | None = Field(default=None, alias="plateScaleArcsecPerPx")
+    measured_target_count: int = Field(default=0, alias="measuredTargetCount")
+    solve_count: int = Field(default=0, alias="solveCount")
+
+
 class PerformanceEnvelope(BaseModel):
     """Every limit for the equipment in use now.
 
@@ -96,6 +147,10 @@ class PerformanceEnvelope(BaseModel):
         fraction of its width.
     thresholds : `dict` [`str`, `PerformanceThreshold`]
         Every limit, by name.
+    tracking_risk : `TrackingRiskMap` or `None`
+        How risky each part of the sky is for tracking with this
+        equipment. Filled in by `control.history.get_performance_envelope`;
+        `None` in the envelopes the night analyses use internally.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -103,6 +158,7 @@ class PerformanceEnvelope(BaseModel):
     equipment_fingerprint: str = Field(alias="equipmentFingerprint")
     blur_tolerance_fraction: float = Field(alias="blurToleranceFraction")
     thresholds: dict[str, PerformanceThreshold] = Field(default_factory=dict)
+    tracking_risk: TrackingRiskMap | None = Field(default=None, alias="trackingRisk")
 
     def value(self, name: str) -> float | None:
         """Return one limit's value, or `None` if it could not be derived.

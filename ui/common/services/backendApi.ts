@@ -28,6 +28,7 @@ import {
     PolarAlignmentStatus,
     AlignmentSessionSummary,
     AlignmentTargetSession,
+    PerformanceEnvelope,
     ObjectVisibility
 } from '../types/backendTypes';
 
@@ -206,6 +207,7 @@ export interface ActionRegistry {
     "telescope:alignment_stop": { payload: Record<string, never>; response: boolean };
     "telescope:list_alignment_sessions": { payload: Record<string, never>; response: AlignmentSessionSummary[] };
     "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_performance_envelope": { payload: Record<string, never>; response: PerformanceEnvelope | null };
     "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
     "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
     "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
@@ -405,6 +407,7 @@ export const EXTENDED_RPC_TIMEOUT_MS = 90000;
 const HEAVY_ACTIONS: ReadonlySet<string> = new Set([
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
+    'telescope:get_performance_envelope',
     'telescope:sync_logs',
     'processing:stack',
     'processing:status',
@@ -429,6 +432,7 @@ const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
     'telescope:list_sessions',
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
+    'telescope:get_performance_envelope',
     'planetarium:get_constellation_lines',
     'planetarium:get_sources',
     'planetarium:get_online_catalog_status',

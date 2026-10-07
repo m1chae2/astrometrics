@@ -85,6 +85,13 @@ from backend.services.infrastructure.system_status_service import (
     TelescopePulse,
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
+from wayfindinglib.models.equipment_and_site.performance_envelope import (
+    PerformanceEnvelope,
+    PerformanceThreshold,
+    ThresholdStatus,
+    ThresholdTier,
+    TrackingRiskMap,
+)
 from wayfindinglib.models.planning.mosaic import MosaicPanel
 from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
 from wayfindinglib.models.planning.sky_source import SkySource
@@ -316,6 +323,11 @@ def render_types() -> str:
         generate_interface(AlignmentTrackPoint, "AlignmentTrackPoint"),
         generate_interface(AlignmentTargetSession, "AlignmentTargetSession"),
         generate_interface(MountPointingModel, "MountPointingModel"),
+        generate_enum(ThresholdTier, "ThresholdTier"),
+        generate_enum(ThresholdStatus, "ThresholdStatus"),
+        generate_interface(PerformanceThreshold, "PerformanceThreshold"),
+        generate_interface(TrackingRiskMap, "TrackingRiskMap"),
+        generate_interface(PerformanceEnvelope, "PerformanceEnvelope"),
         generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
         generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),
         generate_interface(ProcessStatus, "ProcessStatus"),

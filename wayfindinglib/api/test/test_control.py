@@ -321,6 +321,8 @@ def test_changing_the_active_equipment_changes_every_limit_with_no_other_step(
     assert before.equipment_fingerprint != after.equipment_fingerprint
     assert "telescope=short" in before.equipment_fingerprint
     assert "telescope=long" in after.equipment_fingerprint
+    assert before.tracking_risk.plate_scale_arcsec_per_px == pytest.approx(206.265 * 3.76 / 400.0)
+    assert after.tracking_risk.trailing_rms_arcsec == pytest.approx(1.25 * 206.265 * 5.94 / 1000.0)
 
 
 def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(
@@ -336,6 +338,8 @@ def test_the_envelope_is_honest_about_data_a_new_setup_does_not_have_yet(
     for name in ("guiding_rms_limit", "trailing_limit", "guide_snr_low_limit", "guiding_rms_high_limit"):
         assert envelope.value(name) is None
         assert envelope.thresholds[name].status.value == "insufficient_data"
+    assert envelope.tracking_risk.measured_target_count == 0
+    assert len(envelope.tracking_risk.scores) == len(envelope.tracking_risk.dec_deg)
 
 
 def test_compute_pointing_correction_delegates_with_astrometrics_config(control: ObservatoryControl) -> None:

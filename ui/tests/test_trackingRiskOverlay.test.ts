@@ -1,188 +1,131 @@
 /**
  * @fileoverview Unit test suite for TrackingRiskOverlay.
  *
- * Verifies that the mount tracking risk overlay samples altitudes up to 90.0 degrees (Zenith),
- * ensuring seamless coverage of the celestial dome without leaving an unrendered hole,
- * and verifies that the library's cumulative per-target sessions are rendered.
+ * The risk scores come from the backend (the performance envelope's
+ * `trackingRisk` grid; the scoring rules are tested in
+ * `wayfindinglib/analytics/test/test_tracking_risk.py`). These tests check
+ * the display side: the dome is sampled up to the zenith, grid lookups blend
+ * neighboring points, and the legend reports what the grid was built from.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { TrackingRiskOverlay, rmsToRiskScore } from '../planetariumDisplay/layers/TrackingRiskOverlay';
+import { TrackingRiskOverlay, scoreAt } from '../planetariumDisplay/layers/TrackingRiskOverlay';
 import { ProjectionContext } from '../planetariumDisplay/layers/overlayTypes';
+import { TrackingRiskMap } from '../common/types/backendTypes';
+
+/**
+ * Builds a small grid whose score rises with hour angle.
+ *
+ * @param {Partial<TrackingRiskMap>} overrides - Fields to change.
+ * @returns {TrackingRiskMap} The grid.
+ */
+function makeRiskMap(overrides: Partial<TrackingRiskMap> = {}): TrackingRiskMap {
+  const haDeg = [-180, -90, 0, 90, 180];
+  const decDeg = [-90, 0, 90];
+  return {
+    latitudeDeg: 40,
+    haDeg,
+    decDeg,
+    scores: decDeg.map(() => haDeg.map((ha) => (ha + 180) / 400)),
+    cautionScore: 0.28,
+    highScore: 0.58,
+    idealRmsArcsec: 1.4,
+    trailingRmsArcsec: 2.4,
+    plateScaleArcsecPerPx: 1.91,
+    measuredTargetCount: 0,
+    solveCount: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * Builds a canvas context whose drawing calls are all spies.
+ *
+ * @param {ReturnType<typeof vi.fn>} fillText - Spy for text drawing.
+ * @returns {CanvasRenderingContext2D} The stand-in context.
+ */
+function makeContext(fillText = vi.fn()): CanvasRenderingContext2D {
+  return {
+    save: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    fill: vi.fn(),
+    stroke: vi.fn(),
+    roundRect: vi.fn(),
+    fillText,
+    fillRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D;
+}
+
+/**
+ * Builds a projection that maps every sky point to the screen center.
+ *
+ * @param {TrackingRiskMap | null} trackingRisk - The grid, or none.
+ * @param {number[]} sampledAltitudes - Collects the altitudes asked for.
+ * @returns {ProjectionContext} The stand-in projection.
+ */
+function makeProjection(trackingRisk: TrackingRiskMap | null, sampledAltitudes: number[] = []): ProjectionContext {
+  return {
+    showTrackingRisk: true,
+    lst: 310,
+    width: 1600,
+    height: 900,
+    trackingRisk,
+    getRaDec: vi.fn((alt: number) => {
+      sampledAltitudes.push(alt);
+      return { ra: 310, dec: 39.7392 };
+    }),
+    projectCoords: vi.fn(() => ({ x: 800, y: 450, visible: true, alt: 90 })),
+  } as unknown as ProjectionContext;
+}
 
 describe('TrackingRiskOverlay', () => {
-  /**
-   * Tests that TrackingRiskOverlay skips drawing when showTrackingRisk flag is false.
-   */
+  /** Nothing is drawn while the overlay is off. */
   it('does not draw when showTrackingRisk is false', () => {
     const overlay = new TrackingRiskOverlay();
-    const mockContext = {
-      save: vi.fn(),
-      restore: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
-
-    const mockProjection = {
-      showTrackingRisk: false,
-    } as unknown as ProjectionContext;
-
-    overlay.draw(mockContext, mockProjection);
-    expect(mockContext.save).not.toHaveBeenCalled();
+    const context = makeContext();
+    overlay.draw(context, { showTrackingRisk: false } as unknown as ProjectionContext);
+    expect(context.save).not.toHaveBeenCalled();
   });
 
-  /**
-   * Tests that TrackingRiskOverlay samples altitude up to 90.0 degrees (Zenith)
-   * to ensure no dark gap is left at the center of the dome.
-   */
+  /** The dome is sampled up to 90 degrees so no gap is left at the zenith. */
   it('samples altitudes up to 90.0 degrees to fully seal the zenith', () => {
-    const overlay = new TrackingRiskOverlay();
-    const mockContext = {
-      save: vi.fn(),
-      restore: vi.fn(),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      closePath: vi.fn(),
-      fill: vi.fn(),
-      stroke: vi.fn(),
-      roundRect: vi.fn(),
-      fillText: vi.fn(),
-      fillRect: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
-
-    const sampledAltitudes: number[] = [];
-
-    const mockProjection = {
-      showTrackingRisk: true,
-      lst: 310,
-      width: 1600,
-      height: 900,
-      alignmentTargets: [],
-      getRaDec: vi.fn((alt: number, _az: number) => {
-        sampledAltitudes.push(alt);
-        return { ra: 310, dec: 39.7392 };
-      }),
-      projectCoords: vi.fn(() => ({
-        x: 800,
-        y: 450,
-        visible: true,
-        alt: 90,
-      })),
-    } as unknown as ProjectionContext;
-
-    overlay.draw(mockContext, mockProjection);
-
-    expect(mockContext.save).toHaveBeenCalled();
-    const maxSampledAltitude = Math.max(...sampledAltitudes);
-    expect(maxSampledAltitude).toBe(90.0);
+    const sampled: number[] = [];
+    new TrackingRiskOverlay().draw(makeContext(), makeProjection(makeRiskMap(), sampled));
+    expect(Math.max(...sampled)).toBe(90.0);
   });
 
-  /**
-   * Tests that TrackingRiskOverlay prefers cumulativeAlignmentTargets across sessions
-   * and renders the multi-session legend badge title.
-   */
-  it('prefers cumulativeAlignmentTargets and displays multi-session legend title', () => {
-    const overlay = new TrackingRiskOverlay();
-    const fillTextMock = vi.fn();
-    const mockContext = {
-      save: vi.fn(),
-      restore: vi.fn(),
-      beginPath: vi.fn(),
-      moveTo: vi.fn(),
-      lineTo: vi.fn(),
-      closePath: vi.fn(),
-      fill: vi.fn(),
-      stroke: vi.fn(),
-      roundRect: vi.fn(),
-      fillText: fillTextMock,
-      fillRect: vi.fn(),
-    } as unknown as CanvasRenderingContext2D;
-
-    const mockProjection = {
-      showTrackingRisk: true,
-      lst: 310,
-      width: 1600,
-      height: 900,
-      alignmentTargets: [
-        // Live target (should be superseded by the cumulative targets)
-        { id: 'live', targetName: 'Sync #1', meanRaDeg: 100, meanDecDeg: 20, frameCount: 1, rmsTotalArcsec: 0 },
-      ],
-      cumulativeAlignmentTargets: [
-        // Two targets, two solves each, grouped by the library
-        { id: 'a', targetName: 'Deneb', meanRaDeg: 310.4, meanDecDeg: 45.3, frameCount: 2, rmsTotalArcsec: 0.2 },
-        { id: 'b', targetName: 'Vega', meanRaDeg: 279.2, meanDecDeg: 38.8, frameCount: 2, rmsTotalArcsec: 0.7 },
-      ],
-      getRaDec: vi.fn(() => ({ ra: 310, dec: 39.7392 })),
-      projectCoords: vi.fn(() => ({
-        x: 800,
-        y: 450,
-        visible: true,
-        alt: 90,
-      })),
-    } as unknown as ProjectionContext;
-
-    overlay.draw(mockContext, mockProjection);
-
-    expect(mockContext.save).toHaveBeenCalled();
-    const renderedTitles = fillTextMock.mock.calls.map((call) => call[0]);
-    expect(renderedTitles).toContain('Tracking Heatmap (2 targets · 4 solves)');
+  /** Grid lookups blend the nearest points and clamp at the edges. */
+  it('blends neighboring grid points', () => {
+    const riskMap = makeRiskMap();
+    expect(scoreAt(riskMap, 0, 0)).toBeCloseTo(0.45);
+    expect(scoreAt(riskMap, 45, 30)).toBeCloseTo((0.45 + 0.675) / 2);
+    expect(scoreAt(riskMap, 180, 90)).toBeCloseTo(0.9);
+    expect(scoreAt(riskMap, 500, -500)).toBeCloseTo(0.9);
   });
 
-  /**
-   * Tests that rmsToRiskScore properly normalizes tracking errors against equipment plate scale.
-   */
-  it('scales tracking risk score relative to imaging plate scale', () => {
-    // Equipment rig: 75mm f/5.4 (405mm) + 3.76um sensor -> ~1.91"/px plate scale
-    const plateScale = 1.91;
-
-    // Up to 0.75x plate scale (<=1.43" RMS) yields round stars on 5-min subs -> strictly green (<0.28)
-    const alkaidScore = rmsToRiskScore(0.82, plateScale);
-    const mirachScore = rmsToRiskScore(0.87, plateScale);
-    const schedarScore = rmsToRiskScore(0.93, plateScale);
-    const naviScore = rmsToRiskScore(1.0, plateScale);
-    const m81Score = rmsToRiskScore(1.2, plateScale);
-    expect(alkaidScore).toBeLessThan(0.28);
-    expect(mirachScore).toBeLessThan(0.28);
-    expect(schedarScore).toBeLessThan(0.28);
-    expect(naviScore).toBeLessThan(0.28);
-    expect(m81Score).toBeLessThan(0.28);
-
-    // Acceptable guiding between 0.75x and 1.25x plate scale (1.43" to 2.39") -> amber (0.28 to 0.57)
-    const cautionScore = rmsToRiskScore(1.8, plateScale);
-    expect(cautionScore).toBeGreaterThanOrEqual(0.28);
-    expect(cautionScore).toBeLessThan(0.58);
-
-    // Severe trailing (>2.39" RMS) -> red (>=0.58 risk)
-    const trailingScore = rmsToRiskScore(2.8, plateScale);
-    expect(trailingScore).toBeGreaterThanOrEqual(0.58);
+  /** The legend names the measured targets and the grid's jitter limits. */
+  it('reports the measured targets and jitter limits in the legend', () => {
+    const fillText = vi.fn();
+    const riskMap = makeRiskMap({ measuredTargetCount: 2, solveCount: 4 });
+    new TrackingRiskOverlay().draw(makeContext(fillText), makeProjection(riskMap));
+    const texts = fillText.mock.calls.map((call) => call[0]);
+    expect(texts).toContain('Tracking Heatmap (2 targets · 4 solves)');
+    expect(texts).toContain('≤1.4" / Round');
+    expect(texts).toContain('>2.4" / Trailing');
   });
 
-  /**
-   * Tests that rmsToRiskScore uses sensible real-world fallback thresholds when no plate scale is configured.
-   */
-  it('uses realistic amateur mount thresholds when plate scale is undefined', () => {
-    // <= 1.2" RMS should be green (<0.28)
-    expect(rmsToRiskScore(0.8)).toBeLessThan(0.28);
-    expect(rmsToRiskScore(1.2)).toBeLessThanOrEqual(0.28);
-
-    // 1.2" to 2.0" RMS should be amber (0.28 to 0.57)
-    const midScore = rmsToRiskScore(1.6);
-    expect(midScore).toBeGreaterThanOrEqual(0.28);
-    expect(midScore).toBeLessThan(0.58);
-
-    // > 2.0" RMS should be red (>=0.58)
-    const highScore = rmsToRiskScore(2.4);
-    expect(highScore).toBeGreaterThanOrEqual(0.58);
-  });
-
-  /**
-   * Tests that rmsToRiskScore correctly penalizes small RMS on high-magnification narrow-field rigs.
-   */
-  it('penalizes modest RMS on narrow-field planetary or SCT rigs', () => {
-    // 2000mm focal length SCT with 0.40"/px plate scale
-    const sctPlateScale = 0.4;
-
-    // 0.8" RMS is 2 full pixels of blur -> must be red (>=0.58)
-    const sctRisk = rmsToRiskScore(0.8, sctPlateScale);
-    expect(sctRisk).toBeGreaterThanOrEqual(0.58);
+  /** Without a grid (no active equipment) only the legend says so. */
+  it('draws no mesh without a grid', () => {
+    const fillText = vi.fn();
+    const context = makeContext(fillText);
+    new TrackingRiskOverlay().draw(context, makeProjection(null));
+    expect(context.moveTo).not.toHaveBeenCalled();
+    expect(fillText.mock.calls.map((call) => call[0])).toContain(
+      'Tracking Heatmap (no active telescope and camera)'
+    );
   });
 });

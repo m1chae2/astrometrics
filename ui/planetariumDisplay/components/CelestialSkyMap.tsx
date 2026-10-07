@@ -65,8 +65,8 @@ interface Props {
   showTrackingRisk?: boolean;
   /** Plate solves grouped by target (from the library) to project onto the celestial sphere. */
   alignmentTargets?: import('../../common/types/backendTypes').AlignmentTargetSession[];
-  /** Plate solves of every recorded night, grouped by target by the library. */
-  cumulativeAlignmentTargets?: import('../../common/types/backendTypes').AlignmentTargetSession[];
+  /** The backend's tracking-risk grid over hour angle and declination. */
+  trackingRisk?: import('../../common/types/backendTypes').TrackingRiskMap | null;
   /** Polar Alignment Assistant (PAA) status and coordinates. */
   polarAlignment?: import('../../common/types/backendTypes').PolarAlignmentStatus | null;
   /** Selected historical session identifier being reviewed. */
@@ -173,7 +173,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   showAlignment = true,
   showTrackingRisk = false,
   alignmentTargets,
-  cumulativeAlignmentTargets,
+  trackingRisk,
   polarAlignment,
   selectedSessionId,
   simulationDate,
@@ -600,7 +600,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
         showAlignment,
         showTrackingRisk,
         alignmentTargets,
-        cumulativeAlignmentTargets,
+        trackingRisk,
         polarAlignment,
         selectedSessionId,
         sensorFovWidthDeg: sensorFovWidthDegRef.current,
@@ -652,7 +652,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
     sources, targets, showStars, showFOV,
     showEnvironment, showGrid, showCatalog, showTelescope, selectedTargetId,
     showConstellations, constellationLines,
-    showAlignment, showTrackingRisk, alignmentTargets, cumulativeAlignmentTargets, polarAlignment, selectedSessionId,
+    showAlignment, showTrackingRisk, alignmentTargets, trackingRisk, polarAlignment, selectedSessionId,
     simulationDate,
     trackingMode, observerLat, observerLon, overlays
   ]);

@@ -291,6 +291,12 @@ class RPCHandlerRegistry:
         )
         self.register("telescope:sync_logs", ("sync_service", "sync_telescope_logs"))
         self.register("telescope:get_pointing_model", ("alignment_service", "compute_pointing_model"))
+        # The equipment's limits, with the sky's tracking-risk grid that the
+        # planetarium colors.
+        self.register(
+            "telescope:get_performance_envelope",
+            ("wayfinder.control.history", "get_performance_envelope"),
+        )
         self.register("telescope:get_guiding_spectrum", ("guiding_service", "analyze_guiding_spectrum"))
 
         # --- Ingestion (Infrastructure level) ---

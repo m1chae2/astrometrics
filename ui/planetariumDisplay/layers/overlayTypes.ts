@@ -4,7 +4,7 @@
  */
 
 import { PlanetariumSource, PlanetariumTarget, ConstellationLineSegment } from '../../common/types/planetariumTypes';
-import { AlignmentTargetSession, PolarAlignmentStatus } from '../../common/types/backendTypes';
+import { AlignmentTargetSession, PolarAlignmentStatus, TrackingRiskMap } from '../../common/types/backendTypes';
 
 /**
  * Interface representing the read-only projection, coordinates, and view configuration
@@ -57,8 +57,8 @@ export interface ProjectionContext {
   plateScaleArcsecPerPx?: number;
   /** Show mount tracking mechanical risk heatmap. */
   showTrackingRisk?: boolean;
-  /** Plate solves of every recorded night, grouped by target by the library. */
-  cumulativeAlignmentTargets?: AlignmentTargetSession[];
+  /** The backend's tracking-risk grid over hour angle and declination. */
+  trackingRisk?: TrackingRiskMap | null;
 }
 
 /**

@@ -40,10 +40,12 @@ from astrometricslib import (
     ErrorInfo,
     StorageNotMountedError,
     close_interrupted_jobs,
+    configure_offline_iers,
     get_configuration,
     new_request_id,
     require_mounted_storage,
     to_error_info,
+    warm_earth_orientation_data,
 )
 from backend.container import container
 
@@ -57,29 +59,10 @@ configure_logging(
 logger = logging.getLogger(__name__)
 
 
-def _use_bundled_earth_orientation_data() -> None:
-    """Stop astropy downloading Earth-orientation (IERS) data while running.
-
-    Turning a star's position into altitude and azimuth needs a small table
-    of how the Earth's rotation drifts (UT1 minus UTC). By default astropy
-    tries to download the latest copy the first time it is needed, which
-    stalled the first star click for 6 to 14 seconds, and quietly needed the
-    internet. The copy that ships with astropy is used instead.
-
-    Measured (astropy 8.0.1, Bozeman, a star at RA 315.7 deg, Dec 68.7 deg):
-    the first conversion took 5.8 to 13.8 s with the download and 0.5 s
-    without. Altitude and azimuth differed by at most 0.5 arcseconds across
-    dates from two years ago to ten years ahead, far below what a sky map or
-    a telescope slew can resolve, and nothing raised an error for any date.
-    """
-    from astropy.utils import iers
-
-    iers.conf.auto_download = False
-    # Without this, astropy refuses to use a table more than 30 days old.
-    iers.conf.auto_max_age = None
-
-
-_use_bundled_earth_orientation_data()
+# Astropy must use its bundled Earth-rotation (IERS) table and never download
+# one. Importing astrometricslib already does this; the call states it here
+# because the backend depends on it.
+configure_offline_iers()
 
 # Register Socket Logging Handler
 # Register DB Log Handler (general/unscoped logs; job-scoped loggers attach
@@ -1025,23 +1008,6 @@ async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocum
 sky_catalog_warmup_finished = threading.Event()
 
 
-def _warm_earth_orientation_data() -> None:
-    """Load astropy's Earth-orientation table now, while the splash is up.
-
-    The first altitude/azimuth conversion in a process reads that table
-    (about half a second), so do one here instead of on the first star click.
-    """
-    import astropy.units as u
-    from astropy.coordinates import AltAz, EarthLocation, SkyCoord
-    from astropy.time import Time
-
-    started_at = time.monotonic()
-    SkyCoord(0.0 * u.deg, 0.0 * u.deg).transform_to(
-        AltAz(obstime=Time.now(), location=EarthLocation(lat=0.0 * u.deg, lon=0.0 * u.deg))
-    )
-    logger.info("Earth-orientation data loaded in %.1fs", time.monotonic() - started_at)
-
-
 def _warm_sky_catalog() -> None:
     """Warm the caches the first screens need, all at once, ahead of first use.
 
@@ -1073,7 +1039,8 @@ def _warm_sky_catalog() -> None:
     def warm_earth_orientation() -> None:
         """Load astropy's Earth-orientation table."""
         try:
-            _warm_earth_orientation_data()
+            elapsed = warm_earth_orientation_data()
+            logger.info("Earth-orientation data loaded in %.1fs", elapsed)
         except Exception:
             logger.exception("Earth-orientation warm-up failed; the first star click will be slow")
 

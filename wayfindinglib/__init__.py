@@ -25,10 +25,16 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _distribution_version
 from typing import TYPE_CHECKING
 
+from astrometricslib import configure_offline_iers
+
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
 # "no handlers" warning when no program has done so.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
+
+# Every program that uses the library works offline: astropy uses its bundled
+# Earth-rotation table instead of downloading a new one.
+configure_offline_iers()
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics

@@ -151,6 +151,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "classify_and_sort_fits_files",
     "close_interrupted_jobs",
     "configure_logging",
+    "configure_offline_iers",
     "connect_db",
     "derive_field_centers",
     "derive_target_sessions",
@@ -173,6 +174,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "safe_json_dumps",
     "select_library_frames",
     "to_error_info",
+    "warm_earth_orientation_data",
 })
 
 # Internal names the root still exports because code outside the library

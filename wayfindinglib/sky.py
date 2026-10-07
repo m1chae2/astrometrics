@@ -51,11 +51,6 @@ class Sky:
         elevation: float | None = None,
         astrometrics: Any | None = None,
     ) -> None:
-        from astropy.utils import iers
-
-        iers.conf.auto_download = False
-        iers.conf.auto_max_age = None
-
         self._config = config
 
         # Read from config if available and args are None

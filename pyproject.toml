@@ -239,6 +239,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/foundation/test/test_astropy_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # runs this interpreter on a fixed script to import a library in a fresh process
 # These stand in for a Siril process without needing Siril installed, using
 # `true`/`sleep` off PATH like any other list-form subprocess call in this
 # codebase (never shell=True, never interpolated).

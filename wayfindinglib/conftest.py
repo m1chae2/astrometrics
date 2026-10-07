@@ -3,7 +3,7 @@
 The temporary library, database and settings file the tests use are made once
 for the whole repository, in the root `conftest.py`. This file adds only what
 the wayfindinglib tests need on top of them: fake connections to online
-astronomy databases and the bundled earth orientation tables.
+astronomy databases.
 """
 
 import os
@@ -12,12 +12,6 @@ from unittest.mock import MagicMock
 
 # Set the testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
-
-# Configure Astropy to use bundled earth orientation tables without downloading
-from astropy.utils import iers
-
-iers.conf.auto_download = False
-iers.conf.auto_max_age = None
 
 # Mock astroquery if imported
 mock_astroquery = MagicMock()

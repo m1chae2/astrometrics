@@ -8,6 +8,8 @@ MCP servers, and the scripts all need, so none of them has to own it:
 * `logging`: one way to set up logging, a log context that tags every message,
   and the router that fills a job's own log.
 * `config`: the application configuration loader.
+* `astropy_setup`: makes astropy use its bundled Earth-rotation (IERS) table
+  offline, and loads that table ahead of first use.
 * `storage`: generic storage plumbing: SQLite connections, a keyed model store
   (the `Butler`), and file-based locks between programs.
 

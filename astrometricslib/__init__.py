@@ -36,6 +36,7 @@ from astrometricslib.drivers.job_logging import (
 )
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
+from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import (
@@ -178,6 +179,10 @@ if TYPE_CHECKING:
 # calling `configure_logging`. The null handler stops Python from printing a
 # "no handlers" warning when no program has done so.
 logging.getLogger(__name__).addHandler(logging.NullHandler())
+
+# Every program that uses the library works offline: astropy uses its bundled
+# Earth-rotation table instead of downloading a new one.
+configure_offline_iers()
 
 _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
@@ -389,6 +394,7 @@ __all__ = [
     "classify_and_sort_fits_files",
     "close_interrupted_jobs",
     "configure_logging",
+    "configure_offline_iers",
     "connect_db",
     "derive_field_centers",
     "derive_target_sessions",
@@ -415,4 +421,5 @@ __all__ = [
     "select_library_frames",
     "to_epoch_seconds",
     "to_error_info",
+    "warm_earth_orientation_data",
 ]

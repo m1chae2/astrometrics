@@ -10,8 +10,28 @@ import hashlib
 import os
 from typing import Any
 
-from astrometricslib.foundation.errors import ConfigurationError
 from astrometricslib.models.target import Target
+
+#: File endings of a finished, processed picture of a target (as opposed to a
+#: FITS frame). Such a file becomes the target's processed image, not a frame.
+PROCESSED_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".tiff", ".tif"})
+
+
+def is_processed_image(path: str) -> bool:
+    """Tell whether a file is a finished picture rather than a FITS frame.
+
+    Parameters
+    ----------
+    path : `str`
+        The file path.
+
+    Returns
+    -------
+    bool
+        `True` when the file ending is one of `PROCESSED_IMAGE_EXTENSIONS`
+        (upper or lower case).
+    """
+    return os.path.splitext(path)[1].lower() in PROCESSED_IMAGE_EXTENSIONS
 
 
 def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-function-argument]
@@ -453,61 +473,3 @@ def read_saved_target(api, target_id: str) -> Any | None:  # ruff: ignore[missin
     """
     stored = api.catalog_access.get_by_ids("target_catalog", [target_id])
     return stored[0] if stored else None
-
-
-def add_data(api, target_id: str, image_file: Any, camera: str | None = None) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Connect a new image file to a target.
-
-    Parameters
-    ----------
-    api : `Any`
-        The system that manages the targets.
-    target_id : `str`
-        The name of the target the image belongs to.
-    image_file : `Any`
-        The file path (or a list of paths) to the new images.
-    camera : `str`, optional
-        The name of the camera (not currently used here).
-
-    Returns
-    -------
-    serialized_target : `dict`
-        A dictionary representation of the updated target.
-
-    Raises
-    ------
-    ConfigurationError
-        If the image processing system is turned off.
-    """
-    target = get_target(api, target_id)
-    if not target:
-        target = create_target(api, target_id)
-
-    if isinstance(image_file, str):
-        files = [image_file]
-    elif isinstance(image_file, list):
-        files = image_file
-    else:
-        files = []
-
-    if not api._image_service:
-        raise ConfigurationError("Image service is not available in standalone mode.")
-
-    for f in files:
-        path = f.get("path") if isinstance(f, dict) else f
-        if not isinstance(path, str):
-            continue
-
-        ext = os.path.splitext(path)[1].lower()
-        if ext in [".fits", ".fit"]:
-            api._image_service.add_frame_to_target(target, path)
-        elif ext in [".jpg", ".jpeg", ".png", ".tiff", ".tif"]:
-            if not os.path.isabs(path):
-                resolved = api._resolve_relative_image_path(path)
-                if resolved:
-                    path = resolved
-            target.stacking.processed_image = path
-
-    target.recalculate_total_exposure()
-    save_targets(api)
-    return target.serialize()

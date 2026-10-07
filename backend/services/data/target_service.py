@@ -8,7 +8,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import Any
 
 from astrometricslib import (
     AstrometricsError,
@@ -160,22 +160,19 @@ class TargetService:
             self.astrometrics.targets.add(target_or_id)
             return target_or_id
 
-    PROCESSED_IMAGE_EXTENSIONS: ClassVar[set[str]] = {".jpg", ".jpeg", ".png", ".tiff", ".tif"}
-
     def add_target_data(self, target_id: str, image_file: Any, camera: str | None = None) -> dict[str, Any]:
-        """Link captured frame files or scaling outputs to a target.
+        """Link a captured frame file or a finished picture to a target.
 
-        FITS files (``.fits``/``.fit``) are indexed as light frames,
-        subject to the spectral/standard homogeneity check. Image files
-        (``.jpg``/``.jpeg``/``.png``/``.tiff``/``.tif``) are treated as
-        a finished processed image and set directly on the target,
-        bypassing frame indexing entirely.
+        The library decides what the file is. A FITS file is added as a
+        light frame. A finished picture (such as a ``.jpg`` or ``.png``)
+        becomes the target's processed image. A target that does not exist
+        yet is created first.
 
         Returns
         -------
         result : `dict`
             ``{"status": "success"}``, plus ``frame`` when a FITS file
-            was indexed.
+            was added.
 
         Raises
         ------
@@ -193,12 +190,9 @@ class TargetService:
         if not target:
             target = self.astrometrics.targets.create(target_id)
 
-        if os.path.splitext(path)[1].lower() in self.PROCESSED_IMAGE_EXTENSIONS:
-            target.stacking.processed_image = path
-            self.astrometrics.targets.save()
+        report = self.astrometrics.targets.reindex_frames(target, paths=[path], camera_id=camera or "Unknown")
+        if report.processed_image is not None:
             return {"status": "success"}
-
-        self.astrometrics.targets.reindex_frames(target, paths=[path], camera_id=camera or "Unknown")
         frame = next((frame for frame in target.frames if frame.path == path), None)
         return {"status": "success", "frame": frame}
 

@@ -386,7 +386,6 @@ class IngestionService(BaseBackgroundService):
         """
         ingest_type = payload.get("type", "local")
         target_name = payload.get("targetName")
-        telescope_name = payload.get("telescope", "Apertura 75Q")
         selected_files = payload.get("selectedFiles", None)
 
         if target_name and self._target_service:
@@ -399,14 +398,6 @@ class IngestionService(BaseBackgroundService):
 
         # --- 1. Determine Source ---
         source_dir = ""
-        temp_dir = ""
-
-        # Use injected config service
-        config = self._config_service
-        if not config:
-            from astrometricslib import get_configuration
-
-            config = get_configuration()
 
         if ingest_type == "remote":
             provided_source = payload.get("sourcePath")
@@ -419,7 +410,6 @@ class IngestionService(BaseBackgroundService):
                 # what this job finds always matches what the dialog
                 # showed the user before they clicked Start Ingestion.
                 calibration_files_by_folder = self._list_calibration_files()
-                downloaded_paths = []
                 for remote_folder, folder_files in calibration_files_by_folder.items():
                     self._log(job_id, f"Found {remote_folder} ({len(folder_files)} files)")
 
@@ -475,11 +465,9 @@ class IngestionService(BaseBackgroundService):
                         self._wayfinder.control.remote.sync_frames(
                             rf, files=folder_selected_files, log_callback=calibration_log_callback
                         )
-                        downloaded_paths.append(os.path.join(config.get_frames_path(), "lights", rf))
                     except (AstrometricsError, OSError) as e:
                         self._log(job_id, f"Failed to download {rf}: {e}")
 
-                source_dirs = downloaded_paths
                 self._log(job_id, "Download complete.")
 
             else:
@@ -525,7 +513,6 @@ class IngestionService(BaseBackgroundService):
                     self._wayfinder.control.remote.sync_frames(
                         target_name, files=selected_files, log_callback=ingest_log_callback
                     )
-                    source_dir = os.path.join(config.get_frames_path(), "lights", target_name)
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
@@ -541,11 +528,6 @@ class IngestionService(BaseBackgroundService):
 
         # --- 2. Ingestion Logic ---
         if ingest_type != "remote":
-            if "source_dirs" in locals() and source_dirs:
-                scan_list = source_dirs
-            else:
-                scan_list = [source_dir]
-
             # Local ingestion goes through the same library entry point
             # as remote downloads.
             self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)

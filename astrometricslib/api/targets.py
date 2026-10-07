@@ -222,7 +222,9 @@ class TargetCatalog:
         - ``target`` and ``paths``: add only those files to the target, reading
           each FITS header. ``role``, ``filter_type`` and ``camera_id``
           override what the header says. A file that is already listed is
-          updated.
+          updated. A finished picture (``.jpg``, ``.jpeg``, ``.png``,
+          ``.tiff`` or ``.tif``) is not a frame: it becomes the target's
+          processed image instead.
         - ``target`` alone: scan the frames folder for the target's files,
           add the new ones and recompute the total exposure.
           ``prune_missing`` and ``refresh_headers`` apply.
@@ -261,7 +263,8 @@ class TargetCatalog:
         Returns
         -------
         report : `ReindexReport`
-            Each target's frame count before and after, and the files added.
+            Each target's frame count before and after, the files added,
+            and the processed image set from ``paths``, if any.
 
         Raises
         ------
@@ -298,8 +301,13 @@ class TargetCatalog:
         resolved = resolve_target(self, target)
         frames_before = len(resolved.frames)
         added: builtins.list[str] = []
+        processed_image: str | None = None
         if paths is not None:
             for path in paths:
+                if target_records.is_processed_image(path):
+                    resolved.stacking.processed_image = path
+                    processed_image = path
+                    continue
                 record = add_frame(resolved, path, role, filter_type, camera_id)
                 added.append(record.path)
         else:
@@ -318,6 +326,7 @@ class TargetCatalog:
                 )
             ],
             added_paths=added,
+            processed_image=processed_image,
         )
 
     def _reindex_library(

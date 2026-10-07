@@ -137,6 +137,33 @@ def test_reindex_frames_with_paths_adds_each_file_and_saves(monkeypatch: pytest.
     save_mock.assert_called_once()
 
 
+@pytest.mark.parametrize("picture", ["/m13_final.PNG", "/m13.jpg", "/m13.tiff"])
+def test_reindex_frames_makes_a_finished_picture_the_processed_image(
+    monkeypatch: pytest.MonkeyPatch, picture: str
+) -> None:
+    """Verify a .jpg, .png or .tiff becomes the processed image, not a frame."""
+    catalog = _make_catalog()
+    target = Target(id="M13")
+    add_frame = MagicMock(side_effect=lambda t, path, *rest: FrameRecord(path=path))
+    monkeypatch.setattr(frame_grouping, "add_frame", add_frame)
+    monkeypatch.setattr(catalog, "save", MagicMock())
+
+    report = catalog.reindex_frames(target, paths=["/frame.fits", picture])
+
+    add_frame.assert_called_once_with(target, "/frame.fits", "LIGHT", None, None)
+    assert target.stacking.processed_image == picture
+    assert report.processed_image == picture
+    assert report.added_paths == ["/frame.fits"]
+
+
+def test_is_processed_image_ignores_case_and_rejects_fits() -> None:
+    """Verify the file-ending rule for finished pictures."""
+    assert target_records.is_processed_image("/a/b/M13.JPEG")
+    assert target_records.is_processed_image("final.tif")
+    assert not target_records.is_processed_image("/a/b/M13.fits")
+    assert not target_records.is_processed_image("/a/b/M13")
+
+
 def test_reindex_frames_of_one_target_delegates_with_keyword_arguments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

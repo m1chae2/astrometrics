@@ -114,3 +114,6 @@ class ReindexReport(BaseModel):
     targets: list[TargetReindexChange] = Field(default_factory=list)
     # Paths that were asked for and are now frame records.
     added_paths: list[str] = Field(default_factory=list)
+    # The path, among those asked for, that became the target's processed
+    # image (a .jpg, .png or .tiff picture rather than a FITS frame).
+    processed_image: str | None = None

@@ -103,8 +103,8 @@ SERVERS = (
     ),
     ServerSpec(
         "astrometrics-backend",
-        python_module="backend.mcp",
-        manifest="backend/mcp/tool_manifest.json",
+        python_module="mcp_servers.backend",
+        manifest="mcp_servers/backend/tool_manifest.json",
         extra_environment={
             "ASTROMETRICS_API_BASE": "http://127.0.0.1:5000",
             # The server process writes here. This script creates nothing.
@@ -113,7 +113,7 @@ SERVERS = (
     ),
     ServerSpec(
         "astrometrics-gaps",
-        python_module="backend.mcp.gaps",
+        python_module="mcp_servers.gaps",
         fixed_tools=("report_capability_gap", "list_capability_gaps"),
         developer_profile="",
     ),

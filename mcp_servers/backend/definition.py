@@ -1,371 +1,179 @@
-"""Purpose: Central registry for all MCP tools.
+"""Purpose: Say what the astrometrics-backend MCP server offers.
 
-This module is shared between the backend (for the LLM agent) and the
-external MCP server process. REQ: AGENT-1.1, AGENT-3.1
+Description: These tools reach the running backend over HTTP, through its
+``/api/rpc`` route, the same way the app's window does. The server never
+loads the backend in its own process. It imports only the two guard
+functions from ``backend.services.infrastructure`` that refuse destructive
+calls and code. The server's manifest, ``tool_manifest.json`` in this
+folder, decides which tools a profile may use.
 """
 
-import inspect
 import json
 import logging
-from collections.abc import Awaitable
+import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from mcp.types import TextContent, Tool
+from mcp.types import Resource
 
 from astrometricslib import (
     AstrometricsError,
-    ConfigurationError,
     ErrorInfo,
     ExternalServiceError,
     InvalidArgumentError,
+    NotFoundError,
     PermissionDeniedError,
     error_from_info,
-    log_context,
     new_request_id,
     to_error_info,
 )
 from backend.services.infrastructure.agent_code_policy import check_agent_code
 from backend.services.infrastructure.destructive_guard import destructive_rpc_reason
-from mcp_servers.common.profile import current_profile, find_withheld_tools, load_manifest, refusal_message
-from mcp_servers.common.tool_errors import error_content
+from mcp_servers.backend.mcp_http import post_to_backend
+from mcp_servers.common.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+SERVER_NAME = "astrometrics-backend"
+"""The server's name in the client configurations."""
 
-class ToolRegistry:
-    """Centralized model context protocol tool registration and dispatching.
+MANIFEST_PATH = Path(__file__).resolve().parent / "tool_manifest.json"
+"""The reviewed list of this server's tools."""
 
-    Attributes
+NOTIFICATIONS_URI = "astrometrics://notifications"
+"""The address of the resource that lists unread job notifications."""
+
+ToolFunction = Callable[..., Awaitable[Any]]
+"""An async function that runs one tool."""
+
+TOOL_SPECS: list[tuple[str, str, dict[str, Any], ToolFunction]] = []
+"""Every tool this server can offer: name, description, argument schema and
+function. `build_registry` registers them all."""
+
+
+def tool(name: str, description: str, input_schema: dict[str, Any]) -> Callable[[ToolFunction], ToolFunction]:
+    """Build a decorator that adds a function to `TOOL_SPECS`.
+
+    Parameters
     ----------
-    tools : `dict`
-        Tool name -> a dict with the callable and its `Tool` definition.
-    withheld : `dict`
-        Tools that `apply_profile` removed from ``tools``. Empty until a
-        profile is applied.
-    withheld_reasons : `dict`
-        Tool name -> why `apply_profile` removed it. Used in the error a
-        client gets when it calls the tool.
+    name : `str`
+        The tool's name.
+    description : `str`
+        What the tool does, shown to the client.
+    input_schema : `dict`
+        The JSON schema of the tool's arguments.
+
+    Returns
+    -------
+    decorator : `Callable`
+        Records the function it wraps and returns it unchanged.
     """
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
-        self.tools = {}
-        self.withheld = {}
-        self.withheld_reasons = {}
-
-    def apply_profile(self, manifest_path: Path, profile: str | None = None) -> dict[str, str]:
-        """Remove the tools a profile may not use.
-
-        This is the same rule the library servers use (see
-        `mcp_servers.common.profile`). A removed tool is not listed, and
-        a call to it gets the "Unknown tool" error. The in-app agent uses
-        the full registry, so only the MCP server entry point calls this.
-
-        Parameters
-        ----------
-        manifest_path : `pathlib.Path`
-            The server's ``tool_manifest.json``.
-        profile : `str`, optional
-            The profile name. Defaults to the one the
-            ``ASTROMETRICS_MCP_PROFILE`` environment variable chooses.
+    def decorator(func: ToolFunction) -> ToolFunction:
+        """Record `func` as the tool's implementation.
 
         Returns
         -------
-        withheld : `dict` [`str`, `str`]
-            Tool name -> why it was removed.
+        func : `Callable`
+            The same function.
         """
-        profile = profile or current_profile()
-        reasons = find_withheld_tools(list(self.tools), load_manifest(manifest_path), profile)
-        for name in reasons:
-            self.withheld[name] = self.tools.pop(name)
-        self.withheld_reasons.update(reasons)
-        logger.info(
-            "MCP profile %r: serving %d tools, withholding %d.", profile, len(self.tools), len(reasons)
-        )
-        return reasons
+        TOOL_SPECS.append((name, description, input_schema, func))
+        return func
 
-    def register(self, name: str, description: str, input_schema: dict[str, Any] | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Build a decorator that registers a tool under `name`.
+    return decorator
 
-        Parameters
-        ----------
-        name : `str`
-            Unique tool name used for dispatch.
-        description : `str`
-            Human-readable description surfaced to the LLM agent.
-        input_schema : `dict`, optional
-            JSON Schema describing the tool's arguments. If `None`
-            (default), an empty object schema is used.
 
-        Returns
-        -------
-        decorator : `Callable`
-            Decorator that stores the wrapped function and its tool
-            definition in the registry, then returns the function
-            unchanged.
-        """
-        if input_schema is None:
-            input_schema = {"type": "object", "properties": {}}
+def suggest_remediation(tool_name: str, message: str) -> dict[str, Any]:
+    """Suggest how a client can recover from a failed tool call.
 
-        def decorator(func):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-            self.tools[name] = {
-                "func": func,
-                "tool_def": Tool(name=name, description=description, inputSchema=input_schema),
-            }
-            return func
+    Parameters
+    ----------
+    tool_name : `str`
+        Name of the tool that failed.
+    message : `str`
+        The error message the client sees.
 
-        return decorator
-
-    def get_tool_definitions(self) -> list[Tool]:
-        """Return list of all Tool definitions in registry.
-
-        Returns
-        -------
-        definitions : `list` [`Tool`]
-            The `Tool` definition for every function currently
-            registered.
-        """
-        return [t["tool_def"] for t in self.tools.values()]
-
-    async def execute(self, name: str, arguments: dict[str, Any]) -> list[TextContent]:
-        """Execute a registered tool by name with the given arguments.
-
-        Guards against malformed argument payloads from the LLM.
-
-        Parameters
-        ----------
-        name : `str`
-            Name of the registered tool to execute.
-        arguments : `dict`
-            Keyword arguments to pass to the tool function.
-
-        Returns
-        -------
-        result : `list` [`TextContent`]
-            The tool's result wrapped as MCP text content, or a
-            single `TextContent` describing an error.
-        """
-        if name not in self.tools:
-            return error_content(
-                ErrorInfo(
-                    code="permission_denied" if name in self.withheld_reasons else "not_found",
-                    message=refusal_message(name, self.withheld_reasons.get(name)),
-                )
-            )
-
-        # REQ: SEC-1.5: Audit logging of all MCP tool invocations.
-        import logging
-
-        audit_logger = logging.getLogger("mcp.audit")
-        arg_summary = list(arguments.keys()) if isinstance(arguments, dict) else type(arguments).__name__
-        audit_logger.info("Tool invoked: %s | Args: %s", name, arg_summary)
-
-        # Sanitize arguments: the LLM occasionally produces a string
-        # instead of a dict.
-        if not isinstance(arguments, dict):
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Tool '%s' received non-dict arguments (%s: %r). Defaulting to empty dict.",
-                name,
-                type(arguments).__name__,
-                arguments,
-            )
-            arguments = {}
-
-        tool_info = self.tools[name]
-        func = tool_info["func"]
-        input_schema = tool_info["tool_def"].inputSchema
-
-        # REQ: AGENT-3.1 - Strict argument validation
-        try:
-            import jsonschema
-        except ImportError:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "jsonschema library not found. Skipping strict argument validation."
-            )
-            jsonschema = None
-        if jsonschema is not None:
-            try:
-                jsonschema.validate(instance=arguments, schema=input_schema)
-            except (jsonschema.ValidationError, jsonschema.SchemaError) as e:
-                return error_content(
-                    ErrorInfo(
-                        code="invalid_argument",
-                        message=f"Invalid arguments for tool '{name}'. Validation failed: {e}",
-                    )
-                )
-
-        try:
-            if inspect.iscoroutinefunction(func):
-                result = await func(**arguments)
-            else:
-                result = func(**arguments)
-
-            # If result is already List[TextContent], return it
-            if isinstance(result, list) and len(result) > 0 and isinstance(result[0], TextContent):
-                return result
-
-            # Token budget safeguard: truncate oversized lists/payloads
-            result_str = json.dumps(result, indent=2)
-            max_bytes = 40000  # Cap output to ~10k tokens to prevent context blowout
-            if len(result_str) > max_bytes:
-                truncated_note = (
-                    f"\n\n... [Output truncated: payload exceeded {max_bytes} bytes. "
-                    "Use specific filtering arguments or limit queries to avoid context blowout.]"
-                )
-                result_str = result_str[:max_bytes] + truncated_note
-
-            return [TextContent(type="text", text=result_str)]
-        except Exception as exc:
-            info = to_error_info(exc, new_request_id())
-            if info.code in {"invalid_argument", "not_found", "conflict", "permission_denied"}:
-                logger.warning("Tool %s failed (%s): %s", name, info.code, info.message)
-            else:
-                logger.exception("Tool %s failed (%s)", name, info.code)
-            info.details["tool"] = name
-            info.details["remediation"] = self._remediation(name, info.message)
-            return error_content(info)
-
-    def _remediation(self, tool_name: str, message: str) -> dict[str, Any]:
-        """Suggest how an agent can recover from a failed tool call.
-
-        Parameters
-        ----------
-        tool_name : `str`
-            Name of the tool that failed.
-        message : `str`
-            The error message the agent sees.
-
-        Returns
-        -------
-        remediation : `dict[str, Any]`
-            A ``suggestion`` and a tool to call next. The hint is specific
-            when the message names a known problem (a missing target, a
-            disconnected device, a filter, bad syntax), and generic
-            otherwise.
-        """
-        msg = message.lower()
-        if "target" in msg and "not found" in msg:
-            return {
-                "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
-                "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
-            }
-        if "disconnected" in msg or "not connected" in msg or "indi" in msg:
-            return {
-                "suggestion": "Hardware driver is currently offline or disconnected.",
-                "recommended_tool": (
-                    "call_mcp_tool('wayfindinglib-core', 'observatory_equipment_connect', {})"
-                ),
-            }
-        if "filter" in msg:
-            return {
-                "suggestion": "Requested filter wheel slot is unknown or unconfigured.",
-                "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_imaging_status', {})",
-            }
-        if "syntax" in msg or "unexpected" in msg:
-            return {
-                "suggestion": "Check input arguments against parameter schema or query inspect_api.",
-                "recommended_tool": (
-                    "call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {'target': '...'})"
-                ),
-            }
+    Returns
+    -------
+    remediation : `dict` [`str`, `Any`]
+        A ``suggestion`` and a tool to call next. The hint is specific when
+        the message names a known problem (a missing target, a disconnected
+        device, a filter, bad syntax), and general otherwise.
+    """
+    text = message.lower()
+    if "target" in text and "not found" in text:
         return {
-            "suggestion": f"Tool '{tool_name}' failed: {message}",
-            "inspect_tool": (
-                f"call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {{'target': '{tool_name}'}})"
+            "suggestion": "Target names are case-sensitive. Verify exact catalog identifier.",
+            "recommended_tool": "call_mcp_tool('astrometricslib-core', 'target_list', {})",
+        }
+    if "disconnected" in text or "not connected" in text or "indi" in text:
+        return {
+            "suggestion": "Hardware driver is currently offline or disconnected.",
+            "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_equipment_connect', {})",
+        }
+    if "filter" in text:
+        return {
+            "suggestion": "Requested filter wheel slot is unknown or unconfigured.",
+            "recommended_tool": "call_mcp_tool('wayfindinglib-core', 'observatory_imaging_status', {})",
+        }
+    if "syntax" in text or "unexpected" in text:
+        return {
+            "suggestion": "Check input arguments against parameter schema or query inspect_api.",
+            "recommended_tool": (
+                "call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {'target': '...'})"
             ),
         }
+    return {
+        "suggestion": f"Tool '{tool_name}' failed: {message}",
+        "inspect_tool": (
+            f"call_mcp_tool('astrometrics-backend', 'terminal_inspect_api', {{'target': '{tool_name}'}})"
+        ),
+    }
 
 
-registry = ToolRegistry()
-
-
-def get_container():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Fetch the singleton backend dependency container.
-
-    Returns
-    -------
-    result : `object` or `None`
-        The backend `container` instance, or `None` if
-        `backend.container` cannot be imported.
-    """
-    try:
-        from backend.container import container
-
-        return container
-    except ImportError:
-        return None
-
-
-def get_astrometrics():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Fetch a new Astrometrics high-level interface API instance.
+def build_registry() -> ToolRegistry:
+    """Build the registry with every tool this server can offer.
 
     Returns
     -------
-    result : `Astrometrics` or `None`
-        A new `Astrometrics` astrometrics instance, or `None` if
-        `astrometricslib` cannot be imported.
+    registry : `ToolRegistry`
+        All tools, before a profile removes any. A failed call's error
+        holds a recovery hint from `suggest_remediation`.
     """
-    try:
-        from astrometricslib import Astrometrics
-
-        return Astrometrics()
-    except ImportError:
-        return None
+    registry = ToolRegistry(remediation=suggest_remediation)
+    for name, description, input_schema, func in TOOL_SPECS:
+        registry.register(name, description, input_schema)(func)
+    return registry
 
 
-async def execute_rpc(method: str, params: dict | None = None) -> Any:
-    """Execute an RPC method through the in-process or HTTP backend.
-
-    If the backend container is available, delegates directly to
-    `RPCHandlerRegistry` to run the logic in-process. Otherwise,
-    sends a JSON-RPC 2.0 POST request to the backend listener.
+async def execute_rpc(method: str, params: dict[str, Any] | None = None) -> Any:
+    """Call one backend RPC method through the ``/api/rpc`` route.
 
     Parameters
     ----------
     method : `str`
-        Dotted RPC method name to execute.
+        The RPC method name, such as ``"target:list"``.
     params : `dict`, optional
-        Parameters to pass to the RPC method. If `None` (default),
-        an empty dictionary is used.
+        The method's parameters. If `None` (default), none are sent.
 
     Returns
     -------
     data : `Any`
-        The method's result, converted to JSON-safe values.
+        The method's result, without the router's success wrapper.
 
     Raises
     ------
     ExternalServiceError
-        If the backend over HTTP sends an answer that is not a JSON-RPC
-        reply, or an error without an error record.
+        If the backend cannot be reached, sends an answer that is not a
+        JSON-RPC reply, or reports an error without an error record.
 
     Notes
     -----
-    A failed call raises. In-process, the service's own error passes
-    through unchanged. Over HTTP, the error record the backend sent is
-    raised again as the same category (see `error_from_info`), and
-    `post_to_backend` raises `ExternalServiceError` when the backend
-    cannot be reached.
+    When the backend sends an error record, that error is raised again as
+    the same category (see `error_from_info`), such as `NotFoundError`.
     """
-    if params is None:
-        params = {}
-
-    container_inst = get_container()
-    if container_inst and container_inst.initialized:
-        from backend.routers.rpc_router import rpc_registry
-        from backend.services.rpc_protocol import serialize_rpc_result
-
-        with log_context(request_id=new_request_id(), method=method):
-            res = await rpc_registry.execute(method, params)
-        return serialize_rpc_result(res)
-
-    from backend.mcp.mcp_http import post_to_backend
-
-    payload = {"jsonrpc": "2.0", "method": method, "params": params, "id": "mcp-proxy"}
+    payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": "mcp-proxy"}
     reply = await post_to_backend("/api/rpc", payload)
     if not isinstance(reply, dict):
         raise ExternalServiceError(f"The backend sent a malformed answer to {method}.")
@@ -384,12 +192,56 @@ async def execute_rpc(method: str, params: dict | None = None) -> Any:
     return result
 
 
+class NotificationResource:
+    """Offer the unread job notifications as an MCP resource."""
+
+    def list_resources(self) -> list[Resource]:
+        """List the one resource this server offers.
+
+        Returns
+        -------
+        resources : `list` [`mcp.types.Resource`]
+            The notifications resource.
+        """
+        return [
+            Resource(
+                uri=NOTIFICATIONS_URI,
+                name="System Notifications",
+                description="Real-time notifications about background job completions",
+                mimeType="application/json",
+            )
+        ]
+
+    async def read_resource(self, uri: str) -> str:
+        """Read the unread notifications from the backend.
+
+        Parameters
+        ----------
+        uri : `str`
+            The resource address. Only `NOTIFICATIONS_URI` is known.
+
+        Returns
+        -------
+        content : `str`
+            The unread notifications as a JSON list.
+
+        Raises
+        ------
+        NotFoundError
+            If `uri` is not `NOTIFICATIONS_URI`.
+        """
+        if uri != NOTIFICATIONS_URI:
+            raise NotFoundError(f"Unknown resource: {uri}")
+        notifications = await execute_rpc("system:notifications", {"unread_only": True})
+        return json.dumps(notifications)
+
+
 # ---------------------------------------------------------------------------
 # Backend JSON-RPC & Diagnostics Tools
 # ---------------------------------------------------------------------------
 
 
-@registry.register(
+@tool(
     "backend_call_rpc",
     (
         "Execute any backend JSON-RPC 2.0 method directly against the running "
@@ -437,8 +289,6 @@ async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = Non
         Whatever error the call raised. Its details then also hold
         ``elapsed_ms``, so a slow failure can be told from a fast one.
     """
-    import time
-
     refusal = destructive_rpc_reason(method)
     if method.startswith("terminal:"):
         refusal = "Terminal methods run code and are only available through electron_run_python."
@@ -456,7 +306,7 @@ async def tool_backend_call_rpc(method: str, params: dict[str, Any] | None = Non
     return {"status": "success", "method": method, "elapsed_ms": elapsed_ms, "data": data}
 
 
-@registry.register(
+@tool(
     "backend_health_check",
     "Check health and connectivity of the running Astrometrics backend server.",
     {"type": "object", "properties": {}},
@@ -467,13 +317,10 @@ async def tool_backend_health_check() -> dict[str, Any]:
     Returns
     -------
     result : `dict[str, Any]`
-        Dictionary containing connection status, container state, and latency.
+        Whether the backend answered, how long it took, and why it did
+        not answer if it failed.
     """
-    import time
-
     start_time = time.perf_counter()
-    container_inst = get_container()
-    container_active = bool(container_inst and container_inst.initialized)
 
     # Probe backend JSON-RPC via execute_rpc with lightweight target:list.
     # A failed probe is the answer of a health check, not its failure.
@@ -491,7 +338,6 @@ async def tool_backend_health_check() -> dict[str, Any]:
     return {
         "status": "healthy" if is_online else "degraded",
         "backend_online": is_online,
-        "in_process_container": container_active,
         "latency_ms": elapsed_ms,
         "details": details,
     }
@@ -502,7 +348,7 @@ async def tool_backend_health_check() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@registry.register(
+@tool(
     "ui_show_notification",
     "Post a native desktop toast notification to inform or alert the user.",
     {
@@ -537,8 +383,6 @@ async def tool_ui_show_notification(title: str, body: str, urgency: str = "norma
     result : `dict[str, Any]`
         Dictionary containing dispatch status and notification details.
     """
-    import logging
-
     logging.getLogger("mcp.ui").info("AI Notification: %s - %s (urgency=%s)", title, body, urgency)
     await execute_rpc(
         "events:broadcast",
@@ -550,67 +394,7 @@ async def tool_ui_show_notification(title: str, body: str, urgency: str = "norma
     return {"status": "success", "posted": True, "title": title}
 
 
-@registry.register(
-    "ui_pause_pipelines",
-    "Pause active background processing and stacking pipelines (e.g. Siril).",
-    {"type": "object", "properties": {}},
-)
-async def tool_ui_pause_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-async] -- awaited by ToolRegistry.execute
-    """Freeze compute subprocesses via POSIX SIGSTOP.
-
-    Returns
-    -------
-    result : `dict[str, Any]`
-        Dictionary containing operation status and paused state.
-
-    Raises
-    ------
-    ExternalServiceError
-        If ``pkill`` cannot be run.
-    """
-    import shutil
-    import subprocess
-
-    pkill_path = shutil.which("pkill") or "/usr/bin/pkill"
-    try:
-        subprocess.run([pkill_path, "-STOP", "-f", "siril-cli"], check=False)
-        subprocess.run([pkill_path, "-STOP", "-f", "solve-field"], check=False)
-    except (OSError, subprocess.SubprocessError) as err:
-        raise ExternalServiceError(f"Could not pause the pipelines: {err}") from err
-    return {"status": "success", "paused": True}
-
-
-@registry.register(
-    "ui_resume_pipelines",
-    "Resume previously paused background processing and stacking pipelines.",
-    {"type": "object", "properties": {}},
-)
-async def tool_ui_resume_pipelines() -> dict[str, Any]:  # ruff: ignore[unused-async] -- awaited by ToolRegistry.execute
-    """Thaw compute subprocesses via POSIX SIGCONT.
-
-    Returns
-    -------
-    result : `dict[str, Any]`
-        Dictionary containing operation status and resumed state.
-
-    Raises
-    ------
-    ExternalServiceError
-        If ``pkill`` cannot be run.
-    """
-    import shutil
-    import subprocess
-
-    pkill_path = shutil.which("pkill") or "/usr/bin/pkill"
-    try:
-        subprocess.run([pkill_path, "-CONT", "-f", "siril-cli"], check=False)
-        subprocess.run([pkill_path, "-CONT", "-f", "solve-field"], check=False)
-    except (OSError, subprocess.SubprocessError) as err:
-        raise ExternalServiceError(f"Could not resume the pipelines: {err}") from err
-    return {"status": "success", "resumed": True}
-
-
-@registry.register(
+@tool(
     "electron_run_python",
     "Execute Python code against astrometrics and wayfinder public APIs inside the supervised runtime.",
     {
@@ -651,7 +435,7 @@ async def tool_electron_run_python(code: str) -> dict[str, Any]:
     return await execute_rpc("terminal:execute", {"code_str": code, "source": "agent"})
 
 
-@registry.register(
+@tool(
     "terminal_get_workspace",
     "Inspect active user variables in the Python workspace (MATLAB-style Workspace viewer).",
     {"type": "object", "properties": {}},
@@ -669,7 +453,7 @@ async def tool_terminal_get_workspace() -> dict[str, Any]:
     return {"status": "success", "variables": variables}
 
 
-@registry.register(
+@tool(
     "terminal_inspect_api",
     "Inspect signatures, arguments, and docstrings of an object or API branch.",
     {
@@ -704,7 +488,7 @@ async def tool_terminal_inspect_api(target: str) -> dict[str, Any]:
     return data.get("result", data) if isinstance(data, dict) else data
 
 
-@registry.register(
+@tool(
     "ui_navigate_mode",
     "Navigate the UI workspace to a specific view (e.g. 'Planetarium', 'Image Processing') and target.",
     {
@@ -748,7 +532,7 @@ async def tool_ui_navigate_mode(mode: str, target: str | None = None) -> dict[st
     return {"status": "success", "mode": mode, "target": target}
 
 
-@registry.register(
+@tool(
     "ui_inspect_variable",
     "Open the UI Variable Inspector panel to display a specific workspace variable (MATLAB Variable Editor).",
     {
@@ -779,7 +563,7 @@ async def tool_ui_inspect_variable(variable_name: str) -> dict[str, Any]:
     return {"status": "success", "variable_name": variable_name}
 
 
-@registry.register(
+@tool(
     "docs_get",
     "Read repository documentation and guides (same topics available in Command Console Doc Viewer).",
     {
@@ -809,7 +593,7 @@ async def tool_docs_get(topic_id: str) -> dict[str, Any]:
     return await execute_rpc("docs:get_topic", {"topic_id": topic_id})
 
 
-@registry.register(
+@tool(
     "ui_editor_sync",
     "Read or update the active code buffer in the Command Console Code Editor.",
     {
@@ -875,7 +659,7 @@ APP_CONTROL_ACTIONS = ("navigate", "notify")
 thaw Siril and the plate solver, so they are not offered."""
 
 
-@registry.register(
+@tool(
     "app_status",
     (
         "Report the app's live state: backend health, the telescope (position, tracking or parked, pier "
@@ -1155,28 +939,18 @@ async def _indi_properties(device: str, property_names: list[str] | None) -> dic
     }
 
 
-async def _active_jobs() -> dict[str, Any]:
-    """List the jobs recorded as running, from the job history.
+async def _active_jobs() -> Any:
+    """List the jobs the backend records as running.
 
     Returns
     -------
-    jobs : `dict` [`str`, `Any`]
-        The result of the job history query for active jobs.
-
-    Raises
-    ------
-    ConfigurationError
-        If astrometricslib cannot be imported.
+    jobs : `list` [`dict`]
+        The jobs whose status is ``started`` or ``running``.
     """
-    import asyncio
-
-    astrometrics = get_astrometrics()
-    if astrometrics is None:
-        raise ConfigurationError("astrometricslib is not available.")
-    return await asyncio.to_thread(astrometrics.jobs.query, active_only=True, limit=20)
+    return _unwrap(await execute_rpc("processing:active_jobs", {}))
 
 
-@registry.register(
+@tool(
     "app_controls",
     "Do what the person can do in the app: switch the view, or show a notification.",
     {

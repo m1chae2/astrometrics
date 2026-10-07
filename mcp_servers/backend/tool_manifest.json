@@ -1,6 +1,6 @@
 {
   "server": "astrometrics-backend",
-  "generated_by": "backend/mcp/tool_inventory.py --write-runtime-manifests",
+  "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
     "app_controls": {
       "tool_class": "ui-control",
@@ -78,20 +78,6 @@
       "disposition": "merged",
       "merge_into": "app_controls",
       "interim_block": ""
-    },
-    "ui_pause_pipelines": {
-      "tool_class": "ui-control",
-      "category": "app",
-      "disposition": "merged",
-      "merge_into": "app_controls",
-      "interim_block": "Freezes Siril and the plate solver, so it is not read-only. Closed by decision: the AI may navigate and notify only."
-    },
-    "ui_resume_pipelines": {
-      "tool_class": "ui-control",
-      "category": "app",
-      "disposition": "merged",
-      "merge_into": "app_controls",
-      "interim_block": "Thaws Siril and the plate solver, so it is not read-only. Closed by decision: the AI may navigate and notify only."
     },
     "ui_show_notification": {
       "tool_class": "ui-control",

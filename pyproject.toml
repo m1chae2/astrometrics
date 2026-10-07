@@ -231,10 +231,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/siril_stacking_engine.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/plate_solve_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
-"backend/mcp/tool_registry.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
-"backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
-"backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "banned-api"]
 "backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
@@ -267,7 +263,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/main_backend.py" = ["module-import-not-at-top-of-file", "banned-api"] # warnings.filterwarnings() must precede import
-"backend/mcp/__main__.py" = ["module-import-not-at-top-of-file", "banned-api"] # sys.path bootstrap must precede import
 "wayfindinglib/drivers/indi_interface.py" = ["invalid-function-name"] # overrides PyIndi's C++ client interface (camelCase required)
 "wayfindinglib/drivers/indi/pyindi_compatibility.py" = ["invalid-function-name"] # stub mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
@@ -285,9 +280,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # sections 7 and 9. Each phase of the plan empties part of this list. Do not add to it.
 ".claude/hooks/guard_destructive.py" = ["print"]
 "astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
-"backend/mcp/gaps/__main__.py" = ["banned-api"]
-"backend/mcp/gaps/review.py" = ["print"]
-"backend/mcp/tool_inventory.py" = ["print"]
+"mcp_servers/gaps/__main__.py" = ["banned-api"]
+"mcp_servers/gaps/review.py" = ["print"]
+"mcp_servers/inventory/tool_inventory.py" = ["print"]
 "backend/services/infrastructure/indi_worker.py" = ["banned-api"]
 "backend/services/infrastructure/scripting_service.py" = ["print"]
 "backend/services/infrastructure/socket_manager.py" = ["blind-except"]
@@ -381,7 +376,59 @@ source_modules = ["astrometricslib", "wayfindinglib"]
 forbidden_modules = ["mcp_servers"]
 
 [[tool.importlinter.contracts]]
-name = "the library MCP servers never import the backend"
+name = "the library MCP servers, the gap server and the inventory never import the backend"
 type = "forbidden"
-source_modules = ["mcp_servers.common", "mcp_servers.astrometrics_core", "mcp_servers.wayfinding_core", "mcp_servers.devtools"]
+source_modules = [
+    "mcp_servers.common",
+    "mcp_servers.astrometrics_core",
+    "mcp_servers.wayfinding_core",
+    "mcp_servers.devtools",
+    "mcp_servers.gaps",
+    "mcp_servers.inventory",
+]
 forbidden_modules = ["backend"]
+
+[[tool.importlinter.contracts]]
+name = "the backend never imports the MCP servers"
+type = "forbidden"
+source_modules = ["backend"]
+forbidden_modules = ["mcp_servers"]
+
+[[tool.importlinter.contracts]]
+name = "the gap server never imports the libraries"
+type = "forbidden"
+source_modules = ["mcp_servers.gaps"]
+forbidden_modules = ["astrometricslib", "wayfindinglib", "backend"]
+# `mcp_servers.common.tool_errors` names `ErrorInfo` for type checking only,
+# so the chain through the shared server loop loads no library at run time.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "the backend MCP server imports only the backend's guard functions"
+type = "forbidden"
+source_modules = ["mcp_servers.backend"]
+forbidden_modules = [
+    "backend.container",
+    "backend.routers",
+    "backend.main_backend",
+    "backend.services.analysis",
+    "backend.services.data",
+    "backend.services.observatory",
+    "backend.services.processing",
+    "backend.services.rpc_protocol",
+    "backend.services.infrastructure.api_doc_generator",
+    "backend.services.infrastructure.astrometrics_service",
+    "backend.services.infrastructure.base_service",
+    "backend.services.infrastructure.decorators",
+    "backend.services.infrastructure.fallback_static_files",
+    "backend.services.infrastructure.handoff_service",
+    "backend.services.infrastructure.indi_worker",
+    "backend.services.infrastructure.maintenance_service",
+    "backend.services.infrastructure.notification_service",
+    "backend.services.infrastructure.scripting_service",
+    "backend.services.infrastructure.session_auth",
+    "backend.services.infrastructure.socket_manager",
+    "backend.services.infrastructure.sync_service",
+    "backend.services.infrastructure.system_status_service",
+    "backend.services.infrastructure.thread_management"
+]

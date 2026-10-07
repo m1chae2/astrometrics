@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.mcp import tool_inventory
-from backend.mcp.tool_dispositions import (
+from mcp_servers.inventory import tool_inventory
+from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
     DECISIONS,
     DISPOSITIONS,
@@ -21,7 +21,7 @@ from backend.mcp.tool_dispositions import (
     categorize_tool,
     replaced_by_lookup,
 )
-from backend.mcp.tool_inventory import (
+from mcp_servers.inventory.tool_inventory import (
     TOOL_CLASSES,
     ToolRecord,
     apply_decisions,
@@ -346,3 +346,12 @@ def test_navigate_and_notify_are_allowed_but_pause_is_not() -> None:
     by_name = {proposed.name: proposed for proposed in PROPOSED_TOOLS}
     allowed = by_name["app_controls"].argument_rules["investigator"]["action"]["allowed"]
     assert set(allowed) == {"navigate", "notify"}
+
+
+def test_ui_manifest_covers_every_declared_ui_tool() -> None:
+    """The UI server's manifest names exactly the tools its source declares."""
+    declared = {record.name for record in collect_ui_server_tools()}
+    manifest_path = tool_inventory.RUNTIME_MANIFEST_PATHS["astrometrics-ui"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest["tools"]) == declared
+    assert {entry["tool_class"] for entry in manifest["tools"].values()} == {"develop"}

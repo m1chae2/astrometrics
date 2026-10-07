@@ -1,18 +1,19 @@
 """Purpose: Tests for how the RPC layer reports errors and converts results.
 
-Description: These tests cover three behaviors of the RPC layer:
+Description: These tests cover these behaviors of the RPC layer:
 
 * An unknown method name is reported as "Method not found", but a
   ``KeyError`` raised inside a service is not.
 * ``serialize_rpc_result`` turns NumPy values into plain Python values
   instead of strings.
-* The MCP RPC proxy can run a method in-process and serialize the result.
+* An expected error is sent with its error record, and the request id tags
+  the call's log lines.
+
+The MCP server's RPC proxy is tested in ``mcp_servers/backend/test``.
 """
 
-import asyncio
 import json
 import math
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -22,10 +23,8 @@ from astrometricslib import (
     HardwareError,
     InvalidArgumentError,
     NotFoundError,
-    PermissionDeniedError,
 )
 from astrometricslib.foundation.logging import ContextFilter  # ruff: ignore[banned-api]
-from backend.mcp import tool_registry
 from backend.routers import rpc_router
 from backend.services.rpc_protocol import RPCMethodNotFoundError, RPCRequest, serialize_rpc_result
 
@@ -181,113 +180,6 @@ def test_an_unknown_type_is_logged_before_the_str_fallback(caplog: pytest.LogCap
     with caplog.at_level("WARNING", logger="backend.services.rpc_protocol"):
         assert serialize_rpc_result(Opaque()) == "opaque"
     assert "Opaque" in caplog.text
-
-
-@pytest.mark.anyio
-async def test_the_mcp_proxy_runs_a_method_in_process(
-    monkeypatch: pytest.MonkeyPatch, registered_methods: dict
-) -> None:
-    """Run `execute_rpc` in-process and serialize the result."""
-
-    def handler() -> dict:
-        """Return a result holding a NumPy value.
-
-        Returns
-        -------
-        result : `dict`
-            A dictionary with a NumPy integer.
-        """
-        return {"n": np.int64(3)}
-
-    registered_methods["test:numbers"] = handler
-    monkeypatch.setattr(tool_registry, "get_container", lambda: SimpleNamespace(initialized=True))
-
-    reply = await tool_registry.execute_rpc("test:numbers", {})
-    assert reply == {"n": 3}
-
-
-@pytest.mark.anyio
-async def test_the_mcp_proxy_raises_a_failed_method_in_process(
-    monkeypatch: pytest.MonkeyPatch, registered_methods: dict
-) -> None:
-    """An in-process method's error passes through `execute_rpc` as is."""
-
-    def handler() -> None:
-        """Raise an expected error.
-
-        Raises
-        ------
-        NotFoundError
-            Always.
-        """
-        raise NotFoundError("No target 'M 99'.")
-
-    registered_methods["test:missing"] = handler
-    monkeypatch.setattr(tool_registry, "get_container", lambda: SimpleNamespace(initialized=True))
-
-    with pytest.raises(NotFoundError, match="M 99"):
-        await tool_registry.execute_rpc("test:missing", {})
-    with pytest.raises(NotFoundError):
-        await tool_registry.execute_rpc("nothing:here", {})
-
-
-@pytest.mark.anyio
-async def test_the_mcp_proxy_raises_the_category_the_backend_sent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Over HTTP, the backend's error record is raised as its category."""
-
-    async def fake_post(endpoint: str, payload: dict | None = None, timeout: float = 120.0) -> dict:
-        """Answer the way the RPC route does for a failed call.
-
-        Returns
-        -------
-        reply : `dict`
-            A JSON-RPC error reply.
-        """
-        await asyncio.sleep(0)
-        return {
-            "jsonrpc": "2.0",
-            "id": "mcp-proxy",
-            "error": {
-                "code": -32002,
-                "message": "Device in use.",
-                "data": {"code": "conflict", "message": "Device in use.", "details": {"device": "mount"}},
-            },
-        }
-
-    monkeypatch.setattr(tool_registry, "get_container", lambda: None)
-    monkeypatch.setattr("backend.mcp.mcp_http.post_to_backend", fake_post)
-
-    with pytest.raises(ConflictError, match="Device in use") as caught:
-        await tool_registry.execute_rpc("telescope:slew", {})
-    assert caught.value.details == {"device": "mount"}
-
-
-@pytest.mark.anyio
-async def test_the_mcp_proxy_unwraps_a_successful_http_reply(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Over HTTP, the router's success envelope comes off the result."""
-
-    async def fake_post(endpoint: str, payload: dict | None = None, timeout: float = 120.0) -> dict:
-        """Answer the way the RPC route does for a successful call.
-
-        Returns
-        -------
-        reply : `dict`
-            A JSON-RPC success reply.
-        """
-        await asyncio.sleep(0)
-        return {"jsonrpc": "2.0", "id": "mcp-proxy", "result": {"status": "success", "data": [1, 2]}}
-
-    monkeypatch.setattr(tool_registry, "get_container", lambda: None)
-    monkeypatch.setattr("backend.mcp.mcp_http.post_to_backend", fake_post)
-
-    assert await tool_registry.execute_rpc("target:list", {}) == [1, 2]
-
-
-@pytest.mark.anyio
-async def test_backend_call_rpc_refuses_a_destructive_method() -> None:
-    """A delete-style method is refused with PermissionDeniedError."""
-    with pytest.raises(PermissionDeniedError):
-        await tool_registry.tool_backend_call_rpc("target:delete", {"target_id": "M31"})
 
 
 @pytest.mark.anyio

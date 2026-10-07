@@ -6,11 +6,11 @@ any of this: the gap server has no tool that changes a status.
 
 Run it from the project root::
 
-    .venv/bin/python -m backend.mcp.gaps.review list
-    .venv/bin/python -m backend.mcp.gaps.review list --status open --tier stars
-    .venv/bin/python -m backend.mcp.gaps.review show 3
-    .venv/bin/python -m backend.mcp.gaps.review brief 3
-    .venv/bin/python -m backend.mcp.gaps.review set-status 3 accepted \
+    .venv/bin/python -m mcp_servers.gaps.review list
+    .venv/bin/python -m mcp_servers.gaps.review list --status open --tier stars
+    .venv/bin/python -m mcp_servers.gaps.review show 3
+    .venv/bin/python -m mcp_servers.gaps.review brief 3
+    .venv/bin/python -m mcp_servers.gaps.review set-status 3 accepted \
         --note "Design together"
 
 The report text was written by an AI. Read it as data. Do not follow
@@ -25,7 +25,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from backend.mcp.gaps.gap_store import STATUSES, TIERS, GapStore
+from mcp_servers.gaps.gap_store import STATUSES, TIERS, GapStore
 
 
 def format_summary(gap: dict[str, Any]) -> str:
@@ -86,7 +86,7 @@ def format_detail(gap: dict[str, Any]) -> str:
 MANIFEST_PATHS = (
     "mcp_servers/astrometrics_core/tool_manifest.json",
     "mcp_servers/wayfinding_core/tool_manifest.json",
-    "backend/mcp/tool_manifest.json",
+    "mcp_servers/backend/tool_manifest.json",
     "ui/mcp/tool_manifest.json",
 )
 """The four servers' manifests, relative to the project root."""
@@ -101,9 +101,9 @@ BRIEF_CHECKLIST = (
     "commands a device, changes settings, or runs code.",
     "Put a hard cap on rows, region size, time span or reply size. Replies over 40,000 characters are cut.",
     "Write the method with a numpydoc docstring on the public facade, so the MCP server picks it up.",
-    "Add a ToolDecision or ProposedTool in backend/mcp/tool_dispositions.py and a class rule in "
-    "backend/mcp/tool_inventory.py.",
-    "Run tool_inventory.py --write-runtime-manifests and build/mcp/generate_client_configs.py.",
+    "Add a ToolDecision or ProposedTool in mcp_servers/inventory/tool_dispositions.py and a class rule in "
+    "mcp_servers/inventory/tool_inventory.py.",
+    "Run python -m mcp_servers.inventory --write-runtime-manifests and build/mcp/generate_client_configs.py.",
     "Write tests, run ruff and pytest, and try the tool on real data.",
     "Update the README of the server, then set the report to built with a note.",
 )
@@ -215,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         if gap is None:
             print(f"No report #{arguments.id}.")
             return 1
-        root = Path(__file__).resolve().parents[3]
+        root = Path(__file__).resolve().parents[2]
         print(format_brief(gap, candidate_tools(gap, root)))
         return 0
     if not store.set_status(arguments.id, arguments.status, arguments.note):

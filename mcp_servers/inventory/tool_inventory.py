@@ -18,7 +18,7 @@ no server serves.
 
 Run it from the project root::
 
-    .venv/bin/python -m backend.mcp.tool_inventory
+    .venv/bin/python -m mcp_servers.inventory
 
 The script only reads. It imports the tool registries the same way the MCP
 servers do, so it does not connect to the telescope or call any tool.
@@ -28,13 +28,12 @@ import argparse
 import importlib
 import json
 import re
-import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.mcp.tool_dispositions import (
+from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
     DECISIONS,
     DISPOSITIONS,
@@ -50,8 +49,6 @@ from backend.mcp.tool_dispositions import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "scratch" / "mcp_tool_inventory"
 """Where the draft files go unless ``--output-dir`` says otherwise."""
@@ -62,7 +59,7 @@ REVIEW_FILE_NAME = "tool_manifest_review.md"
 PYTHON_SERVER_MODULES = {
     "astrometricslib-core": "mcp_servers.astrometrics_core.definition",
     "wayfindinglib-core": "mcp_servers.wayfinding_core.definition",
-    "astrometrics-backend": "backend.mcp.tool_registry",
+    "astrometrics-backend": "mcp_servers.backend.definition",
 }
 """MCP server name -> module that builds its tool registry."""
 
@@ -73,7 +70,7 @@ UI_SERVER_SOURCE = PROJECT_ROOT / "ui" / "mcp" / "src" / "index.ts"
 RUNTIME_MANIFEST_PATHS = {
     "astrometricslib-core": PROJECT_ROOT / "mcp_servers" / "astrometrics_core" / "tool_manifest.json",
     "wayfindinglib-core": PROJECT_ROOT / "mcp_servers" / "wayfinding_core" / "tool_manifest.json",
-    "astrometrics-backend": PROJECT_ROOT / "backend" / "mcp" / "tool_manifest.json",
+    "astrometrics-backend": PROJECT_ROOT / "mcp_servers" / "backend" / "tool_manifest.json",
     "astrometrics-ui": PROJECT_ROOT / "ui" / "mcp" / "tool_manifest.json",
 }
 """Where each MCP server reads the manifest that limits its tools."""
@@ -723,7 +720,7 @@ def build_runtime_manifest(server: str, records: list[ToolRecord]) -> dict[str, 
     """
     return {
         "server": server,
-        "generated_by": "backend/mcp/tool_inventory.py --write-runtime-manifests",
+        "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
         "tools": {
             record.name: {
                 "tool_class": record.tool_class,
@@ -1079,7 +1076,3 @@ def main(argv: list[str] | None = None) -> int:
     for problem in problems:
         print(f"PROBLEM: {problem}")
     return 1 if problems else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

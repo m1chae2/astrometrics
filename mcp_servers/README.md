@@ -26,7 +26,7 @@ The rules fail closed:
 
 Tools marked `merge` stay available until the tool that replaces them exists. Once it exists, they are marked `merged`: they are no longer offered, and a call to one says which tool replaced it.
 
-Do not edit `tool_manifest.json` by hand. `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. `mcp_servers/inventory/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
 
 ## How a tool call reaches a method
 

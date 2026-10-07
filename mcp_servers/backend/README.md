@@ -4,7 +4,7 @@ This folder holds the MCP server for the backend. MCP (Model Context Protocol) i
 
 ## What each file is for
 
-- `__main__.py` — starts the server. Run it with `python -m backend.mcp`.
+- `__main__.py` — starts the server. Run it with `python -m mcp_servers.backend`.
 - `tool_registry.py` — holds the list of tools this server offers, and runs a tool when the AI calls it.
 - `tool_manifest.json` — the reviewed list of this server's tools, with a class and a disposition for each. The server offers only the tools this file allows. Do not edit it by hand: `tool_inventory.py --write-runtime-manifests` writes it.
 - `mcp_http.py` — holds the settings for talking to the running backend: its address and the HTTP methods the tools may use.
@@ -25,7 +25,7 @@ The rules live in `mcp_servers/common/profile.py`. `tests/test_mcp_backend_profi
 
 The other MCP servers give an AI tools that look things up, calculate and measure (and one that brings frames in). When those tools cannot do what the AI needs, the AI should stop and say so. It should not look for a workaround. The gap server is where it records that.
 
-The server is its own program: run it with `python -m backend.mcp.gaps`. It has two tools:
+The server is its own program: run it with `python -m mcp_servers.gaps`. It has two tools:
 
 - `report_capability_gap` saves a report: the goal, the tools tried and what they returned, why they fell short, and optionally the tool that would help. This is the only thing the AI may write. A report that repeats an open one is counted against it.
 - `list_capability_gaps` lets the AI check whether a gap is already reported.
@@ -33,10 +33,10 @@ The server is its own program: run it with `python -m backend.mcp.gaps`. It has 
 The reports go into a small database of their own, `logs/capability_gaps.db`. Set `ASTROMETRICS_GAP_DATABASE` to use another file. The AI cannot change a report's status. You read and resolve reports with the review command:
 
 ```bash
-.venv/bin/python -m backend.mcp.gaps.review list
-.venv/bin/python -m backend.mcp.gaps.review show 3
-.venv/bin/python -m backend.mcp.gaps.review brief 3
-.venv/bin/python -m backend.mcp.gaps.review set-status 3 accepted --note "Design together"
+.venv/bin/python -m mcp_servers.gaps.review list
+.venv/bin/python -m mcp_servers.gaps.review show 3
+.venv/bin/python -m mcp_servers.gaps.review brief 3
+.venv/bin/python -m mcp_servers.gaps.review set-status 3 accepted --note "Design together"
 ```
 
 `brief` turns a report into a design brief. It lists existing tools whose names share a word with the report, so you can read their code and check whether an argument on one of them would do. It then lists the questions to settle and the steps from a report to a built tool: choose the layer and class, put a hard cap on the answer, add the manifest decision, regenerate the configs, test on real data, and update the README.

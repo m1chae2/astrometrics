@@ -8,7 +8,7 @@ set -euo pipefail
 # the app offers to the read-only profile, and it has no shell, no file access
 # and no code runner. When its tools cannot do something, it files a report
 # with the gap server instead of looking for a workaround. Read the reports
-# with:  .venv/bin/python -m backend.mcp.gaps.review list
+# with:  .venv/bin/python -m mcp_servers.gaps.review list
 #
 # The MCP config comes from .claude/companion.mcp.json and the agent from
 # .claude/agents/investigator.md. Both are written by

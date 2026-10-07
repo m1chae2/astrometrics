@@ -4,24 +4,24 @@ Description: The other MCP servers give an AI read-only tools. This server
 has the one write the AI is allowed: ``report_capability_gap``, which saves a
 note in a small database of its own. ``list_capability_gaps`` lets the AI
 check whether a gap is already reported. A person reads the reports with
-``python -m backend.mcp.gaps.review`` and decides what to build. The AI
+``python -m mcp_servers.gaps.review`` and decides what to build. The AI
 cannot change a report's status.
 
-The server imports only the standard library and the MCP package, so it
-starts quickly and keeps working when the rest of the app is down.
+The server imports only the standard library, the MCP package and the
+shared server loop in ``mcp_servers.common``, so it starts quickly and keeps
+working when the rest of the app is down.
 """
 
-import asyncio
 import json
 import logging
 import sys
 from typing import Any
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import CallToolResult, TextContent, Tool
+from mcp.types import TextContent, Tool
 
-from backend.mcp.gaps.gap_store import (
+from mcp_servers.common.server import run_server
+from mcp_servers.common.tool_errors import ToolErrorContent
+from mcp_servers.gaps.gap_store import (
     MAXIMUM_LISTED_GAPS,
     MAXIMUM_TEXT_LENGTH,
     MAXIMUM_TOOLS_TRIED,
@@ -31,10 +31,10 @@ from backend.mcp.gaps.gap_store import (
     GapStore,
     validate_report,
 )
-from backend.mcp.tool_dispositions import CATEGORIES
+from mcp_servers.inventory.tool_dispositions import CATEGORIES
 
-# Log to stderr so the MCP messages on stdout stay clean.
-logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+SERVER_NAME = "astrometrics-gaps"
+"""The server's name in the client configurations."""
 
 INSTRUCTIONS = (
     "This server is where you report what the other tools cannot do. If none of the tools you can use can "
@@ -43,7 +43,6 @@ INSTRUCTIONS = (
     "report the same gap twice."
 )
 
-app = Server("astrometrics-gaps", instructions=INSTRUCTIONS)
 store = GapStore()
 
 REPORT_SCHEMA: dict[str, Any] = {
@@ -112,18 +111,6 @@ TOOLS = [
 """The two tools this server offers to every profile."""
 
 
-@app.list_tools()
-async def list_tools() -> list[Tool]:  # ruff: ignore[unused-async] -- awaited by mcp Server.list_tools
-    """List the two gap tools.
-
-    Returns
-    -------
-    tools : `list` [`Tool`]
-        The report tool and the list tool.
-    """
-    return TOOLS
-
-
 def handle_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Run one gap tool.
 
@@ -161,37 +148,49 @@ def handle_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     raise GapReportError(f"Unknown tool {name}.")
 
 
-@app.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolResult:  # ruff: ignore[unused-async] -- awaited by mcp Server
-    """Run a gap tool and return its answer as JSON text.
+class GapTools:
+    """List and run the two gap tools for the shared server loop."""
 
-    Parameters
-    ----------
-    name : `str`
-        The tool name.
-    arguments : `dict`
-        The call's arguments.
+    def get_tool_definitions(self) -> list[Tool]:
+        """List the two gap tools.
 
-    Returns
-    -------
-    content : `list` [`TextContent`] or `~mcp.types.CallToolResult`
-        The result as indented JSON. A refused call comes back as an MCP
-        error result (``isError``) whose text is ``code: message``, the
-        same shape the other servers use.
-    """
-    try:
-        result = handle_call(name, arguments if isinstance(arguments, dict) else {})
-    except GapReportError as error:
-        text = f"{error.code}: {error}"
-        return CallToolResult(content=[TextContent(type="text", text=text)], isError=True)
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        Returns
+        -------
+        tools : `list` [`mcp.types.Tool`]
+            The report tool and the list tool.
+        """
+        return TOOLS
+
+    async def execute(self, name: str, arguments: dict[str, Any]) -> list[TextContent]:
+        """Run a gap tool and return its answer as JSON text.
+
+        Parameters
+        ----------
+        name : `str`
+            The tool name.
+        arguments : `dict`
+            The call's arguments.
+
+        Returns
+        -------
+        content : `list` [`mcp.types.TextContent`]
+            The result as indented JSON. A refused call comes back as a
+            `ToolErrorContent` whose text is ``code: message``, the same
+            shape the other servers use.
+        """
+        try:
+            result = handle_call(name, arguments if isinstance(arguments, dict) else {})
+        except GapReportError as error:
+            return ToolErrorContent([TextContent(type="text", text=f"{error.code}: {error}")])
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
 
-async def main() -> None:
-    """Run the stdio server loop."""
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+def main() -> None:
+    """Serve the gap tools to one client over stdin and stdout."""
+    # Log to stderr so the MCP messages on stdout stay clean.
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
+    run_server(SERVER_NAME, INSTRUCTIONS, GapTools())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

@@ -7,7 +7,7 @@ This folder holds a small MCP (Model Context Protocol) server written in TypeScr
 - `src/index.ts` — starts the server and lists its tools.
 - `src/tools.ts` — runs the four checks. Each one runs a fixed command, so the AI cannot send its own command text.
 - `src/profile.ts` — decides which tools the server offers. See the next section.
-- `tool_manifest.json` — the reviewed list of the four tools, with a class and a disposition for each. Do not edit it by hand: `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it.
+- `tool_manifest.json` — the reviewed list of the four tools, with a class and a disposition for each. Do not edit it by hand: `mcp_servers/inventory/tool_inventory.py --write-runtime-manifests` writes it.
 - `tests/test_profile.ts` — tests for the profile rules.
 
 ## Which tools the server offers

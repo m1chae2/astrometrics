@@ -14,7 +14,7 @@ When the server starts, it removes every tool that the manifest does not allow f
 
 The rules fail closed. A tool that is missing from the manifest is not offered, so a new public method stays hidden until someone reviews it. A missing manifest withholds every tool. A tool can also carry an `interim_block`, which hides a read-only tool until a known problem is fixed.
 
-Do not edit `tool_manifest.json` by hand. The script `backend/mcp/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `test/test_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. The script `mcp_servers/inventory/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `test/test_profile.py` fails if a registered tool has no manifest entry.
 
 ## What a client sends
 

@@ -116,6 +116,8 @@ def test_apply_profile_removes_tools_and_calls_to_them_fail(tmp_path: Path) -> N
     assert set(reasons) == {"write_it", "unlisted"}
     result = asyncio.run(test_registry.execute("write_it", {}))
     assert "Unknown tool" in result[0].text
+    assert "change-data" in result[0].text
+    assert "report_capability_gap" in result[0].text
 
 
 def test_a_merged_tool_is_withheld_and_names_its_replacement() -> None:

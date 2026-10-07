@@ -23,8 +23,8 @@ CONFIGURING_CALLS = frozenset({"basicConfig", "addHandler", "removeHandler", "se
 ALLOWED_FILES: dict[str, str] = {
     "astrometricslib/foundation/logging.py": "implements configure_logging and the job log router",
     "backend/main_backend.py": "program entry point",
-    "backend/mcp/__main__.py": "program entry point",
-    "backend/mcp/gaps/__main__.py": "program entry point that imports only the standard library",
+    "mcp_servers/backend/__main__.py": "program entry point",
+    "mcp_servers/gaps/__main__.py": "program entry point that imports only the standard library",
     "mcp_servers/astrometrics_core/__main__.py": "program entry point",
     "mcp_servers/wayfinding_core/__main__.py": "program entry point",
 }

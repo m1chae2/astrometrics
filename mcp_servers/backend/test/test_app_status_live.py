@@ -12,8 +12,8 @@ import asyncio
 import pytest
 
 from astrometricslib import HardwareError, InvalidArgumentError
-from backend.mcp import tool_registry
-from backend.mcp.tool_registry import _unwrap, tool_app_controls, tool_app_status
+from mcp_servers.backend import definition
+from mcp_servers.backend.definition import _unwrap, tool_app_controls, tool_app_status
 
 MOUNT_PROPERTIES = {
     "TELESCOPE_PIER_SIDE": {"state": "Idle", "elements": {"PIER_WEST": "On", "PIER_EAST": "Off"}},
@@ -84,7 +84,7 @@ def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
             raise answer
         return wrapped(answer)
 
-    monkeypatch.setattr(tool_registry, "execute_rpc", fake_execute_rpc)
+    monkeypatch.setattr(definition, "execute_rpc", fake_execute_rpc)
     return calls
 
 
@@ -143,7 +143,7 @@ def test_a_failed_section_is_reported_as_error_info(
     fake_backend: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed section holds an ErrorInfo; the others still answer."""
-    original = tool_registry.execute_rpc
+    original = definition.execute_rpc
 
     async def broken_guiding(method: str, params: dict | None = None) -> object:
         """Fail the guiding call and answer the rest from the canned table.
@@ -155,7 +155,7 @@ def test_a_failed_section_is_reported_as_error_info(
         """
         return await original("guiding:broken" if method == "guiding:status" else method, params)
 
-    monkeypatch.setattr(tool_registry, "execute_rpc", broken_guiding)
+    monkeypatch.setattr(definition, "execute_rpc", broken_guiding)
     answer = asyncio.run(tool_app_status(["guiding", "system"]))
 
     assert answer["guiding"]["error"]["code"] == "hardware"

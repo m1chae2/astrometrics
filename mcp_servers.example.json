@@ -28,7 +28,7 @@
       "command": "/path/to/astrometrics/.venv/bin/python",
       "args": [
         "-m",
-        "backend.mcp"
+        "mcp_servers.backend"
       ],
       "cwd": "/path/to/astrometrics",
       "env": {
@@ -42,7 +42,7 @@
       "command": "/path/to/astrometrics/.venv/bin/python",
       "args": [
         "-m",
-        "backend.mcp.gaps"
+        "mcp_servers.gaps"
       ],
       "cwd": "/path/to/astrometrics",
       "env": {

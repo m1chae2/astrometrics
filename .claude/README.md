@@ -24,15 +24,15 @@ The project runs five MCP servers. For an AI client they look things up, calcula
 |---|---|---|
 | `astrometricslib-core` | `.venv/bin/python -m mcp_servers.astrometrics_core` | Lookups and calculations on targets, stars, calibration, stacks and frames |
 | `wayfindinglib-core` | `.venv/bin/python -m mcp_servers.wayfinding_core` | Observatory status, equipment state, past-night analysis, planning. No device commands |
-| `astrometrics-backend` | `.venv/bin/python -m backend.mcp` | Backend health, documentation, change the view, show a notification |
-| `astrometrics-gaps` | `.venv/bin/python -m backend.mcp.gaps` | Report what the tools cannot do |
+| `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view, show a notification |
+| `astrometrics-gaps` | `.venv/bin/python -m mcp_servers.gaps` | Report what the tools cannot do |
 | `astrometrics-ui` | `node ui/mcp/dist/index.js` | Developer profile only: UI tests, type check, build, accessibility |
 
 Each server reads a `tool_manifest.json` and offers only the tools it allows for the chosen profile (`ASTROMETRICS_MCP_PROFILE`, default `investigator`). See `mcp_servers/README.md`.
 
 - `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json` from one list of servers. Run it after a manifest changes. Do not edit those files by hand.
 - `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent.
-- `.venv/bin/python -m backend.mcp.gaps.review list` shows the gaps an AI reported.
+- `.venv/bin/python -m mcp_servers.gaps.review list` shows the gaps an AI reported.
 
 #### Chrome DevTools MCP Server
 - **Location**: `mcp_servers.json`

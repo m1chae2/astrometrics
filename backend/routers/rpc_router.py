@@ -214,6 +214,7 @@ class RPCHandlerRegistry:
         self.register("system:cameras", ("config_service", "get_available_cameras"))
         self.register("system:filters", ("config_service", "get_available_filters"))
         self.register("system:pulse", ("system_status_service", "get_pulse"))
+        self.register("system:notifications", ("notification_service", "get_notifications"))
         self.register("system:save", lambda: container.astrometrics.targets.save())
         self.register("terminal:execute", ("scripting_service", "execute_structured"))
         self.register("terminal:get_workspace", ("scripting_service", "get_workspace_manifest"))

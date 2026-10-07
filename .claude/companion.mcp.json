@@ -28,7 +28,7 @@
       "command": "$CLAUDE_PROJECT_DIR/.venv/bin/python",
       "args": [
         "-m",
-        "backend.mcp"
+        "mcp_servers.backend"
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {
@@ -42,7 +42,7 @@
       "command": "$CLAUDE_PROJECT_DIR/.venv/bin/python",
       "args": [
         "-m",
-        "backend.mcp.gaps"
+        "mcp_servers.gaps"
       ],
       "cwd": "$CLAUDE_PROJECT_DIR",
       "env": {

@@ -29,7 +29,7 @@ cd "$(git rev-parse --show-toplevel)"
 .venv/bin/python -m mcp_servers.astrometrics_core &
 
 # 2. Start Backend MCP in background
-.venv/bin/python -m backend.mcp &
+.venv/bin/python -m mcp_servers.backend &
 ```
 
 ## 3. Verify

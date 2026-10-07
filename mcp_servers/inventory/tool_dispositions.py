@@ -66,14 +66,6 @@ gives a read-only form."""
 READ_ONLY_NOTE = "The AI is read-only, so a tool that writes is not offered."
 
 INTERIM_BLOCKS = {
-    "ui_pause_pipelines": (
-        "Freezes Siril and the plate solver, so it is not read-only. Closed by decision: the AI may "
-        "navigate and notify only."
-    ),
-    "ui_resume_pipelines": (
-        "Thaws Siril and the plate solver, so it is not read-only. Closed by decision: the AI may "
-        "navigate and notify only."
-    ),
     "observatory_mount_status": (
         "Connects through connect_to_telescope, which sends CONNECTION=ON to every INDI device that is off. "
         "Blocked until it uses the connect-only path. app_status reports the mount through the backend."
@@ -625,7 +617,7 @@ PROPOSED_TOOLS = (
         "observe",
         notes=(
             "Built 2026-10-03 as tool_app_status. health is the old probe; connections and system come "
-            "from the system:health RPC; active_jobs comes from the job history (Jobs.query). view is "
+            "from the system:health RPC; active_jobs comes from the processing:active_jobs RPC. view is "
             "not tracked by the backend, so the reply says so instead of guessing."
         ),
         built=True,
@@ -633,24 +625,18 @@ PROPOSED_TOOLS = (
     ProposedTool(
         "app_controls",
         "app",
-        "Do what the person can do in the app: change the view, show a notification, pause or resume jobs.",
+        "Do what the person can do in the app: change the view or show a notification.",
+        ("ui_navigate_mode", "ui_show_notification"),
         (
-            "ui_navigate_mode",
-            "ui_show_notification",
-            "ui_pause_pipelines",
-            "ui_resume_pipelines",
-        ),
-        (
-            "action: navigate | notify (pause and resume are not offered)",
+            "action: navigate | notify",
             "mode, target",
             "title, body, urgency",
         ),
         "ui-control",
         {"investigator": {"action": {"allowed": ["navigate", "notify"]}}},
         (
-            "The user allows navigate and notify. pause and resume freeze or thaw Siril and the "
-            "plate solver, "
-            "so they are not read-only and stay closed."
+            "The user allows navigate and notify. The old pause and resume tools froze or thawed Siril "
+            "and the plate solver, so they were not read-only and were removed."
         ),
         built=True,
     ),

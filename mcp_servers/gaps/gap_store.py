@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 DATABASE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_GAP_DATABASE"
 """Environment variable that overrides the database location."""

@@ -7,7 +7,7 @@ instead of returning an error dictionary.
 import pytest
 
 from astrometricslib import ExternalServiceError, PermissionDeniedError
-from backend.mcp import mcp_http
+from mcp_servers.backend import mcp_http
 
 
 @pytest.mark.anyio

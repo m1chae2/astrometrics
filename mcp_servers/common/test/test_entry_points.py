@@ -1,8 +1,8 @@
-"""Purpose: Check that each library MCP server starts and lists its tools.
+"""Purpose: Check that each Python MCP server starts and lists its tools.
 
-Description: ``python -m mcp_servers.astrometrics_core`` and
-``python -m mcp_servers.wayfinding_core`` run the ``main`` function of the
-package's ``__main__`` module. These tests call that function in this
+Description: ``python -m mcp_servers.astrometrics_core`` and the other
+server packages run the ``main`` function of the package's ``__main__``
+module. These tests call that function in this
 process, with the stdin/stdout loop replaced by a stand-in. The stand-in
 records what the server would have served, so the test sees the server name
 and the tool list without starting a subprocess that waits for a client.
@@ -14,15 +14,21 @@ from typing import Any
 import pytest
 
 SERVERS = [
-    ("mcp_servers.astrometrics_core.__main__", "astrometrics-core", "diagnostics_frame_quality"),
-    ("mcp_servers.wayfinding_core.__main__", "wayfindinglib-core", "planning_get_visibility"),
+    ("mcp_servers.astrometrics_core.__main__", "astrometrics-core", "diagnostics_frame_quality", 10),
+    ("mcp_servers.wayfinding_core.__main__", "wayfindinglib-core", "planning_get_visibility", 10),
+    ("mcp_servers.backend.__main__", "astrometrics-backend", "app_status", 2),
 ]
-"""Entry module, server name it announces, and one tool it must offer."""
+"""Entry module, server name it announces, one tool it must offer, and the
+fewest tools it may list."""
 
 
-@pytest.mark.parametrize(("module_name", "server_name", "expected_tool"), SERVERS)
+@pytest.mark.parametrize(("module_name", "server_name", "expected_tool", "minimum_tools"), SERVERS)
 def test_entry_point_builds_its_registry_and_lists_tools(
-    module_name: str, server_name: str, expected_tool: str, monkeypatch: pytest.MonkeyPatch
+    module_name: str,
+    server_name: str,
+    expected_tool: str,
+    minimum_tools: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``main()`` builds the registry, applies the profile and serves it."""
     entry_module = importlib.import_module(module_name)
@@ -42,4 +48,4 @@ def test_entry_point_builds_its_registry_and_lists_tools(
     assert served["instructions"]
     tool_names = {tool.name for tool in served["tools"].get_tool_definitions()}
     assert expected_tool in tool_names
-    assert len(tool_names) > 10
+    assert len(tool_names) > minimum_tools

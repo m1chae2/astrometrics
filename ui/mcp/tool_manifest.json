@@ -1,6 +1,6 @@
 {
   "server": "astrometrics-ui",
-  "generated_by": "backend/mcp/tool_inventory.py --write-runtime-manifests",
+  "generated_by": "python -m mcp_servers.inventory --write-runtime-manifests",
   "tools": {
     "ui_audit_accessibility": {
       "tool_class": "develop",

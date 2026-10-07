@@ -7,21 +7,20 @@ review command, and that every refusal tells the client to file a report.
 """
 
 import asyncio
-import json
 from pathlib import Path
 
 import pytest
 
-from backend.mcp.gaps import __main__ as gap_server
-from backend.mcp.gaps import review
-from backend.mcp.gaps.gap_store import (
+from mcp_servers.common.profile import GAP_REPORT_GUIDANCE, refusal_message
+from mcp_servers.common.tool_errors import as_call_tool_result
+from mcp_servers.gaps import __main__ as gap_server
+from mcp_servers.gaps import review
+from mcp_servers.gaps.gap_store import (
     MAXIMUM_TEXT_LENGTH,
     GapReportError,
     GapStore,
     validate_report,
 )
-from backend.mcp.tool_registry import ToolRegistry
-from mcp_servers.common.profile import GAP_REPORT_GUIDANCE, refusal_message
 
 VALID_REPORT = {
     "tier": "astrometricslib",
@@ -134,14 +133,16 @@ def test_the_server_tools_report_and_list(monkeypatch: pytest.MonkeyPatch, store
 def test_a_refused_call_is_an_mcp_error_result(monkeypatch: pytest.MonkeyPatch, store: GapStore) -> None:
     """A bad report comes back flagged isError with code invalid_argument."""
     monkeypatch.setattr(gap_server, "store", store)
-    result = asyncio.run(gap_server.call_tool("report_capability_gap", {"tier": "ui"}))
+    result = as_call_tool_result(
+        asyncio.run(gap_server.GapTools().execute("report_capability_gap", {"tier": "ui"}))
+    )
     assert result.isError is True
     assert result.content[0].text.startswith("invalid_argument: Missing required")
 
 
 def test_the_server_has_no_tool_that_changes_a_status() -> None:
     """The AI can report and list, nothing more."""
-    names = {tool.name for tool in asyncio.run(gap_server.list_tools())}
+    names = {tool.name for tool in gap_server.GapTools().get_tool_definitions()}
     assert names == {"report_capability_gap", "list_capability_gaps"}
 
 
@@ -183,18 +184,3 @@ def test_refusal_message_tells_the_client_to_file_a_report() -> None:
     assert "report_capability_gap" in withheld
     assert "report_capability_gap" in refusal_message("nothing_like_it")
     assert "report_capability_gap" in GAP_REPORT_GUIDANCE
-
-
-def test_a_withheld_backend_tool_call_returns_the_refusal(tmp_path: Path) -> None:
-    """Calling a withheld tool explains why and points to the gap server."""
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(
-        json.dumps({"tools": {"write_it": {"tool_class": "change-data", "disposition": "keep"}}})
-    )
-    registry = ToolRegistry()
-    registry.register("write_it", "A test tool.")(lambda: "done")
-    registry.apply_profile(manifest, "investigator")
-    text = asyncio.run(registry.execute("write_it", {}))[0].text
-    assert "Unknown tool write_it" in text
-    assert "change-data" in text
-    assert "report_capability_gap" in text

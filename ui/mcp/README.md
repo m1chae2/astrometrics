@@ -14,7 +14,7 @@ This folder holds a small MCP (Model Context Protocol) server written in TypeScr
 
 All four tools run the project's own code, so they belong to the `developer` class. The default profile, `investigator`, offers none of them. The `developer` profile offers all four. Set the `ASTROMETRICS_MCP_PROFILE` environment variable to choose. An unknown name falls back to `investigator`. A tool that is missing from the manifest is not offered, and a missing manifest withholds every tool.
 
-The rules match `astrometricslib/mcp/profile.py`. Keep the two files in step.
+The rules match `mcp_servers/common/profile.py`. Keep the two files in step.
 
 Run `npm run build` in this folder after you change a file in `src/`. The client config starts the compiled copy in `dist/`.
 

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from mcp_servers.common.profile import GAP_REPORT_GUIDANCE, refusal_message
 from backend.mcp.gaps import __main__ as gap_server
 from backend.mcp.gaps import review
 from backend.mcp.gaps.gap_store import (
@@ -22,6 +21,7 @@ from backend.mcp.gaps.gap_store import (
     validate_report,
 )
 from backend.mcp.tool_registry import ToolRegistry
+from mcp_servers.common.profile import GAP_REPORT_GUIDANCE, refusal_message
 
 VALID_REPORT = {
     "tier": "astrometricslib",

@@ -26,7 +26,7 @@ pkill -f "node dist/index.js"
 cd "$(git rev-parse --show-toplevel)"
 
 # 1. Start Core MCP in background
-.venv/bin/python -m astrometricslib.mcp &
+.venv/bin/python -m mcp_servers.astrometrics_core &
 
 # 2. Start Backend MCP in background
 .venv/bin/python -m backend.mcp &

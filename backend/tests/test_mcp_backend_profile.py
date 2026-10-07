@@ -9,9 +9,9 @@ only the four reviewed backend tools.
 import json
 from pathlib import Path
 
-from mcp_servers.common.profile import load_manifest
 from backend.mcp.tool_inventory import collect_ui_server_tools
 from backend.mcp.tool_registry import ToolRegistry, registry
+from mcp_servers.common.profile import load_manifest
 
 BACKEND_MANIFEST = Path(__file__).resolve().parent.parent / "mcp" / "tool_manifest.json"
 UI_MANIFEST = Path(__file__).resolve().parent.parent.parent / "ui" / "mcp" / "tool_manifest.json"

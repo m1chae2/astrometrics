@@ -373,10 +373,6 @@ forbidden_modules = [
     "wayfindinglib.watchdog",
 ]
 allow_indirect_imports = true
-ignore_imports = [
-    # Tests may reach into internals to build fixtures.
-    "mcp_servers.**.test.** -> astrometricslib.**",
-]
 
 [[tool.importlinter.contracts]]
 name = "the libraries never import the MCP servers"

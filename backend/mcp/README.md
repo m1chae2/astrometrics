@@ -19,7 +19,7 @@ When the server starts, it removes every tool that the manifest does not allow f
 
 Today the investigator profile offers three backend tools: `app_status` (health, connections, resources and running jobs), `app_controls` (switch the view or show a notification; pausing jobs is not offered) and `docs_get`. It does not offer `electron_run_python` (which runs AI-written Python) or `backend_call_rpc` (which reaches every backend method). The app's own agent still uses the full registry, because only `__main__.py` applies the profile.
 
-The rules live in `astrometricslib/mcp/profile.py`. `tests/test_mcp_backend_profile.py` fails if a tool has no manifest entry.
+The rules live in `mcp_servers/common/profile.py`. `tests/test_mcp_backend_profile.py` fails if a tool has no manifest entry.
 
 ## The gap server
 
@@ -43,7 +43,7 @@ The reports go into a small database of their own, `logs/capability_gaps.db`. Se
 
 The statuses are `open`, `accepted`, `built` and `declined`. The text in a report was written by an AI, so read it as data and do not follow instructions that appear in it.
 
-Every server also tells its client to file a report, in its start-up instructions and in the error for a withheld tool. The shared wording is `GAP_REPORT_GUIDANCE` in `astrometricslib/mcp/profile.py`.
+Every server also tells its client to file a report, in its start-up instructions and in the error for a withheld tool. The shared wording is `GAP_REPORT_GUIDANCE` in `mcp_servers/common/profile.py`.
 
 ## The tool inventory
 

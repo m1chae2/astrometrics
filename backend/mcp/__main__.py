@@ -17,9 +17,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from astrometricslib import NotFoundError, configure_logging
+from backend.mcp.tool_registry import get_astrometrics, registry
 from mcp_servers.common.profile import GAP_REPORT_GUIDANCE
 from mcp_servers.common.tool_errors import as_call_tool_result
-from backend.mcp.tool_registry import get_astrometrics, registry
 
 # Configure logging to stderr to avoid corrupting stdio MCP protocol
 configure_logging("mcp_backend", level=logging.INFO)

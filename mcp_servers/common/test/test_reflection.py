@@ -95,9 +95,7 @@ async def test_a_background_job_method_records_its_own_job(
     stacks_path = tmp_path / "stacks"
     stacks_path.mkdir()
     monkeypatch.setattr(configuration, "get_logs_path", lambda: tmp_path)
-    monkeypatch.setattr(
-        configuration, "get_logs_db_path", lambda: str(tmp_path / "astrometrics_log.db")
-    )
+    monkeypatch.setattr(configuration, "get_logs_db_path", lambda: str(tmp_path / "astrometrics_log.db"))
     monkeypatch.setattr(configuration, "get_stacks_path", lambda: stacks_path)
     received = {}
 

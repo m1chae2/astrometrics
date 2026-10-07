@@ -3,7 +3,7 @@
  *
  * Each MCP server has a manifest, `tool_manifest.json`, that gives every tool a class,
  * a category and a disposition. A profile is a rule for which classes and dispositions
- * a client may use. This file repeats the rules in `astrometricslib/mcp/profile.py`,
+ * a client may use. This file repeats the rules in `mcp_servers/common/profile.py`,
  * because this server is written in TypeScript. Keep the two files in step.
  *
  * The rules fail closed. A tool missing from the manifest is withheld. A missing or

@@ -380,7 +380,8 @@ def run_target_stages(
     Returns
     -------
     result : `ProcessTargetResult`
-        One result per stage that ran, keyed by stage name.
+        One result per stage that ran, keyed by stage name, and the
+        target's quality summaries afterwards.
     """
     result = ProcessTargetResult(target_id=target.id)
     for stage in ANALYSIS_STAGES:
@@ -404,6 +405,7 @@ def run_target_stages(
             **options,
         )
         result.stages_run.append(stage)
+    result.quality = target.quality.model_copy()
     return result
 
 

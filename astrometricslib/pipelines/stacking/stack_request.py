@@ -259,6 +259,7 @@ def run_stack(
             "stacked_path": stacked_path,
             "flagged": getattr(quality, "flagged", None),
             "flag_reasons": list(getattr(quality, "flag_reasons", []) or []),
-            "note": "For the numbers behind this stack, read ProcessingPipelines.stack_summary.",
+            "quality_summary": quality,
+            "note": "To compare this stack with the previous one, use QualityDiagnostics.stack_quality.",
         }
     )

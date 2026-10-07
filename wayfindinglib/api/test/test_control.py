@@ -879,8 +879,25 @@ def test_sync_frames_refuses_arguments_its_case_does_not_use(control: Observator
 
     with pytest.raises(InvalidArgumentError, match="dry_run"):
         control.remote.sync_frames(dry_run=True)
-    with pytest.raises(InvalidArgumentError, match="register_job"):
-        control.remote.sync_frames("M 81", register_job=True)
+    with pytest.raises(InvalidArgumentError, match="files"):
+        control.remote.sync_frames("M 81", local_path="/tmp/frames", files=["a.fits"])
+
+
+def test_sync_frames_of_one_target_records_a_job_only_when_asked(
+    mocker: MockerFixture, control: ObservatoryControl
+) -> None:
+    """Verify one target's copy records a job with register_job=True only."""
+    from wayfindinglib.api.control import remote
+    from wayfindinglib.tasks.control_tasks import remote_transfer_tasks
+
+    mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
+    recorded = mocker.spy(remote, "registered_job")
+
+    assert control.remote.sync_frames("M 81", local_path="/tmp/frames") == {"success": True, "target": "M 81"}
+    control.remote.sync_frames("M 81", local_path="/tmp/frames", register_job=True)
+
+    assert [call.kwargs["enabled"] for call in recorded.call_args_list] == [False, True]
+    assert recorded.call_args_list[1].kwargs["target_id"] == "M 81"
 
 
 def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control: ObservatoryControl) -> None:

@@ -65,7 +65,10 @@ def resolve_target(targets: TargetLookup | None, target: str | Target) -> Target
         caller passes `Target` objects only.
     target : `str` or `Target`
         A target id (matched loosely, as `TargetCatalog.get` does) or a
-        `Target` object, which is returned as it is.
+        `Target` object, which is returned as it is. A name is looked up
+        after reading the stored targets again, so a target that another
+        program (a frame sync, the app) added or changed is seen. That read
+        takes about 0.1 s and keeps the target's unsaved edits in memory.
 
     Returns
     -------
@@ -88,7 +91,7 @@ def resolve_target(targets: TargetLookup | None, target: str | Target) -> Target
         raise InvalidArgumentError(
             f"Pass the Target itself: there is no target catalog to look up {target!r}."
         )
-    found = targets.get(target)
+    found = targets.get(target, refresh=True)
     if found is None:
         raise NotFoundError(f"No target with id {target!r} in the library.", details={"target": target})
     return found

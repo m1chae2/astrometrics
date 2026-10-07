@@ -185,9 +185,7 @@ class RemoteControl(ControlChild):
 
         - No `target`: every folder. Bias, Dark and Flat folders go to the
           calibration library, every other folder to its target. One
-          folder's failure does not stop the others. Uses `log_callback`
-          and `register_job` (record a job in the logs database; default
-          `True`).
+          folder's failure does not stop the others. Uses `log_callback`.
         - `local_path`: no copy. The FITS files already in that local
           folder are sorted into `target` and indexed.
         - `files`, `log_callback` or `incremental`: copy `target`'s folder
@@ -215,7 +213,10 @@ class RemoteControl(ControlChild):
         log_callback : `Callable` [[`str`], `None`], optional
             Receives progress messages.
         register_job : `bool`, optional
-            Whether a copy of every folder records a job.
+            Record the copy as a job in the logs database. Defaults to
+            `True` for a copy of every folder and `False` for one target,
+            whose caller usually tracks the work itself. A dry run, or a
+            call made while a job already runs, records none.
 
         Returns
         -------
@@ -239,8 +240,34 @@ class RemoteControl(ControlChild):
             return tasks.sync_all_remote_folders(
                 context, log_callback, True if register_job is None else register_job
             )
-        _refuse("Copying one target", register_job=register_job)
         target_id = _target_id(target)
+        with registered_job(
+            enabled=bool(register_job) and not dry_run and get_current_job() is None,
+            job_type="remote_sync",
+            target_id=target_id,
+            package_logger_name="wayfindinglib",
+        ):
+            return self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback)
+
+    def _sync_one(
+        self,
+        target_id: str,
+        dry_run: bool,
+        files: builtins.list[str] | None,
+        local_path: str | None,
+        incremental: bool | None,
+        log_callback: Callable[[str], None] | None,
+    ) -> dict[str, Any]:
+        """Copy or index one target's or calibration folder's frames.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            See `sync_frames`.
+        """
+        from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
+
+        context = self._context
         if local_path is not None:
             _refuse("Indexing a local folder", dry_run=dry_run or None, files=files, incremental=incremental)
             success = tasks.download_remote_targets(context, target_id, local_path=local_path)

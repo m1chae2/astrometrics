@@ -8,14 +8,12 @@ this suite does not require wayfindinglib to be installed.
 """
 
 import asyncio
-import types
+from pathlib import Path
 
 import pytest
 
 from astrometricslib.drivers.job_logging import background_job
 from astrometricslib.mcp.reflection import (
-    _infer_background_job_target_id,
-    _make_quality_snapshot_fn,
     generate_tool_schema,
     parse_docstring_params,
     register_astrometrics_tools,
@@ -118,112 +116,52 @@ async def test_astrometrics_reflected_tool_execution():  # ruff: ignore[missing-
     assert res[0].type == "text"
 
 
-def _fake_target(target_id: str) -> types.SimpleNamespace:
-    """Build a bare object with just the attributes a quality snapshot reads.
+async def test_a_background_job_method_records_its_own_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `@background_job` method is called with register_job=True.
 
-    Returns
-    -------
-    target : `types.SimpleNamespace`
-        A stand-in for `astrometricslib.models.target.Target`.
+    The method records its own job, so the tool's reply carries that job's
+    id next to the real result of a fast call.
     """
-    return types.SimpleNamespace(
-        id=target_id,
-        stacking=types.SimpleNamespace(quality_summary=None),
-        spectral_stacking=types.SimpleNamespace(quality_summary=None),
-        quality=types.SimpleNamespace(astrometry=None, photometry=None, spectroscopy=None),
-    )
+    from astrometricslib.drivers.job_logging import registered_job
+    from astrometricslib.foundation import config as config_loader
+    from astrometricslib.foundation.config import AppConfiguration
 
-
-def test_infer_background_job_target_id_prefers_a_resolved_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a single-target call's job is tracked under that target's id."""
-    target_id = _infer_background_job_target_id({"target": _fake_target("Vega")})
-    assert target_id == "Vega"
-
-
-def test_infer_background_job_target_id_falls_back_to_a_batch_label():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify an all-targets call gets a synthetic, camera-scoped label."""
-    target_id = _infer_background_job_target_id({"target": None, "camera_id": "ZWO ASI 533MM Pro"})
-    assert target_id == "batch:ZWO ASI 533MM Pro"
-
-
-def test_infer_background_job_target_id_defaults_when_neither_is_present():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a call identifying no target at all still gets a label."""
-    assert _infer_background_job_target_id({}) == "unknown"
-
-
-def test_quality_snapshot_fn_covers_a_single_resolved_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a single-target call snapshots exactly that target."""
-    target = _fake_target("Vega")
-    target.stacking.quality_summary = "stack-summary-v1"
-
-    snapshot_fn = _make_quality_snapshot_fn(astrometrics_instance=None, kwargs={"target": target})
-
-    assert snapshot_fn is not None
-    assert snapshot_fn() == {
-        "Vega": {
-            "stack": "stack-summary-v1",
-            "spectralStack": None,
-            "astrometry": None,
-            "photometry": None,
-            "spectroscopy": None,
-        }
-    }
-
-
-def test_quality_snapshot_fn_covers_every_target_in_a_batch_call():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a batch call snapshots every target it will touch.
-
-    Uses `.list()`, not `.get()`, since each target in a real batch is
-    processed in its own subprocess -- an in-memory cache in this process
-    would not reflect that work by the time the "post" snapshot runs.
-    """
-    fake_targets = {"Vega": _fake_target("Vega"), "Albireo": _fake_target("Albireo")}
-    fake_astrometrics = types.SimpleNamespace(
-        targets=types.SimpleNamespace(list=lambda: list(fake_targets.values()))
-    )
-
-    snapshot_fn = _make_quality_snapshot_fn(
-        fake_astrometrics, {"target": None, "camera_id": "ZWO ASI 533MM Pro"}
-    )
-
-    assert snapshot_fn is not None
-    assert set(snapshot_fn().keys()) == {"Vega", "Albireo"}
-
-
-def test_quality_snapshot_fn_is_none_when_no_target_can_be_identified():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a call with neither a target nor a camera gets no snapshot."""
-    assert _make_quality_snapshot_fn(astrometrics_instance=None, kwargs={}) is None
-
-
-async def test_a_background_job_marked_method_returns_its_result_without_blocking():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a `@background_job`-marked tool is dispatched as a job.
-
-    A fast call should still get its real return value back, alongside a
-    job id, rather than being called directly and blocking the dispatcher.
-    """
+    library_path = tmp_path / "library"
+    library_path.mkdir()
+    configuration = AppConfiguration()
+    configuration.update_config({"Image Library": {"path": str(library_path)}})
+    monkeypatch.setattr(configuration, "get_logs_path", lambda: tmp_path)
+    monkeypatch.setattr(config_loader, "get_configuration", lambda: configuration)
+    received = {}
 
     class FakeApi:
         """A stand-in `Astrometrics`-like object with one marked method."""
 
         @background_job("unit_test_job", grace_period_seconds=2.0)
-        def do_work(self) -> dict:
-            """Stand in for real pipeline work.
+        def do_work(self, target: str, register_job: bool = False) -> dict:
+            """Stand in for real pipeline work that records its own job.
 
             Returns
             -------
             result : `dict`
                 A trivial, fixed result.
             """
-            return {"stackedImage": "Vega_Stacked.fits"}
+            received.update(target=target, register_job=register_job)
+            with registered_job(enabled=register_job, job_type="unit_test_job", target_id=target):
+                return {"stackedImage": "Vega_Stacked.fits"}
 
     isolated_registry = ToolRegistry()
     register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
+    schema = next(t for t in isolated_registry.get_tool_definitions() if t.name == "fake_do_work").inputSchema
 
-    result = await isolated_registry.execute("fake_do_work", {})
+    result = await isolated_registry.execute("fake_do_work", {"target": "Vega"})
 
-    assert len(result) == 1
+    assert "register_job" not in schema["properties"]
+    assert received == {"target": "Vega", "register_job": True}
     assert '"stackedImage": "Vega_Stacked.fits"' in result[0].text
-    assert '"jobId"' in result[0].text
+    assert '"jobId": null' not in result[0].text
 
 
 async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -271,84 +209,26 @@ async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ru
     assert '"trackingStatus": "Parked"' in result[0].text
 
 
-async def test_injected_arguments_are_hidden_and_filled_in():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """A server-supplied parameter is hidden but reaches the method."""
+async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
+    """The tool does not look targets up; the library method does."""
 
     class FakeApi:
-        """A stand-in with one method that needs a server-built handle."""
+        """A stand-in with one method that takes a target."""
 
-        def describe(self, handle: object, label: str) -> dict:
+        def inspect_target(self, target: str) -> dict:
             """Report what the method received.
 
             Returns
             -------
-            received : `dict`
-                The label and the handle's type name.
-            """
-            return {"label": label, "handle": type(handle).__name__}
-
-    class Handle:
-        """The object the server supplies."""
-
-    isolated_registry = ToolRegistry()
-    register_astrometrics_tools(
-        isolated_registry, FakeApi(), {"": "fake"}, injected_arguments={"handle": Handle}
-    )
-
-    schema = next(
-        t for t in isolated_registry.get_tool_definitions() if t.name == "fake_describe"
-    ).inputSchema
-    assert "handle" not in schema["properties"]
-    assert schema["required"] == ["label"]
-
-    result = await isolated_registry.execute("fake_describe", {"label": "x"})
-    assert '"handle": "Handle"' in result[0].text
-
-
-async def test_argument_resolvers_convert_a_supplied_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """A resolver turns the client's plain value into what the method needs."""
-
-    class FakeApi:
-        """A stand-in with one method that needs an integer."""
-
-        def double(self, count: int) -> dict:
-            """Double the number.
-
-            Returns
-            -------
-            doubled : `dict`
-                Twice the received count.
-            """
-            return {"doubled": count * 2}
-
-    isolated_registry = ToolRegistry()
-    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"}, argument_resolvers={"count": int})
-
-    result = await isolated_registry.execute("fake_double", {"count": 21})
-    assert '"doubled": 42' in result[0].text
-
-
-async def test_an_unknown_target_id_is_reported_not_passed_on_as_a_string():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """An id the library does not have fails with a message naming it."""
-    from astrometricslib.models.target import Target
-
-    class FakeApi:
-        """A stand-in with a target catalog that finds nothing."""
-
-        targets = types.SimpleNamespace(get=lambda target_id: None)
-
-        def inspect_target(self, target: Target) -> dict:
-            """Return the target's id.
-
-            Returns
-            -------
             result : `dict`
-                The id of the received target.
+                The received value and its type name.
             """
-            return {"id": target.id}
+            return {"target": target, "type": type(target).__name__}
 
     isolated_registry = ToolRegistry()
     register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
 
-    result = await isolated_registry.execute("fake_inspect_target", {"target": "Missing"})
-    assert "No target with id 'Missing'" in result[0].text
+    result = await isolated_registry.execute("fake_inspect_target", {"target": "M 13"})
+
+    assert '"target": "M 13"' in result[0].text
+    assert '"type": "str"' in result[0].text

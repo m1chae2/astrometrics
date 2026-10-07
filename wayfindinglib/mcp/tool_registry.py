@@ -1,17 +1,21 @@
-"""Tool registry for the Wayfinding Library MCP Server.
+"""Purpose: Tool registry for the Wayfinding Library MCP server.
 
-Reuses astrometricslib's generic `ToolRegistry` dispatch machinery
-and reflection engine with its own, separate registered-tools instance.
+Description: Reuses astrometricslib's generic `ToolRegistry` dispatch
+machinery and reflection engine with its own, separate registered-tools
+instance. The tools pass the client's arguments to the `Wayfinder` methods
+as they are: the methods accept target ids, ISO times and position
+dictionaries themselves.
 """
+
+from typing import Any
 
 from astrometricslib.mcp.reflection import register_astrometrics_tools
 from astrometricslib.mcp.tool_registry import ToolRegistry
-from wayfindinglib.mcp.argument_resolution import build_argument_hooks
 
 registry = ToolRegistry()
 
 
-def get_wayfinder():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def get_wayfinder() -> Any:
     """Fetch the Wayfinder high-level interface API from the library.
 
     Returns
@@ -28,7 +32,7 @@ def get_wayfinder():  # ruff: ignore[missing-return-type-undocumented-public-fun
         return None
 
 
-def register_wayfinder_reflected_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def register_wayfinder_reflected_tools() -> None:
     """Dynamically register public Wayfinder high-level interface methods."""
     wayfinder = get_wayfinder()
     if not wayfinder:
@@ -45,14 +49,7 @@ def register_wayfinder_reflected_tools():  # ruff: ignore[missing-return-type-un
         "planning": "planning",
         "execution": "execution",
     }
-    argument_resolvers, injected_arguments = build_argument_hooks(wayfinder)
-    register_astrometrics_tools(
-        registry,
-        wayfinder,
-        branch_mapping,
-        argument_resolvers=argument_resolvers,
-        injected_arguments=injected_arguments,
-    )
+    register_astrometrics_tools(registry, wayfinder, branch_mapping)
 
 
 register_wayfinder_reflected_tools()

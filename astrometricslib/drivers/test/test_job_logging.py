@@ -7,6 +7,8 @@ opened, and letting a bookkeeping failure take down the real work.
 """
 
 import logging
+import time
+from collections.abc import Callable
 
 import pytest
 
@@ -246,37 +248,59 @@ def test_mark_can_also_set_message_and_output_metrics(isolated_logs):  # ruff: i
     assert stored.output_metrics == {"result": {"path": "x.fits"}}
 
 
-class TestRunAsBackgroundJob:
-    """Tests for the kickoff/poll primitive behind `@background_job`."""
+def _stack_vega(result: dict, delay_seconds: float = 0.0) -> Callable[[], dict]:
+    """Build work that records its own stacking job, as a library method does.
 
-    def test_fast_work_returns_its_real_result_inline(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a call that finishes quickly gets its actual result back."""
-        from astrometricslib.drivers.job_logging import run_as_background_job
+    Returns
+    -------
+    work : `Callable`
+        Runs a "stacking" job for Vega and returns ``result``.
+    """
 
-        outcome = run_as_background_job(
-            "stacking", "Vega", lambda job: {"stackedImage": "Vega_Stacked.fits"}, grace_period_seconds=2.0
-        )
+    def work() -> dict:
+        """Record the job, wait, and return the result.
 
-        assert outcome["result"] == {"stackedImage": "Vega_Stacked.fits"}
-        assert outcome["jobId"] is not None
-
-    def test_slow_work_returns_a_job_id_and_keeps_running(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a call that outlasts the grace period hands back a job id.
-
-        The work itself must keep running in the background rather than
-        being abandoned -- this is the whole point: a caller giving up on
-        waiting must not kill the work.
+        Returns
+        -------
+        result : `dict`
+            The prepared result.
         """
-        import time
+        with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+            time.sleep(delay_seconds)
+            return result
 
+    return work
+
+
+class TestRunAsBackgroundJob:
+    """Tests for the runner a server uses for `@background_job` methods."""
+
+    def test_fast_work_returns_its_real_result_and_its_own_job_id(self, isolated_logs: str) -> None:
+        """A quick call gets its result and the id of the job it recorded."""
         from astrometricslib.drivers.job_logging import run_as_background_job
         from astrometricslib.drivers.logger_interface import LoggerInterface
 
-        def _slow_work(job: object) -> dict:
-            time.sleep(0.3)
-            return {"stackedImage": "Vega_Stacked.fits"}
+        outcome = run_as_background_job(
+            _stack_vega({"stackedImage": "Vega_Stacked.fits"}), grace_period_seconds=2.0
+        )
 
-        outcome = run_as_background_job("stacking", "Vega", _slow_work, grace_period_seconds=0.05)
+        assert outcome["result"] == {"stackedImage": "Vega_Stacked.fits"}
+        stored = LoggerInterface(isolated_logs).get_job(outcome["jobId"])
+        assert stored.target_id == "Vega"
+        assert stored.output_metrics["result"] == {"stackedImage": "Vega_Stacked.fits"}
+
+    def test_slow_work_returns_a_job_id_and_keeps_running(self, isolated_logs: str) -> None:
+        """A call that outlasts the grace period hands back a job id.
+
+        The work itself must keep running in the background rather than
+        being abandoned: a caller giving up on waiting must not kill it.
+        """
+        from astrometricslib.drivers.job_logging import run_as_background_job
+        from astrometricslib.drivers.logger_interface import LoggerInterface
+
+        outcome = run_as_background_job(
+            _stack_vega({"stackedImage": "Vega_Stacked.fits"}, delay_seconds=0.3), grace_period_seconds=0.1
+        )
 
         assert outcome["status"] == "running"
         assert outcome["jobId"] is not None
@@ -285,52 +309,38 @@ class TestRunAsBackgroundJob:
         logger_interface = LoggerInterface(isolated_logs)
         deadline = time.monotonic() + 2.0
         stored = logger_interface.get_job(outcome["jobId"])
-        while stored is not None and stored.status != "completed" and time.monotonic() < deadline:
+        while stored is not None and not stored.output_metrics and time.monotonic() < deadline:
             time.sleep(0.02)
             stored = logger_interface.get_job(outcome["jobId"])
 
         assert stored is not None and stored.status == "completed", "background work should keep running"
         assert stored.output_metrics["result"] == {"stackedImage": "Vega_Stacked.fits"}
 
-    def test_failing_work_marks_the_job_failed_and_reports_the_error(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a quick failure is raised to the caller, not swallowed."""
+    def test_failing_work_reports_the_error(self, isolated_logs: str) -> None:
+        """A quick failure is raised to the caller, not swallowed."""
         from astrometricslib.drivers.job_logging import run_as_background_job
 
-        def _broken_work(job: object) -> None:
-            raise RuntimeError("stacking blew up")
+        def broken_work() -> None:
+            """Fail inside a recorded job.
+
+            Raises
+            ------
+            RuntimeError
+                Always.
+            """
+            with registered_job(enabled=True, job_type="stacking", target_id="Vega"):
+                raise RuntimeError("stacking blew up")
 
         with pytest.raises(RuntimeError, match="stacking blew up"):
-            run_as_background_job("stacking", "Vega", _broken_work, grace_period_seconds=2.0)
+            run_as_background_job(broken_work, grace_period_seconds=2.0)
 
-    def test_pre_and_post_snapshots_are_stashed_in_output_metrics(self, isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Verify a snapshot_fn's before/after results land in output_metrics.
-
-        This is the actual point of the feature: a poller should be able
-        to see what changed, not just that the job succeeded.
-        """
+    def test_work_that_records_no_job_still_returns_its_result(self, isolated_logs: str) -> None:
+        """Without a job of its own, the result comes back with no job id."""
         from astrometricslib.drivers.job_logging import run_as_background_job
 
-        state = {"rejectedFraction": 0.10}
+        outcome = run_as_background_job(lambda: {"success": True}, grace_period_seconds=2.0)
 
-        def snapshot() -> dict:
-            return dict(state)
-
-        def work(job: object) -> dict:
-            state["rejectedFraction"] = 0.05
-            return {"stackedImage": "Vega_Stacked.fits"}
-
-        outcome = run_as_background_job(
-            "stacking", "Vega", work, grace_period_seconds=2.0, snapshot_fn=snapshot
-        )
-
-        assert outcome["result"] == {"stackedImage": "Vega_Stacked.fits"}
-        from astrometricslib.drivers.logger_interface import LoggerInterface
-
-        stored = LoggerInterface(isolated_logs).get_job(outcome["jobId"])
-        assert stored.output_metrics["quality"] == {
-            "pre": {"rejectedFraction": 0.10},
-            "post": {"rejectedFraction": 0.05},
-        }
+        assert outcome == {"jobId": None, "result": {"success": True}}
 
 
 def test_a_nested_job_of_the_same_kind_joins_the_running_one(isolated_logs):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]

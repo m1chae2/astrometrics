@@ -24,6 +24,8 @@ from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
+
 from astrometricslib import (
     AstrometricsError,
     ConfigurationError,
@@ -187,6 +189,34 @@ def check_sections(include: list[str] | None, known: tuple[str, ...]) -> list[st
     return list(include)
 
 
+def sky_position_from(value: SkyPosition | dict[str, Any]) -> SkyPosition:
+    """Turn ``{"ra_deg": ..., "dec_deg": ...}`` into a `SkyPosition`.
+
+    Parameters
+    ----------
+    value : `SkyPosition` or `dict`
+        A position, or a dictionary with its fields.
+
+    Returns
+    -------
+    position : `SkyPosition`
+        The position.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the dictionary is not a valid position.
+    """
+    if isinstance(value, SkyPosition):
+        return value
+    try:
+        return SkyPosition.model_validate(value)
+    except ValidationError as error:
+        raise InvalidArgumentError(
+            f'{value!r} is not a sky position: use {{"ra_deg": ..., "dec_deg": ...}}. {error}'
+        ) from error
+
+
 def resolve_destination(context: ControlContext, destination: str | Target | SkyPosition) -> SkyPosition:
     """Turn a slew destination into a sky position.
 
@@ -212,7 +242,7 @@ def resolve_destination(context: ControlContext, destination: str | Target | Sky
     if isinstance(destination, SkyPosition):
         return destination
     if isinstance(destination, dict):
-        return SkyPosition.model_validate(destination)
+        return sky_position_from(destination)
     target = destination
     if isinstance(destination, str):
         target = context.astrometrics.targets.get(destination, refresh=True)

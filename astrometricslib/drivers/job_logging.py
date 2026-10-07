@@ -39,7 +39,6 @@ from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.foundation.logging import get_job_log_router, log_context
-from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +48,21 @@ _TERMINAL_STATUSES = frozenset({"completed", "failed"})
 
 
 _current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
-"""The job being run, set by `registered_job` and `run_as_background_job`."""
+"""The job being run, set by `registered_job`."""
+
+_job_started_listener: ContextVar[Callable[[JobHandle], None] | None] = ContextVar(
+    "job_started_listener", default=None
+)
+"""Told about each new job row `registered_job` makes in this thread. Set by
+`run_as_background_job`, which needs the id of the job its work records."""
 
 
 def get_current_job() -> JobHandle | None:
     """Give the job the calling work is running as, if any.
 
-    Work started through `run_as_background_job` (every tool marked with
-    `background_job`) can use this to write log lines and report progress
-    without being handed the job.
+    Work that runs inside `registered_job` (every method that records its
+    own job) can use this to write log lines and report progress without
+    being handed the job.
 
     Returns
     -------
@@ -447,6 +452,9 @@ def registered_job(
                     job_type=job_type,
                     target_id=target_id,
                 )
+                listener = _job_started_listener.get()
+                if listener is not None:
+                    listener(handle)
             except (sqlite3.Error, OSError, AstrometricsError) as registration_error:
                 # A job we cannot record is still a job worth doing.
                 logger.warning("Could not register %s job: %s", job_type, registration_error)
@@ -497,24 +505,23 @@ def _to_plain(value: Any) -> Any:
 
 
 def background_job(job_type: str, *, grace_period_seconds: float = 5.0) -> Callable:
-    """Mark a method as safe to run as a background MCP job.
+    """Mark a method as slow enough to run in the background when served.
 
     This is metadata only: it stamps the given job type and grace period
     onto the function and returns it unchanged. Calling the decorated
-    method directly in Python -- as the backend's own processing flow and
-    the test suite do -- runs synchronously to completion exactly as
-    before. Only `astrometricslib.mcp.reflection`'s dispatch checks for
-    this marker and, when present, routes the call through
-    `run_as_background_job` instead of calling it directly. See that
-    module for why: a slow call blocks the whole MCP connection, not just
-    its own request.
+    method directly in Python runs it to completion, as the backend and the
+    tests do. The method records its own job when called with
+    ``register_job=True``. A server that must stay responsive (the MCP
+    servers) checks for this marker, calls the method with
+    ``register_job=True`` through `run_as_background_job`, and so answers
+    with a job id when the work takes longer than the grace period.
 
     Parameters
     ----------
     job_type : `str`
         What kind of job this is (see `registered_job`).
     grace_period_seconds : `float`, optional
-        How long an MCP caller should wait for the work to finish before
+        How long a caller should wait for the work to finish before
         giving up and returning a job id to poll instead, by default 5.0.
 
     Returns
@@ -532,119 +539,91 @@ def background_job(job_type: str, *, grace_period_seconds: float = 5.0) -> Calla
 
 
 def run_as_background_job(
-    job_type: str,
-    target_id: str,
-    work_fn: Callable[[JobHandle], Any],
+    work_fn: Callable[[], Any],
     *,
     grace_period_seconds: float = 5.0,
-    snapshot_fn: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Run `work_fn` under job tracking, in a background thread.
+    """Run work that records its own job in a background thread.
 
-    Waits briefly for the job row to exist, then a while longer for the
-    work itself to finish, so a fast call can still hand back its real
-    result directly -- same shape as calling `work_fn` synchronously,
-    plus a job id for reference. A slow call instead gets a job id (and
-    log file path) to poll with, and critically, the background thread
-    keeps running to completion regardless of what the caller does next:
-    a caller disconnecting can no longer kill the work partway through,
-    which a synchronous call wrapped in a cancellable request could.
+    The work is a call of a method made with ``register_job=True``, so the
+    method itself writes the job row (through `registered_job`). This
+    function only notices that row, waits a while for the work to finish,
+    and stores the work's result on the job. A fast call hands back its
+    real result directly. A slow call gets the job id (and log file path)
+    to poll with, and the thread keeps running to completion whatever the
+    caller does next: a caller disconnecting can no longer kill the work
+    partway through, which a synchronous call wrapped in a cancellable
+    request could.
 
     Parameters
     ----------
-    job_type : `str`
-        What kind of job this is (see `registered_job`).
-    target_id : `str`
-        Which target the job is working on, or a synthetic label for work
-        spanning several (a batch run, for instance).
     work_fn : `Callable`
-        The work to run, given the job's `JobHandle` so it can log
-        progress or decide its own outcome. Its return value is stashed
-        in the job's `output_metrics["result"]` for later retrieval.
+        The work to run, with no arguments. Its return value is stored in
+        the job's ``output_metrics["result"]`` for later retrieval.
     grace_period_seconds : `float`, optional
         How long to wait before giving up and returning a job id instead
         of the real result, by default 5.0.
-    snapshot_fn : `Callable`, optional
-        Called once right before `work_fn` starts and once right after it
-        finishes; both results are stashed under `output_metrics
-        ["quality"]["pre"/"post"]`. Meant for a target's persisted
-        quality summaries, so a later poll has something concrete to
-        compare, not just a status word. Skipped (with a logged note, not
-        a failure) if it raises.
 
     Returns
     -------
     outcome : `dict`
-        `{"jobId": ..., "result": ...}` if the work finished within
-        `grace_period_seconds`, or `{"status": "running", "jobId": ...,
-        "logFilePath": ...}` if it is still going. If `work_fn` fails
-        within `grace_period_seconds`, its exception is raised here again,
-        and the job record is marked failed as well.
+        ``{"jobId": ..., "result": ...}`` if the work finished within
+        `grace_period_seconds`, or ``{"status": "running", "jobId": ...,
+        "logFilePath": ...}`` if it is still going. The job id is `None`
+        when the work recorded no job. If `work_fn` fails within
+        `grace_period_seconds`, its exception is raised here again.
     """
-    job_created = threading.Event()
     job_finished = threading.Event()
-    job_info: dict[str, Any] = {}
+    started_jobs: list[JobHandle] = []
     outcome: dict[str, Any] = {}
 
-    def _snapshot(when: str) -> dict[str, Any] | None:
-        if snapshot_fn is None:
-            return None
-        try:
-            return snapshot_fn()
-        except (AstrometricsError, sqlite3.Error, OSError, *DATA_ERRORS) as snapshot_error:
-            logger.debug("Could not take %s-processing quality snapshot: %s", when, snapshot_error)
-            return None
+    def _remember_first_job(handle: JobHandle) -> None:
+        """Keep the first job the work records, the outermost one."""
+        if not started_jobs:
+            started_jobs.append(handle)
 
     def _run() -> None:
+        listener_token = _job_started_listener.set(_remember_first_job)
         try:
-            with registered_job(enabled=True, job_type=job_type, target_id=target_id) as job:
-                job_info["job_id"] = job.job_id
-                job_info["log_file_path"] = job.log_file_path
-                job_created.set()
-
-                pre_quality = _snapshot("pre")
-                try:
-                    result = work_fn(job)
-                except BaseException as work_error:
-                    outcome["error"] = work_error
-                    raise
-                outcome["result"] = result
-                metrics: dict[str, Any] = {"result": _to_plain(result)}
-                if snapshot_fn is not None:
-                    metrics["quality"] = _to_plain({"pre": pre_quality, "post": _snapshot("post")})
-                # The work may already have decided the job failed (stacking
-                # that makes no image); do not turn that into a success.
-                job.mark(job.terminal_status or "completed", 100, output_metrics=metrics)
-        except Exception:
-            # This thread is the job runner, a boundary. `registered_job`
-            # already marked the job failed and re-raises by contract, for
-            # callers that run it synchronously and want the exception
-            # back. Nobody is waiting to catch it here -- `outcome["error"]`
-            # above already has it for a caller still waiting, so letting
-            # it propagate would only add a second unhandled-thread log.
-            logger.debug("Background job '%s' failed.", job_type, exc_info=True)
+            outcome["result"] = work_fn()
+        except Exception as work_error:
+            # This thread is a boundary: nobody would catch the error here.
+            # A caller still waiting gets it from `outcome`; the job itself
+            # was already marked failed by `registered_job`.
+            outcome["error"] = work_error
+            logger.debug("Background work failed.", exc_info=True)
         finally:
-            job_finished.set()
+            _job_started_listener.reset(listener_token)
+        if "result" in outcome and started_jobs:
+            job = started_jobs[0]
+            # The work already decided how its job ended (stacking that
+            # makes no image is "failed"); only the result is added.
+            job.mark(
+                job.terminal_status or "completed",
+                100,
+                output_metrics={"result": _to_plain(outcome["result"])},
+            )
+        job_finished.set()
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
 
-    # Just the DB insert -- should be near-instant. A generous cap keeps a
-    # genuinely broken logs DB from hanging the caller forever instead of
-    # falling through to `registered_job`'s own no-op-handle fallback.
-    job_created.wait(timeout=10.0)
-
     if job_finished.wait(timeout=grace_period_seconds):
         if "error" in outcome:
             raise outcome["error"]
-        return {"jobId": job_info.get("job_id"), "result": outcome["result"]}
+        job_id = started_jobs[0].job_id if started_jobs else None
+        return {"jobId": job_id, "result": outcome["result"]}
 
+    job = started_jobs[0] if started_jobs else None
     return {
         "status": "running",
-        "jobId": job_info.get("job_id"),
-        "logFilePath": job_info.get("log_file_path"),
+        "jobId": job.job_id if job else None,
+        "logFilePath": job.log_file_path if job else None,
         "message": (
             f"Still running after {grace_period_seconds:.0f}s; poll with job_get_status/"
             "job_tail_log using this job id."
+            if job
+            else f"Still running after {grace_period_seconds:.0f}s in the background. It records no job "
+            "to poll; check its effect once it has had time to finish."
         ),
     }

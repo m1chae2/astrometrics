@@ -112,24 +112,23 @@ class MountControl(ControlChild):
             target_name=target_name,
         )
 
-    def sync(self, position: SkyPosition) -> bool:
+    def sync(self, position: SkyPosition | dict[str, float]) -> bool:
         """Tell the mount it is pointing at a plate-solved position.
 
         Parameters
         ----------
-        position : `SkyPosition`
-            The solved position, ``{"ra_deg": ..., "dec_deg": ...}``.
+        position : `SkyPosition` or `dict`
+            The solved position, or ``{"ra_deg": ..., "dec_deg": ...}``.
 
         Returns
         -------
         success : `bool`
-            Whether the sync command was accepted.
+            Whether the sync command was accepted. A dictionary that is not
+            a valid position is refused with `InvalidArgumentError`.
         """
         from wayfindinglib.tasks.control_tasks import hardware_operations
 
-        if isinstance(position, dict):
-            position = SkyPosition.model_validate(position)
-        return hardware_operations.sync_mount(self._context, position)
+        return hardware_operations.sync_mount(self._context, hardware_operations.sky_position_from(position))
 
     def park(self) -> bool:
         """Park the mount.

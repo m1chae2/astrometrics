@@ -1,9 +1,12 @@
-"""Purpose: Dynamic astrometrics reflection engine for MCP tools.
+"""Purpose: Turn the libraries' public methods into MCP tools.
 
-Description: Introspects Python class high-level interfaces (signatures,
-PEP-484 type hints, and Google/NumPy docstrings) to dynamically generate
-JSON schemas and register public high-level interface methods directly
-as MCP tools.
+Description: Reads each public method's signature, type hints and numpydoc
+docstring to build a JSON schema, and registers the method as a tool. A tool
+only passes the client's arguments to the method: the library methods accept
+what a client can send (a target id, an ISO time, a position dictionary) and
+convert it themselves. A method marked with `background_job` is called with
+``register_job=True`` in a background thread, so a slow call answers with
+the id of the job it recorded instead of blocking the server.
 """
 
 import asyncio
@@ -12,8 +15,6 @@ import re
 import typing
 from collections.abc import Callable
 from typing import Any, Union
-
-from astrometricslib.foundation.errors import NotFoundError
 
 
 def parse_docstring_params(doc: str) -> dict[str, str]:
@@ -161,136 +162,6 @@ def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
     return {"type": "object", "properties": properties, "required": required_params}
 
 
-def _snapshot_target_quality(target: Any) -> dict[str, Any]:
-    """Collect one target's persisted, per-pipeline quality summaries.
-
-    Meant to be called both right before and right after a background
-    job runs, so the job record can show what actually changed -- not
-    just that the job succeeded. Captures references to the current
-    summary objects rather than copies; safe because each pipeline stage
-    replaces its summary field with a new object on completion rather
-    than mutating the old one's fields in place, so a reference taken
-    before the run is unaffected by the run itself.
-
-    Returns
-    -------
-    quality : `dict`
-        The target's stack/spectral-stack/astrometry/photometry/
-        spectroscopy quality summaries (any not yet computed are `None`).
-    """
-    return {
-        "stack": target.stacking.quality_summary,
-        "spectralStack": target.spectral_stacking.quality_summary,
-        "astrometry": target.quality.astrometry,
-        "photometry": target.quality.photometry,
-        "spectroscopy": target.quality.spectroscopy,
-    }
-
-
-def _infer_background_job_target_id(kwargs: dict[str, Any]) -> str:
-    """Choose a job-tracking target id from a background-job call's arguments.
-
-    Returns
-    -------
-    target_id : `str`
-        The resolved `Target`'s own id for a single-target call, a
-        synthetic `"batch:<camera>"` label for a many-target call, or
-        `"unknown"` if neither is present.
-    """
-    target_value = kwargs.get("target")
-    if target_value is not None and hasattr(target_value, "id"):
-        return target_value.id
-    if "camera_id" in kwargs and (target_value is None or isinstance(target_value, list)):
-        return f"batch:{kwargs['camera_id']}"
-    return "unknown"
-
-
-def _make_quality_snapshot_fn(
-    astrometrics_instance: Any, kwargs: dict[str, Any]
-) -> Callable[[], dict[str, Any]] | None:
-    """Build a snapshot function for a background-job call, if one applies.
-
-    Returns
-    -------
-    snapshot_fn : `Callable` or `None`
-        A no-argument function returning `{target_id: quality_summaries}`
-        for the target(s) this call affects, or `None` if the call's
-        arguments don't identify any (so no snapshot is taken).
-    """
-    target_value = kwargs.get("target")
-    if target_value is not None and hasattr(target_value, "id"):
-        return lambda: {target_value.id: _snapshot_target_quality(target_value)}
-
-    # The many-target form of `process_target`: a list of targets, or
-    # `None` for every target, always with a camera.
-    if "camera_id" not in kwargs or not (target_value is None or isinstance(target_value, list)):
-        return None
-
-    targets_api = getattr(astrometrics_instance, "targets", None)
-    if targets_api is None:
-        return None
-
-    def snapshot_all_batch_targets() -> dict[str, Any]:
-        """Read every affected target fresh and snapshot its quality.
-
-        Returns
-        -------
-        snapshot : `dict` [`str`, `Any`]
-            Each affected target's quality summaries, by target id.
-        """
-        # `.list()` always re-reads from disk (unlike `.get()`, which
-        # prefers its in-memory cache); a fresh read matters here because
-        # each target in the batch is actually processed in its own
-        # `ProcessPoolExecutor` worker (see
-        # `astrometricslib.pipelines.target_batch`), so this process's
-        # cached copies would not reflect that work.
-        fresh_targets_by_id = {t.id: t for t in targets_api.list()}
-        if target_value:
-            target_ids = [getattr(item, "id", item) for item in target_value]
-        else:
-            target_ids = list(fresh_targets_by_id)
-        return {
-            target_id: _snapshot_target_quality(fresh_targets_by_id[target_id])
-            for target_id in target_ids
-            if target_id in fresh_targets_by_id
-        }
-
-    return snapshot_all_batch_targets
-
-
-def _prepare_arguments(
-    kwargs: dict[str, Any],
-    injected: dict[str, Callable[[], Any]],
-    resolvers: dict[str, Callable[[Any], Any]] | None,
-) -> dict[str, Any]:
-    """Apply injected values and argument converters to one tool call.
-
-    Parameters
-    ----------
-    kwargs : `dict` [`str`, `Any`]
-        The arguments the client sent.
-    injected : `dict` [`str`, `Callable`]
-        Factories for parameters the server supplies. A factory fills its
-        parameter when the client left it out or sent a plain string,
-        since a client has no way to build the real object.
-    resolvers : `dict` [`str`, `Callable`] or `None`
-        Converters applied to any supplied parameter of the same name.
-
-    Returns
-    -------
-    prepared : `dict` [`str`, `Any`]
-        A new arguments dictionary ready to pass to the method.
-    """
-    prepared = dict(kwargs)
-    for name, factory in injected.items():
-        if prepared.get(name) is None or isinstance(prepared[name], str):
-            prepared[name] = factory()
-    for name, convert in (resolvers or {}).items():
-        if name in prepared and prepared[name] is not None:
-            prepared[name] = convert(prepared[name])
-    return prepared
-
-
 # Methods whose names start with one of these are never offered as tools.
 # An AI client cannot be trusted to confirm a deletion with the person first
 # (a target was once deleted on an unclear request), so deleting is left to
@@ -304,14 +175,36 @@ WITHHELD_METHOD_PREFIXES = ("delete",)
 SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress")
 
 
+def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[str, Any]:
+    """Add the server's own arguments to a client's call of a slow method.
+
+    Parameters
+    ----------
+    kwargs : `dict` [`str`, `Any`]
+        The arguments the client sent.
+    parameter_names : `set` [`str`]
+        The method's parameter names.
+
+    Returns
+    -------
+    arguments : `dict` [`str`, `Any`]
+        The client's arguments, plus ``register_job=True`` when the method
+        takes it, so the method records its own job for the client to poll.
+    """
+    arguments = dict(kwargs)
+    if "register_job" in parameter_names:
+        arguments["register_job"] = True
+    return arguments
+
+
 def register_astrometrics_tools(
-    registry: Any,
-    astrometrics_instance: Any,
-    branch_mapping: dict[str, str],
-    argument_resolvers: dict[str, Callable[[Any], Any]] | None = None,
-    injected_arguments: dict[str, Callable[[], Any]] | None = None,
+    registry: Any, astrometrics_instance: Any, branch_mapping: dict[str, str]
 ) -> int:
     """Introspect an astrometrics object and register public methods as tools.
+
+    A tool passes the client's arguments to the method as they are. The
+    library methods accept what a client can send: a target id for a
+    target, an ISO string for a time, a dictionary for a sky position.
 
     Parameters
     ----------
@@ -324,18 +217,6 @@ def register_astrometrics_tools(
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
         key of ``""`` maps to root astrometrics methods. A dotted name
         (e.g. ``"processing.diagnostics"``) walks nested attributes.
-    argument_resolvers : `dict` [`str`, `Callable`], optional
-        Converters from what an MCP client can send (a name, an id, an
-        ISO time string) to the object a method needs. Keyed by
-        parameter name; a converter runs on any tool call that supplies
-        that parameter. A converter raises `InvalidArgumentError` with a plain
-        message when it cannot convert, so the client sees the reason
-        rather than a later `AttributeError`.
-    injected_arguments : `dict` [`str`, `Callable`], optional
-        Factories for parameters the server supplies itself (for example
-        the `Astrometrics` handle). Keyed by parameter name. The
-        parameter is hidden from the tool's schema, and the factory
-        fills it whenever the client leaves it out or sends a string.
 
     Returns
     -------
@@ -374,108 +255,69 @@ def register_astrometrics_tools(
                 summary = f"Reflected tool {tool_name}"
 
             schema = generate_tool_schema(method)
-            method_parameter_names = set(inspect.signature(method).parameters)
-            method_injected = {
-                name: factory
-                for name, factory in (injected_arguments or {}).items()
-                if name in method_parameter_names
-            }
-            for hidden_name in (*method_injected, *SERVER_ONLY_PARAMETERS):
+            for hidden_name in SERVER_ONLY_PARAMETERS:
                 schema["properties"].pop(hidden_name, None)
                 if hidden_name in schema["required"]:
                     schema["required"].remove(hidden_name)
 
-            try:
-                type_hints = typing.get_type_hints(method)
-            except NameError, TypeError, AttributeError:
-                type_hints = {}
-
-            # Create closure for invocation with domain model identifier
-            # resolution
-            def make_executor(  # ruff: ignore[missing-return-type-private-function]
-                target_callable: Callable[..., Any],
-                hints: dict[str, Any],
-                injected: dict[str, Callable[[], Any]],
-            ):
-                async def execute_reflected(**kwargs: Any) -> Any:
-                    # Auto-resolve target string IDs to Target domain
-                    # instances if expected
-                    from astrometricslib.models.target import Target
-
-                    for param_k, param_v in list(kwargs.items()):
-                        expected_type = hints.get(param_k)
-                        if expected_type is not None:
-                            # Handle Target or Target | None
-                            type_args = typing.get_args(expected_type) or (expected_type,)
-                            if Target in type_args and isinstance(param_v, str):
-                                targets_api = getattr(astrometrics_instance, "targets", None)
-                                if targets_api and hasattr(targets_api, "get"):
-                                    # Another program (a frame sync, the
-                                    # app) may have changed the catalog
-                                    # since this server loaded it. A fresh
-                                    # read takes about 0.1 s and keeps a
-                                    # tool from reporting a stale frame list.
-                                    if hasattr(targets_api, "list"):
-                                        await asyncio.to_thread(targets_api.list)
-                                    resolved = targets_api.get(param_v)
-                                    if not resolved:
-                                        raise NotFoundError(f"No target with id {param_v!r} in the library.")
-                                    kwargs[param_k] = resolved
-
-                    # Fill the server-supplied parameters and convert
-                    # client-friendly values (names, ISO strings) in a
-                    # worker thread: a converter may read the library or
-                    # query SIMBAD, which must not block this server's
-                    # single event loop.
-                    if injected or argument_resolvers:
-                        kwargs = await asyncio.to_thread(
-                            _prepare_arguments, kwargs, injected, argument_resolvers
-                        )
-
-                    # A method marked with `@background_job` (see
-                    # `astrometricslib.drivers.job_logging`) runs slowly
-                    # enough that calling it directly here would block this
-                    # server's single connection for its whole duration.
-                    # Run it in a background thread instead, and return
-                    # either its real result (if it finishes quickly) or a
-                    # job id to poll -- see `run_as_background_job`.
-                    job_type = getattr(target_callable, "__background_job_type__", None)
-                    if job_type is not None:
-                        from astrometricslib.drivers.job_logging import run_as_background_job
-
-                        grace_period = getattr(target_callable, "__background_job_grace_period__", 5.0)
-                        target_id = _infer_background_job_target_id(kwargs)
-                        snapshot_fn = _make_quality_snapshot_fn(astrometrics_instance, kwargs)
-                        return await asyncio.to_thread(
-                            run_as_background_job,
-                            job_type,
-                            target_id,
-                            lambda job: target_callable(**kwargs),
-                            grace_period_seconds=grace_period,
-                            snapshot_fn=snapshot_fn,
-                        )
-
-                    if inspect.iscoroutinefunction(target_callable):
-                        return await target_callable(**kwargs)
-
-                    # A plain synchronous method still needs its own
-                    # thread, not a direct call on this coroutine: some
-                    # (e.g. wayfindinglib's `ObservatoryControl`, which
-                    # bridges into async INDI drivers via
-                    # `hardware_operations._run_sync`'s own
-                    # `asyncio.run(...)`) start a *second* event loop
-                    # internally, which Python refuses whenever the
-                    # calling thread already has one running -- exactly
-                    # this server's own loop. `backend/main_backend.py`'s
-                    # periodic telemetry loop hit this same conflict
-                    # calling the same hardware layer and fixed it the
-                    # same way: run it via `asyncio.to_thread` so it gets
-                    # a plain worker thread with no event loop of its own.
-                    return await asyncio.to_thread(target_callable, **kwargs)
-
-                return execute_reflected
-
-            registry.register(tool_name, summary, schema)(make_executor(method, type_hints, method_injected))
+            registry.register(tool_name, summary, schema)(_make_executor(method))
             count += 1
 
     return count
+
+
+def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a library method as an asynchronous tool function.
+
+    Parameters
+    ----------
+    target_callable : `Callable`
+        The bound library method.
+
+    Returns
+    -------
+    execute : `Callable`
+        A coroutine function that runs the method off the server's event
+        loop with the client's arguments.
+    """
+    parameter_names = set(inspect.signature(target_callable).parameters)
+    grace_period = getattr(target_callable, "__background_job_grace_period__", None)
+
+    async def execute_reflected(**kwargs: Any) -> Any:
+        """Run the method with the client's arguments.
+
+        Returns
+        -------
+        result : `Any`
+            The method's result, or for a slow method still running, the
+            job id to poll.
+        """
+        if grace_period is not None:
+            # A method marked with `@background_job` runs slowly enough that
+            # calling it directly would block this server's single
+            # connection for its whole duration. It records its own job
+            # (``register_job=True``) and runs in a background thread; the
+            # client gets its real result if it finishes quickly, or the
+            # job id to poll.
+            from astrometricslib.drivers.job_logging import run_as_background_job
+
+            arguments = _call_arguments(kwargs, parameter_names)
+            return await asyncio.to_thread(
+                run_as_background_job,
+                lambda: target_callable(**arguments),
+                grace_period_seconds=grace_period,
+            )
+
+        if inspect.iscoroutinefunction(target_callable):
+            return await target_callable(**kwargs)
+
+        # A plain synchronous method still needs its own thread, not a
+        # direct call on this coroutine: some (e.g. wayfindinglib's
+        # `ObservatoryControl`, which bridges into async INDI drivers via
+        # `hardware_operations._run_sync`'s own `asyncio.run(...)`) start a
+        # second event loop internally, which Python refuses whenever the
+        # calling thread already has one running -- exactly this server's
+        # own loop.
+        return await asyncio.to_thread(target_callable, **kwargs)
+
+    return execute_reflected

@@ -6,16 +6,20 @@ caller (a script, the backend, an AI client) reads named fields instead of
 guessing at the keys of a dictionary.
 
 - `StackResult` says which frames were chosen and, unless only a plan was
-  asked for, where the stack went and whether it was flagged.
+  asked for, where the stack went, its quality summary, and whether it was
+  flagged.
 - `PreviewRemakeResult` says where the new preview picture went and which
   steps made it.
 - `ProcessTargetResult` holds one target's result from each analysis stage
-  that ran.
+  that ran, and the target's quality summaries afterwards.
 """
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from astrometricslib.models.quality_summary import StackQualitySummary
+from astrometricslib.models.target import TargetQualitySummaries
 
 __all__ = ["PreviewRemakeResult", "ProcessTargetResult", "StackResult"]
 
@@ -38,6 +42,9 @@ class StackResult(BaseModel):
     # Whether the stack's quality summary flags a problem. None for a plan.
     flagged: bool | None = None
     flag_reasons: list[str] = Field(default_factory=list)
+    # The new stack's quality summary (rejected fraction, star sharpness
+    # against the inputs, flags). None for a plan.
+    quality_summary: StackQualitySummary | None = None
     note: str = ""
 
 
@@ -71,3 +78,6 @@ class ProcessTargetResult(BaseModel):
     # The stages that ran, in the order they ran.
     stages_run: list[str] = Field(default_factory=list)
     results: dict[str, Any] = Field(default_factory=dict)
+    # The target's astrometry, photometry and spectroscopy quality
+    # summaries after the stages ran.
+    quality: TargetQualitySummaries | None = None

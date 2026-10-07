@@ -1,6 +1,6 @@
 # Wayfinding Library: Architecture and Design
 
-*Version 2.11 · 2026-10-05 · Status: current*
+*Version 2.12 · 2026-10-07 · Status: current*
 
 ## Overview
 
@@ -373,11 +373,11 @@ A related but distinct reconciliation runs inside Control rather than Execution,
 
 Observatory Control groups its operations by topic, so each group stays small enough to read as a whole. The root object holds only the device drivers, which tests and the app replace with their own. Seven groups hold the operations, and all of them share one record of the configuration, storage, and drivers. Each group that has readable state offers a single status read, and the caller names the sections it wants.
 
-* `control.mount`: pointing and tracking — slew to a target or a sky position, sync, park, tracking, manual motion, and the pointing correction.
-* `control.imaging`: the main camera, filter wheel, and focuser, and the focus correction.
-* `control.guiding`: the guide camera, guide pulses, the guider calibrations, and the mount's periodic error model.
-* `control.remote`: the telescope computer's folders and files, and copying new frames and logs into the library.
-* `control.history`: past and current observing sessions — the night analyses, the live session report, and the performance limits.
+* `control.mount`: pointing and tracking — slew to a target or a sky position, optionally centered by plate solving, sync, park, tracking, manual motion, and the pointing correction. Its status also reports the pier side, the park state, and the tracking rate.
+* `control.imaging`: the main camera, filter wheel, and focuser — a capture run of several exposures with one filter change and optional dithering — and the focus correction.
+* `control.guiding`: the guide camera, guide pulses, the guider calibrations, the mount's periodic error model, and the guiding going on now with its root-mean-square (RMS) error. A guiding driver chosen per telescope reads the guider: PHD2, the pulses KStars/Ekos sends the mount, or a simulator that can also run this system's own guide loop.
+* `control.remote`: the telescope computer's folders and files, and copying new frames and logs into the library. One name-matching rule finds a target's remote folder. After a copy, each new frame whose header holds a plate solve gives the mount's pointing error at that moment.
+* `control.history`: past and current observing sessions — the night analyses, the plate-solve alignment record of each night, the live session report, and the performance limits.
 * `control.safety`: weather, the enclosure, the safe state, and which capabilities this system may command.
 * `control.equipment`: the equipment profile, the site, and the device connections.
 
@@ -444,7 +444,7 @@ Two more device-type drivers, `SwitchDriver` and `WeatherDriver`, extend §2.5.1
 
 **Monitoring and controller mode.** The six capabilities' delegation states are set individually, but an operator commonly wants to move all of them together — "go hands-off" or "take control" — the same convenience N.I.N.A. gives by bundling per-device driver choices into one profile switch. `set_all_capabilities` provides this without bypassing any per-capability rule: it replays the existing promotion path once per capability, in dependency order, reporting any capability that cannot yet legally reach the requested state rather than skipping or forcing it. Moving every capability toward `DELEGATED` ("monitoring mode") always fully succeeds, since that state has no precondition of its own. Moving toward `AUTHORITATIVE` ("controller mode") only succeeds for capabilities already positioned to make that jump — safety and mount control have no precondition, the three correction capabilities must already be `SHADOWED`, and capture orchestration must wait for all three of those to be `AUTHORITATIVE` first — so a fresh policy's bulk request to enter controller mode typically returns a partial result, which the caller (a settings toggle, in this codebase's UI) is expected to surface rather than swallow. This is also the toggle's actual backing: the informal global "Safe Mode" flag this design invariant set once lived inside the INDI driver itself is removed outright, since a per-protocol flag with no awareness of which capability was being commanded was a second authority competing with the one described here.
 
-This is also the point at which every remaining backend service that bypassed this facade to reach a hardware driver directly is brought into line: `AlignmentService` and the observatory-wide safety service take Observatory Control itself rather than a raw INDI or remote-transfer driver, so a mount sync/slew during alignment, a safety check's connectivity/humidity read, and a remote sync's file transfer all pass through the same authority checks and pluggable drivers everything else in this section does, rather than around them.
+Every hardware step of the application goes through this facade: centering by plate solving, capture runs, guiding, the imaging queue, and remote syncs. A mount sync during centering, a guide pulse, and a remote file transfer therefore pass through the same authority checks and pluggable drivers as everything else in this section. The application only starts and stops the long-running loops on its own threads.
 
 #### 2.5.5b Incumbent Session Logs and Equipment-Derived Limits
 
@@ -696,7 +696,7 @@ Table 9 maps `wayfindinglib`'s headless Python API functions onto the desktop GU
 | **Ekos Mount Module** | `wayfinder.control.mount.slew()`, `park()`, `unpark()`, `set_tracking()` | Direct API equivalent for mount slewing, park/unpark, and tracking rate configuration (`hardware_operations.py`). |
 | **Ekos Align Module** | `wayfinder.control.mount.compute_pointing_correction()` | Headless plate-solving alignment and pointing error correction ($\Delta \text{RA}, \Delta \text{Dec}$) calculation (`pointing_correction.py`). |
 | **Ekos Focus Module** | `wayfinder.control.imaging.compute_focus_correction()`, `run_autofocus()` | Headless V-curve autofocus fitting and thermal temperature compensation ($dT/dz$) (`focus_correction.py`). |
-| **Ekos Guide Module** | `wayfinder.control.guiding.compute_correction()`, `dither()` | Headless PHD2 guider event stream ingestion, pulse correction calculation, and dither orchestration (`guiding_correction.py`). |
+| **Ekos Guide Module** | `wayfinder.control.guiding.compute_correction()`, `status(include=["live"])`, `wayfinder.control.imaging.capture_image(dither=...)` | Headless PHD2 guider event stream ingestion, pulse correction calculation, and dither orchestration (`guiding_correction.py`). |
 | **Ekos Scheduler** | `wayfinder.planning.create_plan(kind="scheduled_session")` | Headless night window calculation, target visibility scoring, and sequence queue scheduling (`scheduling.py`). |
 | **Ekos Capture Module** | `wayfinder.planning.create_plan(kind="package")` | Declarative request authoring for light and calibration exposure sequences (`observation_package.py`). |
 | **Ekos Dome & Weather Interlock** | `wayfinder.control.safety.execute_safe_state()`, `safety_monitor` | Headless out-of-process safety monitoring, rain/cloud interlock execution, and emergency parking (`safe_state.py`). |

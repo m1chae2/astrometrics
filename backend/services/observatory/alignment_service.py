@@ -16,8 +16,7 @@ import time
 from typing import Any
 
 from astrometricslib import InvalidArgumentError
-from wayfindinglib import MountPointingModel, ObservatoryControl, SkyPosition
-from wayfindinglib.models.session.telemetry import AlignmentAttempt
+from wayfindinglib import AlignmentAttempt, MountPointingModel, ObservatoryControl, SkyPosition
 
 logger = logging.getLogger(__name__)
 

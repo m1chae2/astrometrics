@@ -256,7 +256,7 @@ export interface ActionRegistry {
     // Matches ImagingService.capture_sequence. An earlier declaration listed
     // exposure/iso/filter/camera/delay/prefix, none of which the handler accepts;
     // a call typed against it failed on a missing target_id.
-    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number }; response: string };
+    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:get_active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
 
     // Images

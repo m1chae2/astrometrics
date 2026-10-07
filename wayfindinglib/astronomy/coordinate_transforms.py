@@ -7,11 +7,19 @@ hardware present and a safety check performed mid-slew agree by
 construction, both resolving position from the same `SiteProfile`
 (`Wayfinding_Library_Architecture.md` §2.2.2, "Single Source Of Observer
 Position").
+
+It also converts between the two equatorial frames the app meets. Star
+catalogs, plate solutions and library targets use ICRS, which agrees
+with J2000 to well under an arcsecond. A mount on INDI reports and
+accepts positions in the "current epoch" frame (INDI's
+``EQUATORIAL_EOD_COORD``, often called JNow): the true equator and
+equinox of the date. The Earth's axis precesses, so the two frames drift
+apart by about 50 arcseconds a year, or about 0.36 degrees by 2026.
 """
 
 import astropy.units as u
 import numpy as np
-from astropy.coordinates import AltAz, EarthLocation, SkyCoord
+from astropy.coordinates import ICRS, TETE, AltAz, EarthLocation, SkyCoord
 from astropy.time import Time
 
 
@@ -162,3 +170,58 @@ def signed_offset_components_arcsec(
     ra_arcsec = delta_ra_deg * 3600.0 * np.cos(np.radians(from_dec_deg))
     dec_arcsec = (to_dec_deg - from_dec_deg) * 3600.0
     return float(ra_arcsec), float(dec_arcsec)
+
+
+def icrs_to_current_epoch(ra_deg: float, dec_deg: float, obstime: Time) -> tuple[float, float]:
+    """Convert an ICRS (J2000) position to the current-epoch frame (JNow).
+
+    The current-epoch frame is the true equator and equinox of `obstime`
+    (Astropy's ``TETE`` frame, seen from the Earth's center). It applies
+    precession, nutation and annual aberration. This is the frame an INDI
+    mount expects in ``EQUATORIAL_EOD_COORD``.
+
+    Parameters
+    ----------
+    ra_deg : `float`
+        ICRS Right Ascension in degrees.
+    dec_deg : `float`
+        ICRS Declination in degrees.
+    obstime : `Time`
+        The date that defines the current epoch.
+
+    Returns
+    -------
+    ra_deg, dec_deg : `tuple` [`float`, `float`]
+        The position in the current-epoch frame, in degrees. Right
+        Ascension is in [0, 360).
+    """
+    current = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs").transform_to(
+        TETE(obstime=obstime)
+    )
+    return float(current.ra.wrap_at(360 * u.deg).deg), float(current.dec.deg)
+
+
+def current_epoch_to_icrs(ra_deg: float, dec_deg: float, obstime: Time) -> tuple[float, float]:
+    """Convert a current-epoch (JNow) position to ICRS (J2000).
+
+    The inverse of `icrs_to_current_epoch`. Use it on the position an
+    INDI mount reports, so the mount can be compared with catalog stars
+    and plate solutions.
+
+    Parameters
+    ----------
+    ra_deg : `float`
+        Current-epoch Right Ascension in degrees.
+    dec_deg : `float`
+        Current-epoch Declination in degrees.
+    obstime : `Time`
+        The date that defines the current epoch.
+
+    Returns
+    -------
+    ra_deg, dec_deg : `tuple` [`float`, `float`]
+        The ICRS position in degrees. Right Ascension is in [0, 360).
+    """
+    current = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame=TETE(obstime=obstime))
+    icrs = current.transform_to(ICRS())
+    return float(icrs.ra.wrap_at(360 * u.deg).deg), float(icrs.dec.deg)

@@ -10,6 +10,7 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { PlanetariumSource, PlanetariumTarget, ObserverLocation, ConstellationLineSegment } from '../../common/types/planetariumTypes';
 import { getAltAz, getRaDec, projectAltAz, pixelsPerDegree } from '../utils/projectionMath';
 import { safeParse } from '../utils/coordinateUtils';
+import { calculateLST } from '../utils/siderealTime';
 import { findNearestSource } from '../utils/hitTesting';
 import { useTelescopeStatus } from '../../common/hooks/useTelescopeStatus';
 import { emitToast } from '../../common/utils/emitToast';
@@ -98,17 +99,6 @@ interface Props {
   sensorFovHeightDeg?: number;
 }
 
-
-/**
- * Calculates the Local Sidereal Time (LST) for a given time offset and longitude.
- *
- * The base time is always the current system clock, with an offset applied for
- * simulation mode. The GMST formula follows the IAU 1982 standard.
- *
- * @param {number} offsetMinutes - Time offset from system clock in minutes (0 = live time).
- * @param {number} lon - Observer longitude in degrees (negative = west).
- * @returns {number} Local Sidereal Time in degrees (0–360).
- */
 // How much Local Sidereal Time must drift since the last drawn frame before
 // that drift alone is worth a redraw, at a wide FOV. 0.001 degrees corresponds
 // to roughly a quarter of a real second at 1x live-time speed — imperceptible
@@ -129,18 +119,6 @@ const LST_REDRAW_EPSILON_DEGREES = 0.001;
 // idle viewing keeps its original ~4Hz cadence while tight zooms redraw every
 // frame once sidereal drift exceeds this many pixels.
 const LST_REDRAW_EPSILON_PIXELS = 1.5;
-
-export const calculateLST = (simDate: Date, offsetMinutes: number, lon: number): number => {
-  const date = new Date(simDate.getTime() + offsetMinutes * 60 * 1000);
-
-  const jd2000 = 2451545.0;
-  const currentJd = (date.getTime() / 86400000.0) + 2440587.5;
-  const d = currentJd - jd2000;
-  let gmst = 18.697374558 + 24.06570982441908 * d;
-  gmst = (gmst % 24.0 + 24.0) % 24.0;
-
-  return (gmst * 15.0 + lon + 360.0) % 360.0;
-};
 
 /**
  * High-performance celestial sky map rendered on HTML5 Canvas.

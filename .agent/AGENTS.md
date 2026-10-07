@@ -29,8 +29,9 @@ Maintain clean unidirectional dependency boundaries across layers:
 - Thin delivery layer delegating business logic to services.
 - ❌ NEVER contain business logic or import directly from `astrometrics/`.
 
-### `backend/mcp/` & Running API Layer
-- Hosts the backend MCP server, the capability gap server, and the tool manifests that limit what an AI client may use (see section 5).
+### `mcp_servers/` (MCP Server Layer)
+- Hosts every Python MCP server (`astrometrics_core`, `wayfinding_core`, `backend`, `gaps`), the shared registry and server loop (`common`), and the tool inventory that writes the manifests limiting what an AI client may use (`inventory`; see section 5).
+- `mcp_servers.backend` reaches the running backend only through `/api/rpc`. It imports nothing from `backend` except the guard functions `destructive_rpc_reason` and `check_agent_code`. `backend` never imports `mcp_servers`.
 - ❌ NEVER recreate synthetic or duplicate domain library reflection wrappers (`backend_targets_*`). Domain math belongs in `astrometricslib-core` and `wayfindinglib-core`.
 
 ## 3. Data & Resource Safety

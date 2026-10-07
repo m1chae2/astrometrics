@@ -1,17 +1,20 @@
 # MCP servers
 
-This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries know nothing about MCP.
+This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries and the backend know nothing about MCP. The front end's server (`astrometrics-ui`) is written in TypeScript and lives in `ui/mcp/`.
 
 ## What each folder is for
 
 - `common/` — code every server shares.
   - `reflection.py` — reads the public methods of a facade such as `Astrometrics` at startup and turns each one into a tool, so tools are not listed by hand. Methods whose names start with `delete` are skipped on purpose (`WITHHELD_METHOD_PREFIXES`), so an AI client cannot delete catalog records; deleting is done in the app, which asks the person first.
-  - `tool_registry.py` — holds a server's tools and sends an incoming tool call to the right method.
+  - `tool_registry.py` — holds a server's tools and sends an incoming tool call to the right method. Every Python server with a registry uses this one class. Two options cover the differences: `sandbox_paths` refuses path arguments outside the library folders (the library servers turn it on), and `remediation` adds a recovery hint to a failed call's error (the backend server uses it).
   - `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below.
   - `tool_errors.py` — turns an error raised by a tool into a reply the client can read.
-  - `server.py` — the loop that serves one client over standard input and output.
+  - `server.py` — the loop that serves one client over standard input and output. Every Python server's `__main__.py` builds its tools and calls `run_server`. It imports only the MCP package, so the gap server can use it.
 - `astrometrics_core/` — the `astrometricslib-core` server. Run it with `python -m mcp_servers.astrometrics_core`. `definition.py` builds its registry from `Astrometrics`, and `tool_manifest.json` is the reviewed list of its tools with a class, category and disposition for each.
 - `wayfinding_core/` — the `wayfindinglib-core` server, built from `Wayfinder` in the same way. Run it with `python -m mcp_servers.wayfinding_core`. Its own README describes its tools.
+- `backend/` — the `astrometrics-backend` server. Run it with `python -m mcp_servers.backend`. Its tools reach the running backend over HTTP. See its README.
+- `gaps/` — the `astrometrics-gaps` server, where an AI reports what its tools cannot do. Run it with `python -m mcp_servers.gaps`. See its README.
+- `inventory/` — the tool inventory and the reviewed decisions about each tool. It writes every server's `tool_manifest.json`. See its README.
 - `devtools/contract_validator.py` — a tool that checks a pydantic model's serialization contract (its field names, aliases, and JSON shape). It catches a model that would not survive a round trip through the MCP protocol. The `astrometricslib-core` server offers it.
 
 ## Which tools the server offers
@@ -26,7 +29,7 @@ The rules fail closed:
 
 Tools marked `merge` stay available until the tool that replaces them exists. Once it exists, they are marked `merged`: they are no longer offered, and a call to one says which tool replaced it.
 
-Do not edit `tool_manifest.json` by hand. `mcp_servers/inventory/tool_inventory.py --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. `python -m mcp_servers.inventory --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
 
 ## How a tool call reaches a method
 

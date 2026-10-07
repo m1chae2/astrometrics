@@ -31,6 +31,7 @@ __all__ = [
     "FrameRecord",
     "ImageType",
     "RenderedImage",
+    "StretchParameters",
     "Target",
     "TargetObjectType",
     "TargetQualitySummaries",
@@ -449,6 +450,34 @@ class FitsHeaderEntry(BaseModel):
     comment: str = Field(default="", alias="comment")
 
 
+class StretchParameters(BaseModel):
+    """The automatic stretch used to draw a picture, so a viewer can redo it.
+
+    The stretch maps a pixel value v to ``(v - black_point) / (white_point
+    - black_point)``, clipped to 0..1, and then applies the midtones
+    transfer function (MTF) with the balance ``midtones``. The black point
+    sits 2.8 noise levels below the sky (the median), with the noise taken
+    from the median absolute deviation (MAD); the white point is the
+    brightest pixel; and the balance puts the sky at 25% brightness. These
+    are the PixInsight and Siril defaults.
+
+    Attributes
+    ----------
+    black_point : `float`
+        The pixel value drawn black.
+    white_point : `float`
+        The pixel value drawn white.
+    midtones : `float`
+        The midtones balance, between 0 and 1. 0.5 leaves values unchanged.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    black_point: float = Field(alias="blackPoint")
+    white_point: float = Field(alias="whitePoint")
+    midtones: float = Field(alias="midtones")
+
+
 class RenderedImage(BaseModel):
     """A finished picture ready to display in the app, plus brightness stats.
 
@@ -468,6 +497,10 @@ class RenderedImage(BaseModel):
     headers: list[FitsHeaderEntry] = Field(default_factory=list, alias="headers")
     # The file that was drawn.
     path: str | None = Field(default=None, alias="path")
+    # The automatic stretch the picture was drawn with, or `None` when it
+    # was drawn without one (a manual range, a linear view, an image with
+    # no measurable sky, or Siril's own preview picture).
+    stretch_parameters: StretchParameters | None = Field(default=None, alias="stretchParameters")
 
 
 class ViewableImage(BaseModel):
@@ -482,3 +515,6 @@ class ViewableImage(BaseModel):
     # What the picture shows: the file, the brightness range, the size and
     # the crop.
     description: dict[str, Any] = Field(default_factory=dict)
+    # The automatic stretch the picture was drawn with, or `None` when it
+    # was drawn without one.
+    stretch_parameters: StretchParameters | None = None

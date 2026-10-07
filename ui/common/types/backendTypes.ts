@@ -1085,6 +1085,32 @@ export interface LiveGuidingStatus {
 }
 
 /**
+ * The automatic stretch used to draw a picture, so a viewer can redo it.
+ *
+ * The stretch maps a pixel value v to ``(v - black_point) / (white_point
+ * - black_point)``, clipped to 0..1, and then applies the midtones
+ * transfer function (MTF) with the balance ``midtones``. The black point
+ * sits 2.8 noise levels below the sky (the median), with the noise taken
+ * from the median absolute deviation (MAD); the white point is the
+ * brightest pixel; and the balance puts the sky at 25% brightness. These
+ * are the PixInsight and Siril defaults.
+ *
+ * Attributes
+ * ----------
+ * black_point : `float`
+ * The pixel value drawn black.
+ * white_point : `float`
+ * The pixel value drawn white.
+ * midtones : `float`
+ * The midtones balance, between 0 and 1. 0.5 leaves values unchanged.
+ */
+export interface StretchParameters {
+  blackPoint: number;
+  whitePoint: number;
+  midtones: number;
+}
+
+/**
  * A finished picture ready to display in the app, plus brightness stats.
  *
  * `Visualization.render_fits(kind="data_url")` returns it.
@@ -1096,6 +1122,7 @@ export interface RenderedImage {
   imageData: string;
   headers?: FitsHeaderEntry[];
   path?: string | null;
+  stretchParameters?: StretchParameters | null;
 }
 
 /**

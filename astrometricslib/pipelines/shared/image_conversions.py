@@ -14,14 +14,37 @@ from PIL import Image
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError, ProcessingError
-from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, ViewableImage
+from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, StretchParameters, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
 from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
 
 logger = logging.getLogger(__name__)
 
 # Shared in-memory cache for rendered PNG frames
-_png_cache: dict[tuple[str, int, float | None, float | None, str, bool], tuple[bytes, float, float]] = {}
+_png_cache: dict[
+    tuple[str, int, float | None, float | None, str, bool],
+    tuple[bytes, float, float, StretchParameters | None],
+] = {}
+
+
+def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
+    """Return the automatic stretch a picture was drawn with.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The image data that was drawn.
+    auto_stretched : `bool`
+        Whether the automatic stretch was asked for (stretch on, no manual
+        brightness range).
+
+    Returns
+    -------
+    parameters : `StretchParameters` or `None`
+        The stretch, measured the way `ImageScaler.scale_to_uint8` measures
+        it, or `None` when none was used.
+    """
+    return ImageScaler.autostretch_parameters(data, sample_sky=True) if auto_stretched else None
 
 
 def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
@@ -76,7 +99,7 @@ class ImageConverter:
         width: float | None = None,
         cmap: str = "gray",
         stretch: bool = True,
-    ) -> tuple[bytes, float, float]:
+    ) -> tuple[bytes, float, float, StretchParameters | None]:
         """Convert a FITS file to PNG bytes, tracking the brightness range.
 
         It uses a cache to remember recent images so they load faster
@@ -86,7 +109,8 @@ class ImageConverter:
         -------
         result : `tuple`
             A tuple containing `(png_bytes, minimum_brightness,
-            maximum_brightness)`.
+            maximum_brightness, stretch_parameters)`. The last is the
+            automatic stretch used, or `None` when none was.
         """
         cache_key = (path, int(max_dimensions), center, width, cmap, stretch)
         if cache_key in _png_cache:
@@ -103,6 +127,7 @@ class ImageConverter:
         img8, vmin, vmax = ImageScaler.scale_to_uint8(
             data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
         )
+        stretch_parameters = _stretch_used(data, stretch and center is None)
 
         pil_image = Image.fromarray(img8)
         if pil_image.mode != "L":
@@ -127,8 +152,8 @@ class ImageConverter:
         # Simple cache pruning: evict oldest entry if cache grows too large
         if len(_png_cache) > 128:
             _png_cache.pop(next(iter(_png_cache)))
-        _png_cache[cache_key] = (png_bytes, vmin, vmax)
-        return png_bytes, vmin, vmax
+        _png_cache[cache_key] = (png_bytes, vmin, vmax, stretch_parameters)
+        return png_bytes, vmin, vmax, stretch_parameters
 
 
 def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
@@ -248,9 +273,9 @@ def render_data_url(
     try:
         preview = _siril_preview_picture(path, max_dimensions) if stretch and center is None else None
         if preview is not None:
-            image_data, vmin, vmax = preview, 0.0, 255.0
+            image_data, vmin, vmax, stretch_parameters = preview, 0.0, 255.0, None
         else:
-            png_bytes, vmin, vmax = ImageConverter.convert_fits_to_png_with_stats(
+            png_bytes, vmin, vmax, stretch_parameters = ImageConverter.convert_fits_to_png_with_stats(
                 path, max_dimensions=max_dimensions, center=center, width=width, stretch=stretch
             )
             image_data = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
@@ -262,7 +287,13 @@ def render_data_url(
         logger.warning("Could not read the header of %s while drawing it: %s", path, error)
         headers = []
     return RenderedImage(
-        id=image_id, min=float(vmin), max=float(vmax), image_data=image_data, headers=headers, path=path
+        id=image_id,
+        min=float(vmin),
+        max=float(vmax),
+        image_data=image_data,
+        headers=headers,
+        path=path,
+        stretch_parameters=stretch_parameters,
     )
 
 
@@ -318,6 +349,7 @@ def render_viewable_image(
     img8, vmin, vmax = ImageScaler.scale_to_uint8(
         data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
     )
+    stretch_parameters = _stretch_used(data, stretch and center is None)
     picture = Image.fromarray(img8)
     if picture.mode != "L":
         picture = picture.convert("L")
@@ -343,6 +375,7 @@ def render_viewable_image(
             "brightness_range_shown": {"minimum": float(vmin), "maximum": float(vmax)},
             "stretched": bool(stretch),
         },
+        stretch_parameters=stretch_parameters,
     )
 
 

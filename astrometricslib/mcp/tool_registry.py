@@ -255,7 +255,9 @@ class ToolRegistry:
                         data=base64.b64encode(result.png_bytes).decode("ascii"),
                         mimeType="image/png",
                     ),
-                    TextContent(type="text", text=json.dumps(result.description, indent=2, default=str)),
+                    TextContent(
+                        type="text", text=json.dumps(_picture_description(result), indent=2, default=str)
+                    ),
                 ]
 
             if hasattr(result, "savefig") and callable(result.savefig):
@@ -284,6 +286,26 @@ FIGURE_DOTS_PER_INCH = 100
 """Resolution of a plot sent to a client. A 16 x 9 inch figure becomes a
 1600 x 900 picture, large enough to read axis labels and small enough (a few
 hundred kilobytes) for the MCP transport."""
+
+
+def _picture_description(picture: Any) -> dict[str, Any]:
+    """Describe a returned picture in the text that goes beside it.
+
+    Parameters
+    ----------
+    picture : `ViewableImage`
+        The picture.
+
+    Returns
+    -------
+    description : `dict` [`str`, `Any`]
+        Its description, with the automatic stretch it was drawn with when
+        it has one.
+    """
+    stretch = getattr(picture, "stretch_parameters", None)
+    if stretch is None:
+        return picture.description
+    return {**picture.description, "stretch_parameters": stretch.model_dump()}
 
 
 def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:

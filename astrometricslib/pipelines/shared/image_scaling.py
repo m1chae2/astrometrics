@@ -9,6 +9,7 @@ import logging
 
 import numpy as np
 
+from astrometricslib.models.target import StretchParameters
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -352,8 +353,56 @@ def _scale_to_uint8_in_blocks(
     return img8
 
 
+def _display_array(data: np.ndarray) -> np.ndarray:
+    """Turn image data into the 2-D or colour-last array that is drawn.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The raw image data, 2-D or colour (colour axis first or last).
+
+    Returns
+    -------
+    arr : `numpy.ndarray`
+        Float data, 2-D or with the colour axis last. A cube that is not
+        colour is reduced to its first plane.
+    """
+    arr = np.asarray(data, dtype=float)
+    if arr.ndim == 3:
+        if arr.shape[0] in [3, 4]:
+            arr = np.transpose(arr, (1, 2, 0))
+        elif arr.shape[2] not in [3, 4]:
+            arr = arr[0] if arr.shape[0] == 1 else arr[:, :, 0]
+    return arr
+
+
 class ImageScaler:
     """Adjust an astronomy image's brightness and contrast for viewing."""
+
+    @staticmethod
+    def autostretch_parameters(data: np.ndarray, sample_sky: bool = False) -> StretchParameters | None:
+        """Return the automatic stretch `scale_to_uint8` would use.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The raw image data, 2-D or colour.
+        sample_sky : `bool`, optional
+            Measure the sky from a sample of the pixels (see
+            `measure_sky`), as `scale_to_uint8` does when asked to.
+
+        Returns
+        -------
+        parameters : `StretchParameters` or `None`
+            The black point, white point and midtones balance, or `None`
+            when the image has no measurable sky (then `scale_to_uint8`
+            uses a plain percentile stretch).
+        """
+        autostretch = _autostretch_parameters(_display_array(data), sample_pixels=sample_sky)
+        if autostretch is None:
+            return None
+        black_point, white_point, midtones = autostretch
+        return StretchParameters(black_point=black_point, white_point=white_point, midtones=midtones)
 
     @staticmethod
     def scale_to_uint8(
@@ -405,14 +454,8 @@ class ImageScaler:
             The new image data, the black point used, and the white
             point used.
         """
-        arr = np.asarray(data, dtype=float)
-
         # Handle multi-channel data (e.g. RGB FITS)
-        if arr.ndim == 3:
-            if arr.shape[0] in [3, 4]:
-                arr = np.transpose(arr, (1, 2, 0))
-            elif arr.shape[2] not in [3, 4]:
-                arr = arr[0] if arr.shape[0] == 1 else arr[:, :, 0]
+        arr = _display_array(data)
 
         autostretch = (
             _autostretch_parameters(arr, sample_pixels=sample_sky)

@@ -12,7 +12,9 @@
  *
  * Messages in (all carry a `requestId` that is echoed back):
  *   - `parse`   decode a raw FITS file and file the pixels under `imageId`.
- *   - `render`  draw the image filed under `imageId` into a bitmap.
+ *   - `render`  draw the image filed under `imageId` into a bitmap, with the
+ *               library's `stretchParameters` when the stretch is on (without
+ *               them the view is linear; the stretch is never worked out here).
  *   - `release` forget the image filed under `imageId`.
  *
  * Drawing prefers one long-lived OffscreenCanvas+WebGL2 context (see
@@ -25,7 +27,7 @@
 
 import {
   renderMtfStretch,
-  computeMtfStretchParameters,
+  shaderParametersFromLibraryStretch,
   computeLinearStretchParameters,
   MtfStretchParameters,
 } from './mtfStretchGL';
@@ -40,8 +42,6 @@ interface StoredImage {
   rowOrder: string | undefined;
   min: number;
   max: number;
-  /** Auto-stretch settings, worked out on first use and kept. */
-  stretchParameters: MtfStretchParameters | null;
 }
 
 const storedImages = new Map<number, StoredImage>();
@@ -226,7 +226,6 @@ self.onmessage = async (ev: MessageEvent) => {
         rowOrder: roworder,
         min: decoded.min,
         max: decoded.max,
-        stretchParameters: null,
       });
 
       (self as any).postMessage({
@@ -243,7 +242,7 @@ self.onmessage = async (ev: MessageEvent) => {
 
   if (cmd === 'render') {
     try {
-      const { dstW, dstH, dpr, stretch = true, displayRange } = ev.data;
+      const { dstW, dstH, dpr, stretch = true, displayRange, stretchParameters } = ev.data;
       const image = storedImages.get(imageId);
       if (!image) {
         throw new Error(`No decoded image filed under id ${imageId}`);
@@ -253,10 +252,11 @@ self.onmessage = async (ev: MessageEvent) => {
       const destinationHeight = Math.round(dstH * dpr);
 
       let parameters: MtfStretchParameters;
-      if (stretch) {
-        image.stretchParameters ??= computeMtfStretchParameters(image.pixels);
-        parameters = image.stretchParameters;
+      if (stretch && stretchParameters) {
+        // The library worked out the stretch for this image; it is applied as sent.
+        parameters = shaderParametersFromLibraryStretch(stretchParameters);
       } else {
+        // No stretch asked for, or none sent with the image: a linear view.
         // A caller that knows the file's scale (a stretched picture runs from
         // 0 to 1) passes it, so the picture is not rescaled to its own darkest
         // and brightest pixels. Otherwise the file's own range is used.

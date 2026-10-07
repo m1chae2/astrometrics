@@ -1,24 +1,19 @@
 /**
  * @module mtfStretchGL
- * @fileoverview Single canonical WebGL2 implementation of the FITS midtone
- * transfer function (MTF) auto-stretch, shared by FitsLoaderItem.tsx and
- * fitsWorker.ts.
+ * @fileoverview Single WebGL2 implementation of the FITS midtone transfer
+ * function (MTF) stretch, used by fitsWorker.ts.
  *
- * Those two call sites previously carried independent, genuinely-diverged
- * copies of this stretch: fitsWorker.ts had a numerical-stability guard near
- * midtones ≈ 0.5 and RGB-planar support that FitsLoaderItem.tsx lacked;
- * FitsLoaderItem.tsx corrected FITS row order (TOP-DOWN vs BOTTOM-UP) which
- * fitsWorker.ts's render command silently ignored; the two used different
- * statistics sample caps (50k vs 100k). This module keeps every one of those
- * behaviors (unified to fitsWorker.ts's 100k sample cap), and moves the
- * actual per-pixel remap — a pure, cross-pixel-independent nonlinear
- * function — onto the GPU as a single-pass fragment shader. The bounded
- * subsample statistics pass that derives the stretch parameters stays on the
- * CPU, since it inherently needs a sort and is already cheap relative to a
- * full-resolution per-pixel remap.
+ * The stretch settings (black point, white point and midtones balance) come
+ * from the library: the backend sends them as `stretchParameters` with an
+ * image (see `ImageScaler.autostretch_parameters`), so the app and the
+ * library draw an image the same way. This module only applies them: the
+ * per-pixel remap, a nonlinear function of each pixel alone, runs on the GPU
+ * as a single-pass fragment shader. It keeps the numerical-stability guard
+ * near midtones of 0.5, planar RGB support and FITS row order handling.
  */
 
 import { compileShader, linkProgram, createBuffer } from '../webgl/glUtils';
+import { StretchParameters } from '../types/backendTypes';
 
 const VERTEX_SHADER_SOURCE = `#version 300 es
 layout(location = 0) in vec2 aPosition;
@@ -142,54 +137,7 @@ function getOrCreateResources(gl: WebGL2RenderingContext): CachedGLResources {
   return resources;
 }
 
-/** Statistics derived from a bounded subsample of raw pixel values. */
-export interface MtfStretchStatistics {
-  median: number;
-  standardDeviation: number;
-}
-
-/**
- * Estimates the median and standard deviation of a raw FITS pixel buffer via
- * a bounded subsample, so the cost stays flat regardless of image resolution.
- *
- * @param {Float32Array} raw - Raw physical pixel values (single-channel, or multi-plane concatenated).
- * @param {number} [sampleCap] - Maximum number of samples to draw, unified across both call sites to 100k.
- * @returns {MtfStretchStatistics} The estimated median and standard deviation.
- */
-export function calculateMtfStretchStatistics(raw: Float32Array, sampleCap: number = 100000): MtfStretchStatistics {
-  const totalPixels = raw.length;
-  const step = Math.max(1, Math.floor(totalPixels / sampleCap));
-  const samples: number[] = [];
-  let sum = 0;
-  let count = 0;
-
-  for (let i = 0; i < totalPixels; i += step) {
-    const value = raw[i];
-    if (!isNaN(value) && value !== 0) {
-      samples.push(value);
-      sum += value;
-      count++;
-    }
-  }
-
-  if (count === 0) return { median: 0, standardDeviation: 0 };
-
-  samples.sort((a, b) => a - b);
-  const medianIndex = Math.floor(samples.length / 2);
-  const median =
-    samples.length % 2 !== 0 ? samples[medianIndex] : (samples[medianIndex - 1] + samples[medianIndex]) / 2;
-
-  const mean = sum / count;
-  let varianceSum = 0;
-  for (let k = 0; k < count; k++) {
-    varianceSum += (samples[k] - mean) ** 2;
-  }
-  const standardDeviation = Math.sqrt(varianceSum / count);
-
-  return { median, standardDeviation };
-}
-
-/** Derived MTF stretch parameters, ready to hand to the fragment shader as uniforms. */
+/** MTF stretch parameters, ready to hand to the fragment shader as uniforms. */
 export interface MtfStretchParameters {
   shadows: number;
   range: number;
@@ -197,37 +145,16 @@ export interface MtfStretchParameters {
 }
 
 /**
- * Derives shadow/highlight/midtone stretch parameters from a raw pixel
- * buffer's statistics, targeting a 5% background level.
+ * Turns the library's automatic stretch (black point, white point and
+ * midtones balance, worked out by the backend for this image) into shader
+ * settings. The stretch itself is never worked out here.
  *
- * @param {Float32Array} raw - Raw physical pixel values (single-channel, or multi-plane concatenated).
- * @param {number} [sampleCap] - Maximum number of samples used to estimate statistics.
- * @returns {MtfStretchParameters} The derived shadows, range (highlights - shadows), and midtones.
+ * @param {StretchParameters} stretch - The library's `stretchParameters` for the image.
+ * @returns {MtfStretchParameters} The shadows, range (white point - black point) and midtones.
  */
-export function computeMtfStretchParameters(raw: Float32Array, sampleCap: number = 100000): MtfStretchParameters {
-  const { median, standardDeviation } = calculateMtfStretchStatistics(raw, sampleCap);
-
-  const shadowSigma = -2.8;
-  const shadows = Math.max(0, median + shadowSigma * standardDeviation);
-  const globalMax = raw[0] > 1 || median > 1 ? 65535 : 1.0;
-  const highlights = globalMax;
-  const range = highlights - shadows || 1;
-
-  const targetBackground = 0.05;
-  const normalizedMedian = (median - shadows) / range;
-  let midtones = 0.5;
-  if (normalizedMedian > 0 && normalizedMedian < 1) {
-    const x = normalizedMedian;
-    const y = targetBackground;
-    const numerator = x * y - x;
-    const denominator = 2 * x * y - y - x;
-    if (denominator !== 0) {
-      midtones = numerator / denominator;
-    }
-  }
-  midtones = Math.max(0.0001, Math.min(0.9999, midtones));
-
-  return { shadows, range, midtones };
+export function shaderParametersFromLibraryStretch(stretch: StretchParameters): MtfStretchParameters {
+  const range = stretch.whitePoint - stretch.blackPoint;
+  return { shadows: stretch.blackPoint, range: range > 0 ? range : 1, midtones: stretch.midtones };
 }
 
 /**
@@ -260,8 +187,8 @@ export interface MtfStretchRenderInput {
   /** Destination canvas size in pixels; the source texture is resampled (nearest-neighbor) to fit. */
   destinationWidth: number;
   destinationHeight: number;
-  /** Precomputed stretch parameters; derived from `raw` via computeMtfStretchParameters() when omitted. */
-  parameters?: MtfStretchParameters;
+  /** Shader settings: the library's stretch (see shaderParametersFromLibraryStretch) or a linear range. */
+  parameters: MtfStretchParameters;
   /**
    * Identifies the image in `raw`. When the same key (and size, channels and row order) is
    * passed again on the same context, the pixel upload is skipped and the texture already on
@@ -284,7 +211,7 @@ export interface MtfStretchRenderInput {
 export function renderMtfStretch(gl: WebGL2RenderingContext, input: MtfStretchRenderInput): void {
   const { raw, sourceWidth, sourceHeight, channels, isTopDownRowOrder, destinationWidth, destinationHeight } = input;
   const resources = getOrCreateResources(gl);
-  const parameters = input.parameters ?? computeMtfStretchParameters(raw);
+  const parameters = input.parameters;
 
   const canvas = gl.canvas as HTMLCanvasElement | OffscreenCanvas;
   // Assigning a size, even the same one, can reallocate the drawing buffer; only do it on a real change.

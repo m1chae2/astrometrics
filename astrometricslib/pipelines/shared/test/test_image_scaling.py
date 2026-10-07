@@ -9,6 +9,8 @@ not blow out to white, and an image with no measurable background must
 fall back to the old percentile stretch rather than fail.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -236,3 +238,43 @@ def test_scaling_in_blocks_matches_scaling_all_at_once(
     expected = (whole * 255.0).astype(np.uint8)
 
     np.testing.assert_array_equal(_scale_to_uint8_in_blocks(image, vmin, vmax, midtones), expected)
+
+
+def test_the_autostretch_parameters_are_the_ones_the_picture_used() -> None:
+    """The reported points match the drawing's; the sky lands at 25%."""
+    image = _sky_with_stars()
+
+    _, black_point, white_point = ImageScaler.scale_to_uint8(image, sample_sky=True)
+    parameters = ImageScaler.autostretch_parameters(image, sample_sky=True)
+
+    assert parameters.black_point == pytest.approx(black_point)
+    assert parameters.white_point == pytest.approx(white_point)
+    normalized_sky = (np.median(image) - black_point) / (white_point - black_point)
+    assert _midtones_transfer_function(np.array([normalized_sky]), parameters.midtones)[0] == pytest.approx(
+        0.25, abs=0.02
+    )
+
+
+def test_an_image_without_sky_has_no_autostretch_parameters() -> None:
+    """A flat image cannot anchor a stretch, so none is reported."""
+    assert ImageScaler.autostretch_parameters(np.zeros((50, 50))) is None
+
+
+def test_the_viewer_pictures_carry_the_stretch(tmp_path: Path) -> None:
+    """Both picture kinds report the stretch; a manual range reports none."""
+    from astropy.io import fits
+
+    from astrometricslib.pipelines.shared import image_conversions
+
+    path = str(tmp_path / "sky.fits")
+    fits.PrimaryHDU(_sky_with_stars().astype(np.float32)).writeto(path)
+
+    viewable = image_conversions.render_viewable_image(path, 200, True, None, None, None)
+    assert viewable.stretch_parameters is not None
+    assert 0.0 < viewable.stretch_parameters.midtones < 0.5
+    rendered = image_conversions.render_data_url(path, max_dimensions=200)
+    assert rendered.model_dump(by_alias=True)["stretchParameters"]["blackPoint"] == pytest.approx(
+        viewable.stretch_parameters.black_point
+    )
+    manual = image_conversions.render_viewable_image(path, 200, True, 100.0, 50.0, None)
+    assert manual.stretch_parameters is None

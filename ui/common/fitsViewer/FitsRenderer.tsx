@@ -9,6 +9,7 @@ import { useCanvasInteraction } from './hooks/useCanvasInteraction';
 import { useCanvasDrawer } from './hooks/useCanvasDrawer';
 import { AstrometryOverlayStar } from '../services/astronomyService';
 import { formatStarListLabel } from '../../astronomyManager/utils/starDisplayFormat';
+import { StretchParameters } from '../types/backendTypes';
 
 /**
  * Shortens long catalog identifiers for HUD reticle badges.
@@ -99,6 +100,8 @@ export interface FitsRendererProps {
   stretch?: boolean;
   /** Pixel values drawn black and white when `stretch` is false (default: the file's own range). */
   displayRange?: readonly [number, number];
+  /** The library's automatic stretch for a FITS image, sent by the backend; without it a stretched view is linear. */
+  stretchParameters?: StretchParameters | null;
   overlayStars?: AstrometryOverlayStar[];
   showOverlay?: boolean;
   onStarClick?: (star: AstrometryOverlayStar) => void;
@@ -126,6 +129,7 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
     autoPanTrigger,
     disableStretch,
     displayRange,
+    stretchParameters,
     overlayStars,
     showOverlay,
     onStarClick,
@@ -163,7 +167,9 @@ const FitsRendererInternal = forwardRef<FitsRendererHandle, FitsRendererProps>((
   const effectiveStretch = props.stretch ?? !isStacked;
 
   // Automatically draw with AutoStretch (handled in worker for FITS)
-  useCanvasDrawer(canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch, displayRange);
+  useCanvasDrawer(
+    canvasRef, workerRef, parsedData, bitmap, handleSetDrawnSize, effectiveStretch, displayRange, stretchParameters
+  );
 
   // Expose methods via REF
   useImperativeHandle(ref, () => ({
@@ -360,6 +366,7 @@ export const FitsRenderer = React.memo(FitsRendererInternal, (prevProps, nextPro
     prevProps.disableStretch === nextProps.disableStretch &&
     prevProps.stretch === nextProps.stretch &&
     prevProps.displayRange === nextProps.displayRange &&
+    prevProps.stretchParameters === nextProps.stretchParameters &&
     prevProps.showOverlay === nextProps.showOverlay &&
     prevProps.overlayStars === nextProps.overlayStars &&
     prevProps.selectedStarId === nextProps.selectedStarId

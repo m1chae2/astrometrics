@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { ParsedFitsData } from './useFitsLoader';
+import { StretchParameters } from '../../types/backendTypes';
 
 /** Source of ids that tie each draw request to its reply, so a late reply for an old image is ignored. */
 let nextRenderRequestId = 1;
@@ -13,7 +14,8 @@ let nextRenderRequestId = 1;
  *
  * `displayRange` is the pair of pixel values drawn black and white when
  * `stretch` is false. Leave it out to use the file's own darkest and brightest
- * pixels. Pass a constant, not a new array on every render, or the image is
+ * pixels. `stretchParameters` is the library's automatic stretch for the
+ * image, applied when `stretch` is true; without it the view is linear. Pass a constant, not a new array on every render, or the image is
  * redrawn each time.
  */
 export const useCanvasDrawer = (
@@ -23,7 +25,8 @@ export const useCanvasDrawer = (
     bitmap: ImageBitmap | null,
     setDrawnSize: (size: { w: number, h: number }) => void,
     stretch: boolean = true,
-    displayRange?: readonly [number, number]
+    displayRange?: readonly [number, number],
+    stretchParameters?: StretchParameters | null
 ) => {
 
     // Initial draw for Bitmaps (Processed Backend Images)
@@ -102,11 +105,12 @@ export const useCanvasDrawer = (
             dpr,
             stretch,
             displayRange,
+            stretchParameters,
             channels,
         });
 
         return () => {
             worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange]);
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters]);
 };

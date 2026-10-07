@@ -4,6 +4,7 @@ import { FitsRenderer } from './FitsRenderer';
 import type { FitsRendererHandle } from './FitsRenderer';
 
 import { AstrometryOverlayStar } from '../services/astronomyService';
+import { StretchParameters } from '../types/backendTypes';
 
 export type { FitsRendererHandle };
 
@@ -36,6 +37,8 @@ interface Props {
   stretch?: boolean;
   /** Pixel values drawn black and white when `stretch` is false (default: the file's own range). */
   displayRange?: readonly [number, number];
+  /** The library's automatic stretch for a FITS image, sent by the backend. */
+  stretchParameters?: StretchParameters | null;
   /** Identified star overlay items. */
   overlayStars?: AstrometryOverlayStar[];
   /** Whether astrometry overlay is enabled. */
@@ -61,6 +64,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   disableStretch,
   stretch,
   displayRange,
+  stretchParameters,
   overlayStars,
   showOverlay,
   onStarClick,
@@ -86,6 +90,7 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         disableStretch={disableStretch}
         stretch={stretch}
         displayRange={displayRange}
+        stretchParameters={stretchParameters}
         overlayStars={overlayStars}
         showOverlay={showOverlay}
         onStarClick={onStarClick}

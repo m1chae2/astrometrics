@@ -20,8 +20,12 @@ It offers nothing that commands a device, changes settings or runs code.
 The ``developer`` profile adds the tools that run the project's own tests
 and builds.
 
-The ``backend/mcp/tool_inventory.py`` script writes the manifest files from
-the reviewed decisions. For exact behavior, read the code.
+This file is the one definition of the profiles. The TypeScript UI server
+reads the same rules from ``ui/mcp/src/profileRules.ts``, which
+``build/mcp/generate_client_configs.py`` writes from the constants here.
+``python -m mcp_servers.inventory --write-runtime-manifests`` writes the
+manifest files from the reviewed decisions. For exact behavior, read the
+code.
 """
 
 import json

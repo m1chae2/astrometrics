@@ -197,10 +197,8 @@ def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[s
     return arguments
 
 
-def register_astrometrics_tools(
-    registry: Any, astrometrics_instance: Any, branch_mapping: dict[str, str]
-) -> int:
-    """Introspect an astrometrics object and register public methods as tools.
+def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dict[str, str]) -> int:
+    """Register the public methods of a library's API object as tools.
 
     A tool passes the client's arguments to the method as they are. The
     library methods accept what a client can send: a target id for a
@@ -210,8 +208,8 @@ def register_astrometrics_tools(
     ----------
     registry : `ToolRegistry`
         The tool registry instance to register tools into.
-    astrometrics_instance : `Any`
-        Instantiated astrometrics object (e.g. `Astrometrics` or `Wayfinder`).
+    api_object : `Any`
+        The library's top-level object (`Astrometrics` or `Wayfinder`).
     branch_mapping : `dict` [`str`, `str`]
         Mapping of attribute name on the high-level interface
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
@@ -227,9 +225,9 @@ def register_astrometrics_tools(
 
     for attr_name, prefix in branch_mapping.items():
         if attr_name == "":
-            target_obj = astrometrics_instance
+            target_obj = api_object
         else:
-            target_obj = astrometrics_instance
+            target_obj = api_object
             for part in attr_name.split("."):
                 target_obj = getattr(target_obj, part, None)
                 if target_obj is None:
@@ -299,7 +297,7 @@ def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
             # (``register_job=True``) and runs in a background thread; the
             # client gets its real result if it finishes quickly, or the
             # job id to poll.
-            from astrometricslib.drivers.job_logging import run_as_background_job
+            from astrometricslib import run_as_background_job
 
             arguments = _call_arguments(kwargs, parameter_names)
             return await asyncio.to_thread(

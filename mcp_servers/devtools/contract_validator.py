@@ -1,17 +1,26 @@
-"""Pydantic model serialization contract validator MCP tool.
+"""Purpose: A developer tool that checks the library's models can become JSON.
 
-Scans all registered Pydantic models in the high-level interface package for
-fields that may hold un-serializable scientific types (numpy scalars,
-astropy quantities) and verifies correct type casting at
-serialization boundaries.
+Description: Scans every Pydantic model in astrometricslib for fields that
+may hold scientific types JSON cannot carry (NumPy scalars, Astropy
+quantities). Such a field breaks the type generation for the UI and any
+reply sent over MCP or RPC. The astrometricslib-core server offers it as
+``typegen_contract_validator`` to the developer profile.
 """
 
 import ast
 import os
+from pathlib import Path
 from typing import Any
 
-from astrometricslib.foundation.errors import NotFoundError
-from astrometricslib.mcp.tool_registry import registry
+import astrometricslib
+from astrometricslib import NotFoundError
+from mcp_servers.common.tool_registry import ToolRegistry
+
+TOOL_NAME = "typegen_contract_validator"
+"""The tool's name on the astrometricslib-core server."""
+
+LIBRARY_ROOT = Path(astrometricslib.__file__).resolve().parent
+"""The folder scanned when no other is given."""
 
 
 def _find_python_files(root_dir: str) -> list[str]:
@@ -124,28 +133,7 @@ def _check_field_annotations(models: list[dict[str, Any]]) -> list[dict[str, str
     return warnings
 
 
-@registry.register(
-    name="typegen_contract_validator",
-    description=(
-        "Scans all Pydantic models in the high-level interface package for "
-        "fields that may hold un-serializable scientific types (numpy, "
-        "astropy) and verifies type safety at serialization boundaries."
-    ),
-    input_schema={
-        "type": "object",
-        "properties": {
-            "scan_path": {
-                "type": "string",
-                "description": "Root directory to scan. Defaults to the high-level interface package root.",
-            }
-        },
-        "required": [],
-    },
-)
-async def typegen_contract_validator(  # ruff: ignore[unused-async] -- awaited
-    # by ToolRegistry.execute (astrometricslib/mcp/tool_registry.py)
-    scan_path: str | None = None,
-) -> dict[str, Any]:
+def typegen_contract_validator(scan_path: str | None = None) -> dict[str, Any]:
     """Validate all Pydantic models in the high-level interface package.
 
     Scans AST annotations for dangerous scientific types that would
@@ -172,7 +160,7 @@ async def typegen_contract_validator(  # ruff: ignore[unused-async] -- awaited
         If `scan_path` is not a folder.
     """
     if scan_path is None:
-        scan_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        scan_path = str(LIBRARY_ROOT)
 
     if not os.path.isdir(scan_path):
         raise NotFoundError(
@@ -203,3 +191,31 @@ async def typegen_contract_validator(  # ruff: ignore[unused-async] -- awaited
         "warnings_count": len(warnings),
         "verdict": "PASS" if len(warnings) == 0 else "WARNINGS_FOUND",
     }
+
+
+def register(registry: ToolRegistry) -> None:
+    """Add the validator to a server's registry.
+
+    Parameters
+    ----------
+    registry : `ToolRegistry`
+        The astrometricslib-core server's registry.
+    """
+    registry.register(
+        TOOL_NAME,
+        (
+            "Scans all Pydantic models in the high-level interface package for "
+            "fields that may hold un-serializable scientific types (numpy, "
+            "astropy) and verifies type safety at serialization boundaries."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "scan_path": {
+                    "type": "string",
+                    "description": "Root directory to scan. Defaults to the high-level interface package root.",
+                }
+            },
+            "required": [],
+        },
+    )(typegen_contract_validator)

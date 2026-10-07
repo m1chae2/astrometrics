@@ -1,12 +1,9 @@
 """Tests for the picture tool that returns an image to the client.
 
-`Visualization.render_fits` must return PNG bytes plus a description, and the
-MCP registry must wrap that as image content, not as text.
+`Visualization.render_fits` must return PNG bytes plus a description. The
+MCP server's tests check that the reply reaches the client as an image.
 """
 
-import asyncio
-import base64
-import json
 from io import BytesIO
 from pathlib import Path
 
@@ -62,19 +59,6 @@ def test_half_given_options_are_refused(frame_path: str) -> None:
         Visualization(None, None).render_fits(frame_path, center=1000.0)
     with pytest.raises(InvalidArgumentError):
         Visualization(None, None).render_fits(frame_path, crop_size=40)
-
-
-def test_the_registry_returns_image_content(frame_path: str) -> None:
-    """A tool that returns a `ViewableImage` reaches the client as an image."""
-    from astrometricslib.mcp.tool_registry import ToolRegistry
-
-    registry = ToolRegistry()
-    registry.register("view", "View a frame.")(lambda: Visualization(None, None).render_fits(frame_path))
-    content = asyncio.run(registry.execute("view", {}))
-    assert content[0].type == "image"
-    assert content[0].mimeType == "image/png"
-    assert Image.open(BytesIO(base64.b64decode(content[0].data))).size[0] > 0
-    assert "brightness_range_shown" in json.loads(content[1].text)
 
 
 def test_a_target_frame_is_found_by_its_number(frame_path: str) -> None:

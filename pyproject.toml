@@ -111,15 +111,16 @@ astrometrics = "backend.main_backend:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "astrometricslib", "wayfindinglib"]
+packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers"]
 exclude = [
   "backend/tests",
   "astrometricslib/test",
   "wayfindinglib/test",
+  "mcp_servers/**/test",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test", "build/migrations"]
+testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test", "build/migrations", "mcp_servers"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -187,7 +188,7 @@ convention = "numpy"
 max-doc-length = 79
 
 [tool.ruff.lint.isort]
-known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
+known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
 
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
@@ -264,8 +265,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
 "astrometricslib/**" = ["banned-api"] # Layer 1 (api/) and lower layers reach into each other directly by design
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
-"astrometricslib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
-"wayfindinglib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/main_backend.py" = ["module-import-not-at-top-of-file", "banned-api"] # warnings.filterwarnings() must precede import
 "backend/mcp/__main__.py" = ["module-import-not-at-top-of-file", "banned-api"] # sys.path bootstrap must precede import
@@ -315,7 +314,7 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend"]
 "documentation/notebooks/wayfinding/planning/observation_planning.ipynb" = ["print"]
 
 [tool.importlinter]
-root_packages = ["astrometricslib", "wayfindinglib", "backend"]
+root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
 include_external_packages = false
 
 [[tool.importlinter.contracts]]
@@ -344,19 +343,49 @@ forbidden_modules = [
     "astrometricslib.api",
     "astrometricslib.drivers",
     "astrometricslib.foundation",
-    "astrometricslib.mcp",
     "astrometricslib.models",
     "astrometricslib.pipelines",
     "astrometricslib.utilities",
     "astrometricslib.visualization",
 ]
 allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "the MCP servers use only the public API of astrometricslib and wayfindinglib"
+type = "forbidden"
+source_modules = ["mcp_servers"]
+forbidden_modules = [
+    "astrometricslib.api",
+    "astrometricslib.drivers",
+    "astrometricslib.foundation",
+    "astrometricslib.models",
+    "astrometricslib.pipelines",
+    "astrometricslib.utilities",
+    "astrometricslib.visualization",
+    "wayfindinglib.analytics",
+    "wayfindinglib.data_access",
+    "wayfindinglib.drivers",
+    "wayfindinglib.models",
+    "wayfindinglib.observationlib",
+    "wayfindinglib.observatorylib",
+    "wayfindinglib.session_analysis",
+    "wayfindinglib.tasks",
+    "wayfindinglib.watchdog",
+]
+allow_indirect_imports = true
 ignore_imports = [
     # Tests may reach into internals to build fixtures.
-    "wayfindinglib.**.test.** -> astrometricslib.**",
-    # Removed in phase 7, when the MCP servers move out of the libraries.
-    "wayfindinglib.mcp.__main__ -> astrometricslib.mcp.profile",
-    "wayfindinglib.mcp.tool_registry -> astrometricslib.mcp.reflection",
-    "wayfindinglib.mcp.tool_registry -> astrometricslib.mcp.tool_registry",
-    "wayfindinglib.mcp.__main__ -> astrometricslib.mcp.tool_errors",
+    "mcp_servers.**.test.** -> astrometricslib.**",
 ]
+
+[[tool.importlinter.contracts]]
+name = "the libraries never import the MCP servers"
+type = "forbidden"
+source_modules = ["astrometricslib", "wayfindinglib"]
+forbidden_modules = ["mcp_servers"]
+
+[[tool.importlinter.contracts]]
+name = "the library MCP servers never import the backend"
+type = "forbidden"
+source_modules = ["mcp_servers.common", "mcp_servers.astrometrics_core", "mcp_servers.wayfinding_core", "mcp_servers.devtools"]
+forbidden_modules = ["backend"]

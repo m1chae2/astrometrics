@@ -7,6 +7,7 @@ the right driver; each read calls its driver with no check.
 """
 
 import threading
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -873,3 +874,31 @@ def test_configured_observer_location_is_none_without_a_latitude_and_longitude()
 
     assert ops.configured_observer_location(_EmptyConfig()) is None
     assert ops.configured_observer_location(None) is None
+
+
+def test_a_position_dictionary_becomes_a_sky_position() -> None:
+    """The mount methods take the dictionary a client sends."""
+    position = ops.sky_position_from({"ra_deg": 10.5, "dec_deg": -5.25})
+
+    assert position == SkyPosition(ra_deg=10.5, dec_deg=-5.25)
+
+
+def test_a_bad_position_dictionary_is_an_invalid_argument() -> None:
+    """A dictionary that is not a position names the expected keys."""
+    with pytest.raises(InvalidArgumentError, match="ra_deg"):
+        ops.sky_position_from({"ra": 10.5})
+
+
+def test_a_slew_target_id_is_read_fresh_from_the_library() -> None:
+    """A target id is looked up after re-reading the catalog."""
+    calls = []
+
+    def get(target_id: str, refresh: bool = False) -> None:
+        """Record the lookup; no target has the id."""
+        calls.append((target_id, refresh))
+
+    context = SimpleNamespace(astrometrics=SimpleNamespace(targets=SimpleNamespace(get=get)))
+
+    with pytest.raises(NotFoundError, match="Nope"):
+        ops.resolve_destination(context, "Nope")
+    assert calls == [("Nope", True)]

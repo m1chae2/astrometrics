@@ -1,10 +1,9 @@
-"""Purpose: Unit tests for dynamic MCP astrometrics reflection engine.
+"""Purpose: Unit tests for the reflection engine that turns methods into MCP tools.
 
-Description: Verifies that the high-level interface generates valid
-JSON Schemas and executes reflected tools. The equivalent coverage for
-wayfindinglib's Wayfinder high-level interface lives in
-`wayfindinglib/mcp/test/test_wayfinding_reflection.py` -- split out so
-this suite does not require wayfindinglib to be installed.
+Description: Checks that docstrings and type hints become valid JSON schemas
+and that reflected tools run, using small fake APIs. The tests of the real
+servers' tool lists are in ``astrometrics_core/test`` and
+``wayfinding_core/test``.
 """
 
 import asyncio
@@ -12,14 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.drivers.job_logging import background_job
-from astrometricslib.mcp.reflection import (
+from astrometricslib import background_job
+from mcp_servers.common.reflection import (
     generate_tool_schema,
     parse_docstring_params,
-    register_astrometrics_tools,
+    register_reflected_tools,
 )
-from astrometricslib.mcp.tool_registry import ToolRegistry
-from astrometricslib.mcp.tool_registry import registry as astrometrics_registry
+from mcp_servers.common.tool_registry import ToolRegistry
 
 pytestmark = pytest.mark.anyio
 
@@ -85,37 +83,6 @@ def test_generate_tool_schema_builds_json_schema():  # ruff: ignore[missing-retu
     assert schema["required"] == ["target_id"]
 
 
-def test_astrometricslib_mcp_reflection_registers_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify astrometricslib MCP server reflects astrometrics tools."""
-    tool_defs = astrometrics_registry.get_tool_definitions()
-    tool_names = {t.name for t in tool_defs}
-
-    # Verify key reflected tools are present
-    assert "target_list" in tool_names
-    assert "target_create" in tool_names
-    assert "visualization_render_fits" in tool_names
-    assert "star_query" in tool_names
-
-    # Verify nested sub-APIs (dotted branch_mapping keys) are reflected too
-    assert "diagnostics_stack_quality" in tool_names
-    assert "calibration_query" in tool_names
-
-
-def test_delete_methods_are_never_offered_as_tools():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Deleting is left to the app's own UI, so no delete tool is reflected."""
-    tool_names = {t.name for t in astrometrics_registry.get_tool_definitions()}
-
-    assert not [name for name in tool_names if "_delete" in name or name.startswith("delete")]
-    assert "target_save" in tool_names
-
-
-async def test_astrometrics_reflected_tool_execution():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify executing a reflected tool via Astrometrics registry succeeds."""
-    res = await astrometrics_registry.execute("target_list", {})
-    assert len(res) > 0
-    assert res[0].type == "text"
-
-
 async def test_a_background_job_method_records_its_own_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -153,7 +120,7 @@ async def test_a_background_job_method_records_its_own_job(
                 return {"stackedImage": "Vega_Stacked.fits"}
 
     isolated_registry = ToolRegistry()
-    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
+    register_reflected_tools(isolated_registry, FakeApi(), {"": "fake"})
     schema = next(t for t in isolated_registry.get_tool_definitions() if t.name == "fake_do_work").inputSchema
 
     result = await isolated_registry.execute("fake_do_work", {"target": "Vega"})
@@ -201,7 +168,7 @@ async def test_a_sync_method_that_starts_its_own_event_loop_still_works():  # ru
             return asyncio.run(_coroutine())
 
     isolated_registry = ToolRegistry()
-    register_astrometrics_tools(isolated_registry, FakeObservatoryControl(), {"": "fake"})
+    register_reflected_tools(isolated_registry, FakeObservatoryControl(), {"": "fake"})
 
     result = await isolated_registry.execute("fake_get_telescope_status", {})
 
@@ -226,7 +193,7 @@ async def test_a_target_id_reaches_the_method_as_the_client_sent_it() -> None:
             return {"target": target, "type": type(target).__name__}
 
     isolated_registry = ToolRegistry()
-    register_astrometrics_tools(isolated_registry, FakeApi(), {"": "fake"})
+    register_reflected_tools(isolated_registry, FakeApi(), {"": "fake"})
 
     result = await isolated_registry.execute("fake_inspect_target", {"target": "M 13"})
 

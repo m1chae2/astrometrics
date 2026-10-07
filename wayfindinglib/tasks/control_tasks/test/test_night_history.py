@@ -404,16 +404,6 @@ def test_control_history_has_the_front_door_and_limits() -> None:
         assert "latest_nights" in inspect.signature(getattr(night_analysis, name)).parameters
 
 
-@pytest.mark.parametrize("name", ["observatory_history_query"])
-def test_the_mcp_server_offers_the_tool(name: str) -> None:
-    """The reflected MCP tool has the documented arguments."""
-    from wayfindinglib.mcp.tool_registry import registry
-
-    schema = registry.tools[name]["tool_def"].inputSchema
-    assert schema["required"] == ["kind"]
-    assert set(schema["properties"]) == {"kind", "session_id", "ekos_file_id", "include", "limit"}
-
-
 def test_sky_coverage_without_an_active_profile_is_a_conflict(observatory: _Observatory) -> None:
     """With no telescope and camera active, sky coverage is a conflict."""
     observatory.location = None

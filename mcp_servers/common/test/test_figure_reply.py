@@ -10,7 +10,7 @@ import base64
 
 import matplotlib.pyplot as plt
 
-from astrometricslib.mcp.tool_registry import ToolRegistry
+from mcp_servers.common.tool_registry import ToolRegistry
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 

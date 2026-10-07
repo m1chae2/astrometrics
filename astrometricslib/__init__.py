@@ -33,6 +33,7 @@ from astrometricslib.drivers.job_logging import (
     capture_job_logs,
     get_current_job,
     registered_job,
+    run_as_background_job,
 )
 from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
@@ -423,6 +424,7 @@ __all__ = [
     "resolve_camera_profile",
     "resolve_mounted_path",
     "resolve_target",
+    "run_as_background_job",
     "safe_json_dumps",
     "select_library_frames",
     "to_epoch_seconds",

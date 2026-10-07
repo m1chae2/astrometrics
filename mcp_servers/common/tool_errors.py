@@ -4,14 +4,18 @@ Description: An MCP tool call that fails must come back flagged as an error
 (``isError`` in the MCP result), so the AI client knows the text is a failure
 and not data. The registries build the content of that reply here. The
 servers' ``call_tool`` handlers turn it into a result with the flag set.
+
+The module imports only the MCP package at run time, so the gap server can
+use it without loading astrometricslib.
 """
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import CallToolResult, TextContent
 
-from astrometricslib.foundation.errors import ErrorInfo
+if TYPE_CHECKING:
+    from astrometricslib import ErrorInfo
 
 
 class ToolErrorContent(list):

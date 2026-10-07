@@ -38,6 +38,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "check_choice",
     "check_include",
     "registered_job",
+    "run_as_background_job",
     "reject_unused_arguments",
     "resolve_target",
     "to_epoch_seconds",
@@ -204,6 +205,7 @@ KEPT_FOR_OUTSIDE_CALLERS = {
     "frame_is_spectral": "wayfindinglib and the backend",
     "get_current_job": "wayfindinglib",
     "parse_iso_time": "wayfindinglib",
+    "run_as_background_job": "the MCP servers",
     "safe_json_dumps": "wayfindinglib",
     "select_library_frames": "wayfindinglib",
 }

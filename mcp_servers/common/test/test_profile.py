@@ -2,8 +2,8 @@
 
 Description: A profile limits which tools an MCP server offers. These tests
 check the rules, the failure cases (missing manifest, unknown tool, unknown
-profile), and that the committed manifest of this library covers every tool
-the server registers, so a new tool cannot appear without a review.
+profile). Each server's own tests check that its committed manifest covers
+every tool it registers, so a new tool cannot appear without a review.
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib.mcp.profile import (
+from mcp_servers.common.profile import (
     DEFAULT_PROFILE,
     PROFILE_ENVIRONMENT_VARIABLE,
     current_profile,
@@ -20,9 +20,7 @@ from astrometricslib.mcp.profile import (
     load_manifest,
     withheld_reason,
 )
-from astrometricslib.mcp.tool_registry import ToolRegistry, registry
-
-MANIFEST_PATH = Path(__file__).resolve().parent.parent / "tool_manifest.json"
+from mcp_servers.common.tool_registry import ToolRegistry
 
 
 def _entry(tool_class: str, disposition: str = "merge", interim_block: str = "") -> dict[str, str]:
@@ -118,28 +116,6 @@ def test_apply_profile_removes_tools_and_calls_to_them_fail(tmp_path: Path) -> N
     assert set(reasons) == {"write_it", "unlisted"}
     result = asyncio.run(test_registry.execute("write_it", {}))
     assert "Unknown tool" in result[0].text
-
-
-def test_manifest_covers_every_registered_tool() -> None:
-    """Every registered tool has a manifest entry, and none is stale."""
-    manifest = load_manifest(MANIFEST_PATH)
-    assert manifest is not None
-    registered = set(registry.tools) | set(registry.withheld)
-    assert registered - set(manifest["tools"]) == set(), "Tools missing from the manifest"
-    assert set(manifest["tools"]) - registered == set(), "Manifest entries with no tool"
-
-
-def test_investigator_profile_offers_only_reading_tools() -> None:
-    """The manifest keeps writers, device commands and code out."""
-    copy = ToolRegistry()
-    copy.tools = dict(registry.tools) | dict(registry.withheld)
-    copy.apply_profile(MANIFEST_PATH, "investigator")
-    manifest = load_manifest(MANIFEST_PATH)
-    assert copy.tools
-    for name in copy.tools:
-        entry = manifest["tools"][name]
-        assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
-        assert entry["disposition"] in ("keep", "merge"), name
 
 
 def test_a_merged_tool_is_withheld_and_names_its_replacement() -> None:

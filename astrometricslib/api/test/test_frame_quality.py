@@ -139,30 +139,6 @@ def test_bad_requests_are_errors(diagnostics: QualityDiagnostics) -> None:
         diagnostics.frame_quality(_target(), kind="raw_check", include=["fwhm"])
 
 
-def test_the_mcp_server_offers_the_tool() -> None:
-    """The reflected tool has the documented arguments."""
-    from astrometricslib.mcp.tool_registry import registry
-
-    schema = registry.tools["diagnostics_frame_quality"]["tool_def"].inputSchema
-    assert set(schema["properties"]) == {
-        "target",
-        "folder_path",
-        "filter_name",
-        "first_file",
-        "last_file",
-        "since",
-        "until",
-        "trend_frames",
-        "trend_threshold_percent",
-        "kind",
-        "include",
-        "remeasure",
-        "camera_id",
-        "limit",
-    }
-    assert not schema.get("required")
-
-
 def test_a_file_range_takes_the_first_frames_inside_it(diagnostics: QualityDiagnostics) -> None:
     """With a range, the limit keeps the first frames in it, not the newest."""
     with patch(

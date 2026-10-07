@@ -215,21 +215,3 @@ def test_read_only_store_cannot_write(database: Path) -> None:
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         store.upsert_job(_job("job-z", "M 1", "stacking", "completed", 9))
     assert store.get_job("job-z") is None
-
-
-def test_the_mcp_server_offers_the_tool() -> None:
-    """The MCP registry has `jobs_query` with the documented arguments."""
-    from astrometricslib.mcp.tool_registry import registry
-
-    schema = registry.tools["jobs_query"]["tool_def"].inputSchema
-    assert set(schema["properties"]) == {
-        "job_id",
-        "target_id",
-        "job_type",
-        "status",
-        "active_only",
-        "detail",
-        "lines",
-        "limit",
-    }
-    assert not schema.get("required")

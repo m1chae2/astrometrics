@@ -4,12 +4,15 @@ Description: `ObservationPlanning.get_sources` and
 `ObservationPlanning.get_online_catalog_sources` return a list of
 `SkySource`. Each one holds the position in degrees, a name, the brightness
 when known, and what data the library holds for it. The field names turn into
-the camelCase keys the app's Planetarium reads.
+the camelCase keys the app's Planetarium reads. `has_catalog_magnitude` tells
+the map whether the brightness is a real catalog magnitude it can draw by.
 """
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from astrometricslib import has_catalog_magnitude
 
 
 class SkySource(BaseModel):
@@ -54,3 +57,14 @@ class SkySource(BaseModel):
     field_of_view: str | None = Field(
         default=None, alias="fieldOfView", description="A target's field of view, as saved on the target."
     )
+
+    @computed_field(alias="hasCatalogMagnitude")
+    @property
+    def has_catalog_magnitude(self) -> bool:
+        """Check if the magnitude is a real catalog magnitude.
+
+        `False` for a missing magnitude, an instrument reading from
+        photometry, or the 0 saved when a catalog gave none (see
+        astrometricslib's `has_catalog_magnitude`).
+        """
+        return has_catalog_magnitude(self.magnitude)

@@ -22,7 +22,12 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.models.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality_summary import FrameEnsembleComposition
-from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+from astrometricslib.models.stellar_source import (
+    MINIMUM_POINTS_FOR_PERIOD_SEARCH,
+    MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
+    PhotometryResult,
+    StellarObject,
+)
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.post_processing.assess_output_quality import (
     assess_output_quality,
@@ -1155,13 +1160,13 @@ class VariabilityAnalyzer:
             The search result (check its ``verdict``), or `None` if there
             were fewer than 8 measurements.
         """
-        if not star.photometry or len(star.photometry.timestamps) < 8:
+        if not star.can_run_transit_search:
             return None
 
         from astrometricslib.pipelines.photometry.processing.periodicity_search import box_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < 8 or np.mean(fluxes) <= 0:
+        if fluxes.size < MINIMUM_POINTS_FOR_TRANSIT_SEARCH or np.mean(fluxes) <= 0:
             return None
         candidate = box_search(time_days, fluxes)
         star.photometry.transit_candidate = candidate
@@ -1180,13 +1185,13 @@ class VariabilityAnalyzer:
             The search result (check its ``verdict``), or `None` if there
             were fewer than 5 measurements.
         """
-        if not star.photometry or len(star.photometry.timestamps) < 5:
+        if not star.can_run_period_search:
             return None
 
         from astrometricslib.pipelines.photometry.processing.periodicity_search import lomb_scargle_search
 
         time_days, fluxes = self._light_curve_arrays(star)
-        if fluxes.size < 5:
+        if fluxes.size < MINIMUM_POINTS_FOR_PERIOD_SEARCH:
             return None
         result = lomb_scargle_search(time_days, fluxes)
         star.photometry.periodogram = result

@@ -35,11 +35,6 @@ logger = logging.getLogger(__name__)
 # Any other star can still be searched from the Astronomy Manager.
 MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH = 10
 
-# Fewest measurements the smooth-cycle search accepts (the repeating-dip
-# search needs 8). A star with fewer is not worth choosing, because its
-# search would return nothing.
-MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5
-
 
 def _run_variability_analysis_for_session(
     session: Any,
@@ -490,11 +485,7 @@ def select_period_search_stars(
         The target's star first (when it can be found), then up to `limit`
         stars from brightest to faintest.
     """
-    searchable = [
-        star
-        for star in stellar_objects
-        if star.photometry is not None and len(star.photometry.timestamps) >= MINIMUM_POINTS_FOR_PERIOD_SEARCH
-    ]
+    searchable = [star for star in stellar_objects if star.can_run_period_search]
 
     target_star = None
     if center_ra is not None and center_dec is not None:

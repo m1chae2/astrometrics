@@ -127,16 +127,6 @@ export function computeLimitingMagnitude(fovDegrees: number): number {
 export const DEEP_STAR_MAX_MAGNITUDE = 16;
 
 /**
- * Brightest magnitude treated as a real catalog magnitude. Sirius, the
- * brightest star in the sky, is about -1.5, but the same field also holds
- * instrumental magnitudes from photometry (around -10 to -17), which say
- * nothing about how bright a star looks on the sky. Anything below this
- * floor is therefore treated as "no catalog magnitude". Must match
- * `BRIGHTEST_CATALOG_MAGNITUDE` in astrometricslib/models/stellar_source.py.
- */
-export const BRIGHTEST_CATALOG_MAGNITUDE = -2.0;
-
-/**
  * Widest FOV, in degrees, at which the user's own stars that have no catalog
  * magnitude are shown. Most of a local library's stars are detections around
  * imaged targets with an empty or instrumental magnitude, so no magnitude cut
@@ -155,33 +145,36 @@ export const UNCATALOGED_STAR_MAX_FOV_DEG = 10.0;
  */
 export const UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG = UNCATALOGED_STAR_MAX_FOV_DEG / 2;
 
-/**
- * Whether a star's magnitude is a real catalog magnitude rather than missing
- * (`null`/`""`) or instrumental (see BRIGHTEST_CATALOG_MAGNITUDE).
- *
- * @param {unknown} magnitude - The source's magnitude field as received from the backend.
- * @returns {boolean} True if the value is a finite number at or above the catalog floor.
- */
-export function hasCatalogMagnitude(magnitude: unknown): magnitude is number {
-  return typeof magnitude === 'number' && Number.isFinite(magnitude) && magnitude >= BRIGHTEST_CATALOG_MAGNITUDE;
+/** The parts of a source that say how bright it is. */
+export interface SourceMagnitude {
+  /** The source's magnitude field as received from the backend. */
+  magnitude?: number | null;
+  /** The library's verdict that `magnitude` is a real catalog magnitude (SkySource `hasCatalogMagnitude`). */
+  hasCatalogMagnitude?: boolean;
 }
 
 /**
- * Formats a star's magnitude for display, or `'--'` when it isn't a real one.
+ * The source's catalog magnitude, when the library says it has one.
  *
- * Older library records store an exact `0` for stars whose catalog had no
- * magnitude (the pipeline used to write `0.0` as a placeholder). A genuine
- * catalog magnitude is never exactly `0`, so it is shown as unknown here
- * rather than as a measurement. Instrumental and missing values are unknown
- * too (see hasCatalogMagnitude).
+ * @param {SourceMagnitude} source - The source.
+ * @returns {number | null} The magnitude, or null when it is missing, 0 or instrumental.
+ */
+export function catalogMagnitudeOf(source: SourceMagnitude): number | null {
+  return source.hasCatalogMagnitude === true && typeof source.magnitude === 'number' ? source.magnitude : null;
+}
+
+/**
+ * Formats a star's magnitude for display, or `'--'` when the library says it
+ * is not a real catalog magnitude (missing, the 0 saved when a catalog gave
+ * none, or an instrumental value from photometry).
  *
- * @param {unknown} magnitude - The source's magnitude field as received from the backend.
+ * @param {SourceMagnitude} source - The source.
  * @param {number} decimals - Number of decimal places. Defaults to 2.
  * @returns {string} The formatted magnitude, or `'--'` if it is unknown.
  */
-export function formatCatalogMagnitude(magnitude: unknown, decimals: number = 2): string {
-  if (!hasCatalogMagnitude(magnitude) || magnitude === 0) return '--';
-  return magnitude.toFixed(decimals);
+export function formatCatalogMagnitude(source: SourceMagnitude, decimals: number = 2): string {
+  const magnitude = catalogMagnitudeOf(source);
+  return magnitude === null ? '--' : magnitude.toFixed(decimals);
 }
 
 /**
@@ -206,7 +199,7 @@ export function formatCatalogMagnitude(magnitude: unknown, decimals: number = 2)
  * @returns {boolean} True if this source should be rendered as a star point.
  */
 export function isDisplayableStar(
-  source: { ra: number; dec: number; type?: string; catalogSource?: string; magnitude?: number },
+  source: { ra: number; dec: number; type?: string; catalogSource?: string } & SourceMagnitude,
   showStars: boolean,
   showCatalog: boolean,
   limitingMagnitude: number,
@@ -221,8 +214,9 @@ export function isDisplayableStar(
     return showStars;
   }
 
-  if (hasCatalogMagnitude(source.magnitude)) {
-    if (source.magnitude > limitingMagnitude) return false;
+  const catalogMagnitude = catalogMagnitudeOf(source);
+  if (catalogMagnitude !== null) {
+    if (catalogMagnitude > limitingMagnitude) return false;
   } else if (fovDegrees > UNCATALOGED_STAR_MAX_FOV_DEG) {
     return false;
   }
@@ -235,18 +229,19 @@ export function isDisplayableStar(
  *
  * A star with a real catalog magnitude is shaded by that magnitude (see
  * computeStarBrightness). Any other star -- the user's own detections, whose
- * magnitude is missing or instrumental (see hasCatalogMagnitude) -- says nothing
+ * magnitude is missing or instrumental (the library's hasCatalogMagnitude) -- says nothing
  * about how bright it looks, so it is drawn dim at the lowest brightness and
  * fades in as the FOV narrows from UNCATALOGED_STAR_MAX_FOV_DEG to
  * UNCATALOGED_STAR_FULL_BRIGHTNESS_FOV_DEG. Sharing this between StarOverlay and
  * StarFieldRenderer keeps both drawing paths identical.
  *
- * @param {unknown} magnitude - The source's magnitude field as received from the backend.
+ * @param {SourceMagnitude} source - The source's magnitude and the library's verdict on it.
  * @param {number} fovDegrees - Current viewport field of view, in degrees.
  * @returns {number} Opacity in [0, STAR_MAX_BRIGHTNESS].
  */
-export function computeSourceBrightness(magnitude: unknown, fovDegrees: number): number {
-  if (hasCatalogMagnitude(magnitude)) return computeStarBrightness(magnitude);
+export function computeSourceBrightness(source: SourceMagnitude, fovDegrees: number): number {
+  const magnitude = catalogMagnitudeOf(source);
+  if (magnitude !== null) return computeStarBrightness(magnitude);
 
   const fadeProgress =
     (UNCATALOGED_STAR_MAX_FOV_DEG - fovDegrees) /
@@ -331,7 +326,7 @@ export class StarOverlay implements PlanetariumOverlay {
       const point = projectionContext.projectCoords(source.ra, source.dec);
       if (!point.visible) return;
 
-      const brightness = computeSourceBrightness(source.magnitude, projectionContext.fov);
+      const brightness = computeSourceBrightness(source, projectionContext.fov);
 
       context.fillStyle = `rgba(255, 255, 255, ${brightness})`;
       context.beginPath();

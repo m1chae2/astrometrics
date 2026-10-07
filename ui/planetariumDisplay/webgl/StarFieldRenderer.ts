@@ -202,7 +202,7 @@ export class StarFieldRenderer {
       this.starInstanceData[offset] = point.x;
       this.starInstanceData[offset + 1] = point.y;
       this.starInstanceData[offset + 2] = STAR_MARKER_RADIUS_PX;
-      this.starInstanceData[offset + 3] = computeSourceBrightness(source.magnitude, projectionContext.fov);
+      this.starInstanceData[offset + 3] = computeSourceBrightness(source, projectionContext.fov);
       writeIndex += 1;
     }
 

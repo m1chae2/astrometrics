@@ -52,6 +52,14 @@ a star looks. Must match BRIGHTEST_CATALOG_MAGNITUDE in
 ui/planetariumDisplay/layers/StarOverlay.ts."""
 
 
+MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5
+"""Fewest brightness measurements the smooth-cycle (Lomb-Scargle) search
+accepts. A star with fewer gives no result, so it is not worth searching."""
+
+MINIMUM_POINTS_FOR_TRANSIT_SEARCH = 8
+"""Fewest brightness measurements the repeating-dip (box least squares)
+search accepts."""
+
 NO_GOOD_MATCH_RMS = 0.15
 """A star's own spectrum is a poor match ("no good match") when its closest
 reference spectrum differs from it by more than this fraction."""
@@ -592,6 +600,28 @@ class StellarObject(BaseModel):
         if own_position is None or catalog_position is None:
             return None
         return abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
+
+    @computed_field(alias="canRunPeriodSearch")
+    @property
+    def can_run_period_search(self) -> bool:
+        """Check if the light curve has enough points for the cycle search.
+
+        `True` with at least `MINIMUM_POINTS_FOR_PERIOD_SEARCH` (5)
+        measurements.
+        """
+        points = len(self.photometry.timestamps) if self.photometry else 0
+        return points >= MINIMUM_POINTS_FOR_PERIOD_SEARCH
+
+    @computed_field(alias="canRunTransitSearch")
+    @property
+    def can_run_transit_search(self) -> bool:
+        """Check if the light curve has enough points for the dip search.
+
+        `True` with at least `MINIMUM_POINTS_FOR_TRANSIT_SEARCH` (8)
+        measurements.
+        """
+        points = len(self.photometry.timestamps) if self.photometry else 0
+        return points >= MINIMUM_POINTS_FOR_TRANSIT_SEARCH
 
     @computed_field(alias="hasPhotometry")
     @property

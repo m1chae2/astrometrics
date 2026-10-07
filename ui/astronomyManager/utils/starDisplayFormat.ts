@@ -10,13 +10,6 @@ import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/sp
 /** Prefix of an id given to a star found in an image but never matched to a catalog. */
 const POSITION_ONLY_STAR_ID_PATTERN = /^FIELD_J(-?\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)$/;
 
-/**
- * A magnitude below this is an instrument reading, not a catalog magnitude. A magnitude of exactly 0
- * is also not one: it is what is saved when the catalog gave none.
- * Must match BRIGHTEST_CATALOG_MAGNITUDE and has_catalog_magnitude in astrometricslib/models/stellar_source.py.
- */
-const BRIGHTEST_CATALOG_MAGNITUDE = -2;
-
 /** Longest run of digits shown whole; a longer catalog number is shortened to its last digits. */
 const LONGEST_WHOLE_NUMBER_LENGTH = 8;
 
@@ -63,19 +56,15 @@ export function formatStarListLabel(starName: string): string {
 }
 
 /**
- * Formats a magnitude if it is a real catalog magnitude.
+ * Formats a magnitude when the library says it is a real catalog magnitude.
  *
- * @param magnitude The star's raw magnitude field.
- * @returns The magnitude to two decimals, or null when it is missing or is
- *     an instrument reading.
+ * @param star The star record: its magnitude and the library's `hasCatalogMagnitude` verdict.
+ * @returns The magnitude to two decimals, or null when it is missing, 0 or an instrument reading.
  */
-export function formatCatalogMagnitude(magnitude: unknown): string | null {
-    if (magnitude === null || magnitude === undefined || magnitude === '') return null;
-    const magnitudeNumber = Number(magnitude);
-    if (!Number.isFinite(magnitudeNumber) || magnitudeNumber < BRIGHTEST_CATALOG_MAGNITUDE) return null;
-    // Exactly 0 is what is saved when the catalog gave no magnitude, not a measurement.
-    if (magnitudeNumber === 0) return null;
-    return magnitudeNumber.toFixed(2);
+export function formatCatalogMagnitude(star: { magnitude?: unknown; hasCatalogMagnitude?: boolean | null }): string | null {
+    if (star.hasCatalogMagnitude !== true) return null;
+    const magnitudeNumber = Number(star.magnitude);
+    return Number.isFinite(magnitudeNumber) ? magnitudeNumber.toFixed(2) : null;
 }
 
 /**
@@ -87,11 +76,12 @@ export function formatCatalogMagnitude(magnitude: unknown): string | null {
 export function buildStarListSubtitle(summary: {
     id?: unknown;
     magnitude?: unknown;
+    hasCatalogMagnitude?: boolean | null;
     spectralType?: unknown;
 }): string {
     const parts: string[] = [];
     if (POSITION_ONLY_STAR_ID_PATTERN.test(String(summary.id ?? ''))) parts.push('no catalog match');
-    const magnitudeText = formatCatalogMagnitude(summary.magnitude);
+    const magnitudeText = formatCatalogMagnitude(summary);
     if (magnitudeText !== null) parts.push(`mag ${magnitudeText}`);
     const spectralType = typeof summary.spectralType === 'string' ? summary.spectralType.trim() : '';
     if (spectralType !== '' && spectralType !== 'Unknown') parts.push(spectralType);

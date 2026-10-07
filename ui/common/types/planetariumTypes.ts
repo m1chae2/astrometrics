@@ -20,6 +20,8 @@ export interface PlanetariumSource {
   name: string;
   spectralType?: string;
   magnitude?: number;
+  /** The library's verdict that `magnitude` is a real catalog magnitude (not missing, 0 or instrumental). */
+  hasCatalogMagnitude?: boolean;
   hasSpectra: boolean;
   hasPhotometry: boolean;
   type?: "star" | "target" | "alignment";

@@ -131,6 +131,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
     TargetFilesResponse,
     VariableCandidate,
+    has_catalog_magnitude,
 )
 from astrometricslib.models.target import (
     FitsHeaderEntry,
@@ -409,6 +410,7 @@ __all__ = [
     "get_configuration",
     "get_current_job",
     "get_log_context",
+    "has_catalog_magnitude",
     "is_path_inside",
     "log_context",
     "new_request_id",

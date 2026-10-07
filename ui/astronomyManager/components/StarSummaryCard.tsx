@@ -135,7 +135,7 @@ export const StarSummaryCard: React.FC<StarSummaryCardProps> = ({
     const raNum = typeof ra === 'number' ? ra : parseFloat(ra);
     const decNum = typeof dec === 'number' ? dec : parseFloat(dec);
     const canLocate = Number.isFinite(raNum) && Number.isFinite(decNum);
-    const catalogMagnitudeText = formatCatalogMagnitude(astronomyData?.magnitude ?? astronomyData?.mag);
+    const catalogMagnitudeText = formatCatalogMagnitude(astronomyData ?? {});
     const typeBadges = describeStarTypeBadges(spectralType, astronomyData);
     const patternBadges = describePatternBadges(astronomyData?.photometry);
     const targetIds: string[] = Array.isArray(astronomyData?.targetIds) ? astronomyData.targetIds : [];

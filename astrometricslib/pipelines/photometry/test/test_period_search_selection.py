@@ -16,10 +16,13 @@ import pytest
 
 from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+from astrometricslib.models.stellar_source import (
+    MINIMUM_POINTS_FOR_PERIOD_SEARCH,
+    PhotometryResult,
+    StellarObject,
+)
 from astrometricslib.pipelines.photometry.batch import (
     MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH,
-    MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     search_periods_and_save,
     select_period_search_stars,
 )

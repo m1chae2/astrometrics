@@ -23,12 +23,6 @@ import {
 } from '../utils/starDisplayFormat';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
-/** Fewest measurements the Lomb-Scargle period search accepts. Matches the backend analyzer. */
-const MINIMUM_POINTS_FOR_PERIOD_SEARCH = 5;
-
-/** Fewest measurements the BLS transit search accepts. Matches the backend analyzer. */
-const MINIMUM_POINTS_FOR_TRANSIT_SEARCH = 8;
-
 /**
  * A false-alarm probability above this means a pattern this strong would show up
  * by chance more than 1 time in 100, so the period is not trustworthy.
@@ -144,7 +138,10 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
 
     // A photometry run already searches the target's own star and its brightest stars. The button is for
     // any other star, so it is only offered while a star has no result.
-    const canAnalyze = !!onAnalyze && pointCount >= MINIMUM_POINTS_FOR_PERIOD_SEARCH && !hasSearchResult;
+    // The library says whether the light curve is long enough for each search.
+    const canRunPeriodSearch = astronomyData?.canRunPeriodSearch === true;
+    const canRunTransitSearch = astronomyData?.canRunTransitSearch === true;
+    const canAnalyze = !!onAnalyze && canRunPeriodSearch && !hasSearchResult;
 
     if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && emissionLines.length === 0 && !periodogram && !transitCandidate) {
         return (
@@ -158,17 +155,15 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     let periodSearchNote = '';
     let periodSearchNoteDetail = '';
     if (!hasSearchResult && pointCount > 0) {
-        if (pointCount < MINIMUM_POINTS_FOR_PERIOD_SEARCH) {
-            periodSearchNote = `Needs at least ${MINIMUM_POINTS_FOR_PERIOD_SEARCH} measurements; this star has ${pointCount}.`;
+        if (!canRunPeriodSearch) {
+            periodSearchNote = `Too few measurements for a period search; this star has ${pointCount}.`;
         } else {
             periodSearchNote = 'Not run yet.';
             periodSearchNoteDetail =
                 `It would search ${pointCount} measurements` +
                 (timeSpanText ? ` spanning ${timeSpanText}` : '') +
                 ', so it can only find patterns shorter than that span.' +
-                (pointCount < MINIMUM_POINTS_FOR_TRANSIT_SEARCH
-                    ? ` The repeating-dip search needs at least ${MINIMUM_POINTS_FOR_TRANSIT_SEARCH} measurements.`
-                    : '');
+                (!canRunTransitSearch ? ' The repeating-dip search needs more measurements.' : '');
         }
     }
 

@@ -21,6 +21,7 @@ from astrometricslib import (
     StellarObject,
     Target,
 )
+from wayfindinglib import SkySource
 from wayfindinglib.tasks.planning_tasks import resolution_operations, sky_sources
 
 
@@ -153,6 +154,7 @@ def test_a_star_source_uses_the_planetarium_keys(tmp_path: Path, monkeypatch: py
         "catalogSource": None,
         "stackedImage": None,
         "fieldOfView": None,
+        "hasCatalogMagnitude": True,
     }
 
 
@@ -219,3 +221,14 @@ def test_online_catalog_sources_name_their_driver(tmp_path: Path, monkeypatch: p
     assert source.catalog_source == "deep_stars"
     assert source.is_global is True
     assert source.model_dump(by_alias=True)["catalogSource"] == "deep_stars"
+
+
+@pytest.mark.parametrize(
+    ("magnitude", "real"), [(6.2, True), (-1.46, True), (None, False), (0.0, False), (-14.98, False)]
+)
+def test_a_sky_source_says_whether_its_magnitude_is_a_catalog_magnitude(
+    magnitude: float | None, real: bool
+) -> None:
+    """Missing, zero and instrumental magnitudes are not catalog magnitudes."""
+    source = SkySource(id="s", ra=1.0, dec=2.0, name="s", common_name="s", type="star", magnitude=magnitude)
+    assert source.model_dump(by_alias=True)["hasCatalogMagnitude"] is real

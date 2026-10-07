@@ -139,7 +139,7 @@ export const PlanetariumInfoCard: React.FC<Props> = ({
               <>
                 <tr>
                   <td>Magnitude</td>
-                  <td>{formatCatalogMagnitude(source.magnitude, 2)}</td>
+                  <td>{formatCatalogMagnitude(source, 2)}</td>
                 </tr>
                 <tr>
                   <td>Spectral Type</td>

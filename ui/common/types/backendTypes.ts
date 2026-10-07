@@ -309,6 +309,10 @@ export interface Spectrum {
   hasCatalogMagnitude?: boolean;
   /** Check if the spectrum's matched type disagrees with the catalog. */
   differsFromCatalog?: boolean | null;
+  /** Check if the light curve has enough points for the cycle search. */
+  canRunPeriodSearch?: boolean;
+  /** Check if the light curve has enough points for the dip search. */
+  canRunTransitSearch?: boolean;
   /** Check if this star's brightness has been tracked over time. */
   hasPhotometry?: boolean;
   /** The star's spectrum, formatted so it's easy to draw on a graph. */
@@ -1336,6 +1340,8 @@ export interface SkySource {
   stackedImage?: string | null;
   /** A target's field of view, as saved on the target. */
   fieldOfView?: string | null;
+  /** Check if the magnitude is a real catalog magnitude. */
+  hasCatalogMagnitude?: boolean;
 }
 
 /**

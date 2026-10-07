@@ -39,35 +39,35 @@ describe('formatStarListLabel', () => {
 });
 
 describe('formatCatalogMagnitude', () => {
-    it('formats a catalog magnitude to two decimals', () => {
-        expect(formatCatalogMagnitude(7.479027271270752)).toBe('7.48');
+    it('formats a magnitude the library marks as a catalog magnitude to two decimals', () => {
+        expect(formatCatalogMagnitude({ magnitude: 7.479027271270752, hasCatalogMagnitude: true })).toBe('7.48');
+        expect(formatCatalogMagnitude({ magnitude: 0.03, hasCatalogMagnitude: true })).toBe('0.03'); // Vega
     });
 
-    it('rejects a missing or instrumental magnitude', () => {
-        expect(formatCatalogMagnitude(null)).toBeNull();
-        expect(formatCatalogMagnitude('')).toBeNull();
-        expect(formatCatalogMagnitude(-16.38)).toBeNull();
-    });
-
-    it('treats exactly zero as unknown, not as a very bright star', () => {
-        expect(formatCatalogMagnitude(0)).toBeNull();
-        expect(formatCatalogMagnitude('0')).toBeNull();
-        expect(formatCatalogMagnitude(0.03)).toBe('0.03'); // Vega
+    it('shows nothing when the library says it is not a catalog magnitude', () => {
+        expect(formatCatalogMagnitude({ magnitude: -16.38, hasCatalogMagnitude: false })).toBeNull();
+        expect(formatCatalogMagnitude({ magnitude: 0, hasCatalogMagnitude: false })).toBeNull();
+        expect(formatCatalogMagnitude({ magnitude: 7.48 })).toBeNull();
+        expect(formatCatalogMagnitude({})).toBeNull();
     });
 });
 
 describe('buildStarListSubtitle', () => {
     it('joins the magnitude and spectral type', () => {
-        expect(buildStarListSubtitle({ magnitude: 7.48, spectralType: 'M2V' })).toBe('mag 7.48 · M2V');
+        expect(buildStarListSubtitle({ magnitude: 7.48, hasCatalogMagnitude: true, spectralType: 'M2V' })).toBe(
+            'mag 7.48 · M2V'
+        );
     });
 
     it('says when a star has no catalog match', () => {
-        expect(buildStarListSubtitle({ id: 'FIELD_J10.0007+39.5771', magnitude: -16.4 })).toBe('no catalog match');
+        expect(
+            buildStarListSubtitle({ id: 'FIELD_J10.0007+39.5771', magnitude: -16.4, hasCatalogMagnitude: false })
+        ).toBe('no catalog match');
     });
 
     it('leaves out what is unknown', () => {
-        expect(buildStarListSubtitle({ magnitude: -16.4, spectralType: 'Unknown' })).toBe('');
-        expect(buildStarListSubtitle({ magnitude: 9, spectralType: '' })).toBe('mag 9.00');
+        expect(buildStarListSubtitle({ magnitude: -16.4, hasCatalogMagnitude: false, spectralType: 'Unknown' })).toBe('');
+        expect(buildStarListSubtitle({ magnitude: 9, hasCatalogMagnitude: true, spectralType: '' })).toBe('mag 9.00');
     });
 });
 

@@ -595,7 +595,6 @@ export const PlanetariumDisplay: React.FC = () => {
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
-        plateScaleArcsecPerPx={equipmentConfig?.plateScaleArcsecPerPx}
       />
 
       <EquipmentConfigPanel

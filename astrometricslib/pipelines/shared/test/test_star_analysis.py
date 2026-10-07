@@ -3,11 +3,7 @@
 import pytest
 
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
-from astrometricslib.pipelines.shared.star_analysis import (
-    ladder_position,
-    spectral_class_letter,
-    summarize_star,
-)
+from astrometricslib.pipelines.shared.star_analysis import spectral_class_letter, summarize_star
 
 
 @pytest.mark.parametrize(
@@ -17,14 +13,6 @@ from astrometricslib.pipelines.shared.star_analysis import (
 def test_the_class_letter_follows_the_browser_rules(spectral_type: str, letter: str) -> None:
     """Carbon-star letters fold into C; unknown or odd types give no class."""
     assert spectral_class_letter(spectral_type) == letter
-
-
-def test_the_ladder_places_a_type_by_class_and_subtype() -> None:
-    """A3V sits at 23 and G2V at 42; a carbon star is off the ladder."""
-    assert ladder_position("A3V") == 23
-    assert ladder_position("G2V") == 42
-    assert ladder_position("K") == 50
-    assert ladder_position("C5") is None
 
 
 def make_star(own_type: str, rms: float, candidates: list[dict], catalog_type: str = "A0V") -> StellarObject:

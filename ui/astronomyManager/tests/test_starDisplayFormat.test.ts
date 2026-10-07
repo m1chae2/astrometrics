@@ -181,19 +181,13 @@ describe('selectLightCurveSeries', () => {
 });
 
 describe('spectral type and verdict helpers', () => {
-    it('reads a spectral type as a position on the O to M ladder', async () => {
-        const { spectralLadderPosition } = await import('../utils/starDisplayFormat');
-        expect(spectralLadderPosition('A0Va')).toBe(20);
-        expect(spectralLadderPosition('K2')).toBe(52);
-        expect(spectralLadderPosition('A5V+M3-4V')).toBe(25);
-        expect(spectralLadderPosition('Unknown')).toBeNull();
-        expect(spectralLadderPosition(undefined)).toBeNull();
-    });
-
     it('describes a good template match without cautions', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
         const description = describeTemplateMatch(
-            { selfDeterminedSpectralType: 'A5V', selfDeterminedSpectralTypeRms: 0.07 },
+            {
+                spectroscopy: { selfDeterminedSpectralType: 'A5V', selfDeterminedSpectralTypeRms: 0.07, isPoorMatch: false },
+                differsFromCatalog: false,
+            },
             'A2'
         );
         expect(description?.badgeText).toBe('Spectrum: A5V (7% off)');
@@ -201,21 +195,37 @@ describe('spectral type and verdict helpers', () => {
         expect(description?.differsFromCatalog).toBe(false);
     });
 
-    it('flags a poor match and a match far from the catalog type', async () => {
+    it('words the library verdicts for a poor match far from the catalog type', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
         const poor = describeTemplateMatch(
-            { selfDeterminedSpectralType: 'G0V', selfDeterminedSpectralTypeRms: 0.19 },
+            {
+                spectroscopy: { selfDeterminedSpectralType: 'G0V', selfDeterminedSpectralTypeRms: 0.19, isPoorMatch: true },
+                differsFromCatalog: true,
+            },
             'A2'
         );
         expect(poor?.isPoor).toBe(true);
         expect(poor?.badgeText).toBe('Spectrum: no good match');
         expect(poor?.differsFromCatalog).toBe(true);
+        expect(poor?.hoverText).toContain('It differs from the catalog type (A2).');
     });
 
     it('describes nothing when no type was determined', async () => {
         const { describeTemplateMatch } = await import('../utils/starDisplayFormat');
-        expect(describeTemplateMatch({ selfDeterminedSpectralType: 'Unknown' }, 'A2')).toBeNull();
+        expect(describeTemplateMatch({ spectroscopy: { selfDeterminedSpectralType: 'Unknown' } }, 'A2')).toBeNull();
         expect(describeTemplateMatch(null, 'A2')).toBeNull();
+    });
+
+    it('words the library candidate separation', async () => {
+        const { describeCandidateSeparation } = await import('../utils/starDisplayFormat');
+        expect(describeCandidateSeparation(null)).toBeNull();
+        expect(describeCandidateSeparation({ runnerUpType: 'B8V', gapPoints: 0.3, isWellSeparated: false })).toEqual({
+            label: 'marginal',
+            detail: 'B8V within 0.3 pts',
+        });
+        expect(describeCandidateSeparation({ runnerUpType: 'A5V', gapPoints: 4, isWellSeparated: true })?.label).toBe(
+            'well-separated'
+        );
     });
 
     it('treats only detected and possible verdicts as significant', async () => {
@@ -302,8 +312,14 @@ describe('spectral type and verdict helpers', () => {
 
     it('shows one chip when no type is known, and two only when each says something', async () => {
         const { describeStarTypeBadges } = await import('../utils/starDisplayFormat');
-        const goodMatch = { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.07 } as never;
-        const poorMatch = { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.23 } as never;
+        const goodSpectrum = { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.07, isPoorMatch: false };
+        const goodMatch = { spectroscopy: goodSpectrum, differsFromCatalog: null };
+        const poorMatch = {
+            spectroscopy: { selfDeterminedSpectralType: 'B1V', selfDeterminedSpectralTypeRms: 0.23, isPoorMatch: true },
+        };
+        // The library's verdicts against a K2 and a B2 catalog type.
+        const disagreeingMatch = { spectroscopy: goodSpectrum, differsFromCatalog: true };
+        const agreeingMatch = { spectroscopy: goodSpectrum, differsFromCatalog: false };
 
         // Neither the catalog nor the spectrum names a type: one grey chip.
         const unknown = describeStarTypeBadges('Unknown', poorMatch);
@@ -325,7 +341,7 @@ describe('spectral type and verdict helpers', () => {
         expect(describeStarTypeBadges('K2', null).map((badge) => badge.text)).toEqual(['Catalog: K2']);
 
         // Both name a type, and they disagree: the measured one is a caution.
-        const disagreeing = describeStarTypeBadges('K2', goodMatch);
+        const disagreeing = describeStarTypeBadges('K2', disagreeingMatch);
         expect(disagreeing.map((badge) => badge.text)).toEqual([
             'Catalog: K2',
             'Spectrum: B1V (7% off) · differs from catalog',
@@ -333,7 +349,7 @@ describe('spectral type and verdict helpers', () => {
         expect(disagreeing[1].tone).toBe('caution');
 
         // Both agree.
-        const agreeing = describeStarTypeBadges('B2', goodMatch);
+        const agreeing = describeStarTypeBadges('B2', agreeingMatch);
         expect(agreeing[1].tone).toBe('measured');
     });
 

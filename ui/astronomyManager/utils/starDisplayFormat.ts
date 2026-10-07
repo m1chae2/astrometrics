@@ -4,7 +4,7 @@
  * subtitles, coordinates, and the choice of light-curve series to plot.
  */
 
-import { PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
+import { CandidateSeparation, PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
 /** Prefix of an id given to a star found in an image but never matched to a catalog. */
@@ -216,60 +216,47 @@ export function selectLightCurveSeries(photometry: PhotometryResult | null | und
 }
 
 
-/** Spectral letters in order from hottest to coolest. */
-const SPECTRAL_LETTER_ORDER = 'OBAFGKM';
-
-/** A match differs from the catalog type when their ladder positions are more than this many subtypes apart. */
-const CATALOG_DISAGREEMENT_SUBTYPES = 8;
-
 /** How a spectrum's template match should be shown. */
 export interface TemplateMatchDescription {
     /** Badge text, for example "Spectrum: A5V (7% off)". */
     badgeText: string;
     /** Longer hover text. */
     hoverText: string;
-    /** True when the match is poor (a large difference from every reference). */
+    /** True when the match is poor (the library's `isPoorMatch`). */
     isPoor: boolean;
-    /** True when the matched type is far from the catalog's type. */
+    /** True when the matched type is far from the catalog's type (the library's `differsFromCatalog`). */
     differsFromCatalog: boolean;
 }
 
-/**
- * Turns a spectral type such as "K0Va" or "A5V+M3" into a position on the O to M ladder.
- * @param spectralType A spectral type from a catalog or a template match.
- * @returns The position (each letter is 10 subtypes wide), or null when the text has no letter and number.
- */
-export function spectralLadderPosition(spectralType: string | null | undefined): number | null {
-    const match = /^\s*([OBAFGKM])\s*(\d(?:\.\d)?)/i.exec(spectralType ?? '');
-    if (!match) return null;
-    return SPECTRAL_LETTER_ORDER.indexOf(match[1].toUpperCase()) * 10 + Number(match[2]);
+/** The parts of a star record that say how its spectrum matched. */
+export interface StarSpectralMatch {
+    /** The star's spectroscopy result, with the library's `isPoorMatch` verdict. */
+    spectroscopy?: SpectroscopyResult | null;
+    /** The library's verdict on whether the matched type disagrees with the catalog. */
+    differsFromCatalog?: boolean | null;
 }
 
 /**
  * Describes a spectrum's best-matching reference type and whether to trust it.
  *
  * The match is a comparison of the spectrum's shape with reference spectra,
- * not a probability. A poor match (large root-mean-square difference) or one
- * far from the catalog type is flagged so it is not read as a measurement.
+ * not a probability. The library decides whether the match is poor and
+ * whether it is far from the catalog type; this only words those verdicts.
  *
- * @param spectroscopy The star's spectroscopy result.
- * @param catalogSpectralType The star's catalog spectral type, if known.
+ * @param star The star record (its spectroscopy and verdicts).
+ * @param catalogSpectralType The star's catalog spectral type, if known, for the hover text.
  * @returns The description, or null when no type was determined.
  */
 export function describeTemplateMatch(
-    spectroscopy: SpectroscopyResult | null | undefined,
+    star: StarSpectralMatch | null | undefined,
     catalogSpectralType: string | null | undefined
 ): TemplateMatchDescription | null {
+    const spectroscopy = star?.spectroscopy;
     const matchedType = spectroscopy?.selfDeterminedSpectralType;
     if (!matchedType || matchedType === 'Unknown') return null;
     const rms = spectroscopy?.selfDeterminedSpectralTypeRms;
-    const isPoor = typeof rms === 'number' && rms > 0.15;
-    const matchedPosition = spectralLadderPosition(matchedType);
-    const catalogPosition = spectralLadderPosition(catalogSpectralType);
-    const differsFromCatalog =
-        matchedPosition !== null &&
-        catalogPosition !== null &&
-        Math.abs(matchedPosition - catalogPosition) > CATALOG_DISAGREEMENT_SUBTYPES;
+    const isPoor = spectroscopy?.isPoorMatch === true;
+    const differsFromCatalog = star?.differsFromCatalog === true;
     const candidates = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
     const closest = candidates
         .slice(0, 3)
@@ -328,9 +315,6 @@ export function spectralClassLetter(spectralType: string | null | undefined): st
     return KNOWN_SPECTRAL_CLASSES.has(resolved) ? resolved : '';
 }
 
-/** RMS gap, in percentage points, between the best and runner-up candidate needed to call the type well-separated rather than marginal. */
-const WELL_SEPARATED_RMS_GAP_POINTS = 2;
-
 /** How cleanly a spectrum's best-matching type stands out from the next-closest candidate. */
 export interface CandidateSeparationDescription {
     /** "well-separated" when the runner-up is a clearly worse fit; "marginal" when it is nearly as close. */
@@ -340,22 +324,19 @@ export interface CandidateSeparationDescription {
 }
 
 /**
- * Describes whether the best-matching spectral type is a clear best or a close call
- * against the next-closest candidate, so a near-tied runner-up is not read as a
- * confidently determined type.
+ * Words the library's verdict on whether the best-matching spectral type is a
+ * clear best or a close call against the next-closest candidate.
  *
- * @param candidates Candidates as ranked by the backend, closest match (lowest RMS) first.
+ * @param separation The spectroscopy result's `candidateSeparation`.
  * @returns The separation description, or null when fewer than two candidates were compared.
  */
-export function describeCandidateSeparation(candidates: any[] | null | undefined): CandidateSeparationDescription | null {
-    if (!candidates || candidates.length < 2) return null;
-    const best = Number(candidates[0]?.rms);
-    const runnerUp = Number(candidates[1]?.rms);
-    if (!Number.isFinite(best) || !Number.isFinite(runnerUp)) return null;
-    const gapPoints = (runnerUp - best) * 100;
+export function describeCandidateSeparation(
+    separation: CandidateSeparation | null | undefined
+): CandidateSeparationDescription | null {
+    if (!separation) return null;
     return {
-        label: gapPoints >= WELL_SEPARATED_RMS_GAP_POINTS ? 'well-separated' : 'marginal',
-        detail: `${candidates[1].spectral_type} within ${gapPoints.toFixed(1)} pts`,
+        label: separation.isWellSeparated ? 'well-separated' : 'marginal',
+        detail: `${separation.runnerUpType} within ${separation.gapPoints.toFixed(1)} pts`,
     };
 }
 
@@ -377,16 +358,16 @@ export interface StarBadge {
  * single "Type: unknown" chip.
  *
  * @param catalogSpectralType The catalog's spectral type, if any.
- * @param spectroscopy The star's spectroscopy result.
+ * @param star The star record (its spectroscopy and the library's match verdicts).
  * @returns One or two chips.
  */
 export function describeStarTypeBadges(
     catalogSpectralType: string | null | undefined,
-    spectroscopy: SpectroscopyResult | null | undefined
+    star: StarSpectralMatch | null | undefined
 ): StarBadge[] {
     const catalogType = (catalogSpectralType ?? '').trim();
     const catalogKnown = catalogType !== '' && catalogType !== 'Unknown';
-    const match = describeTemplateMatch(spectroscopy, catalogSpectralType);
+    const match = describeTemplateMatch(star, catalogSpectralType);
     const matchIsUsable = match !== null && !match.isPoor;
 
     const badges: StarBadge[] = [];

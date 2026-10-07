@@ -29,6 +29,7 @@ from astrometricslib.models.spectroscopy_quality import (
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "AnalysisResult",
+    "CandidateSeparation",
     "FileItem",
     "GroupedFrameStat",
     "PeriodogramResult",
@@ -40,6 +41,7 @@ __all__ = [
     "TransitCandidate",
     "VariableCandidate",
     "has_catalog_magnitude",
+    "ladder_position",
 ]
 
 BRIGHTEST_CATALOG_MAGNITUDE = -2.0
@@ -48,6 +50,70 @@ magnitudes stop near -1.5 (Sirius). Photometry stores instrumental magnitudes
 (about -10 to -17) in the same field, and those say nothing about how bright
 a star looks. Must match BRIGHTEST_CATALOG_MAGNITUDE in
 ui/planetariumDisplay/layers/StarOverlay.ts."""
+
+
+NO_GOOD_MATCH_RMS = 0.15
+"""A star's own spectrum is a poor match ("no good match") when its closest
+reference spectrum differs from it by more than this fraction."""
+
+WELL_SEPARATED_POINTS = 2.0
+"""The runner-up reference spectrum must be at least this many percentage
+points worse than the best for the match to count as well separated."""
+
+DIFFERS_FROM_CATALOG_SUBTYPES = 8
+"""A measured type more than this many subtypes from the catalog type (on
+the O-to-M ladder, ten subtypes to a class) is called different."""
+
+LADDER_ORDER = "OBAFGKM"
+"""Spectral classes from hottest to coolest."""
+
+
+def ladder_position(spectral_type: str | None) -> int | None:
+    """Place a spectral type on the O-to-M ladder, ten subtypes to a class.
+
+    Parameters
+    ----------
+    spectral_type : `str`, optional
+        A type such as ``"A3V"``.
+
+    Returns
+    -------
+    position : `int` or `None`
+        For example 23 for ``"A3V"``, or `None` for a type that is not on
+        the ladder (such as a carbon star).
+    """
+    trimmed = (spectral_type or "").strip().upper()
+    if not trimmed or trimmed[0] not in LADDER_ORDER:
+        return None
+    digits = ""
+    for character in trimmed[1:]:
+        if character.isdigit() or (character == "." and digits):
+            digits += character
+        else:
+            break
+    return LADDER_ORDER.index(trimmed[0]) * 10 + (round(float(digits)) if digits else 0)
+
+
+class CandidateSeparation(BaseModel):
+    """How clearly a spectrum's best reference type beats the next one.
+
+    Attributes
+    ----------
+    runner_up_type : `str`
+        The second-closest reference type.
+    gap_points : `float`
+        How much worse the runner-up fits, in percentage points of the
+        root-mean-square (RMS) difference.
+    is_well_separated : `bool`
+        `True` when the gap is at least `WELL_SEPARATED_POINTS`; otherwise
+        the match is a close call.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    runner_up_type: str = Field(alias="runnerUpType")
+    gap_points: float = Field(alias="gapPoints")
+    is_well_separated: bool = Field(alias="isWellSeparated")
 
 
 def has_catalog_magnitude(magnitude: object) -> bool:
@@ -377,6 +443,43 @@ class SpectroscopyResult(BaseModel):
     # written outside a tracked job.
     generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")
 
+    @computed_field(alias="isPoorMatch")
+    @property
+    def is_poor_match(self) -> bool:
+        """Check if even the closest reference spectrum fits badly.
+
+        `True` when the best reference differs from the spectrum by more
+        than `NO_GOOD_MATCH_RMS` (15%), so its type should not be claimed.
+        `False` when the fit is good or no type was matched.
+        """
+        rms = self.self_determined_spectral_type_rms
+        return rms is not None and rms > NO_GOOD_MATCH_RMS
+
+    @computed_field(alias="candidateSeparation")
+    @property
+    def candidate_separation(self) -> CandidateSeparation | None:
+        """How clearly the best reference type beats the runner-up.
+
+        The candidates are ranked by their root-mean-square difference,
+        closest first. `None` when fewer than two candidates have one.
+        """
+        ranked = sorted(
+            (
+                c
+                for c in self.self_determined_spectral_type_candidates
+                if isinstance(c.get("rms"), int | float)
+            ),
+            key=lambda c: c["rms"],
+        )
+        if len(ranked) < 2:
+            return None
+        gap = (float(ranked[1]["rms"]) - float(ranked[0]["rms"])) * 100.0
+        return CandidateSeparation(
+            runner_up_type=str(ranked[1].get("spectral_type", "")),
+            gap_points=gap,
+            is_well_separated=gap >= WELL_SEPARATED_POINTS,
+        )
+
 
 class StellarObject(BaseModel):
     """The main record for an individual star found in an image."""
@@ -474,6 +577,21 @@ class StellarObject(BaseModel):
         See the module function `has_catalog_magnitude` for the rule.
         """
         return has_catalog_magnitude(self.magnitude)
+
+    @computed_field(alias="differsFromCatalog")
+    @property
+    def differs_from_catalog(self) -> bool | None:
+        """Check if the spectrum's matched type disagrees with the catalog.
+
+        `True` when the two types are more than
+        `DIFFERS_FROM_CATALOG_SUBTYPES` (8) subtypes apart on the O-to-M
+        ladder. `None` when either type is missing or not on the ladder.
+        """
+        own_type = self.spectroscopy.self_determined_spectral_type if self.spectroscopy else None
+        own_position, catalog_position = ladder_position(own_type), ladder_position(self.spectral_type)
+        if own_position is None or catalog_position is None:
+            return None
+        return abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
 
     @computed_field(alias="hasPhotometry")
     @property

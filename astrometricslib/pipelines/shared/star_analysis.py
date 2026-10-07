@@ -31,22 +31,6 @@ SPECTRAL_CLASS_LABELS: dict[str, str] = {
 SPECTRAL_CLASS_ALIASES: dict[str, str] = {"R": "C", "N": "C"}
 """R and N are older names for carbon stars, which are now class C."""
 
-NO_GOOD_MATCH_RMS = 0.15
-"""A star's own spectrum is called "no good match" when its closest reference
-spectrum differs from it by more than this fraction (the same limit the
-Astronomy Manager uses)."""
-
-WELL_SEPARATED_POINTS = 2.0
-"""The runner-up reference spectrum must be at least this many percentage
-points worse than the best for the match to count as well separated."""
-
-DIFFERS_FROM_CATALOG_SUBTYPES = 8
-"""A measured type more than this many subtypes from the catalog type (on
-the O-to-M ladder, ten subtypes to a class) is called different."""
-
-LADDER_ORDER = "OBAFGKM"
-"""Spectral classes from hottest to coolest."""
-
 TOP_CANDIDATES = 3
 """How many closest reference types are listed."""
 
@@ -76,32 +60,6 @@ def spectral_class_letter(spectral_type: str) -> str:
         return ""
     letter = SPECTRAL_CLASS_ALIASES.get(letter, letter)
     return letter if letter in SPECTRAL_CLASS_LABELS else ""
-
-
-def ladder_position(spectral_type: str | None) -> int | None:
-    """Place a spectral type on the O-to-M ladder, ten subtypes to a class.
-
-    Parameters
-    ----------
-    spectral_type : `str`, optional
-        A type such as ``"A3V"``.
-
-    Returns
-    -------
-    position : `int` or `None`
-        For example 23 for ``"A3V"``, or `None` for a type that is not on
-        the ladder (such as a carbon star).
-    """
-    trimmed = (spectral_type or "").strip().upper()
-    if not trimmed or trimmed[0] not in LADDER_ORDER:
-        return None
-    digits = ""
-    for character in trimmed[1:]:
-        if character.isdigit() or (character == "." and digits):
-            digits += character
-        else:
-            break
-    return LADDER_ORDER.index(trimmed[0]) * 10 + (round(float(digits)) if digits else 0)
 
 
 def _field(item: Any, name: str) -> Any:
@@ -143,34 +101,29 @@ def _round(value: Any, digits: int = 3) -> Any:
     )
 
 
-def _spectrum_summary(spectroscopy: Any, catalog_type: str | None) -> dict[str, Any]:
+def _spectrum_summary(star: Any) -> dict[str, Any]:
     """Summarize a star's extracted spectrum and what was found in it.
 
     Parameters
     ----------
-    spectroscopy : `SpectroscopyResult`
-        The stored spectrum record.
-    catalog_type : `str`, optional
-        The type the catalog gives the star, to say whether the two differ.
+    star : `StellarObject`
+        The star, with its stored spectrum record and catalog type.
 
     Returns
     -------
     summary : `dict` [`str`, `Any`]
         The star's own type with its match quality, features, lines and
-        quality notes.
+        quality notes. The poor-match, separation and catalog-disagreement
+        verdicts are the models' own fields.
     """
+    spectroscopy = star.spectroscopy
     wavelengths = list(spectroscopy.wavelengths_angstrom or [])
     own_type = spectroscopy.self_determined_spectral_type
     rms = spectroscopy.self_determined_spectral_type_rms
     candidates = [_plain(item) for item in (spectroscopy.self_determined_spectral_type_candidates or [])]
     ranked = sorted(candidates, key=lambda item: item.get("rms", 9.0))
-    gap = (ranked[1]["rms"] - ranked[0]["rms"]) * 100.0 if len(ranked) > 1 else None
-    own_position, catalog_position = ladder_position(own_type), ladder_position(catalog_type)
-    differs = (
-        abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
-        if own_position is not None and catalog_position is not None
-        else None
-    )
+    separation = spectroscopy.candidate_separation
+    differs = star.differs_from_catalog
     features = [
         {
             "feature": _field(item, "feature"),
@@ -201,15 +154,15 @@ def _spectrum_summary(spectroscopy: Any, catalog_type: str | None) -> dict[str, 
         "valid_fraction": _round(spectroscopy.valid_fraction),
         "own_spectral_type": own_type,
         "own_type_percent_off": _round(None if rms is None else rms * 100.0, 1),
-        "no_good_match": None if rms is None else rms > NO_GOOD_MATCH_RMS,
+        "no_good_match": None if rms is None else spectroscopy.is_poor_match,
         "confidence": _round(spectroscopy.self_determined_spectral_type_confidence),
         "note": spectroscopy.self_determined_spectral_type_note or None,
         "closest_reference_types": [
             {"type": item.get("spectral_type"), "percent_off": _round(item.get("rms", 0.0) * 100.0, 1)}
             for item in ranked[:TOP_CANDIDATES]
         ],
-        "runner_up_gap_points": _round(gap, 1),
-        "well_separated": None if gap is None else gap >= WELL_SEPARATED_POINTS,
+        "runner_up_gap_points": _round(separation.gap_points, 1) if separation else None,
+        "well_separated": separation.is_well_separated if separation else None,
         "differs_from_catalog": differs,
         "emission_line_source": spectroscopy.is_emission_line_source,
         "emission_lines": lines[:MAXIMUM_ROWS_PER_LIST],
@@ -304,6 +257,6 @@ def summarize_star(star: Any) -> dict[str, Any]:
         "catalog_identified": star.is_catalog_identified,
         "catalog_match_quality": _plain(star.catalog_match_quality),
         "target_ids": list(star.target_ids or []),
-        "spectrum": _spectrum_summary(star.spectroscopy, star.spectral_type) if star.has_spectra else None,
+        "spectrum": _spectrum_summary(star) if star.has_spectra else None,
         "photometry": _photometry_summary(star.photometry) if star.has_photometry else None,
     }

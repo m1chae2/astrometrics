@@ -283,6 +283,18 @@ export interface Spectrum {
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
   catalogMatchQuality?: CatalogMatchQuality | null;
+  /** How much this star's brightness jumps around, on a display scale. */
+  variabilityScore?: number | null;
+  /** Check if this star's light spectrum has been measured. */
+  hasSpectra?: boolean;
+  /** Check if the star's magnitude is a real catalog magnitude. */
+  hasCatalogMagnitude?: boolean;
+  /** Check if the spectrum's matched type disagrees with the catalog. */
+  differsFromCatalog?: boolean | null;
+  /** Check if this star's brightness has been tracked over time. */
+  hasPhotometry?: boolean;
+  /** The star's spectrum, formatted so it's easy to draw on a graph. */
+  plotData?: Record<string, number[]>;
   /** Flexible index to accommodate additional data from the backend. */
   [key: string]: any;
 }
@@ -341,6 +353,26 @@ export interface TargetStarCount {
 }
 
 /**
+ * How clearly a spectrum's best reference type beats the next one.
+ *
+ * Attributes
+ * ----------
+ * runner_up_type : `str`
+ * The second-closest reference type.
+ * gap_points : `float`
+ * How much worse the runner-up fits, in percentage points of the
+ * root-mean-square (RMS) difference.
+ * is_well_separated : `bool`
+ * `True` when the gap is at least `WELL_SEPARATED_POINTS`; otherwise
+ * the match is a close call.
+ */
+export interface CandidateSeparation {
+  runnerUpType: string;
+  gapPoints: number;
+  isWellSeparated: boolean;
+}
+
+/**
  * A star's own extracted spectrum, and what it suggests about the star.
  *
  * Bundles spectroscopy's results the same way `PhotometryResult` bundles
@@ -380,6 +412,10 @@ export interface SpectroscopyResult {
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
   generatedByJobId?: string | null;
+  /** Check if even the closest reference spectrum fits badly. */
+  isPoorMatch?: boolean;
+  /** How clearly the best reference type beats the runner-up. */
+  candidateSeparation?: CandidateSeparation | null;
 }
 
 /**
@@ -958,6 +994,8 @@ export interface VariableCandidate {
   coefficientOfVariation: number;
   ra: number;
   dec: number;
+  /** How confident the code is that this star is truly variable. */
+  score?: number;
 }
 
 /**

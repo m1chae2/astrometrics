@@ -51,6 +51,7 @@ from astrometricslib.models.spectroscopy_quality import (
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
+    CandidateSeparation,
     FileItem,
     GroupedFrameStat,
     PeriodogramResult,
@@ -263,6 +264,14 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
 
         lines.append(f"  {ts_name}{'?' if optional else ''}: {ts_type};")
 
+    # Computed fields are sent in every reply too. They are marked optional
+    # so the app's own test data need not spell them out.
+    for field_name, computed_info in model.model_computed_fields.items():
+        ts_name = computed_info.alias or field_name
+        if computed_info.description:
+            lines.append(f"  /** {computed_info.description.strip().splitlines()[0]} */")
+        lines.append(f"  {ts_name}?: {get_ts_type(computed_info.return_type)};")
+
     # Add flexible index for known models
     if name in ("TelescopeStatus", "TargetObject", "Spectrum"):
         lines.append("  /** Flexible index to accommodate additional data from the backend. */")
@@ -306,6 +315,7 @@ def render_types() -> str:
         generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
         generate_interface(OverlayStar, "OverlayStar"),
         generate_interface(TargetStarCount, "TargetStarCount"),
+        generate_interface(CandidateSeparation, "CandidateSeparation"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),

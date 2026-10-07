@@ -127,9 +127,9 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
 
     const measuredSpectralType: string = spectroscopy?.selfDeterminedSpectralType || '';
     const spectralRms = spectroscopy?.selfDeterminedSpectralTypeRms;
-    const templateMatch = describeTemplateMatch(spectroscopy, astronomyData?.spectralType);
+    const templateMatch = describeTemplateMatch(astronomyData, astronomyData?.spectralType);
     const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
-    const candidateSeparation = describeCandidateSeparation(spectralCandidates);
+    const candidateSeparation = describeCandidateSeparation(spectroscopy?.candidateSeparation);
     const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
     // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
     const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];

@@ -87,7 +87,7 @@ class GuidingSection:
     frames_without_pixel_scale : `int`
         How many rows were left out because no pixel scale was known.
     samples : `list` [`dict`]
-        The usable frames, ready for `LoggerInterface.record_guiding_samples`.
+        The usable frames, ready for `ControlRecordStore.record_guiding_samples`.
     """
 
     started_at: float

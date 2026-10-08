@@ -69,7 +69,7 @@ class _Logs:
             },
         ]
 
-    def get_polar_alignment_logs(
+    def get_polar_alignments(
         self, session_id: str | None = None, limit: int = 10
     ) -> list[dict[str, Any]]:
         """Return no polar alignment runs.
@@ -92,7 +92,7 @@ def _context() -> SimpleNamespace:
         the newer night.
     """
     targets = SimpleNamespace(query=lambda detail: {"nights": {"2026-09-25": 1}})
-    return SimpleNamespace(logger_interface=_Logs(), astrometrics=SimpleNamespace(targets=targets))
+    return SimpleNamespace(records=_Logs(), astrometrics=SimpleNamespace(targets=targets))
 
 
 def test_nights_are_listed_with_their_mean_pointing_and_target_count() -> None:

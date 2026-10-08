@@ -76,7 +76,7 @@ def equipment_match_level(
     return "none"
 
 
-def measured_night_samples(logger_interface: Any, session_id: str) -> list[dict[str, Any]]:
+def measured_night_samples(records: Any, session_id: str) -> list[dict[str, Any]]:
     """Read one night's measured guide samples.
 
     Returns
@@ -86,7 +86,7 @@ def measured_night_samples(logger_interface: Any, session_id: str) -> list[dict[
         are never returned.
     """
     measured_sources = [source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES]
-    return logger_interface.get_guiding_logs(
+    return records.get_guiding_samples(
         session_id=session_id, limit=_SAMPLE_READ_LIMIT, sources=measured_sources
     )
 

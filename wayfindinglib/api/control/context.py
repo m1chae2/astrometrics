@@ -2,8 +2,8 @@
 
 Description: `ControlContext` holds what every part of `control` needs:
 the configuration, the `DiskButler` that stores records, the correction
-settings, the safety monitor, the shared `Astrometrics` handle, the log
-database, and the hardware drivers. The drivers are built on first use,
+settings, the safety monitor, the shared `Astrometrics` handle, the store
+of alignment and guiding records, and the hardware drivers. The drivers are built on first use,
 so building a context never touches hardware.
 
 `ObservatoryControl` builds one context and hands it to each of its seven
@@ -32,7 +32,8 @@ from wayfindinglib.tasks.control_tasks.live_guiding import LiveGuidingMonitor
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 
 if TYPE_CHECKING:
-    from astrometricslib import AppConfiguration, Astrometrics, LoggerInterface
+    from astrometricslib import AppConfiguration, Astrometrics
+    from wayfindinglib.drivers.control_record_store import ControlRecordStore
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
     from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
     from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
@@ -95,7 +96,7 @@ class ControlContext:
         self.safety_monitor = SafetyMonitor()
         self.live_guiding = LiveGuidingMonitor()
         self._astrometrics = astrometrics
-        self._logger_interface: LoggerInterface | None = None
+        self._records: ControlRecordStore | None = None
         self._driver = driver
         self._mount_driver: MountDriver | None = None
         self._focuser_driver: FocuserDriver | None = None
@@ -129,27 +130,26 @@ class ControlContext:
         return self._astrometrics
 
     @property
-    def logger_interface(self) -> LoggerInterface:
-        """The log database that holds guiding samples and plate solves.
+    def records(self) -> ControlRecordStore:
+        """The store of alignment attempts, guiding samples and polar alignment runs.
 
-        Built on first use, so a test configuration that has no log
-        database path is never asked for one unless a method needs it.
+        Built on first use, in the butler's ``wayfinding.db``, so a test
+        configuration is never asked for a library folder unless a method
+        needs the records.
 
         Returns
         -------
-        logger_interface : `astrometricslib.LoggerInterface`
-            The shared log-database interface.
+        records : `ControlRecordStore`
+            The shared record store.
         """
-        if self._logger_interface is None:
-            from astrometricslib import LoggerInterface
+        if self._records is None:
+            self._records = self.butler.control_records
+        return self._records
 
-            self._logger_interface = LoggerInterface(self.config.get_logs_db_path())
-        return self._logger_interface
-
-    @logger_interface.setter
-    def logger_interface(self, logger_interface: LoggerInterface) -> None:
-        """Set the log database (tests use this to inject one)."""
-        self._logger_interface = logger_interface
+    @records.setter
+    def records(self, records: ControlRecordStore) -> None:
+        """Set the record store (tests use this to inject one)."""
+        self._records = records
 
     # -- Drivers ---------------------------------------------------------
 

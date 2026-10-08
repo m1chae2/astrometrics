@@ -25,7 +25,7 @@ from wayfindinglib.api.control.mount import MountControl
 class _Logs:
     """A stand-in log database holding two recorded attempts."""
 
-    def get_alignment_logs(self, limit: int = 100) -> list[dict[str, Any]]:
+    def get_alignment_attempts(self, limit: int = 100) -> list[dict[str, Any]]:
         """Return the attempts, newest first.
 
         Returns
@@ -56,7 +56,7 @@ def _autospec_control() -> MagicMock:
 
 def test_get_attempts_lists_recorded_attempts_oldest_first() -> None:
     """Attempts come back camelCase, oldest first; no position, no target."""
-    service = AlignmentService(observatory_api=_autospec_control(), logger_interface=_Logs())
+    service = AlignmentService(observatory_api=_autospec_control(), records=_Logs())
 
     live = service.get_attempts()
     attempts = live["alignmentAttempts"]
@@ -84,7 +84,7 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     released = threading.Event()
     observatory.mount.slew.side_effect = lambda *args, **kwargs: released.wait(timeout=5.0)
     observatory.mount.abort_motion.side_effect = lambda: released.set()
-    service = AlignmentService(observatory_api=observatory, logger_interface=_Logs())
+    service = AlignmentService(observatory_api=observatory, records=_Logs())
 
     assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
     assert service.is_active() is True

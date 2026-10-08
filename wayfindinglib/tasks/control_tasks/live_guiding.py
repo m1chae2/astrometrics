@@ -170,7 +170,7 @@ def poll(context: ControlContext) -> None:
         return
     monitor.add(reading.samples)
     target_name = hardware_operations.mount_status(context, ["mount"]).get("targetName")
-    context.logger_interface.record_guiding_samples([
+    context.records.record_guiding_samples([
         {
             **sample.model_dump(),
             "target_name": target_name,

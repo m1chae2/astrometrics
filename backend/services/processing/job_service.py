@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import ConflictError, LoggerInterface, NotFoundError, ProcessingJob
+from astrometricslib import ConflictError, JobStore, NotFoundError, ProcessingJob
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +18,17 @@ logger = logging.getLogger(__name__)
 class JobService:
     """Coordinates job creation, updates, and historical retrieval.
 
-    Acts as a bridge between high-level services and the JobRepository.
+    Acts as a bridge between high-level services and the job store.
     """
 
-    def __init__(self, job_repository: LoggerInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, job_repository: JobStore) -> None:
+        """Keep the job store this service reads and writes.
+
+        Parameters
+        ----------
+        job_repository : `JobStore`
+            The logs database's job list.
+        """
         self.repository = job_repository
 
     def create_job(
@@ -239,37 +246,3 @@ class JobService:
             if self.delete_job(job.id):
                 count += 1
         return count
-
-    # --- Agent LTM Methods ---
-
-    def log_agent_interaction(self, session_id: str, prompt: str, response_json: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Log a raw LLM interaction for auditing and future reflection."""
-        interaction_id = str(uuid.uuid4())
-        self.repository.log_interaction(interaction_id, session_id, prompt, response_json)
-
-    def get_session_interactions(self, session_id: str) -> list[dict]:
-        """Retrieve interaction history for reflection.
-
-        Returns
-        -------
-        interactions : `list`
-            The logged interactions for the session.
-        """
-        return self.repository.get_session_interactions(session_id)
-
-    def add_agent_knowledge(  # ruff: ignore[missing-return-type-undocumented-public-function]
-        self, category: str, content: str, summary: str | None = None, importance: int = 1
-    ):
-        """Record distilled agent knowledge."""
-        knowledge_id = str(uuid.uuid4())
-        self.repository.add_knowledge(knowledge_id, category, content, summary, importance)
-
-    def get_relevant_agent_knowledge(self, limit: int = 5) -> list[dict]:
-        """Retrieve the most relevant knowledge for prompt injection.
-
-        Returns
-        -------
-        knowledge : `list`
-            The most relevant knowledge entries.
-        """
-        return self.repository.get_relevant_knowledge(limit)

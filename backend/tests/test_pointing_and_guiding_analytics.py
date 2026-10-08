@@ -136,21 +136,21 @@ def test_alignment_service_compute_pointing_model() -> None:
     from backend.services.observatory.alignment_service import AlignmentService
     from wayfindinglib import ObservatoryControl
 
-    logger_mock = MagicMock()
-    logger_mock.get_session_alignment_attempts.return_value = [
+    records_mock = MagicMock()
+    records_mock.get_session_alignment_attempts.return_value = [
         {"ra": 180.0, "dec": 45.0, "delta_ra_arcsec": 5.0, "delta_dec_arcsec": -3.0},
         {"ra": 190.0, "dec": 50.0, "delta_ra_arcsec": 6.0, "delta_dec_arcsec": -2.0},
     ]
 
     observatory = ObservatoryControl(config=MagicMock())
-    observatory._context.logger_interface = logger_mock
+    observatory._context.records = records_mock
     observatory._context.observer_location = lambda: {"latitude": 39.7}
 
     service = AlignmentService(observatory_api=observatory)
     res = service.compute_pointing_model(session_id="2026-09-25")
     assert res["sampleCount"] == 2
     assert res["confidence"] == "insufficient_data"
-    logger_mock.get_session_alignment_attempts.assert_called_once_with("2026-09-25")
+    records_mock.get_session_alignment_attempts.assert_called_once_with("2026-09-25")
 
 
 def test_guiding_service_analyze_guiding_spectrum() -> None:
@@ -163,11 +163,11 @@ def test_guiding_service_analyze_guiding_spectrum() -> None:
     from backend.services.observatory.guiding_service import GuidingService
     from wayfindinglib import ObservatoryControl
 
-    logger_mock = MagicMock()
-    logger_mock.get_guiding_logs.return_value = []
+    records_mock = MagicMock()
+    records_mock.get_guiding_samples.return_value = []
 
     observatory = ObservatoryControl(config=MagicMock())
-    observatory._context.logger_interface = logger_mock
+    observatory._context.records = records_mock
     observatory._context.butler = MagicMock()  # refit_spectrum saves; avoid real disk I/O
 
     service = GuidingService(observatory_api=observatory)
@@ -175,7 +175,7 @@ def test_guiding_service_analyze_guiding_spectrum() -> None:
     assert res["sampleCount"] == 0
     # Only samples measured from a real guide star are refit; estimates
     # reconstructed from mount pulses are never read.
-    logger_mock.get_guiding_logs.assert_called_once_with(
+    records_mock.get_guiding_samples.assert_called_once_with(
         session_id="2026-09-25",
         limit=2000,
         sources=["phd2_guide_log", "phd2_live", "ekos_guide_log", "ekos_analyze_log"],

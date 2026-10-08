@@ -285,7 +285,7 @@ def _sorted_paths(directory: str, prefixes: tuple[str, ...], suffix: str) -> lis
 
 def ingest_ekos_session_logs_from_directory(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     directory: str,
     frame_lookup: FrameLookup | None = None,
 ) -> EkosLogIngestionSummary:
@@ -296,7 +296,7 @@ def ingest_ekos_session_logs_from_directory(
     context : `ControlContext`
         Supplies the configured guide plate scale, used as a fallback and
         for comparison, and stores the session records.
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Stores the guiding samples.
     directory : `str`
         Folder holding ``guide_log*.txt``, ``PHD2_GuideLog_*.txt`` and
@@ -336,7 +336,7 @@ def ingest_ekos_session_logs_from_directory(
         if not samples:
             summary.guide_log_files_with_no_samples.append(os.path.basename(guide_log_path))
             continue
-        logger_interface.replace_guiding_samples(samples)
+        records.replace_guiding_samples(samples)
         summary.guide_samples_stored += len(samples)
 
     for analyze_path in _sorted_paths(directory, ("ekos-",), ".analyze"):
@@ -359,7 +359,7 @@ def ingest_ekos_session_logs_from_directory(
 
 def fetch_and_ingest_ekos_session_logs(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     destination_dir: str,
     frame_lookup: FrameLookup | None = None,
 ) -> EkosLogIngestionSummary:
@@ -375,7 +375,7 @@ def fetch_and_ingest_ekos_session_logs(
     ----------
     context : `ControlContext`
         Supplies `remote_transfer_driver` and the ingestion inputs.
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Stores the guiding samples.
     destination_dir : `str`
         Local folder to download into and read from.
@@ -394,7 +394,7 @@ def fetch_and_ingest_ekos_session_logs(
             logger.info("Remote-transfer driver has no %s; reading local files only", method_name)
             continue
         download(destination_dir)
-    return ingest_ekos_session_logs_from_directory(context, logger_interface, destination_dir, frame_lookup)
+    return ingest_ekos_session_logs_from_directory(context, records, destination_dir, frame_lookup)
 
 
 def ingest_ekos_logs(context: ControlContext, destination_dir: str, download: bool = True) -> dict[str, Any]:
@@ -426,10 +426,10 @@ def ingest_ekos_logs(context: ControlContext, destination_dir: str, download: bo
 
     if download:
         summary = fetch_and_ingest_ekos_session_logs(
-            context, context.logger_interface, destination_dir, frame_lookup
+            context, context.records, destination_dir, frame_lookup
         )
     else:
         summary = ingest_ekos_session_logs_from_directory(
-            context, context.logger_interface, destination_dir, frame_lookup
+            context, context.records, destination_dir, frame_lookup
         )
     return summary.as_dict()

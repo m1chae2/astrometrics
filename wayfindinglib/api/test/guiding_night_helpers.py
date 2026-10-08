@@ -47,7 +47,7 @@ def record_guiding_night(
     start = FIRST_NIGHT + day * 86400.0
     night = observing_night_id(start)
     generator = np.random.default_rng(day)
-    control._context.logger_interface.replace_guiding_samples([
+    control._context.records.replace_guiding_samples([
         {
             "timestamp": start + 60.0 + 3.2 * index,
             "dra": float(generator.normal(0.0, sigma)),

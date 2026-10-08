@@ -2,7 +2,7 @@
 
 Description: Verifies the fetch -> parse -> persist -> refit chain in
 `guiding_log_ingestion.py`, using fake `ObservatoryControl`/
-`LoggerInterface`/`RemoteTransferDriver` stand-ins rather than a real
+`ControlRecordStore`/`RemoteTransferDriver` stand-ins rather than a real
 database or SSH-reachable host.
 """
 
@@ -12,7 +12,7 @@ from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
 
-class _FakeLoggerInterface:
+class _FakeRecordStore:
     """Records `replace_guiding_samples` calls and serves a fixed history."""
 
     def __init__(self, guiding_logs: list[dict[str, Any]] | None = None) -> None:
@@ -31,7 +31,7 @@ class _FakeLoggerInterface:
         self.recorded_batches.append(samples)
         return 0
 
-    def get_guiding_logs(
+    def get_guiding_samples(
         self,
         session_id: str | None = None,
         limit: int = 2000,
@@ -39,7 +39,7 @@ class _FakeLoggerInterface:
     ) -> list[dict[str, Any]]:
         """Return the fixed cumulative guiding-log history.
 
-        Filters by `sources` the way the real `LoggerInterface` does, so
+        Filters by `sources` the way the real `ControlRecordStore` does, so
         a test sees what the real refit would see.
 
         Returns
@@ -95,24 +95,24 @@ def _write_guide_log(tmp_path) -> str:  # ruff: ignore[missing-type-function-arg
 def test_ingest_guide_log_file_returns_none_for_unparseable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify an empty/missing log file ingests and persists nothing."""
     observatory = _FakeObservatory()
-    logger_interface = _FakeLoggerInterface()
+    records = _FakeRecordStore()
 
     result = guiding_log_ingestion.ingest_guide_log_file(
-        observatory, logger_interface, str(tmp_path / "missing.txt")
+        observatory, records, str(tmp_path / "missing.txt")
     )
 
     assert result is None
-    assert logger_interface.recorded_batches == []
+    assert records.recorded_batches == []
     assert observatory.saved is None
 
 
 def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify a real log file's samples record, then the spectrum refits."""
     file_path = _write_guide_log(tmp_path)
-    # The refit reads back through get_guiding_logs, not the just-recorded
+    # The refit reads back through get_guiding_samples, not the just-recorded
     # batch directly -- simulate that with a fixed cumulative-history stub
     # shaped like the samples ingest_guide_log_file would have recorded.
-    logger_interface = _FakeLoggerInterface(
+    records = _FakeRecordStore(
         guiding_logs=[
             {"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80, "source": "phd2_guide_log"},
             {"time": 2.0, "dra": 0.5, "ddec": 0.1, "pulse_dec": 90, "source": "phd2_guide_log"},
@@ -120,11 +120,11 @@ def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  
     )
     observatory = _FakeObservatory()
 
-    result = guiding_log_ingestion.ingest_guide_log_file(observatory, logger_interface, file_path)
+    result = guiding_log_ingestion.ingest_guide_log_file(observatory, records, file_path)
 
     assert isinstance(result, GuidingSpectrumAnalysis)
-    assert len(logger_interface.recorded_batches) == 1
-    assert len(logger_interface.recorded_batches[0]) == 2
+    assert len(records.recorded_batches) == 1
+    assert len(records.recorded_batches[0]) == 2
     assert observatory.saved is result
 
 
@@ -135,14 +135,14 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_without_driver_support(): 
         """A `RemoteTransferDriver` stand-in lacking guide-log methods."""
 
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithoutGuideLogs())
-    logger_interface = _FakeLoggerInterface()
+    records = _FakeRecordStore()
 
     result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, logger_interface, "/tmp/guiding"
+        observatory, records, "/tmp/guiding"
     )
 
     assert result is None
-    assert logger_interface.recorded_batches == []
+    assert records.recorded_batches == []
 
 
 def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -162,10 +162,10 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded():
             return []
 
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithNoLogs())
-    logger_interface = _FakeLoggerInterface()
+    records = _FakeRecordStore()
 
     result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, logger_interface, "/tmp/guiding"
+        observatory, records, "/tmp/guiding"
     )
 
     assert result is None
@@ -188,28 +188,28 @@ def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path): 
             """
             return [file_path]
 
-    logger_interface = _FakeLoggerInterface(
+    records = _FakeRecordStore(
         guiding_logs=[{"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80}]
     )
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithOneLog())
 
     result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, logger_interface, str(tmp_path)
+        observatory, records, str(tmp_path)
     )
 
     assert isinstance(result, GuidingSpectrumAnalysis)
-    assert len(logger_interface.recorded_batches) == 1
+    assert len(records.recorded_batches) == 1
     assert observatory.saved is result
 
 
 def test_refit_and_persist_guiding_spectrum_persists_through_observatory():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify the standalone refit helper persists via the observatory."""
-    logger_interface = _FakeLoggerInterface(
+    records = _FakeRecordStore(
         guiding_logs=[{"time": 1.0, "dra": 0.1, "ddec": 0.1, "pulse_dec": 50}]
     )
     observatory = _FakeObservatory()
 
-    result = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, logger_interface)
+    result = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, records)
 
     assert isinstance(result, GuidingSpectrumAnalysis)
     assert observatory.saved is result
@@ -231,9 +231,9 @@ def test_refit_ignores_samples_that_were_not_measured_from_a_real_star():  # ruf
         for second in range(5)
     ]
     unverified = [{"time": 200.0, "dra": 9.0, "ddec": 9.0, "pulse_dec": 50, "source": "unverified"}]
-    logger_interface = _FakeLoggerInterface(guiding_logs=measured + estimated + unverified)
+    records = _FakeRecordStore(guiding_logs=measured + estimated + unverified)
     observatory = _FakeObservatory()
 
-    analysis = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, logger_interface)
+    analysis = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, records)
 
     assert analysis.sample_count == len(measured)

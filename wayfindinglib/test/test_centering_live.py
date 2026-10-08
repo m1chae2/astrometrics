@@ -24,7 +24,8 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib import AppConfiguration, LoggerInterface
+from astrometricslib import AppConfiguration
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib import ObservatoryControl, SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.indi_interface import IndiInterface
@@ -126,7 +127,7 @@ def observatory(
 
     observatory_control = ObservatoryControl(config=config, butler=DiskButler(app_config=config))
     observatory_control.driver = live_interface
-    observatory_control._context.logger_interface = LoggerInterface(str(isolated_dir / "logs.db"))
+    observatory_control._context.records = ControlRecordStore(str(isolated_dir / "logs.db"))
     observatory_control.safety.apply_promotion_decision(
         ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE
     )

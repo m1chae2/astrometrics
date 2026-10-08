@@ -148,19 +148,19 @@ def performance_envelope(
     guide_scale = equipment.guider_plate_scale_arcsec_per_px(guide_scope, guide_camera)
     guide_focal_length = guide_scope.focal_length_mm if guide_scope else telescope.focal_length_mm
     fingerprint = build_equipment_fingerprint(telescope.name, camera.name, guide_focal_length, guide_scale)
-    logger_interface = context.logger_interface
+    records = context.records
 
     # The guide cycle is a property of the equipment, not of one night,
     # so it is read from every recorded night. The baseline limits use
     # only the nights before `before_night`.
     every_night = performance_envelope_tasks.collect_baseline_values(
-        logger_interface, contexts, fingerprint, runs
+        records, contexts, fingerprint, runs
     )
     baseline_values = (
         every_night
         if before_night is None
         else performance_envelope_tasks.collect_baseline_values(
-            logger_interface, contexts, fingerprint, runs, before_night
+            records, contexts, fingerprint, runs, before_night
         )
     )
 
@@ -224,7 +224,7 @@ def performance_envelope(
     if excursion_limit is not None:
         baseline_values["guide_excursion_fraction"] = (
             performance_envelope_tasks.collect_excursion_fraction_baseline(
-                logger_interface, contexts, fingerprint, excursion_limit, before_night
+                records, contexts, fingerprint, excursion_limit, before_night
             )
         )
         envelope = derive(baseline_values)
@@ -296,7 +296,7 @@ def guiding_night_analysis(
     library_cache = {} if library_cache is None else library_cache
     night_contexts = [record for record in contexts if record.session_id == session_id]
     night_runs = [run for run in runs if run.session_id == session_id]
-    samples = tasks.measured_night_samples(context.logger_interface, session_id)
+    samples = tasks.measured_night_samples(context.records, session_id)
     if not (night_contexts or night_runs or samples):
         return None
     envelope = performance_envelope(context, None, session_id, contexts, runs, library_cache)

@@ -110,7 +110,6 @@ class HistoryControl(ControlChild):
             enabled=register_job and get_current_job() is None,
             job_type="diagnostics",
             target_id=kind,
-            package_logger_name="wayfindinglib",
         ):
             return night_history.build_night_history(
                 self._context, kind, session_id, ekos_file_id, include, limit

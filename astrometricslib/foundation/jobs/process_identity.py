@@ -1,12 +1,12 @@
 """Purpose: Tell one running program from another, and whether one still runs.
 
-Description: Every job the app records names the program that is running it, so that a job
-left open by a program that crashed or was stopped can be recognised and
-closed. A program's number (its process ID) alone is not enough: the
-operating system reuses numbers, so a new, unrelated program can later get
-the number of one that ended. The time the program started is kept with the
-number, and only a program with both the same number and the same start time
-counts as the same program.
+Description: Every job the app records names the program that is running it,
+so that a job left open by a program that crashed or was stopped can be
+recognised and closed. A program's number (its process ID) alone is not
+enough: the operating system reuses numbers, so a new, unrelated program can
+later get the number of one that ended. The time the program started is kept
+with the number, and only a program with both the same number and the same
+start time counts as the same program.
 """
 
 import logging

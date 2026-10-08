@@ -72,7 +72,7 @@ class _AlignmentLogs:
         """
         return [{"status": "aligned", "mount_ra": 10.0, "mount_dec": 20.0, "session_id": session_id}]
 
-    def get_polar_alignment_logs(
+    def get_polar_alignments(
         self, session_id: str | None = None, limit: int = 10
     ) -> list[dict[str, Any]]:
         """Return no polar alignment runs.
@@ -92,7 +92,7 @@ class _Observatory:
         """Start with no calls and a known location."""
         self.calls: list[tuple[str, Any]] = []
         self.location: dict[str, float] | None = {"latitude": 45.0}
-        self.logger_interface = _AlignmentLogs()
+        self.records = _AlignmentLogs()
 
     def capture_night_analysis(self, context: Any, session_id: str) -> Any:
         """Record the call; return an analysis unless the night is "none".
@@ -201,7 +201,7 @@ class _Observatory:
         """
         return self.location
 
-    def compute_pointing_model(self, context: Any, logger_interface: Any, session_id: str) -> Any:
+    def compute_pointing_model(self, context: Any, records: Any, session_id: str) -> Any:
         """Record the call and return a small model.
 
         Returns

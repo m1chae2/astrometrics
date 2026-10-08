@@ -86,13 +86,13 @@ def test_only_plate_solved_frames_are_recorded(tmp_path: Path) -> None:
         DATE_OBS="2026-09-24T22:00:00",
     )
     unsolved = _frame(tmp_path / "unsolved.fits", RA=150.0, DEC=30.0)
-    context = SimpleNamespace(logger_interface=MagicMock())
+    context = SimpleNamespace(records=MagicMock())
 
     recorded = frame_pointing.record_frame_pointing_errors(
         context, [solved, unsolved, str(tmp_path / "notes.txt")]
     )
 
     assert recorded == 1
-    (attempt,) = context.logger_interface.record_alignment_attempt.call_args.args
+    (attempt,) = context.records.record_alignment_attempt.call_args.args
     assert attempt["target_name"] == "M 81"
     assert attempt["timestamp"] == pytest.approx(1790287200.0)

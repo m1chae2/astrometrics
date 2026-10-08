@@ -107,7 +107,7 @@ def test_estimated_samples_never_reach_the_analysis(control: ObservatoryControl)
     """Verify fabricated pulse-derived samples never change an analysis."""
     night = record_guiding_night(control, 0)
     start = FIRST_NIGHT
-    control._context.logger_interface.replace_guiding_samples([
+    control._context.records.replace_guiding_samples([
         {
             "timestamp": start + 60.0 + index,
             "dra": 50.0,
@@ -142,7 +142,7 @@ def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:
     before = {
         name: len(control._context.butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")
     }
-    samples_before = len(control._context.logger_interface.get_guiding_logs(limit=100000))
+    samples_before = len(control._context.records.get_guiding_samples(limit=100000))
 
     night_analysis.guiding_night_analysis(control._context, night)
     night_analysis.guiding_night_summaries(control._context)
@@ -151,4 +151,4 @@ def test_the_analysis_is_not_stored(control: ObservatoryControl) -> None:
         name: len(control._context.butler.get_all(name)) for name in ("ekos_session_context", "guiding_run")
     }
     assert after == before
-    assert len(control._context.logger_interface.get_guiding_logs(limit=100000)) == samples_before
+    assert len(control._context.records.get_guiding_samples(limit=100000)) == samples_before

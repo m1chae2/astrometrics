@@ -182,7 +182,7 @@ def _record(
             "dec": correction.solved_dec_deg,
             "force_record": True,
         })
-    context.logger_interface.record_alignment_attempt(attempt)
+    context.records.record_alignment_attempt(attempt)
 
 
 def center_on(

@@ -22,7 +22,7 @@ This module also holds `background_job`, the marker for methods that a
 server runs in the background, `run_as_background_job`, which runs them,
 and `close_interrupted_jobs`, which closes the jobs a program left open
 when it ended.
-""" 
+"""
 
 import dataclasses
 import logging
@@ -423,7 +423,6 @@ def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJ
     except (AstrometricsError, sqlite3.Error, OSError) as recovery_error:
         logger.warning("Could not close interrupted jobs: %s", recovery_error)
         return []
-
 
 
 @contextmanager

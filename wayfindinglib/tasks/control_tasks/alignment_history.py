@@ -110,7 +110,7 @@ def alignment_nights(context: ControlContext, limit: int) -> dict[str, Any]:
         alignment errors, the mean pointing ``meanRaDeg`` and
         ``meanDecDeg``, and the tracking jitter ``rmsJitterArcsec``.
     """
-    logs = context.logger_interface
+    logs = context.records
     rows = logs.get_alignment_sessions()
     target_counts = _target_counts(context)
     sessions = []
@@ -162,7 +162,7 @@ def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
     NotFoundError
         If nothing is recorded for that night.
     """
-    logs = context.logger_interface
+    logs = context.records
     rows = logs.get_session_alignment_attempts(session_id)
     if not rows:
         raise NotFoundError(
@@ -170,7 +170,7 @@ def alignment_night(context: ControlContext, session_id: str) -> dict[str, Any]:
             details={"session_id": session_id},
         )
     attempts = attempt_models(rows)
-    polar = logs.get_polar_alignment_logs(session_id=session_id, limit=1)
+    polar = logs.get_polar_alignments(session_id=session_id, limit=1)
     return {
         "kind": "alignment",
         "session_id": session_id,

@@ -214,7 +214,7 @@ def link_frames_to_guiding(
         windows.append((frame, frame.timestamp, frame.timestamp + exposure_seconds, exposure_seconds))
     first_start = min(window[1] for window in windows)
     last_end = max(window[2] for window in windows)
-    rows = context.logger_interface.get_guiding_logs(
+    rows = context.records.get_guiding_samples(
         start_time=first_start - 5.0, limit=500_000, sources=[GUIDE_LOG_SOURCE]
     )
     rows = sorted(

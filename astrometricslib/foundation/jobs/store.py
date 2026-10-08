@@ -531,7 +531,6 @@ class JobStore:
             logger.exception("Could not close interrupted jobs")
         return interrupted
 
-
     def add_log_entry(
         self,
         component: str,
@@ -682,6 +681,7 @@ class JobStore:
         except sqlite3.Error:
             logger.exception("Error reading recent log entries for job %s", job_id)
             return [], 0
+
 
 class DbLogHandler(logging.Handler):
     """Logging handler that records emitted records into log_entries.

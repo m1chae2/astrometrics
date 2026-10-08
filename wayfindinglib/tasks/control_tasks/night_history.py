@@ -572,5 +572,5 @@ def _pointing_model(context: ControlContext, session_id: str | None) -> dict[str
         )
     from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
-    model = pointing_log_ingestion.compute_pointing_model(context, context.logger_interface, session_id)
+    model = pointing_log_ingestion.compute_pointing_model(context, context.records, session_id)
     return {"kind": "pointing_model", "session_id": session_id, "model": to_plain(model)}

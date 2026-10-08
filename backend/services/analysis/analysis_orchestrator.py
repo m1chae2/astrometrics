@@ -232,13 +232,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
         with capture_job_logs(
             job_id=job_id,
             log_file_path=job.log_file_path if job else None,
-            logger_interface=self._job_service.repository if self._job_service else None,
-        ) as job_logger:
-            return self._run_analysis_task_body(job_logger, job_id, target_id, image_files, filter_type, type)
+            job_store=self._job_service.repository if self._job_service else None,
+        ):
+            return self._run_analysis_task_body(job_id, target_id, image_files, filter_type, type)
 
     def _run_analysis_task_body(
         self,
-        job_logger: logging.Logger,
         job_id: str,
         target_id: str,
         image_files: Any,
@@ -263,7 +262,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             If no image files were given (outside photometry mode), or
             if the filter is not one the analysis supports.
         """
-        job_logger.info(
+        logger.info(
             "[%s] Background analysis worker started for %s (Job: %s)", target_id, target_id, job_id
         )
 
@@ -303,7 +302,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 else:
                     paths.append(str(item))
 
-        job_logger.info("[%s] Analysis task for %s found %s files", target_id, target_id, len(paths))
+        logger.info("[%s] Analysis task for %s found %s files", target_id, target_id, len(paths))
 
         if not paths and type != "photometry":
             raise InvalidArgumentError(
@@ -358,19 +357,19 @@ class AnalysisOrchestrator(BaseBackgroundService):
                         "STAR ANALYZER 200",
                     ]:
                         fallback_is_spec = True
-                        job_logger.info(
+                        logger.info(
                             "[%s] Auto-detected spectroscopy from FITS header FILTER: %s",
                             target_id,
                             fit_filter,
                         )
             except FITS_READ_ERRORS as e:
-                job_logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
+                logger.warning("[%s] Could not read FITS header for auto-detection: %s", target_id, e)
 
             if not fallback_is_spec:
                 first_file = os.path.basename(unmatched_paths[0]).upper()
                 if "SPECTRUM" in first_file or "_SPEC" in first_file or "SPECTROSCOPY" in first_file:
                     fallback_is_spec = True
-                    job_logger.info(
+                    logger.info(
                         "[%s] Auto-detected spectroscopy from filename: %s", target_id, unmatched_paths[0]
                     )
 
@@ -378,17 +377,17 @@ class AnalysisOrchestrator(BaseBackgroundService):
         light_paths = matched_light_paths + (unmatched_paths if not fallback_is_spec else [])
 
         if spec_paths and light_paths:
-            job_logger.info(
+            logger.info(
                 "[%s] Analysis batch spans both frame types: %s light/luminance, %s spectroscopy.",
                 target_id,
                 len(light_paths),
                 len(spec_paths),
             )
             spectroscopy_result = self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_type or "SPEC", logger=job_logger
+                job_id, target_id, spec_paths, filter_type or "SPEC", logger=logger
             )
             photometry_result = self._run_photometry_analysis(
-                job_id, target_id, light_paths, filter_type, logger=job_logger
+                job_id, target_id, light_paths, filter_type, logger=logger
             )
             return {
                 "status": "finished",
@@ -398,12 +397,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         if spec_paths:
             return self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, filter_type or "SPEC", logger=job_logger
+                job_id, target_id, spec_paths, filter_type or "SPEC", logger=logger
             )
 
         if light_paths or type == "photometry":
             return self._run_photometry_analysis(
-                job_id, target_id, light_paths, filter_type, logger=job_logger
+                job_id, target_id, light_paths, filter_type, logger=logger
             )
 
         raise InvalidArgumentError(

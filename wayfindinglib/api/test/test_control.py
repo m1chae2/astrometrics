@@ -248,7 +248,7 @@ def test_ingest_ekos_session_logs_twice_does_not_duplicate_anything(
     control.remote.sync_logs(destination_dir=str(logs_directory), download=False)
 
     assert len(control.history.query(kind="ekos_sessions")["sessions"]) == 1
-    assert len(control._context.logger_interface.get_guiding_logs()) == 1
+    assert len(control._context.records.get_guiding_samples()) == 1
 
 
 def test_get_ekos_session_context_is_none_for_an_unknown_session(control: ObservatoryControl) -> None:
@@ -475,15 +475,15 @@ def test_refit_spectrum_reads_one_guide_log_through_the_task_module(
     """Verify refit_spectrum(file_path=...) reads that one log."""
     from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
-    fake_logger_interface = mocker.Mock()
-    control._context.logger_interface = fake_logger_interface
+    fake_records = mocker.Mock()
+    control._context.records = fake_records
     mocker.patch.object(guiding_log_ingestion, "ingest_guide_log_file", return_value="analysis")
 
     result = control.guiding.refit_spectrum(file_path="/tmp/log.txt", target_name="M 81")
 
     assert result == "analysis"
     guiding_log_ingestion.ingest_guide_log_file.assert_called_once_with(
-        control._context, fake_logger_interface, "/tmp/log.txt", "M 81"
+        control._context, fake_records, "/tmp/log.txt", "M 81"
     )
 
 
@@ -493,15 +493,15 @@ def test_refit_spectrum_downloads_guide_logs_through_the_task_module(
     """Verify refit_spectrum(download=True) downloads every guide log first."""
     from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 
-    fake_logger_interface = mocker.Mock()
-    control._context.logger_interface = fake_logger_interface
+    fake_records = mocker.Mock()
+    control._context.records = fake_records
     mocker.patch.object(guiding_log_ingestion, "fetch_and_ingest_new_guide_logs", return_value="analysis")
 
     result = control.guiding.refit_spectrum(download=True, destination_dir="/tmp/guiding", target_name="M 81")
 
     assert result == "analysis"
     guiding_log_ingestion.fetch_and_ingest_new_guide_logs.assert_called_once_with(
-        control._context, fake_logger_interface, "/tmp/guiding", "M 81"
+        control._context, fake_records, "/tmp/guiding", "M 81"
     )
 
 
@@ -523,8 +523,8 @@ def test_pointing_model_query_delegates_to_the_task_module(
     """Verify the pointing-model query forwards to the task module."""
     from wayfindinglib.tasks.control_tasks import pointing_log_ingestion
 
-    fake_logger_interface = mocker.Mock()
-    control._context.logger_interface = fake_logger_interface
+    fake_records = mocker.Mock()
+    control._context.records = fake_records
     mocker.patch.object(control._context, "observer_location", return_value={"latitude": 40.0})
     mocker.patch.object(pointing_log_ingestion, "compute_pointing_model", return_value={"me": 1.0})
 
@@ -532,17 +532,17 @@ def test_pointing_model_query_delegates_to_the_task_module(
 
     assert result["model"] == {"me": 1.0}
     pointing_log_ingestion.compute_pointing_model.assert_called_once_with(
-        control._context, fake_logger_interface, "s1"
+        control._context, fake_records, "s1"
     )
 
 
-def test_logger_interface_lazily_builds_from_config(control: ObservatoryControl) -> None:
-    """Verify `_logger_interface` lazily builds a real LoggerInterface once."""
-    from astrometricslib import LoggerInterface
+def test_records_lazily_builds_from_config(control: ObservatoryControl) -> None:
+    """Verify `_records` lazily builds a real ControlRecordStore once."""
+    from wayfindinglib.drivers.control_record_store import ControlRecordStore
 
-    logger_interface = control._context.logger_interface
-    assert isinstance(logger_interface, LoggerInterface)
-    assert control._context.logger_interface is logger_interface
+    records = control._context.records
+    assert isinstance(records, ControlRecordStore)
+    assert control._context.records is records
 
 
 def test_run_guider_calibration_persists_the_derived_calibration(

@@ -58,7 +58,7 @@ def _context(location: dict[str, float] | None) -> SimpleNamespace:
     logs = SimpleNamespace(get_session_alignment_attempts=lambda session_id: rows)
     return SimpleNamespace(
         config=None,
-        logger_interface=logs,
+        records=logs,
         observer_location=lambda: location,
         observer_latitude_deg=lambda: 45.0,
     )

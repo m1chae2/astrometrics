@@ -163,7 +163,7 @@ def record_frame_pointing_errors(context: ControlContext, paths: list[str]) -> i
             continue
         if attempt is None:
             continue
-        context.logger_interface.record_alignment_attempt(attempt)
+        context.records.record_alignment_attempt(attempt)
         recorded += 1
     if recorded:
         logger.info("Recorded the pointing error of %s new plate-solved frame(s)", recorded)

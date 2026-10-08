@@ -122,9 +122,9 @@ class Container:
         )
         self.stellar_service = self.stellar_object_service
         self.image_service = ImageService(target_service=self.target_service)
-        from astrometricslib import LoggerInterface
+        from astrometricslib import JobStore
 
-        self.job_repository = LoggerInterface(self.config_service.get_logs_db_path())
+        self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
         self.job_service = JobService(self.job_repository)
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the calibration namespace's single CalibrationLibrary
@@ -183,9 +183,12 @@ class Container:
 
         # 5. Initialize Domain Services with proper DI
         from backend.services.observatory.alignment_service import AlignmentService
+        from wayfindinglib import ControlRecordStore
 
         self.alignment_service = AlignmentService(
-            observatory_api=self.wayfinder.control, logger_interface=self.job_repository
+            observatory_api=self.wayfinder.control,
+            records=ControlRecordStore.for_configuration(self.config_service),
+            targets=self.astrometrics.targets,
         )
         self.telescope_service = TelescopeService(
             guiding_service=self.guiding_service,

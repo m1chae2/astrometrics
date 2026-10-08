@@ -1318,7 +1318,6 @@ class ObservationPlanning:
                 enabled=register_job and get_current_job() is None,
                 job_type="planning",
                 target_id="deep_catalog",
-                package_logger_name="wayfindinglib",
             ):
                 estimate = estimate_catalog_size(**{
                     name: value for name, value in settings.items() if value is not None

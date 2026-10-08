@@ -307,13 +307,11 @@ def start_siril_processing_task(
             pass
 
     # The stacking stage writes its decisions (which frames were set aside,
-    # which preview steps ran) through the shared "astrometricslib" logger,
-    # not through this job's own logger. `capture_job_logs` sends both to the
-    # job's log file and its database rows, so the job log shows them.
+    # which preview steps ran) through its own module loggers.
+    # `capture_job_logs` sends them, and the lines written here, to the job's
+    # log file and its database rows, so the job log shows them.
     job_repository = getattr(siril, "job_repository", None)
-    with capture_job_logs(
-        job_id=job_id, log_file_path=log_file_path, logger_interface=job_repository
-    ) as logger:
+    with capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_repository):
         logger.info("Starting new processing task for %s (Job: %s)", target_id, job_id)
 
         # The stacking stage works on the target's own frame records, so

@@ -251,7 +251,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # string value that escapes the query.
 "astrometricslib/foundation/storage/butler.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
-"astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
+"astrometricslib/foundation/jobs/store.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/control_record_store.py" = ["hardcoded-sql-expression"]
+"build/migrations/move_guiding_alignment_records.py" = ["hardcoded-sql-expression"]
 "astrometricslib/pipelines/astrometry/processing/star_identifier.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
     from wayfindinglib.data_access.delegation_policy_reader import DelegationPolicyValidationError
+    from wayfindinglib.drivers.control_record_store import ControlRecordStore
     from wayfindinglib.drivers.indi_interface import IndiInterface
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.control_status import (
@@ -101,6 +102,8 @@ _LAZY_EXPORTS = {
     "ObservationExecution": "wayfindinglib.api.execution",
     "IndiInterface": "wayfindinglib.drivers.indi_interface",
     "SimulatorIndiInterface": "wayfindinglib.drivers.simulators.indi_simulator",
+    # The store of each night's alignment, guiding and polar alignment records.
+    "ControlRecordStore": "wayfindinglib.drivers.control_record_store",
     # Models that `control` takes and returns.
     "SkyPosition": "wayfindinglib.models.sky_position",
     "MountPointingModel": "wayfindinglib.models.session.telemetry",

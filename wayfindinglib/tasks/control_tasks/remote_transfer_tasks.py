@@ -17,6 +17,7 @@ already uses elsewhere.
 
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -44,6 +45,8 @@ CALIBRATION_FOLDER_KINDS: dict[str, CalibrationKind] = {"bias": "bias", "dark": 
 # per-telescope library subdirectory; matches the fixed default used
 # elsewhere in the ingestion pipeline (see
 # `backend.services.processing.ingestion_service`).
+logger = logging.getLogger(__name__)
+
 _DEFAULT_TELESCOPE_NAME = "Apertura 75Q"
 
 
@@ -947,7 +950,6 @@ def sync_all_remote_folders(
         registered `ProcessingJob` id, or `None` if `register_job` was
         `False` or registration failed.
     """
-    import logging as _logging
     import os
     import uuid
     from contextlib import ExitStack
@@ -958,12 +960,11 @@ def sync_all_remote_folders(
     def log(message: str) -> None:
         if log_callback:
             log_callback(message)
-        if job_logger:
-            job_logger.info(message)
+        if job_id:
+            logger.info("%s", message)
 
-    logger_if = None
+    job_store = None
     job_id = None
-    job_logger = None
 
     # Attaching and detaching this job's log handlers is shared with
     # astrometricslib rather than written out again here, because every
@@ -975,10 +976,10 @@ def sync_all_remote_folders(
 
     if register_job:
         try:
-            from astrometricslib import LoggerInterface, ProcessingJob, capture_job_logs
+            from astrometricslib import JobStore, ProcessingJob, capture_job_logs
 
             config = get_configuration()
-            logger_if = LoggerInterface(config.get_logs_db_path())
+            job_store = JobStore(str(config.get_logs_db_path()))
             job_id = str(uuid.uuid4())
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -986,7 +987,7 @@ def sync_all_remote_folders(
             os.makedirs(log_dir, exist_ok=True)
             log_file_path = str(log_dir / f"remote_sync_{timestamp}.log")
 
-            logger_if.upsert_job(
+            job_store.upsert_job(
                 ProcessingJob(
                     id=job_id,
                     target_id="global",
@@ -1000,29 +1001,23 @@ def sync_all_remote_folders(
                 )
             )
 
-            # The wayfindinglib package logger, not astrometricslib's, so
-            # progress logged deeper in the download drivers (such as
-            # StellarMateInterface's rsync output) reaches this job's log.
-            job_logger = log_capture.enter_context(
-                capture_job_logs(
-                    job_id=job_id,
-                    log_file_path=log_file_path,
-                    logger_interface=logger_if,
-                    package_logger_name="wayfindinglib",
-                )
+            # The job log router sends every message either library writes
+            # during the sync, such as StellarMateInterface's rsync output,
+            # to this job's log.
+            log_capture.enter_context(
+                capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_store)
             )
         except (AstrometricsError, sqlite3.Error, OSError) as job_err:
-            logger_if = None
+            job_store = None
             job_id = None
-            job_logger = None
             log_capture.close()
-            _logging.getLogger(__name__).warning("Could not register job in astrometrics_log.db: %s", job_err)
+            logger.warning("Could not register job in astrometrics_log.db: %s", job_err)
 
     def update_job(status: str | None = None, progress_current: int | None = None, **fields: Any) -> None:
-        if not (logger_if and job_id):
+        if not (job_store and job_id):
             return
         try:
-            job = logger_if.get_job(job_id)
+            job = job_store.get_job(job_id)
             if not job:
                 return
             if status is not None:
@@ -1034,9 +1029,9 @@ def sync_all_remote_folders(
             job.updated_at = datetime.now().isoformat()
             if status in ("completed", "completed_with_errors", "failed"):
                 job.completed_at = datetime.now().isoformat()
-            logger_if.upsert_job(job)
+            job_store.upsert_job(job)
         except sqlite3.Error as update_err:
-            _logging.getLogger(__name__).debug("Failed to record job status update: %s", update_err)
+            logger.debug("Failed to record job status update: %s", update_err)
 
     succeeded: list[str] = []
     failed: list[tuple[str, str]] = []

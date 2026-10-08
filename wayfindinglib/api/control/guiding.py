@@ -468,17 +468,17 @@ class GuidingControl(ControlChild):
             raise InvalidArgumentError(f"This source of samples does not use {', '.join(unused)}.")
         if file_path is not None:
             return guiding_log_ingestion.ingest_guide_log_file(
-                context, context.logger_interface, file_path, target_name
+                context, context.records, file_path, target_name
             )
         if download:
             return guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
                 context,
-                context.logger_interface,
+                context.records,
                 destination_dir or context.ekos_log_directory(),
                 target_name,
             )
         return guiding_log_ingestion.refit_and_persist_guiding_spectrum(
-            context, context.logger_interface, session_id, limit
+            context, context.records, session_id, limit
         )
 
     def save_calibration(self, calibration: GuiderCalibration) -> None:

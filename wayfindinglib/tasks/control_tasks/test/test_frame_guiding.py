@@ -29,8 +29,8 @@ def _control(rows: list[dict[str, float]], library: object = None) -> SimpleName
     control : `types.SimpleNamespace`
         An object with the two attributes the module uses.
     """
-    logger = SimpleNamespace(get_guiding_logs=lambda **_: rows)
-    return SimpleNamespace(config=None, logger_interface=logger, astrometrics=library)
+    logger = SimpleNamespace(get_guiding_samples=lambda **_: rows)
+    return SimpleNamespace(config=None, records=logger, astrometrics=library)
 
 
 def _samples(start: float, count: int, error: float) -> list[dict[str, float]]:

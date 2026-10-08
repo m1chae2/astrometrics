@@ -1,6 +1,6 @@
 """Purpose: Unit tests for cumulative multi-session alignment and tracking.
 
-Description: Verifies that AlignmentService and LoggerInterface support
+Description: Verifies that AlignmentService and ControlRecordStore support
 querying all alignment attempts across all recorded sessions when session_id
 is "all", enabling long-term empirical mount tracking analytics.
 """
@@ -37,7 +37,7 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
             "target_name": "Vega",
         },
     ]
-    mock_logger.get_polar_alignment_logs.return_value = [
+    mock_logger.get_polar_alignments.return_value = [
         {
             "status": "aligned",
             "total_error_arcsec": 42.0,
@@ -52,13 +52,13 @@ def test_get_session_data_all_retrieves_cumulative_attempts() -> None:
 
     service = AlignmentService(
         observatory_api=None,
-        logger_interface=mock_logger,
+        records=mock_logger,
     )
 
     data = service.get_session_data("all")
 
     mock_logger.get_session_alignment_attempts.assert_called_once_with("all")
-    mock_logger.get_polar_alignment_logs.assert_called_once_with(limit=1)
+    mock_logger.get_polar_alignments.assert_called_once_with(limit=1)
 
     assert len(data["alignmentAttempts"]) == 2
     assert data["alignmentAttempts"][0]["targetName"] == "Deneb"
@@ -72,11 +72,11 @@ def test_get_cumulative_tracking_data_delegates_to_all_sessions() -> None:
     """Verify get_cumulative_tracking_data delegates to get_session_data."""
     mock_logger = MagicMock()
     mock_logger.get_session_alignment_attempts.return_value = []
-    mock_logger.get_polar_alignment_logs.return_value = []
+    mock_logger.get_polar_alignments.return_value = []
 
     service = AlignmentService(
         observatory_api=None,
-        logger_interface=mock_logger,
+        records=mock_logger,
     )
 
     data = service.get_cumulative_tracking_data()

@@ -12,6 +12,11 @@ astrometricslib's library folder.
 Each dataset type maps to a table and a pydantic model class in
 `_DATASET_TYPES`. A record's key is its ``id`` field, except for
 ``calibration_stats``, whose key is ``camera_id``.
+
+The alignment, guiding and polar alignment records of each night are too
+many, and are read back by time range, so they live in plain SQL tables of
+the same ``wayfinding.db`` file. `DiskButler.control_records` gives the
+`ControlRecordStore` that reads and writes them.
 """
 
 import configparser
@@ -20,6 +25,7 @@ from typing import Any
 
 from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError
 from astrometricslib import Butler as _GenericButler
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -111,6 +117,7 @@ class DiskButler(AbstractButler):
             app_config = get_configuration()
         self.config = app_config
         self.__generic: _GenericButler | None = None
+        self.__control_records: ControlRecordStore | None = None
 
     @property
     def library_path(self) -> Path:
@@ -120,6 +127,22 @@ class DiskButler(AbstractButler):
         it, such as downloaded Ekos logs and the latest centering frame.
         """
         return _wayfinding_library_path(self.config)
+
+    @property
+    def control_records(self) -> ControlRecordStore:
+        """The store of alignment, guiding and polar alignment records.
+
+        It keeps its tables in this butler's ``wayfinding.db`` file. It is
+        built on first use.
+
+        Returns
+        -------
+        records : `ControlRecordStore`
+            The record store.
+        """
+        if self.__control_records is None:
+            self.__control_records = ControlRecordStore(str(self.library_path / "wayfinding.db"))
+        return self.__control_records
 
     @property
     def _generic(self) -> _GenericButler:

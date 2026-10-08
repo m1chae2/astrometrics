@@ -224,7 +224,7 @@ def run_polar_alignment_assist(
     magnitude trend toward zero confirms the adjustment direction was
     correct. Distinct from `pointing_log_ingestion.compute_pointing_model`
     in taking `attempts` directly rather than reading recorded history
-    from a `LoggerInterface`: this loop is meant to run before any of
+    from a `ControlRecordStore`: this loop is meant to run before any of
     these solves are necessarily worth recording as real alignment
     attempts.
 

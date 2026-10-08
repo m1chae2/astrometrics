@@ -433,7 +433,7 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     than the sync itself.
     """
     import astrometricslib
-    from astrometricslib import AppConfiguration, LoggerInterface
+    from astrometricslib import AppConfiguration, JobStore
 
     library_path = tmp_path / "library"
     library_path.mkdir()
@@ -457,7 +457,7 @@ def test_sync_all_remote_folders_records_a_job_and_cleans_up_its_log_handlers(
     assert result["failed"] == []
     assert result["job_id"] is not None
 
-    stored_job = LoggerInterface(configuration.get_logs_db_path()).get_job(result["job_id"])
+    stored_job = JobStore(str(configuration.get_logs_db_path())).get_job(result["job_id"])
     assert stored_job is not None
     assert stored_job.job_type == "remote_sync"
     assert stored_job.status == "completed"

@@ -108,7 +108,6 @@ class ImagingControl(ControlChild):
             enabled=register_job and get_current_job() is None,
             job_type="capture",
             target_id=filter_name or "capture",
-            package_logger_name="wayfindinglib",
         ):
             return capture_frames(
                 self._context,

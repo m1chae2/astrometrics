@@ -30,6 +30,7 @@ EXPECTED_EXPORTS = frozenset({
     "ObservationExecution",
     "IndiInterface",
     "SimulatorIndiInterface",
+    "ControlRecordStore",
     # Models.
     "AlignmentAttempt",
     "AlignmentTargetSession",

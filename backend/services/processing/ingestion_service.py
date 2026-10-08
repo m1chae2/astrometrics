@@ -322,16 +322,22 @@ class IngestionService(BaseBackgroundService):
         self._log(job_id, "Re-index complete.")
         return True
 
-    def _log(self, job_id, message):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _log(self, job_id: str, message: str) -> None:
+        """Show a progress line on the job and write it to the log.
+
+        Inside the job's `capture_job_logs` block the line also reaches the
+        job's own log file and rows.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job the line belongs to.
+        message : `str`
+            The line to write.
+        """
         if self._job_service:
             self._job_service.update_job(job_id, status_message=message)
-
-        # Use isolated worker logger if it exists
-        worker_logger = logging.getLogger(f"job_{job_id}")
-        if worker_logger.handlers:
-            worker_logger.info(message)
-        else:
-            logger.info("[Job %s] %s", job_id, message)
+        logger.info("[Job %s] %s", job_id, message)
 
     def _run_ingestion(self, job_id, target_id, payload, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
         """Background worker for frame ingestion.
@@ -362,7 +368,7 @@ class IngestionService(BaseBackgroundService):
         with capture_job_logs(
             job_id=job_id,
             log_file_path=log_file_path,
-            logger_interface=self._job_service.repository if self._job_service else None,
+            job_store=self._job_service.repository if self._job_service else None,
         ):
             return self._run_ingestion_body(job_id, target_id, payload)
 

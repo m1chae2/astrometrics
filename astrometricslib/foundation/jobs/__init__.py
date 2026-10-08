@@ -1,4 +1,4 @@
-"""Purpose: The job framework both libraries, the backend and the MCP servers share.
+"""Purpose: The job framework that every part of the repository shares.
 
 Description: A job is a slow piece of work that the app lists with its
 progress and its own log. This package holds everything about jobs:
@@ -16,7 +16,6 @@ Import these names from the top-level `astrometricslib` package.
 """
 
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
-from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
 from astrometricslib.foundation.jobs.runner import (
     JOB_LOG_PACKAGES,
     JobHandle,
@@ -29,6 +28,7 @@ from astrometricslib.foundation.jobs.runner import (
     registered_job,
     run_as_background_job,
 )
+from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
 
 __all__ = [
     "JOB_LOG_PACKAGES",

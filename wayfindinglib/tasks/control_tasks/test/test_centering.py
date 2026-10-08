@@ -68,7 +68,7 @@ def _context(tolerance_arcsec: float = 30.0) -> SimpleNamespace:
     return SimpleNamespace(
         correction_config=CorrectionConfig(alignment_convergence_tolerance_arcsec=tolerance_arcsec),
         motion_stop=threading.Event(),
-        logger_interface=_RecordingLogs(),
+        records=_RecordingLogs(),
         observer_latitude_deg=lambda: 45.0,
     )
 
@@ -108,7 +108,7 @@ def test_a_solve_within_tolerance_stops_without_a_sync(
 
     assert centering.center_on(context, SkyPosition(ra_deg=180.0, dec_deg=45.0)) is True
 
-    assert [attempt["status"] for attempt in context.logger_interface.attempts] == ["aligned"]
+    assert [attempt["status"] for attempt in context.records.attempts] == ["aligned"]
     assert mount_calls["sync"] == []
     assert len(mount_calls["slew"]) == 1
 
@@ -122,7 +122,7 @@ def test_the_recorded_offset_is_a_distance_on_the_sky(
 
     centering.center_on(context, SkyPosition(ra_deg=100.0, dec_deg=20.0), max_iterations=1)
 
-    attempt = context.logger_interface.attempts[0]
+    attempt = context.records.attempts[0]
     assert attempt["delta_ra_arcsec"] == pytest.approx(36.0 * math.cos(math.radians(20.0)), rel=1e-3)
     assert attempt["delta_dec_arcsec"] == pytest.approx(72.0, rel=1e-3)
     assert attempt["status"] == "warning"
@@ -145,7 +145,7 @@ def test_the_offset_wraps_across_zero_hours(
 
     centering.center_on(context, SkyPosition(ra_deg=target_ra, dec_deg=0.0), max_iterations=1)
 
-    assert context.logger_interface.attempts[0]["delta_ra_arcsec"] == pytest.approx(
+    assert context.records.attempts[0]["delta_ra_arcsec"] == pytest.approx(
         expected_delta_deg * 3600.0, rel=1e-3
     )
 
@@ -164,7 +164,7 @@ def test_a_solve_outside_tolerance_syncs_and_slews_back(
     assert synced.ra_hours == pytest.approx(151.0 / 15.0)
     assert synced.dec_deg == pytest.approx(31.0)
     assert [position.ra_deg for position in mount_calls["slew"]] == [150.0, 150.0]
-    assert [attempt["status"] for attempt in context.logger_interface.attempts] == ["warning", "aligned"]
+    assert [attempt["status"] for attempt in context.records.attempts] == ["warning", "aligned"]
 
 
 def test_failed_solves_are_recorded_and_retried(monkeypatch: pytest.MonkeyPatch, mount_calls: dict) -> None:
@@ -174,7 +174,7 @@ def test_failed_solves_are_recorded_and_retried(monkeypatch: pytest.MonkeyPatch,
 
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=4) is False
 
-    assert [attempt["status"] for attempt in context.logger_interface.attempts] == ["failed"] * 4
+    assert [attempt["status"] for attempt in context.records.attempts] == ["failed"] * 4
 
 
 def test_a_missing_frame_is_a_failed_attempt(monkeypatch: pytest.MonkeyPatch, mount_calls: dict) -> None:
@@ -184,7 +184,7 @@ def test_a_missing_frame_is_a_failed_attempt(monkeypatch: pytest.MonkeyPatch, mo
 
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=2) is False
 
-    assert len(context.logger_interface.attempts) == 2
+    assert len(context.records.attempts) == 2
 
 
 def test_the_iteration_limit_defaults_to_the_correction_settings(
@@ -196,7 +196,7 @@ def test_the_iteration_limit_defaults_to_the_correction_settings(
 
     centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0))
 
-    assert len(context.logger_interface.attempts) == CorrectionConfig().alignment_iteration_limit
+    assert len(context.records.attempts) == CorrectionConfig().alignment_iteration_limit
 
 
 def test_abort_motion_stops_the_loop(monkeypatch: pytest.MonkeyPatch, mount_calls: dict) -> None:
@@ -219,7 +219,7 @@ def test_abort_motion_stops_the_loop(monkeypatch: pytest.MonkeyPatch, mount_call
 
     assert centering.center_on(context, SkyPosition(ra_deg=10.0, dec_deg=20.0), max_iterations=5) is False
     assert mount_calls["sync"] == []
-    assert len(context.logger_interface.attempts) == 1
+    assert len(context.records.attempts) == 1
 
 
 def test_solved_center_reads_the_middle_of_the_image() -> None:

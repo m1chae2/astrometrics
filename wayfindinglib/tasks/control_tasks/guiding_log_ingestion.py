@@ -36,7 +36,7 @@ _REFIT_SAMPLE_LIMIT = 50000
 
 def refit_and_persist_guiding_spectrum(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     session_id: str | None = None,
     limit: int = 2000,
 ) -> GuidingSpectrumAnalysis:
@@ -57,7 +57,7 @@ def refit_and_persist_guiding_spectrum(
     ----------
     context : `ControlContext`
         Saves the analysis for the active telescope.
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Source of recorded guiding samples.
     session_id : `str` | `None`, optional
         Target session to refit, or `None` for all recorded samples.
@@ -69,7 +69,7 @@ def refit_and_persist_guiding_spectrum(
     analysis : `GuidingSpectrumAnalysis`
         The refit and persisted spectrum analysis.
     """
-    samples = logger_interface.get_guiding_logs(
+    samples = records.get_guiding_samples(
         session_id=session_id,
         limit=limit,
         sources=[source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES],
@@ -81,7 +81,7 @@ def refit_and_persist_guiding_spectrum(
 
 def ingest_guide_log_file(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     file_path: str,
     target_name: str | None = None,
 ) -> GuidingSpectrumAnalysis | None:
@@ -91,7 +91,7 @@ def ingest_guide_log_file(
     ----------
     context : `ControlContext`
         Saves the refit analysis.
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Records the parsed samples and supplies the cumulative history
         the refit reads back.
     file_path : `str`
@@ -108,10 +108,10 @@ def ingest_guide_log_file(
     samples = parse_phd2_guide_log(file_path, target_name=target_name)
     if not samples:
         return None
-    logger_interface.replace_guiding_samples(samples)
+    records.replace_guiding_samples(samples)
     return refit_and_persist_guiding_spectrum(
         context,
-        logger_interface,
+        records,
         session_id=observing_night_id(samples[-1]["timestamp"]),
         limit=_REFIT_SAMPLE_LIMIT,
     )
@@ -119,7 +119,7 @@ def ingest_guide_log_file(
 
 def fetch_and_ingest_new_guide_logs(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     destination_dir: str,
     target_name: str | None = None,
 ) -> GuidingSpectrumAnalysis | None:
@@ -134,7 +134,7 @@ def fetch_and_ingest_new_guide_logs(
     ----------
     context : `ControlContext`
         Supplies `remote_transfer_driver` and saves the refit analysis.
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Records parsed samples and supplies the cumulative history the
         refit reads back.
     destination_dir : `str`
@@ -162,7 +162,7 @@ def fetch_and_ingest_new_guide_logs(
     for file_path in downloaded_files:
         samples = parse_phd2_guide_log(file_path, target_name=target_name)
         if samples:
-            logger_interface.replace_guiding_samples(samples)
+            records.replace_guiding_samples(samples)
             total_new_samples += len(samples)
             latest_sample_time = max(latest_sample_time or 0.0, samples[-1]["timestamp"])
 
@@ -170,7 +170,7 @@ def fetch_and_ingest_new_guide_logs(
         return None
     return refit_and_persist_guiding_spectrum(
         context,
-        logger_interface,
+        records,
         session_id=observing_night_id(latest_sample_time),
         limit=_REFIT_SAMPLE_LIMIT,
     )

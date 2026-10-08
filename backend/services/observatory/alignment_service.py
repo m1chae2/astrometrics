@@ -10,15 +10,15 @@ program (such as Ekos) sends to the mount.
 """
 
 import logging
-import sqlite3
 import threading
 import time
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, parse_coordinate_string
+from astrometricslib import InvalidArgumentError, StorageError, TargetCatalog, parse_coordinate_string
 from wayfindinglib import (
     AlignmentAttempt,
     AlignmentTargetSession,
+    ControlRecordStore,
     MountPointingModel,
     ObservatoryControl,
     SkyPosition,
@@ -39,18 +39,27 @@ ATTEMPT_STATUSES = ("solving", "failed", "warning", "aligned", "idle")
 class AlignmentService:
     """Run mount centering in the background and report alignment records."""
 
-    def __init__(self, observatory_api: ObservatoryControl, logger_interface: Any = None) -> None:
-        """Keep the observatory control and the log database.
+    def __init__(
+        self,
+        observatory_api: ObservatoryControl,
+        records: ControlRecordStore | None = None,
+        targets: TargetCatalog | None = None,
+    ) -> None:
+        """Keep the observatory control, the alignment records and the targets.
 
         Parameters
         ----------
         observatory_api : `ObservatoryControl`
             The Wayfinder's `control`, which runs the centering.
-        logger_interface : `LoggerInterface`, optional
-            The log database that holds the alignment records.
+        records : `ControlRecordStore`, optional
+            The store that holds the alignment records.
+        targets : `astrometricslib.TargetCatalog`, optional
+            The target library, whose frames show when each target was
+            tracked in a night's view.
         """
         self._observatory = observatory_api
-        self._logger_interface = logger_interface
+        self._records = records
+        self._targets = targets
         self._alignment_thread: threading.Thread | None = None
         self._run_started_at: float | None = None
 
@@ -69,9 +78,9 @@ class AlignmentService:
             `AlignmentTargetSession` per target, with jitter and drift
             rates, worked out by the library.
         """
-        if not self._logger_interface:
+        if not self._records:
             return {"alignmentAttempts": [], "alignmentTargets": []}
-        rows = list(reversed(self._logger_interface.get_alignment_logs(limit=RECENT_ATTEMPTS_SHOWN)))
+        rows = list(reversed(self._records.get_alignment_attempts(limit=RECENT_ATTEMPTS_SHOWN)))
         if self._run_started_at is not None:
             rows = [row for row in rows if (row.get("timestamp") or 0) >= self._run_started_at]
         attempts = [
@@ -110,9 +119,9 @@ class AlignmentService:
                 return st
 
         # Fallback to latest persisted polar alignment in SQLite
-        if self._logger_interface:
+        if self._records:
             try:
-                logs = self._logger_interface.get_polar_alignment_logs(limit=1)
+                logs = self._records.get_polar_alignments(limit=1)
                 if logs:
                     row = logs[0]
                     return {
@@ -125,7 +134,7 @@ class AlignmentService:
                         "paaPoints": row.get("paa_points", []),
                         "timestamp": row.get("timestamp"),
                     }
-            except sqlite3.Error as exc:
+            except StorageError as exc:
                 logger.debug("Error fetching polar alignment fallback: %s", exc)
 
         return {
@@ -167,11 +176,11 @@ class AlignmentService:
             target, with jitter and drift rates, from
             `AlignmentTargetSession.from_attempts`) and ``polarAlignment``.
         """
-        if not self._logger_interface:
+        if not self._records:
             return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
 
         try:
-            raw_attempts = self._logger_interface.get_session_alignment_attempts(session_id)
+            raw_attempts = self._records.get_session_alignment_attempts(session_id)
             attempts = []
             for row in raw_attempts:
                 attempts.append({
@@ -186,20 +195,14 @@ class AlignmentService:
                     "sessionId": row.get("session_id"),
                 })
 
-            # Also fetch synthesized target tracking telemetry for this session
-            if hasattr(self._logger_interface, "get_session_target_telemetry"):
-                try:
-                    target_attempts = self._logger_interface.get_session_target_telemetry(session_id)
-                    attempts.extend(target_attempts)
-                except sqlite3.Error as target_telemetry_err:
-                    logger.debug(
-                        "Error loading target telemetry for session %s: %s", session_id, target_telemetry_err
-                    )
+            # Also add the tracking of the targets imaged that night.
+            if self._targets is not None:
+                attempts.extend(self._records.get_session_target_telemetry(session_id, self._targets.list()))
 
             if session_id in ("all", "*", None):
-                polar_logs = self._logger_interface.get_polar_alignment_logs(limit=1)
+                polar_logs = self._records.get_polar_alignments(limit=1)
             else:
-                polar_logs = self._logger_interface.get_polar_alignment_logs(session_id=session_id, limit=1)
+                polar_logs = self._records.get_polar_alignments(session_id=session_id, limit=1)
 
             polar_status = None
             if polar_logs:
@@ -223,7 +226,7 @@ class AlignmentService:
                 "alignmentTargets": [target.model_dump(mode="json", by_alias=True) for target in targets],
                 "polarAlignment": polar_status,
             }
-        except (sqlite3.Error, ValueError, TypeError) as exc:
+        except (StorageError, ValueError, TypeError) as exc:
             logger.debug("Error loading session %s alignment data: %s", session_id, exc)
             return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
 
@@ -295,9 +298,9 @@ class AlignmentService:
                 if not isinstance(target_name, str):
                     target_name = None
                 for record in sync_records:
-                    if not self._logger_interface:
+                    if not self._records:
                         continue
-                    self._logger_interface.record_alignment_attempt({
+                    self._records.record_alignment_attempt({
                         "status": record.get("status", "aligned"),
                         "delta_ra_arcsec": record.get("delta_ra_arcsec"),
                         "delta_dec_arcsec": record.get("delta_dec_arcsec"),
@@ -307,16 +310,16 @@ class AlignmentService:
                         "dec": record.get("dec"),
                         "target_name": target_name,
                     })
-            except (sqlite3.Error, ValueError) as exc:
+            except (StorageError, ValueError) as exc:
                 logger.debug("Error polling external syncs: %s", exc)
 
         # Poll polar alignment updates
         if hasattr(driver, "drain_polar_alignment"):
             try:
                 polar_record = driver.drain_polar_alignment()
-                if polar_record and self._logger_interface:
-                    self._logger_interface.record_polar_alignment(polar_record)
-            except sqlite3.Error as p_err:
+                if polar_record and self._records:
+                    self._records.record_polar_alignment(polar_record)
+            except StorageError as p_err:
                 logger.debug("Error polling polar alignment: %s", p_err)
 
     def start_alignment(self, target_ra: str, target_dec: str) -> bool:

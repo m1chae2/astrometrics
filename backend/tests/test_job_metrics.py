@@ -1,19 +1,19 @@
 """Unit tests for pipeline input/output quality metrics persistence.
 
 Verifies that ProcessingJob correctly stores input_metrics and output_metrics
-in SQLite via LoggerInterface and JobService.
+in SQLite via JobStore and JobService.
 """
 
 from pathlib import Path
 
-from astrometricslib import LoggerInterface, ProcessingJob
+from astrometricslib import JobStore, ProcessingJob
 from backend.services.processing.job_service import JobService
 
 
-def test_logger_interface_metrics_persistence(tmp_path: Path) -> None:
+def test_job_store_metrics_persistence(tmp_path: Path) -> None:
     """Verify input/output metrics are persisted and retrieved from SQLite."""
     db_path = tmp_path / "test_logs.db"
-    logger_db = LoggerInterface(db_path=str(db_path))
+    logger_db = JobStore(db_path=str(db_path))
 
     job = ProcessingJob(
         id="job-metrics-001",
@@ -45,7 +45,7 @@ def test_logger_interface_metrics_persistence(tmp_path: Path) -> None:
 def test_job_service_metrics_lifecycle(tmp_path: Path) -> None:
     """Verify JobService handles input and output metrics lifecycle."""
     db_path = tmp_path / "test_job_service.db"
-    repo = LoggerInterface(db_path=str(db_path))
+    repo = JobStore(db_path=str(db_path))
     service = JobService(job_repository=repo)
 
     job = service.create_job(

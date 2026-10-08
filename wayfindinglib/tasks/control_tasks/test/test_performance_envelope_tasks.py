@@ -4,14 +4,15 @@ Description: Verifies how the envelope's inputs are read: the camera's
 stored profile, the star width measured from the equipment's own frames
 (including which frames are left out and why), and the per-session
 baseline collected only from sessions of the same equipment. The baseline
-tests use a real `LoggerInterface` on a temporary database.
+tests use a real `ControlRecordStore` on a temporary database.
 """
 
 from pathlib import Path
 
 import pytest
 
-from astrometricslib import LoggerInterface, observing_night_id
+from astrometricslib import observing_night_id
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.tasks.control_tasks.performance_envelope_tasks import (
@@ -253,20 +254,20 @@ def _session_of(started_at: float, fingerprint: str = "fp-a") -> EkosSessionCont
 
 
 @pytest.fixture
-def logger_interface(tmp_path: Path) -> LoggerInterface:
-    """Build a real `LoggerInterface` on a temporary database.
+def records(tmp_path: Path) -> ControlRecordStore:
+    """Build a real `ControlRecordStore` on a temporary database.
 
     Returns
     -------
-    logger_interface : `LoggerInterface`
+    records : `ControlRecordStore`
         An initialised interface, isolated from the real log database.
     """
-    return LoggerInterface(db_path=str(tmp_path / "log.db"))
+    return ControlRecordStore(db_path=str(tmp_path / "log.db"))
 
 
-def _record_night(logger_interface: LoggerInterface, started_at: float, snr: float, error: float) -> None:
+def _record_night(records: ControlRecordStore, started_at: float, snr: float, error: float) -> None:
     """Record 200 measured guide samples, 3 seconds apart, for one night."""
-    logger_interface.replace_guiding_samples([
+    records.replace_guiding_samples([
         {
             "timestamp": started_at + 60.0 + 3.0 * index,
             "dra": error * (1 if index % 2 else -1),
@@ -284,37 +285,37 @@ def _sample(timestamp: float, source: str, error: float = 1.0, snr: float = 300.
     Returns
     -------
     sample : `dict`
-        A sample ready for `LoggerInterface.replace_guiding_samples`.
+        A sample ready for `ControlRecordStore.replace_guiding_samples`.
     """
     return {"timestamp": timestamp, "dra": error, "ddec": error, "snr": snr, "source": source}
 
 
-def test_the_baseline_has_one_value_per_qualifying_night(logger_interface: LoggerInterface) -> None:
+def test_the_baseline_has_one_value_per_qualifying_night(records: ControlRecordStore) -> None:
     """Verify each night gives one SNR, one error and one cadence."""
     contexts = []
     for day, (snr, error) in enumerate([(300.0, 1.0), (280.0, 1.2), (320.0, 0.9)]):
         started_at = _NIGHT_START + day * 86400.0
-        _record_night(logger_interface, started_at, snr, error)
+        _record_night(records, started_at, snr, error)
         contexts.append(_session(observing_night_id(started_at), started_at, "fp-a"))
 
-    baseline = collect_baseline_values(logger_interface, contexts, "fp-a")
+    baseline = collect_baseline_values(records, contexts, "fp-a")
 
     assert len(baseline["guide_snr"]) == 3
     assert sorted(baseline["guide_snr"]) == pytest.approx([280.0, 300.0, 320.0])
     assert baseline["guide_cadence_seconds"] == pytest.approx([3.0, 3.0, 3.0])
 
 
-def test_sessions_of_other_equipment_are_not_read(logger_interface: LoggerInterface) -> None:
+def test_sessions_of_other_equipment_are_not_read(records: ControlRecordStore) -> None:
     """Verify a change of equipment starts with an empty history.
 
     This is what lets the limits follow the equipment with no other step:
     the new fingerprint simply has no sessions yet.
     """
     started_at = _NIGHT_START
-    _record_night(logger_interface, started_at, 300.0, 1.0)
+    _record_night(records, started_at, 300.0, 1.0)
     old_equipment_session = _session(observing_night_id(started_at), started_at, "old-fingerprint")
 
-    baseline = collect_baseline_values(logger_interface, [old_equipment_session], "new-fingerprint")
+    baseline = collect_baseline_values(records, [old_equipment_session], "new-fingerprint")
 
     assert baseline == {
         "guide_snr": [],
@@ -325,9 +326,9 @@ def test_sessions_of_other_equipment_are_not_read(logger_interface: LoggerInterf
     }
 
 
-def test_a_session_without_attribution_is_not_used(logger_interface: LoggerInterface) -> None:
+def test_a_session_without_attribution_is_not_used(records: ControlRecordStore) -> None:
     """Verify a session whose equipment is unknown joins no baseline."""
-    _record_night(logger_interface, _NIGHT_START, 300.0, 1.0)
+    _record_night(records, _NIGHT_START, 300.0, 1.0)
     unattributed = EkosSessionContext(
         id="x",
         session_id=observing_night_id(_NIGHT_START),
@@ -335,12 +336,12 @@ def test_a_session_without_attribution_is_not_used(logger_interface: LoggerInter
         ended_at=_NIGHT_START + 7200.0,
     )
 
-    assert collect_baseline_values(logger_interface, [unattributed], "fp-a")["guide_snr"] == []
+    assert collect_baseline_values(records, [unattributed], "fp-a")["guide_snr"] == []
 
 
-def test_a_night_with_too_few_samples_is_skipped(logger_interface: LoggerInterface) -> None:
+def test_a_night_with_too_few_samples_is_skipped(records: ControlRecordStore) -> None:
     """Verify a short test run does not count as a session."""
-    logger_interface.replace_guiding_samples([
+    records.replace_guiding_samples([
         {
             "timestamp": _NIGHT_START + 60.0 + 3.0 * index,
             "dra": 1.0,
@@ -352,15 +353,15 @@ def test_a_night_with_too_few_samples_is_skipped(logger_interface: LoggerInterfa
     ])
 
     baseline = collect_baseline_values(
-        logger_interface, [_session(observing_night_id(_NIGHT_START), _NIGHT_START, "fp-a")], "fp-a"
+        records, [_session(observing_night_id(_NIGHT_START), _NIGHT_START, "fp-a")], "fp-a"
     )
 
     assert baseline["guide_snr"] == []
 
 
-def test_estimated_samples_never_enter_the_baseline(logger_interface: LoggerInterface) -> None:
+def test_estimated_samples_never_enter_the_baseline(records: ControlRecordStore) -> None:
     """Verify pulse-derived estimates are not read, however many there are."""
-    logger_interface.replace_guiding_samples([
+    records.replace_guiding_samples([
         {
             "timestamp": _NIGHT_START + 60.0 + 3.0 * index,
             "dra": 9.0,
@@ -371,9 +372,9 @@ def test_estimated_samples_never_enter_the_baseline(logger_interface: LoggerInte
         for index in range(500)
     ])
 
-    assert len(logger_interface.get_guiding_logs(limit=1000)) == 500  # they really are stored
+    assert len(records.get_guiding_samples(limit=1000)) == 500  # they really are stored
     baseline = collect_baseline_values(
-        logger_interface, [_session(observing_night_id(_NIGHT_START), _NIGHT_START, "fp-a")], "fp-a"
+        records, [_session(observing_night_id(_NIGHT_START), _NIGHT_START, "fp-a")], "fp-a"
     )
 
     assert baseline["guide_snr"] == []
@@ -398,38 +399,38 @@ def _run(night_started_at: float, frames_total: int, frames_lost: int) -> Guidin
     )
 
 
-def test_the_baseline_includes_each_nights_share_of_lost_frames(logger_interface: LoggerInterface) -> None:
+def test_the_baseline_includes_each_nights_share_of_lost_frames(records: ControlRecordStore) -> None:
     """Verify the lost share comes from the run records, not the samples."""
-    _record_night(logger_interface, _NIGHT_START, 300.0, 1.0)
+    _record_night(records, _NIGHT_START, 300.0, 1.0)
 
     baseline = collect_baseline_values(
-        logger_interface, [_session_of(_NIGHT_START)], "fp-a", [_run(_NIGHT_START, 200, 10)]
+        records, [_session_of(_NIGHT_START)], "fp-a", [_run(_NIGHT_START, 200, 10)]
     )
 
     assert baseline["guide_lost_fraction"] == pytest.approx([0.05])
 
 
-def test_lost_frames_of_other_nights_are_not_counted(logger_interface: LoggerInterface) -> None:
+def test_lost_frames_of_other_nights_are_not_counted(records: ControlRecordStore) -> None:
     """Verify a run from another night does not change this night's share."""
-    _record_night(logger_interface, _NIGHT_START, 300.0, 1.0)
+    _record_night(records, _NIGHT_START, 300.0, 1.0)
     other_night = _run(_NIGHT_START + 10 * 86400.0, 100, 100)
 
     baseline = collect_baseline_values(
-        logger_interface, [_session_of(_NIGHT_START)], "fp-a", [_run(_NIGHT_START, 200, 0), other_night]
+        records, [_session_of(_NIGHT_START)], "fp-a", [_run(_NIGHT_START, 200, 0), other_night]
     )
 
     assert baseline["guide_lost_fraction"] == pytest.approx([0.0])
 
 
-def test_the_excursion_baseline_counts_samples_beyond_the_limit(logger_interface: LoggerInterface) -> None:
+def test_the_excursion_baseline_counts_samples_beyond_the_limit(records: ControlRecordStore) -> None:
     """Verify the share of samples whose total error exceeds the limit."""
-    logger_interface.replace_guiding_samples([
+    records.replace_guiding_samples([
         _sample(_NIGHT_START + 60.0 + 3.0 * index, "ekos_guide_log", error=10.0 if index < 20 else 0.5)
         for index in range(200)
     ])
 
     fractions = collect_excursion_fraction_baseline(
-        logger_interface, [_session_of(_NIGHT_START)], "fp-a", excursion_limit_arcsec=6.0
+        records, [_session_of(_NIGHT_START)], "fp-a", excursion_limit_arcsec=6.0
     )
 
     assert fractions == pytest.approx([0.1])

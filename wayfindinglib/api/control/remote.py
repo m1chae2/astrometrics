@@ -245,7 +245,6 @@ class RemoteControl(ControlChild):
             enabled=bool(register_job) and not dry_run and get_current_job() is None,
             job_type="remote_sync",
             target_id=target_id,
-            package_logger_name="wayfindinglib",
         ):
             return self._sync_one(target_id, dry_run, files, local_path, incremental, log_callback)
 
@@ -342,7 +341,6 @@ class RemoteControl(ControlChild):
             enabled=register_job and not dry_run and get_current_job() is None,
             job_type="remote_sync",
             target_id="logs",
-            package_logger_name="wayfindinglib",
         ):
             if not download:
                 return ekos_log_ingestion.ingest_ekos_logs(context, directory, download=False)

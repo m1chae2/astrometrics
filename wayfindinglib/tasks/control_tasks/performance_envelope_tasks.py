@@ -195,7 +195,7 @@ def _matching_windows_by_night(
 
 
 def _night_samples(
-    logger_interface: Any, night: str, windows: list[tuple[float, float]]
+    records: Any, night: str, windows: list[tuple[float, float]]
 ) -> list[dict[str, Any]]:
     """Read one night's measured guide samples that fall inside `windows`.
 
@@ -207,7 +207,7 @@ def _night_samples(
     measured_sources = [source.value for source in MEASURED_GUIDING_SAMPLE_SOURCES]
     return [
         sample
-        for sample in logger_interface.get_guiding_logs(
+        for sample in records.get_guiding_samples(
             session_id=night, limit=_SAMPLE_READ_LIMIT, sources=measured_sources
         )
         if any(start <= sample["timestamp"] <= end for start, end in windows)
@@ -215,7 +215,7 @@ def _night_samples(
 
 
 def collect_baseline_values(
-    logger_interface: Any,
+    records: Any,
     session_contexts: Iterable[EkosSessionContext],
     equipment_fingerprint: str,
     guiding_runs: Iterable[GuidingRunSummary] = (),
@@ -232,7 +232,7 @@ def collect_baseline_values(
 
     Parameters
     ----------
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Source of the recorded guiding samples.
     session_contexts : `Iterable` [`EkosSessionContext`]
         Every recorded session.
@@ -265,7 +265,7 @@ def collect_baseline_values(
     for night, windows in sorted(windows_by_night.items()):
         if before_night is not None and night >= before_night:
             continue
-        samples = _night_samples(logger_interface, night, windows)
+        samples = _night_samples(records, night, windows)
         if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
             continue
         snr = [sample["snr"] for sample in samples if sample.get("snr") is not None]
@@ -299,7 +299,7 @@ def collect_baseline_values(
 
 
 def collect_excursion_fraction_baseline(
-    logger_interface: Any,
+    records: Any,
     session_contexts: Iterable[EkosSessionContext],
     equipment_fingerprint: str,
     excursion_limit_arcsec: float,
@@ -313,7 +313,7 @@ def collect_excursion_fraction_baseline(
 
     Parameters
     ----------
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Source of the recorded guiding samples.
     session_contexts : `Iterable` [`EkosSessionContext`]
         Every recorded session.
@@ -333,7 +333,7 @@ def collect_excursion_fraction_baseline(
     for night, windows in sorted(_matching_windows_by_night(session_contexts, equipment_fingerprint).items()):
         if before_night is not None and night >= before_night:
             continue
-        samples = _night_samples(logger_interface, night, windows)
+        samples = _night_samples(records, night, windows)
         if len(samples) < MINIMUM_SAMPLES_PER_SESSION:
             continue
         excursions = sum(
@@ -409,7 +409,7 @@ def tracking_risk_map(context: ControlContext) -> TrackingRiskMap:
     )
     location = context.observer_location()
     latitude = location["latitude"] if location else context.observer_latitude_deg()
-    logs = context.logger_interface
+    logs = context.records
     rows = logs.get_session_alignment_attempts("all") if logs is not None else []
     sessions = [
         s

@@ -58,7 +58,7 @@ def _context(driver: Any) -> SimpleNamespace:
         The driver, a fresh monitor and a recording log database.
     """
     return SimpleNamespace(
-        guiding_driver=driver, live_guiding=live_guiding.LiveGuidingMonitor(), logger_interface=MagicMock()
+        guiding_driver=driver, live_guiding=live_guiding.LiveGuidingMonitor(), records=MagicMock()
     )
 
 
@@ -133,7 +133,7 @@ def test_poll_records_pulse_estimates_with_their_source(mount: dict) -> None:
     status = context.live_guiding.status(now=2.0)
     assert status.is_guiding is True
     assert status.stats.rms_ra == pytest.approx(1.88)
-    (record,) = context.logger_interface.record_guiding_samples.call_args.args[0]
+    (record,) = context.records.record_guiding_samples.call_args.args[0]
     assert record["source"] == "indi_pulse_estimate"
     assert record["target_name"] == "M31"
     assert record["dra"] == pytest.approx(1.88)
@@ -153,7 +153,7 @@ def test_phd2_steps_come_first_and_keep_their_own_rms(mount: dict) -> None:
     assert status.stats.rms_ra == pytest.approx(0.18)
     assert status.stats.rms_dec == pytest.approx(0.15)
     assert status.stats.snr == pytest.approx(28.5)
-    (record,) = context.logger_interface.record_guiding_samples.call_args.args[0]
+    (record,) = context.records.record_guiding_samples.call_args.args[0]
     assert record["source"] == "phd2_live"
 
 
@@ -178,7 +178,7 @@ def test_an_idle_guider_adds_nothing(mount: dict) -> None:
 
     assert context.live_guiding.status().history == []
     assert context.live_guiding.status().is_guiding is False
-    context.logger_interface.record_guiding_samples.assert_not_called()
+    context.records.record_guiding_samples.assert_not_called()
 
 
 def test_the_simulator_loop_guides_until_stopped(mount: dict) -> None:
@@ -208,7 +208,7 @@ def test_the_simulator_loop_guides_until_stopped(mount: dict) -> None:
     assert all(direction in ("north", "south", "east", "west") for direction, _ in mount["pulses"])
     assert status.exposure == pytest.approx(2.0)
     assert status.stats.rms_total > 0
-    context.logger_interface.record_guiding_samples.assert_not_called()
+    context.records.record_guiding_samples.assert_not_called()
 
 
 def test_the_loop_does_not_start_without_tracking(mount: dict) -> None:

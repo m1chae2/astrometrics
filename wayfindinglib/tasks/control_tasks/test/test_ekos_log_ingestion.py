@@ -1,7 +1,7 @@
 """Purpose: Unit tests for Ekos session log ingestion.
 
 Description: Verifies the download, parse and store chain for Ekos guide
-and analyze logs, using a real `LoggerInterface` on a temporary database so
+and analyze logs, using a real `ControlRecordStore` on a temporary database so
 that repeat-safety is tested against real storage, not a stand-in. Also
 verifies that each session is tied to the equipment its own data shows.
 """
@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib import LoggerInterface
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext
 from wayfindinglib.models.session.guide_log import GuidingSection
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -77,15 +77,15 @@ class _FakeObservatory:
 
 
 @pytest.fixture
-def logger_interface(tmp_path: Path) -> LoggerInterface:
-    """Build a real `LoggerInterface` on a temporary database.
+def records(tmp_path: Path) -> ControlRecordStore:
+    """Build a real `ControlRecordStore` on a temporary database.
 
     Returns
     -------
-    logger_interface : `LoggerInterface`
+    records : `ControlRecordStore`
         An initialised interface, isolated from the real log database.
     """
-    return LoggerInterface(db_path=str(tmp_path / "log.db"))
+    return ControlRecordStore(db_path=str(tmp_path / "log.db"))
 
 
 @pytest.fixture
@@ -105,12 +105,12 @@ def logs_directory(tmp_path: Path) -> str:
 
 
 def test_guide_samples_are_stored_in_arcseconds_and_labelled_as_measured(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify samples are scaled, signed, and labelled as Ekos data."""
-    ingest_ekos_session_logs_from_directory(_FakeObservatory(), logger_interface, logs_directory)
+    ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, logs_directory)
 
-    stored = logger_interface.get_guiding_logs()
+    stored = records.get_guiding_samples()
     assert len(stored) == 2
     assert stored[0]["dra"] == pytest.approx(0.100 * 6.39)
     assert stored[1]["pulse_ra"] == pytest.approx(-20.0)
@@ -118,35 +118,35 @@ def test_guide_samples_are_stored_in_arcseconds_and_labelled_as_measured(
 
 
 def test_lost_star_frames_are_counted_not_stored(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify the failed frame shows in the summary but not as a sample."""
-    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), logger_interface, logs_directory)
+    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, logs_directory)
 
     assert summary.guide_frames_with_error_code == 1
     assert summary.guide_samples_stored == 2
 
 
 def test_ingesting_twice_leaves_the_same_data_as_ingesting_once(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify a repeat run neither duplicates samples nor session records."""
     observatory = _FakeObservatory()
 
-    ingest_ekos_session_logs_from_directory(observatory, logger_interface, logs_directory)
-    ingest_ekos_session_logs_from_directory(observatory, logger_interface, logs_directory)
+    ingest_ekos_session_logs_from_directory(observatory, records, logs_directory)
+    ingest_ekos_session_logs_from_directory(observatory, records, logs_directory)
 
-    assert len(logger_interface.get_guiding_logs()) == 2
+    assert len(records.get_guiding_samples()) == 2
     assert len(observatory.saved_contexts) == 1
 
 
 def test_a_session_record_is_saved_for_each_analyze_file(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify the analyze file becomes a session record named for it."""
     observatory = _FakeObservatory()
 
-    summary = ingest_ekos_session_logs_from_directory(observatory, logger_interface, logs_directory)
+    summary = ingest_ekos_session_logs_from_directory(observatory, records, logs_directory)
 
     assert summary.analyze_files_read == 1
     assert summary.session_contexts_stored == 1
@@ -156,12 +156,12 @@ def test_a_session_record_is_saved_for_each_analyze_file(
 
 
 def test_each_guiding_run_is_recorded_with_its_lost_frames(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify lost frames survive as a run fact, since they are not samples."""
     observatory = _FakeObservatory()
 
-    summary = ingest_ekos_session_logs_from_directory(observatory, logger_interface, logs_directory)
+    summary = ingest_ekos_session_logs_from_directory(observatory, records, logs_directory)
 
     (run,) = observatory.saved_runs.values()
     assert summary.guiding_runs_stored == 1
@@ -178,7 +178,7 @@ def test_each_guiding_run_is_recorded_with_its_lost_frames(
 
 
 def test_a_log_with_only_a_calibration_records_no_run(
-    logger_interface: LoggerInterface, tmp_path: Path
+    records: ControlRecordStore, tmp_path: Path
 ) -> None:
     """Verify a calibration alone is not a guiding run."""
     directory = tmp_path / "logs"
@@ -188,24 +188,24 @@ def test_a_log_with_only_a_calibration_records_no_run(
     )
     observatory = _FakeObservatory()
 
-    ingest_ekos_session_logs_from_directory(observatory, logger_interface, str(directory))
+    ingest_ekos_session_logs_from_directory(observatory, records, str(directory))
 
     assert observatory.saved_runs == {}
 
 
 def test_an_unreadable_analyze_file_is_reported_not_fatal(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify an empty analyze file is listed as skipped."""
     (Path(logs_directory) / "ekos-2026-01-06T18-00-34.analyze").write_text("", encoding="utf-8")
 
-    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), logger_interface, logs_directory)
+    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, logs_directory)
 
     assert summary.analyze_files_skipped == ["ekos-2026-01-06T18-00-34.analyze"]
     assert summary.session_contexts_stored == 1
 
 
-def test_a_log_with_no_usable_samples_is_listed(logger_interface: LoggerInterface, tmp_path: Path) -> None:
+def test_a_log_with_no_usable_samples_is_listed(records: ControlRecordStore, tmp_path: Path) -> None:
     """Verify a calibration-only guide log is reported, not dropped."""
     directory = tmp_path / "logs"
     directory.mkdir()
@@ -213,15 +213,15 @@ def test_a_log_with_no_usable_samples_is_listed(logger_interface: LoggerInterfac
         "KStars version 3.8.1. PHD2 log version 2.5. Log enabled at 2026-03-03 04:43:50\n", encoding="utf-8"
     )
 
-    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), logger_interface, str(directory))
+    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, str(directory))
 
     assert summary.guide_log_files_with_no_samples == ["guide_log-2026-03-03T04-43-50.txt"]
 
 
-def test_a_missing_directory_ingests_nothing(logger_interface: LoggerInterface, tmp_path: Path) -> None:
+def test_a_missing_directory_ingests_nothing(records: ControlRecordStore, tmp_path: Path) -> None:
     """Verify a directory that does not exist gives an empty summary."""
     summary = ingest_ekos_session_logs_from_directory(
-        _FakeObservatory(), logger_interface, str(tmp_path / "nowhere")
+        _FakeObservatory(), records, str(tmp_path / "nowhere")
     )
 
     assert summary.guide_log_files_read == 0
@@ -229,7 +229,7 @@ def test_a_missing_directory_ingests_nothing(logger_interface: LoggerInterface, 
 
 
 def test_fetch_downloads_both_kinds_of_log_then_ingests(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify the download methods are called, then the directory is read."""
     calls: list[str] = []
@@ -260,7 +260,7 @@ def test_fetch_downloads_both_kinds_of_log_then_ingests(
             return []
 
     summary = fetch_and_ingest_ekos_session_logs(
-        _FakeObservatory(remote_transfer_driver=_Driver()), logger_interface, logs_directory
+        _FakeObservatory(remote_transfer_driver=_Driver()), records, logs_directory
     )
 
     assert calls == ["guide", "analyze"]
@@ -268,11 +268,11 @@ def test_fetch_downloads_both_kinds_of_log_then_ingests(
 
 
 def test_fetch_still_ingests_local_files_when_the_driver_cannot_download(
-    logger_interface: LoggerInterface, logs_directory: str
+    records: ControlRecordStore, logs_directory: str
 ) -> None:
     """Verify a driver with no Ekos support still allows local reads."""
     summary = fetch_and_ingest_ekos_session_logs(
-        _FakeObservatory(remote_transfer_driver=object()), logger_interface, logs_directory
+        _FakeObservatory(remote_transfer_driver=object()), records, logs_directory
     )
 
     assert summary.guide_samples_stored == 2

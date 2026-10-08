@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 def compute_pointing_model(
     context: ControlContext,
-    logger_interface: Any,
+    records: Any,
     session_id: str | None = None,
     limit: int = 5000,
 ) -> MountPointingModel:
@@ -46,7 +46,7 @@ def compute_pointing_model(
     context : `ControlContext`
         Supplies the observer latitude for the fit (45 degrees when no
         location is known).
-    logger_interface : `astrometricslib.LoggerInterface`
+    records : `ControlRecordStore`
         Source of recorded alignment attempts.
     session_id : `str` | `None`, optional
         Target session to fit, or `None` to fit all recorded historical
@@ -62,8 +62,8 @@ def compute_pointing_model(
         sessions (see module docstring).
     """
     if session_id:
-        attempts = logger_interface.get_session_alignment_attempts(session_id)
+        attempts = records.get_session_alignment_attempts(session_id)
     else:
-        attempts = logger_interface.get_alignment_logs(limit=limit)
+        attempts = records.get_alignment_attempts(limit=limit)
 
     return fit_pointing_model(attempts, latitude_deg=context.observer_latitude_deg())

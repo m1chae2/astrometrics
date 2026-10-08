@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import LoggerInterface
+from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.tasks.control_tasks.session_analysis_tasks import (
@@ -111,18 +111,18 @@ def test_the_logged_scale_is_the_most_common_one() -> None:
 
 def test_only_measured_samples_are_read(tmp_path: Path) -> None:
     """Verify pulse-derived estimates and unverified samples are never read."""
-    logger_interface = LoggerInterface(db_path=str(tmp_path / "log.db"))
-    logger_interface.replace_guiding_samples([
+    records = ControlRecordStore(db_path=str(tmp_path / "log.db"))
+    records.replace_guiding_samples([
         {"timestamp": 1790217108.0 + index, "source": "ekos_guide_log", "dra": 0.1, "ddec": 0.1}
         for index in range(3)
     ])
-    logger_interface.replace_guiding_samples([
+    records.replace_guiding_samples([
         {"timestamp": 1790217108.0 + index, "source": "indi_pulse_estimate", "dra": 9.0, "ddec": 9.0}
         for index in range(5)
     ])
-    logger_interface.record_guiding_samples([{"timestamp": 1790217108.0, "dra": 9.0, "ddec": 9.0}])
+    records.record_guiding_samples([{"timestamp": 1790217108.0, "dra": 9.0, "ddec": 9.0}])
 
-    samples = measured_night_samples(logger_interface, "2026-09-23")
+    samples = measured_night_samples(records, "2026-09-23")
 
     assert len(samples) == 3
     assert {sample["source"] for sample in samples} == {"ekos_guide_log"}

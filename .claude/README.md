@@ -30,7 +30,8 @@ The project runs five MCP servers. For an AI client they look things up, calcula
 
 Each server reads a `tool_manifest.json` and offers only the tools it allows for the chosen profile (`ASTROMETRICS_MCP_PROFILE`, default `investigator`). See `mcp_servers/README.md`.
 
-- `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json` from one list of servers. Run it after a manifest changes. Do not edit those files by hand.
+- `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json` from one list of servers, and `ui/mcp/src/profileRules.ts` from `mcp_servers/common/profile.py`. Run it after a manifest or the profile rules change. Do not edit those files by hand.
+- The Python servers need the optional `mcp` extra (`pip install -e ".[mcp]"`), which `build/linux/setup_venv.sh` installs.
 - `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent.
 - `.venv/bin/python -m mcp_servers.gaps.review list` shows the gaps an AI reported.
 

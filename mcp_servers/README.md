@@ -2,34 +2,36 @@
 
 This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries and the backend know nothing about MCP. The front end's server (`astrometrics-ui`) is written in TypeScript and lives in `ui/mcp/`.
 
+The servers need the MCP SDK, the `mcp` package. It is an optional extra in `pyproject.toml`, so the libraries and the backend install and run without it. `build/linux/setup_venv.sh` installs the project with the extra (`pip install -e ".[mcp]"`). Run the servers' tests with `build/linux/run_tests.sh mcp_servers`.
+
 ## What each folder is for
 
 - `common/` — code every server shares.
   - `reflection.py` — reads the public methods of a facade such as `Astrometrics` at startup and turns each one into a tool, so tools are not listed by hand. Methods whose names start with `delete` are skipped on purpose (`WITHHELD_METHOD_PREFIXES`), so an AI client cannot delete catalog records; deleting is done in the app, which asks the person first.
   - `tool_registry.py` — holds a server's tools and sends an incoming tool call to the right method. Every Python server with a registry uses this one class. Two options cover the differences: `sandbox_paths` refuses path arguments outside the library folders (the library servers turn it on), and `remediation` adds a recovery hint to a failed call's error (the backend server uses it).
-  - `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below.
+  - `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below. It is the only definition of the rules: `build/mcp/generate_client_configs.py` copies its constants into `ui/mcp/src/profileRules.ts` for the TypeScript server, and a test fails when that file is out of date.
   - `tool_errors.py` — turns an error raised by a tool into a reply the client can read.
   - `server.py` — the loop that serves one client over standard input and output. Every Python server's `__main__.py` builds its tools and calls `run_server`. It imports only the MCP package, so the gap server can use it.
 - `astrometrics_core/` — the `astrometricslib-core` server. Run it with `python -m mcp_servers.astrometrics_core`. `definition.py` builds its registry from `Astrometrics`, and `tool_manifest.json` is the reviewed list of its tools with a class, category and disposition for each.
 - `wayfinding_core/` — the `wayfindinglib-core` server, built from `Wayfinder` in the same way. Run it with `python -m mcp_servers.wayfinding_core`. Its own README describes its tools.
 - `backend/` — the `astrometrics-backend` server. Run it with `python -m mcp_servers.backend`. Its tools reach the running backend over HTTP. See its README.
 - `gaps/` — the `astrometrics-gaps` server, where an AI reports what its tools cannot do. Run it with `python -m mcp_servers.gaps`. See its README.
-- `inventory/` — the tool inventory and the reviewed decisions about each tool. It writes every server's `tool_manifest.json`. See its README.
+- `inventory/` — the tool inventory and the table of decisions about each tool (`tool_dispositions.py`). It writes every server's `tool_manifest.json`. See its README.
 - `devtools/contract_validator.py` — a tool that checks a pydantic model's serialization contract (its field names, aliases, and JSON shape). It catches a model that would not survive a round trip through the MCP protocol. The `astrometricslib-core` server offers it.
 
 ## Which tools the server offers
 
-When the server starts, it removes every tool that the manifest does not allow for the chosen profile. The `ASTROMETRICS_MCP_PROFILE` environment variable picks the profile. The default, `investigator`, is read-only: it offers tools that look things up or calculate, and no tool that writes data, commands a device, or runs code. The `developer` profile also offers the tools that run the project's tests and builds. An unknown profile name falls back to `investigator`.
+When the server starts, it removes every tool that the manifest does not allow for the chosen profile. The `ASTROMETRICS_MCP_PROFILE` environment variable picks the profile. The default, `investigator`, offers tools that look things up or calculate. Its only writes are bringing frames from the telescope into the library (class `ingest`) and stacking a target's frames the way the app does (class `process`). It offers no tool that changes other data, commands a device, or runs code. The `developer` profile also offers the tools that run the project's tests and builds. An unknown profile name falls back to `investigator`.
 
 The rules fail closed:
 
-1. A tool that is missing from the manifest is not offered. A new public method stays hidden until someone reviews it and adds it.
+1. A tool that is missing from the manifest, or has no decision, is not offered. A new public method stays hidden until someone adds a row for it to `inventory/tool_dispositions.py`. Until then `inventory/test/test_served_tools.py` fails: it checks that the offered tools are exactly the reflected public methods minus the ones the table says not to offer.
 2. A missing or unreadable manifest withholds every tool.
 3. A tool with an `interim_block` is hidden until its known problem is fixed.
 
-Tools marked `merge` stay available until the tool that replaces them exists. Once it exists, they are marked `merged`: they are no longer offered, and a call to one says which tool replaced it.
+Only tools marked `keep` are offered. A call to any other tool is refused, and the refusal quotes the decision's note, for example "Replaced by target_query".
 
-Do not edit `tool_manifest.json` by hand. `python -m mcp_servers.inventory --write-runtime-manifests` writes it from the reviewed decisions. `common/test/test_profile.py` fails if a registered tool has no manifest entry.
+Do not edit `tool_manifest.json` by hand. `python -m mcp_servers.inventory --write-runtime-manifests` writes it from the reviewed decisions. `inventory/test/test_served_tools.py` fails when a committed manifest differs from a fresh run.
 
 ## How a tool call reaches a method
 

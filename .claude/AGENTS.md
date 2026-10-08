@@ -56,7 +56,7 @@ Stop. Do not look for a workaround: do not chain tools to imitate a missing one,
 - **Companion**: `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent. It has only MCP tools, no shell and no file access. For Gemini, `.gemini/settings.json` lists the same tools in `includeTools`.
 - **Developer**: a normal session that edits the repo. It uses `.mcp.json`. It still cannot write data or command devices through MCP. Test code against a scratch configuration (`ASTROMETRICS_CONFIG_PATH`), never the live library.
 
-Run `.venv/bin/python build/mcp/generate_client_configs.py` after a tool manifest changes. It writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json`. Do not edit those files by hand. `.venv/bin/python -m mcp_servers.inventory --write-runtime-manifests` writes the manifests from the reviewed decisions.
+Run `.venv/bin/python build/mcp/generate_client_configs.py` after a tool manifest changes. It writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md`, `.gemini/settings.json` and `ui/mcp/src/profileRules.ts`. Do not edit those files by hand. `.venv/bin/python -m mcp_servers.inventory --write-runtime-manifests` writes the manifests from the table in `mcp_servers/inventory/tool_dispositions.py`. A new public library method needs a row in that table, or `mcp_servers/inventory/test/test_served_tools.py` fails.
 
 ### Server Selection Hierarchy
 - `astrometricslib-core`: Read-only lookups and calculations on targets, stars, calibration, stacks and frames.
@@ -66,10 +66,10 @@ Run `.venv/bin/python build/mcp/generate_client_configs.py` after a tool manifes
 - `astrometrics-ui` (developer profile only): UI tests, type check, build and accessibility checks.
 
 ### Common Invocations Cheat Sheet
-Tool names change as the proposed merged tools are built. The manifests are the source of truth.
-- **List targets**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_list", Arguments={})`
-- **Get a target**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_get", Arguments={"target_id": "<id>"})`
-- **Check backend health**: `call_mcp_tool(ServerName="astrometrics-backend", ToolName="backend_health_check", Arguments={})`
+Each server's `tool_manifest.json` is the source of truth for which tools it offers.
+- **List targets**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_query", Arguments={})`
+- **Get a target**: `call_mcp_tool(ServerName="astrometricslib-core", ToolName="target_query", Arguments={"target_id": "<id>", "detail": "full"})`
+- **Check backend health**: `call_mcp_tool(ServerName="astrometrics-backend", ToolName="app_status", Arguments={})`
 - **Report a gap**: `call_mcp_tool(ServerName="astrometrics-gaps", ToolName="report_capability_gap", Arguments={...})`
 - **Run UI tests (developer profile)**: `call_mcp_tool(ServerName="astrometrics-ui", ToolName="ui_run_tests", Arguments={})`
 

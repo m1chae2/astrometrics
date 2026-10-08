@@ -46,6 +46,6 @@ Four MCP servers provide direct tooling for AI agents. Claude Code has access vi
 - **Diagnose API & UI Stalls**: Call `backend_call_rpc(method, params)`.
   - If `backend_call_rpc` succeeds with low latency (<200ms), the backend is healthy; the bug is in frontend React state, hooks, or networking.
   - If `backend_call_rpc` errors, hangs, or returns 500, the bug is in the backend route or container service.
-- **Diagnose Backend Health**: Call `backend_health_check()`. Confirms whether the FastAPI server and container are responding.
+- **Diagnose Backend Health**: Call `app_status()`. Confirms whether the FastAPI server and container are responding.
 - **Diagnose Domain Calculations**: Call `astrometricslib-core` or `wayfindinglib-core` tools directly on disk data.
 - **Diagnose Frontend Code & Builds**: Call `ui_diagnose_code`, `ui_run_tests`, or `ui_build_check`.

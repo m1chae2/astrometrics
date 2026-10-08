@@ -45,28 +45,24 @@ class ImageService:
 
     Parameters
     ----------
-    target_service : `TargetService`, optional
-        The service whose `Astrometrics` handle is shared. Without one, a
-        handle is built on the default configuration.
+    target_service : `TargetService`
+        The service whose `Astrometrics` handle is shared, so frames are
+        found with the same settings as the rest of the app.
     """
 
-    def __init__(self, target_service: Any = None) -> None:
+    def __init__(self, target_service: Any) -> None:
         self.target_service = target_service
 
     @property
     def _astrometrics(self) -> Any:
-        """The library handle: the target service's, or a new one.
+        """The library handle the target service holds.
 
         Returns
         -------
         astrometrics : `Astrometrics`
             The handle whose sub-APIs draw and find frames.
         """
-        if self.target_service is not None:
-            return self.target_service.astrometrics
-        from astrometricslib import Astrometrics
-
-        return Astrometrics()
+        return self.target_service.astrometrics
 
     def get_light_frame_data_by_id(
         self, target_id: str, iso: str, exposure: str, index: int = 0, stretch: bool = True

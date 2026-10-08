@@ -51,7 +51,7 @@ class TargetService:
             self.astrometrics = Astrometrics(config)
         else:
             self.astrometrics = astrometrics
-        self.image_service = ImageService()
+        self.image_service = ImageService(target_service=self)
 
     def get_all_targets_list(self) -> list[dict[str, Any]]:
         """Return a summarized catalog list of all registered targets.

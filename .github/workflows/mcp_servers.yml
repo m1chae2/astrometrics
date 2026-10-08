@@ -1,19 +1,27 @@
 # ==============================================================================
-# Purpose: GitHub Actions workflow for astrometricslib unit testing and code coverage reporting.
+# Purpose: GitHub Actions workflow for the MCP server tests and code coverage reporting.
 # ==============================================================================
 
-name: astrometricslib CI
+name: mcp_servers CI
 
 on:
   push:
     branches: [ main, master ]
+    # The MCP servers reflect both libraries and call the backend over
+    # HTTP, and build/mcp/ writes the client configurations from their
+    # manifests, so a change to any of them can break these tests.
     paths: &paths
+      - 'mcp_servers/**'
+      - 'backend/**'
       - 'astrometricslib/**'
+      - 'wayfindinglib/**'
+      - 'build/mcp/**'
+      - 'ui/mcp/**'
       - 'pyproject.toml'
       - 'build/linux/run_tests.sh'
       - 'build/linux/setup_venv.sh'
       - '.github/actions/setup-python-env/**'
-      - '.github/workflows/astrometricslib.yml'
+      - '.github/workflows/mcp_servers.yml'
   pull_request:
     branches: [ main, master ]
     paths: *paths
@@ -25,7 +33,7 @@ concurrency:
 
 jobs:
   test:
-    name: Run astrometricslib Tests
+    name: Run mcp_servers Tests
     # ubuntu-26.04, not ubuntu-latest: this job installs INDI via
     # setup-python-env, and the INDI Stable Builds PPA now publishes the
     # core libindi packages only for the resolute (26.04) series. On
@@ -45,29 +53,19 @@ jobs:
       - name: Setup Python Environment
         uses: ./.github/actions/setup-python-env
 
-      # The MCP SDK is an optional extra that only mcp_servers/ needs.
-      # Removing it here proves the library runs without it.
-      - name: Remove the Optional MCP SDK
-        run: .venv/bin/pip uninstall --yes mcp
-
       - name: Run Unit Tests with Coverage
         env:
           PYTHONPATH: .
           ASTROMETRICS_TESTING: "1"
           ASTROMETRICS_FAST_TEST: "1"
-          # setup_venv.sh treats a failed _extractor_c.c compile as a
-          # non-fatal warning (some dev machines lack a C toolchain), so
-          # without this a broken build would just silently skip
-          # test_extractor_c_equivalence.py instead of failing CI.
-          ASTROMETRICS_REQUIRE_C_EXTENSION: "1"
         run: |
-          COVERAGE=1 ./build/linux/run_tests.sh astrometricslib
+          COVERAGE=1 ./build/linux/run_tests.sh mcp_servers
 
       - name: Comment PR with Code Coverage
         if: github.event_name == 'pull_request'
         uses: py-cov-action/python-coverage-comment-action@v3
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SUBPROJECT_ID: "astrometricslib"
+          SUBPROJECT_ID: "mcp_servers"
           MINIMUM_GREEN: 70
           MINIMUM_ORANGE: 50

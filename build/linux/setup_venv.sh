@@ -130,14 +130,15 @@ log "Upgrading pip inside venv and installing hatchling, editables & build depen
 "$VENV_PYTHON" -m pip install --quiet --upgrade pip hatchling editables setuptools_scm Cython numpy
 
 # Install the project in editable mode so local source is used at runtime.
-# pyproject.toml declares all dependencies.
+# pyproject.toml declares all dependencies. The `mcp` extra adds the MCP SDK,
+# which only the MCP servers in mcp_servers/ need.
 PYPROJECT="$ROOT_DIR/pyproject.toml"
 if [ ! -f "$PYPROJECT" ]; then
   die "pyproject.toml not found at $PYPROJECT"
 fi
 
-log "Installing project from $ROOT_DIR (editable)..."
-"$VENV_PYTHON" -m pip install --no-build-isolation -e "$ROOT_DIR"
+log "Installing project from $ROOT_DIR (editable, with the mcp extra)..."
+"$VENV_PYTHON" -m pip install --no-build-isolation -e "$ROOT_DIR[mcp]"
 
 # pyindi-client is the real SWIG binding to the INDI client C++ library.
 # Without it, wayfindinglib.drivers.indi.pyindi_compatibility silently

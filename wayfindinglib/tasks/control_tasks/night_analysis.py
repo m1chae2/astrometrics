@@ -153,9 +153,7 @@ def performance_envelope(
     # The guide cycle is a property of the equipment, not of one night,
     # so it is read from every recorded night. The baseline limits use
     # only the nights before `before_night`.
-    every_night = performance_envelope_tasks.collect_baseline_values(
-        records, contexts, fingerprint, runs
-    )
+    every_night = performance_envelope_tasks.collect_baseline_values(records, contexts, fingerprint, runs)
     baseline_values = (
         every_night
         if before_night is None

@@ -113,29 +113,13 @@ def _source_files() -> list[Path]:
     return sorted(files)
 
 
-# These modules call `setLevel` or `addHandler` today. Each one is a separate
-# piece of work in ARCHITECTURE_PLAN.md and leaves this list when it is done.
-KNOWN_VIOLATIONS: frozenset[str] = frozenset({
-    "astrometricslib/drivers/job_logging.py",
-    "astrometricslib/drivers/siril_interface.py",
-    "astrometricslib/utilities/parallel_batch.py",
-    "backend/services/infrastructure/base_service.py",
-})
-
-
 @pytest.mark.parametrize("path", _source_files(), ids=lambda path: str(path.relative_to(REPOSITORY_ROOT)))
 def test_only_entry_points_configure_logging(path: Path) -> None:
     """Fail when a module outside the allowed files configures logging."""
     relative = str(path.relative_to(REPOSITORY_ROOT))
     calls = _configuring_calls(path)
-    if relative in ALLOWED_FILES or relative in KNOWN_VIOLATIONS:
+    if relative in ALLOWED_FILES:
         return
     assert not calls, (
         f"{relative} configures logging at lines {calls}. Use `configure_logging` in an entry point."
     )
-
-
-def test_the_known_violations_still_exist() -> None:
-    """Fail when a listed file has been fixed, so the list shrinks."""
-    stale = [name for name in sorted(KNOWN_VIOLATIONS) if not _configuring_calls(REPOSITORY_ROOT / name)]
-    assert not stale, f"These files no longer configure logging. Remove them from KNOWN_VIOLATIONS: {stale}"

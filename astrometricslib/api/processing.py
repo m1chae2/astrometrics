@@ -23,9 +23,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from astropy.time import Time
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.calibration_ingest import CalibrationIngestReport, FlatSetAssessment
 from astrometricslib.models.catalog_queries import CalibrationQueryResult
 from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport

@@ -14,6 +14,7 @@ file inside the shared test folder or the test's own folder.
 """
 
 import collections.abc
+import logging
 import os
 import sys
 import tempfile
@@ -179,6 +180,29 @@ def isolate_config_singleton(
     config_loader._instance = sandbox_config
     yield sandbox_config
     config_loader._instance = original_instance
+
+
+@pytest.fixture(autouse=True)
+def root_logging_is_restored() -> collections.abc.Generator[None]:
+    """Put the root logger's level and handlers back after each test.
+
+    A test that runs a script's ``main`` also runs its `configure_logging`
+    call, which may set the root logger to a quieter level, such as
+    ``WARNING``. Without this, later tests in the same process would lose
+    their ``INFO`` messages, and a test that reads a job log would fail
+    only when it happens to run after such a script test.
+    """
+    root = logging.getLogger()
+    level = root.level
+    handlers = list(root.handlers)
+    yield
+    root.setLevel(level)
+    for handler in list(root.handlers):
+        if handler not in handlers:
+            root.removeHandler(handler)
+    for handler in handlers:
+        if handler not in root.handlers:
+            root.addHandler(handler)
 
 
 @pytest.fixture(autouse=True)

@@ -968,7 +968,7 @@ export interface ProcessStatus {
  * owner_started_at : `str` or `None`
  * When that program started. With `owner_pid` it tells whether the
  * program is still the one that took the job (see
- * `astrometricslib.utilities.process_identity`).
+ * `astrometricslib.foundation.jobs.process_identity`).
  */
 export interface ProcessingJob {
   id: string;

@@ -10,12 +10,11 @@ This folder holds small, generic helpers used across the library that do not bel
 - `coordinate_parsing.py` — parses astronomical coordinate strings (right ascension, declination) into decimal degrees.
 - `camera_names.py` — compares camera names that may be written differently in different places (a header, a config section, a UI field) to decide whether they refer to the same camera.
 - `observatory_setups.py` — the optics an observatory owns, and which camera is paired with which optic.
-- `observing_night.py` — names the observing night a moment belongs to: the local date on which the night began, found by subtracting 12 hours from the moment. A night that crosses midnight keeps one name, so records written before and after midnight group together. The log database's SQL queries use the same rule.
+- `observing_night.py` — names the observing night a moment belongs to: the local date on which the night began, found by subtracting 12 hours from the moment. A night that crosses midnight keeps one name, so records written before and after midnight group together. The SQL queries of wayfindinglib's `ControlRecordStore` use the same rule.
 - `iso_text.py` — helpers for parsing and formatting the ISO and gain text stored on a frame.
 - `concurrency.py`, `parallel_batch.py` — generic worker-count reconciliation and a parallel batch-processing engine, used by any pipeline stage that fans work out across multiple processes.
 - `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count, and for keeping a sharpness filter from discarding too many frames.
 - `spectroscopy_models.py` — pydantic models for spectroscopy camera and session configuration.
-- `pipeline_models.py` — domain models for tracking a background processing task's status.
 - `storage_mount.py` — checks that the drive holding the raw frames (a USB disk or a network share) is mounted before anything is written there. Without the check, a missing drive leaves an empty folder on the computer's own disk, and downloads would fill it. It reads the optional `frames_mount_point` setting and does nothing when that is not set.
 - `warn_once.py` — logs a given warning only once per process run, instead of once per occurrence.
 

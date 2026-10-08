@@ -28,7 +28,6 @@ Astrometrics Library (`astrometricslib`)
    :skip: ConfigFileDescription
    :skip: DatasetDescription
    :skip: DatasetEntity
-   :skip: DbLogHandler
    :skip: EntityDescription
    :skip: FileItem
    :skip: FilterType
@@ -37,7 +36,6 @@ Astrometrics Library (`astrometricslib`)
    :skip: GenerationDescription
    :skip: GroupedFrameStat
    :skip: ImageProcessing
-   :skip: LoggerInterface
    :skip: MovingObjectConfig
    :skip: Parameter
    :skip: ParameterDescription

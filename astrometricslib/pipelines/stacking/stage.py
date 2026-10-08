@@ -10,9 +10,9 @@ from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
+from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)

@@ -294,7 +294,7 @@ def record_pipeline_run(
     try:
         # Imported here, not at module level, so a test's monkeypatch of
         # `config_loader.get_configuration` is honored -- the same
-        # lazy-import convention `job_logging.registered_job` already
+        # lazy-import convention the job runner's `_create_job_row` already
         # uses for the same reason.
         from astrometricslib.foundation.config import get_configuration
 

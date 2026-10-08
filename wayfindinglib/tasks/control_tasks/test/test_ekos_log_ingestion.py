@@ -117,9 +117,7 @@ def test_guide_samples_are_stored_in_arcseconds_and_labelled_as_measured(
     assert {row["source"] for row in stored} == {"ekos_guide_log"}
 
 
-def test_lost_star_frames_are_counted_not_stored(
-    records: ControlRecordStore, logs_directory: str
-) -> None:
+def test_lost_star_frames_are_counted_not_stored(records: ControlRecordStore, logs_directory: str) -> None:
     """Verify the failed frame shows in the summary but not as a sample."""
     summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, logs_directory)
 
@@ -177,9 +175,7 @@ def test_each_guiding_run_is_recorded_with_its_lost_frames(
     assert run.duration_seconds == pytest.approx(300.0)
 
 
-def test_a_log_with_only_a_calibration_records_no_run(
-    records: ControlRecordStore, tmp_path: Path
-) -> None:
+def test_a_log_with_only_a_calibration_records_no_run(records: ControlRecordStore, tmp_path: Path) -> None:
     """Verify a calibration alone is not a guiding run."""
     directory = tmp_path / "logs"
     directory.mkdir()
@@ -220,9 +216,7 @@ def test_a_log_with_no_usable_samples_is_listed(records: ControlRecordStore, tmp
 
 def test_a_missing_directory_ingests_nothing(records: ControlRecordStore, tmp_path: Path) -> None:
     """Verify a directory that does not exist gives an empty summary."""
-    summary = ingest_ekos_session_logs_from_directory(
-        _FakeObservatory(), records, str(tmp_path / "nowhere")
-    )
+    summary = ingest_ekos_session_logs_from_directory(_FakeObservatory(), records, str(tmp_path / "nowhere"))
 
     assert summary.guide_log_files_read == 0
     assert summary.analyze_files_read == 0

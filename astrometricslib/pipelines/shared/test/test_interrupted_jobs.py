@@ -8,7 +8,6 @@ live program still runs, and putting the parked stack back.
 
 from datetime import datetime, timedelta
 from pathlib import Path
-
 from types import SimpleNamespace
 
 from astrometricslib.foundation.jobs import JobStore, ProcessingJob, recover_interrupted_jobs
@@ -167,7 +166,7 @@ def test_recovery_keeps_the_staging_of_a_target_with_another_live_job(tmp_path: 
 
 
 def test_the_package_registers_the_stack_cleanup() -> None:
-    """Importing the library registers the stack cleanup with the job framework."""
+    """Importing the library registers the stack cleanup with the runner."""
     from astrometricslib.foundation.jobs import runner
 
     assert restore_interrupted_stacks in runner._interrupted_job_cleanups

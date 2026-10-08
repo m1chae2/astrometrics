@@ -22,8 +22,8 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Literal
 
-from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
+from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.logging import get_log_context
 from astrometricslib.models.processing_results import StackResult
 from astrometricslib.models.target import FrameRecord, Target

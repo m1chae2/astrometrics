@@ -3,8 +3,8 @@
 Description: `ControlContext` holds what every part of `control` needs:
 the configuration, the `DiskButler` that stores records, the correction
 settings, the safety monitor, the shared `Astrometrics` handle, the store
-of alignment and guiding records, and the hardware drivers. The drivers are built on first use,
-so building a context never touches hardware.
+of alignment and guiding records, and the hardware drivers. The drivers
+are built on first use, so building a context never touches hardware.
 
 `ObservatoryControl` builds one context and hands it to each of its seven
 children. The children and the task functions under
@@ -131,7 +131,7 @@ class ControlContext:
 
     @property
     def records(self) -> ControlRecordStore:
-        """The store of alignment attempts, guiding samples and polar alignment runs.
+        """The store of alignment attempts, guiding samples and polar runs.
 
         Built on first use, in the butler's ``wayfinding.db``, so a test
         configuration is never asked for a library folder unless a method

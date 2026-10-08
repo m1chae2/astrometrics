@@ -31,7 +31,9 @@ class _FakeRecordStore:
         self.last_limit: int | None = None
         self.last_session_id: str | None = None
 
-    def get_alignment_attempts(self, target_name: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def get_alignment_attempts(
+        self, target_name: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
         """Return the fixed all-history attempts.
 
         Returns

@@ -262,9 +262,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             If no image files were given (outside photometry mode), or
             if the filter is not one the analysis supports.
         """
-        logger.info(
-            "[%s] Background analysis worker started for %s (Job: %s)", target_id, target_id, job_id
-        )
+        logger.info("[%s] Background analysis worker started for %s (Job: %s)", target_id, target_id, job_id)
 
         paths = []
         if isinstance(image_files, list):
@@ -401,9 +399,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
             )
 
         if light_paths or type == "photometry":
-            return self._run_photometry_analysis(
-                job_id, target_id, light_paths, filter_type, logger=logger
-            )
+            return self._run_photometry_analysis(job_id, target_id, light_paths, filter_type, logger=logger)
 
         raise InvalidArgumentError(
             f"The filter {filter_type!r} is not supported for analysis.",

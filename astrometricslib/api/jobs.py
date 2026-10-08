@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.models import ProcessingJob
+from astrometricslib.foundation.jobs.store import JobStore
 
 __all__ = ["Jobs"]
 
@@ -258,9 +258,7 @@ class Jobs:
             "note": UNTRUSTED_TEXT_NOTE,
         }
 
-    def _one_job(
-        self, job_store: JobStore, job_id: str, detail: str, lines: int
-    ) -> dict[str, Any]:
+    def _one_job(self, job_store: JobStore, job_id: str, detail: str, lines: int) -> dict[str, Any]:
         """Answer for one job: its summary, log tail or stored result.
 
         Parameters

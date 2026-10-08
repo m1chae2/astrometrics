@@ -425,9 +425,7 @@ def ingest_ekos_logs(context: ControlContext, destination_dir: str, download: bo
         logger.warning("Could not read the frame library to name imaging equipment: %s", error)
 
     if download:
-        summary = fetch_and_ingest_ekos_session_logs(
-            context, context.records, destination_dir, frame_lookup
-        )
+        summary = fetch_and_ingest_ekos_session_logs(context, context.records, destination_dir, frame_lookup)
     else:
         summary = ingest_ekos_session_logs_from_directory(
             context, context.records, destination_dir, frame_lookup

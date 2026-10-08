@@ -19,6 +19,7 @@ from pydantic import BaseModel
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from astrometricslib import ErrorInfo, FilterType
+from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
@@ -82,7 +83,6 @@ from astrometricslib.models.target import (
     TargetQualitySummaries,
     TargetStackingResult,
 )
-from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
     IntrospectionEndpoint,

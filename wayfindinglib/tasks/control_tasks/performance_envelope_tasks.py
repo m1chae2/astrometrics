@@ -194,9 +194,7 @@ def _matching_windows_by_night(
     return windows_by_night
 
 
-def _night_samples(
-    records: Any, night: str, windows: list[tuple[float, float]]
-) -> list[dict[str, Any]]:
+def _night_samples(records: Any, night: str, windows: list[tuple[float, float]]) -> list[dict[str, Any]]:
     """Read one night's measured guide samples that fall inside `windows`.
 
     Returns

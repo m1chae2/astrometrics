@@ -7,6 +7,7 @@ retrieve the resulting stacked image.
 
 import atexit
 import contextlib
+import contextvars
 import logging
 import os
 import queue
@@ -29,6 +30,7 @@ from astrometricslib.drivers.siril_output_parsing import (
     parse_stacked_image_count,
 )
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
+from astrometricslib.foundation.jobs.runner import capture_job_logs
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -866,17 +868,9 @@ class ImageProcessing:
                 logger.debug("Could not restore cached %s master: %s", kind, copy_error)
                 continue
             restored_kinds.add(kind)
-            if job_logger:
-                job_logger.info("Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
-            # Also emitted on this module's own logger, which propagates
-            # to the "astrometricslib" package logger that carries the
-            # database handler. `process_target`'s job_logger sets
-            # propagate=False and only gains a DbLogHandler when a job
-            # repository was supplied, which the batch path does not do,
-            # so hits were recorded solely in per-target file logs and a
-            # run appeared to have zero cache reuse while actually
-            # serving 59 masters from cache.
-            logger.info("Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
+            (job_logger or logger).info(
+                "Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12]
+            )
 
         return restored_kinds
 
@@ -1723,32 +1717,28 @@ class ImageProcessing:
             stack_weight = self.config.get_stack_weight()
         if generate_rejmap is None:
             generate_rejmap = self.config.get_stack_generate_rejmap()
-        job_logger = logging.getLogger(f"siril_{id}")
-        job_logger.setLevel(logging.INFO)
-        # Isolate this job's log to its own dedicated file (below)
-        # instead of bubbling up to the root logger, which may be
-        # shared with unrelated activity in the calling process
-        # (e.g. the backend/planetarium server).
-        job_logger.propagate = False
-        if job_logger.handlers:
-            job_logger.handlers.clear()
         if not log_file:
             try:
                 logs_path = self.config.get_logs_path()
                 log_file = os.path.join(str(logs_path), f"stack_{work_directory_name(id, output_file)}.log")
             except ConfigurationError, OSError:
                 log_file = "siril.log"
+        # Each run starts its log file afresh.
+        with contextlib.suppress(OSError), open(log_file, "w", encoding="utf-8"):
+            pass
 
-        handler = logging.FileHandler(log_file, mode="w")
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        job_logger.addHandler(handler)
-
-        db_handler = None
-        if self.job_repository is not None:
-            from astrometricslib.foundation.jobs.store import DbLogHandler
-
-            db_handler = DbLogHandler(self.job_repository, job_id=job_id)
-            job_logger.addHandler(db_handler)
+        # This run's own log file. The job log router writes every message
+        # the run logs into it, and into the job's rows when the run is not
+        # already inside its job's own capture.
+        run_log = contextlib.ExitStack()
+        run_log.enter_context(
+            capture_job_logs(
+                job_id=job_id or f"siril:{id}",
+                log_file_path=log_file,
+                job_store=self.job_repository if job_id else None,
+            )
+        )
+        job_logger = logger
 
         job_logger.info("JOB START: %s", id)
 
@@ -1914,7 +1904,11 @@ class ImageProcessing:
                     if job_logger:
                         job_logger.exception("Error in Siril stdout reader thread")
 
-            log_reader_thread = threading.Thread(target=read_siril_stdout, daemon=True)
+            # The reader runs in the run's log context, so its lines reach
+            # this run's log file.
+            log_reader_thread = threading.Thread(
+                target=contextvars.copy_context().run, args=(read_siril_stdout,), daemon=True
+            )
             log_reader_thread.start()
 
             script = ["setext fits"]
@@ -2288,10 +2282,6 @@ class ImageProcessing:
             # Siril run never starts while this one's process tree is
             # still being torn down.
             siril_lock.close()
-            job_logger.removeHandler(handler)
-            handler.close()
-            if db_handler is not None:
-                job_logger.removeHandler(db_handler)
             # Only remove the scratch work directory once the final stack has
             # been copied out to library_dest. If library_dest wasn't
             # resolvable, the returned file lives inside target_folder itself,
@@ -2316,6 +2306,7 @@ class ImageProcessing:
                 # to 1.1MB. Dropping only the intermediates keeps every
                 # artifact that has ever been useful.
                 self._discard_stacking_intermediates(target_folder, job_logger)
+            run_log.close()
 
     def _stack_phase_correlation_aligned_spectral_frames(
         self,

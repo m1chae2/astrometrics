@@ -276,15 +276,44 @@ class IngestionService(BaseBackgroundService):
 
         return self._submit_job("global", "reindex", self._run_reindex, log_file_path=log_file)
 
-    def _run_reindex(self, job_id, target_id, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
+    def _run_reindex(
+        self, job_id: str, target_id: str, log_file_path: str | None = None, **kwargs: object
+    ) -> bool:
         """Background task to re-index all files in the library.
+
+        Parameters
+        ----------
+        job_id : `str`
+            The job this run records into.
+        target_id : `str`
+            Not used: a re-index covers the whole library.
+        log_file_path : `str`, optional
+            Where the job's own log file is written.
+        **kwargs : `object`
+            Not used; the job runner passes its own options.
 
         Returns
         -------
         success : `bool`
             `True` once re-indexing completes.
         """
-        self._setup_worker_logger(f"job_{job_id}", log_file_path)
+        from astrometricslib import capture_job_logs
+
+        with capture_job_logs(
+            job_id=job_id,
+            log_file_path=log_file_path,
+            job_store=self._job_service.repository if self._job_service else None,
+        ):
+            return self._reindex_library(job_id)
+
+    def _reindex_library(self, job_id: str) -> bool:
+        """Re-index every target folder and calibration frame, with progress.
+
+        Returns
+        -------
+        success : `bool`
+            `True` once re-indexing completes.
+        """
         self._log(job_id, "Starting full library re-index...")
 
         # 1. Reindex every target folder on disk. The library creates a

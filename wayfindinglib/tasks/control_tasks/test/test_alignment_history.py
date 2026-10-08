@@ -69,9 +69,7 @@ class _Logs:
             },
         ]
 
-    def get_polar_alignments(
-        self, session_id: str | None = None, limit: int = 10
-    ) -> list[dict[str, Any]]:
+    def get_polar_alignments(self, session_id: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
         """Return no polar alignment runs.
 
         Returns

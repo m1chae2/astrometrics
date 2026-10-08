@@ -32,18 +32,6 @@ from astrometricslib.drivers.provenance_store import ProvenanceStore, export_tar
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.foundation.jobs import (
-    DbLogHandler,
-    JobStore,
-    ProcessingJob,
-    background_job,
-    capture_job_logs,
-    close_interrupted_jobs,
-    get_current_job,
-    register_interrupted_job_cleanup,
-    registered_job,
-    run_as_background_job,
-)
 from astrometricslib.foundation.errors import (
     RPC_CODES,
     AstrometricsError,
@@ -59,6 +47,18 @@ from astrometricslib.foundation.errors import (
     StorageError,
     error_from_info,
     to_error_info,
+)
+from astrometricslib.foundation.jobs import (
+    DbLogHandler,
+    JobStore,
+    ProcessingJob,
+    background_job,
+    capture_job_logs,
+    close_interrupted_jobs,
+    get_current_job,
+    register_interrupted_job_cleanup,
+    registered_job,
+    run_as_background_job,
 )
 from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
 from astrometricslib.foundation.paths import is_path_inside, resolve_mounted_path
@@ -345,8 +345,8 @@ __all__ = [
     "ImageProcessing",
     "InputQualityReport",
     "InvalidArgumentError",
-    "Jobs",
     "JobStore",
+    "Jobs",
     "MovingObjectConfig",
     "NotFoundError",
     "NumpyEncoder",

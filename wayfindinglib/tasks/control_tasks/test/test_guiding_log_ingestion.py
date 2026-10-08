@@ -15,10 +15,10 @@ from wayfindinglib.tasks.control_tasks import guiding_log_ingestion
 class _FakeRecordStore:
     """Records `replace_guiding_samples` calls and serves a fixed history."""
 
-    def __init__(self, guiding_logs: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, guiding_samples: list[dict[str, Any]] | None = None) -> None:
         """Initialize with a fixed cumulative-history response."""
         self.recorded_batches: list[list[dict[str, Any]]] = []
-        self._guiding_logs = guiding_logs if guiding_logs is not None else []
+        self._guiding_samples = guiding_samples if guiding_samples is not None else []
 
     def replace_guiding_samples(self, samples: list[dict[str, Any]]) -> int:
         """Record a batch of samples for later assertion.
@@ -49,8 +49,8 @@ class _FakeRecordStore:
             `sources` when given.
         """
         if sources is None:
-            return self._guiding_logs
-        return [log for log in self._guiding_logs if log.get("source") in sources]
+            return self._guiding_samples
+        return [log for log in self._guiding_samples if log.get("source") in sources]
 
 
 class _FakeObservatory:
@@ -97,9 +97,7 @@ def test_ingest_guide_log_file_returns_none_for_unparseable_file(tmp_path):  # r
     observatory = _FakeObservatory()
     records = _FakeRecordStore()
 
-    result = guiding_log_ingestion.ingest_guide_log_file(
-        observatory, records, str(tmp_path / "missing.txt")
-    )
+    result = guiding_log_ingestion.ingest_guide_log_file(observatory, records, str(tmp_path / "missing.txt"))
 
     assert result is None
     assert records.recorded_batches == []
@@ -113,7 +111,7 @@ def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  
     # batch directly -- simulate that with a fixed cumulative-history stub
     # shaped like the samples ingest_guide_log_file would have recorded.
     records = _FakeRecordStore(
-        guiding_logs=[
+        guiding_samples=[
             {"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80, "source": "phd2_guide_log"},
             {"time": 2.0, "dra": 0.5, "ddec": 0.1, "pulse_dec": 90, "source": "phd2_guide_log"},
         ]
@@ -137,9 +135,7 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_without_driver_support(): 
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithoutGuideLogs())
     records = _FakeRecordStore()
 
-    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, records, "/tmp/guiding"
-    )
+    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(observatory, records, "/tmp/guiding")
 
     assert result is None
     assert records.recorded_batches == []
@@ -164,9 +160,7 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded():
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithNoLogs())
     records = _FakeRecordStore()
 
-    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, records, "/tmp/guiding"
-    )
+    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(observatory, records, "/tmp/guiding")
 
     assert result is None
 
@@ -188,14 +182,10 @@ def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path): 
             """
             return [file_path]
 
-    records = _FakeRecordStore(
-        guiding_logs=[{"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80}]
-    )
+    records = _FakeRecordStore(guiding_samples=[{"time": 1.0, "dra": 0.4, "ddec": 0.2, "pulse_dec": 80}])
     observatory = _FakeObservatory(remote_transfer_driver=_DriverWithOneLog())
 
-    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(
-        observatory, records, str(tmp_path)
-    )
+    result = guiding_log_ingestion.fetch_and_ingest_new_guide_logs(observatory, records, str(tmp_path))
 
     assert isinstance(result, GuidingSpectrumAnalysis)
     assert len(records.recorded_batches) == 1
@@ -204,9 +194,7 @@ def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path): 
 
 def test_refit_and_persist_guiding_spectrum_persists_through_observatory():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify the standalone refit helper persists via the observatory."""
-    records = _FakeRecordStore(
-        guiding_logs=[{"time": 1.0, "dra": 0.1, "ddec": 0.1, "pulse_dec": 50}]
-    )
+    records = _FakeRecordStore(guiding_samples=[{"time": 1.0, "dra": 0.1, "ddec": 0.1, "pulse_dec": 50}])
     observatory = _FakeObservatory()
 
     result = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, records)
@@ -231,7 +219,7 @@ def test_refit_ignores_samples_that_were_not_measured_from_a_real_star():  # ruf
         for second in range(5)
     ]
     unverified = [{"time": 200.0, "dra": 9.0, "ddec": 9.0, "pulse_dec": 50, "source": "unverified"}]
-    records = _FakeRecordStore(guiding_logs=measured + estimated + unverified)
+    records = _FakeRecordStore(guiding_samples=measured + estimated + unverified)
     observatory = _FakeObservatory()
 
     analysis = guiding_log_ingestion.refit_and_persist_guiding_spectrum(observatory, records)

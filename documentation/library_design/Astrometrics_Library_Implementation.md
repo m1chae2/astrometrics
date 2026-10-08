@@ -22,7 +22,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 | **2. Public Helpers**<br>*(calls L3)* | `stack_frames_with_timeout`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **pipelines/**<br>`tasks`<br>`pipeline_base`<br>`runners` |
 | **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
 | **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **drivers/**<br>`catalog_access`<br>`fits_access` |
-| **5. Drivers**<br>*(edge)* | `siril_interface` | `astrometry_net_driver` | *(reaches through astrometry)* | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`job_logging`<br>`local_database` |
+| **5. Drivers**<br>*(edge)* | `siril_interface` | `astrometry_net_driver` | *(reaches through astrometry)* | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`local_database`<br>**foundation/jobs/** |
 | **Outside** | Siril (headless) | astrometry.net<br>Gaia, SIMBAD | astrometry.net | *(via astrometry)* | IMCCE SkyBoT | FITS on disk<br>SQLite |
 
 > [!NOTE]
@@ -93,7 +93,6 @@ Table columns are the five pipelines plus a column for code shared across all of
 - **SIMBAD star lookups:** `astroquery_simbad_driver.py` (`AstroquerySimbadDriver`)
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
 - **One-time startup migration and schema backfill for the target/stellar catalogs:** `local_database.py`
-- **Job logging:** `job_logging.py` and `logger_interface.py`
 - **Target/stellar-catalog repository (`CatalogAccess`), the front door every other layer reaches for the database through:** `catalog_access.py`
 
 `catalog_access.py` doesn't execute SQL itself. It records through a generic,
@@ -104,6 +103,13 @@ keyed-record SQLite store shared with wayfindinglib:
 - **Generic keyed-model storage (get/put/exists/merge, one table per dataset type):** `butler.py`
 - **SQLite connection setup and JSON encoding:** `local_database.py`
 - **Cross-process file locking for shared hardware/storage resources:** `process_locks.py`
+
+### Job Framework
+*Located in:* `astrometricslib/foundation/jobs/`. Shared by both libraries, the backend and the MCP servers.
+- **Job list and job log lines in `astrometrics_log.db` (`JobStore`, `DbLogHandler`):** `store.py`
+- **Recording a job and collecting its log through the job log router (`registered_job`, `capture_job_logs`, `background_job`, `run_as_background_job`, `close_interrupted_jobs`):** `runner.py`
+- **Job records (`ProcessingJob`):** `models.py`
+- **Telling whether the program that owns a job still runs:** `process_identity.py`
 
 ## Empirical Validation Campaign — Implementation Notes
 

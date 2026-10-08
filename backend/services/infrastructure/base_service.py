@@ -206,34 +206,6 @@ class BaseBackgroundService:
                     return future.cancel()
         return False
 
-    def _setup_worker_logger(self, name: str, log_file_path: str | None):  # ruff: ignore[missing-return-type-private-function]
-        """Set up an isolated logger for a worker task.
-
-        REQ: IMG-5.3
-
-        Returns
-        -------
-        worker_logger : `logging.Logger` or `None`
-            The configured logger, or `None` if `log_file_path` is
-            not provided.
-        """
-        import logging
-
-        if log_file_path:
-            # Clear old logs for this target at the start of a new job
-            handler = logging.FileHandler(log_file_path, mode="w")
-            handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            worker_logger = logging.getLogger(name)
-            worker_logger.propagate = False
-            # Remove existing handlers to avoid duplicates if
-            # re-using logger name
-            for h in worker_logger.handlers[:]:
-                worker_logger.removeHandler(h)
-            worker_logger.addHandler(handler)
-            worker_logger.setLevel(logging.INFO)
-            return worker_logger
-        return None
-
     def stream_log(self, job_id: str, log_file: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
         """Yield log lines from `log_file` as they are written.
 

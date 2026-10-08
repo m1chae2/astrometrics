@@ -1,7 +1,7 @@
 """Purpose: Equatorial-to-Horizontal Coordinate Transforms.
 
 Description: Pure Astropy-backed RA/Dec <-> Alt/Az transforms, taking a
-plain latitude/longitude/elevation triple rather than a `Sky` astrometrics or
+plain latitude/longitude/elevation triple rather than a `SkyEngine` or
 a connected device -- so a placement calculation performed with no
 hardware present and a safety check performed mid-slew agree by
 construction, both resolving position from the same `SiteProfile`

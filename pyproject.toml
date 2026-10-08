@@ -214,7 +214,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "wayfindinglib.analytics".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.session_analysis".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.data_access".msg = "Internal. Use the `Wayfinder` API instead."
-"wayfindinglib.observatorylib".msg = "Internal. Use the `Wayfinder` API instead."
 "wayfindinglib.watchdog".msg = "Internal. The watchdog must not be imported by what it watches."
 "logging.basicConfig".msg = "Only a program's entry point configures logging. Call the shared logging setup instead."
 
@@ -363,7 +362,6 @@ forbidden_modules = [
     "wayfindinglib.data_access",
     "wayfindinglib.drivers",
     "wayfindinglib.models",
-    "wayfindinglib.observatorylib",
     "wayfindinglib.session_analysis",
     "wayfindinglib.tasks",
     "wayfindinglib.watchdog",

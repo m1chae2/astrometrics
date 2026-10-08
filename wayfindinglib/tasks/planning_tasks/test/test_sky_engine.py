@@ -1,9 +1,12 @@
-"""Unit tests for the Sky coordinate and visibility calculations.
+"""Purpose: Tests for the planning sky engine and its sums.
 
-Defines mathematical correctness verification tests.
+Description: Checks that `SkyEngine` reads its site, and that the
+coordinate, catalog and visibility sums it feeds give correct answers.
 """
 
+import configparser
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import astropy.units as u
@@ -12,16 +15,18 @@ from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
-from wayfindinglib.sky import Sky
+from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.tasks.planning_tasks.catalog_operations import astrometrics_catalog
 from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 from wayfindinglib.tasks.planning_tasks.resolution_operations import get_library_star_summaries, get_sources
+from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
+from wayfindinglib.tasks.planning_tasks.visibility_operations import hour_angle_from_lst, rise_set_transit
 
 
 def test_sky_initialization() -> None:
-    """Verifies Sky initializes coordinates correctly."""
+    """Verifies SkyEngine initializes coordinates correctly."""
     # Denver defaults
-    sky = Sky()
+    sky = SkyEngine()
     assert pytest.approx(sky.latitude) == 39.7392
     assert pytest.approx(sky.longitude) == -104.9903
     assert pytest.approx(sky.elevation) == 1600.0
@@ -29,7 +34,7 @@ def test_sky_initialization() -> None:
 
 def test_local_sidereal_time() -> None:
     """Verifies Local Sidereal Time calculations."""
-    sky = Sky(latitude=39.7392, longitude=-104.9903, elevation=1600.0)
+    sky = SkyEngine(latitude=39.7392, longitude=-104.9903, elevation=1600.0)
 
     # Vernal equinox midnight
     time = datetime(2026, 3, 20, 0, 0, 0)
@@ -37,38 +42,19 @@ def test_local_sidereal_time() -> None:
     assert 0.0 <= lst <= 24.0
 
 
-def test_coordinate_projections() -> None:
-    """Verifies bidirectional conversions between RA/Dec and Alt/Az."""
-    sky = Sky(latitude=45.0, longitude=-90.0, elevation=100.0)
-    time = datetime(2026, 6, 21, 22, 0, 0)
-
-    # Define a test source (RA=10h, Dec=45°)
-    ra, dec = 150.0, 45.0
-    alt, az = sky.radec_to_altaz(ra, dec, time)
-
-    # Convert back
-    ra_rec, dec_rec = sky.altaz_to_radec(alt, az, time)
-    assert pytest.approx(ra, abs=1e-5) == ra_rec
-    assert pytest.approx(dec, abs=1e-5) == dec_rec
-
-
-def test_tracking_rates() -> None:
-    """Verifies tracking rates are calculated as valid floats."""
-    sky = Sky(latitude=45.0, longitude=-90.0, elevation=100.0)
-    time = datetime(2026, 6, 21, 22, 0, 0)
-
-    rates = sky.get_tracking_rates(150.0, 45.0, time)
-    assert "alt_rate" in rates
-    assert "az_rate" in rates
-    assert isinstance(rates["alt_rate"], float)
-    assert isinstance(rates["az_rate"], float)
+def test_the_engine_location_is_the_given_site() -> None:
+    """Verifies the engine's EarthLocation is built from the given site."""
+    sky = SkyEngine(latitude=45.0, longitude=-90.0, elevation=100.0)
+    assert sky.location.lat.deg == pytest.approx(45.0)
+    assert sky.location.lon.deg == pytest.approx(-90.0)
+    assert sky.location.height.to_value(u.m) == pytest.approx(100.0)
 
 
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.astrometrics_catalog")
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.global_catalog")
 def test_get_sources(mock_global, mock_local) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verifies regional source query delegation."""
-    sky = Sky()
+    sky = SkyEngine()
 
     star = StellarObject(id="S1", name="Star 1", ra=12.0, dec=34.0)
     target = Target(id="T1", commonName="Target 1", ra="12h", dec="34d")
@@ -76,7 +62,7 @@ def test_get_sources(mock_global, mock_local) -> None:  # ruff: ignore[missing-t
     mock_local.return_value = [target]
     mock_global.return_value = [star]
 
-    # Mock local Astrometrics instance on Sky
+    # Mock the local Astrometrics instance on the engine
     sky._astrometrics = MagicMock()
     sky._astrometrics.targets.list.return_value = [target]
     sky._astrometrics.stars.query.return_value.objects = []
@@ -144,7 +130,7 @@ def test_astrometrics_catalog_filters_stellar_objects_by_radius() -> None:
     """Verifies the stellar-object branch returns only in-radius stars.
 
     Also covers the local-only (`include_catalog=False`) path of
-    `Sky.get_sources`, which used to return every stellar object
+    `SkyEngine.get_sources`, which used to return every stellar object
     regardless of the requested region.
     """
     near_star = StellarObject(id="NEAR", ra=250.17, dec=36.46)
@@ -225,7 +211,7 @@ def test_meridian_status_and_flips() -> None:
     """Verifies hour angle and meridian flip triggers."""
     from wayfindinglib.tasks.planning_tasks.visibility_report import build_visibility_report, to_astropy_time
 
-    sky = Sky(latitude=40.0, longitude=-100.0, elevation=1000.0)
+    sky = SkyEngine(latitude=40.0, longitude=-100.0, elevation=1000.0)
     sky.meridian_flip_delay_min = 10.0  # 10 minutes delay
 
     # Current Sidereal Time
@@ -247,21 +233,30 @@ def test_meridian_status_and_flips() -> None:
     assert past.flip_required  # Since 15 mins > 10 mins delay limit
 
 
-def test_object_visibility() -> None:
-    """Verifies rise, set, and transit estimations."""
-    sky = Sky(latitude=40.0, longitude=-100.0, elevation=1000.0)
+def test_rise_set_transit_marks_circumpolar_and_never_rising_targets() -> None:
+    """Verifies rise and set report circumpolar and never-rising targets."""
+    sky = SkyEngine(latitude=40.0, longitude=-100.0, elevation=1000.0)
+    time = Time(datetime(2026, 6, 21, 22, 0, 0))
+    lst = sky.get_local_sidereal_time(time)
 
-    time = datetime(2026, 6, 21, 22, 0, 0)
+    def visibility(dec_deg: float) -> dict:
+        """Return rise, set and transit times of a target at RA 180 degrees.
 
-    # Test circumpolar target (high declination)
-    vis_circumpolar = sky.get_object_visibility(180.0, 85.0, time)
-    assert vis_circumpolar["rise_time"] == "Circumpolar"
-    assert vis_circumpolar["set_time"] == "Circumpolar"
+        Returns
+        -------
+        visibility : `dict`
+            The rise_set_transit result.
+        """
+        alt, _ = compute_altaz(180.0, dec_deg, sky.location, time)
+        return rise_set_transit(sky, dec_deg, alt, hour_angle_from_lst(lst, 12.0), time)
 
-    # Test never-rises target (opposite hemisphere declination)
-    vis_subhorizon = sky.get_object_visibility(180.0, -85.0, time)
-    assert vis_subhorizon["rise_time"] == "Never Rises"
-    assert vis_subhorizon["set_time"] == "Never Rises"
+    circumpolar = visibility(85.0)
+    assert circumpolar["rise_time"] == "Circumpolar"
+    assert circumpolar["set_time"] == "Circumpolar"
+
+    never_rises = visibility(-85.0)
+    assert never_rises["rise_time"] == "Never Rises"
+    assert never_rises["set_time"] == "Never Rises"
 
 
 def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -320,3 +315,59 @@ def test_resolve_target_coordinates_asks_the_library_for_the_named_star_only() -
 
     assert resolved is placed
     fake_sky._astrometrics.stars.query.assert_called_once_with(name="Vega", detail="objects", limit=None)
+
+
+def _location_config(**location: str) -> SimpleNamespace:
+    """Build a config whose ``app_config`` holds the given location keys.
+
+    Returns
+    -------
+    config : `types.SimpleNamespace`
+        An object with a real `configparser.ConfigParser` as ``app_config``.
+    """
+    parser = configparser.ConfigParser()
+    parser.add_section("Observatory.Location")
+    for key, value in location.items():
+        parser.set("Observatory.Location", key, value)
+    return SimpleNamespace(app_config=parser)
+
+
+def _sky_with(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> SkyEngine:
+    """Build a `SkyEngine` for a config without the catalog and the library.
+
+    Returns
+    -------
+    sky : `SkyEngine`
+        A planning engine that read its site from the config.
+    """
+    import astrometricslib
+    import wayfindinglib.drivers.catalog as catalog_module
+    import wayfindinglib.tasks.planning_tasks.sky_engine as sky_engine_module
+
+    monkeypatch.setattr(astrometricslib, "Astrometrics", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(catalog_module, "LocalDeepStarStore", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(sky_engine_module, "build_catalog_driver_registry", lambda **k: SimpleNamespace())
+    return SkyEngine(config=config)
+
+
+def test_sky_uses_the_configured_site_and_elevation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Planning reads the same site and elevation as the live-status tools."""
+    config = _location_config(latitude="45.76", longitude="-110.74")
+    sky = _sky_with(monkeypatch, config)
+    site = configured_observer_location(config)
+    assert (sky.latitude, sky.longitude, sky.elevation) == (
+        site["latitude"],
+        site["longitude"],
+        site["elevation"],
+    )
+    assert sky.elevation == pytest.approx(0.0)
+
+
+def test_sky_warns_and_uses_denver_without_a_site(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With no site, planning uses Denver and says so."""
+    with caplog.at_level("WARNING"):
+        sky = _sky_with(monkeypatch, _location_config())
+    assert (sky.latitude, sky.longitude, sky.elevation) == (39.7392, -104.9903, 1600.0)
+    assert "No Observatory.Location" in caplog.text

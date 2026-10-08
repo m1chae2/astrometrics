@@ -199,7 +199,7 @@ def collect_sky_sources(
 
     Parameters
     ----------
-    sky : `wayfindinglib.sky.Sky`
+    sky : `SkyEngine`
         The sky engine, which holds the `Astrometrics` handle.
     ra_deg, dec_deg : `float`
         The region's center, in degrees.
@@ -309,7 +309,7 @@ def online_catalog_sources(
 
     Parameters
     ----------
-    sky : `wayfindinglib.sky.Sky`
+    sky : `SkyEngine`
         The sky engine, which holds the catalog drivers.
     ra_deg, dec_deg : `float`
         The region's center, in degrees.

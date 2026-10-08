@@ -102,10 +102,8 @@ def test_get_equipment_configuration_returns_none_without_active_camera(app_conf
 def test_get_equipment_configuration_reports_fov_geometry_for_active_rig(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify the active telescope+camera pairing reports FOV geometry.
 
-    `EquipmentConfigurationManager` predates the multi-telescope
-    catalog and reads the single flat `[Observatory.Telescope]`
-    focal_length_mm/focal_ratio fields directly, not a per-name
-    `[Observatory.Telescope.<Name>]` sub-section.
+    With no telescope ``models`` list, the catalog builds its one
+    telescope from the flat `[Observatory.Telescope]` section.
     """
     app_config.update_config({
         "Observatory.Telescope": {"focal_length_mm": "450.0", "focal_ratio": "6.0"},
@@ -118,4 +116,12 @@ def test_get_equipment_configuration_reports_fov_geometry_for_active_rig(app_con
     })
     configuration = get_equipment_configuration(app_config)
     assert configuration is not None
-    assert configuration["camera"]["name"] == "ASI2600MM"
+    assert configuration["camera"] == {
+        "name": "ASI2600MM",
+        "pixelSizeUm": 3.76,
+        "sensorWidthPx": 6248,
+        "sensorHeightPx": 4176,
+    }
+    assert configuration["telescope"] == {"name": "Apertura 75Q", "focalLengthMm": 450.0, "focalRatio": 6.0}
+    assert configuration["plateScaleArcsecPerPx"] == pytest.approx(206.265 * 3.76 / 450.0, abs=1e-4)
+    assert configuration["fovWidthDeg"] == pytest.approx(206.265 * 3.76 / 450.0 * 6248 / 3600.0, abs=1e-5)

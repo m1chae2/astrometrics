@@ -52,7 +52,7 @@ class DeepStarSource(Protocol):
 class LocalDeepStarStore:
     """Adapts the local deep-star store to the `DeepStarSource` protocol.
 
-    Binds a config object once so a caller (`Sky`) doesn't have to thread
+    Binds a config object once so a caller (`SkyEngine`) doesn't have to thread
     it through every lookup. Provisioning (downloading the catalog) lives
     in `deep_star_catalog_builder.py`; this only reads what has already
     been saved.

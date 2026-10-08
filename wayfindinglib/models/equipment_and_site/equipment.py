@@ -13,9 +13,9 @@ than independently stored, per `Wayfinding_Library_Architecture.md`
 flips rather than merely reporting them means the two can no longer be
 allowed to disagree.
 
-`EquipmentConfiguration`'s plate-scale and field-of-view formulas match
-`observatorylib.equipment_configuration.EquipmentConfiguration` exactly,
-as `Wayfinding_Library_Architecture.md` §2.2.5 requires.
+`EquipmentConfiguration` is the one model of an active telescope and
+camera pairing. It derives the plate scale and field of view from the
+two (`Wayfinding_Library_Architecture.md` §2.2.5).
 """
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

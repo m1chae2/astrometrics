@@ -93,8 +93,8 @@ def get_constellation_line_segments(sky) -> list[dict[str, Any]]:  # ruff: ignor
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the constellation line library.
+    sky : `SkyEngine`
+        The sky engine providing the constellation line library.
 
     Returns
     -------

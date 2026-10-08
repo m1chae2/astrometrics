@@ -6,10 +6,8 @@ concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
 (`Wayfinding_Library_Architecture.md` §2.2.2, §2.5.2).
 
-Cameras and telescopes share one multi-section config pattern (the
-camera side matches
-`observatorylib.equipment_configuration.EquipmentConfigurationManager`).
-For telescopes, an `[Observatory.Telescope]` base section carries a
+Cameras and telescopes share one multi-section config pattern. For
+telescopes, an `[Observatory.Telescope]` base section carries a
 comma-separated `models` list and an `active_telescope` key, with each
 named telescope's fields in `[Observatory.Telescope.<Name>]`, falling
 back through `Telescope.<Name>`, `Observatory.Telescope`, then
@@ -23,6 +21,9 @@ absent, resolution falls back to the single global
 exclusively, so a rig that has not yet been given its own section does
 not silently change behavior.
 
+`get_meridian_flip_delay_min` reads the planning code's meridian-flip
+delay, the minutes past the meridian at which a target needs a flip.
+
 Where no `models` list is configured at all -- today's state, before an
 operator has split telescopes into named sections -- resolution falls
 back to constructing exactly one `Telescope` from the flat
@@ -31,6 +32,7 @@ back to constructing exactly one `Telescope` from the flat
 """
 
 import logging
+from typing import Any
 
 from astrometricslib import ConfigurationError
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, GuideScope, Telescope
@@ -48,6 +50,9 @@ GUIDE_SCOPE_SECTION = "Observatory.GuideScope"
 ACTIVE_GUIDE_SCOPE_KEY = "active_guide_scope"
 
 _BOOL_TRUE_STRINGS = {"true", "1", "yes", "on"}
+
+DEFAULT_MERIDIAN_FLIP_DELAY_MIN = 5.0
+"""Meridian-flip delay used when the configuration does not set one."""
 
 
 def _as_bool(value: str | bool | None, default: bool) -> bool:
@@ -407,4 +412,27 @@ def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-t
         active_camera_id=active_camera_id,
         active_guide_scope_id=active_guide_scope_id,
         active_guide_camera_id=active_guide_camera_id,
+    )
+
+
+def get_meridian_flip_delay_min(config: Any) -> float:
+    """Return the meridian-flip delay the planning code uses, in minutes.
+
+    Read from ``meridian_flip_delay_min`` in ``[Observatory.Telescope]``.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration.
+
+    Returns
+    -------
+    delay_min : `float`
+        Minutes past the meridian at which a target needs a flip, or
+        `DEFAULT_MERIDIAN_FLIP_DELAY_MIN` when unset.
+    """
+    return float(
+        config.app_config.get(
+            TELESCOPE_SECTION, "meridian_flip_delay_min", fallback=str(DEFAULT_MERIDIAN_FLIP_DELAY_MIN)
+        )
     )

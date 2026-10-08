@@ -81,4 +81,10 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Archive-informed advising:** `calibration_advisory_tasks.py` and `quality_advisory_tasks.py`
 - **Visibility report:** `visibility_report.py` answers `ObservationPlanning.get_visibility`, at one moment for any number of objects or over a night for up to 30, using the hour-angle and rise/set helpers in `visibility_operations.py`.
 - **Sequence plans:** `planning_operations.py` builds the plan the app's sequencer queue runs (`create_plan(kind="sequence")`).
-- **Sky engine operations:** `coordinate_operations.py`, `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` back the `Sky` engine's methods (name lookup, catalogs, coordinate sums). `wayfindinglib/observationlib/` holds only the older `ObservationSession` model and its `session_operations.py` conduit to astrometricslib.
+- **Sky engine:** `sky_engine.py` holds `SkyEngine`, which `ObservationPlanning` builds once and passes to the planning sums: the site (read through `data_access/site_profile_reader.py`), the meridian-flip delay, the library handle, the catalog drivers and the constellation lines. `coordinate_operations.py`, `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` hold those sums (name lookup, catalogs, coordinate sums).
+
+### Storage
+
+*Located in:* `wayfindinglib/drivers/butler.py`
+
+- **Records:** `DiskButler` is the one storage path for wayfindinglib's records. It implements astrometricslib's shared `AbstractButler` and stores each dataset type (observation sessions, packages, site profiles, calibrations, policies and the rest, listed in `_DATASET_TYPES`) as its own table in `wayfinding.db`, through astrometricslib's generic SQLite `Butler`. `DiskButler.library_path` is the folder that holds the database and the files kept next to it, such as downloaded Ekos logs.

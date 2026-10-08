@@ -388,17 +388,17 @@ def test_the_sky_engine_is_lazily_constructed_once(isolated_butler: DiskButler) 
 def test_sky_engine_is_constructed_once_under_concurrent_first_access(
     isolated_butler: DiskButler, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Simultaneous first requests share one `Sky` instead of one each.
+    """Simultaneous first requests share one `SkyEngine` instead of one each.
 
     Regression test: the Planetarium fires several queries at once on mount,
-    and an unguarded lazy init let every one of them construct its own `Sky`
-    -- each loading a full copy of the star catalog (tens of seconds and
-    gigabytes each on a 270k-star library).
+    and an unguarded lazy init let every one of them construct its own
+    `SkyEngine` -- each loading a full copy of the star catalog (tens of
+    seconds and gigabytes each on a 270k-star library).
     """
     import threading
     import time
 
-    import wayfindinglib.sky
+    import wayfindinglib.tasks.planning_tasks.sky_engine as sky_engine_module
 
     construction_count = 0
     count_lock = threading.Lock()
@@ -413,7 +413,7 @@ def test_sky_engine_is_constructed_once_under_concurrent_first_access(
                 construction_count += 1
             time.sleep(0.2)  # long enough that every thread arrives mid-construction
 
-    monkeypatch.setattr(wayfindinglib.sky, "Sky", SlowFakeSky)
+    monkeypatch.setattr(sky_engine_module, "SkyEngine", SlowFakeSky)
 
     planning = ObservationPlanning(isolated_butler.config, isolated_butler)
     thread_count = 8

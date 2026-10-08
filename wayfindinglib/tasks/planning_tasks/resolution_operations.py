@@ -1,7 +1,7 @@
 """Target Resolution & Region Source Query Operations.
 
 Resolves a named target/star against the local Astrometrics database or
-SIMBAD, and retrieves objects within a sky region for wayfindinglib.sky.Sky.
+SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 """
 
 from typing import Any
@@ -26,8 +26,8 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the local Astrometrics catalog.
+    sky : `SkyEngine`
+        The sky engine providing the local Astrometrics catalog.
     target_name : str
         The name or identifier of the target/star.
 
@@ -135,8 +135,8 @@ def get_sources(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the local Astrometrics catalog.
+    sky : `SkyEngine`
+        The sky engine providing the local Astrometrics catalog.
     ra_deg : float
         Center Right Ascension in degrees.
     dec_deg : float
@@ -192,8 +192,8 @@ def get_library_star_summaries(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the local Astrometrics catalog.
+    sky : `SkyEngine`
+        The sky engine providing the local Astrometrics catalog.
     ra_deg : float
         Center Right Ascension in degrees.
     dec_deg : float
@@ -242,8 +242,8 @@ def get_online_catalog_sources(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the catalog driver registry.
+    sky : `SkyEngine`
+        The sky engine providing the catalog driver registry.
     ra_deg : float
         Center Right Ascension in degrees (ICRS).
     dec_deg : float

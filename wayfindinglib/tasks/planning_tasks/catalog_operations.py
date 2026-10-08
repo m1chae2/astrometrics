@@ -2,7 +2,7 @@
 
 Registers online/local catalog query drivers and queries the local
 Astrometrics database and online astronomical catalogs (SIMBAD, GAIA DR3,
-bundled Hipparcos bright-star extract) for wayfindinglib.sky.Sky, parsing
+bundled Hipparcos bright-star extract) for `SkyEngine`, parsing
 results into standard Target/StellarObject domain model instances.
 """
 
@@ -253,8 +253,8 @@ def astrometrics_catalog(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the local Astrometrics catalog.
+    sky : `SkyEngine`
+        The sky engine providing the local Astrometrics catalog.
     ra_deg : float
         Right Ascension of the search center in degrees.
     dec_deg : float
@@ -356,8 +356,8 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance (unused directly; kept for call-signature
+    sky : `SkyEngine`
+        The sky engine (unused directly; kept for call-signature
         consistency).
     ra_deg : float
         Right Ascension of the search center in degrees.
@@ -436,8 +436,8 @@ def list_catalog_driver_metadata(sky) -> list[dict[str, Any]]:  # ruff: ignore[m
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the catalog driver registry.
+    sky : `SkyEngine`
+        The sky engine providing the catalog driver registry.
 
     Returns
     -------
@@ -473,8 +473,8 @@ def query_online_catalogs(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the catalog driver registry.
+    sky : `SkyEngine`
+        The sky engine providing the catalog driver registry.
     ra_degrees : float
         Center Right Ascension in degrees (ICRS).
     dec_degrees : float

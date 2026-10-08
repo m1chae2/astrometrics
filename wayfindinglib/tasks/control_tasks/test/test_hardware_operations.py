@@ -24,6 +24,7 @@ from astrometricslib import (
     PermissionDeniedError,
 )
 from wayfindinglib.astronomy.coordinate_transforms import icrs_to_current_epoch
+from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
@@ -872,8 +873,8 @@ def test_configured_observer_location_is_none_without_a_latitude_and_longitude()
 
         app_config = _FakeAppConfig({})
 
-    assert ops.configured_observer_location(_EmptyConfig()) is None
-    assert ops.configured_observer_location(None) is None
+    assert configured_observer_location(_EmptyConfig()) is None
+    assert configured_observer_location(None) is None
 
 
 def test_a_position_dictionary_becomes_a_sky_position() -> None:

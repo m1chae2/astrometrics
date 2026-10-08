@@ -3,7 +3,7 @@
 Description: Verifies Telescope's derived meridian-flip delay, altitude
 envelope validation, EquipmentCatalog active-selection resolution and
 validation, and EquipmentConfiguration's plate-scale/FOV arithmetic
-against the values the deprecated observatorylib implementation produced.
+against known values.
 """
 
 import pytest
@@ -97,8 +97,7 @@ def test_equipment_catalog_rejects_unresolvable_active_telescope_id():  # ruff: 
 def test_equipment_configuration_plate_scale_matches_known_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify plate scale matches the standard formula for known inputs.
 
-    206.265 x 3.76 / 450 ~= 1.72346 arcsec/px -- the same formula and
-    constant the deprecated observatorylib.EquipmentConfiguration used.
+    206.265 x 3.76 / 450 ~= 1.72346 arcsec/px.
     """
     config = EquipmentConfiguration(telescope=_make_telescope(), camera=_make_camera())
     assert config.plate_scale_arcsec_per_px == pytest.approx(1.723459, abs=1e-4)

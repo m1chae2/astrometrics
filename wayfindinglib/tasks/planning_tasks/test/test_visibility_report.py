@@ -23,7 +23,7 @@ START = 1791061200.0  # 2026-10-03T21:00:00Z, about 15:00 in Montana
 
 
 def _sky() -> SimpleNamespace:
-    """Build a stand-in for `Sky` at a Montana site.
+    """Build a stand-in for `SkyEngine` at a Montana site.
 
     Returns
     -------

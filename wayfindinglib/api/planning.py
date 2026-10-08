@@ -190,7 +190,8 @@ class ObservationPlanning:
         # object from many threads at once, and the first request after startup
         # (e.g. the Planetarium mounting and firing several queries together)
         # would otherwise find the engine still None on every thread and build
-        # one apiece -- each `Sky` loads its own full copy of the star catalog.
+        # one apiece -- each `SkyEngine` loads its own full copy of the star
+        # catalog.
         self._engine_construction_lock = threading.Lock()
 
     @property
@@ -218,15 +219,15 @@ class ObservationPlanning:
 
         Returns
         -------
-        sky : `wayfindinglib.sky.Sky`
+        sky : `SkyEngine`
             The engine.
         """
         if self.__sky_engine is None:
             with self._engine_construction_lock:
                 if self.__sky_engine is None:
-                    from wayfindinglib.sky import Sky
+                    from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
 
-                    self.__sky_engine = Sky(config=self._config, astrometrics=self._astrometrics)
+                    self.__sky_engine = SkyEngine(config=self._config, astrometrics=self._astrometrics)
         return self.__sky_engine
 
     def _target(self, target: str | Target) -> Target:

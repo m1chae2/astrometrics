@@ -1,9 +1,8 @@
 """Purpose: Unit tests for telemetry domain models.
 
 Description: Verifies GuidingSample.total_drift and
-AlignmentAttempt.pointing_error's Euclidean-norm calculations, carried
-forward unchanged from `wayfindinglib.observatorylib.test.test_observatory`
-per `Wayfinding_Library_Architecture.md` §2.4.7, plus basic
+AlignmentAttempt.pointing_error's Euclidean-norm calculations
+(`Wayfinding_Library_Architecture.md` §2.4.7), plus basic
 construction coverage for the previously untested telemetry models.
 """
 

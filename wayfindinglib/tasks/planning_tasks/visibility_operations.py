@@ -1,7 +1,7 @@
 """Purpose: Hour angle, meridian-flip status, and rise, set and transit times.
 
-Description: Small sums shared by `Sky.get_object_visibility` and by
-`visibility_report`, which answers `ObservationPlanning.get_visibility`.
+Description: Small sums used by `visibility_report`, which answers
+`ObservationPlanning.get_visibility`.
 Each takes values the caller already computed (a sidereal time, an
 altitude), so a caller that handles many objects at once can compute
 those once for the whole list.
@@ -9,7 +9,6 @@ those once for the whole list.
 
 import logging
 import math
-from datetime import datetime
 from typing import Any
 
 import astropy.units as u
@@ -45,8 +44,8 @@ def meridian_from_hour_angle(sky: Any, hour_angle: float) -> dict[str, Any]:
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing the configured meridian flip delay.
+    sky : `SkyEngine`
+        Supplies the configured meridian-flip delay.
     hour_angle : float
         Hour Angle in hours, normalized to [-12.0, 12.0].
 
@@ -87,8 +86,8 @@ def rise_set_transit(
 
     Parameters
     ----------
-    sky : Sky
-        The Sky instance providing observer latitude.
+    sky : `SkyEngine`
+        Supplies the observer latitude.
     dec_deg : float
         Declination of the target in degrees.
     alt_deg : float
@@ -159,39 +158,3 @@ def rise_set_transit(
         "set_time": set_time,
         "transit_time": transit_time,
     }
-
-
-def get_object_visibility(sky, ra_deg: float, dec_deg: float, time_input: datetime | Time) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
-    """Calculate Rise, Set, Transit times, and current visibility status.
-
-    Parameters
-    ----------
-    sky : Sky
-        The Sky instance providing coordinate transforms and observer location.
-    ra_deg : float
-        Right Ascension of the target in degrees.
-    dec_deg : float
-        Declination of the target in degrees.
-    time_input : Union[datetime, Time]
-        The observation time.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Visibility dictionary containing:
-        - "above_horizon": Boolean.
-        - "rise_time": Formatted rise time or "Circumpolar" / "Never Rises".
-        - "set_time": Formatted set time or "Circumpolar" / "Never Rises".
-        - "transit_time": Formatted transit time.
-    """
-    observation_time = time_input if isinstance(time_input, Time) else Time(time_input)
-
-    # Calculate current Alt/Az to check if above horizon
-    alt, _ = sky.radec_to_altaz(ra_deg, dec_deg, observation_time)
-
-    # Transit calculations: Local Sidereal Time = RA
-    lst = sky.get_local_sidereal_time(observation_time)
-    ra_hours = ra_deg / 15.0
-    hour_angle = hour_angle_from_lst(lst, ra_hours)
-
-    return rise_set_transit(sky, dec_deg, alt, hour_angle, observation_time)

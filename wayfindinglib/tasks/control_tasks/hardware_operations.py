@@ -38,10 +38,10 @@ from astrometricslib import (
 )
 from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs, icrs_to_current_epoch
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set
+from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
 from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.models.sky_position import SkyPosition
-from wayfindinglib.observatorylib.site_location import configured_observer_location
 
 if TYPE_CHECKING:
     from astrometricslib import Target

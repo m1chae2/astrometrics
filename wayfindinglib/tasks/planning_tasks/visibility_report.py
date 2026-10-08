@@ -124,7 +124,7 @@ def resolve_sky_objects(sky: Any, objects: Sequence[Any] | None) -> list[Target 
 
     Parameters
     ----------
-    sky : `Sky`
+    sky : `SkyEngine`
         Looks names up in the library, then in SIMBAD.
     objects : `Sequence` or `None`
         Each item is a name or id, a `Target` or `StellarObject`, or a
@@ -448,7 +448,7 @@ def build_visibility_report(
 
     Parameters
     ----------
-    sky : `Sky`
+    sky : `SkyEngine`
         Supplies the observing location, sidereal time and flip delay.
     objects : `list` [`Target` or `StellarObject`]
         The objects. One with no usable position is left out.
@@ -542,7 +542,7 @@ def _add_span(
 
     Parameters
     ----------
-    sky : `Sky`
+    sky : `SkyEngine`
         Supplies the observing location, sidereal time and flip delay.
     report : `VisibilityReport`
         The report whose objects already hold the start-moment values.

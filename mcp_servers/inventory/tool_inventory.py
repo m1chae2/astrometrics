@@ -386,7 +386,7 @@ CLASSIFICATION_RULES = (
     # Calculations.
     _rule(
         r"^(?:observatory_[a-z]+|[a-z]+)_(analyze|compute|calculate|estimate|plan|plot|convert"
-        r"|detect|compare|measure|flag|resolve|assess)(_|$)",
+        r"|detect|compare|measure|flag|resolve|assess|plate_solve)(_|$)",
         "compute",
         "high",
         "Name says it calculates or plots.",

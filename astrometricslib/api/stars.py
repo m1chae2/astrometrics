@@ -499,3 +499,26 @@ class StellarCatalog:
         from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 
         return SourceDetector(threshold_sigma=threshold_sigma, fwhm=fwhm).detect(image_data)
+
+    def plate_solve(self, image_path: str) -> Any | None:
+        """Work out where on the sky an image points, from its stars.
+
+        Plate solving matches the pattern of stars in the image against a
+        star catalog. The result is a World Coordinate System (WCS): the
+        mapping from each pixel to a sky position.
+
+        Parameters
+        ----------
+        image_path : `str`
+            The FITS file to solve.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            The pixel-to-sky mapping, or `None` when the star pattern could
+            not be matched.
+        """
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+
+        _, wcs = StarIdentifier(config=self._config).process_image(image_path, attempt_plate_solving=True)
+        return wcs

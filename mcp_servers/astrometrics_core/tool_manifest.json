@@ -184,6 +184,13 @@
       "interim_block": "",
       "note": "Reads one star's full record by id. Writes nothing."
     },
+    "star_plate_solve": {
+      "tool_class": "compute",
+      "category": "stars",
+      "disposition": "fix",
+      "interim_block": "",
+      "note": "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale."
+    },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",

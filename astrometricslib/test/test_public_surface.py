@@ -124,7 +124,6 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "StackQualityReport",
     "StackResult",
     "StackSummary",
-    "StarIdentifier",
     "StarQueryResult",
     "StellarCatalog",
     "StellarObject",
@@ -156,7 +155,6 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "configure_logging",
     "configure_offline_iers",
     "connect_db",
-    "derive_field_centers",
     "derive_target_sessions",
     "error_from_info",
     "export_target_lineage_as_prov_xml",
@@ -183,30 +181,22 @@ EXPECTED_PUBLIC_NAMES = frozenset({
 
 # Internal names the root still exports because code outside the library
 # imports them from here. wayfindinglib may import only the package root
-# (the import-linter contract), and the backend uses these until the
-# library consistency work moves them. Each one should leave the root once
-# its last outside caller has a public alternative.
+# (the import-linter contract). Each one should leave the root once its
+# last outside caller has a public alternative.
+#
+# Everything else in `EXPECTED_PUBLIC_NAMES` is public on purpose. That
+# includes the job and storage tools of `astrometricslib.foundation`
+# (`capture_job_logs`, `background_job`, `connect_db`, `file_lock`, ...),
+# which wayfindinglib, the backend and the MCP servers share, and the
+# frame helpers wayfindinglib calls (`FrameSelection`,
+# `select_library_frames`, `derive_target_sessions`,
+# `classify_and_sort_fits_files`, `frame_is_spectral`, the `SATURATED_*`
+# limits). wayfindinglib's plate solving goes through `stars.plate_solve`
+# and its field-center list through `targets.imaged_field_centers`.
 KEPT_FOR_OUTSIDE_CALLERS = {
-    "DbLogHandler": "the backend",
-    "FrameSelection": "wayfindinglib",
+    # The backend container builds the Siril driver and hands it to its
+    # stacking service.
     "ImageProcessing": "the backend",
-    "SATURATED_BLOB_MINIMUM_PIXELS": "wayfindinglib",
-    "SATURATED_FRAME_FRACTION": "wayfindinglib",
-    "StarIdentifier": "the backend",
-    "background_job": "wayfindinglib",
-    "capture_job_logs": "wayfindinglib and the backend",
-    "classify_and_sort_fits_files": "wayfindinglib",
-    "close_interrupted_jobs": "the backend",
-    "connect_db": "wayfindinglib",
-    "derive_field_centers": "wayfindinglib",
-    "derive_target_sessions": "wayfindinglib",
-    "file_lock": "wayfindinglib",
-    "frame_is_spectral": "wayfindinglib and the backend",
-    "get_current_job": "wayfindinglib",
-    "parse_iso_time": "wayfindinglib",
-    "run_as_background_job": "the MCP servers",
-    "safe_json_dumps": "wayfindinglib",
-    "select_library_frames": "wayfindinglib",
 }
 
 
@@ -282,6 +272,7 @@ SUB_API_MEMBERS = {
         "detect_point_sources",
         "find_or_create_by_position",
         "get",
+        "plate_solve",
         "query",
         "save_all",
         "tune_spectroscopy_calibration",

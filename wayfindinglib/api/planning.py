@@ -629,9 +629,7 @@ class ObservationPlanning:
             ``right_ascension_deg``, ``declination_deg``, ``target_ids``
             and ``frames_examined``.
         """
-        from astrometricslib import derive_field_centers
-
-        return derive_field_centers(self._astrometrics.targets.list())
+        return self._astrometrics.targets.imaged_field_centers(register_job=False)
 
     # -- Visibility ---------------------------------------------------------
 

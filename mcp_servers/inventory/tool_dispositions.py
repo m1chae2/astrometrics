@@ -168,6 +168,10 @@ DECISIONS = {
     "star_detect_point_sources": ToolDecision(
         "fix", "Needs a NumPy array, which MCP cannot send. Take a frame path."
     ),
+    "star_plate_solve": ToolDecision(
+        "fix",
+        "Returns an astropy WCS, which MCP cannot send. Return the solved center and pixel scale.",
+    ),
     "processing_run_spectroscopy_by_session": ToolDecision(
         "fix",
         "Needs Python objects, so it cannot be called through MCP. Consider making it a stage "

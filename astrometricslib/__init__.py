@@ -165,10 +165,6 @@ if TYPE_CHECKING:
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
     from astrometricslib.drivers.siril_interface import ImageProcessing
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
-    from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
-        derive_field_centers,
-    )
     from astrometricslib.pipelines.shared.api_arguments import (
         check_choice,
         check_include,
@@ -197,8 +193,6 @@ register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
-    "StarIdentifier": "astrometricslib.pipelines.astrometry.processing.star_identifier",
-    "derive_field_centers": "astrometricslib.pipelines.astrometry.utilities.catalog_seeding",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
     "QualityDiagnostics": "astrometricslib.api.processing",
@@ -375,7 +369,6 @@ __all__ = [
     "StackQualityReport",
     "StackResult",
     "StackSummary",
-    "StarIdentifier",
     "StarQueryResult",
     "StellarCatalog",
     "StellarObject",
@@ -409,7 +402,6 @@ __all__ = [
     "configure_logging",
     "configure_offline_iers",
     "connect_db",
-    "derive_field_centers",
     "derive_target_sessions",
     "error_from_info",
     "export_target_lineage_as_prov_xml",

@@ -335,3 +335,33 @@ class TestFindOrCreateByPosition:
 
         assert created.id == "Star_2"
         assert created.name == "Star_2"
+
+
+def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`plate_solve` asks the star identifier to solve and returns its WCS."""
+    from astrometricslib.pipelines.astrometry.processing import star_identifier
+
+    calls: list[tuple[str, bool]] = []
+    solved = object()
+
+    class FakeIdentifier:
+        """Stands in for `StarIdentifier` and records each request."""
+
+        def __init__(self, config: object) -> None:
+            """Accept the configuration the catalog passes."""
+
+        def process_image(self, path: str, attempt_plate_solving: bool) -> tuple[list, object]:
+            """Record the call and return a made-up solution.
+
+            Returns
+            -------
+            result : `tuple`
+                No stars, and the made-up solution.
+            """
+            calls.append((path, attempt_plate_solving))
+            return [], solved
+
+    monkeypatch.setattr(star_identifier, "StarIdentifier", FakeIdentifier)
+
+    assert _make_catalog().plate_solve("/frames/one.fits") is solved
+    assert calls == [("/frames/one.fits", True)]

@@ -128,7 +128,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the configuration.
+        Supplies the science library that solves the frame.
     path : `pathlib.Path`
         The FITS file.
 
@@ -142,9 +142,7 @@ def _solve(context: ControlContext, path: Path) -> tuple[float, float]:
     PlateSolveFailedError
         If the star pattern could not be matched.
     """
-    from astrometricslib import StarIdentifier
-
-    _, wcs = StarIdentifier(config=context.config).process_image(str(path), attempt_plate_solving=True)
+    wcs = context.astrometrics.stars.plate_solve(str(path))
     if wcs is None:
         raise PlateSolveFailedError(f"No plate solution for {path.name}.")
     return solved_center(wcs)

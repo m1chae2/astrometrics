@@ -44,7 +44,6 @@ Astrometrics Library (`astrometricslib`)
    :skip: ProcessingJob
    :skip: RenderedImage
    :skip: SpectroscopyResult
-   :skip: StarIdentifier
    :skip: StellarObject
    :skip: Target
    :skip: TargetFilesResponse

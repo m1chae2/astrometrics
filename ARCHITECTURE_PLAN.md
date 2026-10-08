@@ -18,6 +18,104 @@ The plan covers:
 The findings come from a read-only review of the repository on 2026-10-04. The code is the source
 of truth. Line numbers drift, so this plan names files and functions instead.
 
+## Status
+
+Status on 2026-10-08: phases 1 to 8 of section 10 are done. Sections 2 to 9 describe the review
+and the target design. Some of the paths they name have since moved, for example
+`backend/mcp/tool_dispositions.py` is now `mcp_servers/inventory/tool_dispositions.py`.
+
+### Done
+
+- **Phases 1 to 3.** The Appendix A bugs are fixed. The enforcement checks in section 9 run in CI:
+  - `TID251` banned-API entries;
+  - eleven import-linter contracts in `pyproject.toml`;
+  - public-surface tests for both libraries;
+  - the served-tools test in `mcp_servers/inventory/test/`;
+  - the backend public-interface test;
+  - the ESLint `fetch`/`WebSocket` rule;
+  - the generated-types currency test;
+  - the `BLE`, `TRY`, `LOG`, `G`, and `T20` rules and the `logging.basicConfig` ban.
+
+  `astrometricslib/foundation/` holds the error model, `configure_logging`, the log context, the
+  job framework (`foundation/jobs/`), and the storage classes (`foundation/storage/`).
+- **Phases 4 to 6.** The section 5.1 copies and the section 6.3 legacy code are gone. The library
+  API has the section 4 shape, including the seven `control` children. Library code raises the
+  section 7.2 categories. The section 5.2 logic lives in the libraries.
+- **Phase 7.** The MCP servers live in `mcp_servers/`, and `mcp` is an optional dependency. The
+  backend declares its public interface in `backend/public_interface.py`. Startup work lives in
+  `backend/startup.py`, and the routes live in `backend/routers/`.
+- **Phase 8.** Section 6.2 items 1 to 11 are done:
+  - one storage path through `DiskButler`;
+  - no leftover packages;
+  - one injected `Astrometrics` handle;
+  - one exception tree;
+  - `abc.ABC` driver interfaces in `drivers/interfaces/` in both libraries;
+  - job records in `foundation/jobs/`;
+  - alignment and guiding records in `wayfindinglib/drivers/control_record_store.py`.
+
+  Scripts follow the item 8 rule. The import-linter contract "a library script never imports
+  another script" checks it, and import-linter also keeps `wayfindinglib/scripts/` on
+  astrometricslib's public API. Library docstrings no longer cite architecture section numbers or
+  mention MCP and agents.
+
+### Behavior changes
+
+- The alignment overlay groups plate-solve attempts by target in the library
+  (`AlignmentTargetSession`). The cumulative view no longer merges live attempts.
+- The tracking-risk map blends measured guiding error by hour angle and declination at the time
+  of each observation, not by RA and Dec today. With no equipment profile, the map is empty.
+- The candidate separation of a spectral match ranks candidates by RMS (root-mean-square) fit
+  error, not by the order the backend returned them.
+- Ceres is classified as a planet (`TargetObjectType`). A target with no object type appears only
+  under the "All" and "No Image" filters.
+- The mount's INDI readback and commands convert between the current-epoch frame (JNow) and J2000
+  in `hardware_operations`.
+- The queue runner applies the real safety gate. An `UNKNOWN` safety verdict suspends the queue.
+- The internal guiding protocol's `run_cycle` raises `ConfigurationError`, because the library has
+  no guide-star measurement step. The PHD2 protocol's `run_cycle` raises `ConflictError`.
+
+### Remaining
+
+- Nothing in the UI passes `stretchParameters` yet. No current UI flow shows a raw FITS file with
+  stretching on.
+- `astrometricslib/pipelines/spectroscopy/processing/spectral_classifier.py` keeps its own
+  `POOR_MATCH_RMS_THRESHOLD` and spectral-letter order beside the ones in
+  `models/stellar_source.py`.
+- The UI keeps its own `PlanetariumSource` type instead of the generated `SkySource`. The two
+  differ in UI-only fields and in which fields may be empty.
+- Positions that Ekos writes when it syncs the mount itself are in JNow. Their conversion is not
+  checked.
+- Two copies of the calibration inventory models remain: `CalibrationEntry` and
+  `CalibrationStats` in both `wayfindinglib/models/equipment_and_site/calibration.py` and
+  `astrometricslib/models/calibration_inventory.py`.
+- The meridian-flip delay has two sources that can disagree. Planning reads
+  `meridian_flip_delay_min` from the `[Observatory.Telescope]` configuration section (default 5
+  minutes). The `Telescope` model derives its own `meridian_flip_delay_min` from
+  `flip_hour_angle_deg`.
+- Only the method names of the UI's `ActionRegistry` are generated. Its payload types are written
+  by hand.
+- INDI image delivery for the main camera is not turned on, so `control.imaging.capture_image`
+  returns no image from real INDI hardware.
+- The internal guiding protocol cannot run a guide loop on its own (see "Behavior changes").
+- The sequencer (`ObservationExecution.advance_session`) does not run meridian flips or fault
+  recovery.
+- `astrometricslib/foundation/config.py` reads the `ASTROMETRICS_TESTING` environment variable, a
+  test switch inside library code.
+- The section 9 allow-list in `pyproject.toml` still lists:
+  - `banned-api` for `backend/services/infrastructure/indi_worker.py`,
+    `backend/services/observatory/execution_service.py`, three backend tests,
+    `documentation/notebooks/wayfinding/execution/scripts/observatory_session_recorder.py`, and
+    `mcp_servers/gaps/__main__.py`;
+  - `blind-except` for the logging handler in `socket_manager.py`;
+  - `print` for the notebooks and the command-line tools whose output is their result.
+- `wayfindinglib/test/test_observatory_session_recorder.py` imports a documentation script.
+- `ruff: ignore` suppressions remain:
+  - 346 in astrometricslib, mostly missing argument types;
+  - 13 in backend;
+  - 10 in wayfindinglib, for PyIndi's camelCase names and similar cases.
+- `ui/mcp/dist` was not rebuilt after the profile constants moved into the generated
+  `ui/mcp/src/profileRules.ts`.
+
 ## 1. Target layering
 
 The repository has four kinds of code. Each layer may call only the layer below it.
@@ -239,7 +337,7 @@ follow section 4, and no row adds a function beyond those listed there.
 | `backend/services/observatory/target_imaging_planner.py` `create_sequence_plan` | `ObservationPlanning.create_sequence_plan`, then `create_plan` |
 | `backend/services/observatory/mosaic_service.py` `create_mosaic_targets` | `ObservationPlanning.create_mosaic_targets`, then `create_mosaic` |
 | `backend/services/data/stellar_service.py` spectral-class labels, aliases, summary, and by-class listing | `StellarCatalog.query(detail="class_counts")`, `StellarCatalog.query(spectral_class=..., order="match")`. The backend copy also hid single-frame detections, so deleting it depends on moving that "displayable star" filter into `StellarCatalog.query` (`include_unresolved=False`, section 5.2). |
-| `backend/services/data/stellar_service.py` `get_visible_targets` | `ObservationPlanning.get_visibility` |
+| `backend/services/data/stellar_service.py` `get_visible_targets` | `ObservationPlanning.get_visibility`. This row was not a copy: the backend held visibility logic of its own, and phase 5 moved that logic into `get_visibility`. |
 | `backend/services/observatory/observatory_service.py` humidity safety rule | `control.safety.assess` |
 | `backend/services/observatory/telescope_service.py` `_infer_target_at_coordinates` (small-angle distance, 1° match) | `TargetCatalog.query(ra=..., dec=..., radius_deg=...)` |
 | `backend/services/analysis/analysis_orchestrator.py` frame classification (spectroscopy versus photometry) | `ProcessingPipelines.process_target(stages=...)`, which already chooses, using `frame_is_spectral` |
@@ -306,7 +404,7 @@ logging in detail.
 | **Background jobs.** Long-running methods use `@background_job` and take `register_job: bool = True`. | 14 decorated methods; `register_job` appears on 4. | 4 decorated methods; `register_job` appears on 1. |
 | **Exports.** The package root exports the root object, the sub-APIs, the models, the exceptions, and the driver base classes. A test pins the list. | Remove about 35 internal names, among them `AstrometryPipeline`, `StarIdentifier`, `FrameSelection`, `select_library_frames`, `close_interrupted_jobs`, `resolve_worker_counts`, `run_parallel_batch`, `DbLogHandler`, `LoggerInterface`, `run_siril_stack`, `stack_frames`, `ImageProcessing`, `SATURATED_FRAME_FRACTION`, and `SATURATED_BLOB_MINIMUM_PIXELS`. Stop importing `background_job` into the package root, where wayfindinglib picks it up. | Add the models and exceptions. Add a public-surface test like `astrometricslib/test/test_public_surface.py`. |
 | **`api/__init__.py`.** One lazy-export lookup table and one statement of how to import. | Its docstring says not to import from `api`. Align the guidance. | Replace the `if` chain with the lookup table. |
-| **Docstrings.** numpydoc, with no architecture section numbers and no mention of MCP or agents. | 13 mentions of MCP or agents, for example "Called through the MCP server, this runs as a background job". | 26 `` citations, some to sections that do not exist, and 7 mentions of MCP or agents. |
+| **Docstrings.** numpydoc, with no architecture section numbers and no mention of MCP or agents. | 13 mentions of MCP or agents, for example "Called through the MCP server, this runs as a background job". | 26 citations of architecture section numbers, some to sections that do not exist, and 7 mentions of MCP or agents. |
 
 ### 6.2 Library consistency work
 
@@ -668,7 +766,7 @@ Decided on 2026-10-04:
   - HTTP 200 for every well-formed JSON-RPC reply;
   - JSON Lines as the log file format.
 
-Open: none.
+Open: none. The "Remaining" list in the Status section holds the work left after phase 8.
 
 ## Appendix A. Confirmed bugs
 
@@ -703,3 +801,9 @@ Other issues the review reported but did not re-check:
 - `astrometricslib/mcp/tools/contract_validator.py` scans from the repository root, not from the
   library its docstring names.
 - The planetarium alignment clustering averages RA without wrapping at 0h/24h.
+
+On 2026-10-08 all three no longer apply. The container assigns `wayfinder.control.driver` once,
+after it builds the driver. The contract validator (now `mcp_servers/devtools/contract_validator.py`)
+scans the astrometricslib package. The alignment grouping moved into
+`wayfindinglib/analytics/alignment_sessions.py`, whose `mean_position_deg` takes the circular mean
+of RA.

@@ -15,7 +15,7 @@ def test_recovery_succeeds_on_first_enabled_outcome() -> None:
     """Verify recovery stops as soon as the device reports ENABLED."""
     call_count = {"value": 0}
 
-    def read_state():
+    def read_state() -> DeviceSummaryState:
         call_count["value"] += 1
         return DeviceSummaryState.ENABLED
 

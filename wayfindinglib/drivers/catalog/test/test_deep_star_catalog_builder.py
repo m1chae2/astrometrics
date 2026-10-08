@@ -157,7 +157,7 @@ def test_a_fine_pixel_lies_inside_its_coarse_parent() -> None:
 
 
 @pytest.mark.parametrize(("level", "pixel"), [(-1, 0), (13, 0), (0, -1), (0, 12), (4, 3072)])
-def test_pixel_source_id_range_rejects_out_of_range_arguments(level, pixel) -> None:
+def test_pixel_source_id_range_rejects_out_of_range_arguments(level: int, pixel: int) -> None:
     """A typo must not silently ask for the wrong part of the sky."""
     with pytest.raises(InvalidArgumentError, match=r"HEALPix level|Pixel"):
         pixel_source_id_range(level, pixel)
@@ -473,7 +473,7 @@ REAL_GAIA_STARS = [
 
 
 @pytest.mark.parametrize("level", [0, 2, 4, 8, 12])
-def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level) -> None:
+def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level: int) -> None:
     """The pixel worked out from a star's position is the one in its ID."""
     ids = np.array([star[0] for star in REAL_GAIA_STARS], dtype=np.int64)
     ra = np.array([star[1] for star in REAL_GAIA_STARS])
@@ -485,7 +485,7 @@ def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level) ->
 
 
 @pytest.mark.parametrize("level", [0, 1, 2, 3])
-def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level) -> None:
+def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level: int) -> None:
     """Every pixel of a level gets its fair share of evenly spread points.
 
     The real stars above only cover the northern sky, so this is what
@@ -526,7 +526,9 @@ CIRCLES = [
 
 
 @pytest.mark.parametrize(("center_ra", "center_dec", "radius"), CIRCLES)
-def test_every_point_inside_a_circle_is_in_a_chosen_pixel(center_ra, center_dec, radius) -> None:
+def test_every_point_inside_a_circle_is_in_a_chosen_pixel(
+    center_ra: float, center_dec: float, radius: float
+) -> None:
     """No star inside a circle can be left in a chunk that was not chosen."""
     random_generator = np.random.default_rng(seed=5)
     # Random distances and directions from the center, then turned into

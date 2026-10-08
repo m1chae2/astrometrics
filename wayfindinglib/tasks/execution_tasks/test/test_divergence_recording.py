@@ -84,7 +84,7 @@ def test_divergence_magnitude_is_signed_intended_minus_observed() -> None:
         ObservatoryCapability.OBSERVATORY_SAFETY,
     ],
 )
-def test_uncomparable_capabilities_are_rejected(capability) -> None:
+def test_uncomparable_capabilities_are_rejected(capability: ObservatoryCapability) -> None:
     """Verify MOUNT_CONTROL/CAPTURE_ORCHESTRATION/OBSERVATORY_SAFETY raise."""
     with pytest.raises(InvalidArgumentError, match="no shadowed counterpart"):
         record_divergence(

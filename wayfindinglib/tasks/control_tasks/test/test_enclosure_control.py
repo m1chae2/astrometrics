@@ -65,7 +65,7 @@ def test_close_permitted_across_azimuth_wraparound() -> None:
         EnclosureState.UNKNOWN,
     ],
 )
-def test_mount_motion_refused_for_every_non_open_state(state) -> None:
+def test_mount_motion_refused_for_every_non_open_state(state: EnclosureState) -> None:
     """Verify mount motion is refused for every non-OPEN state."""
     assert can_leave_park(state) is False
 

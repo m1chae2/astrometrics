@@ -73,7 +73,7 @@ class _FakeClient:
         """Initialize with no switch vector sent yet."""
         self.sent_switch = None
 
-    def sendNewSwitch(self, switch_vector) -> None:
+    def sendNewSwitch(self, switch_vector: object) -> None:
         """Record the switch vector that was sent."""
         self.sent_switch = switch_vector
 

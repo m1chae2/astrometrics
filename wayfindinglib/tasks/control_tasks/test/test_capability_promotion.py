@@ -39,7 +39,9 @@ def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButl
     return DiskButler(app_config=config)
 
 
-def _divergence_record(capability, within_tolerance, comparison_input_id="frame-1") -> DivergenceRecord:
+def _divergence_record(
+    capability: ObservatoryCapability, within_tolerance: bool, comparison_input_id: str = "frame-1"
+) -> DivergenceRecord:
     return DivergenceRecord(
         id=f"div-{comparison_input_id}",
         observation_session_id="session-1",

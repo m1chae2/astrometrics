@@ -94,7 +94,7 @@ def test_realign_never_converges_exhausts_iteration_limit() -> None:
     config = CorrectionConfig(alignment_iteration_limit=3)
     call_count = {"value": 0}
 
-    def realign_iteration():
+    def realign_iteration() -> tuple[bool, float]:
         call_count["value"] += 1
         return False, 60.0
 

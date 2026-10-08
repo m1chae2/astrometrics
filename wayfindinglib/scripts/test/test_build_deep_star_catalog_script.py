@@ -236,7 +236,7 @@ def fake_environment_planning() -> ObservationPlanning:
     ("seconds", "expected"),
     [(5, "5s"), (125, "2m"), (3 * 3600 + 7 * 60, "3h07m"), (0, "0s")],
 )
-def test_durations_are_written_the_way_a_person_would_say_them(seconds, expected) -> None:
+def test_durations_are_written_the_way_a_person_would_say_them(seconds: int, expected: str) -> None:
     """The time-left estimate is easy to read at a glance."""
     assert script._format_duration(seconds) == expected
 

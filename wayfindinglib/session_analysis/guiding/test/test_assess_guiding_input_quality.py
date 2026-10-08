@@ -5,17 +5,27 @@ judged against equipment-derived limits: lost frames, excursions, weak guide
 signal, impossible calibrations and too little data.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
 
 from wayfindinglib.analytics.performance_envelope import MINIMUM_SAMPLES_PER_SESSION
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
+from wayfindinglib.models.session.guiding_run import GuidingRunSummary
+from wayfindinglib.models.session.session_quality import GuidingInputQuality
 from wayfindinglib.session_analysis.guiding.pre_processing.assess_guiding_input_quality import (
     assess_guiding_input_quality,
 )
 
 
-def _assess(samples, runs, envelope, match="exact", scale_matches=True):
+def _assess(
+    samples: Sequence[dict[str, Any]],
+    runs: Sequence[GuidingRunSummary],
+    envelope: PerformanceEnvelope | None,
+    match: str = "exact",
+    scale_matches: bool | None = True,
+) -> GuidingInputQuality:
     """Run pre-processing with this module's usual arguments.
 
     Returns

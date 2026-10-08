@@ -8,6 +8,7 @@ Description: Verifies the listing, download, sync and log-sync tasks behind
 import os
 import time
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -28,13 +29,15 @@ class _FakeObservatory:
         self.astrometrics = Mock()
 
 
+@dataclass
 class _FakeFrame:
-    def __init__(self, path) -> None:
-        self.path = path
+    """A stand-in frame record holding only its path."""
+
+    path: str
 
 
 class _FakeTarget:
-    def __init__(self, target_id, frame_paths) -> None:
+    def __init__(self, target_id: str, frame_paths: list[str]) -> None:
         self.id = target_id
         self.frames = [_FakeFrame(p) for p in frame_paths]
         self.recalculate_total_exposure_calls = 0
@@ -43,18 +46,46 @@ class _FakeTarget:
         self.recalculate_total_exposure_calls += 1
 
 
-def _patched_config(**overrides: Any):
-    class _FakeConfig:
-        def get_telescope_hostname(self):
-            return overrides.get("host", "stellarmate")
+class _FakeConfig:
+    """A stand-in configuration with the three paths a sync reads."""
 
-        def get_remote_pictures_path(self):
-            return overrides.get("remote_path", "/home/stellarmate/Pictures")
+    def __init__(self, overrides: dict[str, str]) -> None:
+        """Keep the values that replace the defaults."""
+        self._overrides = overrides
 
-        def get_frames_path(self):
-            return overrides.get("frames_path", "/tmp/frames")
+    def get_telescope_hostname(self) -> str:
+        """Return the telescope host name.
 
-    return _FakeConfig()
+        Returns
+        -------
+        host : `str`
+            The host name.
+        """
+        return self._overrides.get("host", "stellarmate")
+
+    def get_remote_pictures_path(self) -> str:
+        """Return the picture folder on the telescope computer.
+
+        Returns
+        -------
+        path : `str`
+            The folder.
+        """
+        return self._overrides.get("remote_path", "/home/stellarmate/Pictures")
+
+    def get_frames_path(self) -> str:
+        """Return the local frames folder.
+
+        Returns
+        -------
+        path : `str`
+            The folder.
+        """
+        return self._overrides.get("frames_path", "/tmp/frames")
+
+
+def _patched_config(**overrides: str) -> _FakeConfig:
+    return _FakeConfig(overrides)
 
 
 def test_download_remote_frames_indexes_through_science_astrometrics_on_success() -> None:
@@ -100,31 +131,33 @@ def test_download_remote_frames_returns_false_without_indexing_on_failure() -> N
     observatory.astrometrics.targets.reindex_frames.assert_not_called()
 
 
+@dataclass
 class _FakeTargetRecord:
-    def __init__(self, target_id, ra="0h 0m 0s", dec="0° 0′ 0″") -> None:
-        self.id = target_id
-        self.ra = ra
-        self.dec = dec
+    """A stand-in target record with an id and a position."""
+
+    id: str
+    ra: str = "0h 0m 0s"
+    dec: str = "0° 0′ 0″"
 
 
 class _FakeAstrometrics:
-    def __init__(self, existing=None) -> None:
+    def __init__(self, existing: list[_FakeTargetRecord] | None = None) -> None:
         self._existing = {t.id: t for t in (existing or [])}
         self.created = []
         self.saved = False
         self.prune_flags = []
         self.targets = self
 
-    def get(self, target_id, refresh=False):
+    def get(self, target_id: str, refresh: bool = False) -> _FakeTargetRecord | None:
         return self._existing.get(target_id)
 
-    def create(self, target_id):
+    def create(self, target_id: str) -> _FakeTargetRecord:
         target = _FakeTargetRecord(target_id)
         self._existing[target_id] = target
         self.created.append(target_id)
         return target
 
-    def reindex_frames(self, target, prune_missing=True) -> None:
+    def reindex_frames(self, target: _FakeTargetRecord, prune_missing: bool = True) -> None:
         target.reindexed = True
         self.prune_flags.append(prune_missing)
 
@@ -385,14 +418,14 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
 class _EmptyTargetCatalog:
     """Stands in for the target catalog, with nothing in it."""
 
-    def list(self):
+    def list(self) -> list[Any]:
         return []
 
 
 class _EmptyAstrometrics:
     """Stands in for the Astrometrics facade the sync builds for itself."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         self.targets = _EmptyTargetCatalog()
 
 
@@ -562,7 +595,9 @@ def test_sync_calibration_folder_summarises_what_was_added(
     }
 
 
-def _sync_observatory(remote_folders, resolved, remote_files) -> tuple[_FakeObservatory, Mock]:
+def _sync_observatory(
+    remote_folders: list[str], resolved: str | None, remote_files: list[tuple[str, int]]
+) -> tuple[_FakeObservatory, Mock]:
     """Build a fake observatory with a listed telescope computer.
 
     Returns

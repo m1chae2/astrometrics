@@ -184,7 +184,7 @@ def test_reconcile_session_delegates_and_persists(butler: DiskButler) -> None:
     """Verify reconcile_session runs both reconciliations and records."""
 
     class _FakeTargetRegistry:
-        def get(self, target_id) -> None:
+        def get(self, target_id: str) -> None:
             return None
 
     class _FakeAstrometrics:

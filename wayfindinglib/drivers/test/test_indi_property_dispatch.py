@@ -26,7 +26,9 @@ import pytest
 from wayfindinglib.drivers.indi_interface import IndiClient, IndiInterface
 
 
-def _make_generic_property(property_class, name: str, elements=None) -> PyIndi.Property:
+def _make_generic_property(
+    property_class: type[PyIndi.Property], name: str, elements: list[tuple[str, float]] | None = None
+) -> PyIndi.Property:
     """Build a real INDI property and upcast it to a generic Property.
 
     Parameters
@@ -63,19 +65,19 @@ class _RecordingClient(IndiClient):
         super().__init__()
         self.received: list[tuple[str, str]] = []
 
-    def newNumber(self, property) -> None:
+    def newNumber(self, property: PyIndi.Property) -> None:
         """Record that a number property arrived."""
         self.received.append(("newNumber", property.getName()))
 
-    def newSwitch(self, property) -> None:
+    def newSwitch(self, property: PyIndi.Property) -> None:
         """Record that a switch property arrived."""
         self.received.append(("newSwitch", property.getName()))
 
-    def newText(self, property) -> None:
+    def newText(self, property: PyIndi.Property) -> None:
         """Record that a text property arrived."""
         self.received.append(("newText", property.getName()))
 
-    def newLight(self, property) -> None:
+    def newLight(self, property: PyIndi.Property) -> None:
         """Record that a light property arrived."""
         self.received.append(("newLight", property.getName()))
 
@@ -89,7 +91,9 @@ class _RecordingClient(IndiClient):
         (PyIndi.PropertyLight, "newLight"),
     ],
 )
-def test_update_property_routes_to_per_type_callback(property_class, expected_callback) -> None:
+def test_update_property_routes_to_per_type_callback(
+    property_class: type[PyIndi.Property], expected_callback: str
+) -> None:
     """Each property type reaches the callback named for that type."""
     client = _RecordingClient()
 

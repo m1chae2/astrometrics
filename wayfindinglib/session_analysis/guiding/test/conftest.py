@@ -20,6 +20,7 @@ from wayfindinglib.models.equipment_and_site.equipment import (
     GuideScope,
     Telescope,
 )
+from wayfindinglib.models.equipment_and_site.performance_envelope import PerformanceEnvelope
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 
 NIGHT_START = 1790217108.0
@@ -58,7 +59,7 @@ def make_envelope() -> Callable[..., Any]:
         envelope. Pass ``star_width=None`` for equipment with no frames yet.
     """
 
-    def make(star_width: float | None = 5.59, baseline: dict | None = GOOD_BASELINE):
+    def make(star_width: float | None = 5.59, baseline: dict | None = GOOD_BASELINE) -> PerformanceEnvelope:
         """Build the envelope.
 
         Returns

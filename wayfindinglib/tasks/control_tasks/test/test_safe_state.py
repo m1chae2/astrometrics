@@ -6,6 +6,7 @@ did not park, and `failed_step` records the first failure -- the cases
 `Wayfinding_Library_Architecture.md` calls out.
 """
 
+from collections.abc import Callable
 from typing import Any, Never
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
@@ -110,7 +111,7 @@ def test_steps_run_in_documented_order() -> None:
     """Verify the six steps are attempted in the documented order."""
     call_order = []
 
-    def tracker(name):
+    def tracker(name: str) -> Callable[[], bool]:
         def _call() -> bool:
             call_order.append(name)
             return True

@@ -189,7 +189,7 @@ def _finished_process(return_code: int = 0) -> MagicMock:
     return process
 
 
-def _rsync_writing(files: dict[str, bytes], destination) -> Callable[..., Any]:
+def _rsync_writing(files: dict[str, bytes], destination: Path) -> Callable[..., Any]:
     """Build a ``subprocess.Popen`` stand-in whose rsync run creates files.
 
     Returns
@@ -198,7 +198,7 @@ def _rsync_writing(files: dict[str, bytes], destination) -> Callable[..., Any]:
         Writes `files` into `destination` when called, as rsync would.
     """
 
-    def fake_popen(command, **kwargs) -> MagicMock:
+    def fake_popen(command: list[str], **kwargs: object) -> MagicMock:
         """Write the files and return a finished process stand-in.
 
         Returns

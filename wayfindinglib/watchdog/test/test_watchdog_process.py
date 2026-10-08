@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
+from wayfindinglib.models.session.safe_state import SafeStateOutcome
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
 from wayfindinglib.watchdog.heartbeat import write_heartbeat
 from wayfindinglib.watchdog.watchdog_process import check_and_escalate, run_watchdog_loop
@@ -73,7 +74,7 @@ def test_run_watchdog_loop_reports_each_escalation(tmp_path: Path) -> None:
     escalations = []
     stop_event = threading.Event()
 
-    def stop_after_one(outcome) -> None:
+    def stop_after_one(outcome: SafeStateOutcome) -> None:
         escalations.append(outcome)
         stop_event.set()
 
@@ -98,7 +99,7 @@ def test_run_watchdog_loop_does_not_escalate_when_heartbeat_kept_fresh(tmp_path:
     stop_event = threading.Event()
     call_count = {"value": 0}
 
-    def stop_after_three_checks():
+    def stop_after_three_checks() -> SafeStateSteps:
         call_count["value"] += 1
         if call_count["value"] >= 3:
             stop_event.set()

@@ -53,9 +53,9 @@ def _unsafe_assessment() -> SafetyAssessment:
 
 
 def _entry(
-    entry_id="entry-1",
-    status=QueueEntryStatus.PENDING,
-    computed_start_time=_NOW,
+    entry_id: str = "entry-1",
+    status: QueueEntryStatus = QueueEntryStatus.PENDING,
+    computed_start_time: datetime = _NOW,
 ) -> QueuedObservationPackage:
     return QueuedObservationPackage(
         id=entry_id,
@@ -67,7 +67,7 @@ def _entry(
     )
 
 
-def _session(entries=None) -> ObservationSession:
+def _session(entries: list[QueuedObservationPackage] | None = None) -> ObservationSession:
     return ObservationSession(
         id="session-1",
         night_date=_NOW.date(),
@@ -284,7 +284,7 @@ def test_authoritative_issues_exactly_what_shadowed_would_have_recorded() -> Non
     shadowed_intent_seen = []
     authoritative_intent_seen = []
 
-    def make_disposition(sink) -> ActionDisposition:
+    def make_disposition(sink: list[float]) -> ActionDisposition:
         return ActionDisposition(
             ObservatoryCapability.AUTOFOCUS,
             issue=lambda: None,

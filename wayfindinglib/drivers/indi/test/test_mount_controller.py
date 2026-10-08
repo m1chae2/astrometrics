@@ -17,6 +17,7 @@ without needing to independently reimplement the Alt/Az transform in
 the test.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +27,11 @@ from astrometricslib import AppConfiguration, ConflictError
 from wayfindinglib.drivers.indi.mount_controller import MountController
 
 
+@dataclass
 class _FakeNumberElement:
-    def __init__(self, value) -> None:
-        self.value = value
+    """One element of a fake INDI number vector."""
+
+    value: float
 
 
 class _FakeTelescope:
@@ -41,15 +44,17 @@ class _FakeTelescope:
             _FakeNumberElement(elevation_m),
         ]
 
-    def getNumber(self, name):
+    def getNumber(self, name: str) -> list[_FakeNumberElement] | None:
         if name == "GEOGRAPHIC_COORD":
             return self._geographic_coord
         return None
 
 
+@dataclass
 class _FakeClient:
-    def __init__(self, config) -> None:
-        self.config = config
+    """A fake INDI client that only holds the configuration."""
+
+    config: AppConfiguration
 
 
 @pytest.fixture

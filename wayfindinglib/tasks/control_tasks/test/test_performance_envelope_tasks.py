@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from astrometricslib import AppConfiguration, observing_night_id
+from wayfindinglib.analytics.performance_envelope import MeasuredImageQuality
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -110,7 +111,7 @@ class _Astrometrics:
         self.targets = _Targets()
 
 
-def _measure(astrometrics: _Astrometrics, config):
+def _measure(astrometrics: _Astrometrics, config: AppConfiguration) -> MeasuredImageQuality | None:
     """Measure star width for this observatory's rig with a 10 second cut.
 
     Returns

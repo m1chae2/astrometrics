@@ -5,8 +5,9 @@ get_status) and drain_guiding_samples against a fake PHD2Client, so no real
 PHD2 connection is needed.
 """
 
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -17,10 +18,10 @@ from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 class FakeClient:
     """A fake PHD2Client yielding a fixed list of events once, then idling."""
 
-    def __init__(self, events) -> None:
+    def __init__(self, events: list[dict[str, Any]]) -> None:
         self._events = events
 
-    def events(self, stop_event=None) -> Iterator[dict[str, Any]]:
+    def events(self, stop_event: threading.Event | None = None) -> Iterator[dict[str, Any]]:
         """Yield the fixed event list once, then idle until stopped.
 
         Yields
@@ -36,7 +37,7 @@ class FakeClient:
             time.sleep(0.01)
 
 
-def _wait_until(condition, timeout_seconds=2.0) -> bool:
+def _wait_until(condition: Callable[[], object], timeout_seconds: float = 2.0) -> bool:
     """Poll condition() until it's truthy or timeout_seconds elapses.
 
     Returns

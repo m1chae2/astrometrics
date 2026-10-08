@@ -100,7 +100,7 @@ def test_sample_focus_curve_approaches_every_point_from_one_direction() -> None:
     def get_position() -> int:
         return current_position["value"]
 
-    def measure_fwhm():
+    def measure_fwhm() -> tuple[float, int] | None:
         return (2.0, 20)
 
     curve = sample_focus_curve(
@@ -132,7 +132,7 @@ def test_sample_focus_curve_skips_failed_measurements() -> None:
     def get_position() -> int:
         return current_position["value"]
 
-    def measure_fwhm():
+    def measure_fwhm() -> tuple[float, int] | None:
         call_count["value"] += 1
         if call_count["value"] == 2:
             return None

@@ -26,7 +26,11 @@ from wayfindinglib.models.equipment_and_site.equipment import (
     GuideScope,
     Telescope,
 )
-from wayfindinglib.models.equipment_and_site.performance_envelope import ThresholdStatus, ThresholdTier
+from wayfindinglib.models.equipment_and_site.performance_envelope import (
+    PerformanceEnvelope,
+    ThresholdStatus,
+    ThresholdTier,
+)
 
 
 def _equipment(focal_length_mm: float = 405.0, pixel_size_um: float = 3.76) -> EquipmentConfiguration:
@@ -76,7 +80,7 @@ def _guide_camera(pixel_size_um: float = 3.75, width_px: int = 1280) -> Camera:
     )
 
 
-def _envelope(**overrides: Any):
+def _envelope(**overrides: Any) -> PerformanceEnvelope:
     """Derive an envelope for the default equipment, with overrides.
 
     Returns

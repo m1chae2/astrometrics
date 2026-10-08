@@ -15,7 +15,10 @@ wayfindinglib/astronomy/'s own tests.
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+from astropy.coordinates import EarthLocation
+from astropy.time import Time
 
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
@@ -79,7 +82,9 @@ def _soonest_request(ra_key: float, **package_overrides: Any) -> PlacementReques
     )
 
 
-def _always_high_altitude(ra_deg, dec_deg, location, obstime):
+def _always_high_altitude(
+    ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+) -> tuple[float, float]:
     """Return an altitude/azimuth pair well above any reasonable floor.
 
     Returns
@@ -90,7 +95,9 @@ def _always_high_altitude(ra_deg, dec_deg, location, obstime):
     return 60.0, 180.0
 
 
-def _always_low_altitude(ra_deg, dec_deg, location, obstime):
+def _always_low_altitude(
+    ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+) -> tuple[float, float]:
     """Return an altitude/azimuth pair that never clears the floor.
 
     Returns
@@ -102,7 +109,7 @@ def _always_low_altitude(ra_deg, dec_deg, location, obstime):
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_two_packages_place_without_overlap(_mock_altaz) -> None:
+def test_two_packages_place_without_overlap(_mock_altaz: MagicMock) -> None:
     """Verify two independently-fitting packages are placed without overlap."""
     site, telescope = _site(), _telescope()
     requests = [_soonest_request(1.0, exposure_sec=600.0), _soonest_request(2.0, exposure_sec=600.0)]
@@ -115,7 +122,7 @@ def test_two_packages_place_without_overlap(_mock_altaz) -> None:
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_low_altitude)
-def test_never_clears_altitude(_mock_altaz) -> None:
+def test_never_clears_altitude(_mock_altaz: MagicMock) -> None:
     """Verify a target that never clears the floor is diagnosed distinctly.
 
     Expects `InfeasibilityReasonCode.NEVER_CLEARS_ALTITUDE`.
@@ -161,7 +168,9 @@ def test_window_too_short() -> None:
     """Verify a too-short clear window is diagnosed distinctly."""
     site, telescope = _site(), _telescope(min_altitude_deg=20.0)
 
-    def brief_clearing(ra_deg, dec_deg, location, obstime):
+    def brief_clearing(
+        ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+    ) -> tuple[float, float]:
         # Clear for a single 5-minute sample near the window start,
         # low otherwise.
         elapsed_min = (obstime.datetime - _WINDOW_START).total_seconds() / 60.0
@@ -199,7 +208,7 @@ def test_night_fully_committed() -> None:
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz) -> None:
+def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz: MagicMock) -> None:
     """Verify a higher-priority package is placed first on a start-time tie."""
     site, telescope = _site(), _telescope()
     low_priority = _soonest_request(1.0, priority=0)
@@ -232,7 +241,7 @@ def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz) -> None:
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.visibility_state_at")
-def test_fixed_time_packages_placed_as_anchors(mock_visibility) -> None:
+def test_fixed_time_packages_placed_as_anchors(mock_visibility: MagicMock) -> None:
     """Verify a fixed-time request is placed at its requested start time."""
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
@@ -255,7 +264,7 @@ def test_fixed_time_packages_placed_as_anchors(mock_visibility) -> None:
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.visibility_state_at")
-def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility) -> None:
+def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility: MagicMock) -> None:
     """Verify overlapping fixed-time requests both diagnose as conflicts."""
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
@@ -285,7 +294,7 @@ def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility) -> None
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_quality_boost_never_applied_without_opt_in(_mock_altaz) -> None:
+def test_quality_boost_never_applied_without_opt_in(_mock_altaz: MagicMock) -> None:
     """Verify a package without quality weighting opted in gets no boost."""
     site, telescope = _site(), _telescope()
     package = _package(1.0, quality_weighting_enabled=False)

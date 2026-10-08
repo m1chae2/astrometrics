@@ -107,7 +107,7 @@ def test_every_tile_is_about_the_same_size_on_the_sky() -> None:
 
 
 @pytest.mark.parametrize("seed", [11, 12])
-def test_tiled_lookup_matches_a_brute_force_check_of_every_star(tmp_path: Path, seed) -> None:
+def test_tiled_lookup_matches_a_brute_force_check_of_every_star(tmp_path: Path, seed: int) -> None:
     """Random circles anywhere on the sky find exactly the stars inside."""
     config = _LibraryConfig(tmp_path)
     source_ids, ra, dec, magnitude = _random_sky(30000, seed=seed)

@@ -9,6 +9,7 @@ session unchanged.
 """
 
 import threading
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -22,18 +23,18 @@ from wayfindinglib.models.session.telemetry import GuidingSample
 from wayfindinglib.tasks.execution_tasks.session_recorder import ObservationSessionRecorder
 
 
+@dataclass
 class _FakeTelescopeStatus:
     """A minimal stand-in for TelescopeStatus, carrying only weather fields."""
 
-    def __init__(self, temperature, humidity) -> None:
-        self.temperature = temperature
-        self.humidity = humidity
+    temperature: str
+    humidity: str
 
 
 class FakeIndiDriver:
     """A fake INDI driver with a fixed status, for weather-snapshot tests."""
 
-    def __init__(self, temperature="12.3°C", humidity="45.0%") -> None:
+    def __init__(self, temperature: str = "12.3°C", humidity: str = "45.0%") -> None:
         self._status = _FakeTelescopeStatus(temperature, humidity)
 
     def get_status(self) -> Any:
@@ -50,7 +51,7 @@ class FakeIndiDriver:
 class FakeGuidingService:
     """A fake guiding service returning a fixed sample list once."""
 
-    def __init__(self, samples) -> None:
+    def __init__(self, samples: list[GuidingSample]) -> None:
         self._samples = samples
         self.poll_count = 0
 

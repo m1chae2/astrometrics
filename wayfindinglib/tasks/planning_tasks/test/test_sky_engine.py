@@ -52,7 +52,7 @@ def test_the_engine_location_is_the_given_site() -> None:
 
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.astrometrics_catalog")
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.global_catalog")
-def test_get_sources(mock_global, mock_local) -> None:
+def test_get_sources(mock_global: MagicMock, mock_local: MagicMock) -> None:
     """Verifies regional source query delegation."""
     sky = SkyEngine()
 

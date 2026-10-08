@@ -5,6 +5,8 @@ Confirms each ABC enforces its full abstract method set (mirrors
 and that the INDI adapters conform to their respective ABCs.
 """
 
+from datetime import datetime
+
 import pytest
 
 from wayfindinglib.drivers.indi.camera_driver import IndiCameraDriver
@@ -23,6 +25,7 @@ from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransf
 from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
 from wayfindinglib.drivers.interfaces.weather_driver import WeatherDriver
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
+from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
 
 def test_mount_driver_cannot_be_instantiated_directly() -> None:
@@ -194,7 +197,7 @@ async def test_indi_camera_driver_main_role_reads_camera_temperature_field() -> 
     class _FakeSession:
         """A stand-in session returning a fixed status."""
 
-        def get_status(self):
+        def get_status(self) -> _FakeStatus:
             """Return the fixed fake status.
 
             Returns
@@ -234,7 +237,7 @@ async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() ->
     class _FakeSession:
         """A stand-in session recording enclosure command calls."""
 
-        def get_enclosure_state(self):
+        def get_enclosure_state(self) -> EnclosureState:
             """Report a fixed `OPEN` state.
 
             Returns
@@ -339,7 +342,7 @@ async def test_indi_weather_driver_delegates_to_session_weather_method() -> None
     class _FakeSession:
         """A stand-in session returning a fixed weather reading."""
 
-        def get_weather_readings(self):
+        def get_weather_readings(self) -> dict[str, tuple[float, datetime]]:
             """Return the fixed reading map.
 
             Returns

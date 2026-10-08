@@ -99,11 +99,11 @@ class _FakeClient:
         self.sent_switch = None
         self.sent_number = None
 
-    def sendNewSwitch(self, switch_vector) -> None:
+    def sendNewSwitch(self, switch_vector: object) -> None:
         """Record the switch vector that was sent."""
         self.sent_switch = switch_vector
 
-    def sendNewNumber(self, number_vector) -> None:
+    def sendNewNumber(self, number_vector: object) -> None:
         """Record the number vector that was sent."""
         self.sent_number = number_vector
 

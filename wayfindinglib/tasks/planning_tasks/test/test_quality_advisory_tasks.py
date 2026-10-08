@@ -5,41 +5,57 @@ status across pipelines and counts confirmed asteroid candidates,
 against a lightweight fake target rather than a real Target instance.
 """
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import build_target_quality_advisory
 
 
+@dataclass
 class _FakeQualitySummary:
-    def __init__(self, flagged=False, flag_reasons=None) -> None:
-        self.flagged = flagged
-        self.flag_reasons = flag_reasons or []
+    """A stand-in quality summary: a flag and the reasons for it."""
+
+    flagged: bool = False
+    flag_reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _FakeStage:
+    """A stand-in cascade stage holding its value."""
+
+    value: str
 
 
 class _FakeCandidate:
-    def __init__(self, cascade_stage_value) -> None:
-        class _Stage:
-            value = cascade_stage_value
+    """A stand-in asteroid candidate at one cascade stage."""
 
-        self.cascade_stage = _Stage()
+    def __init__(self, cascade_stage_value: str) -> None:
+        """Record the stage the candidate reached."""
+        self.cascade_stage = _FakeStage(cascade_stage_value)
 
 
+@dataclass
 class _FakeStacking:
-    def __init__(self, quality_summary=None) -> None:
-        self.quality_summary = quality_summary
+    """A stand-in stacking result holding its quality summary."""
+
+    quality_summary: _FakeQualitySummary | None = None
 
 
+@dataclass
 class _FakeQuality:
-    def __init__(self, astrometry=None, photometry=None, spectroscopy=None) -> None:
-        self.astrometry = astrometry
-        self.photometry = photometry
-        self.spectroscopy = spectroscopy
+    """A stand-in set of analysis quality summaries."""
+
+    astrometry: _FakeQualitySummary | None = None
+    photometry: _FakeQualitySummary | None = None
+    spectroscopy: _FakeQualitySummary | None = None
 
 
+@dataclass
 class _FakeAsteroidDetection:
-    def __init__(self, quality_summary=None, candidates=None) -> None:
-        self.quality_summary = quality_summary
-        self.candidates = candidates or []
+    """A stand-in asteroid detection result."""
+
+    quality_summary: _FakeQualitySummary | None = None
+    candidates: list[_FakeCandidate] = field(default_factory=list)
 
 
 class _FakeTarget:

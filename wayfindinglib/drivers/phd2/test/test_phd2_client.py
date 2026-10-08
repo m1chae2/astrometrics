@@ -12,7 +12,9 @@ import threading
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 
 
-def _start_test_server(handler_class) -> tuple[socketserver.TCPServer, int]:
+def _start_test_server(
+    handler_class: type[socketserver.BaseRequestHandler],
+) -> tuple[socketserver.TCPServer, int]:
     """Start a local TCPServer with an ephemeral port for one test.
 
     Parameters

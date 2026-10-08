@@ -9,6 +9,7 @@ the cases `Wayfinding_Library_Architecture.md` calls out
 ("reconciliation run twice yields identical CalibrationStats").
 """
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -31,7 +32,9 @@ from wayfindinglib.tasks.execution_tasks.post_session_reconciliation import (
 )
 
 
-def _entry(entry_id, target_id, status, exposure_requests) -> QueuedObservationPackage:
+def _entry(
+    entry_id: str, target_id: str, status: QueueEntryStatus, exposure_requests: list[ExposureRequest]
+) -> QueuedObservationPackage:
     return QueuedObservationPackage(
         id=entry_id,
         observation_package_id=f"pkg-{entry_id}",
@@ -42,7 +45,13 @@ def _entry(entry_id, target_id, status, exposure_requests) -> QueuedObservationP
     )
 
 
-def _session(session_id, camera_id, status, entries, night_date=date(2026, 8, 10)) -> ObservationSession:
+def _session(
+    session_id: str,
+    camera_id: str,
+    status: SessionStatus,
+    entries: list[QueuedObservationPackage],
+    night_date: date = date(2026, 8, 10),
+) -> ObservationSession:
     return ObservationSession(
         id=session_id,
         night_date=night_date,
@@ -157,29 +166,46 @@ def test_compute_calibration_stats_sums_across_multiple_sessions() -> None:
     assert stats.darks[0].count == 25
 
 
+@dataclass
 class _FakeFrame:
-    def __init__(self, timestamp, iso="800", offset="0", path="frame.fits") -> None:
-        self.timestamp = timestamp
-        self.iso = iso
-        self.offset = offset
-        self.path = path
+    """A stand-in frame record with the fields reconciliation reads."""
+
+    timestamp: float
+    iso: str = "800"
+    offset: str = "0"
+    path: str = "frame.fits"
 
 
+@dataclass
 class _FakeTarget:
-    def __init__(self, frames) -> None:
-        self.frames = frames
+    """A stand-in target holding only its frames."""
+
+    frames: list[_FakeFrame]
 
 
 class _FakeTargetRegistry:
-    def __init__(self, targets) -> None:
+    """A stand-in target catalog that looks targets up by id."""
+
+    def __init__(self, targets: dict[str, _FakeTarget]) -> None:
+        """Keep the targets by id."""
         self._targets = targets
 
-    def get(self, target_id):
+    def get(self, target_id: str) -> _FakeTarget | None:
+        """Return the target with this id, if any.
+
+        Returns
+        -------
+        target : `_FakeTarget` or `None`
+            The target, or `None` when no target has this id.
+        """
         return self._targets.get(target_id)
 
 
 class _FakeAstrometrics:
-    def __init__(self, targets) -> None:
+    """A stand-in `Astrometrics` with only a target catalog."""
+
+    def __init__(self, targets: dict[str, _FakeTarget]) -> None:
+        """Build the target catalog."""
         self._targets = targets
         self.targets = _FakeTargetRegistry(targets)
 

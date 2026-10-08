@@ -14,6 +14,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from astropy.coordinates import EarthLocation
+from astropy.time import Time
 
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
@@ -123,7 +125,9 @@ def test_find_earliest_visible_window_finds_continuous_span() -> None:
     step = timedelta(minutes=10)
 
     # Altitude climbs above the floor starting 30 minutes in and stays there.
-    def fake_altaz(ra_deg, dec_deg, location, obstime):
+    def fake_altaz(
+        ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+    ) -> tuple[float, float]:
         elapsed_min = (obstime.datetime - window_start).total_seconds() / 60.0
         return (40.0 if elapsed_min >= 30 else 5.0), 180.0
 
@@ -200,7 +204,9 @@ def test_ever_visible_detects_single_isolated_clear_sample() -> None:
     window_end = window_start + timedelta(hours=1)
     step = timedelta(minutes=10)
 
-    def single_clear_sample(ra_deg, dec_deg, location, obstime):
+    def single_clear_sample(
+        ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+    ) -> tuple[float, float]:
         return (40.0 if obstime.datetime == window_start else 5.0), 180.0
 
     with patch(

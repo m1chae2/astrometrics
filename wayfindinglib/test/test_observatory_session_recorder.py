@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 
+from astrometricslib import AppConfiguration
 from documentation.notebooks.wayfinding.execution.scripts.observatory_session_recorder import (
     _ensure_session,
 )
@@ -26,7 +26,7 @@ from wayfindinglib.models.session.observation_session import ObservationSession,
 class _FakeEquipment:
     """A stand-in `control.equipment` with a fixed telescope and camera."""
 
-    def __init__(self, telescope: Any = None, camera: Any = None) -> None:
+    def __init__(self, telescope: Telescope | None = None, camera: Camera | None = None) -> None:
         """Hold the telescope and camera the status read reports."""
         self._telescope = telescope
         self._camera = camera
@@ -45,7 +45,7 @@ class _FakeEquipment:
 class _FakeControl:
     """A stand-in `ObservatoryControl` with only an `equipment` child."""
 
-    def __init__(self, telescope: Any = None, camera: Any = None) -> None:
+    def __init__(self, telescope: Telescope | None = None, camera: Camera | None = None) -> None:
         """Build the equipment child."""
         self.equipment = _FakeEquipment(telescope, camera)
 
@@ -58,7 +58,13 @@ class _FakeExecution:
 
 
 class _FakeWayfinder:
-    def __init__(self, config, butler: DiskButler, telescope=None, camera=None) -> None:
+    def __init__(
+        self,
+        config: AppConfiguration,
+        butler: DiskButler,
+        telescope: Telescope | None = None,
+        camera: Camera | None = None,
+    ) -> None:
         self.config = config
         self.control = _FakeControl(telescope, camera)
         self.execution = _FakeExecution(butler)

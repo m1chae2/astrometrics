@@ -10,6 +10,7 @@ import time
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import ANY, Mock, patch
 
 import pytest
@@ -28,29 +29,29 @@ class _FakeObservatory:
 
 
 class _FakeFrame:
-    def __init__(self, path):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, path) -> None:
         self.path = path
 
 
 class _FakeTarget:
-    def __init__(self, target_id, frame_paths):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, target_id, frame_paths) -> None:
         self.id = target_id
         self.frames = [_FakeFrame(p) for p in frame_paths]
         self.recalculate_total_exposure_calls = 0
 
-    def recalculate_total_exposure(self):  # ruff: ignore[missing-return-type-private-function]
+    def recalculate_total_exposure(self) -> None:
         self.recalculate_total_exposure_calls += 1
 
 
-def _patched_config(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _patched_config(**overrides: Any):
     class _FakeConfig:
-        def get_telescope_hostname(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_telescope_hostname(self):
             return overrides.get("host", "stellarmate")
 
-        def get_remote_pictures_path(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_remote_pictures_path(self):
             return overrides.get("remote_path", "/home/stellarmate/Pictures")
 
-        def get_frames_path(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_frames_path(self):
             return overrides.get("frames_path", "/tmp/frames")
 
     return _FakeConfig()
@@ -100,34 +101,34 @@ def test_download_remote_frames_returns_false_without_indexing_on_failure() -> N
 
 
 class _FakeTargetRecord:
-    def __init__(self, target_id, ra="0h 0m 0s", dec="0° 0′ 0″"):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, target_id, ra="0h 0m 0s", dec="0° 0′ 0″") -> None:
         self.id = target_id
         self.ra = ra
         self.dec = dec
 
 
 class _FakeAstrometrics:
-    def __init__(self, existing=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, existing=None) -> None:
         self._existing = {t.id: t for t in (existing or [])}
         self.created = []
         self.saved = False
         self.prune_flags = []
         self.targets = self
 
-    def get(self, target_id, refresh=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def get(self, target_id, refresh=False):
         return self._existing.get(target_id)
 
-    def create(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def create(self, target_id):
         target = _FakeTargetRecord(target_id)
         self._existing[target_id] = target
         self.created.append(target_id)
         return target
 
-    def reindex_frames(self, target, prune_missing=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def reindex_frames(self, target, prune_missing=True) -> None:
         target.reindexed = True
         self.prune_flags.append(prune_missing)
 
-    def save(self):  # ruff: ignore[missing-return-type-private-function]
+    def save(self) -> None:
         self.saved = True
 
 
@@ -384,14 +385,14 @@ def test_download_remote_targets_transfers_same_name_file_of_different_size(tmp_
 class _EmptyTargetCatalog:
     """Stands in for the target catalog, with nothing in it."""
 
-    def list(self):  # ruff: ignore[missing-return-type-private-function]
+    def list(self):
         return []
 
 
 class _EmptyAstrometrics:
     """Stands in for the Astrometrics facade the sync builds for itself."""
 
-    def __init__(self, *args, **kwargs):  # ruff: ignore[missing-return-type-special-method, missing-type-kwargs, missing-type-args]
+    def __init__(self, *args, **kwargs) -> None:
         self.targets = _EmptyTargetCatalog()
 
 
@@ -561,7 +562,7 @@ def test_sync_calibration_folder_summarises_what_was_added(
     }
 
 
-def _sync_observatory(remote_folders, resolved, remote_files) -> tuple[_FakeObservatory, Mock]:  # ruff: ignore[missing-type-function-argument]
+def _sync_observatory(remote_folders, resolved, remote_files) -> tuple[_FakeObservatory, Mock]:
     """Build a fake observatory with a listed telescope computer.
 
     Returns

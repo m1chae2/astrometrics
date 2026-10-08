@@ -133,7 +133,7 @@ def test_indi_enclosure_driver_conforms_to_enclosure_driver() -> None:
 
 
 @pytest.fixture
-def anyio_backend():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def anyio_backend() -> str:
     """Restrict anyio-marked tests in this module to the asyncio backend.
 
     Returns
@@ -194,7 +194,7 @@ async def test_indi_camera_driver_main_role_reads_camera_temperature_field() -> 
     class _FakeSession:
         """A stand-in session returning a fixed status."""
 
-        def get_status(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_status(self):
             """Return the fixed fake status.
 
             Returns
@@ -234,7 +234,7 @@ async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() ->
     class _FakeSession:
         """A stand-in session recording enclosure command calls."""
 
-        def get_enclosure_state(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_enclosure_state(self):
             """Report a fixed `OPEN` state.
 
             Returns
@@ -339,7 +339,7 @@ async def test_indi_weather_driver_delegates_to_session_weather_method() -> None
     class _FakeSession:
         """A stand-in session returning a fixed weather reading."""
 
-        def get_weather_readings(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_weather_readings(self):
             """Return the fixed reading map.
 
             Returns

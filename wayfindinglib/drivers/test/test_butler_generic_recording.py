@@ -10,6 +10,7 @@ model_dump(mode="json").
 """
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ from wayfindinglib.models.session.observation_session import ObservationSession,
 
 
 @pytest.fixture
-def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by a fully isolated temporary database.
 
     Overrides `_find_config_file` directly via `monkeypatch.setattr`
@@ -45,7 +46,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
     return DiskButler(app_config=config)
 
 
-def test_site_profile_round_trips(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_site_profile_round_trips(isolated_butler: DiskButler) -> None:
     """Verify a SiteProfile records and loads back with identical fields."""
     profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7392, longitude_deg=-104.9903)
     isolated_butler.put(profile, "site_profile", {"id": "site1"})
@@ -56,19 +57,19 @@ def test_site_profile_round_trips(isolated_butler):  # ruff: ignore[missing-type
     assert loaded.latitude_deg == pytest.approx(39.7392)
 
 
-def test_site_profile_exists_false_before_put(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_site_profile_exists_false_before_put(isolated_butler: DiskButler) -> None:
     """Verify exists() is False for a dataset that has not been written yet."""
     assert isolated_butler.exists("site_profile", {"id": "nonexistent"}) is False
 
 
-def test_site_profile_exists_true_after_put(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_site_profile_exists_true_after_put(isolated_butler: DiskButler) -> None:
     """Verify exists() is True after a put()."""
     profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7392, longitude_deg=-104.9903)
     isolated_butler.put(profile, "site_profile", {"id": "site1"})
     assert isolated_butler.exists("site_profile", {"id": "site1"}) is True
 
 
-def test_enclosure_round_trips_enum_fields(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_enclosure_round_trips_enum_fields(isolated_butler: DiskButler) -> None:
     """Verify Enclosure's StrEnum field (enclosure_type) survives a round trip.
 
     StrEnum members serialize as plain strings via the standard json
@@ -83,7 +84,7 @@ def test_enclosure_round_trips_enum_fields(isolated_butler):  # ruff: ignore[mis
     assert loaded.enclosure_type == EnclosureType.ROLL_OFF_ROOF
 
 
-def test_guide_star_loss_event_round_trips(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guide_star_loss_event_round_trips(isolated_butler: DiskButler) -> None:
     """Verify a GuideStarLossEvent round-trips with identical fields."""
     event = GuideStarLossEvent(
         id="loss1", observation_session_id="session1", comparison_input_id="frame1", reacquire_attempts=2
@@ -136,7 +137,7 @@ def test_library_path_is_the_configured_folder(isolated_butler: DiskButler, tmp_
     assert (isolated_butler.library_path / "wayfinding.db").is_file()
 
 
-def test_get_all_returns_every_persisted_instance(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_all_returns_every_persisted_instance(isolated_butler: DiskButler) -> None:
     """Verify get_all() returns every row for a generic dataset type."""
     isolated_butler.put(
         SiteProfile(id="site1", name="A", latitude_deg=1.0, longitude_deg=1.0),
@@ -152,7 +153,7 @@ def test_get_all_returns_every_persisted_instance(isolated_butler):  # ruff: ign
     assert {p.id for p in all_profiles} == {"site1", "site2"}
 
 
-def test_put_overwrites_existing_row_with_same_id(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_put_overwrites_existing_row_with_same_id(isolated_butler: DiskButler) -> None:
     """Verify a second put() with the same id overwrites the row."""
     isolated_butler.put(
         SiteProfile(id="site1", name="Original", latitude_deg=1.0, longitude_deg=1.0),
@@ -169,19 +170,19 @@ def test_put_overwrites_existing_row_with_same_id(isolated_butler):  # ruff: ign
     assert len(isolated_butler.get_all("site_profile")) == 1
 
 
-def test_unknown_dataset_type_raises_on_get(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_unknown_dataset_type_raises_on_get(isolated_butler: DiskButler) -> None:
     """Verify an unrecognized dataset_type still raises."""
     with pytest.raises(InvalidArgumentError):
         isolated_butler.get("not_a_real_dataset_type", {"id": "x"})
 
 
-def test_unknown_dataset_type_raises_on_put(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_unknown_dataset_type_raises_on_put(isolated_butler: DiskButler) -> None:
     """Verify put() with an unrecognized dataset_type raises."""
     with pytest.raises(InvalidArgumentError):
         isolated_butler.put(object(), "not_a_real_dataset_type", {"id": "x"})
 
 
-def test_get_all_returns_every_persisted_observation_session(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_all_returns_every_persisted_observation_session(isolated_butler: DiskButler) -> None:
     """Verify get_all("observation_session") returns every recorded session.
 
     Added for `post_session_reconciliation`, which recomputes a

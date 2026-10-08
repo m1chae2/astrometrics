@@ -9,6 +9,7 @@ already-recorded profile unchanged.
 """
 
 import configparser
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -22,7 +23,7 @@ from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
 
 
 @pytest.fixture
-def isolated_butler_and_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_butler_and_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Build a DiskButler and AppConfiguration, both fully isolated.
 
     Overrides `_find_config_file` directly via `monkeypatch.setattr`
@@ -45,7 +46,7 @@ def isolated_butler_and_config(tmp_path, monkeypatch):  # ruff: ignore[missing-t
     return DiskButler(app_config=config), config
 
 
-def test_seeds_denver_fallback_when_location_unconfigured(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_seeds_denver_fallback_when_location_unconfigured(isolated_butler_and_config) -> None:
     """Verify the default profile seeds with the Denver fallback site."""
     butler, config = isolated_butler_and_config
     profile = get_or_seed_default_site_profile(butler, config)
@@ -54,7 +55,7 @@ def test_seeds_denver_fallback_when_location_unconfigured(isolated_butler_and_co
     assert profile.elevation_m == pytest.approx(1600.0)
 
 
-def test_seeds_from_configured_location(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_seeds_from_configured_location(isolated_butler_and_config) -> None:
     """Verify the profile seeds from [Observatory.Location] when set."""
     butler, config = isolated_butler_and_config
     config.update_config({
@@ -66,7 +67,7 @@ def test_seeds_from_configured_location(isolated_butler_and_config):  # ruff: ig
     assert profile.elevation_m == pytest.approx(71.0)
 
 
-def test_seeding_persists_so_second_call_does_not_reseed(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_seeding_persists_so_second_call_does_not_reseed(isolated_butler_and_config) -> None:
     """Verify the seeded profile records rather than regenerating."""
     butler, config = isolated_butler_and_config
     first = get_or_seed_default_site_profile(butler, config)
@@ -75,7 +76,7 @@ def test_seeding_persists_so_second_call_does_not_reseed(isolated_butler_and_con
     assert butler.exists("site_profile", {"id": "default"}) is True
 
 
-def test_returns_existing_profile_unchanged(isolated_butler_and_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_returns_existing_profile_unchanged(isolated_butler_and_config) -> None:
     """Verify an already-recorded profile is returned as-is, not reseeded."""
     butler, config = isolated_butler_and_config
     existing = SiteProfile(id="default", name="My Backyard", latitude_deg=1.0, longitude_deg=2.0)

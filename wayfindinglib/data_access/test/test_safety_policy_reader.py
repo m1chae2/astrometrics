@@ -5,6 +5,8 @@ unconfigured (never a default-permissive rule set) and that a
 recorded rule set round-trips.
 """
 
+from pathlib import Path
+
 import pytest
 
 from wayfindinglib.data_access.safety_policy_reader import get_safety_rule_set, save_safety_rule_set
@@ -13,7 +15,7 @@ from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet
 
 
 @pytest.fixture
-def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by a fully isolated temporary database.
 
     Overrides `_find_config_file` directly via `monkeypatch.setattr`
@@ -36,7 +38,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
     return DiskButler(app_config=config)
 
 
-def test_get_safety_rule_set_returns_none_when_unconfigured(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_safety_rule_set_returns_none_when_unconfigured(isolated_butler: DiskButler) -> None:
     """Verify an unconfigured rule set resolves to None, not permissive.
 
     Callers (the safety monitor) must treat None as grounds for an
@@ -45,7 +47,7 @@ def test_get_safety_rule_set_returns_none_when_unconfigured(isolated_butler):  #
     assert get_safety_rule_set(isolated_butler) is None
 
 
-def test_save_and_get_safety_rule_set_round_trips(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_and_get_safety_rule_set_round_trips(isolated_butler: DiskButler) -> None:
     """Verify a recorded rule set is returned by get_safety_rule_set()."""
     rule_set = SafetyRuleSet(
         id="default",
@@ -63,7 +65,7 @@ def test_save_and_get_safety_rule_set_round_trips(isolated_butler):  # ruff: ign
     assert loaded.rules[0].unsafe_threshold == pytest.approx(40.0)
 
 
-def test_save_safety_rule_set_under_non_default_id_not_found_by_get(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_safety_rule_set_under_non_default_id_not_found_by_get(isolated_butler: DiskButler) -> None:
     """Verify get_safety_rule_set() only finds a rule set under 'default'."""
     rule_set = SafetyRuleSet(id="draft", rules=[])
     save_safety_rule_set(isolated_butler, rule_set)

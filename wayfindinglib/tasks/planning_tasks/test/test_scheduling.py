@@ -14,6 +14,7 @@ wayfindinglib/astronomy/'s own tests.
 
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
@@ -36,7 +37,7 @@ _WINDOW_START = datetime(2026, 8, 10, 3, 0, 0)
 _WINDOW_END = _WINDOW_START + timedelta(hours=6)
 
 
-def _telescope(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _telescope(**overrides: Any) -> Telescope:
     defaults = {
         "id": "t1",
         "name": "Test Scope",
@@ -48,13 +49,15 @@ def _telescope(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return
     return Telescope(**defaults)
 
 
-def _site(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _site(**overrides: Any) -> SiteProfile:
     defaults = {"id": "s1", "name": "Test Site", "latitude_deg": 39.7392, "longitude_deg": -104.9903}
     defaults.update(overrides)
     return SiteProfile(**defaults)
 
 
-def _package(ra_key: float, exposure_sec: float = 600.0, count: int = 1, **overrides) -> ObservationPackage:  # ruff: ignore[missing-type-kwargs]
+def _package(
+    ra_key: float, exposure_sec: float = 600.0, count: int = 1, **overrides: Any
+) -> ObservationPackage:
     defaults = {
         "id": str(uuid.uuid4()),
         "name": f"pkg-{ra_key}",
@@ -67,7 +70,7 @@ def _package(ra_key: float, exposure_sec: float = 600.0, count: int = 1, **overr
     return ObservationPackage(**defaults)
 
 
-def _soonest_request(ra_key: float, **package_overrides) -> PlacementRequest:  # ruff: ignore[missing-type-kwargs]
+def _soonest_request(ra_key: float, **package_overrides: Any) -> PlacementRequest:
     return PlacementRequest(
         package=_package(ra_key, **package_overrides),
         start_time_mode=StartTimeMode.SOONEST,
@@ -76,7 +79,7 @@ def _soonest_request(ra_key: float, **package_overrides) -> PlacementRequest:  #
     )
 
 
-def _always_high_altitude(ra_deg, dec_deg, location, obstime):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _always_high_altitude(ra_deg, dec_deg, location, obstime):
     """Return an altitude/azimuth pair well above any reasonable floor.
 
     Returns
@@ -87,7 +90,7 @@ def _always_high_altitude(ra_deg, dec_deg, location, obstime):  # ruff: ignore[m
     return 60.0, 180.0
 
 
-def _always_low_altitude(ra_deg, dec_deg, location, obstime):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _always_low_altitude(ra_deg, dec_deg, location, obstime):
     """Return an altitude/azimuth pair that never clears the floor.
 
     Returns
@@ -99,7 +102,7 @@ def _always_low_altitude(ra_deg, dec_deg, location, obstime):  # ruff: ignore[mi
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_two_packages_place_without_overlap(_mock_altaz):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_two_packages_place_without_overlap(_mock_altaz) -> None:
     """Verify two independently-fitting packages are placed without overlap."""
     site, telescope = _site(), _telescope()
     requests = [_soonest_request(1.0, exposure_sec=600.0), _soonest_request(2.0, exposure_sec=600.0)]
@@ -112,7 +115,7 @@ def test_two_packages_place_without_overlap(_mock_altaz):  # ruff: ignore[missin
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_low_altitude)
-def test_never_clears_altitude(_mock_altaz):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_never_clears_altitude(_mock_altaz) -> None:
     """Verify a target that never clears the floor is diagnosed distinctly.
 
     Expects `InfeasibilityReasonCode.NEVER_CLEARS_ALTITUDE`.
@@ -126,7 +129,7 @@ def test_never_clears_altitude(_mock_altaz):  # ruff: ignore[missing-type-functi
     assert diagnostics[0].reason_code == InfeasibilityReasonCode.NEVER_CLEARS_ALTITUDE
 
 
-def test_blocked_by_avoidance_zone():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_blocked_by_avoidance_zone() -> None:
     """Verify a target blocked by an avoidance zone is diagnosed distinctly.
 
     Altitude clears the floor everywhere, but a full-circle avoidance
@@ -154,11 +157,11 @@ def test_blocked_by_avoidance_zone():  # ruff: ignore[missing-return-type-undocu
     assert diagnostics[0].reason_code == InfeasibilityReasonCode.BLOCKED_BY_AVOIDANCE_ZONE
 
 
-def test_window_too_short():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_window_too_short() -> None:
     """Verify a too-short clear window is diagnosed distinctly."""
     site, telescope = _site(), _telescope(min_altitude_deg=20.0)
 
-    def brief_clearing(ra_deg, dec_deg, location, obstime):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def brief_clearing(ra_deg, dec_deg, location, obstime):
         # Clear for a single 5-minute sample near the window start,
         # low otherwise.
         elapsed_min = (obstime.datetime - _WINDOW_START).total_seconds() / 60.0
@@ -175,7 +178,7 @@ def test_window_too_short():  # ruff: ignore[missing-return-type-undocumented-pu
     assert diagnostics[0].reason_code == InfeasibilityReasonCode.WINDOW_TOO_SHORT
 
 
-def test_night_fully_committed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_night_fully_committed() -> None:
     """Verify a crowded-out package is diagnosed distinctly."""
     site, telescope = _site(), _telescope()
     # Two long packages consume the whole window; a third, shorter package
@@ -196,7 +199,7 @@ def test_night_fully_committed():  # ruff: ignore[missing-return-type-undocument
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz) -> None:
     """Verify a higher-priority package is placed first on a start-time tie."""
     site, telescope = _site(), _telescope()
     low_priority = _soonest_request(1.0, priority=0)
@@ -229,7 +232,7 @@ def test_priority_breaks_tie_and_boost_is_recorded(_mock_altaz):  # ruff: ignore
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.visibility_state_at")
-def test_fixed_time_packages_placed_as_anchors(mock_visibility):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fixed_time_packages_placed_as_anchors(mock_visibility) -> None:
     """Verify a fixed-time request is placed at its requested start time."""
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
@@ -252,7 +255,7 @@ def test_fixed_time_packages_placed_as_anchors(mock_visibility):  # ruff: ignore
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.visibility_state_at")
-def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility) -> None:
     """Verify overlapping fixed-time requests both diagnose as conflicts."""
     mock_visibility.return_value = (True, None)
     site, telescope = _site(), _telescope()
@@ -282,7 +285,7 @@ def test_overlapping_fixed_time_requests_both_diagnosed(mock_visibility):  # ruf
 
 
 @patch("wayfindinglib.tasks.planning_tasks.visibility_tasks.compute_altaz", side_effect=_always_high_altitude)
-def test_quality_boost_never_applied_without_opt_in(_mock_altaz):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_quality_boost_never_applied_without_opt_in(_mock_altaz) -> None:
     """Verify a package without quality weighting opted in gets no boost."""
     site, telescope = _site(), _telescope()
     package = _package(1.0, quality_weighting_enabled=False)

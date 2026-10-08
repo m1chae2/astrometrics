@@ -11,7 +11,7 @@ from wayfindinglib.astronomy.coordinate_transforms import earth_location
 from wayfindinglib.astronomy.solar_position import solar_altitude_deg
 
 
-def test_solar_altitude_positive_at_local_solar_noon():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_solar_altitude_positive_at_local_solar_noon() -> None:
     """Verify the sun is well above the horizon near local solar noon."""
     location = earth_location(latitude_deg=39.7392, longitude_deg=-104.9903, elevation_m=1600.0)
     # Denver (UTC-6/7); ~19:00 UTC is near local solar noon in August.
@@ -19,7 +19,7 @@ def test_solar_altitude_positive_at_local_solar_noon():  # ruff: ignore[missing-
     assert solar_altitude_deg(location, obstime) > 30.0
 
 
-def test_solar_altitude_negative_at_local_midnight():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_solar_altitude_negative_at_local_midnight() -> None:
     """Verify the sun is well below the horizon near local midnight."""
     location = earth_location(latitude_deg=39.7392, longitude_deg=-104.9903, elevation_m=1600.0)
     # ~07:00 UTC is near local solar midnight in Denver during August.

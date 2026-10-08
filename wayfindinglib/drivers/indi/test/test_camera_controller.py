@@ -15,7 +15,7 @@ from wayfindinglib.drivers.indi.camera_controller import CameraController
 class _FakeBlobElement:
     """A fake INDI BLOB element holding raw frame bytes."""
 
-    def __init__(self, data: bytes):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, data: bytes) -> None:
         self._data = data
 
     def getblobdata(self) -> bytes:
@@ -36,10 +36,10 @@ class _FakeBlobVector(list):
 class _FakeDevice:
     """A fake INDI device exposing only `getBLOB`."""
 
-    def __init__(self, blobs: dict):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, blobs: dict) -> None:
         self._blobs = blobs
 
-    def getBLOB(self, name: str):  # ruff: ignore[invalid-function-name, missing-return-type-private-function]
+    def getBLOB(self, name: str) -> _FakeBlobVector | None:  # ruff: ignore[invalid-function-name]
         """Return the named BLOB vector, or `None` if not present.
 
         Returns

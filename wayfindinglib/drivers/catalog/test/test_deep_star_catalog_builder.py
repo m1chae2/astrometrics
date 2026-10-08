@@ -131,7 +131,7 @@ def _no_sleep(_seconds: float) -> None:
     """Skip the pause between requests, so tests run instantly."""
 
 
-def test_pixel_source_id_ranges_tile_the_whole_id_space_without_gaps():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_pixel_source_id_ranges_tile_the_whole_id_space_without_gaps() -> None:
     """Neighbouring chunks meet exactly, so no star falls between two."""
     for level in (0, 3, 4):
         count = 12 * 4**level
@@ -146,7 +146,7 @@ def test_pixel_source_id_ranges_tile_the_whole_id_space_without_gaps():  # ruff:
         assert previous_high > 6917528997577384320
 
 
-def test_a_fine_pixel_lies_inside_its_coarse_parent():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_fine_pixel_lies_inside_its_coarse_parent() -> None:
     """A level 12 pixel p is inside level 4 pixel p >> 16."""
     fine_pixel = 123_456_789
     fine_low, fine_high = pixel_source_id_range(12, fine_pixel)
@@ -157,13 +157,13 @@ def test_a_fine_pixel_lies_inside_its_coarse_parent():  # ruff: ignore[missing-r
 
 
 @pytest.mark.parametrize(("level", "pixel"), [(-1, 0), (13, 0), (0, -1), (0, 12), (4, 3072)])
-def test_pixel_source_id_range_rejects_out_of_range_arguments(level, pixel):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_pixel_source_id_range_rejects_out_of_range_arguments(level, pixel) -> None:
     """A typo must not silently ask for the wrong part of the sky."""
     with pytest.raises(InvalidArgumentError, match=r"HEALPix level|Pixel"):
         pixel_source_id_range(level, pixel)
 
 
-def test_query_asks_for_the_id_range_and_magnitude_limit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_query_asks_for_the_id_range_and_magnitude_limit() -> None:
     """The query has the range, the depth, and the columns it needs."""
     query = build_pixel_query(100, 200, 16.0)
 
@@ -174,7 +174,7 @@ def test_query_asks_for_the_id_range_and_magnitude_limit():  # ruff: ignore[miss
     assert "COUNT(*)" in build_pixel_query(100, 200, 16.0, count_only=True)
 
 
-def test_full_download_saves_every_pixel_and_reports_it(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_full_download_saves_every_pixel_and_reports_it(tmp_path: Path) -> None:
     """A clean run saves all 12 chunks and says so."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive(stars_per_pixel=5)
@@ -190,7 +190,7 @@ def test_full_download_saves_every_pixel_and_reports_it(tmp_path):  # ruff: igno
     assert status["star_count"] == PIXEL_COUNT * 5
 
 
-def test_running_again_downloads_nothing_it_already_has(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_running_again_downloads_nothing_it_already_has(tmp_path: Path) -> None:
     """A finished catalog is not downloaded a second time."""
     config = _LibraryConfig(tmp_path)
     build_deep_star_catalog(config, LEVEL, 16.0, gaia=_FakeArchive(), sleep=_no_sleep)
@@ -203,7 +203,7 @@ def test_running_again_downloads_nothing_it_already_has(tmp_path):  # ruff: igno
     assert report["pixels_downloaded"] == 0
 
 
-def test_failed_pixel_is_skipped_then_picked_up_on_the_next_run(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_failed_pixel_is_skipped_then_picked_up_on_the_next_run(tmp_path: Path) -> None:
     """One bad chunk does not stop the rest, and a rerun fetches only it."""
     config = _LibraryConfig(tmp_path)
     bad_start, _ = pixel_source_id_range(LEVEL, 3)
@@ -224,7 +224,7 @@ def test_failed_pixel_is_skipped_then_picked_up_on_the_next_run(tmp_path):  # ru
     assert deep_star_store.read_catalog_status(config)["complete"] is True
 
 
-def test_a_transient_failure_is_retried_with_a_growing_wait(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_transient_failure_is_retried_with_a_growing_wait(tmp_path: Path) -> None:
     """A blip from the archive is retried, and the wait grows each time."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive()
@@ -247,7 +247,7 @@ def test_a_transient_failure_is_retried_with_a_growing_wait(tmp_path):  # ruff: 
     assert sleeps == [5.0, 10.0]
 
 
-def test_run_stops_when_the_archive_keeps_failing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_stops_when_the_archive_keeps_failing(tmp_path: Path) -> None:
     """Five chunks failing in a row means the archive is down; stop."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive(
@@ -262,7 +262,9 @@ def test_run_stops_when_the_archive_keeps_failing(tmp_path):  # ruff: ignore[mis
     assert deep_star_store.read_catalog_status(config)["installed"] is False
 
 
-def test_a_result_at_the_archive_row_limit_is_not_trusted(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_result_at_the_archive_row_limit_is_not_trusted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A result that may have been cut short must not be saved as complete."""
     config = _LibraryConfig(tmp_path)
     monkeypatch.setattr(deep_star_catalog_builder, "_ANONYMOUS_ASYNC_ROW_LIMIT", 3)
@@ -274,7 +276,7 @@ def test_a_result_at_the_archive_row_limit_is_not_trusted(tmp_path, monkeypatch)
     assert deep_star_store.get_downloaded_pixels(config) == set()
 
 
-def test_missing_result_table_is_a_failure(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_missing_result_table_is_a_failure(tmp_path: Path) -> None:
     """No table at all must not be saved as an empty chunk."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive()
@@ -288,7 +290,7 @@ def test_missing_result_table_is_a_failure(tmp_path):  # ruff: ignore[missing-ty
     assert deep_star_store.get_downloaded_pixels(config) == set()
 
 
-def test_a_genuinely_empty_chunk_is_saved_as_finished(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_genuinely_empty_chunk_is_saved_as_finished(tmp_path: Path) -> None:
     """A patch of sky with no stars this bright is still finished."""
     config = _LibraryConfig(tmp_path)
 
@@ -301,7 +303,7 @@ def test_a_genuinely_empty_chunk_is_saved_as_finished(tmp_path):  # ruff: ignore
     assert deep_star_store.read_catalog_status(config)["star_count"] == 0
 
 
-def test_rows_with_missing_values_are_dropped_not_saved(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_rows_with_missing_values_are_dropped_not_saved(tmp_path: Path) -> None:
     """A star with no magnitude, or a NaN position, cannot be drawn."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive()
@@ -318,7 +320,7 @@ def test_rows_with_missing_values_are_dropped_not_saved(tmp_path):  # ruff: igno
     assert sorted(star[0] for star in stars) == [10, 13]
 
 
-def test_maximum_pixels_stops_a_short_trial_run(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_maximum_pixels_stops_a_short_trial_run(tmp_path: Path) -> None:
     """A trial run of a few chunks stops when asked and can be resumed."""
     config = _LibraryConfig(tmp_path)
 
@@ -331,7 +333,7 @@ def test_maximum_pixels_stops_a_short_trial_run(tmp_path):  # ruff: ignore[missi
     assert deep_star_store.read_catalog_status(config)["pixels_downloaded"] == 4
 
 
-def test_catalog_started_with_other_settings_is_refused(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_started_with_other_settings_is_refused(tmp_path: Path) -> None:
     """Chunks made at different depths cannot be mixed into one catalog."""
     config = _LibraryConfig(tmp_path)
     build_deep_star_catalog(config, LEVEL, 16.0, gaia=_FakeArchive(), sleep=_no_sleep, maximum_pixels=1)
@@ -340,7 +342,7 @@ def test_catalog_started_with_other_settings_is_refused(tmp_path):  # ruff: igno
         build_deep_star_catalog(config, LEVEL, 15.0, gaia=_FakeArchive(), sleep=_no_sleep)
 
 
-def test_progress_callback_is_told_about_every_pixel_and_cannot_break_the_run(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_progress_callback_is_told_about_every_pixel_and_cannot_break_the_run(tmp_path: Path) -> None:
     """The progress display hears each chunk; its errors are contained."""
     config = _LibraryConfig(tmp_path)
     heard: list[dict[str, Any]] = []
@@ -364,7 +366,7 @@ def test_progress_callback_is_told_about_every_pixel_and_cannot_break_the_run(tm
     assert heard[-1]["stars_total"] == PIXEL_COUNT * 2
 
 
-def test_request_delay_is_used_between_pixels_but_not_after_the_last(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_request_delay_is_used_between_pixels_but_not_after_the_last(tmp_path: Path) -> None:
     """The pause paces requests but never delays the end of the run."""
     config = _LibraryConfig(tmp_path)
     sleeps: list[float] = []
@@ -376,7 +378,7 @@ def test_request_delay_is_used_between_pixels_but_not_after_the_last(tmp_path): 
     assert sleeps == [2.0] * (PIXEL_COUNT - 1)
 
 
-def test_download_that_never_answers_is_abandoned_after_the_timeout(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_that_never_answers_is_abandoned_after_the_timeout(tmp_path: Path) -> None:
     """A query stuck in the archive's queue must not hang the whole run."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive()
@@ -400,7 +402,7 @@ def test_download_that_never_answers_is_abandoned_after_the_timeout(tmp_path):  
     assert report["pixels_failed"][0] == 0
 
 
-def test_size_estimate_scales_a_sample_up_to_the_whole_sky():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_size_estimate_scales_a_sample_up_to_the_whole_sky() -> None:
     """The estimate is the sample's mean times the number of chunks."""
     archive = _FakeArchive(stars_per_pixel=1000)
 
@@ -415,7 +417,7 @@ def test_size_estimate_scales_a_sample_up_to_the_whole_sky():  # ruff: ignore[mi
     assert all("COUNT(*)" in query for query in archive.queries)
 
 
-def test_size_estimate_samples_are_spread_across_the_sky():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_size_estimate_samples_are_spread_across_the_sky() -> None:
     """Evenly spaced samples touch every one of the twelve biggest patches."""
     archive = _FakeArchive()
 
@@ -426,7 +428,7 @@ def test_size_estimate_samples_are_spread_across_the_sky():  # ruff: ignore[miss
     assert base_pixels == set(range(12))
 
 
-def test_size_estimate_uses_the_counts_that_worked():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_size_estimate_uses_the_counts_that_worked() -> None:
     """A few failed counts are skipped rather than ruining the estimate."""
     archive = _FakeArchive(stars_per_pixel=500)
     archive.fail_first_calls = 2
@@ -437,7 +439,7 @@ def test_size_estimate_uses_the_counts_that_worked():  # ruff: ignore[missing-re
     assert estimate["estimated_stars"] == pytest.approx(500 * PIXEL_COUNT)
 
 
-def test_size_estimate_with_no_working_counts_raises():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_size_estimate_with_no_working_counts_raises() -> None:
     """With nothing counted there is nothing honest to report."""
     archive = _FakeArchive()
     archive.fail_first_calls = 100
@@ -471,7 +473,7 @@ REAL_GAIA_STARS = [
 
 
 @pytest.mark.parametrize("level", [0, 2, 4, 8, 12])
-def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level) -> None:
     """The pixel worked out from a star's position is the one in its ID."""
     ids = np.array([star[0] for star in REAL_GAIA_STARS], dtype=np.int64)
     ra = np.array([star[1] for star in REAL_GAIA_STARS])
@@ -483,7 +485,7 @@ def test_healpix_pixel_of_a_real_gaia_star_matches_the_pixel_in_its_id(level):  
 
 
 @pytest.mark.parametrize("level", [0, 1, 2, 3])
-def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level) -> None:
     """Every pixel of a level gets its fair share of evenly spread points.
 
     The real stars above only cover the northern sky, so this is what
@@ -506,7 +508,7 @@ def test_healpix_pixels_all_have_the_same_area_over_the_whole_sky(level):  # ruf
     assert np.all(np.abs(counts - expected) < 5 * np.sqrt(expected))
 
 
-def test_healpix_pixels_of_points_rejects_a_level_that_does_not_exist():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_healpix_pixels_of_points_rejects_a_level_that_does_not_exist() -> None:
     """A level outside 0..12 raises instead of returning nonsense."""
     with pytest.raises(InvalidArgumentError, match="level"):
         healpix_pixels_of_points(13, 10.0, 10.0)
@@ -524,7 +526,7 @@ CIRCLES = [
 
 
 @pytest.mark.parametrize(("center_ra", "center_dec", "radius"), CIRCLES)
-def test_every_point_inside_a_circle_is_in_a_chosen_pixel(center_ra, center_dec, radius):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_every_point_inside_a_circle_is_in_a_chosen_pixel(center_ra, center_dec, radius) -> None:
     """No star inside a circle can be left in a chunk that was not chosen."""
     random_generator = np.random.default_rng(seed=5)
     # Random distances and directions from the center, then turned into
@@ -547,7 +549,7 @@ def test_every_point_inside_a_circle_is_in_a_chosen_pixel(center_ra, center_dec,
     assert needed <= chosen
 
 
-def test_a_small_circle_chooses_only_a_few_pixels():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_small_circle_chooses_only_a_few_pixels() -> None:
     """A field-sized circle needs a few of the 3072 chunks, not thousands."""
     chosen = pixels_near_circles(4, [(250.0, 36.0, 0.8)])
 
@@ -555,14 +557,14 @@ def test_a_small_circle_chooses_only_a_few_pixels():  # ruff: ignore[missing-ret
     assert chosen == sorted(set(chosen))
 
 
-def test_the_pixel_at_a_circles_center_is_always_chosen():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_pixel_at_a_circles_center_is_always_chosen() -> None:
     """The center's own chunk is in the list, including at the poles."""
     for center_ra, center_dec, radius in CIRCLES:
         center_pixel = int(healpix_pixels_of_points(4, center_ra, center_dec))
         assert center_pixel in pixels_near_circles(4, [(center_ra, center_dec, radius)])
 
 
-def test_several_circles_choose_the_union_of_their_pixels():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_several_circles_choose_the_union_of_their_pixels() -> None:
     """Two far-apart circles give both circles' chunks, each listed once."""
     first = pixels_near_circles(4, [(250.0, 36.0, 0.8)])
     second = pixels_near_circles(4, [(10.0, -50.0, 0.8)])
@@ -572,12 +574,12 @@ def test_several_circles_choose_the_union_of_their_pixels():  # ruff: ignore[mis
     assert both == sorted(set(first) | set(second))
 
 
-def test_a_circle_as_big_as_the_sky_chooses_every_pixel():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_circle_as_big_as_the_sky_chooses_every_pixel() -> None:
     """Whole-sky radius selects all chunks."""
     assert pixels_near_circles(1, [(0.0, 0.0, 180.0)]) == list(range(48))
 
 
-def test_building_only_the_chosen_pixels_leaves_the_rest_alone(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_building_only_the_chosen_pixels_leaves_the_rest_alone(tmp_path: Path) -> None:
     """Only the asked-for chunks are requested, and the report counts them."""
     config = _LibraryConfig(tmp_path)
     archive = _FakeArchive(stars_per_pixel=5)
@@ -593,7 +595,7 @@ def test_building_only_the_chosen_pixels_leaves_the_rest_alone(tmp_path):  # ruf
     assert status["complete"] is False
 
 
-def test_a_later_run_for_more_pixels_skips_the_ones_already_saved(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_later_run_for_more_pixels_skips_the_ones_already_saved(tmp_path: Path) -> None:
     """A second, wider selection only fetches what is new."""
     config = _LibraryConfig(tmp_path)
     build_deep_star_catalog(config, LEVEL, 16.0, gaia=_FakeArchive(), sleep=_no_sleep, pixels=[2, 7])
@@ -609,7 +611,7 @@ def test_a_later_run_for_more_pixels_skips_the_ones_already_saved(tmp_path):  # 
     assert deep_star_store.get_downloaded_pixels(config) == {2, 7, 9}
 
 
-def test_progress_counts_only_the_chosen_pixels(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_progress_counts_only_the_chosen_pixels(tmp_path: Path) -> None:
     """The 'done of total' shown to the user is about the chosen chunks."""
     config = _LibraryConfig(tmp_path)
     seen = []
@@ -627,7 +629,7 @@ def test_progress_counts_only_the_chosen_pixels(tmp_path):  # ruff: ignore[missi
     assert [(item["pixels_done"], item["pixels_total"]) for item in seen] == [(1, 3), (2, 3), (3, 3)]
 
 
-def test_asking_for_a_pixel_outside_the_sky_is_refused_before_anything_is_saved(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_asking_for_a_pixel_outside_the_sky_is_refused_before_anything_is_saved(tmp_path: Path) -> None:
     """A bad chunk number raises and leaves no catalog file behind."""
     config = _LibraryConfig(tmp_path)
 

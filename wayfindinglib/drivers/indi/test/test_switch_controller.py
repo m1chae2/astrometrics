@@ -16,7 +16,7 @@ from wayfindinglib.drivers.indi.switch_controller import SwitchController
 class _FakeSwitchElement:
     """A fake INDI switch element with a settable name and on/off state."""
 
-    def __init__(self, name: str, state: int):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, name: str, state: int) -> None:
         self._name = name
         self.s = state
 
@@ -44,7 +44,7 @@ class _FakeSwitchElement:
 class _FakeNumberElement:
     """A fake INDI number element with a settable name and value."""
 
-    def __init__(self, name: str, value: float):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, name: str, value: float) -> None:
         self._name = name
         self.value = value
 
@@ -66,11 +66,11 @@ class _FakeVector(list):
 class _FakeDevice:
     """A fake INDI device exposing switch and number vectors by name."""
 
-    def __init__(self, switches: dict | None = None, numbers: dict | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, switches: dict | None = None, numbers: dict | None = None) -> None:
         self._switches = switches or {}
         self._numbers = numbers or {}
 
-    def getSwitch(self, name: str):  # ruff: ignore[missing-return-type-private-function]
+    def getSwitch(self, name: str) -> _FakeVector | None:
         """Return the named fake switch vector, or `None`.
 
         Returns
@@ -80,7 +80,7 @@ class _FakeDevice:
         """
         return self._switches.get(name)
 
-    def getNumber(self, name: str):  # ruff: ignore[missing-return-type-private-function]
+    def getNumber(self, name: str) -> _FakeVector | None:
         """Return the named fake number vector, or `None`.
 
         Returns
@@ -99,11 +99,11 @@ class _FakeClient:
         self.sent_switch = None
         self.sent_number = None
 
-    def sendNewSwitch(self, switch_vector) -> None:  # ruff: ignore[missing-type-function-argument]
+    def sendNewSwitch(self, switch_vector) -> None:
         """Record the switch vector that was sent."""
         self.sent_switch = switch_vector
 
-    def sendNewNumber(self, number_vector) -> None:  # ruff: ignore[missing-type-function-argument]
+    def sendNewNumber(self, number_vector) -> None:
         """Record the number vector that was sent."""
         self.sent_number = number_vector
 

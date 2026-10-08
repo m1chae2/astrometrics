@@ -16,7 +16,7 @@ from wayfindinglib.models.equipment_and_site.focus_model import (
 from wayfindinglib.models.equipment_and_site.guider_calibration import GuiderCalibration
 
 
-def test_guider_calibration_round_trips():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guider_calibration_round_trips() -> None:
     """Verify a GuiderCalibration constructs and reports its fields back."""
     calibration = GuiderCalibration(
         id="gc1",
@@ -31,7 +31,7 @@ def test_guider_calibration_round_trips():  # ruff: ignore[missing-return-type-u
     assert calibration.calibrated_at is not None
 
 
-def test_focus_model_rejects_duplicate_filter_offsets():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_focus_model_rejects_duplicate_filter_offsets() -> None:
     """Verify two offsets for the same filter are rejected."""
     with pytest.raises(ValidationError):
         FocusModel(
@@ -47,7 +47,7 @@ def test_focus_model_rejects_duplicate_filter_offsets():  # ruff: ignore[missing
         )
 
 
-def test_focus_model_offset_for_filter_returns_zero_when_unconfigured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_focus_model_offset_for_filter_returns_zero_when_unconfigured() -> None:
     """Verify offset_for_filter() falls back to zero for an unlisted filter."""
     model = FocusModel(
         id="fm1",

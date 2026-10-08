@@ -8,6 +8,7 @@ using a fake SafeStateSteps bundle rather than real hardware.
 
 import threading
 import time
+from pathlib import Path
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
@@ -33,7 +34,7 @@ def _steps() -> SafeStateSteps:
     )
 
 
-def test_fresh_heartbeat_triggers_no_escalation(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fresh_heartbeat_triggers_no_escalation(tmp_path: Path) -> None:
     """Verify a heartbeat within the timeout does not escalate."""
     heartbeat_path = tmp_path / "heartbeat"
     write_heartbeat(heartbeat_path, 1000.0)
@@ -43,7 +44,7 @@ def test_fresh_heartbeat_triggers_no_escalation(tmp_path):  # ruff: ignore[missi
     assert outcome is None
 
 
-def test_stale_heartbeat_escalates_with_watchdog_trigger(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_stale_heartbeat_escalates_with_watchdog_trigger(tmp_path: Path) -> None:
     """Verify a heartbeat past the timeout escalates via safe_state.execute."""
     heartbeat_path = tmp_path / "heartbeat"
     write_heartbeat(heartbeat_path, 1000.0)
@@ -55,7 +56,7 @@ def test_stale_heartbeat_escalates_with_watchdog_trigger(tmp_path):  # ruff: ign
     assert outcome.mount_parked is True
 
 
-def test_missing_heartbeat_escalates(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_missing_heartbeat_escalates(tmp_path: Path) -> None:
     """Verify a heartbeat file that was never written escalates immediately."""
     heartbeat_path = tmp_path / "never-written"
 
@@ -65,14 +66,14 @@ def test_missing_heartbeat_escalates(tmp_path):  # ruff: ignore[missing-type-fun
     assert outcome.trigger == "watchdog"
 
 
-def test_run_watchdog_loop_reports_each_escalation(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_watchdog_loop_reports_each_escalation(tmp_path: Path) -> None:
     """Verify the polling loop reports an escalation via on_escalation."""
     heartbeat_path = tmp_path / "heartbeat"
     # Never written -- every poll finds it stale.
     escalations = []
     stop_event = threading.Event()
 
-    def stop_after_one(outcome):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def stop_after_one(outcome) -> None:
         escalations.append(outcome)
         stop_event.set()
 
@@ -89,7 +90,7 @@ def test_run_watchdog_loop_reports_each_escalation(tmp_path):  # ruff: ignore[mi
     assert escalations[0].trigger == "watchdog"
 
 
-def test_run_watchdog_loop_does_not_escalate_when_heartbeat_kept_fresh(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_watchdog_loop_does_not_escalate_when_heartbeat_kept_fresh(tmp_path: Path) -> None:
     """Verify the loop takes no action while the heartbeat stays fresh."""
     heartbeat_path = tmp_path / "heartbeat"
     write_heartbeat(heartbeat_path, time.monotonic())
@@ -97,7 +98,7 @@ def test_run_watchdog_loop_does_not_escalate_when_heartbeat_kept_fresh(tmp_path)
     stop_event = threading.Event()
     call_count = {"value": 0}
 
-    def stop_after_three_checks():  # ruff: ignore[missing-return-type-private-function]
+    def stop_after_three_checks():
         call_count["value"] += 1
         if call_count["value"] >= 3:
             stop_event.set()

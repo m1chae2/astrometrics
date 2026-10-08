@@ -6,6 +6,7 @@ Description: Verifies the fetch -> parse -> persist -> refit chain in
 database or SSH-reachable host.
 """
 
+from pathlib import Path
 from typing import Any
 
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
@@ -79,7 +80,7 @@ _SAMPLE_LOG_LINES = [
 ]
 
 
-def _write_guide_log(tmp_path) -> str:  # ruff: ignore[missing-type-function-argument]
+def _write_guide_log(tmp_path: Path) -> str:
     """Write a minimal, parseable PHD2 guide log file.
 
     Returns
@@ -92,7 +93,7 @@ def _write_guide_log(tmp_path) -> str:  # ruff: ignore[missing-type-function-arg
     return str(log_path)
 
 
-def test_ingest_guide_log_file_returns_none_for_unparseable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ingest_guide_log_file_returns_none_for_unparseable_file(tmp_path: Path) -> None:
     """Verify an empty/missing log file ingests and persists nothing."""
     observatory = _FakeObservatory()
     records = _FakeRecordStore()
@@ -104,7 +105,7 @@ def test_ingest_guide_log_file_returns_none_for_unparseable_file(tmp_path):  # r
     assert observatory.saved is None
 
 
-def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path: Path) -> None:
     """Verify a real log file's samples record, then the spectrum refits."""
     file_path = _write_guide_log(tmp_path)
     # The refit reads back through get_guiding_samples, not the just-recorded
@@ -126,7 +127,7 @@ def test_ingest_guide_log_file_persists_samples_and_refits_spectrum(tmp_path):  
     assert observatory.saved is result
 
 
-def test_fetch_and_ingest_new_guide_logs_returns_none_without_driver_support():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fetch_and_ingest_new_guide_logs_returns_none_without_driver_support() -> None:
     """Verify a remote-transfer driver without guide-log support is a no-op."""
 
     class _DriverWithoutGuideLogs:
@@ -141,7 +142,7 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_without_driver_support(): 
     assert records.recorded_batches == []
 
 
-def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded() -> None:
     """Verify an empty remote listing ingests nothing."""
 
     class _DriverWithNoLogs:
@@ -165,7 +166,7 @@ def test_fetch_and_ingest_new_guide_logs_returns_none_when_nothing_downloaded():
     assert result is None
 
 
-def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path: Path) -> None:
     """Verify downloaded logs are parsed, recorded, and the spectrum refit."""
     file_path = _write_guide_log(tmp_path)
 
@@ -192,7 +193,7 @@ def test_fetch_and_ingest_new_guide_logs_downloads_parses_and_refits(tmp_path): 
     assert observatory.saved is result
 
 
-def test_refit_and_persist_guiding_spectrum_persists_through_observatory():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_refit_and_persist_guiding_spectrum_persists_through_observatory() -> None:
     """Verify the standalone refit helper persists via the observatory."""
     records = _FakeRecordStore(guiding_samples=[{"time": 1.0, "dra": 0.1, "ddec": 0.1, "pulse_dec": 50}])
     observatory = _FakeObservatory()
@@ -203,7 +204,7 @@ def test_refit_and_persist_guiding_spectrum_persists_through_observatory():  # r
     assert observatory.saved is result
 
 
-def test_refit_ignores_samples_that_were_not_measured_from_a_real_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_refit_ignores_samples_that_were_not_measured_from_a_real_star() -> None:
     """Verify estimated and unverified samples never reach the fit.
 
     A sample reconstructed from mount pulses has a drift value that is a

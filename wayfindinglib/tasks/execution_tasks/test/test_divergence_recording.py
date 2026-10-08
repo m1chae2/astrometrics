@@ -14,7 +14,7 @@ from wayfindinglib.models.policy.delegation import ObservatoryCapability
 from wayfindinglib.tasks.execution_tasks.divergence_recording import record_divergence
 
 
-def test_agreeing_comparison_is_within_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_agreeing_comparison_is_within_tolerance() -> None:
     """Verify a comparison within tolerance is recorded as within_tolerance."""
     record = record_divergence(
         "div-1",
@@ -31,7 +31,7 @@ def test_agreeing_comparison_is_within_tolerance():  # ruff: ignore[missing-retu
     assert record.divergence_magnitude == pytest.approx(-0.3)
 
 
-def test_disagreeing_comparison_is_still_recorded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_disagreeing_comparison_is_still_recorded() -> None:
     """Verify a comparison outside tolerance is still written to the record."""
     record = record_divergence(
         "div-2",
@@ -48,7 +48,7 @@ def test_disagreeing_comparison_is_still_recorded():  # ruff: ignore[missing-ret
     assert record.divergence_magnitude == pytest.approx(50.0)
 
 
-def test_divergence_magnitude_is_signed_intended_minus_observed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_divergence_magnitude_is_signed_intended_minus_observed() -> None:
     """Verify divergence_magnitude is signed, not an absolute value."""
     positive = record_divergence(
         "div-3",
@@ -84,7 +84,7 @@ def test_divergence_magnitude_is_signed_intended_minus_observed():  # ruff: igno
         ObservatoryCapability.OBSERVATORY_SAFETY,
     ],
 )
-def test_uncomparable_capabilities_are_rejected(capability):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_uncomparable_capabilities_are_rejected(capability) -> None:
     """Verify MOUNT_CONTROL/CAPTURE_ORCHESTRATION/OBSERVATORY_SAFETY raise."""
     with pytest.raises(InvalidArgumentError, match="no shadowed counterpart"):
         record_divergence(
@@ -100,7 +100,7 @@ def test_uncomparable_capabilities_are_rejected(capability):  # ruff: ignore[mis
         )
 
 
-def test_optional_queued_package_id_may_be_none():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_optional_queued_package_id_may_be_none() -> None:
     """Verify queued_observation_package_id may be None at session level."""
     record = record_divergence(
         "div-6",
@@ -116,7 +116,7 @@ def test_optional_queued_package_id_may_be_none():  # ruff: ignore[missing-retur
     assert record.queued_observation_package_id is None
 
 
-def test_tolerance_is_stored_on_the_record():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_tolerance_is_stored_on_the_record() -> None:
     """Verify the tolerance a comparison was evaluated against is recorded."""
     record = record_divergence(
         "div-7",
@@ -132,7 +132,7 @@ def test_tolerance_is_stored_on_the_record():  # ruff: ignore[missing-return-typ
     assert record.tolerance == pytest.approx(2.5)
 
 
-def test_converged_defaults_to_none():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_converged_defaults_to_none() -> None:
     """Verify converged defaults to None when the caller does not supply it."""
     record = record_divergence(
         "div-8",
@@ -148,7 +148,7 @@ def test_converged_defaults_to_none():  # ruff: ignore[missing-return-type-undoc
     assert record.converged is None
 
 
-def test_converged_is_stored_when_supplied():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_converged_is_stored_when_supplied() -> None:
     """Verify a supplied converged value is recorded on the record."""
     record = record_divergence(
         "div-9",

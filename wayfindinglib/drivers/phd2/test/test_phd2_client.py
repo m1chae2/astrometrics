@@ -12,7 +12,7 @@ import threading
 from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
 
 
-def _start_test_server(handler_class):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _start_test_server(handler_class) -> tuple[socketserver.TCPServer, int]:
     """Start a local TCPServer with an ephemeral port for one test.
 
     Parameters
@@ -35,7 +35,7 @@ def _start_test_server(handler_class):  # ruff: ignore[missing-type-function-arg
     return server, port
 
 
-def test_events_yields_correctly_parsed_json_lines():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_events_yields_correctly_parsed_json_lines() -> None:
     """Verify events() parses each JSON line from a real server."""
     sent_events = [
         {"Event": "Version", "PHDVersion": "2.6.11"},
@@ -43,7 +43,7 @@ def test_events_yields_correctly_parsed_json_lines():  # ruff: ignore[missing-re
     ]
 
     class Handler(socketserver.BaseRequestHandler):
-        def handle(self):  # ruff: ignore[missing-return-type-private-function]
+        def handle(self) -> None:
             for event in sent_events:
                 self.request.sendall((json.dumps(event) + "\n").encode())
 
@@ -61,12 +61,12 @@ def test_events_yields_correctly_parsed_json_lines():  # ruff: ignore[missing-re
         server.server_close()
 
 
-def test_events_reconnects_after_dropped_connection():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_events_reconnects_after_dropped_connection() -> None:
     """Verify events() reconnects and keeps yielding after socket closes."""
     connection_count = {"count": 0}
 
     class Handler(socketserver.BaseRequestHandler):
-        def handle(self):  # ruff: ignore[missing-return-type-private-function]
+        def handle(self) -> None:
             connection_count["count"] += 1
             event = {"Event": "GuideStep", "Timestamp": float(connection_count["count"]), "RADuration": 0}
             self.request.sendall((json.dumps(event) + "\n").encode())

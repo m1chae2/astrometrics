@@ -10,6 +10,8 @@ session unchanged.
 
 import threading
 from datetime import date
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,7 +25,7 @@ from wayfindinglib.tasks.execution_tasks.session_recorder import ObservationSess
 class _FakeTelescopeStatus:
     """A minimal stand-in for TelescopeStatus, carrying only weather fields."""
 
-    def __init__(self, temperature, humidity):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, temperature, humidity) -> None:
         self.temperature = temperature
         self.humidity = humidity
 
@@ -31,10 +33,10 @@ class _FakeTelescopeStatus:
 class FakeIndiDriver:
     """A fake INDI driver with a fixed status, for weather-snapshot tests."""
 
-    def __init__(self, temperature="12.3°C", humidity="45.0%"):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, temperature="12.3°C", humidity="45.0%") -> None:
         self._status = _FakeTelescopeStatus(temperature, humidity)
 
-    def get_status(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_status(self) -> Any:
         """Return the fixed fake TelescopeStatus.
 
         Returns
@@ -48,15 +50,15 @@ class FakeIndiDriver:
 class FakeGuidingService:
     """A fake guiding service returning a fixed sample list once."""
 
-    def __init__(self, samples):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, samples) -> None:
         self._samples = samples
         self.poll_count = 0
 
-    def poll_external_telemetry(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def poll_external_telemetry(self) -> None:
         """Record that a poll occurred."""
         self.poll_count += 1
 
-    def drain_guiding_samples(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def drain_guiding_samples(self) -> list[Any]:
         """Return and clear the configured fake GuidingSample list.
 
         Returns
@@ -69,7 +71,7 @@ class FakeGuidingService:
 
 
 @pytest.fixture
-def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by an isolated temporary database.
 
     Returns
@@ -95,7 +97,7 @@ def _planned_session(session_id: str) -> ObservationSession:
     )
 
 
-def test_capture_weather_snapshot_parses_available_indi_properties(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_capture_weather_snapshot_parses_available_indi_properties(butler: DiskButler) -> None:
     """Verify capture_weather_snapshot parses temperature/humidity."""
     recorder = ObservationSessionRecorder(FakeGuidingService([]), FakeIndiDriver(), butler=butler)
     snapshot = recorder.capture_weather_snapshot()
@@ -103,7 +105,7 @@ def test_capture_weather_snapshot_parses_available_indi_properties(butler):  # r
     assert snapshot.humidity_percent == pytest.approx(45.0)
 
 
-def test_capture_weather_snapshot_tolerates_unavailable_readings(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_capture_weather_snapshot_tolerates_unavailable_readings(butler: DiskButler) -> None:
     """Verify unavailable INDI readings stay None rather than raising."""
     recorder = ObservationSessionRecorder(
         FakeGuidingService([]), FakeIndiDriver(temperature="-", humidity="Unknown"), butler=butler
@@ -113,7 +115,7 @@ def test_capture_weather_snapshot_tolerates_unavailable_readings(butler):  # ruf
     assert snapshot.humidity_percent is None
 
 
-def test_save_checkpoint_persists_session_via_butler(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_checkpoint_persists_session_via_butler(butler: DiskButler) -> None:
     """Verify save_checkpoint round-trips through DiskButler."""
     recorder = ObservationSessionRecorder(FakeGuidingService([]), FakeIndiDriver(), butler=butler)
     session = _planned_session("test-checkpoint")
@@ -124,14 +126,14 @@ def test_save_checkpoint_persists_session_via_butler(butler):  # ruff: ignore[mi
     assert reloaded.id == "test-checkpoint"
 
 
-def test_run_raises_for_a_session_that_does_not_exist(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_raises_for_a_session_that_does_not_exist(butler: DiskButler) -> None:
     """Verify run() raises rather than fabricating a never-planned session."""
     recorder = ObservationSessionRecorder(FakeGuidingService([]), FakeIndiDriver(), butler=butler)
     with pytest.raises(NotFoundError, match="not found"):
         recorder.run("does-not-exist")
 
 
-def test_run_accumulates_guiding_samples_and_weather_until_stopped(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_accumulates_guiding_samples_and_weather_until_stopped(butler: DiskButler) -> None:
     """Verify one loop drains, snapshots weather, and checkpoints."""
     session = _planned_session("test-run-session")
     butler.put(session, "observation_session", {"session_id": session.id})
@@ -149,7 +151,7 @@ def test_run_accumulates_guiding_samples_and_weather_until_stopped(butler):  # r
     # this test to exactly one iteration's worth of accumulation.
     original_poll = guiding_service.poll_external_telemetry
 
-    def poll_then_maybe_stop():  # ruff: ignore[missing-return-type-private-function]
+    def poll_then_maybe_stop() -> None:
         original_poll()
         if guiding_service.poll_count >= 2:
             stop_event.set()

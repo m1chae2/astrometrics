@@ -6,7 +6,7 @@ Description: Verifies GuideStarLossEvent's default unrecovered state.
 from wayfindinglib.models.session.guide_star_loss import GuideStarLossEvent
 
 
-def test_guide_star_loss_event_defaults_unrecovered():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guide_star_loss_event_defaults_unrecovered() -> None:
     """Verify a freshly opened event defaults to unrecovered, zero attempts."""
     event = GuideStarLossEvent(id="loss-1", observation_session_id="session-1", comparison_input_id="frame-1")
 

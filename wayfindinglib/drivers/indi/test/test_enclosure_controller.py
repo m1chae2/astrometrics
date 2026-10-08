@@ -16,7 +16,7 @@ from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 class _FakeSwitchElement:
     """A fake INDI switch element with a settable name and on/off state."""
 
-    def __init__(self, name: str, state: int):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, name: str, state: int) -> None:
         self._name = name
         self.s = state
 
@@ -44,7 +44,7 @@ class _FakeSwitchElement:
 class _FakeSwitchVector(list):
     """A fake INDI switch property vector: a list of elements plus `.s`."""
 
-    def __init__(self, elements: list, vector_state: int):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, elements: list, vector_state: int) -> None:
         super().__init__(elements)
         self.s = vector_state
 
@@ -52,10 +52,10 @@ class _FakeSwitchVector(list):
 class _FakeEnclosureDevice:
     """A fake INDI device exposing a single `DOME_SHUTTER` switch."""
 
-    def __init__(self, shutter_switch: _FakeSwitchVector | None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, shutter_switch: _FakeSwitchVector | None) -> None:
         self._shutter_switch = shutter_switch
 
-    def getSwitch(self, name: str):  # ruff: ignore[missing-return-type-private-function]
+    def getSwitch(self, name: str) -> _FakeSwitchVector | None:
         """Return the fixed `DOME_SHUTTER` switch, or `None`.
 
         Returns
@@ -73,7 +73,7 @@ class _FakeClient:
         """Initialize with no switch vector sent yet."""
         self.sent_switch = None
 
-    def sendNewSwitch(self, switch_vector) -> None:  # ruff: ignore[missing-type-function-argument]
+    def sendNewSwitch(self, switch_vector) -> None:
         """Record the switch vector that was sent."""
         self.sent_switch = switch_vector
 

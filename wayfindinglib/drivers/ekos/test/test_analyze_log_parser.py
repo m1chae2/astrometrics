@@ -6,6 +6,7 @@ sample text is cut from a real log (KStars 3.8.3, session of 2026-09-23).
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -51,7 +52,7 @@ def _write(tmp_path: Path, text: str, name: str = "ekos-2026-09-23T20-31-48.anal
     return str(path)
 
 
-def _parse(tmp_path: Path, text: str = _ANALYZE_LOG):  # ruff: ignore[missing-return-type-private-function]
+def _parse(tmp_path: Path, text: str = _ANALYZE_LOG) -> tuple[Any, ...]:
     """Parse `text` as an analyze file.
 
     Returns

@@ -7,6 +7,7 @@ and that history-based limits are not thrown off by a few bad sessions.
 """
 
 import math
+from typing import Any
 
 import pytest
 
@@ -75,7 +76,7 @@ def _guide_camera(pixel_size_um: float = 3.75, width_px: int = 1280) -> Camera:
     )
 
 
-def _envelope(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _envelope(**overrides: Any):
     """Derive an envelope for the default equipment, with overrides.
 
     Returns

@@ -15,7 +15,7 @@ from wayfindinglib.session_analysis.guiding.pre_processing.assess_guiding_input_
 )
 
 
-def _assess(samples, runs, envelope, match="exact", scale_matches=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _assess(samples, runs, envelope, match="exact", scale_matches=True):
     """Run pre-processing with this module's usual arguments.
 
     Returns

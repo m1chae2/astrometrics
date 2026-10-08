@@ -12,7 +12,7 @@ from wayfindinglib.models.equipment_and_site.calibration import (
 from wayfindinglib.models.planning.observation_package import FrameType
 
 
-def test_calibration_stats_groups_by_frame_type_list():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_stats_groups_by_frame_type_list() -> None:
     """Verify darks/biases/flats are stored as separate lists."""
     stats = CalibrationStats(
         camera_id="c1",
@@ -24,7 +24,7 @@ def test_calibration_stats_groups_by_frame_type_list():  # ruff: ignore[missing-
     assert stats.flats == []
 
 
-def test_calibration_advisory_defaults_to_zero_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_advisory_defaults_to_zero_count() -> None:
     """Verify CalibrationAdvisory defaults existing_count to zero."""
     advisory = CalibrationAdvisory(camera_id="c1", frame_type=FrameType.DARK, exposure_sec=300.0)
     assert advisory.existing_count == 0

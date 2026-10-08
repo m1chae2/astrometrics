@@ -16,7 +16,7 @@ from wayfindinglib.drivers.indi.weather_controller import WeatherController
 class _FakeNumberElement:
     """A fake INDI number element with a settable name and value."""
 
-    def __init__(self, name: str, value: float):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, name: str, value: float) -> None:
         self._name = name
         self.value = value
 
@@ -38,10 +38,10 @@ class _FakeVector(list):
 class _FakeDevice:
     """A fake INDI device exposing a single `WEATHER_PARAMETERS` vector."""
 
-    def __init__(self, weather_parameters: _FakeVector | None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, weather_parameters: _FakeVector | None) -> None:
         self._weather_parameters = weather_parameters
 
-    def getNumber(self, name: str):  # ruff: ignore[missing-return-type-private-function]
+    def getNumber(self, name: str) -> _FakeVector | None:
         """Return the fixed `WEATHER_PARAMETERS` vector, or `None`.
 
         Returns

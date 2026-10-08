@@ -7,6 +7,7 @@ fail-fast behavior, without requiring a real SSH-reachable host.
 import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -17,7 +18,7 @@ from astrometricslib import ExternalServiceError
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 
-def test_resolve_remote_folder_name_matches_underscore_variant():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_remote_folder_name_matches_underscore_variant() -> None:
     """Verify a space-to-underscore variant resolves against the listing."""
     driver = StellarMateInterface(host_alias="test-host")
     with patch.object(driver, "list_remote_targets", return_value=["M_81"]):
@@ -25,7 +26,7 @@ def test_resolve_remote_folder_name_matches_underscore_variant():  # ruff: ignor
     assert resolved == "M_81"
 
 
-def test_resolve_remote_folder_name_matches_space_variant():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_remote_folder_name_matches_space_variant() -> None:
     """Verify an underscore-to-space variant resolves against the listing."""
     driver = StellarMateInterface(host_alias="test-host")
     with patch.object(driver, "list_remote_targets", return_value=["M 81"]):
@@ -33,7 +34,7 @@ def test_resolve_remote_folder_name_matches_space_variant():  # ruff: ignore[mis
     assert resolved == "M 81"
 
 
-def test_resolve_remote_folder_name_returns_unchanged_when_no_match():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_remote_folder_name_returns_unchanged_when_no_match() -> None:
     """Verify the original name is returned when no variant matches."""
     driver = StellarMateInterface(host_alias="test-host")
     with patch.object(driver, "list_remote_targets", return_value=["NGC 7000"]):
@@ -41,7 +42,7 @@ def test_resolve_remote_folder_name_returns_unchanged_when_no_match():  # ruff: 
     assert resolved == "M 81"
 
 
-def test_run_command_fails_fast_within_offline_cooldown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_command_fails_fast_within_offline_cooldown() -> None:
     """Verify a command raises immediately, without a subprocess call.
 
     Applies while the host is within its known-offline cooldown window.
@@ -56,7 +57,7 @@ def test_run_command_fails_fast_within_offline_cooldown():  # ruff: ignore[missi
     mock_run.assert_not_called()
 
 
-def test_check_connection_returns_false_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_check_connection_returns_false_on_failure() -> None:
     """Verify check_connection() returns False rather than raising."""
     driver = StellarMateInterface(host_alias="test-host")
     with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
@@ -78,14 +79,14 @@ def test_check_connection_does_not_hide_a_bug() -> None:
         driver.check_connection()
 
 
-def test_list_remote_targets_returns_empty_list_on_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_list_remote_targets_returns_empty_list_on_failure() -> None:
     """Verify list_remote_targets() degrades to an empty list on failure."""
     driver = StellarMateInterface(host_alias="test-host")
     with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
         assert driver.list_remote_targets() == []
 
 
-def test_full_folder_download_protects_remote_path_from_word_splitting(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_full_folder_download_protects_remote_path_from_word_splitting(tmp_path: Path) -> None:
     """A full-folder rsync (no selected_files) must pass -s (--protect-args).
 
     Without it, a space-named remote folder like "NGC 7023" splits into
@@ -116,7 +117,7 @@ def test_full_folder_download_protects_remote_path_from_word_splitting(tmp_path)
     assert "-s" in rsync_cmd
 
 
-def _make_driver():  # ruff: ignore[missing-return-type-private-function]
+def _make_driver() -> StellarMateInterface:
     """Build a driver with a fixed host alias, without touching the network.
 
     Returns
@@ -135,7 +136,7 @@ _REMOTE_LISTING = (
 )
 
 
-def test_guide_log_listing_searches_both_the_phd2_and_the_kstars_folders():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guide_log_listing_searches_both_the_phd2_and_the_kstars_folders() -> None:
     """Verify the Ekos internal guider's folder is searched, not just PHD2's.
 
     Regression test: only PHD2's own folders were searched, so the guide
@@ -155,7 +156,7 @@ def test_guide_log_listing_searches_both_the_phd2_and_the_kstars_folders():  # r
     ]
 
 
-def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder() -> None:
     """Verify analyze logs are found in the KStars analyze folder."""
     driver = _make_driver()
     listing = "5000\t/home/stellarmate/.local/share/kstars/analyze/ekos-2026-09-23T20-31-48.analyze\n"
@@ -166,7 +167,7 @@ def test_ekos_analyze_log_listing_reads_the_kstars_analyze_folder():  # ruff: ig
     assert files == ["/home/stellarmate/.local/share/kstars/analyze/ekos-2026-09-23T20-31-48.analyze"]
 
 
-def test_listing_is_empty_when_the_host_cannot_be_reached():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_listing_is_empty_when_the_host_cannot_be_reached() -> None:
     """Verify an unreachable telescope computer gives an empty list."""
     driver = _make_driver()
     with patch.object(driver, "_run_command", side_effect=ExternalServiceError("unreachable")):
@@ -174,7 +175,7 @@ def test_listing_is_empty_when_the_host_cannot_be_reached():  # ruff: ignore[mis
         assert driver.list_remote_ekos_analyze_logs() == []
 
 
-def _finished_process(return_code: int = 0):  # ruff: ignore[missing-return-type-private-function]
+def _finished_process(return_code: int = 0) -> MagicMock:
     """Build a stand-in for a finished rsync process.
 
     Returns
@@ -188,7 +189,7 @@ def _finished_process(return_code: int = 0):  # ruff: ignore[missing-return-type
     return process
 
 
-def _rsync_writing(files: dict[str, bytes], destination):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _rsync_writing(files: dict[str, bytes], destination) -> Callable[..., Any]:
     """Build a ``subprocess.Popen`` stand-in whose rsync run creates files.
 
     Returns
@@ -197,7 +198,7 @@ def _rsync_writing(files: dict[str, bytes], destination):  # ruff: ignore[missin
         Writes `files` into `destination` when called, as rsync would.
     """
 
-    def fake_popen(command, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
+    def fake_popen(command, **kwargs) -> MagicMock:
         """Write the files and return a finished process stand-in.
 
         Returns
@@ -212,7 +213,7 @@ def _rsync_writing(files: dict[str, bytes], destination):  # ruff: ignore[missin
     return fake_popen
 
 
-def test_download_skips_files_that_are_already_current(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_skips_files_that_are_already_current(tmp_path: Path) -> None:
     """Verify rsync is not even started when everything is current."""
     driver = _make_driver()
     (tmp_path / "guide_log-2026-09-24T20-43-58.txt").write_bytes(b"x" * 1200)
@@ -227,7 +228,7 @@ def test_download_skips_files_that_are_already_current(tmp_path):  # ruff: ignor
     assert len(local_paths) == 2
 
 
-def test_log_and_image_downloads_share_one_rsync_runner(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_log_and_image_downloads_share_one_rsync_runner(tmp_path: Path) -> None:
     """Verify image and log downloads both use `_run_rsync`."""
     driver = StellarMateInterface(host_alias="test-host", remote_pictures_path="/home/stellarmate/Pictures")
     with (
@@ -245,7 +246,7 @@ def test_log_and_image_downloads_share_one_rsync_runner(tmp_path):  # ruff: igno
         assert {"-avz", "--no-p", "--no-g", "--no-o", "-s"} <= set(command)
 
 
-def test_log_download_filters_by_name_and_stops_if_the_link_stalls(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_log_download_filters_by_name_and_stops_if_the_link_stalls(tmp_path: Path) -> None:
     """Verify folders sync with include filters and an idle timeout."""
     driver = _make_driver()
     with (
@@ -267,7 +268,7 @@ def test_log_download_filters_by_name_and_stops_if_the_link_stalls(tmp_path):  #
     }
 
 
-def test_files_from_one_folder_share_one_rsync_run(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_files_from_one_folder_share_one_rsync_run(tmp_path: Path) -> None:
     """Verify many files cost one rsync run, hence one connection.
 
     Regression test: fetching one file at a time with ``scp`` took minutes
@@ -290,7 +291,7 @@ def test_files_from_one_folder_share_one_rsync_run(tmp_path):  # ruff: ignore[mi
     assert len(local_paths) == 60
 
 
-def test_a_file_that_grew_is_synced_again(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_file_that_grew_is_synced_again(tmp_path: Path) -> None:
     """Verify a log still being written triggers a sync and ends up current."""
     driver = _make_driver()
     (tmp_path / "guide_log-2026-09-24T20-43-58.txt").write_bytes(b"x" * 800)
@@ -306,7 +307,7 @@ def test_a_file_that_grew_is_synced_again(tmp_path):  # ruff: ignore[missing-typ
     assert len(local_paths) == 2
 
 
-def test_a_failed_rsync_still_returns_the_files_that_are_current(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_failed_rsync_still_returns_the_files_that_are_current(tmp_path: Path) -> None:
     """Verify a failed run is not retried with another tool."""
     driver = _make_driver()
     (tmp_path / "PHD2_GuideLog_2026-09-20_201500.txt").write_bytes(b"y" * 300)
@@ -320,7 +321,7 @@ def test_a_failed_rsync_still_returns_the_files_that_are_current(tmp_path):  # r
     assert local_paths == [str(tmp_path / "PHD2_GuideLog_2026-09-20_201500.txt")]
 
 
-def test_listing_commands_tolerate_missing_folders():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_listing_commands_tolerate_missing_folders() -> None:
     """Verify `find` failing on a missing folder does not fail the listing.
 
     Regression test: an Ekos-only setup has no PHD2 folder, `find` then
@@ -338,7 +339,7 @@ def test_listing_commands_tolerate_missing_folders():  # ruff: ignore[missing-re
     assert analyze_command.rstrip().endswith("|| true")
 
 
-def test_kstars_logs_go_into_their_own_folder(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_kstars_logs_go_into_their_own_folder(tmp_path: Path) -> None:
     """Verify the KStars text logs are fetched into ``kstars_logs`` only."""
     driver = _make_driver()
     (tmp_path / "kstars_logs").mkdir()
@@ -357,7 +358,9 @@ def test_kstars_logs_go_into_their_own_folder(tmp_path):  # ruff: ignore[missing
     assert local_paths == [str(tmp_path / "kstars_logs" / "log_20-14-00.txt")]
 
 
-def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a download below an unmounted mount point makes no folders."""
     from astrometricslib import StorageNotMountedError
 
@@ -381,7 +384,7 @@ def test_download_refuses_and_creates_nothing_when_the_frames_drive_is_missing(t
     mock_popen.assert_not_called()
 
 
-def test_a_host_known_offline_fails_fast_even_after_the_cooldown_and_rechecks_in_the_background():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_host_known_offline_fails_fast_even_after_the_cooldown_and_rechecks_in_the_background() -> None:
     """A caller never waits on an offline host; a background check follows."""
     driver = StellarMateInterface(host_alias="test-host")
     driver._last_connection_status = False

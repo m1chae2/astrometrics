@@ -14,6 +14,7 @@ scope to change).
 
 import pathlib
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
@@ -37,7 +38,7 @@ _NOW = datetime(2026, 8, 5, 4, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture
-def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by an isolated temporary database.
 
     Returns
@@ -172,22 +173,22 @@ def test_record_divergence_delegates_to_task_function() -> None:
     assert record.within_tolerance is True
 
 
-def test_create_recorder_binds_the_astrometrics_own_butler(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_create_recorder_binds_the_astrometrics_own_butler(butler: DiskButler) -> None:
     """Verify create_recorder binds the recorder to this interface's butler."""
     execution = ObservationExecution(butler=butler)
     recorder = execution.create_recorder(guiding_service=object(), indi_driver=object())
     assert recorder._butler is butler
 
 
-def test_reconcile_session_delegates_and_persists(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reconcile_session_delegates_and_persists(butler: DiskButler) -> None:
     """Verify reconcile_session runs both reconciliations and records."""
 
     class _FakeTargetRegistry:
-        def get(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def get(self, target_id) -> None:
             return None
 
     class _FakeAstrometrics:
-        def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+        def __init__(self) -> None:
             self.targets = _FakeTargetRegistry()
 
     execution = ObservationExecution(butler=butler, astrometrics=_FakeAstrometrics())

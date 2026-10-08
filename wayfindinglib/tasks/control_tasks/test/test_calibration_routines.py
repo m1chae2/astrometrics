@@ -26,7 +26,7 @@ _ATTEMPTS = [
 ]
 
 
-def test_run_guider_calibration_sequences_ra_then_dec_pulses():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_guider_calibration_sequences_ra_then_dec_pulses() -> None:
     """Verify the RA pulse and measurement happen before the Dec pulse."""
     centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0), (10.0, 8.0)])
     call_order: list[str] = []
@@ -54,7 +54,7 @@ def test_run_guider_calibration_sequences_ra_then_dec_pulses():  # ruff: ignore[
     assert calibration.dec_rate_arcsec_per_sec == pytest.approx((8.0 * 2.0) / 3.0)
 
 
-def test_run_guider_calibration_raises_when_ra_pulse_command_fails():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_guider_calibration_raises_when_ra_pulse_command_fails() -> None:
     """Verify a failed RA pulse command raises rather than measuring anyway."""
     steps = GuiderCalibrationSteps(
         pulse_ra=lambda duration_sec: False,
@@ -66,7 +66,7 @@ def test_run_guider_calibration_raises_when_ra_pulse_command_fails():  # ruff: i
         run_guider_calibration(steps, "cal-2", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 
-def test_run_guider_calibration_raises_when_dec_pulse_command_fails():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_guider_calibration_raises_when_dec_pulse_command_fails() -> None:
     """Verify a failed Dec pulse command raises instead of measuring."""
     centroids = iter([(0.0, 0.0), (10.0, 0.0), (10.0, 0.0)])
     steps = GuiderCalibrationSteps(
@@ -79,7 +79,7 @@ def test_run_guider_calibration_raises_when_dec_pulse_command_fails():  # ruff: 
         run_guider_calibration(steps, "cal-3", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 
-def test_run_guider_calibration_propagates_no_displacement_value_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_guider_calibration_propagates_no_displacement_value_error() -> None:
     """Verify a run with no measurable displacement raises ProcessingError."""
     steps = GuiderCalibrationSteps(
         pulse_ra=lambda duration_sec: True,
@@ -91,7 +91,7 @@ def test_run_guider_calibration_propagates_no_displacement_value_error():  # ruf
         run_guider_calibration(steps, "cal-4", "cam-1", "scope-1", arcsec_per_pixel=2.0)
 
 
-def test_run_backlash_calibration_returns_elapsed_time_to_first_motion():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_backlash_calibration_returns_elapsed_time_to_first_motion() -> None:
     """Verify the reported delay matches the pulse count before motion."""
     centroids = iter([
         (0.0, 0.0),  # after the settle pulse
@@ -117,7 +117,7 @@ def test_run_backlash_calibration_returns_elapsed_time_to_first_motion():  # ruf
     assert len(pulse_calls) == 4  # 1 settle + 3 reversed-direction test pulses
 
 
-def test_run_backlash_calibration_reports_full_budget_if_motion_never_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_backlash_calibration_reports_full_budget_if_motion_never_detected() -> None:
     """Verify exhausting the probe budget returns the full elapsed time."""
     steps = BacklashCalibrationSteps(
         pulse_dec=lambda direction, duration_sec: True, measure_guide_star_centroid=lambda: (0.0, 0.0)
@@ -128,7 +128,7 @@ def test_run_backlash_calibration_reports_full_budget_if_motion_never_detected()
     assert backlash_ms == pytest.approx(10 * 0.05 * 1000.0)
 
 
-def test_run_polar_alignment_assist_fits_from_the_given_attempts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_polar_alignment_assist_fits_from_the_given_attempts() -> None:
     """Verify the assist routine fits directly from the passed-in attempts."""
     model = run_polar_alignment_assist(_ATTEMPTS, latitude_deg=39.7)
 
@@ -136,7 +136,7 @@ def test_run_polar_alignment_assist_fits_from_the_given_attempts():  # ruff: ign
     assert model.confidence != "insufficient_data" or model.sample_count < 4
 
 
-def test_run_polar_alignment_assist_reports_insufficient_data_early():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_run_polar_alignment_assist_reports_insufficient_data_early() -> None:
     """Verify fewer than 4 attempts reports insufficient_data, not a fit."""
     model = run_polar_alignment_assist(_ATTEMPTS[:2])
 

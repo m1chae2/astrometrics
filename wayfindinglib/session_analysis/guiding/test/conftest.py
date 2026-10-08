@@ -7,6 +7,9 @@ match this observatory: a 121.05 mm guide scope with a 3.75 um camera
 about 3.2 seconds.
 """
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -45,7 +48,7 @@ def good_baseline() -> dict:
 
 
 @pytest.fixture
-def make_envelope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def make_envelope() -> Callable[..., Any]:
     """Return a function that builds this observatory's performance envelope.
 
     Returns
@@ -55,7 +58,7 @@ def make_envelope():  # ruff: ignore[missing-return-type-undocumented-public-fun
         envelope. Pass ``star_width=None`` for equipment with no frames yet.
     """
 
-    def make(star_width: float | None = 5.59, baseline: dict | None = GOOD_BASELINE):  # ruff: ignore[missing-return-type-private-function]
+    def make(star_width: float | None = 5.59, baseline: dict | None = GOOD_BASELINE):
         """Build the envelope.
 
         Returns
@@ -84,7 +87,7 @@ def make_envelope():  # ruff: ignore[missing-return-type-undocumented-public-fun
 
 
 @pytest.fixture
-def make_samples():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def make_samples() -> Callable[..., Any]:
     """Return a function that builds synthetic guide samples.
 
     Returns
@@ -93,7 +96,7 @@ def make_samples():  # ruff: ignore[missing-return-type-undocumented-public-func
         Builds evenly spaced samples with Gaussian errors.
     """
 
-    def make(  # ruff: ignore[missing-return-type-private-function]
+    def make(
         count: int = 400,
         start: float = NIGHT_START + 60.0,
         cadence: float = 3.2,
@@ -102,7 +105,7 @@ def make_samples():  # ruff: ignore[missing-return-type-undocumented-public-func
         pulse_dec_ms: float = 0.0,
         seed: int = 1,
         star_mass: float = 300000.0,
-    ):
+    ) -> list[dict[str, Any]]:
         """Build the samples.
 
         Returns
@@ -129,7 +132,7 @@ def make_samples():  # ruff: ignore[missing-return-type-undocumented-public-func
 
 
 @pytest.fixture
-def make_run():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def make_run() -> Callable[..., Any]:
     """Return a function that builds a guiding run.
 
     Returns

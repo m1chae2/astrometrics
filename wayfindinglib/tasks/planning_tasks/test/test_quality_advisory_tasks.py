@@ -5,17 +5,19 @@ status across pipelines and counts confirmed asteroid candidates,
 against a lightweight fake target rather than a real Target instance.
 """
 
+from typing import Any
+
 from wayfindinglib.tasks.planning_tasks.quality_advisory_tasks import build_target_quality_advisory
 
 
 class _FakeQualitySummary:
-    def __init__(self, flagged=False, flag_reasons=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, flagged=False, flag_reasons=None) -> None:
         self.flagged = flagged
         self.flag_reasons = flag_reasons or []
 
 
 class _FakeCandidate:
-    def __init__(self, cascade_stage_value):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, cascade_stage_value) -> None:
         class _Stage:
             value = cascade_stage_value
 
@@ -23,25 +25,25 @@ class _FakeCandidate:
 
 
 class _FakeStacking:
-    def __init__(self, quality_summary=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, quality_summary=None) -> None:
         self.quality_summary = quality_summary
 
 
 class _FakeQuality:
-    def __init__(self, astrometry=None, photometry=None, spectroscopy=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, astrometry=None, photometry=None, spectroscopy=None) -> None:
         self.astrometry = astrometry
         self.photometry = photometry
         self.spectroscopy = spectroscopy
 
 
 class _FakeAsteroidDetection:
-    def __init__(self, quality_summary=None, candidates=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, quality_summary=None, candidates=None) -> None:
         self.quality_summary = quality_summary
         self.candidates = candidates or []
 
 
 class _FakeTarget:
-    def __init__(self, **overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-special-method]
+    def __init__(self, **overrides: Any) -> None:
         self.id = "M 81"
         self.stacking = _FakeStacking(overrides.get("stack_quality_summary"))
         self.spectral_stacking = _FakeStacking(overrides.get("spectral_stack_quality_summary"))
@@ -56,7 +58,7 @@ class _FakeTarget:
         )
 
 
-def test_advisory_aggregates_flagged_pipelines():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_advisory_aggregates_flagged_pipelines() -> None:
     """Verify flagged status/reasons aggregate across every pipeline."""
     target = _FakeTarget(
         stack_quality_summary=_FakeQualitySummary(flagged=True, flag_reasons=["low SNR"]),
@@ -69,7 +71,7 @@ def test_advisory_aggregates_flagged_pipelines():  # ruff: ignore[missing-return
     assert pipeline_names == {"stacking", "astrometry"}
 
 
-def test_advisory_counts_confirmed_asteroid_candidates():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_advisory_counts_confirmed_asteroid_candidates() -> None:
     """Verify only ephemeris_matched candidates count as confirmed."""
     target = _FakeTarget(
         asteroid_candidates=[
@@ -84,7 +86,7 @@ def test_advisory_counts_confirmed_asteroid_candidates():  # ruff: ignore[missin
     assert advisory.science_outcomes.confirmed_asteroid_candidate_count == 2
 
 
-def test_advisory_variable_star_count_always_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_advisory_variable_star_count_always_zero() -> None:
     """Verify variable-star cross-reference is deferred, reporting zero."""
     target = _FakeTarget()
     advisory = build_target_quality_advisory(target)

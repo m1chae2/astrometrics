@@ -7,9 +7,11 @@ single-telescope fallback for today's unconfigured state, and the
 per-rig-altitude-falls-back-to-global-constraint safety invariant.
 """
 
+from pathlib import Path
+
 import pytest
 
-from astrometricslib import ConfigurationError
+from astrometricslib import AppConfiguration, ConfigurationError
 from wayfindinglib.data_access.equipment_catalog_reader import (
     get_active_camera_id,
     get_active_guide_scope_id,
@@ -22,7 +24,7 @@ from wayfindinglib.data_access.equipment_catalog_reader import (
 
 
 @pytest.fixture
-def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     """Build a real AppConfiguration backed by an isolated config file.
 
     Overrides `_find_config_file` directly via `monkeypatch.setattr`
@@ -39,14 +41,14 @@ def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-arg
     config : `AppConfiguration`
         The constructed, isolated configuration.
     """
-    from astrometricslib import AppConfiguration
-
     config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     return AppConfiguration()
 
 
-def test_list_telescopes_falls_back_to_single_telescope_when_unconfigured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_telescopes_falls_back_to_single_telescope_when_unconfigured(
+    app_config: AppConfiguration,
+) -> None:
     """Verify an unconfigured catalog (today's state) yields one telescope.
 
     Named after the pre-existing hardcoded single-telescope name, built
@@ -58,7 +60,7 @@ def test_list_telescopes_falls_back_to_single_telescope_when_unconfigured(app_co
     assert telescopes == []
 
 
-def test_list_telescopes_single_fallback_resolves_once_focal_length_set(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_telescopes_single_fallback_resolves_once_focal_length_set(app_config: AppConfiguration) -> None:
     """Verify the single-telescope fallback resolves once configured."""
     app_config.update_config({"Observatory.Telescope": {"focal_length_mm": "450.0", "focal_ratio": "6.0"}})
     telescopes = list_telescopes(app_config)
@@ -67,7 +69,7 @@ def test_list_telescopes_single_fallback_resolves_once_focal_length_set(app_conf
     assert telescopes[0].focal_length_mm == pytest.approx(450.0)
 
 
-def test_list_telescopes_multi_entry_catalog(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_telescopes_multi_entry_catalog(app_config: AppConfiguration) -> None:
     """Verify a configured models list resolves multiple named telescopes."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Apertura 75Q, Celestron EdgeHD 8"},
@@ -79,7 +81,7 @@ def test_list_telescopes_multi_entry_catalog(app_config):  # ruff: ignore[missin
     assert names == {"Apertura 75Q", "Celestron EdgeHD 8"}
 
 
-def test_per_rig_altitude_limit_preferred_when_present(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_per_rig_altitude_limit_preferred_when_present(app_config: AppConfiguration) -> None:
     """Verify a per-telescope altitude limit overrides the global one."""
     app_config.update_config({
         "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
@@ -97,7 +99,7 @@ def test_per_rig_altitude_limit_preferred_when_present(app_config):  # ruff: ign
     assert telescopes[0].max_altitude_deg == pytest.approx(80.0)
 
 
-def test_altitude_limit_falls_back_to_global_constraint_when_absent(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_altitude_limit_falls_back_to_global_constraint_when_absent(app_config: AppConfiguration) -> None:
     """Verify a rig with no per-rig section uses [Observatory.Constraints].
 
     This is the "Documented Safety Fallback" invariant: a safety-relevant
@@ -114,7 +116,7 @@ def test_altitude_limit_falls_back_to_global_constraint_when_absent(app_config):
     assert telescopes[0].max_altitude_deg == pytest.approx(85.0)
 
 
-def test_get_active_telescope_id_defaults_to_first_when_unset(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_active_telescope_id_defaults_to_first_when_unset(app_config: AppConfiguration) -> None:
     """Verify the active telescope defaults to the first configured entry."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Apertura 75Q, Celestron EdgeHD 8"},
@@ -126,7 +128,7 @@ def test_get_active_telescope_id_defaults_to_first_when_unset(app_config):  # ru
     assert catalog.active_telescope().focal_length_mm == pytest.approx(450.0)
 
 
-def test_get_active_telescope_id_honors_configured_selection(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_active_telescope_id_honors_configured_selection(app_config: AppConfiguration) -> None:
     """Verify an explicitly configured active_telescope key is honored."""
     app_config.update_config({
         "Observatory.Telescope": {
@@ -141,7 +143,7 @@ def test_get_active_telescope_id_honors_configured_selection(app_config):  # ruf
     assert catalog.active_telescope().name == "Celestron EdgeHD 8"
 
 
-def test_list_cameras_resolves_configured_camera(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_cameras_resolves_configured_camera(app_config: AppConfiguration) -> None:
     """Verify list_cameras() reuses the camera-catalog config reader."""
     app_config.update_config({
         "Observatory.Camera": {
@@ -160,14 +162,16 @@ def test_list_cameras_resolves_configured_camera(app_config):  # ruff: ignore[mi
     assert get_active_camera_id(app_config) == "ZWO ASI533MM Pro"
 
 
-def test_get_equipment_catalog_active_camera_none_when_no_cameras_configured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_equipment_catalog_active_camera_none_when_no_cameras_configured(
+    app_config: AppConfiguration,
+) -> None:
     """Verify an unconfigured camera catalog resolves to no active camera."""
     catalog = get_equipment_catalog(app_config)
     assert catalog.active_camera_id is None
     assert catalog.active_camera() is None
 
 
-def test_telescope_protocol_fields_default_to_indi(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_telescope_protocol_fields_default_to_indi(app_config: AppConfiguration) -> None:
     """Verify a telescope's protocol fields default to 'indi' when unset."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Apertura 75Q"},
@@ -179,7 +183,7 @@ def test_telescope_protocol_fields_default_to_indi(app_config):  # ruff: ignore[
     assert telescope.filter_wheel_protocol == "indi"
 
 
-def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config: AppConfiguration) -> None:
     """Verify a misconfigured mount protocol fails at catalog-load time.
 
     Not the first time a `mount_driver` property happens to be accessed
@@ -196,7 +200,7 @@ def test_get_equipment_catalog_raises_on_unregistered_mount_protocol(app_config)
         get_equipment_catalog(app_config)
 
 
-def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config: AppConfiguration) -> None:
     """Verify a misconfigured camera protocol fails at catalog-load time."""
     app_config.update_config({
         "Observatory.Camera": {
@@ -214,7 +218,7 @@ def test_get_equipment_catalog_raises_on_unregistered_camera_protocol(app_config
         get_equipment_catalog(app_config)
 
 
-def test_list_guide_scopes_is_empty_when_unconfigured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_guide_scopes_is_empty_when_unconfigured(app_config: AppConfiguration) -> None:
     """Verify an unconfigured catalog yields no guide scopes.
 
     Unlike telescopes, there is no single-entry fallback: guiding
@@ -225,7 +229,7 @@ def test_list_guide_scopes_is_empty_when_unconfigured(app_config):  # ruff: igno
     assert get_active_guide_scope_id(app_config) is None
 
 
-def test_list_guide_scopes_resolves_a_configured_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_guide_scopes_resolves_a_configured_guide_scope(app_config: AppConfiguration) -> None:
     """Verify a named guide scope section resolves with its optics."""
     app_config.update_config({
         "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
@@ -239,7 +243,7 @@ def test_list_guide_scopes_resolves_a_configured_guide_scope(app_config):  # ruf
     assert get_active_guide_scope_id(app_config) == "Orion 50mm"
 
 
-def test_get_equipment_catalog_resolves_active_guide_scope(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_equipment_catalog_resolves_active_guide_scope(app_config: AppConfiguration) -> None:
     """Verify `get_equipment_catalog` wires the active guide scope through."""
     app_config.update_config({
         "Observatory.GuideScope": {"models": "Orion 50mm", "active_guide_scope": "Orion 50mm"},
@@ -250,7 +254,7 @@ def test_get_equipment_catalog_resolves_active_guide_scope(app_config):  # ruff:
     assert catalog.active_guide_scope().id == "Orion 50mm"
 
 
-def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_config: AppConfiguration) -> None:
     """Verify a stale/unresolved active guide scope id resolves to `None`.
 
     Unlike telescopes/cameras, this does not fall back to "the first
@@ -264,7 +268,7 @@ def test_get_equipment_catalog_ignores_unresolved_active_guide_scope_id(app_conf
     assert catalog.active_guide_scope() is None
 
 
-def _configure_two_cameras(app_config, **camera_section_overrides: str):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _configure_two_cameras(app_config: AppConfiguration, **camera_section_overrides: str) -> None:
     """Configure a main camera and a guide camera in an isolated config."""
     camera_section = {
         "models": "Main, Guide",
@@ -286,25 +290,25 @@ def _configure_two_cameras(app_config, **camera_section_overrides: str):  # ruff
     })
 
 
-def test_guide_camera_is_unset_when_nothing_is_configured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_guide_camera_is_unset_when_nothing_is_configured(app_config: AppConfiguration) -> None:
     """Verify no guide-camera key means the main camera guides."""
     _configure_two_cameras(app_config)
     assert get_equipment_catalog(app_config).active_guide_camera() is None
 
 
-def test_explicit_default_guide_camera_key_selects_the_guide_camera(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_explicit_default_guide_camera_key_selects_the_guide_camera(app_config: AppConfiguration) -> None:
     """Verify `default_guide_camera` resolves to a configured camera."""
     _configure_two_cameras(app_config, default_guide_camera="Guide")
     assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
 
 
-def test_legacy_secondary_camera_key_is_the_guide_camera_fallback(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_legacy_secondary_camera_key_is_the_guide_camera_fallback(app_config: AppConfiguration) -> None:
     """Verify a config that only has `default_secondary_camera` still works."""
     _configure_two_cameras(app_config, default_secondary_camera="Guide")
     assert get_equipment_catalog(app_config).active_guide_camera().id == "Guide"
 
 
-def test_an_unknown_guide_camera_name_resolves_to_none_not_an_error(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_an_unknown_guide_camera_name_resolves_to_none_not_an_error(app_config: AppConfiguration) -> None:
     """Verify a stale guide-camera name never breaks catalog loading."""
     _configure_two_cameras(app_config, default_guide_camera="Removed Camera")
     assert get_equipment_catalog(app_config).active_guide_camera() is None

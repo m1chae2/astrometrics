@@ -76,13 +76,13 @@ def _random_sky(count: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarr
     return source_ids, ra, dec, magnitude
 
 
-def test_tile_grid_rejects_a_height_that_does_not_divide_the_sky():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_tile_grid_rejects_a_height_that_does_not_divide_the_sky() -> None:
     """Rows of unequal height would leave a gap at the pole."""
     with pytest.raises(InvalidArgumentError, match="divide"):
         TileGrid(7.0)
 
 
-def test_scalar_and_vector_tile_numbers_agree():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_scalar_and_vector_tile_numbers_agree() -> None:
     """One-at-a-time and many-at-once versions file stars identically."""
     grid = TileGrid(1.0)
     _, ra, dec, _ = _random_sky(2000, seed=1)
@@ -95,7 +95,7 @@ def test_scalar_and_vector_tile_numbers_agree():  # ruff: ignore[missing-return-
     assert np.array_equal(vector, scalar)
 
 
-def test_every_tile_is_about_the_same_size_on_the_sky():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_tile_is_about_the_same_size_on_the_sky() -> None:
     """Rows near the pole must be cut into fewer, wider columns."""
     grid = TileGrid(1.0)
 
@@ -107,7 +107,7 @@ def test_every_tile_is_about_the_same_size_on_the_sky():  # ruff: ignore[missing
 
 
 @pytest.mark.parametrize("seed", [11, 12])
-def test_tiled_lookup_matches_a_brute_force_check_of_every_star(tmp_path, seed):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_tiled_lookup_matches_a_brute_force_check_of_every_star(tmp_path: Path, seed) -> None:
     """Random circles anywhere on the sky find exactly the stars inside."""
     config = _LibraryConfig(tmp_path)
     source_ids, ra, dec, magnitude = _random_sky(30000, seed=seed)
@@ -147,7 +147,7 @@ def test_tiled_lookup_matches_a_brute_force_check_of_every_star(tmp_path, seed):
         assert must_find <= found_ids <= may_find, (circle_ra, circle_dec, radius, limit)
 
 
-def test_stars_come_back_brightest_first_with_their_saved_values(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_stars_come_back_brightest_first_with_their_saved_values(tmp_path: Path) -> None:
     """Order, IDs, positions and magnitudes survive the round trip."""
     config = _LibraryConfig(tmp_path)
     record_downloaded_pixel(
@@ -167,7 +167,7 @@ def test_stars_come_back_brightest_first_with_their_saved_values(tmp_path):  # r
     assert [star[3] for star in stars] == pytest.approx([9.25, 11.5, 14.0])
 
 
-def test_faint_and_bright_stars_are_split_at_the_tier_boundary(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_faint_and_bright_stars_are_split_at_the_tier_boundary(tmp_path: Path) -> None:
     """A star at the boundary is bright-tier; just past it, faint-tier."""
     config = _LibraryConfig(tmp_path)
     boundary = BRIGHT_TIER_MAX_MAGNITUDE
@@ -187,7 +187,7 @@ def test_faint_and_bright_stars_are_split_at_the_tier_boundary(tmp_path):  # ruf
     assert [star[0] for star in with_faint] == [1, 2, 3]
 
 
-def test_maximum_stars_keeps_the_brightest(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_maximum_stars_keeps_the_brightest(tmp_path: Path) -> None:
     """A cap on the count drops the faintest stars, not random ones."""
     config = _LibraryConfig(tmp_path)
     record_downloaded_pixel(
@@ -204,7 +204,7 @@ def test_maximum_stars_keeps_the_brightest(tmp_path):  # ruff: ignore[missing-ty
     assert [star[3] for star in stars] == pytest.approx([8.0, 10.0, 12.0])
 
 
-def test_negative_magnitudes_are_kept(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_negative_magnitudes_are_kept(tmp_path: Path) -> None:
     """The brightest stars in the sky have negative magnitudes."""
     config = _LibraryConfig(tmp_path)
     record_downloaded_pixel(
@@ -217,7 +217,7 @@ def test_negative_magnitudes_are_kept(tmp_path):  # ruff: ignore[missing-type-fu
     assert stars[0][3] == pytest.approx(-1.46)
 
 
-def test_lookup_without_a_catalog_returns_none_and_creates_nothing(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_lookup_without_a_catalog_returns_none_and_creates_nothing(tmp_path: Path) -> None:
     """A fresh install has no catalog; looking must not create one."""
     config = _LibraryConfig(tmp_path)
 
@@ -226,7 +226,7 @@ def test_lookup_without_a_catalog_returns_none_and_creates_nothing(tmp_path):  #
     assert not get_deep_catalog_path(config).exists()
 
 
-def test_empty_area_gives_an_empty_list_not_none(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_empty_area_gives_an_empty_list_not_none(tmp_path: Path) -> None:
     """An empty area is different from no catalog being installed."""
     config = _LibraryConfig(tmp_path)
     record_downloaded_pixel(
@@ -236,7 +236,7 @@ def test_empty_area_gives_an_empty_list_not_none(tmp_path):  # ruff: ignore[miss
     assert find_deep_stars(config, 200.0, -50.0, 1.0, 16.0) == []
 
 
-def test_recording_a_pixel_twice_does_not_duplicate_its_stars(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_recording_a_pixel_twice_does_not_duplicate_its_stars(tmp_path: Path) -> None:
     """Re-running a chunk (say after a crash) must not double the stars."""
     config = _LibraryConfig(tmp_path)
     arguments = (
@@ -254,7 +254,7 @@ def test_recording_a_pixel_twice_does_not_duplicate_its_stars(tmp_path):  # ruff
     assert read_catalog_status(config)["star_count"] == 2
 
 
-def test_status_reports_progress_and_completeness(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_status_reports_progress_and_completeness(tmp_path: Path) -> None:
     """Status says how much of the sky is downloaded, and when all of it is."""
     config = _LibraryConfig(tmp_path)
     assert read_catalog_status(config)["installed"] is False
@@ -285,7 +285,7 @@ def test_status_reports_progress_and_completeness(tmp_path):  # ruff: ignore[mis
     assert read_catalog_status(config)["complete"] is True
 
 
-def test_resuming_with_different_settings_is_refused(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_resuming_with_different_settings_is_refused(tmp_path: Path) -> None:
     """Chunks made at a different depth or chunk size cannot be mixed in."""
     config = _LibraryConfig(tmp_path)
     set_deep_catalog_plan(config, healpix_level=4, magnitude_limit=16.0)
@@ -297,14 +297,14 @@ def test_resuming_with_different_settings_is_refused(tmp_path):  # ruff: ignore[
         set_deep_catalog_plan(config, healpix_level=4, magnitude_limit=15.0)
 
 
-def test_tile_sizes_are_the_documented_ones():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_tile_sizes_are_the_documented_ones() -> None:
     """Guard the constants the derivation comments describe."""
     assert COARSE_TILE_HEIGHT_DEGREES == pytest.approx(5.0)
     assert FINE_TILE_HEIGHT_DEGREES == pytest.approx(1.0)
     assert math.isclose(BRIGHT_TIER_MAX_MAGNITUDE, 12.0)
 
 
-def test_stars_are_counted_by_grid(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_stars_are_counted_by_grid(tmp_path: Path) -> None:
     """The end-of-download report can say how many stars are in each grid."""
     config = _LibraryConfig(tmp_path)
     assert count_stars_by_grid(config) == {"bright": 0, "faint": 0}

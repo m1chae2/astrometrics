@@ -6,6 +6,8 @@ re-validates policy rules before recording -- an invalid decision
 must not reach the butler at all.
 """
 
+from pathlib import Path
+
 import pytest
 
 from wayfindinglib.data_access.delegation_policy_reader import DelegationPolicyValidationError
@@ -20,7 +22,7 @@ from wayfindinglib.tasks.control_tasks.capability_promotion import (
 
 
 @pytest.fixture
-def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by a fully isolated temporary database.
 
     Returns
@@ -37,7 +39,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
     return DiskButler(app_config=config)
 
 
-def _divergence_record(capability, within_tolerance, comparison_input_id="frame-1") -> DivergenceRecord:  # ruff: ignore[missing-type-function-argument]
+def _divergence_record(capability, within_tolerance, comparison_input_id="frame-1") -> DivergenceRecord:
     return DivergenceRecord(
         id=f"div-{comparison_input_id}",
         observation_session_id="session-1",
@@ -52,7 +54,7 @@ def _divergence_record(capability, within_tolerance, comparison_input_id="frame-
     )
 
 
-def test_summarize_divergence_evidence_computes_agreement_rate():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_summarize_divergence_evidence_computes_agreement_rate() -> None:
     """Verify the summary computes sample count and agreement rate."""
     records = [
         _divergence_record(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT, True, "f1"),
@@ -66,7 +68,7 @@ def test_summarize_divergence_evidence_computes_agreement_rate():  # ruff: ignor
     assert summary.agreement_rate == pytest.approx(2.0 / 3.0)
 
 
-def test_summarize_divergence_evidence_zero_samples_is_not_perfect_agreement():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_summarize_divergence_evidence_zero_samples_is_not_perfect_agreement() -> None:
     """Verify no evidence yields a 0.0 agreement rate, not a divide-by-zero."""
     summary = summarize_divergence_evidence(ObservatoryCapability.AUTOFOCUS, [])
     assert summary.sample_count == 0
@@ -74,7 +76,7 @@ def test_summarize_divergence_evidence_zero_samples_is_not_perfect_agreement(): 
     assert summary.meets_phase_gate(minimum_sample_count=1, minimum_agreement_rate=0.9) is False
 
 
-def test_meets_phase_gate_requires_both_sample_count_and_agreement_rate():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_meets_phase_gate_requires_both_sample_count_and_agreement_rate() -> None:
     """Verify a high agreement rate from too few samples fails the gate."""
     records = [_divergence_record(ObservatoryCapability.AUTOFOCUS, True, "f1")]
     summary = summarize_divergence_evidence(ObservatoryCapability.AUTOFOCUS, records)
@@ -82,7 +84,7 @@ def test_meets_phase_gate_requires_both_sample_count_and_agreement_rate():  # ru
     assert summary.meets_phase_gate(minimum_sample_count=20, minimum_agreement_rate=0.9) is False
 
 
-def test_apply_promotion_decision_persists_valid_transition(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_apply_promotion_decision_persists_valid_transition(isolated_butler: DiskButler) -> None:
     """Verify a valid promotion is written to the butler and returned."""
     policy = apply_promotion_decision(
         isolated_butler,
@@ -96,7 +98,9 @@ def test_apply_promotion_decision_persists_valid_transition(isolated_butler):  #
     assert reloaded.state_for(ObservatoryCapability.PLATE_SOLVE_ALIGNMENT) == DelegationState.SHADOWED
 
 
-def test_apply_promotion_decision_rejects_invalid_transition_without_persisting(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_apply_promotion_decision_rejects_invalid_transition_without_persisting(
+    isolated_butler: DiskButler,
+) -> None:
     """Verify skipping SHADOWED raises and writes nothing to the butler."""
     with pytest.raises(DelegationPolicyValidationError):
         apply_promotion_decision(
@@ -109,7 +113,9 @@ def test_apply_promotion_decision_rejects_invalid_transition_without_persisting(
     assert reloaded is None
 
 
-def test_apply_promotion_decision_rejects_safety_shadowed_without_persisting(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_apply_promotion_decision_rejects_safety_shadowed_without_persisting(
+    isolated_butler: DiskButler,
+) -> None:
     """Verify OBSERVATORY_SAFETY may never be SHADOWED, nothing written."""
     with pytest.raises(DelegationPolicyValidationError):
         apply_promotion_decision(
@@ -122,7 +128,7 @@ def test_apply_promotion_decision_rejects_safety_shadowed_without_persisting(iso
     assert reloaded is None
 
 
-def test_set_all_capabilities_to_delegated_always_succeeds_from_default(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_all_capabilities_to_delegated_always_succeeds_from_default(isolated_butler: DiskButler) -> None:
     """Verify monitoring mode succeeds for every capability, no evidence."""
     outcome = set_all_capabilities(isolated_butler, DelegationState.DELEGATED)
 
@@ -131,7 +137,9 @@ def test_set_all_capabilities_to_delegated_always_succeeds_from_default(isolated
     assert all(state == DelegationState.DELEGATED for state in outcome.applied.values())
 
 
-def test_set_all_capabilities_to_authoritative_rejects_corrections_not_shadowed(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_all_capabilities_to_authoritative_rejects_corrections_not_shadowed(
+    isolated_butler: DiskButler,
+) -> None:
     """Verify controller mode from a fresh policy only promotes safety/mount.
 
     The three correction capabilities cannot skip SHADOWED, and capture
@@ -153,7 +161,9 @@ def test_set_all_capabilities_to_authoritative_rejects_corrections_not_shadowed(
     }
 
 
-def test_set_all_capabilities_to_authoritative_succeeds_once_corrections_are_shadowed(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_all_capabilities_to_authoritative_succeeds_once_corrections_are_shadowed(
+    isolated_butler: DiskButler,
+) -> None:
     """Verify controller mode fully succeeds once every precondition is met."""
     for capability in (
         ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
@@ -177,7 +187,7 @@ def test_set_all_capabilities_to_authoritative_succeeds_once_corrections_are_sha
     assert len(outcome.applied) == len(ObservatoryCapability)
 
 
-def test_set_all_capabilities_never_writes_a_rejected_capability(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_set_all_capabilities_never_writes_a_rejected_capability(isolated_butler: DiskButler) -> None:
     """Verify a rejected capability's prior recorded state is unchanged."""
     set_all_capabilities(isolated_butler, DelegationState.AUTHORITATIVE)
 

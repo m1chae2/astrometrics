@@ -40,12 +40,12 @@ def test_alignment_attempt_pointing_error() -> None:
     assert attempt_without_offsets.pointing_error is None
 
 
-def test_indi_status_defaults_to_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_indi_status_defaults_to_unknown() -> None:
     """Verify IndiStatus defaults to UNKNOWN when unset."""
     assert IndiStatus().status == "UNKNOWN"
 
 
-def test_guiding_status_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guiding_status_defaults() -> None:
     """Verify LiveGuidingStatus defaults to not guiding with zeroed stats."""
     status = LiveGuidingStatus()
     assert status.is_guiding is False

@@ -52,7 +52,7 @@ def test_the_engine_location_is_the_given_site() -> None:
 
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.astrometrics_catalog")
 @patch("wayfindinglib.tasks.planning_tasks.catalog_operations.global_catalog")
-def test_get_sources(mock_global, mock_local) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_get_sources(mock_global, mock_local) -> None:
     """Verifies regional source query delegation."""
     sky = SkyEngine()
 
@@ -259,7 +259,7 @@ def test_rise_set_transit_marks_circumpolar_and_never_rising_targets() -> None:
     assert never_rises["set_time"] == "Never Rises"
 
 
-def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_query_online_catalogs_passes_the_magnitude_limit_to_every_driver() -> None:
     """A magnitude limit given to the dispatcher reaches each driver."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock

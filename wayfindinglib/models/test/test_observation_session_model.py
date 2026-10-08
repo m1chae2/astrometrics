@@ -21,7 +21,7 @@ from wayfindinglib.models.session.observation_session import (
 )
 
 
-def test_queue_entry_status_has_no_infeasible_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_queue_entry_status_has_no_infeasible_value() -> None:
     """Verify INFEASIBLE was deliberately removed as unreachable.
 
     Unplaced packages never enter the queue -- infeasibility is
@@ -31,12 +31,12 @@ def test_queue_entry_status_has_no_infeasible_value():  # ruff: ignore[missing-r
     assert {s.value for s in QueueEntryStatus} == {"PENDING", "RUNNING", "COMPLETED", "FAILED", "SKIPPED"}
 
 
-def test_session_status_includes_suspended():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_session_status_includes_suspended() -> None:
     """Verify SUSPENDED exists alongside the four original lifecycle states."""
     assert {s.value for s in SessionStatus} == {"PLANNED", "RUNNING", "SUSPENDED", "COMPLETED", "ABORTED"}
 
 
-def test_all_five_infeasibility_reason_codes_distinct():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_all_five_infeasibility_reason_codes_distinct() -> None:
     """Verify the closed set of infeasibility reason codes has five members."""
     codes = {c.value for c in InfeasibilityReasonCode}
     assert codes == {
@@ -48,7 +48,7 @@ def test_all_five_infeasibility_reason_codes_distinct():  # ruff: ignore[missing
     }
 
 
-def test_queued_observation_package_freezes_a_self_contained_snapshot():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_queued_observation_package_freezes_a_self_contained_snapshot() -> None:
     """Verify a queue entry carries its own copy of requests and priority.
 
     Template/Instance Separation: editing the originating ObservationPackage
@@ -73,7 +73,7 @@ def test_queued_observation_package_freezes_a_self_contained_snapshot():  # ruff
     assert entry.status == QueueEntryStatus.PENDING
 
 
-def test_fixed_disposition_requires_no_special_handling_of_requested_start_time():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fixed_disposition_requires_no_special_handling_of_requested_start_time() -> None:
     """Verify a FIXED entry carries its requested start time."""
     from datetime import UTC, datetime
 
@@ -87,7 +87,7 @@ def test_fixed_disposition_requires_no_special_handling_of_requested_start_time(
     assert entry.requested_start_time is not None
 
 
-def test_observation_session_round_trips_full_shape():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_observation_session_round_trips_full_shape() -> None:
     """Verify an ObservationSession constructs with placement/diagnostics."""
     from datetime import date
 
@@ -122,7 +122,7 @@ def test_observation_session_round_trips_full_shape():  # ruff: ignore[missing-r
     assert session.closed_at is None
 
 
-def test_weather_sample_optional_fields_default_none():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_weather_sample_optional_fields_default_none() -> None:
     """Verify WeatherSample's readings default to absent, no populator yet."""
     sample = WeatherSample(time=1723334400.0)
     assert sample.ambient_temperature_c is None

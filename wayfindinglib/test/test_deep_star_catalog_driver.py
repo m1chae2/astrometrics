@@ -54,19 +54,19 @@ class _LibraryConfig:
         return self._library_path
 
 
-def test_driver_without_a_source_returns_no_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_driver_without_a_source_returns_no_stars() -> None:
     """Constructed with nothing to read from, it is silent, not broken."""
     assert DeepStarCatalogDriver().query_region(250.0, 36.0, 2.0, 16.0) == []
 
 
-def test_catalog_not_downloaded_gives_no_stars_not_an_error():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_catalog_not_downloaded_gives_no_stars_not_an_error() -> None:
     """A source that says no catalog is installed (None) gives no stars."""
     driver = DeepStarCatalogDriver(star_source=_RecordingSource(None))
 
     assert driver.query_region(250.0, 36.0, 2.0, 16.0) == []
 
 
-def test_driver_turns_catalog_rows_into_stars_named_like_the_library_names_them():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_driver_turns_catalog_rows_into_stars_named_like_the_library_names_them() -> None:
     """IDs match the library's, so a star in both is only drawn once."""
     source = _RecordingSource([(1067177056683315584, 250.1, 36.2, 9.5), (42, 250.2, 36.3, 15.25)])
 
@@ -81,7 +81,7 @@ def test_driver_turns_catalog_rows_into_stars_named_like_the_library_names_them(
     assert stars[1].magnitude == pytest.approx(15.25)
 
 
-def test_driver_passes_the_limit_and_a_cap_to_the_source():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_driver_passes_the_limit_and_a_cap_to_the_source() -> None:
     """The magnitude limit and the star cap reach the database lookup."""
     source = _RecordingSource([])
 
@@ -92,7 +92,7 @@ def test_driver_passes_the_limit_and_a_cap_to_the_source():  # ruff: ignore[miss
     assert cap == deep_star_catalog_driver._MAXIMUM_STARS_PER_QUERY
 
 
-def test_no_limit_means_no_star_is_excluded_by_magnitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_limit_means_no_star_is_excluded_by_magnitude() -> None:
     """A caller that gives no limit still gets a valid, generous one."""
     source = _RecordingSource([])
 
@@ -101,7 +101,7 @@ def test_no_limit_means_no_star_is_excluded_by_magnitude():  # ruff: ignore[miss
     assert source.calls[0][3] >= 30.0
 
 
-def test_registry_holds_only_drivers_that_read_from_this_computer():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_registry_holds_only_drivers_that_read_from_this_computer() -> None:
     """No live SIMBAD or Gaia driver is registered any more."""
     registry = build_catalog_driver_registry()
 
@@ -109,7 +109,7 @@ def test_registry_holds_only_drivers_that_read_from_this_computer():  # ruff: ig
     assert registry["deep_stars"].driver_name == "deep_stars"
 
 
-def test_downloaded_stars_come_back_through_the_local_store(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_downloaded_stars_come_back_through_the_local_store(tmp_path: Path) -> None:
     """End to end: save stars, then read them through the driver's own store.
 
     The deep-star catalog is provisioned and queried entirely within

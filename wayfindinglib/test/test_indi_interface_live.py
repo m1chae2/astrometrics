@@ -18,6 +18,7 @@ than xfail-documenting it.
 import os
 import socket
 import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -55,7 +56,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _switch_state(device, property_name: str, fallback_name: str | None = None) -> dict:  # ruff: ignore[missing-type-function-argument]
+def _switch_state(device, property_name: str, fallback_name: str | None = None) -> dict:
     """Read all element name->state pairs for a switch property as a dict.
 
     Returns
@@ -71,10 +72,10 @@ def _switch_state(device, property_name: str, fallback_name: str | None = None) 
 
 
 def _wait_for_switch_state(
-    device,  # ruff: ignore[missing-type-function-argument]
+    device,
     property_name: str,
     element_name: str,
-    expected_state,  # ruff: ignore[missing-type-function-argument]
+    expected_state,
     fallback_name: str | None = None,
     timeout: float = CONVERGENCE_TIMEOUT_S,
 ) -> dict:
@@ -103,7 +104,7 @@ def _wait_for_switch_state(
 
 
 @pytest.fixture(scope="module")
-def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def live_interface() -> Iterator[IndiInterface]:
     """Yield a real IndiInterface connected to the live server.
 
     Yields
@@ -135,7 +136,7 @@ def live_interface():  # ruff: ignore[missing-return-type-undocumented-public-fu
 
 
 @pytest.fixture()
-def telescope(live_interface):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def telescope(live_interface: IndiInterface):
     """Yield the telescope device, park state reset to a known baseline.
 
     Yields
@@ -148,7 +149,7 @@ def telescope(live_interface):  # ruff: ignore[missing-type-function-argument, m
     yield device
 
 
-def test_park_then_unpark_eventually_converges(live_interface, telescope) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_park_then_unpark_eventually_converges(live_interface: IndiInterface, telescope) -> None:
     """Verify park and unpark both eventually reach the correct switch state.
 
     This is the core functional safety net: regardless of the
@@ -169,7 +170,7 @@ def test_park_then_unpark_eventually_converges(live_interface, telescope) -> Non
     )
 
 
-def test_set_tracking_eventually_converges(live_interface, telescope) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_set_tracking_eventually_converges(live_interface: IndiInterface, telescope) -> None:
     """Verify tracking on/off both eventually reach the correct state."""
     live_interface.set_tracking(True)
     on_state = _wait_for_switch_state(telescope, "TELESCOPE_TRACK_STATE", "TRACK_ON", 1)
@@ -184,7 +185,7 @@ def test_set_tracking_eventually_converges(live_interface, telescope) -> None:  
     )
 
 
-def test_unpark_return_value_implies_confirmed_state(live_interface, telescope) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_unpark_return_value_implies_confirmed_state(live_interface: IndiInterface, telescope) -> None:
     """Verify unpark() returning True means the device confirmed UNPARK=1.
 
     Previously (pre Phase 2) unpark() returned True as soon as
@@ -209,7 +210,7 @@ def test_unpark_return_value_implies_confirmed_state(live_interface, telescope) 
     )
 
 
-def test_set_tracking_return_value_implies_confirmed_state(live_interface, telescope) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_set_tracking_return_value_implies_confirmed_state(live_interface: IndiInterface, telescope) -> None:
     """Verify set_tracking() returning True means the change is confirmed."""
     live_interface.set_tracking(False)
     _wait_for_switch_state(telescope, "TELESCOPE_TRACK_STATE", "TRACK_OFF", 1)
@@ -223,7 +224,7 @@ def test_set_tracking_return_value_implies_confirmed_state(live_interface, teles
     )
 
 
-def test_park_unpark_repeated_trials_are_reliable(live_interface, telescope) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_park_unpark_repeated_trials_are_reliable(live_interface: IndiInterface, telescope) -> None:
     """Regression guard: repeated park/unpark cycles must be honest, not ~50%.
 
     This is the specific scenario that caught the pre-Phase-2
@@ -246,7 +247,7 @@ def test_park_unpark_repeated_trials_are_reliable(live_interface, telescope) -> 
         )
 
 
-def test_is_server_responsive_matches_connection_manager(live_interface) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_is_server_responsive_matches_connection_manager(live_interface: IndiInterface) -> None:
     """Verify the inline responsiveness check and ConnectionManager's agree.
 
     These are two separate implementations of the same socket

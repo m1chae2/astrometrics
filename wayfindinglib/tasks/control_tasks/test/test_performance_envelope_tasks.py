@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from astrometricslib import observing_night_id
+from astrometricslib import AppConfiguration, observing_night_id
 from wayfindinglib.drivers.control_record_store import ControlRecordStore
 from wayfindinglib.models.session.ekos_session import EkosSessionContext, SessionEquipmentAttribution
 from wayfindinglib.models.session.guiding_run import GuidingRunSummary
@@ -25,7 +25,9 @@ from wayfindinglib.tasks.control_tasks.performance_envelope_tasks import (
 
 
 @pytest.fixture
-def camera_profile_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shipped_camera_sections: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def camera_profile_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shipped_camera_sections: str
+) -> AppConfiguration:
     """Build a config holding the shipped camera profiles.
 
     Passed explicitly, so these tests do not depend on the process-wide
@@ -37,8 +39,6 @@ def camera_profile_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shipp
         A configuration with every shipped camera profile and the generic
         fallback.
     """
-    from astrometricslib import AppConfiguration
-
     config_path = tmp_path / "astrometrics.config.toml"
     config_path.write_text(shipped_camera_sections, encoding="utf-8")
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
@@ -110,7 +110,7 @@ class _Astrometrics:
         self.targets = _Targets()
 
 
-def _measure(astrometrics: _Astrometrics, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _measure(astrometrics: _Astrometrics, config):
     """Measure star width for this observatory's rig with a 10 second cut.
 
     Returns
@@ -121,7 +121,9 @@ def _measure(astrometrics: _Astrometrics, config):  # ruff: ignore[missing-type-
     return measure_image_quality(astrometrics, "Apertura 75Q", "ZWO ASI 533MM Pro", 10.0, config)
 
 
-def test_star_width_is_the_median_converted_with_each_frames_own_plate_scale(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_star_width_is_the_median_converted_with_each_frames_own_plate_scale(
+    camera_profile_config: AppConfiguration,
+) -> None:
     """Verify width in pixels x plate scale, then the median."""
     frames = [_Frame(fwhm_px=3.0, pixel_scale=2.0), _Frame(fwhm_px=2.0, pixel_scale=2.0), _Frame(fwhm_px=4.0)]
 
@@ -132,7 +134,7 @@ def test_star_width_is_the_median_converted_with_each_frames_own_plate_scale(cam
     assert quality.minimum_exposure_seconds == pytest.approx(10.0, camera_profile_config)
 
 
-def test_short_exposures_are_left_out(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_short_exposures_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify frames too short for guiding to show in them do not count.
 
     Regression test, found on real data: bright single stars shot for 1 to
@@ -155,7 +157,7 @@ def test_short_exposures_are_left_out(camera_profile_config) -> None:  # ruff: i
     assert quality.sample_count == 5
 
 
-def test_frames_of_other_equipment_are_left_out(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_frames_of_other_equipment_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify only this telescope and camera's frames are measured."""
     frames = [
         _Frame(fwhm_px=3.0),
@@ -168,7 +170,7 @@ def test_frames_of_other_equipment_are_left_out(camera_profile_config) -> None: 
     assert quality.sample_count == 1
 
 
-def test_a_cameras_other_spellings_are_accepted(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_cameras_other_spellings_are_accepted(camera_profile_config: AppConfiguration) -> None:
     """Verify the FITS-header spelling matches the library one."""
     frames = [_Frame(camera="ZWO CCD ASI533MM Pro", fwhm_px=3.0)]
 
@@ -178,7 +180,7 @@ def test_a_cameras_other_spellings_are_accepted(camera_profile_config) -> None: 
     assert quality.sample_count == 1
 
 
-def test_spectroscopy_and_calibration_frames_are_left_out(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_spectroscopy_and_calibration_frames_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify dispersed stars and non-light frames are not measured."""
     frames = [
         _Frame(fwhm_px=3.0),
@@ -191,7 +193,7 @@ def test_spectroscopy_and_calibration_frames_are_left_out(camera_profile_config)
     assert quality.sample_count == 1
 
 
-def test_frames_with_no_measured_width_are_left_out(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_frames_with_no_measured_width_are_left_out(camera_profile_config: AppConfiguration) -> None:
     """Verify an unmeasured frame is skipped, not counted as zero."""
     frames = [_Frame(fwhm_px=3.0), _Frame(fwhm_px=None)]
 
@@ -200,12 +202,12 @@ def test_frames_with_no_measured_width_are_left_out(camera_profile_config) -> No
     assert quality.sample_count == 1
 
 
-def test_no_matching_frames_gives_none(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_no_matching_frames_gives_none(camera_profile_config: AppConfiguration) -> None:
     """Verify equipment with no frames has no measured star width."""
     assert _measure(_Astrometrics([]), camera_profile_config) is None
 
 
-def test_sensor_limits_come_from_the_camera_profile(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_sensor_limits_come_from_the_camera_profile(camera_profile_config: AppConfiguration) -> None:
     """Verify saturation facts and provenance come from the profile."""
     limits = sensor_limits_for_camera("ZWO ASI 533MM Pro", camera_profile_config)
 
@@ -214,7 +216,7 @@ def test_sensor_limits_come_from_the_camera_profile(camera_profile_config) -> No
     assert limits.is_generic_fallback is False
 
 
-def test_an_unlisted_camera_gets_the_generic_stand_in(camera_profile_config) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_an_unlisted_camera_gets_the_generic_stand_in(camera_profile_config: AppConfiguration) -> None:
     """Verify a camera without a profile is marked as a stand-in."""
     assert (
         sensor_limits_for_camera("Some Unlisted Camera 9000", camera_profile_config).is_generic_fallback

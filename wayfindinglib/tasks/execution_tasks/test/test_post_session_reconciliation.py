@@ -10,6 +10,7 @@ the cases `Wayfinding_Library_Architecture.md` calls out
 """
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -30,7 +31,7 @@ from wayfindinglib.tasks.execution_tasks.post_session_reconciliation import (
 )
 
 
-def _entry(entry_id, target_id, status, exposure_requests) -> QueuedObservationPackage:  # ruff: ignore[missing-type-function-argument]
+def _entry(entry_id, target_id, status, exposure_requests) -> QueuedObservationPackage:
     return QueuedObservationPackage(
         id=entry_id,
         observation_package_id=f"pkg-{entry_id}",
@@ -41,7 +42,7 @@ def _entry(entry_id, target_id, status, exposure_requests) -> QueuedObservationP
     )
 
 
-def _session(session_id, camera_id, status, entries, night_date=date(2026, 8, 10)) -> ObservationSession:  # ruff: ignore[missing-type-function-argument]
+def _session(session_id, camera_id, status, entries, night_date=date(2026, 8, 10)) -> ObservationSession:
     return ObservationSession(
         id=session_id,
         night_date=night_date,
@@ -53,7 +54,7 @@ def _session(session_id, camera_id, status, entries, night_date=date(2026, 8, 10
     )
 
 
-def test_compute_calibration_stats_counts_completed_calibration_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_counts_completed_calibration_frames() -> None:
     """Verify calibration-type requests on COMPLETED entries are counted."""
     entry = _entry(
         "entry-1",
@@ -70,7 +71,7 @@ def test_compute_calibration_stats_counts_completed_calibration_frames():  # ruf
     assert stats.darks[0].exposure_sec == pytest.approx(300.0)
 
 
-def test_compute_calibration_stats_ignores_light_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_ignores_light_frames() -> None:
     """Verify LIGHT frame requests are never counted as calibration."""
     entry = _entry(
         "entry-1",
@@ -87,7 +88,7 @@ def test_compute_calibration_stats_ignores_light_frames():  # ruff: ignore[missi
     assert stats.flats == []
 
 
-def test_compute_calibration_stats_ignores_non_completed_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_ignores_non_completed_entries() -> None:
     """Verify calibration requests on a FAILED entry are not counted."""
     entry = _entry(
         "entry-1",
@@ -102,7 +103,7 @@ def test_compute_calibration_stats_ignores_non_completed_entries():  # ruff: ign
     assert stats.biases == []
 
 
-def test_compute_calibration_stats_ignores_non_terminal_sessions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_ignores_non_terminal_sessions() -> None:
     """Verify a still-RUNNING session's frames are not counted."""
     entry = _entry(
         "entry-1",
@@ -117,7 +118,7 @@ def test_compute_calibration_stats_ignores_non_terminal_sessions():  # ruff: ign
     assert stats.flats == []
 
 
-def test_compute_calibration_stats_recompute_is_idempotent():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_recompute_is_idempotent() -> None:
     """Verify recomputing from the same sessions twice is idempotent."""
     entry = _entry(
         "entry-1",
@@ -133,7 +134,7 @@ def test_compute_calibration_stats_recompute_is_idempotent():  # ruff: ignore[mi
     assert first == second
 
 
-def test_compute_calibration_stats_sums_across_multiple_sessions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_calibration_stats_sums_across_multiple_sessions() -> None:
     """Verify counts accumulate across multiple terminal sessions."""
     entry_a = _entry(
         "entry-a",
@@ -157,7 +158,7 @@ def test_compute_calibration_stats_sums_across_multiple_sessions():  # ruff: ign
 
 
 class _FakeFrame:
-    def __init__(self, timestamp, iso="800", offset="0", path="frame.fits"):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, timestamp, iso="800", offset="0", path="frame.fits") -> None:
         self.timestamp = timestamp
         self.iso = iso
         self.offset = offset
@@ -165,25 +166,25 @@ class _FakeFrame:
 
 
 class _FakeTarget:
-    def __init__(self, frames):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, frames) -> None:
         self.frames = frames
 
 
 class _FakeTargetRegistry:
-    def __init__(self, targets):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, targets) -> None:
         self._targets = targets
 
-    def get(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def get(self, target_id):
         return self._targets.get(target_id)
 
 
 class _FakeAstrometrics:
-    def __init__(self, targets):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, targets) -> None:
         self._targets = targets
         self.targets = _FakeTargetRegistry(targets)
 
 
-def test_attach_target_session_ids_derives_from_matching_target_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_attach_target_session_ids_derives_from_matching_target_frames() -> None:
     """Verify target_session_ids picks up sessions matching the night_date."""
     import time
     from datetime import datetime
@@ -201,7 +202,7 @@ def test_attach_target_session_ids_derives_from_matching_target_frames():  # ruf
     assert result.target_session_ids == ["M 81:2026-08-10:800:0"]
 
 
-def test_attach_target_session_ids_ignores_non_completed_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_attach_target_session_ids_ignores_non_completed_entries() -> None:
     """Verify a target with only a FAILED entry contributes no ids."""
     astrometrics = _FakeAstrometrics({"M 81": _FakeTarget([_FakeFrame(timestamp=0.0)])})
     entry = _entry("entry-1", "M 81", QueueEntryStatus.FAILED, [])
@@ -212,7 +213,7 @@ def test_attach_target_session_ids_ignores_non_completed_entries():  # ruff: ign
     assert result.target_session_ids == []
 
 
-def test_attach_target_session_ids_ignores_unknown_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_attach_target_session_ids_ignores_unknown_target() -> None:
     """Verify an unresolvable target is skipped rather than raising."""
     astrometrics = _FakeAstrometrics({})
     entry = _entry("entry-1", "does-not-exist", QueueEntryStatus.COMPLETED, [])
@@ -224,7 +225,7 @@ def test_attach_target_session_ids_ignores_unknown_target():  # ruff: ignore[mis
 
 
 @pytest.fixture
-def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by an isolated temporary database.
 
     Returns
@@ -241,7 +242,7 @@ def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argumen
     return DiskButler(app_config=config)
 
 
-def test_reconcile_session_raises_for_non_terminal_session(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reconcile_session_raises_for_non_terminal_session(butler: DiskButler) -> None:
     """Verify reconcile_session refuses a session that has not ended."""
     entry = _entry("entry-1", "M 81", QueueEntryStatus.RUNNING, [])
     session = _session("session-1", "cam-1", SessionStatus.RUNNING, [entry])
@@ -250,7 +251,7 @@ def test_reconcile_session_raises_for_non_terminal_session(butler):  # ruff: ign
         reconcile_session(butler, session, _FakeAstrometrics({}))
 
 
-def test_reconcile_session_persists_calibration_stats_and_session(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reconcile_session_persists_calibration_stats_and_session(butler: DiskButler) -> None:
     """Verify a terminal session's reconciliation records both results."""
     entry = _entry(
         "entry-1",

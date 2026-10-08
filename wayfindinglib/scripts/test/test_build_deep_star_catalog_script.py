@@ -80,7 +80,7 @@ class _FakeGaia:
 
 
 @pytest.fixture
-def fake_environment(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def fake_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _FakeGaia:
     """Point the script at a temporary library and a fake archive.
 
     Returns
@@ -105,7 +105,9 @@ def fake_environment(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functi
     return gaia
 
 
-def test_dry_run_reports_the_plan_and_uses_no_internet(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_dry_run_reports_the_plan_and_uses_no_internet(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A dry run shows what would happen without contacting the archive."""
     exit_code = script.run_catalog_build(["--dry-run", "--healpix-level", "0"])
 
@@ -116,7 +118,9 @@ def test_dry_run_reports_the_plan_and_uses_no_internet(fake_environment, capsys)
     assert fake_environment.queries == []
 
 
-def test_full_run_downloads_everything_and_says_it_is_complete(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_full_run_downloads_everything_and_says_it_is_complete(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A clean run finishes, reports the counts, and exits with success."""
     exit_code = script.run_catalog_build(["--healpix-level", "0", "--request-delay-seconds", "0"])
 
@@ -128,7 +132,9 @@ def test_full_run_downloads_everything_and_says_it_is_complete(fake_environment,
     assert len(fake_environment.queries) == 12
 
 
-def test_a_short_trial_run_says_the_catalog_is_not_complete(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_short_trial_run_says_the_catalog_is_not_complete(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A trial run of a few chunks tells the user how to carry on."""
     exit_code = script.run_catalog_build([
         "--healpix-level",
@@ -145,7 +151,9 @@ def test_a_short_trial_run_says_the_catalog_is_not_complete(fake_environment, ca
     assert "Run the same command again" in output
 
 
-def test_running_again_resumes_instead_of_starting_over(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_running_again_resumes_instead_of_starting_over(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A second run only fetches the chunks the first one did not."""
     script.run_catalog_build(["--healpix-level", "0", "--request-delay-seconds", "0", "--max-pixels", "5"])
     queries_after_first_run = len(fake_environment.queries)
@@ -158,7 +166,9 @@ def test_running_again_resumes_instead_of_starting_over(fake_environment, capsys
     assert "5 of 12 chunks downloaded" in capsys.readouterr().out
 
 
-def test_different_settings_from_the_existing_catalog_are_refused(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_different_settings_from_the_existing_catalog_are_refused(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Resuming with another depth would mix incompatible chunks."""
     script.run_catalog_build(["--healpix-level", "0", "--request-delay-seconds", "0", "--max-pixels", "1"])
 
@@ -175,7 +185,9 @@ def test_different_settings_from_the_existing_catalog_are_refused(fake_environme
     assert "Delete the file to start over" in capsys.readouterr().out
 
 
-def test_estimate_prints_a_size_guess_and_saves_nothing(fake_environment, capsys, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_estimate_prints_a_size_guess_and_saves_nothing(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
     """The estimate counts a sample, prints a guess, and leaves no catalog."""
     exit_code = script.run_catalog_build([
         "--estimate",
@@ -193,7 +205,9 @@ def test_estimate_prints_a_size_guess_and_saves_nothing(fake_environment, capsys
     assert not list(tmp_path.rglob("deep_star_catalog.db"))
 
 
-def test_ctrl_c_stops_cleanly_and_says_how_to_resume(fake_environment, capsys, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ctrl_c_stops_cleanly_and_says_how_to_resume(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Interrupting a long download is normal, not a crash."""
 
     def _interrupt(*_arguments: Any, **_keyword_arguments: Any) -> None:
@@ -207,7 +221,7 @@ def test_ctrl_c_stops_cleanly_and_says_how_to_resume(fake_environment, capsys, m
     assert "run the same command again to resume" in capsys.readouterr().out
 
 
-def fake_environment_planning():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def fake_environment_planning() -> ObservationPlanning:
     """Fetch the `ObservationPlanning` the `fake_environment` fixture built.
 
     Returns
@@ -222,7 +236,7 @@ def fake_environment_planning():  # ruff: ignore[missing-return-type-undocumente
     ("seconds", "expected"),
     [(5, "5s"), (125, "2m"), (3 * 3600 + 7 * 60, "3h07m"), (0, "0s")],
 )
-def test_durations_are_written_the_way_a_person_would_say_them(seconds, expected):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_durations_are_written_the_way_a_person_would_say_them(seconds, expected) -> None:
     """The time-left estimate is easy to read at a glance."""
     assert script._format_duration(seconds) == expected
 
@@ -231,7 +245,9 @@ def test_durations_are_written_the_way_a_person_would_say_them(seconds, expected
 NEAR_ARGUMENTS = ["--near", "315.13", "68.57", "1.5"]
 
 
-def test_near_downloads_only_the_chunks_touching_the_circle(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_near_downloads_only_the_chunks_touching_the_circle(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """--near asks the archive for a few chunks, not the whole sky."""
     exit_code = script.run_catalog_build([
         "--healpix-level",
@@ -249,7 +265,9 @@ def test_near_downloads_only_the_chunks_touching_the_circle(fake_environment, ca
     assert "The catalog is complete" not in output
 
 
-def test_near_dry_run_counts_only_the_chosen_chunks_and_uses_no_internet(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_near_dry_run_counts_only_the_chosen_chunks_and_uses_no_internet(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A dry run with --near says how many of the chosen chunks are missing."""
     exit_code = script.run_catalog_build(["--dry-run", "--healpix-level", "4", *NEAR_ARGUMENTS])
 
@@ -261,7 +279,9 @@ def test_near_dry_run_counts_only_the_chosen_chunks_and_uses_no_internet(fake_en
     assert fake_environment.queries == []
 
 
-def test_a_second_near_run_adds_new_places_and_skips_saved_chunks(fake_environment, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_second_near_run_adds_new_places_and_skips_saved_chunks(
+    fake_environment: _FakeGaia, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Running again with the same place downloads nothing new."""
     arguments = ["--healpix-level", "4", "--request-delay-seconds", "0", *NEAR_ARGUMENTS]
     script.run_catalog_build(arguments)
@@ -273,7 +293,9 @@ def test_a_second_near_run_adds_new_places_and_skips_saved_chunks(fake_environme
     assert len(fake_environment.queries) == first_run_query_count
 
 
-def test_near_targets_uses_the_fields_the_library_has_imaged(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_near_targets_uses_the_fields_the_library_has_imaged(
+    fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """--near-targets draws a circle around every imaged field."""
     fields = [
         {"right_ascension_deg": 315.13, "declination_deg": 68.57, "target_ids": ["NGC 7023"]},
@@ -298,7 +320,9 @@ def test_near_targets_uses_the_fields_the_library_has_imaged(fake_environment, m
     assert 2 <= len(fake_environment.queries) <= 8
 
 
-def test_near_targets_with_no_imaged_fields_downloads_nothing(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_near_targets_with_no_imaged_fields_downloads_nothing(
+    fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """An empty library gives a clear message, not a whole-sky download."""
     monkeypatch.setattr(fake_environment_planning(), "get_imaged_field_centers", lambda: [])
 
@@ -310,7 +334,9 @@ def test_near_targets_with_no_imaged_fields_downloads_nothing(fake_environment, 
     assert fake_environment.queries == []
 
 
-def test_near_and_near_targets_can_be_combined(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_near_and_near_targets_can_be_combined(
+    fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Both kinds of place add up."""
     fields = [{"right_ascension_deg": 250.42, "declination_deg": 36.46, "target_ids": ["M 13"]}]
     monkeypatch.setattr(fake_environment_planning(), "get_imaged_field_centers", lambda: fields)
@@ -320,7 +346,9 @@ def test_near_and_near_targets_can_be_combined(fake_environment, monkeypatch, ca
     assert "touch the 2 chosen place(s)" in capsys.readouterr().out
 
 
-def test_a_failed_near_chunk_leaves_the_chosen_chunks_unfinished(fake_environment, monkeypatch, capsys):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_failed_near_chunk_leaves_the_chosen_chunks_unfinished(
+    fake_environment: _FakeGaia, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A chosen chunk that fails leaves a non-zero exit code and a hint."""
 
     def always_fail(*_arguments: Any, **_keyword_arguments: Any) -> Any:

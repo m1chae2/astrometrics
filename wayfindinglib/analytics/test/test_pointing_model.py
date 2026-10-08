@@ -71,7 +71,7 @@ _POSITIONS = [
 ]
 
 
-def test_fit_pointing_model_recovers_known_coefficients_exactly():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fit_pointing_model_recovers_known_coefficients_exactly() -> None:
     """Verify a noiseless synthetic run recovers the true coefficients."""
     model = fit_pointing_model(_synthetic_attempts(_POSITIONS), latitude_deg=_LATITUDE_DEG)
 
@@ -84,7 +84,7 @@ def test_fit_pointing_model_recovers_known_coefficients_exactly():  # ruff: igno
     assert model.residual_rms_arcsec == pytest.approx(0.0, abs=1e-6)
 
 
-def test_predict_pointing_error_reproduces_the_synthetic_input_exactly():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_predict_pointing_error_reproduces_the_synthetic_input_exactly() -> None:
     """Verify predict_pointing_error matches the exact forward-model input.
 
     The fit and predict directions of this one geometric model must
@@ -102,7 +102,7 @@ def test_predict_pointing_error_reproduces_the_synthetic_input_exactly():  # ruf
         assert predicted_d_dec == pytest.approx(attempt["delta_dec_arcsec"], abs=1e-4)
 
 
-def test_predict_pointing_error_is_zero_for_a_zeroed_model():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_predict_pointing_error_is_zero_for_a_zeroed_model() -> None:
     """Verify a model with every term at its default (0.0) predicts none."""
     zero_model = MountPointingModel(sample_count=0, raw_rms_arcsec=0.0, residual_rms_arcsec=0.0)
 
@@ -112,7 +112,7 @@ def test_predict_pointing_error_is_zero_for_a_zeroed_model():  # ruff: ignore[mi
     assert predicted_d_dec == pytest.approx(0.0, abs=1e-9)
 
 
-def test_fit_pointing_model_reports_insufficient_data_below_four_points():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fit_pointing_model_reports_insufficient_data_below_four_points() -> None:
     """Verify fewer than 4 valid points short-circuits to insufficient_data."""
     model = fit_pointing_model(_synthetic_attempts(_POSITIONS[:2]), latitude_deg=_LATITUDE_DEG)
 

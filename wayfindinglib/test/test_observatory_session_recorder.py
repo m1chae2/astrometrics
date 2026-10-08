@@ -7,7 +7,9 @@ telescope/camera raises rather than fabricating a session with
 invented equipment.
 """
 
+from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -48,20 +50,22 @@ class _FakeControl:
         self.equipment = _FakeEquipment(telescope, camera)
 
 
+@dataclass
 class _FakeExecution:
-    def __init__(self, butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self._butler = butler
+    """A stand-in `ObservationExecution` that only holds the store."""
+
+    _butler: DiskButler
 
 
 class _FakeWayfinder:
-    def __init__(self, config, butler, telescope=None, camera=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config, butler: DiskButler, telescope=None, camera=None) -> None:
         self.config = config
         self.control = _FakeControl(telescope, camera)
         self.execution = _FakeExecution(butler)
 
 
 @pytest.fixture
-def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by an isolated temporary database.
 
     Returns
@@ -78,7 +82,7 @@ def butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argumen
     return DiskButler(app_config=config)
 
 
-def test_returns_existing_session_unchanged(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_returns_existing_session_unchanged(butler: DiskButler) -> None:
     """Verify an already-recorded session is returned as-is."""
     existing = ObservationSession(
         id="session-1",
@@ -97,7 +101,7 @@ def test_returns_existing_session_unchanged(butler):  # ruff: ignore[missing-typ
     assert result.status == SessionStatus.RUNNING
 
 
-def test_creates_minimal_session_from_active_equipment(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_creates_minimal_session_from_active_equipment(butler: DiskButler) -> None:
     """Verify a missing session is created from the active telescope/camera."""
     telescope = Telescope(id="scope-1", name="Rig A", focal_length_mm=450.0, focal_ratio=6.0)
     camera = Camera(id="cam-1", name="CamA", pixel_size_um=3.76, sensor_width_px=6248, sensor_height_px=4176)
@@ -114,7 +118,7 @@ def test_creates_minimal_session_from_active_equipment(butler):  # ruff: ignore[
     assert reloaded is not None
 
 
-def test_raises_without_active_telescope_or_camera(butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_raises_without_active_telescope_or_camera(butler: DiskButler) -> None:
     """Verify a missing session with no active equipment raises."""
     wayfinder = _FakeWayfinder(butler.config, butler, telescope=None, camera=None)
 

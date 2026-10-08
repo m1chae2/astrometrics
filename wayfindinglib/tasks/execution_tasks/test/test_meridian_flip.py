@@ -8,13 +8,15 @@ exhausted, without proceeding past the failing step -- the cases
 `Wayfinding_Library_Architecture.md` calls out.
 """
 
+from typing import Any
+
 import pytest
 
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.tasks.execution_tasks.meridian_flip import MeridianFlipSteps, execute_meridian_flip
 
 
-def _steps(**overrides) -> MeridianFlipSteps:  # ruff: ignore[missing-type-kwargs]
+def _steps(**overrides: Any) -> MeridianFlipSteps:
     defaults = {
         "complete_or_abandon_exposure": lambda: True,
         "stop_guiding": lambda: True,
@@ -27,7 +29,7 @@ def _steps(**overrides) -> MeridianFlipSteps:  # ruff: ignore[missing-type-kwarg
     return MeridianFlipSteps(**defaults)
 
 
-def test_flip_completes_and_resumes_when_every_step_succeeds():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flip_completes_and_resumes_when_every_step_succeeds() -> None:
     """Verify a fully successful flip is marked completed and resumed."""
     outcome = execute_meridian_flip("flip-1", "entry-1", 5.0, _steps(), CorrectionConfig())
     assert outcome.flip_completed is True
@@ -35,7 +37,7 @@ def test_flip_completes_and_resumes_when_every_step_succeeds():  # ruff: ignore[
     assert outcome.failure_detail is None
 
 
-def test_exposure_handling_failure_stops_immediately():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_exposure_handling_failure_stops_immediately() -> None:
     """Verify a failed exposure-handling step stops before later steps."""
     later_steps_called = []
     outcome = execute_meridian_flip(
@@ -53,7 +55,7 @@ def test_exposure_handling_failure_stops_immediately():  # ruff: ignore[missing-
     assert later_steps_called == []
 
 
-def test_guiding_stop_failure_stops_before_slew():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guiding_stop_failure_stops_before_slew() -> None:
     """Verify a failed guiding-stop step stops before the slew step runs."""
     later_steps_called = []
     outcome = execute_meridian_flip(
@@ -70,7 +72,7 @@ def test_guiding_stop_failure_stops_before_slew():  # ruff: ignore[missing-retur
     assert later_steps_called == []
 
 
-def test_slew_failure_stops_before_realign():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_slew_failure_stops_before_realign() -> None:
     """Verify a failed slew step stops before the realign loop runs."""
     later_steps_called = []
     outcome = execute_meridian_flip(
@@ -87,12 +89,12 @@ def test_slew_failure_stops_before_realign():  # ruff: ignore[missing-return-typ
     assert later_steps_called == []
 
 
-def test_realign_never_converges_exhausts_iteration_limit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_realign_never_converges_exhausts_iteration_limit() -> None:
     """Verify realign_iteration always failing exhausts the iteration limit."""
     config = CorrectionConfig(alignment_iteration_limit=3)
     call_count = {"value": 0}
 
-    def realign_iteration():  # ruff: ignore[missing-return-type-private-function]
+    def realign_iteration():
         call_count["value"] += 1
         return False, 60.0
 
@@ -114,7 +116,7 @@ def test_realign_never_converges_exhausts_iteration_limit():  # ruff: ignore[mis
     assert later_steps_called == []
 
 
-def test_realign_converges_partway_through_iteration_budget():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_realign_converges_partway_through_iteration_budget() -> None:
     """Verify a later-attempt convergence records the correct attempt count."""
     config = CorrectionConfig(alignment_iteration_limit=5)
     attempts = iter([(False, 40.0), (False, 20.0), (True, 8.0)])
@@ -127,12 +129,12 @@ def test_realign_converges_partway_through_iteration_budget():  # ruff: ignore[m
     assert outcome.resumed is True
 
 
-def test_guide_reacquire_exhausts_attempt_budget():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_guide_reacquire_exhausts_attempt_budget() -> None:
     """Verify reacquire_guide_star always failing exhausts its budget."""
     config = CorrectionConfig(guide_reacquire_attempts=2)
     call_count = {"value": 0}
 
-    def reacquire_guide_star():  # ruff: ignore[missing-return-type-private-function]
+    def reacquire_guide_star() -> bool:
         call_count["value"] += 1
         return False
 
@@ -153,7 +155,7 @@ def test_guide_reacquire_exhausts_attempt_budget():  # ruff: ignore[missing-retu
     assert later_steps_called == []
 
 
-def test_resume_exposure_failure_is_final_bound():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resume_exposure_failure_is_final_bound() -> None:
     """Verify a failed resume step leaves flip_completed False."""
     outcome = execute_meridian_flip(
         "flip-8", "entry-1", 5.0, _steps(resume_exposure=lambda: False), CorrectionConfig()

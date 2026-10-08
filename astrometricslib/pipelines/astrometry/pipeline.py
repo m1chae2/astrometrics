@@ -499,10 +499,10 @@ class AstrometryPipeline:
             from astropy.coordinates import SkyCoord
             from astropy.wcs import FITSFixedWarning
 
-            from astrometricslib.drivers import simbad_interface
+            from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
 
             warnings.simplefilter("ignore", FITSFixedWarning)
-            result = simbad_interface.query_object(
+            result = AstroquerySimbadDriver().query_object(
                 object_name, votable_fields=("otype", "ra", "dec", "galdim_majaxis")
             )
             if result is not None and len(result) > 0:

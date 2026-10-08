@@ -65,9 +65,7 @@ def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
 
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
 
     identifier._identify_stars_with_simbad(
         wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -83,9 +81,7 @@ def test_hint_based_identification_stores_the_catalog_stars_own_position(monkeyp
     """The star gets SIMBAD's position, not the (slightly off) hint."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
     # The Vega session's hint was the solved stack's centre, 22 arcsec away.
     hint_ra, hint_dec = VEGA_RA_DEG + 0.0079, VEGA_DEC_DEG + 0.0032
 
@@ -103,9 +99,7 @@ def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch)
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
 
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
@@ -136,9 +130,7 @@ def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch): 
         "ra": [VEGA_RA_DEG],
         "dec": [VEGA_DEC_DEG],
     })
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=galaxy_only_table)
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
 
     identifier._identify_stars_with_simbad(
         wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
@@ -161,9 +153,7 @@ def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch): 
     off_center_star.star_data = {"x_centroid": 100.0, "y_centroid": 100.0, "flux": 20000.0}
     stellar_objects = [center_star, off_center_star]
 
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
@@ -204,9 +194,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch):  # ruf
         return original(stellar_objects, wcs, width, height)
 
     monkeypatch.setattr(identifier, "identify_stars_with_wcs", _spy)
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=_build_simbad_table())
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
 
     fake_wcs = MagicMock()
     fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
@@ -245,9 +233,7 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(monkeypatch, ca
         "ra": [VEGA_RA_DEG],
         "dec": [VEGA_DEC_DEG],
     })
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=galaxy_only_table)
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
 
     with caplog.at_level("WARNING", logger=star_identifier_module.logger.name):
         identifier._identify_stars_with_simbad(

@@ -87,7 +87,7 @@ The pattern instead:
 
 ## Stacking
 
-`stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingEngine` contract in `drivers/stacking_engine.py`, so the pipeline does not depend on Siril's commands or files.
+`stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingDriver` contract in `drivers/interfaces/stacking_driver.py`, so the pipeline does not depend on Siril's commands or files.
 
 ## Applying this to astrometry and photometry
 

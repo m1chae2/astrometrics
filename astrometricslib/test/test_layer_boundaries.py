@@ -43,7 +43,7 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "drivers/calibration_library.py",
     "drivers/fits_access.py",
     "drivers/image.py",
-    "drivers/plate_solve_interface.py",
+    "drivers/astrometry_net_driver.py",
     "drivers/siril_interface.py",
     "pipelines/astrometry/utilities/catalog_seeding.py",
     "pipelines/astrometry/pre_processing/fwhm.py",

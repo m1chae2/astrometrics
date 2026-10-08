@@ -1,7 +1,8 @@
 """Running a stacking engine, with the two safeguards spectroscopy needs.
 
 `run_stack` is what the stacking stage calls instead of talking to the
-engine directly (the engine is Siril today, see `drivers/stacking_engine.py`).
+engine directly (the engine is Siril today, see
+`drivers/interfaces/stacking_driver.py`).
 It adds two things the engine alone does not do:
 
 1. Registration fallback. Spectral frames are lined up by matching stars
@@ -24,7 +25,7 @@ import shutil
 from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.stacking_engine import StackingEngine, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackSettings
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ SPECTRAL_STAR_DETECTION_ORDER = ("standard", "relaxed", "phase_correlation")
 
 
 def run_stack(
-    engine: StackingEngine,
+    engine: StackingDriver,
     frames: list[Any],
     target_id: str,
     output_file: str | None,
@@ -69,7 +70,7 @@ def run_stack(
 
     Parameters
     ----------
-    engine : `StackingEngine`
+    engine : `StackingDriver`
         The program that stacks each batch of frames.
     frames : `list`
         The frame records to stack (or dictionaries of them).
@@ -147,7 +148,7 @@ def run_siril_stack(
     """Stack frames with a Siril driver (`run_stack` with Siril as the engine).
 
     Kept for callers that hold an `ImageProcessing` driver. The driver is
-    wrapped in `SirilStackingEngine`. A caller with another engine uses
+    wrapped in `SirilStackingDriver`. A caller with another engine uses
     `run_stack` directly.
 
     Returns
@@ -157,10 +158,10 @@ def run_siril_stack(
     diagnostics : `dict`
         What the run reported (see `run_stack`).
     """
-    from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
+    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
 
     return run_stack(
-        SirilStackingEngine(siril_driver),
+        SirilStackingDriver(siril_driver),
         frames,
         target_id,
         output_file,
@@ -172,7 +173,7 @@ def run_siril_stack(
 
 
 def _stack_one_batch(
-    engine: StackingEngine,
+    engine: StackingDriver,
     frames: list[Any],
     target_id: str,
     output_file: str,
@@ -426,7 +427,7 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
 
 
 def _stack_exposure_groups(
-    engine: StackingEngine,
+    engine: StackingDriver,
     groups: list[Any],
     target_id: str,
     output_file: str,

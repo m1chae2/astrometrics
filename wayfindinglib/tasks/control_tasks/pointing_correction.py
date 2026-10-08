@@ -2,8 +2,8 @@
 
 Description: `compute_pointing_correction` per
 `Wayfinding_Library_Architecture.md` §2.5.3 -- a pure function of a
-commanded position and a plate-solve result (astrometricslib's
-`PlateSolver`, frame-only and therefore science-side per the litmus
+commanded position and a plate-solve result (astrometricslib's plate
+solve driver, frame-only and therefore science-side per the litmus
 test) that returns the angular separation and the per-axis correction
 that closes it. Issues nothing: syncing the mount and re-slewing are
 a separate, delegation-gated orchestration step layered on top of this

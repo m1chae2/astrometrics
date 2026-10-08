@@ -1,8 +1,10 @@
-"""Tools to figure out exactly what part of the sky an image shows.
+"""Purpose: Astrometry.net as the plate solver.
 
-This uses a tool called Astrometry.net to map the stars in an image to
-known coordinate systems. It tries to do this on the computer first,
-and if that fails, it tries asking the internet.
+Description: `AstrometryNetPlateSolveDriver` implements the
+`PlateSolveDriver` interface (`drivers/interfaces/plate_solve_driver.py`)
+with Astrometry.net, which maps the stars in an image to sky coordinates.
+It tries the program installed on this computer first, and if that
+fails, it asks the online service.
 """
 
 import http.client
@@ -21,6 +23,7 @@ from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
 
 logger = logging.getLogger(__name__)
 
@@ -197,13 +200,13 @@ def _call_with_transient_retry(
     return None
 
 
-class PlateSolver:
-    """The tool that manages all attempts to map out an image.
+class AstrometryNetPlateSolveDriver(PlateSolveDriver):
+    """Plate solves an image with Astrometry.net.
 
     It tries the local computer first, then the internet as a backup.
     """
 
-    def __init__(self, api_key: str | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, api_key: str | None = None) -> None:
         """Set up the solver.
 
         Parameters
@@ -223,7 +226,7 @@ class PlateSolver:
         sources: list[dict[str, Any]] | None = None,
         image_width: int = 1000,
         image_height: int = 1000,
-        **kwargs,  # ruff: ignore[missing-type-kwargs]
+        **hints: Any,
     ) -> fits.Header | None:
         """Try everything possible to figure out where the image is pointing.
 
@@ -242,8 +245,9 @@ class PlateSolver:
             How wide the image is (needed for the "just dots" internet solve).
         image_height : `int`, optional
             How tall the image is (needed for the "just dots" internet solve).
-        **kwargs
-            Extra settings like hints about where the telescope was pointing.
+        **hints
+            Extra settings like hints about where the telescope was pointing
+            (see `PlateSolveDriver.solve`).
 
         Returns
         -------
@@ -253,7 +257,7 @@ class PlateSolver:
         # astroquery.astrometry_net defaults verbose=True, which prints
         # progress dots and dumps the full source table to stdout. Silence
         # it unless a caller explicitly asks for that output.
-        kwargs.setdefault("verbose", False)
+        hints.setdefault("verbose", False)
 
         # 1. Local Solve -- skipped when a pre-detected source list is too
         # thin to plausibly solve, since a local attempt would just burn
@@ -270,19 +274,19 @@ class PlateSolver:
                 MINIMUM_SOURCES_FOR_LOCAL_SOLVE,
             )
         elif image_path:
-            header = self._solve_locally(image_path, **kwargs)
+            header = self._solve_locally(image_path, **hints)
             if header:
                 return header
 
         # 2. Online Source-based Solve
         if sources:
-            header = self._solve_online_sources(sources, image_width, image_height, **kwargs)
+            header = self._solve_online_sources(sources, image_width, image_height, **hints)
             if header:
                 return header
 
         # 3. Online Image-based Solve (Fallback)
         if image_path:
-            return self._solve_online_image(image_path, **kwargs)
+            return self._solve_online_image(image_path, **hints)
 
         return None
 

@@ -27,10 +27,12 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers import simbad_interface
+from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.plate_solve_interface import PlateSolver
+from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
+from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
@@ -98,7 +100,7 @@ _SIMBAD_V_MAGNITUDE_COLUMNS = ["V", "FLUX_V", "flux_v", "flux(V)"]
 _COLOR_DETECTION_BIN_FACTOR = 2
 
 # SIMBAD's client configuration, request timeout and thread lock live in
-# drivers/simbad_interface.py, alongside every other external-service
+# drivers/astroquery_simbad_driver.py, alongside every other external-service
 # driver, rather than here: they describe how to talk to astroquery, not
 # how this pipeline identifies a star.
 
@@ -472,7 +474,8 @@ class StarIdentifier:
         )
         if api_key is not None and not isinstance(api_key, str) and hasattr(api_key, "_mock_methods"):
             api_key = "mock-api-key"
-        self.solver = PlateSolver(api_key=api_key)
+        self.solver: PlateSolveDriver = AstrometryNetPlateSolveDriver(api_key=api_key)
+        self.simbad: SimbadDriver = AstroquerySimbadDriver()
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
         self.solve_attempted: bool = False
@@ -739,7 +742,7 @@ class StarIdentifier:
 
                 # Determine scale hints dynamically. We
                 # use a very narrow 5% window here because the
-                # PlateSolver will relax it by another 20%.
+                # plate solve driver will relax it by another 20%.
                 scale_lower, scale_upper = self._calculate_scale_hints(image_data_or_path)
 
                 header = self.solver.solve(
@@ -820,7 +823,7 @@ class StarIdentifier:
         )
         try:
             coord = SkyCoord(ra_center * u.deg, dec_center * u.deg)
-            result_table = simbad_interface.query_region(
+            result_table = self.simbad.query_region(
                 coord,
                 radius=f"{radius_deg}d",
                 # "ids" carries the common names used to label a star.
@@ -1764,8 +1767,7 @@ class StarIdentifier:
             return None
         return brightest
 
-    @staticmethod
-    def _resolve_target_position(target_name: str) -> tuple[str, SkyCoord | None]:
+    def _resolve_target_position(self, target_name: str) -> tuple[str, SkyCoord | None]:
         """Look a target's name up in SIMBAD and return where it is.
 
         Parameters
@@ -1783,7 +1785,7 @@ class StarIdentifier:
             The object's position when `status` is ``"resolved"``.
         """
         try:
-            table = simbad_interface.query_object(target_name.replace("_", " "))
+            table = self.simbad.query_object(target_name.replace("_", " "))
         except IndexError:
             # astroquery raises IndexError, not an empty result, for a name
             # SIMBAD does not know.

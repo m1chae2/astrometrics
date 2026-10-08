@@ -18,11 +18,11 @@ import http.client
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers import plate_solve_interface
-from astrometricslib.drivers.plate_solve_interface import (
+from astrometricslib.drivers import astrometry_net_driver
+from astrometricslib.drivers.astrometry_net_driver import (
     MINIMUM_SOURCES_FOR_LOCAL_SOLVE,
     ONLINE_SOLVE_ATTEMPT_LIMIT,
-    PlateSolver,
+    AstrometryNetPlateSolveDriver,
     _call_with_transient_retry,
     _is_transient_network_error,
 )
@@ -31,7 +31,7 @@ from astrometricslib.drivers.plate_solve_interface import (
 @pytest.fixture(autouse=True)
 def _no_retry_sleep(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
     """Keep the backoff from making these tests wait for real seconds."""
-    monkeypatch.setattr(plate_solve_interface.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(astrometry_net_driver.time, "sleep", lambda _seconds: None)
 
 
 def test_dropped_connection_is_transient():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -132,7 +132,7 @@ def test_solve_skips_the_local_solver_when_too_few_sources_are_detected(monkeypa
     tried the local solver anyway, burning two full five-minute
     timeouts before falling through to the (much faster) online path.
     """
-    solver = PlateSolver(api_key="fake-key")
+    solver = AstrometryNetPlateSolveDriver(api_key="fake-key")
     local_solve_calls = []
     monkeypatch.setattr(solver, "_solve_locally", lambda *a, **k: local_solve_calls.append(1))
     header = fits.Header()
@@ -150,7 +150,7 @@ def test_solve_skips_the_local_solver_when_too_few_sources_are_detected(monkeypa
 
 def test_solve_still_tries_the_local_solver_with_enough_sources(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """A normal, well-populated frame is unaffected by the new guard."""
-    solver = PlateSolver(api_key="fake-key")
+    solver = AstrometryNetPlateSolveDriver(api_key="fake-key")
     header = fits.Header()
     header["CRVAL1"] = 250.4  # a non-empty header is truthy; an empty one is not
     local_solve_calls = []
@@ -173,9 +173,9 @@ def test_hinted_solve_exhausting_its_timeout_skips_the_blind_retry(monkeypatch):
     harder, unconstrained search) was always going to fail too --
     trying it anyway doubled the wasted time.
     """
-    solver = PlateSolver()
+    solver = AstrometryNetPlateSolveDriver()
     monotonic_values = iter([0.0, 295.0])
-    monkeypatch.setattr(plate_solve_interface.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(astrometry_net_driver.time, "monotonic", lambda: next(monotonic_values))
     run_solve_field_calls = []
     monkeypatch.setattr(
         solver,
@@ -197,9 +197,9 @@ def test_hinted_solve_failing_quickly_still_retries_blind(monkeypatch):  # ruff:
     Likely a hint mismatch, not an exhaustive search -- this is the
     real rescue case the blind retry exists for.
     """
-    solver = PlateSolver()
+    solver = AstrometryNetPlateSolveDriver()
     monotonic_values = iter([0.0, 5.0])
-    monkeypatch.setattr(plate_solve_interface.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(astrometry_net_driver.time, "monotonic", lambda: next(monotonic_values))
     run_solve_field_calls = []
     monkeypatch.setattr(
         solver,

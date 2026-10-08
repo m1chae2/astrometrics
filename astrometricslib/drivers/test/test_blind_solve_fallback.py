@@ -9,20 +9,20 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.drivers import plate_solve_interface
-from astrometricslib.drivers.plate_solve_interface import PlateSolver
+from astrometricslib.drivers import astrometry_net_driver
+from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
 
 
 @pytest.fixture
 def solver():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Return a PlateSolver with no API key, so online paths stay off.
+    """Return a plate solve driver with no API key, so online paths stay off.
 
     Returns
     -------
-    solver : `PlateSolver`
+    solver : `AstrometryNetPlateSolveDriver`
         Solver instance for local-path tests.
     """
-    return PlateSolver()
+    return AstrometryNetPlateSolveDriver()
 
 
 def test_a_failed_hinted_solve_is_retried_blind(solver, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -36,7 +36,7 @@ def test_a_failed_hinted_solve_is_retried_blind(solver, monkeypatch):  # ruff: i
             return None
         return fits.Header({"CRVAL1": 10.7, "CRVAL2": 41.27})
 
-    monkeypatch.setattr(PlateSolver, "_run_solve_field", _fake_run)
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
     header = solver._solve_locally(
         "/nonexistent/image.fits",
@@ -60,7 +60,7 @@ def test_position_hints_alone_also_trigger_the_blind_retry(solver, monkeypatch):
         commands.append(command)
         return None if "--ra" in command else fits.Header({"CRVAL1": 1.0})
 
-    monkeypatch.setattr(PlateSolver, "_run_solve_field", _fake_run)
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
     assert solver._solve_locally("/nonexistent/image.fits", center_ra=10.0, center_dec=41.0) is not None
     assert len(commands) == 2
@@ -74,7 +74,7 @@ def test_a_successful_hinted_solve_does_not_retry(solver, monkeypatch):  # ruff:
         calls.append(command)
         return fits.Header({"CRVAL1": 10.7})
 
-    monkeypatch.setattr(PlateSolver, "_run_solve_field", _fake_run)
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
     solver._solve_locally(
         "/nonexistent/image.fits", scale_units="arcsecperpix", scale_lower=2.0, scale_upper=2.1
     )
@@ -90,7 +90,7 @@ def test_an_unhinted_solve_is_attempted_only_once(solver, monkeypatch):  # ruff:
         calls.append(command)
         return None
 
-    monkeypatch.setattr(PlateSolver, "_run_solve_field", _fake_run)
+    monkeypatch.setattr(AstrometryNetPlateSolveDriver, "_run_solve_field", _fake_run)
 
     assert solver._solve_locally("/nonexistent/image.fits") is None
     assert len(calls) == 1
@@ -102,7 +102,7 @@ def test_solve_field_success_requires_the_output_file(solver, tmp_path, monkeypa
     class _Result:
         returncode = 0
 
-    monkeypatch.setattr(plate_solve_interface.subprocess, "run", lambda *a, **k: _Result())
+    monkeypatch.setattr(astrometry_net_driver.subprocess, "run", lambda *a, **k: _Result())
 
     assert solver._run_solve_field(["solve-field"], str(tmp_path), 10) is None
 

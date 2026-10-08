@@ -17,7 +17,6 @@ from astropy.table import Column, MaskedColumn, Table
 
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 # The Alhena stack's position hint (the mount's report), in degrees.
@@ -97,14 +96,12 @@ def _identifier(monkeypatch: pytest.MonkeyPatch, table: Table, name_lookup: obje
     centre_star.name = "Star 1"
     centre_star.star_data = {"x_centroid": 500.0, "y_centroid": 500.0, "flux": 50000.0}
     identifier.stellar_objects = [centre_star]
-    monkeypatch.setattr(
-        star_identifier_module.simbad_interface, "query_region", MagicMock(return_value=table)
-    )
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=table))
     if isinstance(name_lookup, Table | type(None)):
         lookup = MagicMock(return_value=name_lookup)
     else:
         lookup = MagicMock(side_effect=name_lookup)
-    monkeypatch.setattr(star_identifier_module.simbad_interface, "query_object", lookup)
+    monkeypatch.setattr(identifier.simbad, "query_object", lookup)
     return identifier
 
 
@@ -233,7 +230,7 @@ def test_a_planet_is_left_without_a_star_name(monkeypatch: pytest.MonkeyPatch) -
 
     assert star.name == "Star 1"
     assert star.is_catalog_identified is False
-    star_identifier_module.simbad_interface.query_region.assert_not_called()
+    identifier.simbad.query_region.assert_not_called()
 
 
 def test_the_pipeline_passes_the_target_name_to_the_identifier() -> None:

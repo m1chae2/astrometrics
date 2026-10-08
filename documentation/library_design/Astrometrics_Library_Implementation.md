@@ -22,7 +22,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 | **2. Public Helpers**<br>*(calls L3)* | `stack_frames_with_timeout`<br>*(pre-stage)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | `analyze_target`<br>*(runner)* | **pipelines/**<br>`tasks`<br>`pipeline_base`<br>`runners` |
 | **3. Pipelines**<br>*(calls L4)* | **stacking/**<br>`stage`<br>`stack_quality` | **astrometry/**<br>`star_identifier`<br>`catalog_seeding`<br>`spectral_star_reg` | **photometry/**<br>`variability_anal.`<br>`ensemble normal.` | **spectroscopy/**<br>`spectrum_extract`<br>`optics_physics`<br>`calibration_tuner` | **asteroid_detection/**<br>`detection`<br>`ephemeris` | **pipelines/shared/**<br>`frame_grouping`<br>`star_recording` |
 | **4. Driver Access**<br>*(exposed via L1)* | *(handed one by stack_frames_with_timeout)* | `catalog_access` | `catalog_access` | `catalog_access` | *(skips L4/L5)* | **drivers/**<br>`catalog_access`<br>`fits_access` |
-| **5. Drivers**<br>*(edge)* | `siril_interface` | `plate_solve_interface` | *(reaches through astrometry)* | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`job_logging`<br>`local_database` |
+| **5. Drivers**<br>*(edge)* | `siril_interface` | `astrometry_net_driver` | *(reaches through astrometry)* | *(reaches through astrometry)* | *(none)* | **drivers/**<br>`job_logging`<br>`local_database` |
 | **Outside** | Siril (headless) | astrometry.net<br>Gaia, SIMBAD | astrometry.net | *(via astrometry)* | IMCCE SkyBoT | FITS on disk<br>SQLite |
 
 > [!NOTE]
@@ -42,7 +42,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 
 ### Astrometry
 *Located in:* `astrometricslib/pipelines/astrometry/`
-- **Plate solving:** `astrometricslib/drivers/plate_solve_interface.py`
+- **Plate solving:** `astrometricslib/drivers/astrometry_net_driver.py`
 - **Star detection and centroiding:** `star_identifier.py` and `source_detection.py`
 - **Coordinate transformations (WCS) and pipeline orchestration:** `pipeline.py`
 - **Local Gaia catalog cache:** `astrometricslib/drivers/catalog_store.py`
@@ -86,10 +86,11 @@ Table columns are the five pipelines plus a column for code shared across all of
 
 ### Drivers
 *Located in:* `astrometricslib/drivers/`. Wraps every external tool the pipelines depend on, plus the database access layer everything above it reaches through.
-- **Siril stacking/registration:** `siril_interface.py` and `siril_output_parsing.py`
-- **Astrometry.net plate solving:** `plate_solve_interface.py`
+- **Driver interfaces:** `interfaces/` holds one abstract base class per outside program or service: `StackingDriver`, `PlateSolveDriver` and `SimbadDriver`. The pipelines depend on these, and each concrete driver below implements one.
+- **Siril stacking/registration:** `siril_stacking_driver.py` (`SirilStackingDriver`), on top of `siril_interface.py` and `siril_output_parsing.py`
+- **Astrometry.net plate solving:** `astrometry_net_driver.py` (`AstrometryNetPlateSolveDriver`)
 - **Local Gaia catalog cache:** `catalog_store.py`
-- **SIMBAD star lookups:** `simbad_interface.py`
+- **SIMBAD star lookups:** `astroquery_simbad_driver.py` (`AstroquerySimbadDriver`)
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
 - **One-time startup migration and schema backfill for the target/stellar catalogs:** `local_database.py`
 - **Job logging:** `job_logging.py` and `logger_interface.py`
@@ -112,7 +113,7 @@ keyed-record SQLite store shared with wayfindinglib:
 - **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass. It used a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.
 - **Finding 7 (cross-session star identity matching):**
   - The matching itself is implemented per Architecture §5.2 (concept 3).
-  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point — the same one "astrometry"/"spectroscopy" use — when only the already-solved WCS was actually needed. This was fixed by calling `PlateSolver` directly instead.
+  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point — the same one "astrometry"/"spectroscopy" use — when only the already-solved WCS was actually needed. This was fixed by calling `AstrometryNetPlateSolveDriver` directly instead.
   - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session. It was replaced with a KD-tree-backed `search_around_sky` call.
   - Repeatability was verified by checking that two consecutive runs produced a byte-for-byte identical `stellar_catalog` row set.
   - One session was excluded from matching: a light frame in it actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error. This was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.

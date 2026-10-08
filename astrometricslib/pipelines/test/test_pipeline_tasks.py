@@ -1172,11 +1172,11 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
 def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
     """Verify one session's plate-solve failure only excludes that session.
 
-    `PlateSolver.solve()` returns `None` on an ordinary solve failure
-    (no matching field), but a genuinely unexpected exception (a config
-    error, a malformed header, etc.) must also be caught rather than
-    propagating and taking down every other, otherwise-independent
-    session's photometry results too.
+    `AstrometryNetPlateSolveDriver.solve()` returns `None` on an ordinary
+    solve failure (no matching field), but a genuinely unexpected
+    exception (a config error, a malformed header, etc.) must also be
+    caught rather than propagating and taking down every other,
+    otherwise-independent session's photometry results too.
     """
     session_a = _make_test_session(0)
     session_b = _make_test_session(1)
@@ -1186,14 +1186,14 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruf
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
+        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
+        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)

@@ -1,19 +1,22 @@
-"""The contract between the stacking pipeline and a stacking program.
+"""Purpose: The interface between the stacking pipeline and a stacking program.
 
-The stacking pipeline decides which frames to stack, how to group them and
-how to judge the result. A stacking engine does the pixel work: it calibrates
-the frames, registers them (lines them up) and combines them. Siril is the
-engine in use (see `siril_stacking_engine.py`). This module states what any
-engine must offer, so the pipeline never depends on one program's commands or
-file formats.
+Description: The stacking pipeline decides which frames to stack, how to
+group them and how to judge the result. A stacking program (the "engine")
+does the pixel work: it calibrates the frames, registers them (lines them
+up) and combines them. `StackingDriver` is the abstract base class every
+engine's driver implements. Siril is the engine in use
+(`SirilStackingDriver` in `drivers/siril_stacking_driver.py`). Because the
+pipeline only uses this interface, it never depends on one program's
+commands or file formats.
 
-An engine takes a `StackSettings` and returns a `StackRunResult`. Everything
+A driver takes a `StackSettings` and returns a `StackRunResult`. Everything
 the pipeline needs to know about the run, including values it used to read
 from Siril's own files, comes back in the result's diagnostics.
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
-from typing import Any, Protocol
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -85,11 +88,13 @@ class StackRunResult:
     engine_version: str | None = None
 
 
-class StackingEngine(Protocol):
+class StackingDriver(ABC):
     """What the stacking pipeline needs from a stacking program."""
 
     name: str
+    """The program's name, recorded with each stack."""
 
+    @abstractmethod
     def version(self) -> str | None:
         """Report the program's version.
 
@@ -98,8 +103,8 @@ class StackingEngine(Protocol):
         version : `str` or `None`
             The version, or `None` when it cannot be found.
         """
-        ...
 
+    @abstractmethod
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:
         """Read the engine's own files that sit next to a finished stack.
 
@@ -122,8 +127,8 @@ class StackingEngine(Protocol):
             share of pixel values thrown out, 0 to 1, or `None`. A value the
             engine did not produce is an empty list or `None`.
         """
-        ...
 
+    @abstractmethod
     def stack_batch(
         self,
         frames: list[Any],
@@ -163,4 +168,3 @@ class StackingEngine(Protocol):
         result : `StackRunResult`
             The stacked path and what the run reported.
         """
-        ...

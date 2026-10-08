@@ -1,4 +1,7 @@
-"""Driver owning the process's one SIMBAD client.
+"""Purpose: The SIMBAD driver, which owns the process's one SIMBAD client.
+
+Description: `AstroquerySimbadDriver` implements the `SimbadDriver`
+interface (`drivers/interfaces/simbad_driver.py`) with astroquery.
 
 astroquery ships a module-level `Simbad` object and expects callers to
 mutate it in place before each query, setting the row limit and the
@@ -10,13 +13,15 @@ the last caller left behind.
 This module therefore builds and owns its own `SimbadClass` instance
 rather than borrowing that global, and is the only place in the codebase
 permitted to import from `astroquery.simbad`. One object, one owner, one
-lock. `test_simbad_interface.py` enforces the import rule.
+lock. `test_astroquery_simbad_driver.py` enforces the import rule.
 
-Callers use `query_region` and `query_object`; both take `SIMBAD_LOCK`,
-configure the client and query it without releasing it in between, so a
-second caller can never observe a half-applied configuration. A failed
-query (no network, a server error, or a reply that cannot be read) is
-raised as `ExternalServiceError`, so callers catch one error category.
+Callers use the driver's `query_region` and `query_object`. Every
+driver instance shares the one client, and both methods take
+`SIMBAD_LOCK`, configure the client and query it without releasing it in
+between, so a second caller can never observe a half-applied
+configuration. A failed query (no network, a server error, or a reply
+that cannot be read) is raised as `ExternalServiceError`, so callers
+catch one error category.
 """
 
 import logging
@@ -25,6 +30,7 @@ from typing import Any
 
 from astroquery.simbad import SimbadClass
 
+from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
@@ -125,74 +131,77 @@ def _configure(client: SimbadClass, votable_fields: tuple[str, ...], row_limit: 
         client.add_votable_fields(*votable_fields)
 
 
-def query_region(
-    coordinates: Any,
-    radius: str,
-    *,
-    votable_fields: tuple[str, ...] = (),
-    row_limit: int | None = None,
-) -> Any:
-    """Query SIMBAD for every catalog object within `radius` of a point.
+class AstroquerySimbadDriver(SimbadDriver):
+    """Queries SIMBAD through the process's one astroquery client."""
 
-    Parameters
-    ----------
-    coordinates : `astropy.coordinates.SkyCoord`
-        Centre of the search cone.
-    radius : `str`
-        Cone radius in a form astroquery accepts, e.g. ``"0.5d"``.
-    votable_fields : `tuple` [`str`], optional
-        Extra columns to request beyond SIMBAD's defaults.
-    row_limit : `int`, optional
-        Maximum rows to return. If `None` (default), the client's
-        existing limit applies.
+    def query_region(
+        self,
+        coordinates: Any,
+        radius: str,
+        *,
+        votable_fields: tuple[str, ...] = (),
+        row_limit: int | None = None,
+    ) -> Any:
+        """Query SIMBAD for every catalog object within `radius` of a point.
 
-    Returns
-    -------
-    result_table : `astropy.table.Table` or `None`
-        The matching rows, or `None` if SIMBAD returned nothing.
+        Parameters
+        ----------
+        coordinates : `astropy.coordinates.SkyCoord`
+            Centre of the search cone.
+        radius : `str`
+            Cone radius in a form astroquery accepts, e.g. ``"0.5d"``.
+        votable_fields : `tuple` [`str`], optional
+            Extra columns to request beyond SIMBAD's defaults.
+        row_limit : `int`, optional
+            Maximum rows to return. If `None` (default), the client's
+            existing limit applies.
 
-    Raises
-    ------
-    ExternalServiceError
-        If SIMBAD could not be reached or its reply could not be read.
-    """
-    with SIMBAD_LOCK:
-        client = _get_client()
-        _configure(client, votable_fields, row_limit)
-        try:
-            return client.query_region(coordinates, radius=radius)
-        except ONLINE_QUERY_ERRORS as query_error:
-            raise ExternalServiceError(
-                "The SIMBAD region search failed.", details={"radius": radius}
-            ) from query_error
+        Returns
+        -------
+        result_table : `astropy.table.Table` or `None`
+            The matching rows, or `None` if SIMBAD returned nothing.
 
+        Raises
+        ------
+        ExternalServiceError
+            If SIMBAD could not be reached or its reply could not be read.
+        """
+        with SIMBAD_LOCK:
+            client = _get_client()
+            _configure(client, votable_fields, row_limit)
+            try:
+                return client.query_region(coordinates, radius=radius)
+            except ONLINE_QUERY_ERRORS as query_error:
+                raise ExternalServiceError(
+                    "The SIMBAD region search failed.", details={"radius": radius}
+                ) from query_error
 
-def query_object(object_name: str, *, votable_fields: tuple[str, ...] = ()) -> Any:
-    """Look one named object up in SIMBAD.
+    def query_object(self, object_name: str, *, votable_fields: tuple[str, ...] = ()) -> Any:
+        """Look one named object up in SIMBAD.
 
-    Parameters
-    ----------
-    object_name : `str`
-        Catalog identifier to resolve, e.g. ``"M 13"``.
-    votable_fields : `tuple` [`str`], optional
-        Extra columns to request beyond SIMBAD's defaults.
+        Parameters
+        ----------
+        object_name : `str`
+            Catalog identifier to resolve, e.g. ``"M 13"``.
+        votable_fields : `tuple` [`str`], optional
+            Extra columns to request beyond SIMBAD's defaults.
 
-    Returns
-    -------
-    result_table : `astropy.table.Table` or `None`
-        The matching row, or `None` if the name did not resolve.
+        Returns
+        -------
+        result_table : `astropy.table.Table` or `None`
+            The matching row, or `None` if the name did not resolve.
 
-    Raises
-    ------
-    ExternalServiceError
-        If SIMBAD could not be reached or its reply could not be read.
-    """
-    with SIMBAD_LOCK:
-        client = _get_client()
-        _configure(client, votable_fields, None)
-        try:
-            return client.query_object(object_name)
-        except ONLINE_QUERY_ERRORS as query_error:
-            raise ExternalServiceError(
-                "The SIMBAD name lookup failed.", details={"object_name": object_name}
-            ) from query_error
+        Raises
+        ------
+        ExternalServiceError
+            If SIMBAD could not be reached or its reply could not be read.
+        """
+        with SIMBAD_LOCK:
+            client = _get_client()
+            _configure(client, votable_fields, None)
+            try:
+                return client.query_object(object_name)
+            except ONLINE_QUERY_ERRORS as query_error:
+                raise ExternalServiceError(
+                    "The SIMBAD name lookup failed.", details={"object_name": object_name}
+                ) from query_error

@@ -1,9 +1,11 @@
-"""Siril as the stacking engine.
+"""Purpose: Siril as the stacking program.
 
-`SirilStackingEngine` adapts the Siril driver (`ImageProcessing`) to the
-`StackingEngine` contract in `stacking_engine.py`. It calls the driver's
-`process_target` and returns what the driver reported as a `StackRunResult`,
-instead of leaving the report in the driver for the caller to fetch.
+Description: `SirilStackingDriver` implements the `StackingDriver`
+interface (`drivers/interfaces/stacking_driver.py`) on top of the Siril
+session class (`ImageProcessing` in `siril_interface.py`). It calls the
+session's `process_target` and returns what the session reported as a
+`StackRunResult`, instead of leaving the report in the session for the
+caller to fetch.
 
 The ``registration`` names are Siril's spectral star detection settings:
 ``"standard"``, ``"relaxed"`` and ``"phase_correlation"`` (see
@@ -15,27 +17,27 @@ import shlex
 import subprocess
 from typing import Any
 
-from astrometricslib.drivers.stacking_engine import StackRunResult, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackRunResult, StackSettings
 
 
-class SirilStackingEngine:
+class SirilStackingDriver(StackingDriver):
     """Stacks frames by driving Siril through its headless script mode.
 
     Parameters
     ----------
-    driver : `ImageProcessing`, optional
-        The Siril driver to use. A new one is made when `None`.
+    session : `ImageProcessing`, optional
+        The Siril session to use. A new one is made when `None`.
     """
 
     name = "Siril"
 
-    def __init__(self, driver: Any | None = None) -> None:
-        """Hold the driver, making one if none was given."""
-        if driver is None:
+    def __init__(self, session: Any | None = None) -> None:
+        """Hold the Siril session, making one if none was given."""
+        if session is None:
             from astrometricslib.drivers.siril_interface import ImageProcessing
 
-            driver = ImageProcessing()
-        self.driver = driver
+            session = ImageProcessing()
+        self.session = session
         self._version: str | None = None
 
     def version(self) -> str | None:
@@ -48,7 +50,7 @@ class SirilStackingEngine:
             cannot be run. The answer is kept after the first call.
         """
         if self._version is None:
-            self._version = _siril_version(self.driver.siril_executable)
+            self._version = _siril_version(self.session.siril_executable)
         return self._version
 
     def read_stack_artifacts(self, stacked_path: str) -> dict[str, Any]:
@@ -58,7 +60,7 @@ class SirilStackingEngine:
         -------
         artifacts : `dict`
             The per-frame registration results and the rejected pixel
-            fraction (see `StackingEngine.read_stack_artifacts`).
+            fraction (see `StackingDriver.read_stack_artifacts`).
         """
         from astrometricslib.drivers.siril_output_parsing import parse_seq_file
         from astrometricslib.pipelines.shared.quality.quality_metrics import measure_rejected_fraction
@@ -85,12 +87,12 @@ class SirilStackingEngine:
         Returns
         -------
         result : `StackRunResult`
-            The stacked path and the driver's diagnostics for this run.
+            The stacked path and the session's diagnostics for this run.
         """
         options = settings.as_options()
         if registration is not None:
             options["spectral_star_detection"] = registration
-        path = self.driver.process_target(
+        path = self.session.process_target(
             id=target_id,
             image_files=frames,
             output_file=output_file,
@@ -101,7 +103,7 @@ class SirilStackingEngine:
         )
         return StackRunResult(
             stacked_path=path,
-            diagnostics=dict(self.driver.last_run_diagnostics),
+            diagnostics=dict(self.session.last_run_diagnostics),
             engine_name=self.name,
             engine_version=self._version,
         )

@@ -1,10 +1,11 @@
-"""Purpose: Unit tests for the stacking engine contract and its Siril adapter.
+"""Purpose: Unit tests for the driver interfaces and the Siril stacking driver.
 
-Description: The stacking pipeline talks to an engine through `StackingEngine`.
+Description: The stacking pipeline talks to an engine through
+`StackingDriver`.
 These tests check the settings and result objects, that the Siril adapter
 passes the settings to the driver and returns the driver's diagnostics in the
 result, and that the pipeline's runner works with an engine that is not Siril
-at all.
+at all, and that each driver interface is abstract and implemented.
 """
 
 from pathlib import Path
@@ -12,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
-from astrometricslib.drivers.stacking_engine import StackRunResult, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import StackRunResult, StackSettings
+from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
 from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
 
@@ -105,7 +106,7 @@ def test_settings_list_only_the_options_that_were_given() -> None:
 def test_the_siril_adapter_passes_settings_and_returns_diagnostics() -> None:
     """Settings reach `process_target`; diagnostics come back in the result."""
     driver = FakeSirilDriver()
-    engine = SirilStackingEngine(driver)
+    engine = SirilStackingDriver(driver)
     result = engine.stack_batch(
         [{"path": "a.fits"}],
         "M 42",
@@ -127,7 +128,7 @@ def test_the_siril_adapter_passes_settings_and_returns_diagnostics() -> None:
 def test_the_adapter_leaves_registration_out_when_not_given() -> None:
     """No registration name means no ``spectral_star_detection`` option."""
     driver = FakeSirilDriver()
-    SirilStackingEngine(driver).stack_batch([], "M 42", "out.fits", None, False, StackSettings())
+    SirilStackingDriver(driver).stack_batch([], "M 42", "out.fits", None, False, StackSettings())
     assert "spectral_star_detection" not in driver.calls[0]
 
 
@@ -147,7 +148,29 @@ def test_the_runner_works_with_an_engine_that_is_not_siril(tmp_path: Path) -> No
 def test_the_job_id_reaches_the_engine() -> None:
     """A tracked job's id is passed through to `process_target`."""
     driver = FakeSirilDriver()
-    SirilStackingEngine(driver).stack_batch(
+    SirilStackingDriver(driver).stack_batch(
         [], "M 42", "out.fits", None, False, StackSettings(), job_id="job-7"
     )
     assert driver.calls[0]["job_id"] == "job-7"
+
+
+def test_the_driver_interfaces_cannot_be_built_without_their_methods() -> None:
+    """Each driver interface is an abstract base class."""
+    import pytest
+
+    from astrometricslib.drivers.interfaces import PlateSolveDriver, SimbadDriver, StackingDriver
+
+    for interface in (StackingDriver, PlateSolveDriver, SimbadDriver):
+        with pytest.raises(TypeError):
+            interface()
+
+
+def test_the_concrete_drivers_implement_their_interfaces() -> None:
+    """Each concrete driver implements its interface."""
+    from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
+    from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+    from astrometricslib.drivers.interfaces import PlateSolveDriver, SimbadDriver, StackingDriver
+
+    assert issubclass(SirilStackingDriver, StackingDriver)
+    assert issubclass(AstrometryNetPlateSolveDriver, PlateSolveDriver)
+    assert issubclass(AstroquerySimbadDriver, SimbadDriver)

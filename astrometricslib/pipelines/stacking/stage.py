@@ -340,14 +340,14 @@ def stack_frames(
 
     _report_stage(15, f"Frame checks done, {len(target_frames)} frames kept")
 
-    from astrometricslib.drivers.siril_stacking_engine import SirilStackingEngine
+    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
         record_preview_as_processed_image,
         write_stack_preview,
     )
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
-    engine = SirilStackingEngine()
+    engine = SirilStackingDriver()
     from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
 
     stack_weight = choose_stack_weight(

@@ -140,7 +140,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
-        from astrometricslib.drivers.plate_solve_interface import (
+        from astrometricslib.drivers.astrometry_net_driver import (
             get_plate_solve_attempt_count,
             reset_plate_solve_statistics,
         )

@@ -418,7 +418,7 @@ def test_every_setting_the_stacking_code_reads_is_accounted_for() -> None:
     root = Path(si.__file__).resolve().parents[3]
     files = [
         *(root / "pipelines" / "stacking").rglob("*.py"),
-        root / "drivers" / "siril_stacking_engine.py",
+        root / "drivers" / "siril_stacking_driver.py",
         root / "drivers" / "siril_interface.py",
     ]
     pattern = re.compile(r"(?:get_configuration\(\)|config|configuration)\.(get_[a-z_]+)\(")

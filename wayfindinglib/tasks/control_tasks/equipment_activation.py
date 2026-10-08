@@ -19,6 +19,7 @@ frontend's `observatory:list_cameras` and
 import logging
 from typing import Any
 
+from astrometricslib import AppConfiguration
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
     ACTIVE_TELESCOPE_KEY,
@@ -33,7 +34,7 @@ from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentC
 logger = logging.getLogger(__name__)
 
 
-def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def set_active_telescope(config: AppConfiguration, telescope_id: str) -> bool:
     """Record a new active telescope selection.
 
     Parameters
@@ -58,7 +59,7 @@ def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[mis
     return True
 
 
-def set_active_camera(config, camera_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def set_active_camera(config: AppConfiguration, camera_id: str) -> bool:
     """Record a new active camera selection.
 
     Parameters

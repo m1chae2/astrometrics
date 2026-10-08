@@ -45,12 +45,12 @@ class StellarMateInterface(RemoteTransferDriver):
     the telescope's remote pictures path.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         host_alias: str = "stellarmate",
         remote_pictures_path: str = "/home/stellarmate/Pictures",
         frames_path: str | None = None,
-    ):
+    ) -> None:
         """Initialize the StellarMate interface.
 
         Parameters

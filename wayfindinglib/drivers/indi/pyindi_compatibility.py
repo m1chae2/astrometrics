@@ -11,6 +11,8 @@ It also names ``INDI_ERRORS``, the errors a call into ``PyIndi`` can raise
 when a device reports something unexpected.
 """
 
+from typing import Any
+
 
 class PyIndiStub:
     """Stand-in for the ``PyIndi`` module when it is not installed."""
@@ -18,15 +20,15 @@ class PyIndiStub:
     class BaseClient:
         """Stand-in for ``PyIndi.BaseClient`` when PyIndi is absent."""
 
-        def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+        def __init__(self) -> None:
             """Initialize the stub client with no server configured."""
             pass
 
-        def setServer(self, host, port):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        def setServer(self, host: str, port: int) -> None:
             """Record the target server host and port (no-op stub)."""
             pass
 
-        def connectServer(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        def connectServer(self) -> bool:
             """Report that the stub server connection always fails.
 
             Returns
@@ -36,7 +38,7 @@ class PyIndiStub:
             """
             return False
 
-        def isServerConnected(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        def isServerConnected(self) -> bool:
             """Report that the stub server is never connected.
 
             Returns
@@ -46,7 +48,7 @@ class PyIndiStub:
             """
             return False
 
-        def getHost(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        def getHost(self) -> str:
             """Return the placeholder server host name.
 
             Returns
@@ -56,7 +58,7 @@ class PyIndiStub:
             """
             return "localhost"
 
-        def getPort(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        def getPort(self) -> int:
             """Return the placeholder server port number.
 
             Returns
@@ -66,7 +68,7 @@ class PyIndiStub:
             """
             return 7624
 
-        def getDevices(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        def getDevices(self) -> list[Any]:
             """Return an empty device list, since PyIndi is absent.
 
             Returns
@@ -76,7 +78,7 @@ class PyIndiStub:
             """
             return []
 
-        def getDevice(self, name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+        def getDevice(self, name: str) -> None:
             """Return `None`, since PyIndi is absent.
 
             Returns

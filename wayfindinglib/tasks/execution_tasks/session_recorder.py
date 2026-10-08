@@ -69,13 +69,13 @@ class ObservationSessionRecorder:
         (default 300).
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         guiding_service: PHD2GuidingService,
         indi_driver: Any,
         butler: DiskButler | None = None,
         snapshot_interval_seconds: int = 300,
-    ):
+    ) -> None:
         """Initialize the recorder without starting the recording loop yet."""
         self._guiding_service = guiding_service
         self._indi_driver = indi_driver

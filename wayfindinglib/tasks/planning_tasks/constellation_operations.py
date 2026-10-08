@@ -16,7 +16,10 @@ REQ: PLN-3.3
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ class ConstellationLineLibrary:
     REQ: PLN-3.3
     """
 
-    def __init__(self, data_path: Path | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, data_path: Path | None = None) -> None:
         self._data_path = data_path or default_constellation_lines_path()
         self._cached_segments: list[dict[str, Any]] | None = None
 
@@ -88,7 +91,7 @@ class ConstellationLineLibrary:
         return self._cached_segments
 
 
-def get_constellation_line_segments(sky) -> list[dict[str, Any]]:  # ruff: ignore[missing-type-function-argument]
+def get_constellation_line_segments(sky: SkyEngine) -> list[dict[str, Any]]:
     """Return all bundled constellation stick-figure line segments.
 
     Parameters

@@ -13,7 +13,12 @@ telemetry -- no first-class `EquipmentCatalog` entry exists for
 this device, the same limitation the focuser and filter wheel have.
 """
 
+from typing import TYPE_CHECKING
+
 from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 _POWER_CONTROL_PROPERTY = "POWER_CONTROL"
 _DEW_PWM_PROPERTY = "DEW_PWM"
@@ -23,10 +28,10 @@ _POWER_SENSORS_PROPERTY = "POWER_SENSORS"
 class SwitchController:
     """Manages power-outlet and dew-heater switches via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def get_switch_states(self, device) -> dict[str, bool]:  # ruff: ignore[missing-type-function-argument]
+    def get_switch_states(self, device: PyIndi.BaseDevice) -> dict[str, bool]:
         """Return every `POWER_CONTROL` outlet's current on/off state.
 
         Returns
@@ -45,7 +50,7 @@ class SwitchController:
             for i in range(len(power_control))
         }
 
-    def set_switch_state(self, device, switch_name: str, on: bool) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_switch_state(self, device: PyIndi.BaseDevice, switch_name: str, on: bool) -> bool:
         """Command one `POWER_CONTROL` outlet on or off.
 
         Every other outlet's current state is preserved -- `POWER_CONTROL`
@@ -73,7 +78,7 @@ class SwitchController:
         self.client.sendNewSwitch(power_control)
         return True
 
-    def get_variable_values(self, device) -> dict[str, float]:  # ruff: ignore[missing-type-function-argument]
+    def get_variable_values(self, device: PyIndi.BaseDevice) -> dict[str, float]:
         """Return every `DEW_PWM`/`POWER_SENSORS` element's current value.
 
         Returns
@@ -93,7 +98,7 @@ class SwitchController:
                     values[number_vector[i].getName()] = number_vector[i].value
         return values
 
-    def set_variable_value(self, device, name: str, value: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_variable_value(self, device: PyIndi.BaseDevice, name: str, value: float) -> bool:
         """Command one `DEW_PWM` element to a new duty cycle.
 
         `POWER_SENSORS` elements are read-only telemetry and are never

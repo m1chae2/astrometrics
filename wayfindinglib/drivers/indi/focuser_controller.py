@@ -4,8 +4,12 @@ Handles absolute and relative focusing.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 from .pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +17,10 @@ logger = logging.getLogger(__name__)
 class FocuserController:
     """Manages focuser operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def move_to(self, focuser, position: int) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def move_to(self, focuser: PyIndi.BaseDevice, position: int) -> bool:
         """Move the focuser to an absolute position.
 
         Returns
@@ -31,7 +35,7 @@ class FocuserController:
             return True
         return False
 
-    def move_relative(self, focuser, steps: int) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def move_relative(self, focuser: PyIndi.BaseDevice, steps: int) -> bool:
         """Move the focuser by a relative step count (positive or negative).
 
         Prefers REL_FOCUS_POSITION when available. Some drivers
@@ -63,7 +67,13 @@ class FocuserController:
 
         return self._move_relative_via_absolute_fallback(focuser, steps)
 
-    def _move_relative_via_direction_switch(self, focuser, motion, relative_position, steps: int) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def _move_relative_via_direction_switch(
+        self,
+        focuser: PyIndi.BaseDevice,
+        motion: PyIndi.PropertySwitch,
+        relative_position: PyIndi.PropertyNumber,
+        steps: int,
+    ) -> bool:
         """Handle the REL_FOCUS_POSITION + FOCUS_MOTION direction-switch case.
 
         This is the pattern used by drivers that pair a relative-position
@@ -114,7 +124,7 @@ class FocuserController:
         self.client.sendNewNumber(relative_position)
         return True
 
-    def _move_relative_via_absolute_fallback(self, focuser, steps: int) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def _move_relative_via_absolute_fallback(self, focuser: PyIndi.BaseDevice, steps: int) -> bool:
         """Simulate a relative move.
 
         Does so by reading and writing ABS_FOCUS_POSITION.
@@ -132,7 +142,7 @@ class FocuserController:
         self.client.sendNewNumber(absolute_position)
         return True
 
-    def get_position(self, focuser) -> int:  # ruff: ignore[missing-type-function-argument]
+    def get_position(self, focuser: PyIndi.BaseDevice) -> int:
         """Return the current focuser position.
 
         Returns

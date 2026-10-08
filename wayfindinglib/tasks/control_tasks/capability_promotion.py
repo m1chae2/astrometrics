@@ -18,6 +18,7 @@ from wayfindinglib.data_access.delegation_policy_reader import (
     get_delegation_policy,
     promote_capability,
 )
+from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.delegation import DelegationPolicy, DelegationState, ObservatoryCapability
 from wayfindinglib.models.session.divergence import DivergenceRecord
 
@@ -120,7 +121,7 @@ def summarize_divergence_evidence(
 
 
 def apply_promotion_decision(
-    butler,  # ruff: ignore[missing-type-function-argument]
+    butler: DiskButler,
     capability: ObservatoryCapability,
     new_state: DelegationState,
     *,
@@ -170,7 +171,7 @@ def apply_promotion_decision(
 
 
 def set_all_capabilities(
-    butler,  # ruff: ignore[missing-type-function-argument]
+    butler: DiskButler,
     target_state: DelegationState,
     *,
     evidence_note: str = "",

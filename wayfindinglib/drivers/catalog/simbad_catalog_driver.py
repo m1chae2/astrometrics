@@ -5,11 +5,14 @@ downloaded to disk), but looking up a target by name still uses SIMBAD, and
 that lookup reads coordinates with the helper below.
 """
 
+from typing import Any
+
 import astropy.units as u
 from astropy.coordinates import Angle, SkyCoord
+from astropy.table import Row
 
 
-def resolve_simbad_radec(raw_ra, raw_dec) -> tuple[float, float]:  # ruff: ignore[missing-type-function-argument]
+def resolve_simbad_radec(raw_ra: Any, raw_dec: Any) -> tuple[float, float]:
     """Resolve a SIMBAD row's RA/Dec value into decimal degrees.
 
     Tries the fast numeric-degree path first — recent astroquery versions
@@ -44,7 +47,7 @@ def resolve_simbad_radec(raw_ra, raw_dec) -> tuple[float, float]:  # ruff: ignor
         return resolved_coordinate.ra.deg, resolved_coordinate.dec.deg
 
 
-def read_simbad_field(row, name: str, default=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def read_simbad_field(row: Row, name: str, default: Any | None = None) -> Any:
     """Read one column from a SIMBAD result row, whatever its letter case.
 
     astroquery before 0.4.8 named columns in upper case (``MAIN_ID``) and

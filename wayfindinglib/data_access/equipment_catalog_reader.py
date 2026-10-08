@@ -34,7 +34,7 @@ back to constructing exactly one `Telescope` from the flat
 import logging
 from typing import Any
 
-from astrometricslib import ConfigurationError
+from astrometricslib import AppConfiguration, ConfigurationError
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, GuideScope, Telescope
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ def _as_bool(value: str | bool | None, default: bool) -> bool:
     return value.strip().lower() in _BOOL_TRUE_STRINGS
 
 
-def _telescope_section_for_name(config, telescope_name: str) -> dict[str, str]:  # ruff: ignore[missing-type-function-argument]
+def _telescope_section_for_name(config: AppConfiguration, telescope_name: str) -> dict[str, str]:
     """Return the resolved config section dict for a named telescope.
 
     Checked in order of ``Observatory.Telescope.<name>``, then
@@ -90,7 +90,9 @@ def _telescope_section_for_name(config, telescope_name: str) -> dict[str, str]: 
     return {}
 
 
-def _build_telescope(config, telescope_name: str, section: dict[str, str]) -> Telescope | None:  # ruff: ignore[missing-type-function-argument]
+def _build_telescope(
+    config: AppConfiguration, telescope_name: str, section: dict[str, str]
+) -> Telescope | None:
     """Construct a `Telescope` from a resolved config section.
 
     Per-rig altitude limits fall back to the global
@@ -138,7 +140,7 @@ def _build_telescope(config, telescope_name: str, section: dict[str, str]) -> Te
         return None
 
 
-def list_telescopes(config) -> list[Telescope]:  # ruff: ignore[missing-type-function-argument]
+def list_telescopes(config: AppConfiguration) -> list[Telescope]:
     """Return every configured `Telescope`.
 
     Reads the comma-separated ``models`` list under
@@ -169,7 +171,7 @@ def list_telescopes(config) -> list[Telescope]:  # ruff: ignore[missing-type-fun
     return telescopes
 
 
-def get_active_telescope_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+def get_active_telescope_id(config: AppConfiguration) -> str | None:
     """Return the configured active telescope id, or `None` if unset.
 
     Returns
@@ -180,7 +182,7 @@ def get_active_telescope_id(config) -> str | None:  # ruff: ignore[missing-type-
     return config.get_value(TELESCOPE_SECTION, ACTIVE_TELESCOPE_KEY)
 
 
-def list_cameras(config) -> list[Camera]:  # ruff: ignore[missing-type-function-argument]
+def list_cameras(config: AppConfiguration) -> list[Camera]:
     """Return every configured `Camera`, reusing the camera-catalog reader.
 
     Returns
@@ -214,7 +216,7 @@ def list_cameras(config) -> list[Camera]:  # ruff: ignore[missing-type-function-
     return cameras
 
 
-def get_active_camera_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+def get_active_camera_id(config: AppConfiguration) -> str | None:
     """Return the configured active camera identifier, or `None` if unset.
 
     Returns
@@ -263,7 +265,7 @@ def _build_guide_scope(guide_scope_name: str, section: dict[str, str]) -> GuideS
         return None
 
 
-def list_guide_scopes(config) -> list[GuideScope]:  # ruff: ignore[missing-type-function-argument]
+def list_guide_scopes(config: AppConfiguration) -> list[GuideScope]:
     """Return every configured `GuideScope`.
 
     Reads the comma-separated ``models`` list under
@@ -290,7 +292,7 @@ def list_guide_scopes(config) -> list[GuideScope]:  # ruff: ignore[missing-type-
     return guide_scopes
 
 
-def get_active_guide_scope_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+def get_active_guide_scope_id(config: AppConfiguration) -> str | None:
     """Return the configured active guide scope id, or `None` if unset.
 
     Returns
@@ -302,7 +304,7 @@ def get_active_guide_scope_id(config) -> str | None:  # ruff: ignore[missing-typ
     return config.get_value(GUIDE_SCOPE_SECTION, ACTIVE_GUIDE_SCOPE_KEY)
 
 
-def get_active_guide_camera_id(config) -> str | None:  # ruff: ignore[missing-type-function-argument]
+def get_active_guide_camera_id(config: AppConfiguration) -> str | None:
     """Return the configured guide camera identifier, or `None` if unset.
 
     Reads ``default_guide_camera`` under ``[Observatory.Camera]``. A
@@ -351,7 +353,7 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
         )
 
 
-def get_equipment_catalog(config) -> EquipmentCatalog:  # ruff: ignore[missing-type-function-argument]
+def get_equipment_catalog(config: AppConfiguration) -> EquipmentCatalog:
     """Return the full resolved `EquipmentCatalog`.
 
     The active identifiers default to the first configured entry of

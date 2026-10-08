@@ -61,7 +61,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
     REQ: PLN-3.2
     """
 
-    def __init__(self, catalog_path: Path | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, catalog_path: Path | None = None) -> None:
         self._catalog_path = catalog_path or default_catalog_path()
         self._cached_rows: np.ndarray | None = None
 

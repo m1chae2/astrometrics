@@ -10,12 +10,14 @@ property confirms, rather than assume success after a fixed sleep.
 
 import time
 
+from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
 
 def wait_for_switch_state(
-    device,  # ruff: ignore[missing-type-function-argument]
+    device: PyIndi.BaseDevice,
     property_name: str,
     element_name: str,
-    expected_state,  # ruff: ignore[missing-type-function-argument]
+    expected_state: PyIndi.ISState,
     timeout: float = 5.0,
     fallback_name: str | None = None,
     poll_interval: float = 0.2,

@@ -1,15 +1,20 @@
 """Camera and guiding controller for INDI devices."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 
 class CameraController:
     """Manages camera exposure and mount pulse-guiding operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def pulse_guide(self, telescope, direction: str, duration_ms) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def pulse_guide(self, telescope: PyIndi.BaseDevice, direction: str, duration_ms: float) -> bool:
         """Send a pulse guide command to the telescope/mount.
 
         Parameters
@@ -52,7 +57,9 @@ class CameraController:
         self.client.sendNewNumber(axis)
         return True
 
-    def expose(self, camera_device, exposure_seconds, gain=None) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def expose(
+        self, camera_device: PyIndi.BaseDevice, exposure_seconds: float, gain: float | None = None
+    ) -> bool:
         """Start an exposure on the given camera device.
 
         Optionally sets gain first. Used for both the main imaging camera

@@ -46,13 +46,13 @@ class PHD2Client:
         reconnect behavior without waiting the production cooldown.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         host: str = "localhost",
         port: int = DEFAULT_PHD2_PORT,
         socket_factory: Callable[[], socket.socket] | None = None,
         reconnect_cooldown_seconds: float = _RECONNECT_COOLDOWN_SECONDS,
-    ):
+    ) -> None:
         """Initialize the client without opening a connection yet."""
         self.host = host
         self.port = port

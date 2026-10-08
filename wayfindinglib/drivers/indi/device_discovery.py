@@ -7,8 +7,12 @@ type-specific signals. This module centralizes those heuristics.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
-from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS, PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,7 @@ class DeviceDiscovery:
     Roles include telescope, focuser, camera, and filter wheel.
     """
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
         self._cached_filterwheel = None
 
@@ -46,7 +50,7 @@ class DeviceDiscovery:
             except INDI_ERRORS as e:
                 logger.debug("Failed to query device name during refresh: %s", e)
 
-    def find_device_with_property(self, property_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_device_with_property(self, property_name: str) -> PyIndi.BaseDevice | None:
         """Search connected devices for one with the specified property.
 
         Returns
@@ -61,7 +65,7 @@ class DeviceDiscovery:
         if not client.isServerConnected() or not client.deviceMap:
             return None
 
-        def has_property(device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def has_property(device: PyIndi.BaseDevice) -> bool:
             return (
                 device.getNumber(property_name)
                 or device.getText(property_name)
@@ -80,7 +84,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_telescope(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the telescope device.
 
         1. Look for device with EQUATORIAL_EOD_COORD (definitive). 2.
@@ -119,7 +123,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_powerbox(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_powerbox(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find powerbox.
 
         1. Look for WEATHER_PARAMETERS. 2. Look for 'Powerbox' or 'Pegasus' in
@@ -141,7 +145,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_focuser(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_focuser(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find focuser.
 
         1. Look for ABS_FOCUS_POSITION or REL_FOCUS_POSITION. 2. Prefer
@@ -166,7 +170,7 @@ class DeviceDiscovery:
             return candidates[0]
         return None
 
-    def find_filterwheel(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_filterwheel(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find filter wheel.
 
         1. Look for FILTER_SLOT. 2. Prefer 'Filter' or 'Wheel' in name/info.
@@ -200,7 +204,7 @@ class DeviceDiscovery:
         return None
 
     @staticmethod
-    def _sensor_pixel_count(camera_device) -> int:  # ruff: ignore[missing-type-function-argument]
+    def _sensor_pixel_count(camera_device: PyIndi.BaseDevice) -> int:
         """Return a camera's sensor size in pixels, or 0 if it is unknown.
 
         Reads the INDI ``CCD_INFO`` property (``CCD_MAX_X`` times
@@ -228,7 +232,7 @@ class DeviceDiscovery:
             logger.debug("Failed to read CCD_INFO: %s", info_error)
             return 0
 
-    def find_guide_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_guide_camera(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find guide camera.
 
         1. Look for device with CCD_EXPOSURE. 2. Prefer device with
@@ -256,7 +260,7 @@ class DeviceDiscovery:
         # No camera is named "guide": the smallest sensor is the guide camera.
         return min(candidates, key=self._sensor_pixel_count)
 
-    def find_enclosure(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_enclosure(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the roll-off-roof/dome device.
 
         1. Look for the standard INDI Dome Interface's `DOME_SHUTTER`
@@ -280,7 +284,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_main_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_main_camera(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the main imaging camera.
 
         1. Look for device with CCD_EXPOSURE. 2. Prefer devices WITHOUT

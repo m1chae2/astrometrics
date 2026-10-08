@@ -8,11 +8,15 @@ drivers publish for shutter motion.
 """
 
 import logging
+from typing import TYPE_CHECKING
 
 from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
 from .property_wait import wait_for_switch_state
 from .pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +28,10 @@ _CLOSE_ELEMENT = "SHUTTER_CLOSE"
 class EnclosureController:
     """Manages roll-off-roof/dome shutter operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def get_state(self, enclosure_device) -> EnclosureState:  # ruff: ignore[missing-type-function-argument]
+    def get_state(self, enclosure_device: PyIndi.BaseDevice) -> EnclosureState:
         """Return the enclosure's current motion state.
 
         Reads both the ``DOME_SHUTTER`` switch vector's own state
@@ -74,7 +78,7 @@ class EnclosureController:
             return EnclosureState.CLOSED
         return EnclosureState.UNKNOWN
 
-    def open(self, enclosure_device, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def open(self, enclosure_device: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Command the shutter open, waiting for the driver to confirm.
 
         Returns
@@ -85,7 +89,7 @@ class EnclosureController:
         """
         return self._set_shutter(enclosure_device, open_shutter=True, timeout=timeout)
 
-    def close(self, enclosure_device, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def close(self, enclosure_device: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Command the shutter closed, waiting for the driver to confirm.
 
         Returns
@@ -96,7 +100,9 @@ class EnclosureController:
         """
         return self._set_shutter(enclosure_device, open_shutter=False, timeout=timeout)
 
-    def _set_shutter(self, enclosure_device, *, open_shutter: bool, timeout: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def _set_shutter(
+        self, enclosure_device: PyIndi.BaseDevice, *, open_shutter: bool, timeout: float
+    ) -> bool:
         """Send the `DOME_SHUTTER` switch and confirm the requested element.
 
         Returns

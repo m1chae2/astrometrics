@@ -37,7 +37,7 @@ class PHD2GuidingService:
         (default 500); oldest entries are dropped once exceeded.
     """
 
-    def __init__(self, client: PHD2Client, history_limit: int = 500):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, client: PHD2Client, history_limit: int = 500) -> None:
         """Initialize the service without starting the background thread."""
         self._client = client
         self._samples: deque[GuidingSample] = deque(maxlen=history_limit)

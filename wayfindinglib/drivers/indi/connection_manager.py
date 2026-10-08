@@ -14,7 +14,7 @@ _LOOKUP_THREAD = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_nam
 class ConnectionManager:
     """Handle the INDI server connection lifecycle and responsiveness."""
 
-    def __init__(self, hostname: str, port: int = 7624):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, hostname: str, port: int = 7624) -> None:
         self.hostname = hostname
         self.port = port
         self.base_connection_cooldown = 5.0  # Seconds between attempts while connected or newly failed

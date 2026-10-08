@@ -11,7 +11,7 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import astropy.units as u
 import numpy as np
@@ -20,6 +20,7 @@ from astropy.coordinates import SkyCoord
 from astrometricslib import (
     DATA_ERRORS,
     ONLINE_QUERY_ERRORS,
+    Astrometrics,
     AstrometricsError,
     InvalidArgumentError,
     StellarObject,
@@ -37,6 +38,9 @@ from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     read_simbad_field,
     resolve_simbad_radec,
 )
+
+if TYPE_CHECKING:
+    from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +116,7 @@ _target_position_cache: dict[str, tuple[tuple[int, ...], list[tuple[str, float, 
 _target_position_cache_lock = threading.Lock()
 
 
-def _database_version(astrometrics) -> tuple[str, tuple[int, ...]] | None:  # ruff: ignore[missing-type-function-argument]
+def _database_version(astrometrics: Astrometrics) -> tuple[str, tuple[int, ...]] | None:
     """Identify the state of the library database file.
 
     Parameters
@@ -181,7 +185,7 @@ def _parse_target_positions(targets: list[Target]) -> list[tuple[str, float, flo
     return positions
 
 
-def _targets_within_radius(astrometrics, center: SkyCoord, radius_deg: float) -> list[Target]:  # ruff: ignore[missing-type-function-argument]
+def _targets_within_radius(astrometrics: Astrometrics, center: SkyCoord, radius_deg: float) -> list[Target]:
     """Find the library targets inside a circle on the sky.
 
     Reading and validating every target record from the database took about
@@ -243,7 +247,7 @@ def _targets_within_radius(astrometrics, center: SkyCoord, radius_deg: float) ->
 
 
 def astrometrics_catalog(
-    sky,  # ruff: ignore[missing-type-function-argument]
+    sky: SkyEngine,
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
@@ -348,7 +352,9 @@ def astrometrics_catalog(
     return results
 
 
-def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> list[Target | StellarObject]:  # ruff: ignore[missing-type-function-argument]
+def global_catalog(
+    sky: SkyEngine, ra_deg: float, dec_deg: float, radius_deg: float
+) -> list[Target | StellarObject]:
     """Query the online SIMBAD catalog for objects in a region.
 
     Handles network connection issues and timeouts gracefully by logging
@@ -431,7 +437,7 @@ def global_catalog(sky, ra_deg: float, dec_deg: float, radius_deg: float) -> lis
     return results
 
 
-def list_catalog_driver_metadata(sky) -> list[dict[str, Any]]:  # ruff: ignore[missing-type-function-argument]
+def list_catalog_driver_metadata(sky: SkyEngine) -> list[dict[str, Any]]:
     """Return display metadata for all registered online catalog drivers.
 
     Parameters
@@ -458,7 +464,7 @@ def list_catalog_driver_metadata(sky) -> list[dict[str, Any]]:  # ruff: ignore[m
 
 
 def query_online_catalogs(
-    sky,  # ruff: ignore[missing-type-function-argument]
+    sky: SkyEngine,
     ra_degrees: float,
     dec_degrees: float,
     radius_degrees: float,

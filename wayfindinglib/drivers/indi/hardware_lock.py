@@ -5,8 +5,10 @@ operations backed by on-disk lock files.
 """
 
 import os
+from contextlib import AbstractContextManager
+from typing import TextIO
 
-from astrometricslib import file_lock
+from astrometricslib import AppConfiguration, file_lock
 
 
 class HardwareLock:
@@ -15,7 +17,7 @@ class HardwareLock:
     Covers telescope mount, camera, and focuser operations.
     """
 
-    def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration) -> None:
         """Initialize the HardwareLock manager.
 
         Configured with the application configuration object.
@@ -35,7 +37,7 @@ class HardwareLock:
         os.makedirs(lock_dir, exist_ok=True)
         return os.path.join(lock_dir, f"{device_name}.lock")
 
-    def acquire(self, device_name: str, blocking: bool = False):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def acquire(self, device_name: str, blocking: bool = False) -> AbstractContextManager[TextIO]:
         """Context manager helper to acquire a file lock for a device.
 
         The device is identified by its designated name (e.g. 'mount'). Pass

@@ -11,6 +11,7 @@ vector actually publishes, in the `SensorReadings` shape
 
 from datetime import UTC, datetime
 
+from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
 from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
 
 _WEATHER_PARAMETERS_PROPERTY = "WEATHER_PARAMETERS"
@@ -19,7 +20,7 @@ _WEATHER_PARAMETERS_PROPERTY = "WEATHER_PARAMETERS"
 class WeatherController:
     """Reads environmental telemetry from a powerbox's WEATHER_PARAMETERS."""
 
-    def get_readings(self, device) -> SensorReadings:  # ruff: ignore[missing-type-function-argument]
+    def get_readings(self, device: PyIndi.BaseDevice) -> SensorReadings:
         """Return every `WEATHER_PARAMETERS` element as a sensor reading.
 
         Every element is timestamped with the moment of this read --

@@ -23,6 +23,7 @@ place both are actually available together.
 """
 
 from astrometricslib import ConfigurationError
+from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.delegation import (
     CapabilityDelegation,
     DelegationPolicy,
@@ -47,7 +48,7 @@ class DelegationPolicyValidationError(ConfigurationError):
     """Raised when a delegation policy violates one of its validity rules."""
 
 
-def get_delegation_policy(butler) -> DelegationPolicy:  # ruff: ignore[missing-type-function-argument]
+def get_delegation_policy(butler: DiskButler) -> DelegationPolicy:
     """Return the recorded `DelegationPolicy`, or an all-`DELEGATED` default.
 
     Parameters

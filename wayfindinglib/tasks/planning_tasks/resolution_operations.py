@@ -4,7 +4,7 @@ Resolves a named target/star against the local Astrometrics database or
 SIMBAD, and retrieves objects within a sky region for `SkyEngine`.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
     ONLINE_QUERY_ERRORS,
@@ -20,8 +20,11 @@ from wayfindinglib.drivers.catalog.simbad_catalog_driver import (
     resolve_simbad_radec,
 )
 
+if TYPE_CHECKING:
+    from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
 
-def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:  # ruff: ignore[missing-type-function-argument]
+
+def resolve_target_coordinates(sky: SkyEngine, target_name: str) -> Target | StellarObject:
     """Resolve coordinates for a target by name from local database or SIMBAD.
 
     Parameters
@@ -124,7 +127,7 @@ def resolve_target_coordinates(sky, target_name: str) -> Target | StellarObject:
 
 
 def get_sources(
-    sky,  # ruff: ignore[missing-type-function-argument]
+    sky: SkyEngine,
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
@@ -178,7 +181,7 @@ def get_sources(
 
 
 def get_library_star_summaries(
-    sky,  # ruff: ignore[missing-type-function-argument]
+    sky: SkyEngine,
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,
@@ -226,7 +229,7 @@ def get_library_star_summaries(
 
 
 def get_online_catalog_sources(
-    sky,  # ruff: ignore[missing-type-function-argument]
+    sky: SkyEngine,
     ra_deg: float,
     dec_deg: float,
     radius_deg: float,

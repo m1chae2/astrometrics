@@ -4,7 +4,7 @@ Handles slewing, parking, and tracking.
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import astropy.units as u
 from astropy.coordinates import EarthLocation
@@ -15,17 +15,20 @@ from astrometricslib import ConflictError
 from .property_wait import wait_for_switch_state
 from .pyindi_compatibility import INDI_ERRORS, PyIndi
 
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
+
 logger = logging.getLogger(__name__)
 
 
 class MountController:
     """Manages telescope mount operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
         self.config = client.config
 
-    def slew(self, telescope, ra: float, dec: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def slew(self, telescope: PyIndi.BaseDevice, ra: float, dec: float) -> bool:
         """Slews the telescope to the specified coordinates.
 
         Parameters
@@ -66,7 +69,7 @@ class MountController:
             return True
         return False
 
-    def park(self, telescope, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def park(self, telescope: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Parks the telescope, waiting for the driver to confirm the change.
 
         Parameters
@@ -101,7 +104,7 @@ class MountController:
             telescope, "TELESCOPE_PARK", "PARK", PyIndi.ISS_ON, timeout=timeout, fallback_name="PARK"
         )
 
-    def unpark(self, telescope, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def unpark(self, telescope: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Unparks the telescope, waiting for the driver to confirm the change.
 
         Parameters
@@ -147,7 +150,7 @@ class MountController:
             telescope, "TELESCOPE_PARK", "UNPARK", PyIndi.ISS_ON, timeout=timeout, fallback_name="PARK"
         )
 
-    def set_tracking(self, telescope, enabled: bool, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_tracking(self, telescope: PyIndi.BaseDevice, enabled: bool, timeout: float = 5.0) -> bool:
         """Set the tracking state and confirm the change with the driver.
 
         Parameters
@@ -206,7 +209,7 @@ class MountController:
             telescope, "TELESCOPE_TRACK_STATE", expected_name, PyIndi.ISS_ON, timeout=timeout
         )
 
-    def set_slew_rate(self, telescope, rate_index: int, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_slew_rate(self, telescope: PyIndi.BaseDevice, rate_index: int, timeout: float = 5.0) -> bool:
         """Set the manual-slew rate by indexed switch element.
 
         Verified gap fix: the real `IndiInterface` had no `set_slew_rate`
@@ -352,7 +355,7 @@ class MountController:
             return active_telescope.max_hour_angle_hours, active_telescope.hour_angle_limits_enabled
         return 0.0, False
 
-    def validate_hour_angle_limits(self, telescope, ra: float):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def validate_hour_angle_limits(self, telescope: PyIndi.BaseDevice, ra: float) -> None:
         """Calculate and validate hour angle for a target right ascension.
 
         REQ: OBS-1.1
@@ -386,7 +389,7 @@ class MountController:
                 f"envelope (±{max_hour_angle_hours}h)"
             )
 
-    def sync_coordinates(self, telescope, ra: float, dec: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def sync_coordinates(self, telescope: PyIndi.BaseDevice, ra: float, dec: float) -> bool:
         """Sync the telescope to the specified coordinates.
 
         This is a recalibration, not a movement. Uses ON_COORD_SET = SYNC.
@@ -422,7 +425,7 @@ class MountController:
             return True
         return False
 
-    def move(self, telescope, direction: str, start: bool = True) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def move(self, telescope: PyIndi.BaseDevice, direction: str, start: bool = True) -> bool:
         """Start or stop manual jogging in a direction.
 
         Fire-and-forget: this drives interactive jog controls (mouse down/up),
@@ -503,7 +506,7 @@ class MountController:
 
         return success
 
-    def abort(self, telescope) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def abort(self, telescope: PyIndi.BaseDevice) -> bool:
         """Abort all telescope mount motion immediately.
 
         Parameters
@@ -527,7 +530,7 @@ class MountController:
             return True
         return self.move(telescope, "STOP", False)
 
-    def _set_coord_mode(self, telescope, mode: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def _set_coord_mode(self, telescope: PyIndi.BaseDevice, mode: str) -> bool:
         """Set ON_COORD_SET mode (SLEW, TRACK, SYNC) by name or label.
 
         Parameters

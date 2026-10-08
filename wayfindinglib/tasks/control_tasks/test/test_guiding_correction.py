@@ -3,7 +3,7 @@
 Description: Verifies correctly signed pulses per axis, deadband
 suppression, max-pulse clamping, and camera-rotation handling at 0 deg,
 90 deg, and a non-right angle -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import math

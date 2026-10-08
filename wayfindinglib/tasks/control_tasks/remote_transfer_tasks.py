@@ -2,8 +2,8 @@
 
 Description: Remote telescope connection, folder synchronization,
 directory listing, and FITS file download operations over the
-StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`
-§2.5.1's Observatory Control module list.
+StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`'s
+Observatory Control module list.
 
 Pulling files off a telescope host needs a telescope, so this code
 belongs in the observatory-control library rather than the science

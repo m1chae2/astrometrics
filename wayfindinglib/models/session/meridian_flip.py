@@ -2,7 +2,7 @@
 
 Description: The result of one bounded interrupt-flip-reacquire-resume
 sequence -- the single most failure-prone moment in an unattended night
-(`Wayfinding_Library_Architecture.md` §2.4.5). Each step in the
+(`Wayfinding_Library_Architecture.md`). Each step in the
 sequence has an attempt bound; exhausting any of them produces
 `resumed=False` with a `failure_detail` rather than a retry loop,
 because a flip that cannot re-acquire is a night that must be ended

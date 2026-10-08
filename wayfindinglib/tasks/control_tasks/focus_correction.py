@@ -1,7 +1,7 @@
 """Purpose: Autofocus Curve Fitting and Position Selection.
 
 Description: `compute_focus_correction` per
-`Wayfinding_Library_Architecture.md` §2.5.5 -- a pure function that
+`Wayfinding_Library_Architecture.md` -- a pure function that
 fits a parabola to a sampled focus curve and selects its minimum,
 clamped to the sampled span so an ill-conditioned fit cannot command
 an extrapolated position. Star-size measurement (`measure_image_fwhm`,
@@ -51,7 +51,7 @@ def sample_focus_curve(
         ``(measured_fwhm_px, star_count)``, or `None` if measurement
         failed at that position (skipped from the curve).
     starting_position : `int`
-        The model-derived starting position (§2.5.5, step 2).
+        The model-derived starting position (step 2).
     sample_count : `int`
         Number of positions to sample, evenly spaced across the span.
     sample_span_steps : `int`

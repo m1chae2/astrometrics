@@ -8,7 +8,7 @@ per active rig by `ObservatoryControl`.
 
 Concrete-class imports stay inside each function body so importing
 this module never pulls in `PyIndi`
-(`Wayfinding_Library_Architecture.md` §2.3.4, "Planning Is
+(`Wayfinding_Library_Architecture.md`, "Planning Is
 Hardware-Free").
 """
 
@@ -139,7 +139,7 @@ def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriv
     """Return the driver-name -> `RemoteTransferDriver` class registry.
 
     A separate registry from the six hardware-control ones above --
-    remote file transfer is an independent, pluggable concern (§6),
+    remote file transfer is an independent, pluggable concern,
     keyed by `driver_name`, not `protocol_name`.
 
     Returns

@@ -1,7 +1,7 @@
 """Purpose: Verify the watchdog is out of process from what it watches.
 
 Description: A static source-text scan for "Watchdog Is Out Of Process"
-(`Wayfinding_Library_Architecture.md` §2.5.9): the watchdog module
+(`Wayfinding_Library_Architecture.md`): the watchdog module
 tree must never import the session runner, since a hang in the process
 being watched must not also disable the mechanism meant to catch it.
 Mirrors `test_planning.py`'s static-scan approach over a

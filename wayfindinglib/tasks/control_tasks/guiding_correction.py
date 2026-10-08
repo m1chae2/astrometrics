@@ -1,17 +1,18 @@
 """Purpose: Autoguiding Pulse Correction.
 
 Description: `compute_guiding_correction` per
-`Wayfinding_Library_Architecture.md` §2.5.4 -- a pure function of a
+`Wayfinding_Library_Architecture.md` -- a pure function of a
 guide-star pixel drift (astrometricslib's centroid measurement,
 frame-only and therefore science-side per the litmus test) and the
 active `GuiderCalibration`, returning signed per-axis pulse durations
 via one clearly stated control law (Eq. 2) rather than a tuned
 multi-mode controller. Issues nothing: sending the pulse through
-`pulse_guide` is a separate, delegation-gated step (§2.5.9, "Corrections
+`pulse_guide` is a separate, delegation-gated step ("Corrections
 Are Pure").
 
 The optional `mount_model`/`elapsed_guiding_seconds`/
-`dec_direction_reversal` parameters (§2.5.1a's §6a extension, M7b) add
+`dec_direction_reversal` parameters ( the architecture document's extension,
+M7b) add
 a feedforward component on top of the reactive pulse above, learned
 from `guiding_log_ingestion.py`'s persisted, cross-night
 `GuidingSpectrumAnalysis`:

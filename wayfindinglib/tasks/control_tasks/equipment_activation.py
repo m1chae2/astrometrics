@@ -1,7 +1,7 @@
 """Purpose: Equipment Selection.
 
 Description: Changes which configured telescope or camera is active,
-per `Wayfinding_Library_Architecture.md` §2.2.2 / §2.5.2: reading the
+per `Wayfinding_Library_Architecture.md`: reading the
 equipment catalog is a Foundation concern both Control and Planning
 need, but *changing* which entry is active is a Control operation, so
 it lives here rather than in `data_access/equipment_catalog_reader.py`.

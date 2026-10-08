@@ -4,7 +4,7 @@ Description: Verifies divergence records are written for agreeing and
 disagreeing comparisons alike, the sign of divergence_magnitude
 reflects intended-minus-observed, and the three uncomparable
 capabilities are rejected -- the cases
-`Wayfinding_Library_Architecture.md` §2.4.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest

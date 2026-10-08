@@ -1,15 +1,16 @@
 """Purpose: Plate-Solve Pointing Correction.
 
 Description: `compute_pointing_correction` per
-`Wayfinding_Library_Architecture.md` §2.5.3 -- a pure function of a
+`Wayfinding_Library_Architecture.md` -- a pure function of a
 commanded position and a plate-solve result (astrometricslib's plate
 solve driver, frame-only and therefore science-side per the litmus
 test) that returns the angular separation and the per-axis correction
 that closes it. Issues nothing: syncing the mount and re-slewing are
 a separate, delegation-gated orchestration step layered on top of this
-computation, not part of it (§2.5.9, "Corrections Are Pure").
+computation, not part of it ("Corrections Are Pure").
 
-The optional `pointing_model` parameter (§2.5.1a's §6a extension, M7b)
+The optional `pointing_model` parameter ( the architecture document's
+extension, M7b)
 tells a genuinely new pointing failure apart from one already explained
 by tonight's fitted polar-alignment/index-error model: it predicts the
 systematic error `pointing_model` implies at this exact commanded

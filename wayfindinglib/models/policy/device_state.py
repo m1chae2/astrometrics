@@ -2,7 +2,7 @@
 
 Description: A device's lifecycle in one uniform five-state vocabulary,
 adopted from the Vera C. Rubin Observatory's commandable-component
-summary state (`Wayfinding_Library_Architecture.md` §2.1.1, §2.5.2). A
+summary state (`Wayfinding_Library_Architecture.md`). A
 uniform vocabulary lets a caller reason about readiness without knowing
 the device type: an executing session's readiness check asks the same
 question of a mount and of a roof.

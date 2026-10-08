@@ -5,7 +5,7 @@ calibration-type requests on terminal sessions, is idempotent when
 recomputed, target_session_ids attach only for completed entries whose
 target has matching frames, and reconcile_session raises for a
 non-terminal session and records both results for a terminal one --
-the cases `Wayfinding_Library_Architecture.md` §2.4.11 calls out
+the cases `Wayfinding_Library_Architecture.md` calls out
 ("reconciliation run twice yields identical CalibrationStats").
 """
 

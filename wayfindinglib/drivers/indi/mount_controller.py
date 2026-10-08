@@ -251,13 +251,13 @@ class MountController:
         Prefers the active per-rig `Telescope`'s configured envelope
         when one is configured; falls back to the global
         `[Observatory.Constraints]` section otherwise, per
-        `Wayfinding_Library_Architecture.md`
-        §2.2.2's "Documented Safety Fallback" invariant -- a rig that
+        `Wayfinding_Library_Architecture.md`'s "Documented Safety Fallback"
+        invariant -- a rig that
         has not yet been given its own section does not silently
         change behavior. Reading a `Telescope` model here is legal
         (models are Foundation, same as this driver); the observer
         position this envelope is evaluated at, below, is a separate,
-        deliberately deferred concern (§2.5.2).
+        deliberately deferred concern.
 
         Returns
         -------

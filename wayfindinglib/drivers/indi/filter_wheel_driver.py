@@ -1,7 +1,7 @@
 """INDI implementation of the `FilterWheelDriver` protocol ABC.
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`, per
-`Wayfinding_Library_Architecture.md` §2.5.1a.
+`Wayfinding_Library_Architecture.md`.
 """
 
 import asyncio

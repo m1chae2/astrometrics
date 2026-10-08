@@ -3,7 +3,7 @@
 Description: Verifies the ramp respects the configured rate (and the
 sensor's own maximum), reports settled only within tolerance, and
 flags a settle timeout -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest

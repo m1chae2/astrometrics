@@ -651,7 +651,7 @@ def test_refresh_safety_assessment_reflects_a_live_weather_reading(control: Obse
 
     Proof the M12 wiring is live, not just that `WeatherDriver` and
     `assess_safety` each exist independently
-    (`Wayfinding_Library_Architecture.md` §2.5.4's verification note):
+    (`Wayfinding_Library_Architecture.md`'s verification note):
     changing what the injected driver reports changes the verdict
     `refresh_safety_assessment` returns.
     """
@@ -813,7 +813,7 @@ def test_connect_lazily_initializes_every_configured_driver(
 
     `._driver` (a bare alias for `.driver`) was retired in M5: nothing
     in production reads it anymore -- `connect()` now loops over the
-    five per-device-type driver properties (§4), each of which lazily
+    five per-device-type driver properties, each of which lazily
     builds the shared session via `.driver` on its own.
     """
     monkeypatch.setenv("ASTROMETRICS_TESTING", "1")

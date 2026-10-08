@@ -1,8 +1,8 @@
 """Purpose: Queue Advancement — The Nine-Step Execution Cycle.
 
 Description: `advance_session` runs one queue-advancement cycle against
-an `ObservationSession`, per `Wayfinding_Library_Architecture.md`
-§2.4.3 Table 5: safety gate, readiness check, entry selection,
+an `ObservationSession`, per `Wayfinding_Library_Architecture.md`: safety
+gate, readiness check, entry selection,
 meridian check, intent computation, disposition, outcome capture,
 status transition, checkpoint. Table 5 lists readiness check (step 2)
 before entry selection (step 3), but a device's *relevance* is scoped
@@ -11,7 +11,7 @@ candidate entry first and then checks readiness against exactly the
 devices that entry requires -- the only order in which "no device
 required by the entry" (the table's own step-2 wording) is answerable.
 
-**Disposition, not mode** (§2.4.2): for each computed action,
+**Disposition, not mode**: for each computed action,
 `dispose_action` asks the `DelegationPolicy` for that action's
 capability state. `AUTHORITATIVE` issues; `SHADOWED` hands the same
 computed intent to `divergence_recording` and issues nothing;

@@ -1,8 +1,8 @@
 """Purpose: Event-driven pointing-model ingestion pipeline.
 
 Description: The analyze -> expose chain for plate-solve alignment
-attempts, per `Wayfinding_Library_Architecture.md` §2.5.1a's §6a
-extension. Unlike guiding (`guiding_log_ingestion.py`), this half needs
+attempts, per `Wayfinding_Library_Architecture.md`. Unlike guiding
+(`guiding_log_ingestion.py`), this half needs
 no remote fetch and no `RemoteTransferDriver` (M7) dependency:
 `AlignmentService.compute_pointing_model` already reads plate-solve
 attempts from the *local* database as they happen -- there is no file

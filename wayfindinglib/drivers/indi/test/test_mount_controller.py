@@ -5,7 +5,7 @@ per-rig `Telescope`'s configured altitude envelope over the global
 `[Observatory.Constraints]` section when one is configured, falls back
 to the global section when none is, and respects a per-rig
 `altitude_limits_enabled=False` override -- per
-`Wayfinding_Library_Architecture.md` §2.5.2's "Documented Safety
+`Wayfinding_Library_Architecture.md`'s "Documented Safety
 Fallback" invariant. Uses a real, isolated `AppConfiguration` (not a
 mock) against a fake INDI telescope device, matching this codebase's
 established real-config testing discipline.

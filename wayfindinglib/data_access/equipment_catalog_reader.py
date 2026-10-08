@@ -4,7 +4,7 @@ Description: Resolves the configured `Telescope`/`Camera` specifications
 and which of each is active, from `astrometrics.config.toml`. Foundation
 concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
-(`Wayfinding_Library_Architecture.md` §2.2.2, §2.5.2).
+(`Wayfinding_Library_Architecture.md`).
 
 Cameras and telescopes share one multi-section config pattern. For
 telescopes, an `[Observatory.Telescope]` base section carries a
@@ -14,7 +14,7 @@ back through `Telescope.<Name>`, `Observatory.Telescope`, then
 `Telescope`, mirroring `AppConfiguration.get_camera_config`'s exact
 fallback chain.
 
-Per `Wayfinding_Library_Architecture.md` §2.2.2 ("Documented Safety
+Per `Wayfinding_Library_Architecture.md` ("Documented Safety
 Fallback"): a per-rig altitude limit is preferred when present; when
 absent, resolution falls back to the single global
 `[Observatory.Constraints]` section this library previously used
@@ -270,7 +270,7 @@ def list_guide_scopes(config) -> list[GuideScope]:  # ruff: ignore[missing-type-
     ``[Observatory.GuideScope]``, each named guide scope's fields in
     ``[Observatory.GuideScope.<name>]``. Unlike telescopes, there is no
     fallback to a single unnamed entry -- an unconfigured operator has
-    no guide scope, which is the correct default (§1a).
+    no guide scope, which is the correct default.
 
     Returns
     -------

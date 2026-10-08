@@ -2,20 +2,20 @@
 
 Description: Telescope and camera specifications, held in a catalog of
 which more than one may be configured with exactly one of each active.
-Per `Wayfinding_Library_Architecture.md` §2.2.2: a telescope's optics and
+Per `Wayfinding_Library_Architecture.md`: a telescope's optics and
 its mount's safe pointing envelope are configured together, changed
 together, and meaningless apart, so `Telescope` is one flat record
 rather than separately swappable optics and mount components.
 
 `meridian_flip_delay_min` is derived from `flip_hour_angle_deg` rather
-than independently stored, per `Wayfinding_Library_Architecture.md`
-§2.2.2: both describe the same physical threshold, and Phase 4 executing
+than independently stored, per `Wayfinding_Library_Architecture.md`: both
+describe the same physical threshold, and Phase 4 executing
 flips rather than merely reporting them means the two can no longer be
 allowed to disagree.
 
 `EquipmentConfiguration` is the one model of an active telescope and
 camera pairing. It derives the plate scale and field of view from the
-two (`Wayfinding_Library_Architecture.md` §2.2.5).
+two (`Wayfinding_Library_Architecture.md`).
 """
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -36,7 +36,7 @@ class Telescope(BaseModel):
     More than one may be configured in an `EquipmentCatalog`; exactly
     one is active. `flip_hour_angle_deg` is the single stored
     meridian-flip threshold; `meridian_flip_delay_min` is derived from
-    it (Equation 1, `Wayfinding_Library_Architecture.md` §2.2.2).
+    it (Equation 1, `Wayfinding_Library_Architecture.md`).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -110,7 +110,7 @@ class Telescope(BaseModel):
         """Meridian-flip trigger, in minutes past transit.
 
         Derived from `flip_hour_angle_deg` at the sidereal rate
-        (Equation 1, `Wayfinding_Library_Architecture.md` §2.2.2):
+        (Equation 1, `Wayfinding_Library_Architecture.md`):
         minutes = (degrees / 15) x 60.
         """
         return (self.flip_hour_angle_deg / SIDEREAL_DEGREES_PER_HOUR) * 60.0
@@ -176,7 +176,7 @@ class EquipmentCatalog(BaseModel):
     Reading this catalog is a Foundation concern, since both Observation
     Planning and Observatory Control need the active specifications;
     changing which entry is active is a Control operation
-    (`Wayfinding_Library_Architecture.md` §2.2.2, §2.5.2).
+    (`Wayfinding_Library_Architecture.md`).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -290,7 +290,7 @@ class EquipmentConfiguration(BaseModel):
 
     Constructed from an `EquipmentCatalog`'s active entries rather than
     recorded independently, so there is exactly one place activeness is
-    recorded (`Wayfinding_Library_Architecture.md` §2.2.2).
+    recorded (`Wayfinding_Library_Architecture.md`).
     """
 
     model_config = ConfigDict(populate_by_name=True)

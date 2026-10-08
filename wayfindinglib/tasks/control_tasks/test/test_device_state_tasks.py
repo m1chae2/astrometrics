@@ -2,7 +2,7 @@
 
 Description: Verifies every device maps to exactly one
 `DeviceSummaryState` and an alert property produces `FAULT` with
-detail -- the cases `Wayfinding_Library_Architecture.md` §2.5.11
+detail -- the cases `Wayfinding_Library_Architecture.md`
 calls out.
 """
 

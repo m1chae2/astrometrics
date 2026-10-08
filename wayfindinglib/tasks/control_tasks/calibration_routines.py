@@ -1,7 +1,7 @@
 """Purpose: Guider/backlash calibration and polar-alignment-assist routines.
 
 Description: The orchestrating routines `Wayfinding_Library_Architecture.md`
-§2.5.1a's §6a extension (M7b) adds alongside the existing pure
+adds alongside the existing pure
 computations in `guider_calibration_tasks.py` (deriving a
 `GuiderCalibration` from a measured pulse run) and
 `pointing_model.py` (fitting `MountPointingModel` from plate solves):

@@ -3,7 +3,7 @@
 Description: Verifies the six steps run in order even when earlier
 ones fail, enclosure closure is skipped (not attempted) when the mount
 did not park, and `failed_step` records the first failure -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType

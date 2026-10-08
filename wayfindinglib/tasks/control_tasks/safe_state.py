@@ -4,7 +4,7 @@ Description: `execute(trigger, steps)` runs the six ordered steps of
 `Wayfinding_Library_Architecture.md` Table 6 -- abandon exposure, stop
 guiding, park mount, close enclosure, warm sensor, close session --
 recording each into a `SafeStateOutcome`, per
-`Wayfinding_Library_Architecture.md` §2.5.7.
+`Wayfinding_Library_Architecture.md`.
 
 Each step is attempted even if an earlier one failed: a mount that
 will not park must not prevent the attempt to warm the sensor.
@@ -23,7 +23,7 @@ completed safe state is diagnosable rather than an unknown condition.
 
 Every hardware-facing step is injected as a callable (`SafeStateSteps`)
 rather than imported, so this module carries no hardware import and is
-exercisable with no Execution package present (§2.5.9, "Safety Runs
+exercisable with no Execution package present ("Safety Runs
 Without Execution").
 """
 

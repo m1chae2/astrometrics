@@ -1,7 +1,7 @@
 """Purpose: Guider Calibration Measurement.
 
 Description: Derives a `GuiderCalibration` from a measured calibration
-run, per `Wayfinding_Library_Architecture.md` §2.5.1 Table 6. The
+run, per `Wayfinding_Library_Architecture.md`. The
 standard procedure: pulse-guide a fixed duration on each axis and
 measure the resulting guide-star pixel displacement (astrometricslib's
 centroid measurement, before and after). `camera_angle_deg` is the

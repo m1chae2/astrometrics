@@ -2,15 +2,15 @@
 
 Description: Evaluates a configured `SafetyRuleSet` against sensor
 readings and publishes a `SafetyAssessment`, per
-`Wayfinding_Library_Architecture.md` §2.5.6. Readings are passed in
+`Wayfinding_Library_Architecture.md`. Readings are passed in
 as a plain mapping rather than read from a live driver directly, so
 rule evaluation is exercisable with no hardware or Execution package
-present (§2.5.9, "Safety Runs Without Execution") -- gathering the
+present ("Safety Runs Without Execution") -- gathering the
 mapping from `drivers/indi/weather_controller.py` is a thin, separate
 step layered on top.
 
 Three properties are architectural rather than incidental
-(`Wayfinding_Library_Architecture.md` §2.5.4):
+(`Wayfinding_Library_Architecture.md`):
 
 * **Unknown is unsafe.** A reading that is missing, stale, or whose
   rule set is itself unconfigured yields `UNKNOWN`, which

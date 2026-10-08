@@ -5,7 +5,7 @@ temperature, and filter -- the per-filter offsets and thermal
 coefficient autofocus starts from. Foundation state for the same
 reason guider calibration is: a measured, slowly changing physical
 relationship rather than a per-night observation
-(`Wayfinding_Library_Architecture.md` §2.2.2).
+(`Wayfinding_Library_Architecture.md`).
 """
 
 from datetime import UTC, datetime
@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ApproachDirection(StrEnum):
     """The single direction every focus-curve sample is reached from.
 
-    Per `Wayfinding_Library_Architecture.md` §2.5.5's "Single Approach
+    Per `Wayfinding_Library_Architecture.md`'s "Single Approach
     Direction" invariant: a curve sampled with mixed approach directions
     has backlash folded into its shape and produces a minimum that is an
     artifact of traversal order.

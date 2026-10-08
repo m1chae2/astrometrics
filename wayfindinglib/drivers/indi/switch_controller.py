@@ -9,7 +9,7 @@ properties: ``POWER_CONTROL`` (per-outlet boolean switches),
 
 Reads the same heuristically-discovered powerbox device
 `IndiInterface._find_powerbox_device` already uses for weather
-telemetry (§1a) -- no first-class `EquipmentCatalog` entry exists for
+telemetry -- no first-class `EquipmentCatalog` entry exists for
 this device, the same limitation the focuser and filter wheel have.
 """
 

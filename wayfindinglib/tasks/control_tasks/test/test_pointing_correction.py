@@ -3,7 +3,7 @@
 Description: Verifies zero correction for a matching solve, a correctly
 signed correction for a known offset, and that convergence is judged
 against the configured tolerance -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest

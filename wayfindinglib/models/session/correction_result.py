@@ -1,24 +1,24 @@
 """Purpose: Correction Algorithm Result Domain Models.
 
 Description: The computed records returned by the three Observatory
-Control correction algorithms (`Wayfinding_Library_Architecture.md`
-§2.5.1's class diagram). Kept separate from `correction_config.py`,
+Control correction algorithms (`Wayfinding_Library_Architecture.md`'s class
+diagram). Kept separate from `correction_config.py`,
 which holds the tunable parameters these algorithms read rather than
 anything they produce.
 
-Per the "Corrections Are Pure" invariant (§2.5.9), computing one of
+Per the "Corrections Are Pure" invariant, computing one of
 these records issues nothing to hardware -- issuing is a separate,
 delegation-gated step layered on top. Each record is recorded through
 the `DivergenceRecord` it contributes to while its capability is
 shadowed, and through `GuidingSample` (pointing/guiding) while
-authoritative (§2.5.10).
+authoritative.
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class PointingCorrection(BaseModel):
-    """One iteration of plate-solve pointing alignment (§2.5.3).
+    """One iteration of plate-solve pointing alignment.
 
     `model_predicted_error_arcsec`/`unexplained_residual_arcsec` (M7b)
     are `None` unless a session-scoped `MountPointingModel` was
@@ -47,12 +47,12 @@ class PointingCorrection(BaseModel):
 
 
 class GuidingCorrection(BaseModel):
-    """One computed guiding pulse pair from a measured drift (§2.5.4, Eq. 2).
+    """One computed guiding pulse pair from a measured drift (Eq. 2).
 
     `pulse_ra_ms`/`pulse_dec_ms` are signed: the magnitude is the pulse
     duration, the sign names the direction (issuing maps sign to the
     `TELESCOPE_TIMED_GUIDE_NS`/`_WE` pair `pulse_guide` already
-    writes), per §2.5.4's "signed per-axis pulse durations."
+    writes), per the architecture document's "signed per-axis pulse durations."
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -68,7 +68,7 @@ class GuidingCorrection(BaseModel):
 
 
 class FocusCurvePoint(BaseModel):
-    """One sampled (focuser position, measured star size) pair (§2.5.5)."""
+    """One sampled (focuser position, measured star size) pair."""
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -80,7 +80,7 @@ class FocusCurvePoint(BaseModel):
 class FocusCorrection(BaseModel):
     """One autofocus run's sampled curve, fit, and selected position.
 
-    Per `Wayfinding_Library_Architecture.md` §2.5.5.
+    Per `Wayfinding_Library_Architecture.md`.
     """
 
     model_config = ConfigDict(populate_by_name=True)

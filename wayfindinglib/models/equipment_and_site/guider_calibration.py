@@ -2,7 +2,7 @@
 
 Description: The measured relationship between guide-camera pixels and
 mount motion. Foundation state for the same reason equipment
-specification is (`Wayfinding_Library_Architecture.md` §2.2.2): it
+specification is (`Wayfinding_Library_Architecture.md`): it
 describes a measured, slowly changing physical relationship, not a
 per-night observation. It is the precondition for autoguiding to enter
 the shadowed delegation state -- without it there is no mapping from

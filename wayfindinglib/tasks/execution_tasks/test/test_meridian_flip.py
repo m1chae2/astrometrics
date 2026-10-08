@@ -5,7 +5,7 @@ succeeds, and each of the sequence's bounds -- exposure handling,
 guiding stop, slew, realign iteration limit, and guide reacquire
 attempts -- produces a non-resumed outcome with a failure_detail when
 exhausted, without proceeding past the failing step -- the cases
-`Wayfinding_Library_Architecture.md` §2.4.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest

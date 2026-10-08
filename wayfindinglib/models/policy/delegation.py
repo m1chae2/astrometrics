@@ -4,12 +4,12 @@ Description: Which system performs one hardware-facing capability, and
 since when. Foundation state because every function reads it and none
 writes it during operation -- placing it here is what allows a
 capability's state to change without any function's structure changing
-(`Wayfinding_Library_Architecture.md` §2.1.2, §2.2.2, Design Invariant 5).
+(`Wayfinding_Library_Architecture.md`, Design Invariant 5).
 
 Validity rules (shadow precedence, the safety exemption, capture
 orchestration's dependency ordering, and calibration presence) are
 enforced by the delegation policy reader at load time
-(`Wayfinding_Library_Architecture.md` §2.2.2), not by this schema --
+(`Wayfinding_Library_Architecture.md`), not by this schema --
 this module defines only the shape.
 """
 
@@ -24,7 +24,7 @@ class ObservatoryCapability(StrEnum):
 
     Corresponds one-to-one with the functional modules of the incumbent
     software this architecture is designed to replace
-    (`Wayfinding_Library_Architecture.md` §2.1.2).
+    (`Wayfinding_Library_Architecture.md`).
     """
 
     MOUNT_CONTROL = "MOUNT_CONTROL"
@@ -39,7 +39,7 @@ class DelegationState(StrEnum):
     """Which system currently performs a capability.
 
     `SHADOWED` is not a valid state for `OBSERVATORY_SAFETY`
-    (`Wayfinding_Library_Architecture.md` §2.1.2, "Safety Is Never
+    (`Wayfinding_Library_Architecture.md`, "Safety Is Never
     Shadowed") -- enforced by the delegation policy reader, not by this
     enum, since the restriction is per-capability rather than global.
     """
@@ -75,7 +75,7 @@ class DelegationPolicy(BaseModel):
         Defaults to `DELEGATED` when no entry is configured -- the safe
         default, since `DELEGATED` issues no command this system did
         not previously issue
-        (`Wayfinding_Library_Architecture.md` §2.2.2).
+        (`Wayfinding_Library_Architecture.md`).
 
         Returns
         -------

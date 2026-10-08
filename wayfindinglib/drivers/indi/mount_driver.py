@@ -3,7 +3,7 @@
 Wraps an `IndiInterface` session -- the session's connection lifecycle,
 device discovery, and passive telemetry capture are shared across every
 `Indi*Driver` adapter for the same rig, per
-`Wayfinding_Library_Architecture.md` §2.5.1a: one INDI client connection
+`Wayfinding_Library_Architecture.md`: one INDI client connection
 serves every device type, so splitting connection ownership per device
 type would duplicate and re-test that shared lifecycle. `IndiInterface`
 itself is synchronous (`PyIndi.BaseClient` is callback-based); each

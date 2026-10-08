@@ -1,7 +1,7 @@
 """Purpose: Unit tests for observation package placement.
 
 Description: Verifies the documented placement invariants
-(`Wayfinding_Library_Architecture.md` §2.3.6): clean non-overlapping
+(`Wayfinding_Library_Architecture.md`): clean non-overlapping
 placement, each of the five infeasibility codes produced and
 distinguishable, a gap between placed entries reflected correctly,
 priority breaking a tie with the boost recorded, fixed-time anchors and

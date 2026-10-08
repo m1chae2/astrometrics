@@ -1,7 +1,7 @@
 """Purpose: Builds an ObservationSession by Recording Observatory Telemetry.
 
 Description: `ObservationSessionRecorder` runs a guiding and weather
-telemetry loop (`Wayfinding_Library_Architecture.md` §2.4.7-§2.4.8). It
+telemetry loop (`Wayfinding_Library_Architecture.md`). It
 listens to guiding telemetry through a `PHD2GuidingService` and takes
 periodic INDI status and weather snapshots. It never issues commands to
 PHD2 or the mount.
@@ -10,7 +10,7 @@ The recorder does not create sessions. A
 `wayfindinglib.models.session.observation_session.ObservationSession`
 needs `site_profile_id`, `telescope_id`, and `camera_id`, and the recorder
 cannot supply them. Those fields belong to Observation Planning
-(`Wayfinding_Library_Architecture.md` §2.2.3's session field-ownership
+(`Wayfinding_Library_Architecture.md`'s session field-ownership
 rule: only Planning writes the queue and its placement context).
 `run()` therefore loads an existing, already-planned session by id and
 attaches telemetry to it.

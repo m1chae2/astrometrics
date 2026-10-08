@@ -5,7 +5,7 @@ session, apart from the guiding samples themselves: where the mount
 pointed, how the sensor temperature moved, every exposure that finished
 or was aborted, every autofocus run, and the plate-solve and guider state
 changes. Ekos is the incumbent control software (Delegated phase,
-`Wayfinding_Library_Architecture.md` §2.1.3), so this is recorded
+`Wayfinding_Library_Architecture.md`), so this is recorded
 telemetry, not anything this library computed.
 
 `EkosSessionContext` is persisted through the Butler. It keeps only what

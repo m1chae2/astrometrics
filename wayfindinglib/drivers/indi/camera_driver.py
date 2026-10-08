@@ -2,7 +2,7 @@
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
 instantiated once per role (main/guide), per
-`Wayfinding_Library_Architecture.md` §2.5.1a.
+`Wayfinding_Library_Architecture.md`.
 """
 
 import asyncio

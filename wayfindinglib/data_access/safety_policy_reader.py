@@ -3,10 +3,10 @@
 Description: Reads the recorded `SafetyRuleSet`. Returns `None` when
 none has been configured, rather than a default rule set -- an absent
 rule set has nothing to evaluate a reading against, and the safety
-monitor (`Wayfinding_Library_Architecture.md` §2.5.6) must treat that
+monitor (`Wayfinding_Library_Architecture.md`) must treat that
 absence as producing an `UNKNOWN` verdict, the same fail-closed posture
 "Unknown Is Unsafe" applies to a stale or unparseable reading
-(`Wayfinding_Library_Architecture.md` §2.5.4). This module resolves
+(`Wayfinding_Library_Architecture.md`). This module resolves
 configuration only; producing the verdict from it is the safety
 monitor's responsibility, not this reader's.
 """

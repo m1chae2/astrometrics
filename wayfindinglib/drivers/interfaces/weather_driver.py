@@ -4,7 +4,7 @@ Mirrors ASCOM's `IObservingConditions`. Returns exactly the
 `SensorReadings` shape `wayfindinglib.tasks.control_tasks.safety_monitor
 .assess_safety` already accepts -- verified to have no live caller
 anywhere in production code before this driver existed
-(`Wayfinding_Library_Architecture.md` §2.5.4); this driver is that live
+(`Wayfinding_Library_Architecture.md`); this driver is that live
 feed, not new safety logic.
 """
 

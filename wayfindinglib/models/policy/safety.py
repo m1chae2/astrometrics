@@ -3,7 +3,7 @@
 Description: The environmental thresholds a running safety monitor
 evaluates against, and the resulting continuously-refreshed verdict.
 Three properties are architectural rather than incidental
-(`Wayfinding_Library_Architecture.md` §2.5.4):
+(`Wayfinding_Library_Architecture.md`):
 
 - Absence of information is not safety -- a stale, absent, or
   unparseable reading yields `UNKNOWN`, which `permits_observing()`
@@ -12,8 +12,8 @@ Three properties are architectural rather than incidental
   that tolerance applies to the session record, never the safety
   verdict.
 - Reopening is not the inverse of closing -- enforced by the safety
-  monitor's asymmetric-hysteresis logic (`Wayfinding_Library_Architecture.md`
-  §2.5.6), not by this schema.
+  monitor's asymmetric-hysteresis logic
+  (`Wayfinding_Library_Architecture.md`), not by this schema.
 - Safety authority is not observing authority -- `SafetyAssessment` is
   published continuously, whether or not a session exists.
 """
@@ -45,7 +45,7 @@ class SafetyRule(BaseModel):
     measurement -- e.g. ``"greater_than"``, ``"less_than"`` -- rather
     than being hardcoded per measurement, so a new sensor is
     configuration, not a new evaluation path
-    (`Wayfinding_Library_Architecture.md` §2.5.6).
+    (`Wayfinding_Library_Architecture.md`).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -89,7 +89,7 @@ class SafetyAssessment(BaseModel):
         it is a advisory severity level between `SAFE` and `UNSAFE`
         surfaced for operator awareness, not a distinct permission
         state. `UNKNOWN` is treated exactly as `UNSAFE`
-        (`Wayfinding_Library_Architecture.md` §2.5.4, "Unknown Is
+        (`Wayfinding_Library_Architecture.md`, "Unknown Is
         Unsafe").
 
         Returns

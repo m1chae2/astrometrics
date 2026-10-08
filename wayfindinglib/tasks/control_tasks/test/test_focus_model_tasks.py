@@ -2,7 +2,7 @@
 
 Description: Verifies backlash, thermal coefficient, and per-filter
 offset measurement recover known values from simulated sequences --
-the case `Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+the case `Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest

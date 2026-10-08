@@ -9,7 +9,7 @@ capability records divergence and issues zero calls, an AUTHORITATIVE
 capability issues and records nothing, a DELEGATED capability does
 neither, AUTHORITATIVE issues exactly what a SHADOWED run would have
 recorded for the same input, and abort_session skips remaining pending
-entries -- the cases `Wayfinding_Library_Architecture.md` §2.4.11
+entries -- the cases `Wayfinding_Library_Architecture.md`
 calls out.
 """
 

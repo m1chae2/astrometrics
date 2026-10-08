@@ -1,7 +1,7 @@
 """Purpose: Post-Session Reconciliation.
 
 Description: Runs once a session reaches `COMPLETED` or `ABORTED`, per
-`Wayfinding_Library_Architecture.md` §2.4.8: folds captured
+`Wayfinding_Library_Architecture.md`: folds captured
 calibration frames into `CalibrationStats`, and attaches
 `target_session_ids`. Both are idempotent on session identity --
 neither incrementally accumulates onto prior state; each recomputes

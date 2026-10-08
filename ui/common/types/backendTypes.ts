@@ -885,7 +885,7 @@ export interface GuidingSpectrumPeak {
  * persisted via `DiskButler`, refit cumulatively each time
  * `guiding_log_ingestion.py` processes a new guide log, the same
  * status as `GuiderCalibration`/`FocusModel`
- * (`Wayfinding_Library_Architecture.md` §2.5.1a's §6a extension). All
+ * (`Wayfinding_Library_Architecture.md`). All
  * three default so existing ad hoc, non-persisted analysis results
  * (e.g. `GuidingService.analyze_guiding_spectrum`'s live RPC response)
  * are unaffected.

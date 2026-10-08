@@ -2,7 +2,7 @@
 
 Description: The file-based heartbeat protocol the watchdog and its
 writer (Observation Execution's session runner, at each checkpoint)
-share, per `Wayfinding_Library_Architecture.md` §2.5.7. Uses
+share, per `Wayfinding_Library_Architecture.md`. Uses
 `time.monotonic()` rather than wall-clock time: on POSIX, the
 monotonic clock is measured from boot, not process start, so it is
 comparable across two separate processes on the same machine and is

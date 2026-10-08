@@ -1,7 +1,7 @@
 """Purpose: Focus Model Measurement.
 
 Description: Derives the pieces of a `FocusModel` from measured
-calibration runs, per `Wayfinding_Library_Architecture.md` §2.5.2:
+calibration runs, per `Wayfinding_Library_Architecture.md`:
 `backlash_steps` by reversing direction and recording lost motion,
 `thermal_coefficient_steps_per_c` by regressing focus positions
 recorded against temperature across sessions, and per-filter offsets

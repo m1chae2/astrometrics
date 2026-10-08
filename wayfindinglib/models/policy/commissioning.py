@@ -6,7 +6,7 @@ of that gate's criteria, and whether the operator aborted it. It exists
 because several gate criteria are established outside any observing
 night -- a device summary survey, an envelope-rejection check, an
 enclosure cycling drill -- producing evidence with no `ObservationSession`
-to attach to (`Wayfinding_Library_Architecture.md` §2.2.2).
+to attach to (`Wayfinding_Library_Architecture.md`).
 
 Append-only rather than configuration: unlike every other model in this
 subsystem, a `CommissioningRun` is written once at drill completion and
@@ -18,7 +18,7 @@ occur with no session, and a session may contain evidence produced by
 no commissioning run.
 
 `criterion` on each `CommissioningObservation` must name the exact gate
-criterion from `Wayfinding_Library_Architecture.md` §3 Table 7 --
+criterion from `Wayfinding_Library_Architecture.md` --
 `gate_report.py` (`Wayfinding_Library_Commissioning_Plan.md` Appendix B)
 matches on that string, so a drill that invents its own wording produces
 evidence the report cannot find.

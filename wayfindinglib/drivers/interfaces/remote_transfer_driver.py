@@ -4,7 +4,7 @@ A parallel abstraction from `ProtocolDriver` (`base_protocol_driver.py`),
 not a subclass of it: pulling files off a telescope host has no
 `connect()`/device-state notion the hardware-control protocols do --
 it's a separate, independently pluggable concern from INDI or ASCOM
-(`Wayfinding_Library_Architecture.md` §2.5's remote-transfer
+(`Wayfinding_Library_Architecture.md`'s remote-transfer
 abstraction). `StellarMateInterface` is the first implementation.
 """
 

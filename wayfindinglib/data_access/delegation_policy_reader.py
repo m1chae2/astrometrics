@@ -4,7 +4,7 @@ Description: Reads the recorded `DelegationPolicy` -- which system
 performs each hardware-facing capability -- defaulting every capability
 to `DELEGATED` when unconfigured, the safe default since `DELEGATED`
 issues no command this system did not previously issue
-(`Wayfinding_Library_Architecture.md` §2.2.2).
+(`Wayfinding_Library_Architecture.md`).
 
 Validity rules (shadow precedence, the `OBSERVATORY_SAFETY` shadow
 exemption, capture orchestration's dependency ordering, and calibration
@@ -40,7 +40,7 @@ _CORRECTION_CAPABILITIES = (
 """Capabilities that compute a correction and must therefore pass through
 SHADOWED before reaching AUTHORITATIVE (Design Invariant "Computed
 Corrections Pass Through Shadow",
-`Wayfinding_Library_Architecture.md` §2.1.2)."""
+`Wayfinding_Library_Architecture.md`)."""
 
 
 class DelegationPolicyValidationError(ConfigurationError):
@@ -91,7 +91,7 @@ def validate_delegation_policy(
     ------
     DelegationPolicyValidationError
         Raised if any of the three rules below is violated
-        (`Wayfinding_Library_Architecture.md` §2.2.2). Shadow
+        (`Wayfinding_Library_Architecture.md`). Shadow
         precedence (a fourth rule) is not checkable from a snapshot and
         is instead enforced by `promote_capability`.
 

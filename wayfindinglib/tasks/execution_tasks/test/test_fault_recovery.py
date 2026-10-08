@@ -3,7 +3,7 @@
 Description: Verifies recovery succeeds and stops on the first ENABLED
 outcome, attempts are bounded by max_attempts, the backoff interval is
 applied between attempts, and exhaustion escalates to safe state --
-the cases `Wayfinding_Library_Architecture.md` §2.4.11 calls out.
+the cases `Wayfinding_Library_Architecture.md` calls out.
 """
 
 from wayfindinglib.models.policy.device_state import DeviceSummaryState

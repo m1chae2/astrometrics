@@ -126,7 +126,7 @@ def fetch_and_ingest_new_guide_logs(
     """Download every remote PHD2 guide log and ingest each into the spectrum.
 
     The "new-artifact" trigger point this pipeline exists to give
-    Control (§6a) -- call this when an exposure-complete/new-guide-data
+    Control -- call this when an exposure-complete/new-guide-data
     signal fires, or manually for catch-up/backfill against the
     existing poll-based remote listing.
 

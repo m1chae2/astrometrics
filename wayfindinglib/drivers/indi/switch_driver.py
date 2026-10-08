@@ -9,7 +9,7 @@ device's `POWER_CONTROL`/`DEW_PWM`/`POWER_SENSORS` properties.
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
+from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
 
 
 class IndiSwitchDriver(SwitchDriver):

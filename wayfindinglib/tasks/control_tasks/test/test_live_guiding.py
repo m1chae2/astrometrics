@@ -28,9 +28,9 @@ import pytest
 
 from astrometricslib import ConfigurationError, ConflictError
 from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver, samples_from_pulses
+from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands
+from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
 from wayfindinglib.drivers.phd2.guiding_driver import Phd2GuidingDriver
-from wayfindinglib.drivers.protocols.guiding_driver import GuideCommands
-from wayfindinglib.drivers.protocols.registry import build_guiding_driver_registry
 from wayfindinglib.drivers.simulators.guiding_simulator import SimulatedGuidingDriver
 from wayfindinglib.models.session.telemetry import GuidingSample
 from wayfindinglib.tasks.control_tasks import hardware_operations, live_guiding

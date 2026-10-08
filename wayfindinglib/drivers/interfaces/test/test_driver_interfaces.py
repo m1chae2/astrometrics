@@ -1,4 +1,4 @@
-"""Tests for the per-device-type hardware-control protocol driver ABCs.
+"""Tests for the per-device-type driver interfaces (abstract base classes).
 
 Confirms each ABC enforces its full abstract method set (mirrors
 `wayfindinglib/drivers/catalog/test/`'s approach for `CatalogDriver`)
@@ -14,14 +14,14 @@ from wayfindinglib.drivers.indi.focuser_driver import IndiFocuserDriver
 from wayfindinglib.drivers.indi.mount_driver import IndiMountDriver
 from wayfindinglib.drivers.indi.switch_driver import IndiSwitchDriver
 from wayfindinglib.drivers.indi.weather_driver import IndiWeatherDriver
-from wayfindinglib.drivers.protocols.camera_driver import CameraDriver
-from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
-from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
-from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
-from wayfindinglib.drivers.protocols.mount_driver import MountDriver
-from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
-from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
-from wayfindinglib.drivers.protocols.weather_driver import WeatherDriver
+from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
+from wayfindinglib.drivers.interfaces.enclosure_driver import EnclosureDriver
+from wayfindinglib.drivers.interfaces.filter_wheel_driver import FilterWheelDriver
+from wayfindinglib.drivers.interfaces.focuser_driver import FocuserDriver
+from wayfindinglib.drivers.interfaces.mount_driver import MountDriver
+from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
+from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
+from wayfindinglib.drivers.interfaces.weather_driver import WeatherDriver
 from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
 

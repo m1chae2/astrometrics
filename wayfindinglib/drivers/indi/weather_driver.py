@@ -10,7 +10,7 @@ device's `WEATHER_PARAMETERS` property, the same one
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.weather_driver import SensorReadings, WeatherDriver
+from wayfindinglib.drivers.interfaces.weather_driver import SensorReadings, WeatherDriver
 
 
 class IndiWeatherDriver(WeatherDriver):

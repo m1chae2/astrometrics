@@ -13,7 +13,7 @@ method here bridges with `asyncio.to_thread`.
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.mount_driver import MountDriver, MountStatus
+from wayfindinglib.drivers.interfaces.mount_driver import MountDriver, MountStatus
 
 
 class IndiMountDriver(MountDriver):

@@ -10,7 +10,7 @@ dome INDI drivers publish for shutter motion.
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver, EnclosureState
+from wayfindinglib.drivers.interfaces.enclosure_driver import EnclosureDriver, EnclosureState
 
 
 class IndiEnclosureDriver(EnclosureDriver):

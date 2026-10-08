@@ -15,7 +15,7 @@ import time
 
 import numpy as np
 
-from wayfindinglib.drivers.protocols.guiding_driver import GuideCommands, GuidingDriver, GuidingReading
+from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands, GuidingDriver, GuidingReading
 from wayfindinglib.models.session.telemetry import GuidingSample
 
 __all__ = ["SimulatedGuidingDriver"]

@@ -334,7 +334,7 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
         Raised if `protocol` is not a key in the corresponding
         protocol-driver registry.
     """
-    from wayfindinglib.drivers.protocols import registry
+    from wayfindinglib.drivers.interfaces import registry
 
     registry_by_field = {
         "mount_protocol": registry.build_mount_driver_registry,

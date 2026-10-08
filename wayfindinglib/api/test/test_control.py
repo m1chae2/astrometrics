@@ -911,7 +911,7 @@ def test_remote_transfer_driver_lazily_builds_stellarmate_interface(control: Obs
     config (default ``"stellarmate"``) instead of every
     `remote_transfer_tasks.py` function constructing its own instance.
     """
-    from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+    from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
     from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
     driver = control.remote_transfer_driver
@@ -1273,7 +1273,7 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(
     the simulator's real slew physics) so the test asserts the
     interlock wiring, not incidental simulator behavior.
     """
-    from wayfindinglib.drivers.protocols.mount_driver import MountStatus
+    from wayfindinglib.drivers.interfaces.mount_driver import MountStatus
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy

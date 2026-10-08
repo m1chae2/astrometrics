@@ -8,7 +8,7 @@ instantiated once per role (main/guide), per
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.camera_driver import CameraDriver, CameraRole
+from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver, CameraRole
 
 
 class IndiCameraDriver(CameraDriver):

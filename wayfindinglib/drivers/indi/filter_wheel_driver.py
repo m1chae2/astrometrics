@@ -7,7 +7,7 @@ Wraps the same shared `IndiInterface` session as `IndiMountDriver`, per
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
+from wayfindinglib.drivers.interfaces.filter_wheel_driver import FilterWheelDriver
 
 
 class IndiFilterWheelDriver(FilterWheelDriver):

@@ -34,16 +34,16 @@ from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics, LoggerInterface
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
-    from wayfindinglib.drivers.protocols.base_protocol_driver import ProtocolDriver
-    from wayfindinglib.drivers.protocols.camera_driver import CameraDriver
-    from wayfindinglib.drivers.protocols.enclosure_driver import EnclosureDriver
-    from wayfindinglib.drivers.protocols.filter_wheel_driver import FilterWheelDriver
-    from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
-    from wayfindinglib.drivers.protocols.guiding_driver import GuidingDriver
-    from wayfindinglib.drivers.protocols.mount_driver import MountDriver
-    from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
-    from wayfindinglib.drivers.protocols.switch_driver import SwitchDriver
-    from wayfindinglib.drivers.protocols.weather_driver import WeatherDriver
+    from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
+    from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
+    from wayfindinglib.drivers.interfaces.enclosure_driver import EnclosureDriver
+    from wayfindinglib.drivers.interfaces.filter_wheel_driver import FilterWheelDriver
+    from wayfindinglib.drivers.interfaces.focuser_driver import FocuserDriver
+    from wayfindinglib.drivers.interfaces.guiding_driver import GuidingDriver
+    from wayfindinglib.drivers.interfaces.mount_driver import MountDriver
+    from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
+    from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
+    from wayfindinglib.drivers.interfaces.weather_driver import WeatherDriver
     from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
     from wayfindinglib.models.equipment_and_site.equipment import Camera, GuideScope, Telescope
     from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -189,7 +189,7 @@ class ControlContext:
             The active mount driver.
         """
         if self._mount_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_mount_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_mount_driver_registry
 
             telescope = self.active_telescope()
             protocol = telescope.mount_protocol if telescope else "indi"
@@ -211,7 +211,7 @@ class ControlContext:
             The active focuser driver.
         """
         if self._focuser_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_focuser_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_focuser_driver_registry
 
             telescope = self.active_telescope()
             protocol = telescope.focuser_protocol if telescope else "indi"
@@ -233,7 +233,7 @@ class ControlContext:
             The active filter wheel driver.
         """
         if self._filter_wheel_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_filter_wheel_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_filter_wheel_driver_registry
 
             telescope = self.active_telescope()
             protocol = telescope.filter_wheel_protocol if telescope else "indi"
@@ -257,7 +257,7 @@ class ControlContext:
             The active main camera driver (``role="main"``).
         """
         if self._camera_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_camera_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_camera_driver_registry
 
             camera = self.active_camera()
             protocol = camera.protocol if camera else "indi"
@@ -284,7 +284,7 @@ class ControlContext:
             The active guide camera driver (``role="guide"``).
         """
         if self._guide_camera_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_camera_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_camera_driver_registry
 
             self._guide_camera_driver = self._build_protocol_driver(
                 build_camera_driver_registry(), "indi", role="guide"
@@ -306,7 +306,7 @@ class ControlContext:
             The active enclosure driver.
         """
         if self._enclosure_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_enclosure_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_enclosure_driver_registry
 
             enclosure = self.active_enclosure()
             protocol = enclosure.protocol if enclosure else "indi"
@@ -328,7 +328,7 @@ class ControlContext:
             The active power switch driver.
         """
         if self._switch_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_switch_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_switch_driver_registry
 
             self._switch_driver = self._build_protocol_driver(build_switch_driver_registry(), "indi")
         return self._switch_driver
@@ -348,7 +348,7 @@ class ControlContext:
             The active weather sensor driver.
         """
         if self._weather_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_weather_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_weather_driver_registry
 
             self._weather_driver = self._build_protocol_driver(build_weather_driver_registry(), "indi")
         return self._weather_driver
@@ -378,7 +378,7 @@ class ControlContext:
             ``"stellarmate"`` has it today.
         """
         if self._remote_transfer_driver is None:
-            from wayfindinglib.drivers.protocols.registry import build_remote_transfer_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_remote_transfer_driver_registry
 
             driver_name = self.config.get_remote_transfer_driver_name()
             driver_class = build_remote_transfer_driver_registry()[driver_name]
@@ -419,7 +419,7 @@ class ControlContext:
         if self._guiding_driver is None:
             from astrometricslib import ConfigurationError
             from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
-            from wayfindinglib.drivers.protocols.registry import build_guiding_driver_registry
+            from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
 
             telescope = self.active_telescope()
             protocol = telescope.guiding_protocol if telescope else "phd2"

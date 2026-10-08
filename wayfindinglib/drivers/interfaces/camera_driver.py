@@ -14,7 +14,7 @@ point rather than guessed at.
 import abc
 from typing import Any, Literal
 
-from wayfindinglib.drivers.protocols.base_protocol_driver import ProtocolDriver
+from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
 
 CameraRole = Literal["main", "guide"]
 

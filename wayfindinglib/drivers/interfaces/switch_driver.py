@@ -9,7 +9,7 @@ outlets or dew heaters today.
 
 import abc
 
-from wayfindinglib.drivers.protocols.base_protocol_driver import ProtocolDriver
+from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
 
 
 class SwitchDriver(ProtocolDriver):

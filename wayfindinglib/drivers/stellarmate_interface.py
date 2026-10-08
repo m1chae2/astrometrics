@@ -10,7 +10,7 @@ off a telescope host requires a telescope to be present, so it belongs
 in the observatory-control library rather than the science library.
 
 The first implementation of `RemoteTransferDriver`
-(`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) -- a
+(`wayfindinglib/drivers/interfaces/remote_transfer_driver.py`) -- a
 separate, pluggable abstraction from the hardware-control protocol
 drivers, since retrieving files from a telescope host is not part of
 INDI or ASCOM.
@@ -24,7 +24,7 @@ import time
 from typing import Any
 
 from astrometricslib import ConfigurationError, ExternalServiceError, require_mounted_storage
-from wayfindinglib.drivers.protocols.remote_transfer_driver import RemoteTransferDriver
+from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
 

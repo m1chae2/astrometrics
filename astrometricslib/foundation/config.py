@@ -1200,7 +1200,7 @@ class AppConfiguration:
 
         Selects which `RemoteTransferDriver` implementation
         `ObservatoryControl.remote_transfer_driver` builds
-        (`wayfindinglib/drivers/protocols/remote_transfer_driver.py`) --
+        (`wayfindinglib/drivers/interfaces/remote_transfer_driver.py`) --
         a separate, pluggable choice from the hardware-control protocol,
         since pulling files off a telescope host is not part of INDI or
         ASCOM.

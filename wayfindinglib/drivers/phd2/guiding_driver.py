@@ -13,8 +13,8 @@ PHD2 runs its own guiding loop, so this driver refuses `run_cycle`.
 import logging
 
 from astrometricslib import ConflictError
+from wayfindinglib.drivers.interfaces.guiding_driver import GuideCommands, GuidingDriver, GuidingReading
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
-from wayfindinglib.drivers.protocols.guiding_driver import GuideCommands, GuidingDriver, GuidingReading
 from wayfindinglib.models.session.telemetry import GuidingSample, GuidingSampleSource
 
 __all__ = ["Phd2GuidingDriver"]

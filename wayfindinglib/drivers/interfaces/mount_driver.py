@@ -18,7 +18,7 @@ import abc
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib.drivers.protocols.base_protocol_driver import ProtocolDriver
+from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
 
 
 class MountStatus(BaseModel):

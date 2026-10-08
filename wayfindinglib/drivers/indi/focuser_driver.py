@@ -7,7 +7,7 @@ Wraps the same shared `IndiInterface` session as `IndiMountDriver`, per
 import asyncio
 from typing import Any
 
-from wayfindinglib.drivers.protocols.focuser_driver import FocuserDriver
+from wayfindinglib.drivers.interfaces.focuser_driver import FocuserDriver
 
 
 class IndiFocuserDriver(FocuserDriver):

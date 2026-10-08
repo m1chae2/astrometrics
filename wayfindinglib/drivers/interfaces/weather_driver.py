@@ -10,7 +10,7 @@ feed, not new safety logic.
 
 import abc
 
-from wayfindinglib.drivers.protocols.base_protocol_driver import ProtocolDriver
+from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
 from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
 
 __all__ = ["SensorReadings", "WeatherDriver"]

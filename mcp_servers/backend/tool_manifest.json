@@ -6,85 +6,85 @@
       "tool_class": "ui-control",
       "category": "app",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Navigate and notify only; pause and resume are not offered."
     },
     "app_status": {
       "tool_class": "observe",
       "category": "app",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Reads health, connections, resources and jobs."
     },
     "backend_call_rpc": {
       "tool_class": "unrestricted",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Reaches every backend method, including all the ones above."
     },
     "backend_health_check": {
       "tool_class": "observe",
       "category": "app",
-      "disposition": "merged",
-      "merge_into": "app_status",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by app_status."
     },
     "docs_get": {
       "tool_class": "observe",
       "category": "app",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Reads documentation."
     },
     "electron_run_python": {
       "tool_class": "unrestricted",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Runs AI-written Python inside the backend."
     },
     "terminal_get_workspace": {
       "tool_class": "observe",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Console only. Has no use without the code runner."
     },
     "terminal_inspect_api": {
       "tool_class": "unrestricted",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Builds Python code from its argument. Console only."
     },
     "ui_editor_sync": {
       "tool_class": "ui-control",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Console code editor. Has no use without the code runner."
     },
     "ui_inspect_variable": {
       "tool_class": "observe",
       "category": "app",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Console variable viewer. Has no use without the code runner."
     },
     "ui_navigate_mode": {
       "tool_class": "ui-control",
       "category": "app",
-      "disposition": "merged",
-      "merge_into": "app_controls",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by app_controls."
     },
     "ui_show_notification": {
       "tool_class": "ui-control",
       "category": "app",
-      "disposition": "merged",
-      "merge_into": "app_controls",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by app_controls."
     }
   }
 }

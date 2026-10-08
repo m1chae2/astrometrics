@@ -6,316 +6,316 @@
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "calibration_assess_flats": {
       "tool_class": "compute",
       "category": "calibration",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Checks flats. Writes nothing."
     },
     "calibration_get": {
       "tool_class": "observe",
       "category": "calibration",
-      "disposition": "merged",
-      "merge_into": "calibration_query",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by calibration_query."
     },
     "calibration_query": {
       "tool_class": "observe",
       "category": "calibration",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh reloads the index into memory and writes nothing."
     },
     "calibration_refresh": {
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "calibration_save": {
       "tool_class": "change-data",
       "category": "calibration",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Writes the calibration index. The AI is read-only."
     },
     "diagnostics_flag_value_outliers": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "drop",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Arithmetic on numbers the caller passes in. The user does not want it."
     },
     "diagnostics_frame_quality": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
     },
     "diagnostics_spectral_frame_check": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
     },
     "diagnostics_stack_quality": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with the previous stack or another stack file. Saves nothing."
     },
     "jobs_query": {
       "tool_class": "observe",
       "category": "jobs-history",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, opened read-only. A job stuck at 'started' after the app stopped still shows as active."
     },
     "processing_acquire_analysis_slot": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "drop",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Internal concurrency lock exposed by reflection."
     },
     "processing_acquire_stacking_slot": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "drop",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Internal concurrency lock exposed by reflection."
     },
     "processing_discard_previous_stack": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "processing_process_target": {
       "tool_class": "change-data",
       "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "pipeline_run",
-      "interim_block": ""
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "processing_remake_preview": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04 from gap report #1. Makes a target's preview picture again from its existing stack, without restacking. denoise, denoise_strength and star_toning apply to that run only and never reach the configuration. The old pictures are copied into _previous_preview first and put back if the run fails. The stack file is never written. Writes only the preview JPEG, the processed FITS and the target's processed-image pointer."
     },
     "processing_restore_excluded_frames": {
       "tool_class": "change-data",
       "category": "image-processing",
-      "disposition": "merge",
-      "merge_into": "excluded_frames",
-      "interim_block": ""
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "processing_run_spectroscopy_by_session": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "fix",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Needs Python objects, so it cannot be called through MCP. Consider making it a stage of pipeline_run."
     },
     "processing_stack": {
       "tool_class": "process",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04 at the user's request: the AI may stack a target the way the app's Stack button does, choosing imaging or spectral frames, a filter and a file or time range. plan_only lists the frames without stacking. It runs the app's own stage: sets aside bad frames into _excluded (never deletes), keeps one previous stack, and saves the target. Since 2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack."
     },
     "processing_stack_summary": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04. One short answer for a target's stack: frames stacked and skipped, rejected fraction, star width against the inputs, flags and each exposure group. Reads the saved summary."
     },
     "processing_swap_with_previous_stack": {
       "tool_class": "change-data",
       "category": "image-processing",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "star_analyze_periodicity": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "fix",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Writes the result into the live star catalog. Needs a save=false option."
     },
     "star_create": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "star_detect_point_sources": {
       "tool_class": "compute",
       "category": "stars",
       "disposition": "fix",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Needs a NumPy array, which MCP cannot send. Take a frame path."
     },
     "star_find_or_create_by_position": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "star_get": {
       "tool_class": "observe",
       "category": "stars",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Reads one star's full record by id. Writes nothing."
     },
     "star_query": {
       "tool_class": "observe",
       "category": "stars",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Library star lookup with hard caps on rows, region size and full records."
     },
     "star_save_all": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Replaces the whole star catalog."
     },
     "star_tune_spectroscopy_calibration": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Rewrites the live configuration file through update_config. Needs an apply=false mode that only returns the fitted values."
     },
     "star_update": {
       "tool_class": "change-data",
       "category": "stars",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "target_add": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "target_create": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "The AI is read-only, so a tool that writes is not offered."
     },
     "target_get": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merged",
-      "merge_into": "target_query",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by target_query."
     },
     "target_get_frame": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Returns the path of one frame, found by ISO, exposure and index."
     },
     "target_get_header": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Reads one FITS header."
     },
     "target_imaged_field_centers": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04. The distinct sky positions imaged, read from FITS headers (about 35 s on this library), so it runs as a background job."
     },
     "target_list": {
       "tool_class": "observe",
       "category": "targets",
-      "disposition": "merged",
-      "merge_into": "target_query",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Replaced by target_query."
     },
     "target_query": {
       "tool_class": "observe",
       "category": "targets",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-04. Targets as short rows or one grouped record, the cameras used, or each target's frames per camera; replaces target_get and target_list."
     },
     "target_read_saved": {
       "tool_class": "unclassified",
       "category": "targets",
-      "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "disposition": "drop",
+      "interim_block": "",
+      "note": "Returns the whole target record, frames and all, which overflows the reply. Use target_query."
     },
     "target_reindex_frames": {
       "tool_class": "change-data",
       "category": "targets",
-      "disposition": "merge",
-      "merge_into": "target_index_frames",
-      "interim_block": ""
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "Writes the frame records. A dry_run mode that only reports what would change would let an AI use it."
     },
     "target_save": {
       "tool_class": "change-data",
       "category": "targets",
       "disposition": "withhold",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Writes the database. The AI is read-only."
     },
     "typegen_contract_validator": {
       "tool_class": "develop",
       "category": "developer",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Developer check."
     },
     "visualization_get_last_captured_image": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "fix",
-      "merge_into": "",
-      "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image."
+      "interim_block": "Returns the picture as base64 text, which the 40,000 character reply limit cuts in half. Use visualization_render_fits with a path, which returns a real image.",
+      "note": "Returns base64 text that the reply limit cuts in half. Make it return an image, or fold it into visualization_render_fits with a latest option."
     },
     "visualization_plot": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-05. Draws one chart of a target or a star; the registry sends it as a PNG image. Saves nothing."
     },
     "visualization_render_fits": {
       "tool_class": "observe",
       "category": "image-processing",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Built 2026-10-03. Returns a real image of a frame, with a stretch and an optional zoom. Saves nothing."
     }
   }
 }

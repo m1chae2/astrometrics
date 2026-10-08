@@ -23,7 +23,7 @@ from mcp_servers.common.profile import (
 from mcp_servers.common.tool_registry import ToolRegistry
 
 
-def _entry(tool_class: str, disposition: str = "merge", interim_block: str = "") -> dict[str, str]:
+def _entry(tool_class: str, disposition: str = "keep", interim_block: str = "") -> dict[str, str]:
     """Build a manifest entry for a test.
 
     Returns
@@ -120,8 +120,7 @@ def test_apply_profile_removes_tools_and_calls_to_them_fail(tmp_path: Path) -> N
     assert "report_capability_gap" in result[0].text
 
 
-def test_a_merged_tool_is_withheld_and_names_its_replacement() -> None:
-    """A merged tool is withheld, and the reason names its replacement."""
-    entry = {"tool_class": "compute", "disposition": "merged", "merge_into": "observatory_history_query"}
-    reason = withheld_reason(entry, "investigator")
-    assert "observatory_history_query" in reason
+def test_a_dropped_tool_is_withheld_and_its_note_is_the_reason() -> None:
+    """A dropped tool is withheld, and the reason quotes its note."""
+    entry = {"tool_class": "compute", "disposition": "drop", "note": "Replaced by observatory_history_query."}
+    assert withheld_reason(entry, "investigator") == "Replaced by observatory_history_query"

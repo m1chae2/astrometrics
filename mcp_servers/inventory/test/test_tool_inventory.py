@@ -16,10 +16,7 @@ from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
     DECISIONS,
     DISPOSITIONS,
-    PROPOSED_TOOLS,
-    ProposedTool,
     categorize_tool,
-    replaced_by_lookup,
 )
 from mcp_servers.inventory.tool_inventory import (
     TOOL_CLASSES,
@@ -205,8 +202,8 @@ def test_categorize_tool_uses_name_and_class(name: str, tool_class: str, expecte
     assert categorize_tool(name, tool_class) == expected_category
 
 
-def test_decisions_and_proposed_tools_agree_with_served_tools() -> None:
-    """Every name in the decisions and proposed tools is served, once."""
+def test_decisions_agree_with_served_tools() -> None:
+    """Every served tool has a decision; every decision names one."""
     assert check_decisions(collect_inventory()) == []
 
 
@@ -218,17 +215,26 @@ def test_every_served_tool_gets_a_category_and_disposition() -> None:
             assert record.disposition in DISPOSITIONS, record.name
 
 
-def test_apply_decisions_merges_into_the_proposed_tool() -> None:
-    """A replaced tool gets the new tool's category and merged status."""
+def test_a_replaced_tool_is_dropped_and_names_its_replacement() -> None:
+    """A replaced tool is dropped, and its note names the new tool."""
     record = ToolRecord("srv", "target_list", "", tool_class="observe")
-    apply_decisions(record, replaced_by_lookup())
-    assert (record.category, record.disposition, record.merge_into) == ("targets", "merged", "target_query")
+    apply_decisions(record)
+    assert (record.category, record.disposition) == ("targets", "drop")
+    assert "target_query" in record.note
+
+
+def test_a_tool_with_no_decision_stays_undecided() -> None:
+    """A new tool is not offered until someone adds a decision for it."""
+    record = ToolRecord("srv", "star_brand_new_method", "", tool_class="observe")
+    apply_decisions(record)
+    assert record.disposition == "undecided"
+    assert check_decisions({"srv": [record]})[0] == "'star_brand_new_method' has no decision"
 
 
 def test_apply_decisions_corrects_the_class_and_keeps_the_note() -> None:
     """A class correction replaces the drafted class and records why."""
     record = ToolRecord("srv", "star_analyze_periodicity", "", tool_class="compute")
-    apply_decisions(record, replaced_by_lookup())
+    apply_decisions(record)
     assert record.tool_class == "change-data"
     assert record.disposition == "fix"
     assert "star catalog" in record.note
@@ -238,21 +244,6 @@ def test_config_writers_are_withheld() -> None:
     """The tools that change configuration are withheld from AI clients."""
     for name in ("observatory_equipment_set_active_camera", "observatory_safety_save_rule_set"):
         assert DECISIONS[name].disposition == "withhold"
-
-
-def test_investigator_access_follows_class_and_rules() -> None:
-    """Read-only tools are fully open; writers only with safe arguments."""
-    by_name = {proposed.name: proposed for proposed in PROPOSED_TOOLS}
-    assert by_name["star_query"].investigator_access() == "full"
-    assert by_name["target_index_frames"].investigator_access() == "limited"
-    assert by_name["app_controls"].investigator_access() == "limited"
-
-
-def test_proposed_tool_without_replacements_is_allowed() -> None:
-    """A new tool, such as the job history query, replaces nothing."""
-    proposed = ProposedTool("jobs_query", "jobs-history", "x", (), (), "observe")
-    assert proposed.replaces == ()
-    assert proposed.investigator_access() == "full"
 
 
 def test_every_hardware_control_tool_is_dropped() -> None:
@@ -270,7 +261,7 @@ def test_every_hardware_control_tool_is_dropped() -> None:
 def test_polar_alignment_assist_is_a_calculation_not_a_command() -> None:
     """The fit uses records passed in, so it is a monitoring calculation."""
     record = ToolRecord("srv", "observatory_mount_run_polar_alignment_assist", "", tool_class="actuate")
-    apply_decisions(record, replaced_by_lookup())
+    apply_decisions(record)
     assert (record.tool_class, record.category) == ("compute", "observatory-status")
 
 
@@ -278,7 +269,7 @@ def test_delegation_mode_switches_count_as_configuration() -> None:
     """The Safe Mode toggle writes saved state, so an AI may not change it."""
     for name in ("observatory_safety_enter_controller_mode", "observatory_safety_enter_monitoring_mode"):
         record = ToolRecord("srv", name, "", tool_class="actuate")
-        apply_decisions(record, replaced_by_lookup())
+        apply_decisions(record)
         assert (record.category, record.disposition) == ("observatory-config", "withhold")
 
 
@@ -304,34 +295,19 @@ def test_writers_are_withheld_because_the_ai_is_read_only() -> None:
     """A writer with no read-only form is withheld, with the reason."""
     for name in ("star_create", "star_update", "target_create", "calibration_add"):
         record = ToolRecord("srv", name, "", tool_class="change-data")
-        apply_decisions(record, replaced_by_lookup())
+        apply_decisions(record)
         assert record.disposition == "withhold", name
         assert "read-only" in record.note
 
 
-def test_no_proposed_tool_offers_a_writer_to_the_investigator() -> None:
-    """A writing proposed tool gives the investigator safe values or none."""
-    for proposed in PROPOSED_TOOLS:
-        if proposed.tool_class not in ("observe", "compute", "ingest", "process"):
-            assert proposed.investigator_access() in ("limited", "none"), proposed.name
-        assert "operator" not in proposed.argument_rules, proposed.name
-
-
-def test_the_log_sync_tool_is_built_and_offered_to_the_investigator() -> None:
-    """The log sync is an ingest; the refit saves a model, so it is not."""
-    by_name = {proposed.name: proposed for proposed in PROPOSED_TOOLS}
-    logs = by_name["observatory_remote_sync_logs"]
-    assert (logs.built, logs.tool_class, logs.investigator_access()) == (True, "ingest", "full")
+def test_the_sync_tools_are_ingests_offered_to_the_investigator() -> None:
+    """The syncs are kept ingests; the guiding refit is dropped."""
+    for name in ("observatory_remote_sync_frames", "observatory_remote_sync_logs"):
+        tool_class, _, _ = classify_tool(name, "")
+        record = ToolRecord("srv", name, "", tool_class=tool_class)
+        apply_decisions(record)
+        assert (record.tool_class, record.disposition) == ("ingest", "keep"), name
     assert DECISIONS["observatory_guiding_refit_spectrum"].disposition == "drop"
-
-
-def test_the_frame_ingest_tool_is_built_and_offered_to_the_investigator() -> None:
-    """The frame sync is built as an ingest the investigator may use."""
-    sync = next(proposed for proposed in PROPOSED_TOOLS if proposed.name == "observatory_remote_sync_frames")
-    assert sync.built is True
-    assert sync.tool_class == "ingest"
-    assert sync.investigator_access() == "full"
-    assert sync.replaces == ()
 
 
 def test_each_control_child_has_one_status_read() -> None:
@@ -339,13 +315,6 @@ def test_each_control_child_has_one_status_read() -> None:
     for child in ("mount", "imaging", "guiding", "safety", "equipment"):
         decision = DECISIONS[f"observatory_{child}_status"]
         assert (decision.disposition, decision.tool_class) == ("keep", "observe"), child
-
-
-def test_navigate_and_notify_are_allowed_but_pause_is_not() -> None:
-    """The investigator may navigate and notify, but not pause jobs."""
-    by_name = {proposed.name: proposed for proposed in PROPOSED_TOOLS}
-    allowed = by_name["app_controls"].argument_rules["investigator"]["action"]["allowed"]
-    assert set(allowed) == {"navigate", "notify"}
 
 
 def test_ui_manifest_covers_every_declared_ui_tool() -> None:

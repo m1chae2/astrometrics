@@ -29,8 +29,8 @@ export interface ManifestEntry {
   tool_class?: string;
   category?: string;
   disposition?: string;
-  merge_into?: string;
   interim_block?: string;
+  note?: string;
 }
 
 /** The manifest file: tool name -> entry. */
@@ -93,11 +93,8 @@ export function withheldReason(entry: ManifestEntry | undefined, profile: string
   if (!entry.tool_class || !PROFILE_CLASSES[profile].has(entry.tool_class)) {
     return `class '${entry.tool_class}' is not offered to the ${profile} profile`;
   }
-  if (entry.disposition === "merged") {
-    return `it was replaced by ${entry.merge_into || "a newer tool"}`;
-  }
   if (!entry.disposition || !SERVED_DISPOSITIONS.has(entry.disposition)) {
-    return `disposition '${entry.disposition}' is not offered`;
+    return entry.note ? entry.note.replace(/\.$/, "") : `disposition '${entry.disposition}' is not offered`;
   }
   return null;
 }

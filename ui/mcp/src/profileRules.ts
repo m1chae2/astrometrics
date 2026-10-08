@@ -18,7 +18,7 @@ export const PROFILE_CLASSES: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 /** Dispositions a client may use. */
-export const SERVED_DISPOSITIONS: ReadonlySet<string> = new Set(["keep", "merge"]);
+export const SERVED_DISPOSITIONS: ReadonlySet<string> = new Set(["keep"]);
 
 /** Instructions the server gives its client at the start of a session. */
 export const GAP_REPORT_GUIDANCE = "These tools look things up and calculate. The only writes are bringing frames from the telescope into the library and stacking a target's frames the way the app does. If none of the tools you can use can do what you need, stop. Do not look for a workaround: do not chain tools to imitate a missing one, and do not ask for code to be run. Call report_capability_gap on the astrometrics-gaps server. Say what you tried, why it fell short, and what tool would help. Then tell the person you cannot do it with the current tools.";

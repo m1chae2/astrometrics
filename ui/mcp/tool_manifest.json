@@ -6,29 +6,29 @@
       "tool_class": "develop",
       "category": "developer",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Developer check."
     },
     "ui_build_check": {
       "tool_class": "develop",
       "category": "developer",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Developer check."
     },
     "ui_diagnose_code": {
       "tool_class": "develop",
       "category": "developer",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Developer check."
     },
     "ui_run_tests": {
       "tool_class": "develop",
       "category": "developer",
       "disposition": "keep",
-      "merge_into": "",
-      "interim_block": ""
+      "interim_block": "",
+      "note": "Developer check."
     }
   }
 }

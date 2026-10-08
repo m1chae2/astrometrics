@@ -37,15 +37,9 @@ from mcp_servers.inventory.tool_dispositions import (
     CATEGORIES,
     DECISIONS,
     DISPOSITIONS,
-    DROPPED_CATEGORIES,
     INTERIM_BLOCKS,
-    NOT_OFFERED_CLASSES,
-    PROPOSED_TOOLS,
-    READ_ONLY_NOTE,
-    ProposedTool,
     categorize_tool,
     find_problems,
-    replaced_by_lookup,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -97,7 +91,7 @@ TOOL_CLASSES = {
     "unrestricted": "Runs code or any backend call. Reaches whatever the backend reaches.",
     "unclassified": "No rule matched. A person must choose a class.",
 }
-"""The proposed classes and what each one means."""
+"""The classes a tool can have and what each one means."""
 
 CONFIDENCE_LEVELS = ("high", "medium", "low")
 
@@ -435,8 +429,6 @@ class ToolRecord:
         One of ``CATEGORIES`` in ``tool_dispositions``.
     disposition : `str`
         One of ``DISPOSITIONS`` in ``tool_dispositions``.
-    merge_into : `str`
-        The proposed tool that replaces this one, or an empty string.
     interim_block : `str`
         Why a read-only tool stays hidden for now, or an empty string.
     note : `str`
@@ -456,7 +448,6 @@ class ToolRecord:
     reason: str = "No rule matched."
     category: str = "uncategorized"
     disposition: str = "undecided"
-    merge_into: str = ""
     interim_block: str = ""
     note: str = ""
     reviewed: bool = False
@@ -571,48 +562,35 @@ def collect_inventory() -> dict[str, list[ToolRecord]]:
         for server, module_name in PYTHON_SERVER_MODULES.items()
     }
     inventory[UI_SERVER_NAME] = collect_ui_server_tools()
-    replaced_by = replaced_by_lookup()
     for records in inventory.values():
         for record in records:
             record.tool_class, record.confidence, record.reason = classify_tool(
                 record.name, record.description
             )
-            apply_decisions(record, replaced_by)
+            apply_decisions(record)
     return inventory
 
 
-def apply_decisions(record: ToolRecord, replaced_by: dict[str, ProposedTool]) -> None:
+def apply_decisions(record: ToolRecord) -> None:
     """Fill in a record's category, disposition and corrected class.
 
     Parameters
     ----------
     record : `ToolRecord`
-        The record to update in place. It already has a drafted class.
-    replaced_by : `dict` [`str`, `ProposedTool`]
-        Tool name -> the proposed tool that replaces it.
+        The record to update in place. It already has a drafted class. A
+        tool with no row in ``DECISIONS`` stays ``undecided``, so no
+        client gets it.
     """
     record.interim_block = INTERIM_BLOCKS.get(record.name, "")
     decision = DECISIONS.get(record.name)
     if decision:
         record.note = decision.note
+        record.disposition = decision.disposition
         if decision.tool_class:
             record.tool_class = decision.tool_class
             record.confidence = "medium"
             record.reason = f"Corrected after reading the code. {decision.note}"
-    proposed = replaced_by.get(record.name)
-    if proposed:
-        record.category = proposed.category
-        record.disposition = "merged" if proposed.built else "merge"
-        record.merge_into = proposed.name
-    else:
-        record.category = categorize_tool(record.name, record.tool_class)
-        record.disposition = (decision.disposition if decision else None) or "undecided"
-        if record.disposition == "undecided" and record.category in DROPPED_CATEGORIES:
-            record.disposition = "drop"
-            record.note = DROPPED_CATEGORIES[record.category]
-        elif record.disposition == "undecided" and record.tool_class in NOT_OFFERED_CLASSES:
-            record.disposition = "withhold"
-            record.note = record.note or READ_ONLY_NOTE
+    record.category = categorize_tool(record.name, record.tool_class)
 
 
 def merge_reviewed_entries(
@@ -649,7 +627,6 @@ def merge_reviewed_entries(
                 record.reason = earlier.get("reason", record.reason)
                 record.category = earlier.get("category", record.category)
                 record.disposition = earlier.get("disposition", record.disposition)
-                record.merge_into = earlier.get("merge_into", record.merge_into)
                 record.note = earlier.get("note", record.note)
                 record.reviewed = True
         for name, earlier in earlier_for_server.items():
@@ -682,8 +659,8 @@ def build_manifest(inventory: dict[str, list[ToolRecord]]) -> dict[str, Any]:
     Returns
     -------
     manifest : `dict` [`str`, `Any`]
-        Timestamp, the class, category and disposition definitions, every
-        tool entry, and the proposed replacement tools.
+        Timestamp, the class, category and disposition definitions, and
+        every tool entry.
     """
     return {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -694,10 +671,6 @@ def build_manifest(inventory: dict[str, list[ToolRecord]]) -> dict[str, Any]:
             server: {record.name: record.to_manifest_entry() for record in records}
             for server, records in inventory.items()
         },
-        "proposed_tools": [
-            {**asdict(proposed), "investigator_access": proposed.investigator_access()}
-            for proposed in PROPOSED_TOOLS
-        ],
     }
 
 
@@ -715,8 +688,9 @@ def build_runtime_manifest(server: str, records: list[ToolRecord]) -> dict[str, 
     -------
     manifest : `dict` [`str`, `Any`]
         The server name and, for each tool, its class, category,
-        disposition and the tool that replaces it. The server uses it to
-        decide which tools a profile may use.
+        disposition, interim block and note. The server uses it to decide
+        which tools a profile may use, and quotes the note when it refuses
+        a tool.
     """
     return {
         "server": server,
@@ -726,8 +700,8 @@ def build_runtime_manifest(server: str, records: list[ToolRecord]) -> dict[str, 
                 "tool_class": record.tool_class,
                 "category": record.category,
                 "disposition": record.disposition,
-                "merge_into": record.merge_into,
                 "interim_block": record.interim_block,
+                "note": record.note,
             }
             for record in sorted(records, key=lambda record: record.name)
             if not record.stale
@@ -757,7 +731,7 @@ def write_runtime_manifests(inventory: dict[str, list[ToolRecord]]) -> list[Path
 
 
 def check_decisions(inventory: dict[str, list[ToolRecord]]) -> list[str]:
-    """Check the proposed tools and decisions against the served tools.
+    """Check the decisions against the served tools.
 
     Parameters
     ----------
@@ -767,9 +741,9 @@ def check_decisions(inventory: dict[str, list[ToolRecord]]) -> list[str]:
     Returns
     -------
     problems : `list` [`str`]
-        Unknown names, tools replaced twice, bad categories and similar.
-        Empty when everything agrees. A tool left uncategorized is also
-        reported.
+        Tools with no decision, decisions for tools no server serves, bad
+        dispositions and classes, and tools left uncategorized. Empty when
+        everything agrees.
     """
     live = [record for records in inventory.values() for record in records if not record.stale]
     problems = find_problems({record.name for record in live}, set(TOOL_CLASSES))
@@ -837,46 +811,6 @@ def _table_cell(text: str, limit: int = 100) -> str:
     """
     cleaned = " ".join(text.replace("|", "/").split())
     return cleaned if len(cleaned) <= limit else cleaned[: limit - 1] + "…"
-
-
-def _render_proposed_tools(proposed_tools: list[dict[str, Any]]) -> list[str]:
-    """Write the section that describes the proposed replacement tools.
-
-    Parameters
-    ----------
-    proposed_tools : `list` [`dict`]
-        The ``proposed_tools`` list from the manifest.
-
-    Returns
-    -------
-    lines : `list` [`str`]
-        Markdown lines: a summary table, then the arguments and notes.
-    """
-    lines = [
-        "",
-        "## Proposed tools",
-        "",
-        "Each tool replaces the listed tools. Argument rules show the values an investigator may use.",
-        "",
-        "| Tool | Category | Class | Replaces | Investigator access |",
-        "|---|---|---|---|---|",
-    ]
-    for proposed in proposed_tools:
-        replaced = len(proposed["replaces"]) or "new"
-        lines.append(
-            f"| `{proposed['name']}` | {proposed['category']} | {proposed['tool_class']} | {replaced} "
-            f"| {proposed['investigator_access']} |"
-        )
-    for proposed in proposed_tools:
-        lines += ["", f"### `{proposed['name']}`", "", proposed["summary"], ""]
-        lines += [f"- Argument: {parameter}" for parameter in proposed["parameters"]]
-        for profile, rules in proposed["argument_rules"].items():
-            lines += [f"- Rule for {profile}: `{argument}` {rule}" for argument, rule in rules.items()]
-        if proposed["replaces"]:
-            lines.append("- Replaces: " + ", ".join(f"`{name}`" for name in proposed["replaces"]))
-        if proposed["notes"]:
-            lines.append(f"- Notes: {proposed['notes']}")
-    return lines
 
 
 def _render_undecided(all_entries: list[tuple[str, str, dict[str, Any]]]) -> list[str]:
@@ -949,11 +883,11 @@ def render_review_markdown(
         "",
         f"Generated {manifest['generated_at']}. Edit `{MANIFEST_FILE_NAME}`, not this file.",
         "",
-        "Read the sections in this order: the undecided tools, the proposed tools, then each category.",
+        "Read the sections in this order: the undecided tools, then each category.",
         "In a category table, undecided tools come first and are marked UNDECIDED. A row marked REVIEW has a",
         "low-confidence class.",
         "",
-        "Jump to: [Undecided tools](#undecided-tools), [Proposed tools](#proposed-tools)",
+        "Jump to: [Undecided tools](#undecided-tools)",
         "",
         "## Counts by category and disposition",
         "",
@@ -976,7 +910,6 @@ def render_review_markdown(
     lines += [f"- `{name}`: {meaning}" for name, meaning in CATEGORIES.items()]
     lines += ["", "## Dispositions", ""]
     lines += [f"- `{name}`: {meaning}" for name, meaning in DISPOSITIONS.items()]
-    lines += _render_proposed_tools(manifest["proposed_tools"])
     for category in CATEGORIES:
         rows = [(server, name, entry) for server, name, entry in all_entries if entry["category"] == category]
         if not rows:
@@ -985,8 +918,8 @@ def render_review_markdown(
             "",
             f"## Category: {category}",
             "",
-            "| Tool | Server | Class | Disposition | Merge into | Flag | Why or note |",
-            "|---|---|---|---|---|---|---|",
+            "| Tool | Server | Class | Disposition | Flag | Why or note |",
+            "|---|---|---|---|---|---|",
         ]
         rows.sort(
             key=lambda row: (
@@ -1003,10 +936,9 @@ def render_review_markdown(
                 flags.append("REVIEW")
             flag = ", ".join(flags) or ("reviewed" if entry["reviewed"] else entry["confidence"])
             why = entry["note"] or entry["reason"]
-            merge_target = f"`{entry['merge_into']}`" if entry["merge_into"] else ""
             lines.append(
                 f"| `{name}` | {server} | {entry['tool_class']} | {entry['disposition']} "
-                f"| {merge_target} | {flag} | {_table_cell(why, 110)} |"
+                f"| {flag} | {_table_cell(why, 110)} |"
             )
     lines += ["", "## Permission rules that name a tool no server serves", ""]
     lines += [
@@ -1031,8 +963,8 @@ def main(argv: list[str] | None = None) -> int:
     Returns
     -------
     exit_code : `int`
-        0 when the files were written and the proposed tools and decisions
-        agree with the served tools. 1 when they disagree; the files are
+        0 when the files were written and the decisions agree with the
+        served tools. 1 when they disagree; the files are
         still written and each problem is printed.
     """
     parser = argparse.ArgumentParser(description="Draft a class for every MCP tool the project serves.")

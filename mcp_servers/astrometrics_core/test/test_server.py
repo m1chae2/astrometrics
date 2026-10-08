@@ -136,7 +136,7 @@ def test_investigator_profile_offers_only_reading_tools(registry: ToolRegistry) 
     for name in copy.tools:
         entry = manifest["tools"][name]
         assert entry["tool_class"] in ("observe", "compute", "ingest", "process"), name
-        assert entry["disposition"] in ("keep", "merge"), name
+        assert entry["disposition"] == "keep", name
 
 
 def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None:

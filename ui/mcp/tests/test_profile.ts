@@ -24,7 +24,7 @@ const SERVER_SOURCE = path.resolve(__dirname, "../src/index.ts");
 
 describe("withheldReason", () => {
   it("offers a read-only tool with a served disposition", () => {
-    expect(withheldReason({ tool_class: "observe", disposition: "merge" }, "investigator")).toBeNull();
+    expect(withheldReason({ tool_class: "observe", disposition: "keep" }, "investigator")).toBeNull();
   });
 
   it("withholds writers, device commands and code runners from the investigator", () => {
@@ -47,18 +47,18 @@ describe("withheldReason", () => {
 
   it("withholds a tool with an interim block and says why", () => {
     const reason = withheldReason(
-      { tool_class: "observe", disposition: "merge", interim_block: "Loads everything." },
+      { tool_class: "observe", disposition: "keep", interim_block: "Loads everything." },
       "investigator"
     );
     expect(reason).toContain("Loads everything.");
   });
 
-  it("withholds a merged tool and names its replacement", () => {
+  it("withholds a dropped tool and gives its note as the reason", () => {
     const reason = withheldReason(
-      { tool_class: "compute", disposition: "merged", merge_into: "observatory_history_query" },
+      { tool_class: "compute", disposition: "drop", note: "Replaced by observatory_history_query." },
       "investigator"
     );
-    expect(reason).toContain("observatory_history_query");
+    expect(reason).toBe("Replaced by observatory_history_query");
   });
 
   it("withholds a tool that is not in the manifest", () => {

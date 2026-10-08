@@ -1,26 +1,24 @@
-"""Purpose: Record the decisions about what each MCP tool should become.
+"""Purpose: Record the decision about every MCP tool the project serves.
 
 Description: The MCP tool inventory (``tool_inventory.py``) lists every tool
-and drafts a safety class for it. This module adds three more things that a
-person reviews:
+and drafts a safety class for it from its name. This module holds what a
+person decided after reading the code behind each tool:
 
 * a **category** for each tool (for example ``stars`` or ``targets``),
-* a **disposition**: keep the tool, merge it into a new tool, fix it first,
-  keep it away from AI clients, drop it, or leave it undecided,
-* the **proposed tools** that replace groups of near-identical tools. Each
-  one lists the tools it replaces and the argument values an AI client may
-  use in each profile.
+* a **disposition**: offer the tool, fix it first, keep it away from AI
+  clients, or drop it,
+* a corrected class where the drafted one was wrong, and a short note that
+  says why.
 
-The entries come from reading the code behind each tool, not from tool
-names. Names alone hid several cases: a "read" tool that writes, tools that
-cannot work through MCP, and tools that only repeat each other. Every
-``replaces`` name is checked against the live tool list, so a typo or a
-renamed tool shows up as a problem.
+``DECISIONS`` names every tool the servers serve. The two library servers
+offer every public library method as a tool, so a new public method has no
+row until someone adds one. Until then the inventory marks it
+``undecided``, no client gets it, and a test fails. Adding a library
+method is therefore also a choice about the AI tool list.
 """
 
 import re
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 CATEGORIES = {
     "image-processing": (
@@ -41,29 +39,22 @@ CATEGORIES = {
 """The categories a tool can belong to."""
 
 DISPOSITIONS = {
-    "keep": "Stays as it is.",
-    "merge": "Replaced by a proposed tool that takes the differences as arguments.",
-    "merged": "Replaced by a tool that now exists. No longer offered.",
-    "fix": "Stays, but needs a change before an AI client can use it.",
-    "withhold": "Never offered to an AI client.",
-    "drop": "Removed from the MCP tool list.",
-    "undecided": "Not assessed yet.",
+    "keep": "Offered to the profiles that its class allows.",
+    "fix": "Not offered until a change lets an AI client use it safely.",
+    "withhold": "Never offered to an AI client: it writes, runs code or reaches every backend method.",
+    "drop": "Not offered: out of scope, replaced by a broader tool, or of no use to an AI client.",
+    "undecided": "No decision yet. Not offered.",
 }
 """What happens to a tool."""
 
-DROPPED_CATEGORIES = {
-    "observatory-control": (
-        "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. "
-        "Reading from them and from the Pi is allowed."
-    ),
-}
-"""Categories whose tools are all dropped, unless a decision says otherwise."""
-
-NOT_OFFERED_CLASSES = frozenset({"change-data", "actuate", "safe-stop", "unrestricted"})
-"""Classes withheld from the AI, which is read-only, unless a proposed tool
-gives a read-only form."""
-
 READ_ONLY_NOTE = "The AI is read-only, so a tool that writes is not offered."
+"""Note for a writer that has no read-only form."""
+
+DEVICE_COMMAND_NOTE = (
+    "Commanding a device (mount, cameras, focuser, filter wheel, enclosure) is out of scope. "
+    "Reading from them and from the Pi is allowed."
+)
+"""Note for a tool that commands a device."""
 
 INTERIM_BLOCKS = {
     "observatory_mount_status": (
@@ -98,550 +89,27 @@ INTERIM_BLOCKS = {
     ),
 }
 """Read-only tools that stay hidden from the AI until a known hazard is fixed.
-They keep their merge disposition."""
-
-INVESTIGATOR_CLASSES = ("observe", "compute", "ingest", "process")
-"""Classes the investigator profile may use without argument rules."""
-
-PROFILES = ("investigator",)
-"""Profiles with argument rules. The AI is read-only, so none may write."""
+They keep their ``keep`` disposition."""
 
 
 @dataclass(frozen=True)
 class ToolDecision:
-    """A decision about one existing tool.
+    """A decision about one tool.
 
     Attributes
     ----------
-    disposition : `str` or `None`
-        One of ``DISPOSITIONS``. `None` means only the class changes, and
-        the disposition follows from the proposed tools.
+    disposition : `str`
+        One of ``DISPOSITIONS``.
     note : `str`
         Why, in plain words.
     tool_class : `str` or `None`
         A corrected class. `None` keeps the drafted class.
     """
 
-    disposition: str | None
+    disposition: str
     note: str = ""
     tool_class: str | None = None
 
-
-@dataclass(frozen=True)
-class ProposedTool:
-    """A new tool that replaces a group of near-identical tools.
-
-    Attributes
-    ----------
-    name : `str`
-        The proposed tool name.
-    category : `str`
-        One of ``CATEGORIES``.
-    summary : `str`
-        What the tool does.
-    replaces : `tuple` [`str`, ...]
-        Existing tools this one replaces. Empty for a tool that is new.
-    parameters : `tuple` [`str`, ...]
-        A sketch of the arguments, with the differences between the
-        replaced tools expressed as arguments.
-    tool_class : `str`
-        The highest class the tool reaches when every argument is used.
-    argument_rules : `dict`
-        Profile name -> argument name -> rule. A rule is
-        ``{"allowed": [...]}`` or ``{"max": number}``. A profile with
-        rules may call the tool only with values the rules allow.
-    notes : `str`
-        Work needed first, and open questions.
-    built : `bool`
-        `True` once the tool exists. The tools it replaces are then
-        ``merged`` and no longer offered.
-    """
-
-    name: str
-    category: str
-    summary: str
-    replaces: tuple[str, ...]
-    parameters: tuple[str, ...]
-    tool_class: str
-    argument_rules: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
-    notes: str = ""
-    built: bool = False
-
-    def investigator_access(self) -> str:
-        """Say how much of the tool an investigator profile may use.
-
-        Returns
-        -------
-        access : `str`
-            ``"full"`` for a read-only tool, ``"limited"`` when argument
-            rules restrict it to its safe values, or ``"none"``.
-        """
-        if self.argument_rules.get("investigator"):
-            return "limited"
-        return "full" if self.tool_class in INVESTIGATOR_CLASSES else "none"
-
-
-PROPOSED_TOOLS = (
-    # ---- Stars ----
-    ProposedTool(
-        "star_query",
-        "stars",
-        "Look up library stars by id, name, target, region or position, with a hard cap on the answer.",
-        (),
-        (
-            "selector: at most one of ids, name, target_id, region{ra_deg, dec_deg, radius_deg}, "
-            "position{ra_deg, dec_deg, tolerance_arcsec}",
-            "magnitude_min, magnitude_max, has_spectra, spectral_class",
-            "detail: exists | ids | summary | analysis | objects | class_counts | stats",
-            "limit (ids 2000, summary 500, analysis and objects 10), offset",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-03 as StellarCatalog.query. Since 2026-10-05 it is the only star read besides "
-            "star_get: the narrow list, find, audit and class-count tools are gone. Region radius is at "
-            "most 5 degrees. Answers are in id order so offset paging is stable. Library stars only: the "
-            "online and deep catalogs stay on the planning_* tools. Browsing the whole library takes "
-            "about 3 seconds."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "target_query",
-        "targets",
-        "Look up targets: one, a list, camera names, or the sky positions already imaged.",
-        (
-            "target_get",
-            "target_list",
-        ),
-        (
-            "target_id, text, camera_id, object_type, or region{ra_deg, dec_deg, radius_deg}",
-            "detail: summary | full | cameras | nights | camera_index",
-            "include_frames, sort, include_empty, limit, offset",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-04 as TargetCatalog.query. summary leaves out the frame list and the empty "
-            "placeholder targets; full groups one target's frames by night, filter, exposure and camera "
-            "and condenses its quality summaries (about 13 KB for M 57, where target_get was cut at 40 KB). "
-            "Looking does not mark targets as touched, so a later save never writes them. The camera "
-            "names and the per-camera frame index are detail='cameras' and detail='camera_index'."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "target_index_frames",
-        "targets",
-        "Add frames to a target: one file, or a rescan of the target's folder.",
-        ("target_reindex_frames",),
-        (
-            "target (none for every target)",
-            "paths (only these files) or none (rescan)",
-            "role, filter_type, camera_id",
-            "prune_missing, refresh_headers",
-            "dry_run",
-        ),
-        "change-data",
-        {"investigator": {"dry_run": {"allowed": [True]}}},
-        (
-            "TargetCatalog.reindex_frames(target=None, paths=None) now covers the folder scan, adding single "
-            "files and the full-library reindex, and returns a ReindexReport of counts. Still to do: "
-            "dry_run=true, read-only, reporting what would change; and a check that the frames drive is "
-            "mounted before prune_missing, which with the drive missing empties the frame list."
-        ),
-    ),
-    # ---- Calibration ----
-    ProposedTool(
-        "calibration_query",
-        "calibration",
-        "Report the calibration library: counts, or how a target's frames match it.",
-        ("calibration_get",),
-        (
-            "kind: dark | bias | flat (none for all)",
-            "detail: counts | target_match | target_frames",
-            "target, camera_id",
-            "refresh",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-05 as CalibrationCatalog.query, folding stats, load and the target's calibration "
-            "frame statistics. refresh replaces the in-memory index, which is not a write to disk. "
-            "calibration_get, which lists file paths, hides its keyword arguments from MCP, so no camera "
-            "or filter can be passed; it stays merged until a paths detail exists."
-        ),
-        built=True,
-    ),
-    # ---- Image processing ----
-    ProposedTool(
-        "pipeline_run",
-        "image-processing",
-        "Run the processing stages for one target: stack, astrometry, photometry, spectroscopy, asteroids.",
-        ("processing_process_target",),
-        (
-            "target (one, a list, or none for every target)",
-            "stages: astrometry | photometry | spectroscopy | asteroids",
-            "per-stage settings (astrometry, photometry, spectroscopy, asteroids)",
-            "camera_id, focal_length_mm (several targets)",
-            "mode: plan | run",
-            "workspace",
-        ),
-        "change-data",
-        {"investigator": {"mode": {"allowed": ["plan"]}}},
-        (
-            "plan mode does not exist yet: it must report the settings in effect, the frames "
-            "chosen and where "
-            "output would go. No library option runs a pipeline without writing to the live "
-            "catalog, stacks and "
-            "frame folders. The only complete way is a separate process with a scratch config, library and "
-            "stacks folder (ASTROMETRICS_CONFIG_PATH). A workspace argument is the first piece "
-            "of the stacking "
-            "trial tool. Since 2026-10-05 ProcessingPipelines.process_target takes the stages (with the "
-            "asteroid search as a stage) and, given a list of targets or none, runs the full pipeline for "
-            "each, which stacks and saves every target."
-        ),
-    ),
-    ProposedTool(
-        "diagnostics_stack_quality",
-        "image-processing",
-        "Measure a stack, and optionally compare it with another or with the previous stack.",
-        (),
-        (
-            "path_or_target",
-            "kind: imaging | spectral (with a target)",
-            "compare_to: none | previous | path",
-            "include: fwhm, rejected_fraction, registration",
-        ),
-        "compute",
-        notes=(
-            "Built 2026-10-05 as QualityDiagnostics.stack_quality. The comparison always measures noise and "
-            "flatness. The zero-order star of each spectral frame is read from Siril's per-frame .lst file, "
-            "not from a stack, so it is not a section here."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "diagnostics_frame_quality",
-        "image-processing",
-        "Measure raw frames: statistics for a target, a check of a folder, or a quarantine preview.",
-        (),
-        (
-            "target or folder_path",
-            "kind: input_quality | raw_check | quarantine_preview",
-            "include: fwhm, spectra, excluded",
-            "remeasure, camera_id",
-            "limit (1 to 300; the newest frames, or the first inside a range)",
-            "filter_name, first_file, last_file, since, until",
-        ),
-        "compute",
-        notes=(
-            "Built 2026-10-03 as QualityDiagnostics.frame_quality. Nothing is saved: the target is measured "
-            "on a copy, so the saved catalog never changes. About a second per new frame; frames already "
-            "measured keep their stored values. Frames are chosen by filter, file range (a bare number "
-            "such as 013 means frame 013) and time, with the choosing code in "
-            "pipelines/shared/quality/frame_selection.py. Spectroscopy frames are left out unless asked "
-            "for, because their smeared stars are flagged as trailing. raw_check also takes a target. "
-            "include=['excluded'] lists the frames the stacker set aside."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "excluded_frames",
-        "image-processing",
-        "List the frames the stacker set aside, or move them back.",
-        ("processing_restore_excluded_frames",),
-        ("target", "apply"),
-        "change-data",
-        {"investigator": {"apply": {"allowed": [False]}}},
-        (
-            "apply=true moves raw files back into the live frames folder and reindexes the target. The read "
-            "half is built: diagnostics_frame_quality with include=['excluded']."
-        ),
-    ),
-    ProposedTool(
-        "visualization_render_fits",
-        "image-processing",
-        "Draw a FITS frame or stack as a real image, optionally zoomed on one place.",
-        (),
-        (
-            "path, or target and file_name (a name, or a number such as 013), or target, iso and exposure",
-            "kind: image | data_url",
-            "max_dimensions (100 to 2000, default 1200), stretch, center, width",
-            "crop_center_x, crop_center_y, crop_size",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-03 as Visualization.render_fits. The reply is an MCP image block plus a "
-            "description of the brightness range and crop, not base64 text. It draws from the FITS data "
-            "each time, so a restacked file never shows an old picture. A crop is cut at full resolution "
-            "and enlarged so single stars can be judged. get_last_captured_image and target_get_frame stay "
-            "for now: the first is blocked until it returns an image, the second returns a path."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "visualization_plot",
-        "image-processing",
-        "Draw a target dashboard, a single view of it, or the focus-versus-temperature trend.",
-        (),
-        (
-            "kind: dashboard | photometry | spectroscopy | astrometry | asteroids | focus | star",
-            "target, or star (and spectral_star) for kind=star",
-            "selected_star, limit, figsize",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-05 as Visualization.plot, which takes star ids as well as records. The MCP "
-            "registry draws the figure to a PNG image."
-        ),
-        built=True,
-    ),
-    # ---- Observatory status ----
-    ProposedTool(
-        "observatory_equipment_status",
-        "observatory-status",
-        "Report the selected equipment, the camera profiles and the site.",
-        (),
-        (
-            "include: telescope | camera | guide_scope | guide_camera | camera_profiles | configuration | "
-            "observer_location | commissioning_runs | indi_devices | indi_properties",
-            "device_name (only with indi_properties)",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-05 as control.equipment.status, which reads the active equipment, the camera "
-            "profiles, the equipment configuration and the site. The saved guider models are "
-            "observatory_guiding_status, and the delegation policy, safety rules and enclosure are "
-            "observatory_safety_status. The configuration section uses a fixed telescope name, not the "
-            "active one. The commissioning records are long, so they are read only on request."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "observatory_history_query",
-        "observatory-status",
-        "Analyse or list past nights: capture, guiding, sky coverage, recurring issues, Ekos "
-        "sessions, guiding "
-        "runs and the pointing model.",
-        (),
-        (
-            "kind: capture | guiding | sky_coverage | recurring_issues | ekos_sessions | guiding_runs | "
-            "pointing_model",
-            "session_id (a night, YYYY-MM-DD)",
-            "ekos_file_id",
-            "include (sections of an Ekos context)",
-            "limit",
-        ),
-        "compute",
-        notes=(
-            "Built 2026-10-03; control.history.query since 2026-10-05, with the "
-            "logic in wayfindinglib/tasks/control_tasks/night_history.py and night_analysis.py. Every reply "
-            "is measured and shrunk to under 30,000 characters. An argument that a kind does not use is "
-            "refused. Each night is judged against the nights before it, so the per-night work cannot be "
-            "shared; limit bounds it instead (10 nights take about 10 seconds). pointing_model needs a "
-            "session_id and an observer location, and refuses instead of guessing a 45 degree latitude."
-        ),
-        built=True,
-    ),
-    # ---- Observatory synchronization ----
-    ProposedTool(
-        "observatory_remote_list",
-        "observatory-sync",
-        "List folders or files on the telescope computer.",
-        (),
-        (
-            "kind: folders | target_folders | calibration_folders | unassociated_folders | files",
-            "folder_name (only with files)",
-            "sizes (only with files)",
-        ),
-        "observe",
-        notes=(
-            "Built 2026-10-05 as control.remote.list. folder_name is checked against the listed folders "
-            "before it reaches the ssh command. Today an offline host and an empty folder both return []; "
-            "return an error instead. Output is cut at about 650 paths."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "observatory_remote_sync_frames",
-        "observatory-sync",
-        "Bring new frames from the telescope computer into the library, or preview it.",
-        (),
-        (
-            "target (a library target; none means every folder)",
-            "dry_run",
-            "files, local_path, incremental (copy chosen files into the target)",
-        ),
-        "ingest",
-        notes=(
-            "Built 2026-10-03; control.remote.sync_frames since 2026-10-05, "
-            "when it also took over the calibration-folder, all-folder and local-folder copies. The user "
-            "allows the AI to ingest frames. It adds files, frame records and targets and never deletes: no "
-            "copy prunes frame records. The MCP server resolves target against the library, so a made-up "
-            "name cannot reach the shell or create a target. dry_run uses the downloader's rule (file name "
-            "and size). A real run is a background job; follow it with jobs_query. The transfer sorts files "
-            "into the library by their headers, using a fixed telescope name (Apertura 75Q) from older code."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "observatory_remote_sync_logs",
-        "observatory-sync",
-        "Bring the guide and Ekos logs from the telescope computer into the library's database, "
-        "or preview it.",
-        (),
-        ("dry_run", "download", "destination_dir"),
-        "ingest",
-        notes=(
-            "Built 2026-10-03; control.remote.sync_logs since 2026-10-05. A real "
-            "run downloads the new guide and Ekos analyze logs, then stores the guiding samples and one "
-            "session record per analyze file. It is safe to repeat and never deletes. It does not refit the "
-            "stored guiding spectrum: that is observatory_guiding_refit_spectrum, which the user does not "
-            "want an AI to trigger. dry_run compares remote and local files by name and size. The backend's "
-            "SyncService.sync_telescope_logs calls this code."
-        ),
-        built=True,
-    ),
-    # ---- Planning and sessions ----
-    ProposedTool(
-        "planning_get_visibility",
-        "planning-sessions",
-        "Report where objects are at one moment or over a span, with the Sun, Moon and horizon.",
-        (),
-        (
-            "objects: names or {id, ra_deg, dec_deg} (none for every library target)",
-            "time, end_time (none for one moment), step_minutes",
-            "include: meridian | samples",
-            "minimum_altitude_deg, horizon_zones, timezone_offset_hours, clear_only",
-        ),
-        "compute",
-        notes=(
-            "Built 2026-10-03 as a night table; since 2026-10-06 it is ObservationPlanning.get_visibility, "
-            "which also took over the single-moment answer, the meridian status (include=['meridian']) and "
-            "the backend's visible-targets list. A span covers at most 30 objects and 150 rows. Names not in "
-            "the library go to SIMBAD over the network. planning_lookup_coordinates stays separate: it looks "
-            "up a position, not a time."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "planning_get_advisory",
-        "planning-sessions",
-        "Report the quality advisory for a target, or the calibration inventory advisory for a camera.",
-        (),
-        ("kind: quality | calibration", "target", "camera_id, frame_type, exposure_seconds, filter"),
-        "observe",
-        notes=(
-            "Built 2026-10-06 as ObservationPlanning.get_advisory. The calibration advisory always reports 0 "
-            "today: it reads a table that only reconcile_session fills, and that has never run. The quality "
-            "advisory has the variable-star count fixed at 0."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "planning_create_mosaic",
-        "planning-sessions",
-        "Add one library target per mosaic panel, and optionally one observation package each.",
-        (),
-        ("target", "panels (from planning_calculate_panels)", "exposure_requests, dither_config", "packages"),
-        "change-data",
-        notes=(
-            "Built 2026-10-06 as ObservationPlanning.create_mosaic, the write half of mosaic planning; "
-            "planning_calculate_panels is the read half. It writes panel targets to the catalog even with "
-            "packages=false, so no read-only form exists. calculate_panels uses a fixed 23.5 x 15.6 mm "
-            "sensor and 400 mm focal length unless equipment is given, because it reads configuration "
-            "keys that do not exist."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "planning_create_plan",
-        "planning-sessions",
-        "Create a sequence plan, an observation package, or an observing session (empty or placed).",
-        (),
-        (
-            "kind: sequence | package | empty_session | scheduled_session",
-            "target, plan_items, exposure_requests and the package settings",
-            "requests (package ids), site_profile, telescope, camera_id, night_id",
-        ),
-        "change-data",
-        notes=(
-            "Built 2026-10-06 as ObservationPlanning.create_plan. Only sequence writes nothing. The session "
-            "kinds need site and telescope objects that MCP cannot send. The production database holds no "
-            "packages and one hand-made empty session."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "planning_edit_queue",
-        "planning-sessions",
-        "Add recorded packages to a session's queue, or reorder it.",
-        (),
-        ("session_id", "add: [{package_id, start_time_mode, requested_start_time}]", "order: entry ids"),
-        "change-data",
-        notes="Built 2026-10-06 as ObservationPlanning.edit_queue. Writes the session.",
-        built=True,
-    ),
-    ProposedTool(
-        "planning_get_plan",
-        "planning-sessions",
-        "Read one observing session with its queue, or list the sessions.",
-        (),
-        ("session_id, or none to list",),
-        "observe",
-        notes=(
-            "Built 2026-10-06 as ObservationPlanning.get_plan, which also serves the backend's session list "
-            "and session view. Packages are not listed yet."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "planning_deep_catalog_status",
-        "planning-sessions",
-        "Report on the deep star catalog download, and optionally estimate its full size.",
-        (),
-        ("include: estimate", "healpix_level, magnitude_limit, sample_count (estimate only)"),
-        "compute",
-        notes=(
-            "Built 2026-10-06 as ObservationPlanning.deep_catalog_status. The estimate sends about two dozen "
-            "network queries to the Gaia archive and saves nothing. planning_build_deep_star_catalog stays "
-            "separate because it writes: it downloads from Gaia for hours and writes the catalog database."
-        ),
-        built=True,
-    ),
-    # ---- App ----
-    ProposedTool(
-        "app_status",
-        "app",
-        "Report the backend health, the current view, active jobs, and connection and system status.",
-        ("backend_health_check",),
-        ("include: health | view | active_jobs | connections | system",),
-        "observe",
-        notes=(
-            "Built 2026-10-03 as tool_app_status. health is the old probe; connections and system come "
-            "from the system:health RPC; active_jobs comes from the processing:active_jobs RPC. view is "
-            "not tracked by the backend, so the reply says so instead of guessing."
-        ),
-        built=True,
-    ),
-    ProposedTool(
-        "app_controls",
-        "app",
-        "Do what the person can do in the app: change the view or show a notification.",
-        ("ui_navigate_mode", "ui_show_notification"),
-        (
-            "action: navigate | notify",
-            "mode, target",
-            "title, body, urgency",
-        ),
-        "ui-control",
-        {"investigator": {"action": {"allowed": ["navigate", "notify"]}}},
-        (
-            "The user allows navigate and notify. The old pause and resume tools froze or thawed Siril "
-            "and the plate solver, so they were not read-only and were removed."
-        ),
-        built=True,
-    ),
-)
-"""The proposed replacement tools."""
 
 DECISIONS = {
     # ---- Withheld: code runners and the whole-app channel ----
@@ -951,7 +419,10 @@ DECISIONS = {
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
-    "target_read_saved": ToolDecision("keep", "Reads one target record from storage. Writes nothing."),
+    "target_read_saved": ToolDecision(
+        "drop",
+        "Returns the whole target record, frames and all, which overflows the reply. Use target_query.",
+    ),
     "docs_get": ToolDecision("keep", "Reads documentation."),
     "ui_run_tests": ToolDecision("keep", "Developer check."),
     "ui_diagnose_code": ToolDecision("keep", "Developer check."),
@@ -1021,8 +492,63 @@ DECISIONS = {
     "diagnostics_flag_value_outliers": ToolDecision(
         "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
     ),
+    # ---- Writers with no read-only form ----
+    **dict.fromkeys(
+        (
+            "calibration_add",
+            "calibration_refresh",
+            "processing_discard_previous_stack",
+            "processing_process_target",
+            "processing_restore_excluded_frames",
+            "processing_swap_with_previous_stack",
+            "star_create",
+            "star_find_or_create_by_position",
+            "star_update",
+            "target_add",
+            "target_create",
+            "planning_create_mosaic",
+            "planning_create_plan",
+            "planning_edit_queue",
+        ),
+        ToolDecision("withhold", READ_ONLY_NOTE),
+    ),
+    "target_reindex_frames": ToolDecision(
+        "withhold",
+        "Writes the frame records. A dry_run mode that only reports what would change would let an AI "
+        "use it.",
+    ),
+    # ---- Device commands ----
+    **dict.fromkeys(
+        (
+            "observatory_guiding_expose",
+            "observatory_guiding_pulse",
+            "observatory_guiding_run_backlash_calibration",
+            "observatory_guiding_run_calibration",
+            "observatory_guiding_run_exposure_test",
+            "observatory_imaging_capture_image",
+            "observatory_imaging_focus_move",
+            "observatory_imaging_set_filter",
+            "observatory_mount_manual_move",
+            "observatory_mount_park",
+            "observatory_mount_set_slew_rate",
+            "observatory_mount_set_tracking",
+            "observatory_mount_slew",
+            "observatory_mount_sync",
+            "observatory_mount_unpark",
+            "observatory_safety_close_enclosure",
+            "observatory_safety_open_enclosure",
+        ),
+        ToolDecision("drop", DEVICE_COMMAND_NOTE),
+    ),
+    # ---- Replaced by a broader tool ----
+    "calibration_get": ToolDecision("drop", "Replaced by calibration_query."),
+    "target_get": ToolDecision("drop", "Replaced by target_query."),
+    "target_list": ToolDecision("drop", "Replaced by target_query."),
+    "backend_health_check": ToolDecision("drop", "Replaced by app_status."),
+    "ui_navigate_mode": ToolDecision("drop", "Replaced by app_controls."),
+    "ui_show_notification": ToolDecision("drop", "Replaced by app_controls."),
 }
-"""Decisions for tools that are not simply merged."""
+"""Tool name -> the decision about it. Every served tool has one."""
 
 CATEGORY_RULES = (
     (
@@ -1061,7 +587,7 @@ SYNC_NAME_PATTERN = re.compile(r"remote|sync|download|ingest")
 
 
 def categorize_tool(name: str, tool_class: str) -> str:
-    """Choose the category for a tool that no proposed tool replaces.
+    """Choose the category for a tool from its name and class.
 
     Parameters
     ----------
@@ -1087,52 +613,24 @@ def categorize_tool(name: str, tool_class: str) -> str:
     return "uncategorized"
 
 
-def replaced_by_lookup() -> dict[str, ProposedTool]:
-    """Map each replaced tool name to the proposed tool that replaces it.
-
-    Returns
-    -------
-    lookup : `dict` [`str`, `ProposedTool`]
-        Existing tool name -> its replacement. A name listed twice keeps
-        the later entry, and `find_problems` reports it.
-    """
-    return {name: proposed for proposed in PROPOSED_TOOLS for name in proposed.replaces}
-
-
 def find_problems(served_names: set[str], valid_classes: set[str]) -> list[str]:
-    """Check the proposed tools and decisions against the live tool list.
+    """Check the decisions against the live tool list.
 
     Parameters
     ----------
     served_names : `set` [`str`]
         Names of the tools the servers serve now.
     valid_classes : `set` [`str`]
-        The class names the plan allows.
+        The class names the inventory allows.
 
     Returns
     -------
     problems : `list` [`str`]
-        One message per problem: an unknown name, a tool replaced twice,
-        a bad category, disposition or profile, or a class not in the plan.
+        One message per problem: a served tool with no decision, a decision
+        or interim block for a tool no server serves, an unknown
+        disposition or class, or a tool that is not offered with no note.
     """
-    problems = []
-    seen: dict[str, str] = {}
-    for proposed in PROPOSED_TOOLS:
-        if proposed.category not in CATEGORIES:
-            problems.append(f"{proposed.name}: unknown category {proposed.category!r}")
-        for profile in proposed.argument_rules:
-            if profile not in PROFILES:
-                problems.append(f"{proposed.name}: unknown profile {profile!r}")
-        for replaced in proposed.replaces:
-            if replaced not in served_names:
-                problems.append(f"{proposed.name} replaces {replaced!r}, which no server serves")
-            if replaced in seen:
-                problems.append(f"{replaced!r} is replaced by both {seen[replaced]} and {proposed.name}")
-            seen[replaced] = proposed.name
-        if proposed.name in served_names and not proposed.built:
-            problems.append(f"{proposed.name} is already the name of a served tool; mark it built")
-        if proposed.built and proposed.name not in served_names:
-            problems.append(f"{proposed.name} is marked built, but no server serves it")
+    problems = [f"{name!r} has no decision" for name in sorted(served_names - DECISIONS.keys())]
     problems += [
         f"interim block for {name!r}, which no server serves"
         for name in INTERIM_BLOCKS
@@ -1141,15 +639,10 @@ def find_problems(served_names: set[str], valid_classes: set[str]) -> list[str]:
     for name, decision in DECISIONS.items():
         if name not in served_names:
             problems.append(f"decision for {name!r}, which no server serves")
-        if decision.disposition is not None and decision.disposition not in DISPOSITIONS:
+        if decision.disposition not in DISPOSITIONS or decision.disposition == "undecided":
             problems.append(f"{name}: unknown disposition {decision.disposition!r}")
-        if decision.disposition == "merge":
-            problems.append(f"{name}: merge comes from the proposed tools, not from a decision")
+        if decision.disposition != "keep" and not decision.note:
+            problems.append(f"{name}: a tool that is not offered needs a note that says why")
         if decision.tool_class is not None and decision.tool_class not in valid_classes:
             problems.append(f"{name}: unknown class {decision.tool_class!r}")
-    problems += [
-        f"{proposed.name}: unknown class {proposed.tool_class!r}"
-        for proposed in PROPOSED_TOOLS
-        if proposed.tool_class not in valid_classes
-    ]
     return problems

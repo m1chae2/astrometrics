@@ -48,9 +48,8 @@ PROFILE_CLASSES = {
 }
 """Profile name -> the tool classes it may use."""
 
-SERVED_DISPOSITIONS = frozenset({"keep", "merge"})
-"""Dispositions a client may use. A tool marked ``merge`` stays available
-until the tool that replaces it exists."""
+SERVED_DISPOSITIONS = frozenset({"keep"})
+"""Dispositions a client may use."""
 
 
 GAP_REPORT_GUIDANCE = (
@@ -154,10 +153,9 @@ def withheld_reason(entry: dict[str, Any] | None, profile: str) -> str | None:
     if tool_class not in PROFILE_CLASSES[profile]:
         return f"class {tool_class!r} is not offered to the {profile} profile"
     disposition = entry.get("disposition")
-    if disposition == "merged":
-        return f"it was replaced by {entry.get('merge_into') or 'a newer tool'}"
     if disposition not in SERVED_DISPOSITIONS:
-        return f"disposition {disposition!r} is not offered"
+        note = entry.get("note")
+        return note.rstrip(".") if note else f"disposition {disposition!r} is not offered"
     return None
 
 

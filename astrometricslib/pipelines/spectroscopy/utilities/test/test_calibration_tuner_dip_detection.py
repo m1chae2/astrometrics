@@ -73,7 +73,7 @@ def _synthetic_balmer_spectrum() -> np.ndarray:
     return np.convolve(spectrum, np.ones(5) / 5.0, mode="same")
 
 
-def test_find_peaks_matches_historical_scan_on_synthetic_balmer_spectrum():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_peaks_matches_historical_scan_on_synthetic_balmer_spectrum() -> None:
     """Verify find_peaks matches the historical scan on synthetic data."""
     spectrum = _synthetic_balmer_spectrum()
     historical_dips = _historical_dip_scan(spectrum, minimum_depth=0.01)
@@ -90,7 +90,7 @@ def test_find_peaks_matches_historical_scan_on_synthetic_balmer_spectrum():  # r
         assert abs(historical_index - replacement_index) <= 1
 
 
-def test_find_peaks_rejects_shallow_noise_dips():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_peaks_rejects_shallow_noise_dips() -> None:
     """Verify the replacement scan reports no dips on pure noise."""
     rng = np.random.default_rng(7)
     noise_only = 1.0 + rng.normal(0.0, 0.001, size=400)
@@ -98,7 +98,7 @@ def test_find_peaks_rejects_shallow_noise_dips():  # ruff: ignore[missing-return
     assert _find_peaks_dip_scan(smoothed, minimum_depth=0.01) == []
 
 
-def test_find_peaks_respects_edge_exclusion():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_peaks_respects_edge_exclusion() -> None:
     """Verify dips forced onto the excluded edge are not reported."""
     spectrum = _synthetic_balmer_spectrum()
     # A dip forced onto the excluded leading edge must not be reported
@@ -180,7 +180,7 @@ def _synthetic_sloped_continuum_spectrum_with_faint_dip() -> tuple[np.ndarray, l
     return smoothed, dip_centers
 
 
-def test_raw_dip_scan_misses_the_faint_end_dip_on_a_sloped_continuum():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_raw_dip_scan_misses_the_faint_end_dip_on_a_sloped_continuum() -> None:
     """Verify the raw (non-normalized) scan under-detects on a slope.
 
     Establishes that the fallback is actually needed for this
@@ -191,7 +191,7 @@ def test_raw_dip_scan_misses_the_faint_end_dip_on_a_sloped_continuum():  # ruff:
     assert len(raw_dips) < 3
 
 
-def test_continuum_normalized_fallback_recovers_all_three_dips():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_continuum_normalized_fallback_recovers_all_three_dips() -> None:
     """Verify the continuum-normalized fallback finds all three dips.
 
     Where the raw scan under-detects (previous test), dividing out the

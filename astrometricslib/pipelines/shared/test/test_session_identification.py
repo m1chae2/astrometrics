@@ -7,6 +7,8 @@ identify_session_stars() detects sources, resolves a WCS, and runs full
 SIMBAD identification against every detected star.
 """
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -27,7 +29,7 @@ def _make_star_identifier() -> StarIdentifier:
     return StarIdentifier(config=config)
 
 
-def _make_fake_image(wcs=None, path="/fake/session_reference.fits"):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_fake_image(wcs=None, path="/fake/session_reference.fits") -> MagicMock:  # ruff: ignore[missing-type-function-argument]
     image = MagicMock()
     image.wcs = wcs
     image.path = path
@@ -36,7 +38,7 @@ def _make_fake_image(wcs=None, path="/fake/session_reference.fits"):  # ruff: ig
     return image
 
 
-def _make_celestial_wcs():  # ruff: ignore[missing-return-type-private-function]
+def _make_celestial_wcs() -> MagicMock:
     wcs = MagicMock()
     wcs.is_celestial = True
     return wcs
@@ -45,7 +47,7 @@ def _make_celestial_wcs():  # ruff: ignore[missing-return-type-private-function]
 class TestResolveFrameWcs:
     """Unit test suite for resolve_frame_wcs."""
 
-    def test_reuses_existing_header_wcs_without_solving(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_reuses_existing_header_wcs_without_solving(self) -> None:
         """Verify header WCS is reused without plate-solving."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock()
@@ -59,7 +61,7 @@ class TestResolveFrameWcs:
         assert solve_attempted is False
         identifier.solver.solve.assert_not_called()
 
-    def test_non_celestial_header_wcs_is_not_reused(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_non_celestial_header_wcs_is_not_reused(self) -> None:
         """Verify non-celestial header WCS triggers plate-solving."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock(return_value=None)
@@ -73,7 +75,7 @@ class TestResolveFrameWcs:
         assert solve_attempted is True
         identifier.solver.solve.assert_called_once()
 
-    def test_solves_when_no_header_wcs_present(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_solves_when_no_header_wcs_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify solver is called when header WCS is missing."""
         identifier = _make_star_identifier()
         fake_header = MagicMock()
@@ -93,7 +95,7 @@ class TestResolveFrameWcs:
         identifier.solver.solve.assert_called_once()
         write_back_spy.assert_called_once_with(image.path, constructed_wcs)
 
-    def test_write_back_skipped_when_disabled(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_write_back_skipped_when_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify header write-back is skipped when disabled."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock(return_value=MagicMock())
@@ -107,7 +109,7 @@ class TestResolveFrameWcs:
 
         write_back_spy.assert_not_called()
 
-    def test_solve_failure_returns_none(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_solve_failure_returns_none(self) -> None:
         """Verify failed plate solve returns None WCS."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock(return_value=None)
@@ -119,7 +121,7 @@ class TestResolveFrameWcs:
         assert reused is False
         assert solve_attempted is True
 
-    def test_allow_solve_false_never_solves(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_allow_solve_false_never_solves(self) -> None:
         """Verify allow_solve=False prevents solving attempts."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock()
@@ -136,12 +138,14 @@ class TestResolveFrameWcs:
 class TestIdentifySessionStars:
     """Unit test suite for identify_session_stars."""
 
-    def _fake_sources(self, count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_sources(self, count):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         return [
             {"xcentroid": float(i * 10), "ycentroid": float(i * 10), "flux": 1000.0 - i} for i in range(count)
         ]
 
-    def test_reuses_header_wcs_and_identifies_every_detected_star(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_reuses_header_wcs_and_identifies_every_detected_star(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify all detected stars are identified with header WCS."""
         identifier = _make_star_identifier()
         header_wcs = _make_celestial_wcs()
@@ -167,7 +171,7 @@ class TestIdentifySessionStars:
         assert len(called_stellar_objects) == 3
         assert called_stellar_objects is result.stellar_objects
 
-    def test_caps_detections_at_max_detections(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_caps_detections_at_max_detections(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify detections are capped at max_detections parameter."""
         identifier = _make_star_identifier()
         image = _make_fake_image(wcs=_make_celestial_wcs())
@@ -184,7 +188,7 @@ class TestIdentifySessionStars:
         assert result.sources_detected == 10
         assert len(result.stellar_objects) == 5
 
-    def test_no_wcs_available_skips_identification(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_no_wcs_available_skips_identification(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify SIMBAD lookup is skipped when no WCS is available."""
         identifier = _make_star_identifier()
         identifier.solver.solve = MagicMock(return_value=None)
@@ -203,7 +207,7 @@ class TestIdentifySessionStars:
         assert len(result.stellar_objects) == 2
         identify_spy.assert_not_called()
 
-    def test_simbad_matched_count_reflects_identified_stars(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_simbad_matched_count_reflects_identified_stars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify SIMBAD matched count matches identified stars."""
         identifier = _make_star_identifier()
         image = _make_fake_image(wcs=_make_celestial_wcs())
@@ -212,7 +216,7 @@ class TestIdentifySessionStars:
         identifier.detector.detect = MagicMock(return_value=sources)
         identifier.detector.deduplicate = MagicMock(return_value=sources)
 
-        def _fake_identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def _fake_identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
             stellar_objects[0].spectral_type = "A0Va"
             return stellar_objects
 
@@ -233,10 +237,10 @@ class TestReusedHeaderWcsVerification:
     verification that catches that and re-solves.
     """
 
-    def _sources(self, count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _sources(self, count):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         return [{"xcentroid": float(i), "ycentroid": float(i), "flux": 1000.0 - i} for i in range(count)]
 
-    def _identify_marking(self, matched_count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _identify_marking(self, matched_count) -> Callable[..., Any]:  # ruff: ignore[missing-type-function-argument]
         """Build an identify_stars_with_wcs stand-in marking N as matched.
 
         Returns
@@ -245,19 +249,19 @@ class TestReusedHeaderWcsVerification:
             A stand-in for `identify_stars_with_wcs`.
         """
 
-        def _identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def _identify(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
             for star in stellar_objects[:matched_count]:
                 star.is_catalog_identified = True
             return stellar_objects
 
         return _identify
 
-    def _prepare(self, identifier, count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _prepare(self, identifier, count) -> None:  # ruff: ignore[missing-type-function-argument]
         sources = self._sources(count)
         identifier.detector.detect = MagicMock(return_value=sources)
         identifier.detector.deduplicate = MagicMock(return_value=sources)
 
-    def test_good_match_rate_keeps_header_wcs_without_solving(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_good_match_rate_keeps_header_wcs_without_solving(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A header WCS matching plenty of catalog stars is left alone."""
         identifier = _make_star_identifier()
         header_wcs = _make_celestial_wcs()
@@ -276,7 +280,9 @@ class TestReusedHeaderWcsVerification:
         assert result.header_wcs_replaced_after_verification is False
         identifier.solver.solve.assert_not_called()
 
-    def test_poor_match_rate_triggers_resolve_and_adopts_better_wcs(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_poor_match_rate_triggers_resolve_and_adopts_better_wcs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A header WCS matching almost nothing is replaced by a solve."""
         identifier = _make_star_identifier()
         header_wcs = _make_celestial_wcs()
@@ -306,7 +312,7 @@ class TestReusedHeaderWcsVerification:
         assert sum(1 for s in result.stellar_objects if s.is_catalog_identified) == 25
         write_back_spy.assert_called_once()
 
-    def test_keeps_header_wcs_when_resolve_is_not_better(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_keeps_header_wcs_when_resolve_is_not_better(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A re-solve that doesn't improve matches is discarded, header kept.
 
         The header must not be overwritten in this case -- a worse
@@ -336,7 +342,7 @@ class TestReusedHeaderWcsVerification:
         assert result.header_wcs_replaced_after_verification is False
         write_back_spy.assert_not_called()
 
-    def test_keeps_header_wcs_when_resolve_fails(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_keeps_header_wcs_when_resolve_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failed re-solve leaves the header WCS in place."""
         identifier = _make_star_identifier()
         header_wcs = _make_celestial_wcs()
@@ -354,7 +360,7 @@ class TestReusedHeaderWcsVerification:
         assert result.reused_existing_header_wcs is True
         assert result.header_wcs_replaced_after_verification is False
 
-    def test_sparse_field_is_not_verified(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_sparse_field_is_not_verified(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Too few stars to judge by means no re-solve is attempted."""
         identifier = _make_star_identifier()
         header_wcs = _make_celestial_wcs()

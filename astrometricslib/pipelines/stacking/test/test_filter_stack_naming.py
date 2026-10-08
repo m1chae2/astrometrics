@@ -18,7 +18,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
 
-def test_filter_stack_naming_and_target_properties():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_filter_stack_naming_and_target_properties() -> None:
     """Verify filter-aware output filenames and Target property updates.
 
     Confirms that:

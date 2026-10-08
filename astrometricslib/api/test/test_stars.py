@@ -8,10 +8,12 @@ empty list.
 """
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pytest_mock import MockerFixture
 
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.foundation.errors import InvalidArgumentError
@@ -45,7 +47,7 @@ def _ids(catalog: StellarCatalog) -> list[str]:
 class TestSaveAll:
     """Unit test suite for StellarCatalog.save_all."""
 
-    def test_passes_required_coordinate_argument_to_catalog_access(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_passes_required_coordinate_argument_to_catalog_access(self) -> None:
         """Verify the catalog_access receives all three required arguments.
 
         `AbstractCatalogAccess.put(obj, dataset_type, coordinate)` requires
@@ -60,7 +62,7 @@ class TestSaveAll:
         catalog.catalog_access.put.assert_called_once_with(objects, "stellar_catalog", {})
         assert result == "stellar catalog saved"
 
-    def test_empty_list_is_refused_by_default(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_empty_list_is_refused_by_default(self) -> None:
         """An empty list must not silently delete the whole catalog.
 
         `put_all` runs an unconditional DELETE when given an empty
@@ -74,7 +76,7 @@ class TestSaveAll:
 
         catalog.catalog_access.put.assert_not_called()
 
-    def test_empty_list_allowed_when_explicitly_requested(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_empty_list_allowed_when_explicitly_requested(self) -> None:
         """Deliberately clearing the catalog remains possible."""
         catalog = _make_catalog()
 
@@ -87,7 +89,7 @@ class TestSaveAll:
 class TestAnalyzePeriodicity:
     """Unit test suite for StellarCatalog.analyze_periodicity."""
 
-    def test_saves_a_periodogram_when_there_are_enough_points(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_saves_a_periodogram_when_there_are_enough_points(self) -> None:
         """Verify 20 measurements produce a periodogram that is saved."""
         catalog = _make_catalog()
         start = datetime(2026, 1, 1, tzinfo=UTC)
@@ -108,7 +110,7 @@ class TestAnalyzePeriodicity:
         assert object_id == "Gaia DR3 1"
         assert updates["photometry"].periodogram is not None
 
-    def test_returns_a_star_with_too_few_points_without_saving(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_returns_a_star_with_too_few_points_without_saving(self) -> None:
         """Verify a star with 3 measurements is returned unchanged."""
         catalog = _make_catalog()
         star = StellarObject(
@@ -123,7 +125,7 @@ class TestAnalyzePeriodicity:
         assert catalog.analyze_periodicity("Gaia DR3 1") is star
         catalog.update.assert_not_called()
 
-    def test_returns_none_for_an_unknown_star(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_returns_none_for_an_unknown_star(self) -> None:
         """Verify an id that is not in the catalog gives None."""
         catalog = _make_catalog()
         catalog.get = MagicMock(return_value=None)
@@ -131,7 +133,7 @@ class TestAnalyzePeriodicity:
         assert catalog.analyze_periodicity("missing") is None
 
 
-def _make_real_catalog(tmp_path, stars: list[StellarObject]) -> StellarCatalog:  # ruff: ignore[missing-type-function-argument]
+def _make_real_catalog(tmp_path: Path, stars: list[StellarObject]) -> StellarCatalog:
     """Build a `StellarCatalog` over a real temporary database holding `stars`.
 
     Returns
@@ -178,7 +180,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
     """
 
     @staticmethod
-    def _catalog_that_fails_on_a_full_read(tmp_path, mocker) -> StellarCatalog:  # ruff: ignore[missing-type-function-argument]
+    def _catalog_that_fails_on_a_full_read(tmp_path: Path, mocker: MockerFixture) -> StellarCatalog:
         """Build a real catalog that raises if anything reads every star.
 
         Returns
@@ -199,7 +201,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
         )
         return catalog
 
-    def test_find_by_position_reads_only_stars_near_the_spot(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_find_by_position_reads_only_stars_near_the_spot(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify the nearest star inside the tolerance is found."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -209,13 +213,17 @@ class TestQueriesNeverLoadTheWholeCatalog:
 
         assert [star.id for star in found] == ["* alf Lyr"]
 
-    def test_find_by_position_returns_none_outside_the_tolerance(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_find_by_position_returns_none_outside_the_tolerance(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify a spot with no star within the tolerance finds nothing."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
         assert catalog.query(ra_deg=200.0, dec_deg=0.0, tolerance_arcsec=5.0, detail="ids").ids == []
 
-    def test_find_by_position_prefers_the_nearest_of_two_candidates(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_find_by_position_prefers_the_nearest_of_two_candidates(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify that with two stars in range, the closer one wins."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -224,7 +232,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
 
         assert found == ["HD 172167"]
 
-    def test_get_object_fuzzy_lookup_loads_only_the_matching_star(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_get_object_fuzzy_lookup_loads_only_the_matching_star(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify a slightly mistyped id still finds its star."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -234,7 +244,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
         assert found.id == "* alf Lyr"
         assert catalog.get("no such star") is None
 
-    def test_find_by_id_or_name_matches_the_name_ignoring_case(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_find_by_id_or_name_matches_the_name_ignoring_case(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify a star is found by its common name or by its id."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -245,7 +257,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
         assert by_id == ["HD 172167"]
         assert catalog.query(name="Sirius", detail="ids").ids == []
 
-    def test_list_objects_for_target_uses_exact_target_membership(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_list_objects_for_target_uses_exact_target_membership(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify "M 1" does not pick up a star that only belongs to "M 13"."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -255,7 +269,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
             "HD 172167",
         ]
 
-    def test_list_objects_in_region_returns_full_records_near_a_spot(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_list_objects_in_region_returns_full_records_near_a_spot(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify a region query returns the stars inside it and no others."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -263,7 +279,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
 
         assert sorted(star.id for star in found) == ["* alf Lyr", "HD 172167"]
 
-    def test_list_objects_by_ids_returns_only_the_requested_stars(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_list_objects_by_ids_returns_only_the_requested_stars(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify only the given ids are loaded, in full."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -271,7 +289,9 @@ class TestQueriesNeverLoadTheWholeCatalog:
 
         assert [star.id for star in found] == ["HD 172167"]
 
-    def test_ids_and_audit_are_answered_without_loading_stars(self, tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_ids_and_audit_are_answered_without_loading_stars(
+        self, tmp_path: Path, mocker: MockerFixture
+    ) -> None:
         """Verify ids, existence checks and the audit load no stars."""
         catalog = self._catalog_that_fails_on_a_full_read(tmp_path, mocker)
 
@@ -284,7 +304,7 @@ class TestQueriesNeverLoadTheWholeCatalog:
 class TestFindOrCreateByPosition:
     """Unit test suite for StellarCatalog.find_or_create_by_position."""
 
-    def test_creates_a_named_star_with_its_details(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_creates_a_named_star_with_its_details(self, tmp_path: Path) -> None:
         """Verify a brand-new star is created with its details."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("Other", 10.0, 10.0)])
 
@@ -298,7 +318,7 @@ class TestFindOrCreateByPosition:
         assert created.target_ids == ["M 1"]
         assert _ids(catalog) == ["HD 1", "Other"]
 
-    def test_reuses_the_star_at_the_same_position_instead_of_duplicating_it(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_reuses_the_star_at_the_same_position_instead_of_duplicating_it(self, tmp_path: Path) -> None:
         """Verify a star 1 arcsecond away is reused and gains the target."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 50.0, 20.0, name="HD 1")])
 
@@ -308,7 +328,7 @@ class TestFindOrCreateByPosition:
         assert found.target_ids == ["M 13"]
         assert _ids(catalog) == ["HD 1"]
 
-    def test_finds_a_star_by_its_exact_name_wherever_it_sits(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_finds_a_star_by_its_exact_name_wherever_it_sits(self, tmp_path: Path) -> None:
         """Verify an existing id is reused wherever the position is."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 50.0, 20.0, name="HD 1")])
 
@@ -318,7 +338,7 @@ class TestFindOrCreateByPosition:
         assert found.magnitude == pytest.approx(4.0)
         assert _ids(catalog) == ["HD 1"]
 
-    def test_a_field_detection_takes_the_catalog_name_it_is_given(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_a_field_detection_takes_the_catalog_name_it_is_given(self, tmp_path: Path) -> None:
         """Verify an unnamed "Star_" detection takes a catalog name."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("Star_1", 50.0, 20.0, name="")])
 
@@ -327,7 +347,7 @@ class TestFindOrCreateByPosition:
         assert found.id == "* bet Lyr"
         assert _ids(catalog) == ["* bet Lyr"]
 
-    def test_an_unnamed_new_star_gets_a_numbered_id(self, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_an_unnamed_new_star_gets_a_numbered_id(self, tmp_path: Path) -> None:
         """Verify a nameless star with no neighbour gets a Star_ id."""
         catalog = _make_real_catalog(tmp_path, [_positioned_star("HD 1", 10.0, 10.0)])
 

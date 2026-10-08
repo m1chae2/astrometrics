@@ -266,13 +266,13 @@ def split_standard_and_spectral_frames(
     return standard_frames, spectral_frames
 
 
-def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def add_frame(
     target,  # ruff: ignore[missing-type-function-argument]
     path: str,
     role: str = "LIGHT",
     filter_type: str | None = None,
     camera: str | None = None,
-):
+) -> FrameRecord:
     """Add an image to a target, or update it if it's already there.
 
     This function reads the metadata from the image file and updates the

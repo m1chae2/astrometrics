@@ -17,7 +17,7 @@ class TrackOverlay:
         Color configuration.
     """
 
-    def __init__(self, axis, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, axis, config) -> None:  # ruff: ignore[missing-type-function-argument]
         self.ax = axis
         self.config = config
 

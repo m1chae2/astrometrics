@@ -23,7 +23,7 @@ PRIMARY_FOCAL_MM = 405.0
 class _Frame:
     """A frame record stand-in carrying camera and optic."""
 
-    def __init__(self, camera=PRIMARY_CAMERA, focal_length_mm=PRIMARY_FOCAL_MM):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, camera=PRIMARY_CAMERA, focal_length_mm=PRIMARY_FOCAL_MM) -> None:  # ruff: ignore[missing-type-function-argument]
         self.camera = camera
         self.focal_length_mm = focal_length_mm
 
@@ -31,7 +31,7 @@ class _Frame:
 class _Stacking:
     """A `TargetStackingResult` stand-in holding per-configuration stacks."""
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         self.stacks_by_configuration = {}
         self.stacked_image = ""
 
@@ -39,13 +39,13 @@ class _Stacking:
 class _Target:
     """A target stand-in holding per-configuration stacks."""
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         self.id = "PreferenceTestTarget"
         self.stacking = _Stacking()
 
 
 @pytest.fixture(autouse=True)
-def configured_primary(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def configured_primary(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the primary camera and optic for every test here."""
 
     class _Configuration:
@@ -72,7 +72,7 @@ def configured_primary(monkeypatch):  # ruff: ignore[missing-type-function-argum
     monkeypatch.setattr("astrometricslib.foundation.config.get_configuration", lambda: _Configuration())
 
 
-def test_the_primary_configuration_becomes_the_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_primary_configuration_becomes_the_stacked_image() -> None:
     """The observatory's own camera and optic is what a reader should see."""
     target = _Target()
 
@@ -80,7 +80,7 @@ def test_the_primary_configuration_becomes_the_stacked_image():  # ruff: ignore[
     assert target.stacking.stacks_by_configuration["ZWO ASI533MM Pro@405mm"].is_preferred is True
 
 
-def test_a_non_primary_optic_does_not_displace_the_primary():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_non_primary_optic_does_not_displace_the_primary() -> None:
     """The regression: a later pass must not overwrite the preferred stack.
 
     Running both optics assigned stacking.stacked_image on every
@@ -95,7 +95,7 @@ def test_a_non_primary_optic_does_not_displace_the_primary():  # ruff: ignore[mi
     assert len(target.stacking.stacks_by_configuration) == 2
 
 
-def test_a_non_primary_camera_does_not_displace_the_primary():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_non_primary_camera_does_not_displace_the_primary() -> None:
     """Same optic on another camera is still a different configuration."""
     target = _Target()
     _record_configuration_stack(target, [_Frame()], "/primary.fits")
@@ -107,7 +107,7 @@ def test_a_non_primary_camera_does_not_displace_the_primary():  # ruff: ignore[m
     assert displaced is False
 
 
-def test_the_only_stack_wins_when_nothing_is_preferred():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_only_stack_wins_when_nothing_is_preferred() -> None:
     """A target never imaged with the primary rig still needs a stack.
 
     Most of this catalog's DSLR targets are in exactly this position.
@@ -122,7 +122,7 @@ def test_the_only_stack_wins_when_nothing_is_preferred():  # ruff: ignore[missin
     )
 
 
-def test_the_primary_claims_it_back_when_it_arrives_later():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_primary_claims_it_back_when_it_arrives_later() -> None:
     """Pass order must not decide the outcome."""
     target = _Target()
     _record_configuration_stack(target, [_Frame(focal_length_mm=300.0)], "/secondary.fits")
@@ -130,7 +130,7 @@ def test_the_primary_claims_it_back_when_it_arrives_later():  # ruff: ignore[mis
     assert _record_configuration_stack(target, [_Frame()], "/primary.fits") is True
 
 
-def test_a_second_non_primary_still_sets_it_when_none_is_preferred():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_second_non_primary_still_sets_it_when_none_is_preferred() -> None:
     """With no primary present, any stack is better than none."""
     target = _Target()
     _record_configuration_stack(target, [_Frame(camera="Nikon", focal_length_mm=300.0)], "/a.fits")
@@ -141,7 +141,7 @@ def test_a_second_non_primary_still_sets_it_when_none_is_preferred():  # ruff: i
     )
 
 
-def test_a_blended_stack_is_not_recorded_but_still_sets_the_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_blended_stack_is_not_recorded_but_still_sets_the_image() -> None:
     """Recording a mixed-optic stack under one key would assert a falsehood.
 
     It is still the only stack there is, so it must not leave the target
@@ -154,27 +154,27 @@ def test_a_blended_stack_is_not_recorded_but_still_sets_the_image():  # ruff: ig
     assert target.stacking.stacks_by_configuration == {}
 
 
-def test_frames_without_a_focal_length_still_set_the_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_frames_without_a_focal_length_still_set_the_image() -> None:
     """An unlabelled optic cannot be keyed, but the stack still exists."""
     target = _Target()
 
     assert _record_configuration_stack(target, [_Frame(focal_length_mm=None)], "/unknown.fits") is True
 
 
-def test_camera_names_match_across_spelling_differences():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_camera_names_match_across_spelling_differences() -> None:
     """Configuration and FITS headers spell the same camera differently."""
     assert _camera_names_match("ZWO ASI533MM Pro", "ZWO ASI 533MM Pro")
     assert _camera_names_match("zwo asi533mm pro", "ZWO ASI533MM Pro")
     assert not _camera_names_match("ZWO ASI533MM Pro", "Nikon DSLR DSC D5300")
 
 
-def test_camera_names_match_across_profile_aliases():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_camera_names_match_across_profile_aliases() -> None:
     """The header's spelling and the config's are the same camera."""
     assert _camera_names_match("Nikon DSLR DSC D5300", "Nikon D5300")
     assert _camera_names_match("ZWO CCD ASI533MM Pro", "ZWO ASI 533MM Pro")
 
 
-def test_the_recorded_entry_carries_its_frame_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_recorded_entry_carries_its_frame_count() -> None:
     """Frame count is how a reader judges which stack is worth using."""
     target = _Target()
     _record_configuration_stack(target, [_Frame() for _ in range(21)], "/primary.fits")
@@ -182,6 +182,6 @@ def test_the_recorded_entry_carries_its_frame_count():  # ruff: ignore[missing-r
     assert target.stacking.stacks_by_configuration["ZWO ASI533MM Pro@405mm"].frames_stacked == 21
 
 
-def test_module_exposes_the_recorder():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_module_exposes_the_recorder() -> None:
     """Guards against the helper being renamed out from under these tests."""
     assert hasattr(stacking_tasks, "_record_configuration_stack")

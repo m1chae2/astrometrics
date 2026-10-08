@@ -38,7 +38,7 @@ class SpectroscopyInstrument:
         How many pixels away from the star the rainbow starts.
     """
 
-    def __init__(self, config: SpectroscopyConfig):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: SpectroscopyConfig) -> None:
         """Initialize the instrument model and calculate its properties.
 
         Parameters
@@ -49,7 +49,7 @@ class SpectroscopyInstrument:
         self.config = config
         self._calculate_properties()
 
-    def _calculate_properties(self):  # ruff: ignore[missing-return-type-private-function]
+    def _calculate_properties(self) -> None:
         """Calculate physical properties such as dx/dlambda and length."""
         c = self.config
 

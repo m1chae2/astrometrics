@@ -39,14 +39,14 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
 ) -> None:
     """A Siril that exits before opening its pipes fails fast, not forever."""
 
-    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         target_folder = tmp_path / "work" / id
         for subdirectory in ("biases", "darks", "flats", "lights", "process"):
             (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
         (target_folder / "lights" / "light_00000.fits").touch()
         return str(target_folder)
 
-    def fake_run_siril_headless(self, command_pipe, output_pipe, **kwargs: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_run_siril_headless(self, command_pipe, output_pipe, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         # Stands in for a Siril that crashes immediately: a real process
         # that exits right away, having opened neither FIFO.
         process = subprocess.Popen(["true"], stdout=subprocess.PIPE)

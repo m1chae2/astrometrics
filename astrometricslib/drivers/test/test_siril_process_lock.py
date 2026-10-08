@@ -14,7 +14,7 @@ from astrometricslib.drivers.siril_interface import (
 )
 
 
-def test_lock_is_reentrant_across_sequential_uses():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_lock_is_reentrant_across_sequential_uses() -> None:
     """Releasing the lock lets the next acquisition through immediately."""
     for _ in range(3):
         with siril_process_lock(max_concurrent_runs=1):
@@ -26,7 +26,7 @@ def test_lock_is_reentrant_across_sequential_uses():  # ruff: ignore[missing-ret
     assert time.monotonic() - start < 5.0
 
 
-def test_lock_file_path_is_shared_and_absolute():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_lock_file_path_is_shared_and_absolute() -> None:
     """Every process must resolve the same rendezvous file."""
     assert os.path.isabs(SIRIL_PROCESS_LOCK_PATH)
     assert SIRIL_PROCESS_LOCK_PATH.endswith("astrometricslib-siril.lock")
@@ -82,12 +82,12 @@ def _run_holder_and_waiter(slot_count: int) -> float:
         holder.join(timeout=30)
 
 
-def test_a_second_process_waits_rather_than_running_concurrently():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_second_process_waits_rather_than_running_concurrently() -> None:
     """With one slot configured, the second acquisition must block."""
     assert _run_holder_and_waiter(slot_count=1) > 1.0
 
 
-def test_two_slots_allow_two_concurrent_runs():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_two_slots_allow_two_concurrent_runs() -> None:
     """The limit is a tuning knob, so a second slot must actually help.
 
     Stacking was 44% of a 199-minute run at roughly 57% CPU utilisation
@@ -105,7 +105,7 @@ def _acquire_and_record(order_queue: multiprocessing.Queue, worker_index: int) -
         order_queue.put(("exit", worker_index, time.monotonic()))
 
 
-def test_lock_intervals_never_overlap():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_lock_intervals_never_overlap() -> None:
     """Three competing processes must hold the lock in disjoint intervals."""
     context = multiprocessing.get_context("spawn")
     order_queue = context.Queue()
@@ -141,7 +141,7 @@ def _acquire_via_driver(result_queue, barrier, slot_count: int) -> None:  # ruff
         result_queue.put("acquired")
 
 
-def test_the_stacking_path_takes_exactly_one_slot():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_stacking_path_takes_exactly_one_slot() -> None:
     """Two workers must both stack when two slots are configured.
 
     This ensures that stacking only takes a single slot per worker.

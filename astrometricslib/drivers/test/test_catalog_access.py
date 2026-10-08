@@ -5,8 +5,11 @@ correctly, and that a mock catalog_access can be injected to isolate scientific
 core logic.
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+
+from pytest_mock import MockerFixture
 
 from astrometricslib import AbstractCatalogAccess, Astrometrics, CatalogAccess, StellarObject, Target
 
@@ -14,7 +17,7 @@ from astrometricslib import AbstractCatalogAccess, Astrometrics, CatalogAccess, 
 class MockCatalogAccess(AbstractCatalogAccess):
     """A mock CatalogAccess for testing in-memory data flows."""
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         self.targets = [Target(id="M 31"), Target(id="Orion")]
         self.stellar_objects = [StellarObject(id="Star1"), StellarObject(id="Star2")]
 
@@ -91,13 +94,13 @@ class MockCatalogAccess(AbstractCatalogAccess):
         return []
 
 
-def test_disk_butler_instantiation():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_disk_butler_instantiation() -> None:
     """Verifies that CatalogAccess can be instantiated with default config."""
     catalog_access = CatalogAccess()
     assert catalog_access.config is not None
 
 
-def test_mock_catalog_access_injection():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_mock_catalog_access_injection() -> None:
     """Verify a mock CatalogAccess can be injected into the facade."""
     mock_catalog_access = MockCatalogAccess()
     astrometrics = Astrometrics(catalog_access=mock_catalog_access)
@@ -113,7 +116,7 @@ def test_mock_catalog_access_injection():  # ruff: ignore[missing-return-type-un
     assert len(mock_catalog_access.targets) == 2
 
 
-def test_catalog_access_keeps_no_copy_of_the_stellar_catalog(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_keeps_no_copy_of_the_stellar_catalog(mocker: MockerFixture) -> None:
     """Verify a stellar_catalog read goes to the database every time.
 
     A whole-catalog cache used to live here. Every write emptied it, each
@@ -137,7 +140,7 @@ def test_catalog_access_keeps_no_copy_of_the_stellar_catalog(mocker):  # ruff: i
     assert first is not second
 
 
-def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker: MockerFixture) -> None:
     """Verify put() writes to the database and holds on to nothing.
 
     Keeping the saved list as the "current catalog" is what left a second
@@ -160,7 +163,7 @@ def test_catalog_access_put_does_not_keep_the_list_it_was_given(mocker):  # ruff
     assert result is not updated
 
 
-def test_dataset_version_increments_on_put_merge_and_delete(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_dataset_version_increments_on_put_merge_and_delete(mocker: MockerFixture) -> None:
     """Verify each write to a dataset bumps its version.
 
     A cache can compare this number to the one it saw last time to tell
@@ -193,7 +196,7 @@ def test_dataset_version_increments_on_put_merge_and_delete(mocker):  # ruff: ig
     assert catalog_access.get_dataset_version("stellar_catalog") == 3
 
 
-def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
+def _build_catalog_access_with_stars(tmp_path: Path, stars) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
     """Build a `CatalogAccess` over a temporary library holding `stars`.
 
     Returns
@@ -213,7 +216,7 @@ def _build_catalog_access_with_stars(tmp_path, stars) -> CatalogAccess:  # ruff:
     return catalog_access
 
 
-def test_catalog_access_list_star_ids_and_existing_star_ids(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_list_star_ids_and_existing_star_ids(tmp_path: Path) -> None:
     """Verify the id-only queries return ids without loading star records."""
     catalog_access = _build_catalog_access_with_stars(
         tmp_path, [StellarObject(id="Alpha"), StellarObject(id="Beta"), StellarObject(id="Gamma")]
@@ -224,7 +227,7 @@ def test_catalog_access_list_star_ids_and_existing_star_ids(tmp_path):  # ruff: 
     assert catalog_access.existing_star_ids([]) == set()
 
 
-def test_catalog_access_get_by_ids_handles_more_ids_than_one_query_allows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_get_by_ids_handles_more_ids_than_one_query_allows(tmp_path: Path) -> None:
     """Verify a long id list is split, so every star of a big target loads.
 
     SQLite refuses one statement with too many bound values; a target can
@@ -238,7 +241,7 @@ def test_catalog_access_get_by_ids_handles_more_ids_than_one_query_allows(tmp_pa
     assert len(catalog_access.existing_star_ids([*wanted_ids, "Nope"])) == 2500
 
 
-def test_catalog_access_find_star_ids_by_name_matches_id_or_name_ignoring_case(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_find_star_ids_by_name_matches_id_or_name_ignoring_case(tmp_path: Path) -> None:
     """Verify a name lookup finds a star by id or by name, ignoring case.
 
     Also checks that a substring never counts as a match: "Vega" must not
@@ -256,7 +259,7 @@ def test_catalog_access_find_star_ids_by_name_matches_id_or_name_ignoring_case(t
     assert catalog_access.find_star_ids_by_name("") == []
 
 
-def test_abstract_catalog_access_defaults_work_for_a_simple_stand_in():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_abstract_catalog_access_defaults_work_for_a_simple_stand_in() -> None:
     """Verify a bare-bones stand-in gets working versions of the new queries.
 
     Test doubles only implement the abstract methods; the ordinary methods
@@ -268,7 +271,7 @@ def test_abstract_catalog_access_defaults_work_for_a_simple_stand_in():  # ruff:
     assert stand_in.get_by_ids("stellar_catalog", []) == []
 
 
-def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path: Path) -> None:
     """Verify list_star_summaries reaches the real catalog registration.
 
     Regression coverage for the target_id-indexed browsing path added
@@ -296,7 +299,7 @@ def test_catalog_access_list_star_summaries_reads_the_stellar_catalog(tmp_path):
     assert [(star.id, star.name) for star in summaries] == [("InField", "InField")]
 
 
-def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tmp_path: Path) -> None:
     """Verify only position-only stars of the asked-for target come back.
 
     Covers both filters against real SQL at once. The target narrowing
@@ -342,7 +345,7 @@ def test_catalog_access_list_position_only_stars_filters_by_prefix_and_target(tm
     assert stars[0].target_ids == ["M 1"]
 
 
-def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path: Path) -> None:
     """Verify the real stellar_objects table gets its target_id index.
 
     A raw sqlite_master check rather than trusting the query results
@@ -371,7 +374,7 @@ def test_disk_butler_stellar_catalog_has_a_target_id_index(tmp_path):  # ruff: i
     assert "idx_stellar_objects_target_id" in indexes
 
 
-def _make_catalog_access_in(tmp_path) -> CatalogAccess:  # ruff: ignore[missing-type-function-argument]
+def _make_catalog_access_in(tmp_path: Path) -> CatalogAccess:
     """Build a CatalogAccess that saves into an empty temporary library.
 
     Returns
@@ -434,7 +437,7 @@ def _ids_inside_circle_by_the_slow_route(
     }
 
 
-def test_list_stars_in_region_matches_the_old_load_everything_answer(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_stars_in_region_matches_the_old_load_everything_answer(tmp_path: Path) -> None:
     """Verify the fast read returns the same stars astropy would pick.
 
     Circles are tried at the places a search box is most likely to go
@@ -471,7 +474,7 @@ def test_list_stars_in_region_matches_the_old_load_everything_answer(tmp_path): 
         assert found_ids == expected_ids, (ra, dec, radius)
 
 
-def test_list_stars_in_region_carries_magnitude_spectral_type_and_data_flags(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_stars_in_region_carries_magnitude_spectral_type_and_data_flags(tmp_path: Path) -> None:
     """Verify the summary has everything the sky map draws from a star."""
     catalog_access = _make_catalog_access_in(tmp_path)
     catalog_access.put(
@@ -488,7 +491,7 @@ def test_list_stars_in_region_carries_magnitude_spectral_type_and_data_flags(tmp
     assert summary.has_spectra is False
 
 
-def test_list_stars_in_region_leaves_out_stars_with_no_position(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_stars_in_region_leaves_out_stars_with_no_position(tmp_path: Path) -> None:
     """Verify a star at exactly (0, 0) is treated as having no position.
 
     The old sky map dropped these, so the fast read must too, even when
@@ -505,7 +508,7 @@ def test_list_stars_in_region_leaves_out_stars_with_no_position(tmp_path):  # ru
     assert found_ids == ["Near"]
 
 
-def test_region_read_is_answered_from_an_index_without_opening_the_stored_rows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_region_read_is_answered_from_an_index_without_opening_the_stored_rows(tmp_path: Path) -> None:
     """Verify the region read's own query is answered from one index.
 
     Correct answers alone would not prove this, since a full scan gives
@@ -532,7 +535,7 @@ def test_region_read_is_answered_from_an_index_without_opening_the_stored_rows(t
     assert "idx_stellar_objects_dec_ra_magnitude" in plan_text
 
 
-def test_spectral_type_is_backfilled_for_stars_saved_before_the_column_existed(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_spectral_type_is_backfilled_for_stars_saved_before_the_column_existed(tmp_path: Path) -> None:
     """Verify an older database gets spectral types copied out of its JSON.
 
     The table is written by hand the way the app used to write it, with
@@ -561,7 +564,7 @@ def test_spectral_type_is_backfilled_for_stars_saved_before_the_column_existed(t
     assert summary.spectral_type == "K0III"
 
 
-def test_list_stars_in_region_can_keep_only_stars_in_a_magnitude_range(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_stars_in_region_can_keep_only_stars_in_a_magnitude_range(tmp_path: Path) -> None:
     """Verify magnitude_range keeps stars inside it, ends included.
 
     A star with no saved magnitude is left out, since it has no value to

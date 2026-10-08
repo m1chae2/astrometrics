@@ -9,6 +9,8 @@ every target, to it.
 
 from unittest.mock import MagicMock
 
+import pytest
+
 import astrometricslib
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.models.target import Target
@@ -17,7 +19,7 @@ from astrometricslib.pipelines.shared import frame_grouping
 from astrometricslib.utilities import concurrency, parallel_batch
 
 
-def _patch_astrometrics(monkeypatch, target) -> MagicMock:  # ruff: ignore[missing-type-function-argument]
+def _patch_astrometrics(monkeypatch: pytest.MonkeyPatch, target) -> MagicMock:  # ruff: ignore[missing-type-function-argument]
     """Point astrometricslib.Astrometrics() at a mock with a fixed target.
 
     Returns
@@ -35,7 +37,9 @@ def _patch_astrometrics(monkeypatch, target) -> MagicMock:  # ruff: ignore[missi
 class TestProcessSingleTargetWorker:
     """Behavior tests for the per-target worker's outcome classification."""
 
-    def test_returns_failed_when_the_target_is_not_in_the_catalog(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_returns_failed_when_the_target_is_not_in_the_catalog(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify a missing target is reported as a failure, not a crash."""
         _patch_astrometrics(monkeypatch, target=None)
 
@@ -44,7 +48,7 @@ class TestProcessSingleTargetWorker:
         assert result["status"] == "failed"
         assert result["error"] == "Target not found in catalog"
 
-    def test_returns_skipped_when_no_frames_match_the_camera(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_returns_skipped_when_no_frames_match_the_camera(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify a target with no matching frames is skipped, not failed.
 
         Skipped is kept apart from failed so a batch run's success count
@@ -59,7 +63,9 @@ class TestProcessSingleTargetWorker:
         assert result["status"] == "skipped"
         assert "ASI294" in result["error"]
 
-    def test_returns_success_and_the_pipeline_s_output_on_a_normal_run(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_returns_success_and_the_pipeline_s_output_on_a_normal_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify a normal run reports success and carries pipeline output."""
         target = Target(id="M13")
         astrometrics_instance = _patch_astrometrics(monkeypatch, target=target)
@@ -75,7 +81,9 @@ class TestProcessSingleTargetWorker:
             target, astrometrics_instance, max_workers=2, camera_name="ASI294", focal_length_mm=600.0
         )
 
-    def test_returns_failed_with_the_exception_message_when_the_pipeline_raises(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_returns_failed_with_the_exception_message_when_the_pipeline_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify a pipeline exception is caught and reported, not raised.
 
         This runs inside a worker process, so an uncaught exception here
@@ -97,7 +105,9 @@ class TestProcessSingleTargetWorker:
         assert "RuntimeError" in result["error"]
         assert "pipeline blew up" in result["error"]
 
-    def test_reports_the_exception_type_even_when_its_message_is_empty(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_reports_the_exception_type_even_when_its_message_is_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A messageless exception must not collapse to a blank error.
 
         `str(exc)` is empty for an exception raised with no arguments

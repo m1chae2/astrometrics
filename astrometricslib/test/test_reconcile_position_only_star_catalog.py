@@ -6,6 +6,8 @@ find-clusters -> apply -> delete flow end to end against a throwaway
 isolated catalog database -- never the real one.
 """
 
+from pathlib import Path
+
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
@@ -20,7 +22,7 @@ from astrometricslib.scripts.reconcile_position_only_star_catalog import (
 )
 
 
-def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing-type-function-argument]
+def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
     """Build an AppConfiguration pointed at a fresh, empty tmp_path library.
 
     Returns
@@ -41,7 +43,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
 class _FakeAstrometrics:
     """Minimal stand-in exposing only what this script's functions read."""
 
-    def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration) -> None:
         self.config = config
         self.catalog_access = CatalogAccess(config)
 
@@ -50,7 +52,7 @@ def _star(id_: str, ra: float, dec: float, target_id: str = "M42") -> StarPositi
     return StarPosition(id=id_, right_ascension=ra, declination=dec, target_ids=[target_id])
 
 
-def test_cluster_position_only_stars_groups_nearby_positions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cluster_position_only_stars_groups_nearby_positions() -> None:
     """Verify stars within the match radius cluster and distant ones don't."""
     close_pair = [
         _star("FIELD_J083344.3000-263740.0000", 128.834300, -26.627778),
@@ -64,7 +66,7 @@ def test_cluster_position_only_stars_groups_nearby_positions():  # ruff: ignore[
     assert sizes == [1, 2]
 
 
-def test_cluster_position_only_stars_chains_through_intermediate_points():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cluster_position_only_stars_chains_through_intermediate_points() -> None:
     """Verify clustering chains: A-B and B-C close, A-C not directly close.
 
     A chain of independent re-solves lands each new solve near the
@@ -83,14 +85,14 @@ def test_cluster_position_only_stars_chains_through_intermediate_points():  # ru
     assert len(clusters[0]) == 4
 
 
-def test_cluster_position_only_stars_handles_zero_and_one_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cluster_position_only_stars_handles_zero_and_one_star() -> None:
     """Verify the trivial cases return without touching the scipy machinery."""
     assert cluster_position_only_stars([]) == []
     single = _star("FIELD_J1", 128.0, -26.0)
     assert cluster_position_only_stars([single]) == [[single]]
 
 
-def test_is_empty_value_covers_every_shape_of_empty():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_is_empty_value_covers_every_shape_of_empty() -> None:
     """Verify None, blanks, empty lists, and empty light curves are empty."""
     assert is_empty_value(None)
     assert is_empty_value("")
@@ -104,7 +106,7 @@ def test_is_empty_value_covers_every_shape_of_empty():  # ruff: ignore[missing-r
     assert not is_empty_value(PhotometryResult(fluxes=[1.0]))
 
 
-def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting() -> None:
     """Verify a duplicate fills empty fields but never overwrites a set one."""
     survivor = StellarObject(id="FIELD_JA", name="FIELD_JA")
     survivor.magnitude = 12.5
@@ -124,7 +126,7 @@ def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff
     assert survivor.target_ids == ["M42", "M43"]
 
 
-def test_merge_duplicate_into_survivor_never_touches_identity_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_merge_duplicate_into_survivor_never_touches_identity_fields() -> None:
     """Verify id/name/is_catalog_identified never copy from a duplicate."""
     survivor = StellarObject(id="FIELD_JA", name="FIELD_JA")
     duplicate = StellarObject(id="FIELD_JB", name="FIELD_JB")
@@ -137,7 +139,7 @@ def test_merge_duplicate_into_survivor_never_touches_identity_fields():  # ruff:
     assert survivor.is_catalog_identified is False
 
 
-def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_path: Path) -> None:
     """End-to-end: two duplicate rows in a throwaway catalog collapse to one.
 
     Never touches the real library -- everything here runs against a
@@ -187,7 +189,7 @@ def test_find_and_apply_clusters_merges_and_deletes_against_a_real_catalog(tmp_p
     assert remaining_by_id[survivor.id].magnitude == 15.2  # ruff: ignore[float-equality-comparison]
 
 
-def test_find_position_only_clusters_respects_target_id_filter(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_find_position_only_clusters_respects_target_id_filter(tmp_path: Path) -> None:
     """Verify --target scoping only surfaces one target's clusters."""
     config = _make_isolated_config(tmp_path)
     astrometrics = _FakeAstrometrics(config)

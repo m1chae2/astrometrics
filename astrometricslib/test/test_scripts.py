@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -68,7 +69,7 @@ def run_script_as_subprocess(module_name: str, extra_env: dict[str, str] | None 
 
 
 @pytest.mark.slow
-def test_script_reindex_all_targets(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_script_reindex_all_targets(tmp_path: Path) -> None:
     """Run reindex_all_targets against a throwaway catalog, not the real one.
 
     reindex_all_targets.py calls reindex_frames(target, prune_missing=True),
@@ -156,6 +157,6 @@ def test_script_reindex_all_targets(tmp_path):  # ruff: ignore[missing-type-func
 
 
 @pytest.mark.slow
-def test_script_stellar_catalog_audit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_script_stellar_catalog_audit() -> None:
     """Run astrometricslib/scripts/stellar_catalog_audit script."""
     run_script_as_subprocess("astrometricslib.scripts.stellar_catalog_audit")

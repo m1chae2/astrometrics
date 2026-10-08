@@ -13,7 +13,7 @@ from astrometricslib.pipelines.spectroscopy.utilities.registration_quality impor
 )
 
 
-def test_flag_outliers_flags_deviation_in_either_direction():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flag_outliers_flags_deviation_in_either_direction() -> None:
     """Verify a value far from the mean is flagged regardless of sign."""
     values = [10.0, 11.0, 9.0, 10.5, 9.5, 50.0]
     flags = flag_outliers(values, sigma_threshold=2.0)
@@ -21,7 +21,7 @@ def test_flag_outliers_flags_deviation_in_either_direction():  # ruff: ignore[mi
     assert not any(flags[:-1])
 
 
-def test_flag_outliers_low_is_bad_only_flags_below_mean():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flag_outliers_low_is_bad_only_flags_below_mean() -> None:
     """Verify low_is_bad only flags values falling below the mean."""
     values = [10.0, 11.0, 9.0, 10.5, 9.5, -50.0]
     flags = flag_outliers(values, sigma_threshold=2.0, low_is_bad=True)
@@ -29,13 +29,13 @@ def test_flag_outliers_low_is_bad_only_flags_below_mean():  # ruff: ignore[missi
     assert not any(flags[:-1])
 
 
-def test_flag_outliers_handles_too_few_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flag_outliers_handles_too_few_values() -> None:
     """Verify flag_outliers handles empty and single-value inputs safely."""
     assert flag_outliers([], sigma_threshold=2.0) == []
     assert flag_outliers([5.0], sigma_threshold=2.0) == [False]
 
 
-def test_evaluate_spectral_registration_quality_flags_zero_order_position_jump():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_evaluate_spectral_registration_quality_flags_zero_order_position_jump() -> None:
     """Verify an isolated zero-order star position anomaly gets flagged.
 
     Modeled on the real M 13 SA200 session, where 2 of 40 frames showed
@@ -65,7 +65,7 @@ def test_evaluate_spectral_registration_quality_flags_zero_order_position_jump()
     assert "frame_0.fits" not in flagged_paths
 
 
-def test_evaluate_spectral_registration_quality_flags_low_star_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_evaluate_spectral_registration_quality_flags_low_star_count() -> None:
     """Verify a frame with a matched-star-count below minimum is flagged."""
     n = 15
     paths = [f"frame_{i}.fits" for i in range(n)]
@@ -79,6 +79,6 @@ def test_evaluate_spectral_registration_quality_flags_low_star_count():  # ruff:
     assert "low matched star count" in next(f["reason"] for f in flagged if f["path"] == "frame_5.fits")
 
 
-def test_evaluate_spectral_registration_quality_handles_mismatched_lengths():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_evaluate_spectral_registration_quality_handles_mismatched_lengths() -> None:
     """Verifies misaligned input lists return no flags rather than raising."""
     assert evaluate_spectral_registration_quality(["a.fits"], [{"nb_stars": 1}], []) == []

@@ -18,7 +18,7 @@ from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
 _CALIBRATION_FRAME_ENV_VAR = "ASTROMETRICS_SPECTROSCOPY_TEST_FRAME"
 
 
-def test_spectroscopy_calibration_tuning():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_spectroscopy_calibration_tuning() -> None:
     """Tests the SpectroscopyCalibrationTuner on the Vega stacked FITS file.
 
     Verifies that the physical model solver successfully converges to the

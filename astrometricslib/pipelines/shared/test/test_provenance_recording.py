@@ -6,6 +6,8 @@ summary, the helper functions runners use to note a stacked image as
 their upstream input, and per-star `generated_by_job_id` stamping.
 """
 
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +25,7 @@ from astrometricslib.pipelines.shared.provenance_recording import (
 
 
 @pytest.fixture
-def isolated_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Point the live configuration and logs database at a throwaway folder.
 
     Yields
@@ -57,7 +59,7 @@ def make_summary(**overrides) -> PipelineQualitySummaryBase:  # ruff: ignore[mis
     return PipelineQualitySummaryBase(**defaults)
 
 
-def test_recording_with_no_job_id_does_nothing_at_all(isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_recording_with_no_job_id_does_nothing_at_all(isolated_config: str) -> None:
     """Check a job-less run (register_job=False) leaves the summary bare."""
     summary = make_summary()
     record_pipeline_run(
@@ -67,7 +69,7 @@ def test_recording_with_no_job_id_does_nothing_at_all(isolated_config):  # ruff:
     assert summary.upstream_entity_id is None
 
 
-def test_a_successful_run_stamps_activity_and_upstream_ids_onto_the_summary(isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_successful_run_stamps_activity_and_upstream_ids_onto_the_summary(isolated_config: str) -> None:
     """Check the summary is stamped, and never raises on a storage failure."""
     summary = make_summary(resolved_parameters={"aperture_radius": 3.5, "use_annulus": True})
     record_pipeline_run(
@@ -82,7 +84,7 @@ def test_a_successful_run_stamps_activity_and_upstream_ids_onto_the_summary(isol
     assert summary.upstream_entity_id == "entity:stack-image:M13:abc"
 
 
-def test_a_successful_run_is_queryable_through_the_provenance_store(isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_successful_run_is_queryable_through_the_provenance_store(isolated_config: str) -> None:
     """Check `record_pipeline_run` wrote a real activity and lineage entry."""
     summary = make_summary()
     record_pipeline_run(
@@ -101,7 +103,7 @@ def test_a_successful_run_is_queryable_through_the_provenance_store(isolated_con
     assert [entry.id for entry in lineage] == ["job-1"]
 
 
-def test_a_pipeline_with_no_definition_still_records_without_raising(isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_pipeline_with_no_definition_still_records_without_raising(isolated_config: str) -> None:
     """Check an unrecognised pipeline name degrades instead of crashing."""
     summary = make_summary(pipeline_name="a_future_pipeline", pipeline_version="0.1.0")
     record_pipeline_run(
@@ -114,7 +116,7 @@ def test_a_pipeline_with_no_definition_still_records_without_raising(isolated_co
     assert summary.provenance_activity_id == "job-1"
 
 
-def test_stacked_image_entity_id_is_deterministic_and_target_scoped():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stacked_image_entity_id_is_deterministic_and_target_scoped() -> None:
     """Check the same path always resolves to the same id, per target."""
     first = stacked_image_entity_id("M13", "/library/M13/stack.fits")
     second = stacked_image_entity_id("M13", "/library/M13/stack.fits")
@@ -123,7 +125,7 @@ def test_stacked_image_entity_id_is_deterministic_and_target_scoped():  # ruff: 
     assert first != different_target
 
 
-def test_note_stacked_image_upstream_sets_both_options_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_note_stacked_image_upstream_sets_both_options_fields() -> None:
     """Check the helper mutates the options dict a runner is building."""
     options: dict = {}
     note_stacked_image_upstream(options, "M13", "/library/M13/stack.fits", "input_image")
@@ -132,14 +134,14 @@ def test_note_stacked_image_upstream_sets_both_options_fields():  # ruff: ignore
     assert options["used_entity_ids"] == {expected_entity_id: "input_image"}
 
 
-def test_note_stacked_image_upstream_does_nothing_with_no_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_note_stacked_image_upstream_does_nothing_with_no_stacked_image() -> None:
     """Check a target with no stack yet leaves the options dict untouched."""
     options: dict = {}
     note_stacked_image_upstream(options, "M13", None, "input_image")
     assert options == {}
 
 
-def test_stamp_generated_by_job_id_marks_the_matching_nested_result():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stamp_generated_by_job_id_marks_the_matching_nested_result() -> None:
     """Check photometry stamps `.photometry`; astrometry only real matches."""
     photometry_star = SimpleNamespace(photometry=SimpleNamespace(generated_by_job_id=None))
     stamp_generated_by_job_id("photometry", [photometry_star], "job-1")
@@ -152,14 +154,14 @@ def test_stamp_generated_by_job_id_marks_the_matching_nested_result():  # ruff: 
     assert unmatched_star.catalog_match_quality is None
 
 
-def test_stamp_generated_by_job_id_does_nothing_with_no_job_id():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stamp_generated_by_job_id_does_nothing_with_no_job_id() -> None:
     """Check a run with no job leaves every star's provenance untouched."""
     star = SimpleNamespace(photometry=SimpleNamespace(generated_by_job_id="already-set"))
     stamp_generated_by_job_id("photometry", [star], None)
     assert star.photometry.generated_by_job_id == "already-set"
 
 
-def test_stamp_generated_by_job_id_does_nothing_for_an_unrecognised_pipeline():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stamp_generated_by_job_id_does_nothing_for_an_unrecognised_pipeline() -> None:
     """Check asteroid detection, with no nested per-star result, is a no-op."""
     candidate = SimpleNamespace()
     stamp_generated_by_job_id("asteroid_detection", [candidate], "job-1")

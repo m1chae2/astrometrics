@@ -5,6 +5,8 @@ solve will fail. This tests that we successfully fall back to a blind
 solve without scale hints.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -14,7 +16,7 @@ from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolv
 
 
 @pytest.fixture
-def solver():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def solver() -> AstrometryNetPlateSolveDriver:
     """Return a plate solve driver with no API key, so online paths stay off.
 
     Returns
@@ -25,11 +27,13 @@ def solver():  # ruff: ignore[missing-return-type-undocumented-public-function]
     return AstrometryNetPlateSolveDriver()
 
 
-def test_a_failed_hinted_solve_is_retried_blind(solver, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_failed_hinted_solve_is_retried_blind(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The regression: a bad hint must not be the end of the attempt."""
     commands = []
 
-    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         commands.append(command)
         # Fail while constrained, succeed once the hints are gone.
         if "--scale-low" in command:
@@ -52,11 +56,13 @@ def test_a_failed_hinted_solve_is_retried_blind(solver, monkeypatch):  # ruff: i
     assert "--scale-low" not in commands[1]
 
 
-def test_position_hints_alone_also_trigger_the_blind_retry(solver, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_position_hints_alone_also_trigger_the_blind_retry(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A wrong RA/Dec constrains the search just as fatally as scale."""
     commands = []
 
-    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         commands.append(command)
         return None if "--ra" in command else fits.Header({"CRVAL1": 1.0})
 
@@ -66,11 +72,13 @@ def test_position_hints_alone_also_trigger_the_blind_retry(solver, monkeypatch):
     assert len(commands) == 2
 
 
-def test_a_successful_hinted_solve_does_not_retry(solver, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_successful_hinted_solve_does_not_retry(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Hints are usually right; a second solve would double the cost."""
     calls = []
 
-    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         calls.append(command)
         return fits.Header({"CRVAL1": 10.7})
 
@@ -82,11 +90,13 @@ def test_a_successful_hinted_solve_does_not_retry(solver, monkeypatch):  # ruff:
     assert len(calls) == 1
 
 
-def test_an_unhinted_solve_is_attempted_only_once(solver, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_an_unhinted_solve_is_attempted_only_once(
+    solver: AstrometryNetPlateSolveDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """With no hints to blame, a failure is the field's, not the window's."""
     calls = []
 
-    def _fake_run(self, command, working_directory, timeout):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_run(self, command, working_directory, timeout) -> None:  # ruff: ignore[missing-type-function-argument]
         calls.append(command)
         return None
 
@@ -96,7 +106,9 @@ def test_an_unhinted_solve_is_attempted_only_once(solver, monkeypatch):  # ruff:
     assert len(calls) == 1
 
 
-def test_solve_field_success_requires_the_output_file(solver, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_solve_field_success_requires_the_output_file(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A zero exit status alone does not mean the field was solved."""
 
     class _Result:
@@ -107,7 +119,9 @@ def test_solve_field_success_requires_the_output_file(solver, tmp_path, monkeypa
     assert solver._run_solve_field(["solve-field"], str(tmp_path), 10) is None
 
 
-def test_a_colour_stack_is_flattened_before_upload(solver, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_colour_stack_is_flattened_before_upload(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """astrometry.net's uploader crashes on a 3D array.
 
     It raised "weights.ndim (2) must match len(axes) (3)" for every DSLR
@@ -120,7 +134,7 @@ def test_a_colour_stack_is_flattened_before_upload(solver, tmp_path, monkeypatch
 
     solver.api_key = "test-key"
 
-    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         with fits.open(path) as hdul:
             uploaded["ndim"] = hdul[0].data.ndim
         return fits.Header({"CRVAL1": 1.0})
@@ -131,7 +145,9 @@ def test_a_colour_stack_is_flattened_before_upload(solver, tmp_path, monkeypatch
     assert uploaded["ndim"] == 2
 
 
-def test_a_mono_stack_is_uploaded_unchanged(solver, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_mono_stack_is_uploaded_unchanged(
+    solver: AstrometryNetPlateSolveDriver, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Monochrome frames must not pay for a rewrite they do not need."""
     mono_path = tmp_path / "mono.fits"
     fits.PrimaryHDU(np.ones((8, 6), dtype=np.float32)).writeto(mono_path)
@@ -139,7 +155,7 @@ def test_a_mono_stack_is_uploaded_unchanged(solver, tmp_path, monkeypatch):  # r
 
     solver.api_key = "test-key"
 
-    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_solve_from_image(path, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         uploaded["path"] = path
         return fits.Header({"CRVAL1": 1.0})
 

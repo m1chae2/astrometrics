@@ -8,6 +8,8 @@ confirming the shape-agnostic calibration claim empirically rather than
 just by reading the code.
 """
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -23,7 +25,7 @@ from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 class MockAstrometricsImage(AstrometricsImage):
     """Mock AstrometricsImage that accepts a direct array input."""
 
-    def __init__(self, data: np.ndarray, header=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, data: np.ndarray, header=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize MockAstrometricsImage with given data and header."""
         self._data = data
         self._header = header or {}
@@ -40,9 +42,9 @@ class MockAstrometricsImage(AstrometricsImage):
         return self._header
 
 
-def _build_tilted_width_varying_trace(  # ruff: ignore[missing-return-type-private-function]
+def _build_tilted_width_varying_trace(
     width: int = 200, height: int = 100, tilt_slope: float = 0.05, background: float = 500.0
-):
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Build a synthetic horizontal trace with a known tilt and width.
 
     Returns
@@ -64,7 +66,7 @@ def _build_tilted_width_varying_trace(  # ruff: ignore[missing-return-type-priva
     return data, true_sigmas
 
 
-def test_traced_extraction_centerline_tracks_known_tilt():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_traced_extraction_centerline_tracks_known_tilt() -> None:
     """Verifies the fitted centerline follows a known linear tilt slope."""
     tilt_slope = 0.05
     data, _ = _build_tilted_width_varying_trace(tilt_slope=tilt_slope)
@@ -77,7 +79,7 @@ def test_traced_extraction_centerline_tracks_known_tilt():  # ruff: ignore[missi
     assert abs(measured_slope - tilt_slope) < 0.01
 
 
-def test_traced_extraction_width_matches_known_sigma():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_traced_extraction_width_matches_known_sigma() -> None:
     """Verify trail_width_px matches the injected Gaussian sigma."""
     data, true_sigmas = _build_tilted_width_varying_trace()
     image = MockAstrometricsImage(data=data)
@@ -90,7 +92,7 @@ def test_traced_extraction_width_matches_known_sigma():  # ruff: ignore[missing-
         assert abs(widths[step] - expected_sigma) < 0.3
 
 
-def test_traced_extraction_falls_back_on_unfittable_cross_section():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_traced_extraction_falls_back_on_unfittable_cross_section() -> None:
     """Verify a flat, no-signal region falls back to fixed-box extraction."""
     data = np.full((100, 200), 500.0)  # entirely flat -- no trace at all
     image = MockAstrometricsImage(data=data)
@@ -106,7 +108,7 @@ def test_traced_extraction_falls_back_on_unfittable_cross_section():  # ruff: ig
     assert all(np.isfinite(profile))
 
 
-def test_calibration_shape_unaffected_by_extraction_method():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_shape_unaffected_by_extraction_method() -> None:
     """Verify wavelengths/intensities shape matches for fixed vs traced."""
     data, _ = _build_tilted_width_varying_trace(tilt_slope=0.0)
     image = MockAstrometricsImage(data=data)

@@ -517,7 +517,7 @@ class CatalogAccess(AbstractCatalogAccess):
     disk it sits.
     """
 
-    def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set up the CatalogAccess.
 
         Parameters

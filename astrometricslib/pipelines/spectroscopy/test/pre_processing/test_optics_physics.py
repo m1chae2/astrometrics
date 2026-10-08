@@ -14,7 +14,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import
 )
 
 
-def test_wavelength_round_trip():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_wavelength_round_trip() -> None:
     """Verify pixel-offset-to-wavelength-and-back round trips exactly.
 
     Converting from pixel offset to physical wavelength and then back
@@ -49,7 +49,7 @@ def test_wavelength_round_trip():  # ruff: ignore[missing-return-type-undocument
         assert pytest.approx(offset, abs=1e-9) == reconstructed_offset
 
 
-def test_numpy_vectorization():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_numpy_vectorization() -> None:
     """Verify calculate_wavelength/calculate_pixel_offset vectorize.
 
     Both functions must behave correctly when processing vectorized
@@ -81,7 +81,7 @@ def test_numpy_vectorization():  # ruff: ignore[missing-return-type-undocumented
     np.testing.assert_allclose(offsets, reconstructed, atol=1e-9)
 
 
-def test_optics_wavelength_scaling():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_optics_wavelength_scaling() -> None:
     """Verifies that wavelength increases monotonically with pixel offset,.
 
     confirming correct geometry under larger diffraction angles.

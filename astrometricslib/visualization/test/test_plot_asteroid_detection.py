@@ -5,6 +5,7 @@ candidates render together, and that a missing stacked_image is
 rejected the same way the other per-pipeline plot functions are.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
@@ -35,7 +36,7 @@ def _write_stack_fits(path) -> None:  # ruff: ignore[missing-type-function-argum
     fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_plot_asteroid_detection_raises_on_missing_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_asteroid_detection_raises_on_missing_stacked_image() -> None:
     """Verify a target with no stacked_image is rejected."""
     target = SimpleNamespace(
         id="M 13",
@@ -47,7 +48,7 @@ def test_plot_asteroid_detection_raises_on_missing_stacked_image():  # ruff: ign
         plot_asteroid_detection(target)
 
 
-def test_plot_asteroid_detection_draws_a_track_for_each_candidate(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_plot_asteroid_detection_draws_a_track_for_each_candidate(tmp_path: Path) -> None:
     """Verify a candidate's detections are drawn as a track."""
     stack_path = tmp_path / "stack.fits"
     _write_stack_fits(stack_path)
@@ -88,7 +89,7 @@ def test_plot_asteroid_detection_draws_a_track_for_each_candidate(tmp_path):  # 
     plt.close(fig)
 
 
-def test_plot_asteroid_detection_with_no_candidates_still_renders_the_image(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_plot_asteroid_detection_with_no_candidates_still_renders_the_image(tmp_path: Path) -> None:
     """Verify a target with no candidates still returns a usable figure."""
     stack_path = tmp_path / "stack.fits"
     _write_stack_fits(stack_path)

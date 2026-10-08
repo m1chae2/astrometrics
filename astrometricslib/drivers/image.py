@@ -24,7 +24,7 @@ class AstrometricsImage:
     Handles FITS loading, header extraction, and WCS transformations.
     """
 
-    def __init__(self, path: str):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, path: str) -> None:
         """Initialize the high-level interfaceImage with a path to a FITS file.
 
         Data is lazy-loaded upon first access.
@@ -142,7 +142,7 @@ class AstrometricsImage:
             logger.exception("Failed to load FITS header %s", self.path)
             raise
 
-    def _load_data(self):  # ruff: ignore[missing-return-type-private-function]
+    def _load_data(self) -> None:
         """Load the FITS data into `self._data` if not already loaded."""
         if self._data is not None:
             return

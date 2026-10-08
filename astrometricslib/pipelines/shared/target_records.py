@@ -34,7 +34,7 @@ def is_processed_image(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in PROCESSED_IMAGE_EXTENSIONS
 
 
-def _mark_touched(api, target_id: str) -> None:  # ruff: ignore[missing-type-function-argument]
+def _mark_touched(api: Any, target_id: str) -> None:
     """Remember that a target was changed so it can be saved later.
 
     This prevents accidentally saving over someone else's changes
@@ -73,7 +73,7 @@ def _fingerprint(target: Target) -> str:
     return hashlib.blake2b(target.model_dump_json().encode("utf-8"), digest_size=16).hexdigest()
 
 
-def _saved_fingerprints(api) -> dict[str, str]:  # ruff: ignore[missing-type-function-argument]
+def _saved_fingerprints(api: Any) -> dict[str, str]:
     """Get the codes of the target contents as last read or saved.
 
     Parameters
@@ -95,7 +95,7 @@ def _saved_fingerprints(api) -> dict[str, str]:  # ruff: ignore[missing-type-fun
     return fingerprints
 
 
-def remember_stored_state(api, targets: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
+def remember_stored_state(api: Any, targets: list[Any]) -> None:
     """Record that these targets match what is in storage right now.
 
     Later, `save_targets` writes only the targets whose contents have changed
@@ -114,7 +114,7 @@ def remember_stored_state(api, targets: list[Any]) -> None:  # ruff: ignore[miss
         fingerprints[target.id] = _fingerprint(target)
 
 
-def _has_unsaved_changes(api, target: Target) -> bool:  # ruff: ignore[missing-type-function-argument]
+def _has_unsaved_changes(api: Any, target: Target) -> bool:
     """Tell whether a target differs from what this process last stored.
 
     Parameters
@@ -182,7 +182,7 @@ def _find_target(targets: list[Any], target_id: str) -> Any | None:
     return None
 
 
-def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
+def list_targets(api: Any) -> list[Any]:
     """Return all the targets, seeing what other programs have saved.
 
     It reads the stored targets fresh, so a target another program added or
@@ -228,7 +228,7 @@ def list_targets(api) -> list[Any]:  # ruff: ignore[missing-type-function-argume
     return merged
 
 
-def get_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
+def get_target(api: Any, target_id: str) -> Any | None:
     """Find a specific target by its name.
 
     It looks in already-loaded memory first so unsaved changes aren't wiped
@@ -294,7 +294,7 @@ def reindex_frames(
     )
 
 
-def create_target(api, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:  # ruff: ignore[missing-type-function-argument]
+def create_target(api: Any, target_id: str, ra: str | None = None, dec: str | None = None) -> Any:
     """Create a new target and look for its image files on the hard drive.
 
     Parameters
@@ -334,7 +334,7 @@ def create_target(api, target_id: str, ra: str | None = None, dec: str | None = 
     return new_target
 
 
-def update_target(api, target_id: str, updates: dict) -> Any | None:  # ruff: ignore[missing-type-function-argument]
+def update_target(api: Any, target_id: str, updates: dict) -> Any | None:
     """Change specific information about a target.
 
     Parameters
@@ -366,7 +366,7 @@ def update_target(api, target_id: str, updates: dict) -> Any | None:  # ruff: ig
     return target
 
 
-def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def delete_target(api: Any, target_id: str) -> bool:
     """Remove a target completely from the database.
 
     Parameters
@@ -394,7 +394,7 @@ def delete_target(api, target_id: str) -> bool:  # ruff: ignore[missing-type-fun
     return False
 
 
-def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  # ruff: ignore[missing-type-function-argument]
+def refresh_target(api: Any, target_id: str, prune_missing: bool = False) -> None:
     """Check the hard drive again for new images for this target.
 
     Parameters
@@ -419,7 +419,7 @@ def refresh_target(api, target_id: str, prune_missing: bool = False) -> None:  #
     save_targets(api)
 
 
-def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
+def save_targets(api: Any) -> None:
     """Save changes back to the database.
 
     This writes only the targets that were touched and that really changed
@@ -453,7 +453,7 @@ def save_targets(api) -> None:  # ruff: ignore[missing-type-function-argument]
     remember_stored_state(api, changed_targets)
 
 
-def read_saved_target(api, target_id: str) -> Any | None:  # ruff: ignore[missing-type-function-argument]
+def read_saved_target(api: Any, target_id: str) -> Any | None:
     """Read one target's saved record straight from storage.
 
     The in-memory catalog is not used, so the answer is what another program

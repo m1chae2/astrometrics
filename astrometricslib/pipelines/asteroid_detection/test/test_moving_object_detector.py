@@ -43,7 +43,7 @@ def _make_detection(
     )
 
 
-def test_tangent_plane_offset_arcsec_matches_known_declination_scaling():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_tangent_plane_offset_arcsec_matches_known_declination_scaling() -> None:
     """Test that our flat-sky math works correctly at different latitudes."""
     right_ascension_offset, declination_offset = _tangent_plane_offset_arcsec(150.01, 60.0, 150.0, 60.0)
     expected_right_ascension_offset = 0.01 * math.cos(math.radians(60.0)) * 3600.0
@@ -51,7 +51,7 @@ def test_tangent_plane_offset_arcsec_matches_known_declination_scaling():  # ruf
     assert declination_offset == pytest.approx(0.0)
 
 
-def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate() -> None:
     """Test that we measure the speed of an object in a straight line."""
     import numpy as np
 
@@ -65,7 +65,7 @@ def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate():  # ruff: ignore[
     assert r_squared == pytest.approx(1.0)
 
 
-def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray() -> None:
     """Test that a dot that only appears in one photo gets ignored."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [_make_detection("frame0.fits", 0.0, 100.0, 100.0, 150.0, 30.0)]
@@ -76,7 +76,7 @@ def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray():  # r
     assert candidates[0].cascade_stage == CascadeStage.REJECTED_SINGLE_FRAME
 
 
-def test_detect_candidates_rejects_stationary_sky_as_missed_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_rejects_stationary_sky_as_missed_star() -> None:
     """Test a still dot on the sky gets ignored (just a normal star)."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [
@@ -91,7 +91,7 @@ def test_detect_candidates_rejects_stationary_sky_as_missed_star():  # ruff: ign
     assert candidates[0].cascade_stage == CascadeStage.REJECTED_STATIONARY_SKY
 
 
-def test_detect_candidates_rejects_stationary_pixel_as_hot_pixel():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_rejects_stationary_pixel_as_hot_pixel() -> None:
     """Test a dot that never moves on the sensor is ignored (broken pixel)."""
     detector = MovingObjectDetector(MovingObjectConfig())
     detections = [
@@ -106,7 +106,7 @@ def test_detect_candidates_rejects_stationary_pixel_as_hot_pixel():  # ruff: ign
     assert candidates[0].cascade_stage == CascadeStage.REJECTED_STATIONARY_PIXEL
 
 
-def test_detect_candidates_rejects_nonlinear_track():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_rejects_nonlinear_track() -> None:
     """Test that an object moving in a zig-zag line gets ignored."""
     config = MovingObjectConfig(rate_max_arcsec_per_hour=10000.0)
     detector = MovingObjectDetector(config)
@@ -124,7 +124,7 @@ def test_detect_candidates_rejects_nonlinear_track():  # ruff: ignore[missing-re
     assert candidates[0].track is None
 
 
-def test_detect_candidates_links_a_track_near_the_celestial_pole():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_links_a_track_near_the_celestial_pole() -> None:
     """Test we still connect dots if the telescope points near the North Pole.
 
     Near the North Pole, the lines of longitude get very close together,
@@ -164,7 +164,7 @@ def test_detect_candidates_links_a_track_near_the_celestial_pole():  # ruff: ign
     assert candidates[0].track is not None
 
 
-def test_detect_candidates_confirms_a_clean_linear_track():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_candidates_confirms_a_clean_linear_track() -> None:
     """Test that a perfectly normal moving asteroid passes all the tests."""
     detector = MovingObjectDetector(MovingObjectConfig())
     reference_right_ascension_deg = 150.0

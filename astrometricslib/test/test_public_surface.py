@@ -200,7 +200,7 @@ KEPT_FOR_OUTSIDE_CALLERS = {
 }
 
 
-def test_public_all_matches_the_pinned_name_set():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_public_all_matches_the_pinned_name_set() -> None:
     """Verify `astrometricslib.__all__` is exactly the pinned name set.
 
     A mismatch in either direction is a real change to the library's
@@ -224,7 +224,7 @@ def test_public_all_matches_the_pinned_name_set():  # ruff: ignore[missing-retur
     )
 
 
-def test_every_public_name_actually_resolves():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_public_name_actually_resolves() -> None:
     """Verify every name in `__all__` can actually be fetched.
 
     Several exports are only resolved on demand through `__init__.py`'s

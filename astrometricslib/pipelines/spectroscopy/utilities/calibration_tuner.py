@@ -52,7 +52,7 @@ class SpectroscopyCalibrationTuner:
         Where we load our settings from and save our new calibration to.
     """
 
-    def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize the tuner service with the system configuration.
 
         Parameters
@@ -458,7 +458,7 @@ class SpectroscopyCalibrationTuner:
             combo_indices = np.array(combo)
             absolute_offsets = current_start_px + combo_indices
 
-            def loss(grating_distance_param):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            def loss(grating_distance_param):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
                 grating_distance_mm = grating_distance_param[0]
                 if grating_distance_mm <= 0:
                     return 1e10

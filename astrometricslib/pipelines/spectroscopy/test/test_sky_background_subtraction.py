@@ -39,7 +39,7 @@ ZERO_ORDER_X_PX = 30
 class MockAstrometricsImage(AstrometricsImage):
     """Mock AstrometricsImage that accepts a direct array input."""
 
-    def __init__(self, data: np.ndarray):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, data: np.ndarray) -> None:
         """Wrap `data` so the extractor can read it like a real image."""
         self._data = data
         self._header = {}

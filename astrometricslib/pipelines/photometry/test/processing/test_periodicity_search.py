@@ -39,7 +39,7 @@ def _times(count: int, cadence_days: float, seed: int = 0) -> np.ndarray:
     return np.arange(count) * cadence_days + rng.normal(0.0, cadence_days * 0.05, count)
 
 
-def test_robust_point_scatter_matches_a_hand_computed_scaled_mad():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_robust_point_scatter_matches_a_hand_computed_scaled_mad() -> None:
     """Pins the scatter value, now via a library MAD, not a hand-rolled one.
 
     Uses `scipy.stats.median_abs_deviation` for the raw MAD, but keeps this
@@ -56,7 +56,7 @@ def test_robust_point_scatter_matches_a_hand_computed_scaled_mad():  # ruff: ign
     assert scatter == pytest.approx(expected)
 
 
-def test_the_search_grid_needs_two_full_cycles():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_search_grid_needs_two_full_cycles() -> None:
     """Verify the longest searchable period is half the span."""
     times = np.arange(0.0, 1.0, 0.01)
 
@@ -67,7 +67,7 @@ def test_the_search_grid_needs_two_full_cycles():  # ruff: ignore[missing-return
     assert abs(grid.minimum_period_days - 0.03) < 0.005
 
 
-def test_data_too_short_for_two_cycles_is_insufficient_and_gives_no_period():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_data_too_short_for_two_cycles_is_insufficient_and_gives_no_period() -> None:
     """Verify 5 points over 10 minutes report insufficient data."""
     times = np.arange(5) * (2.5 / 1440.0)
 
@@ -78,7 +78,7 @@ def test_data_too_short_for_two_cycles_is_insufficient_and_gives_no_period():  #
     assert "too short" in result.note
 
 
-def test_a_real_cycle_is_detected_and_its_period_found():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_real_cycle_is_detected_and_its_period_found() -> None:
     """Verify a 0.25 day sine is detected with a small false alarm."""
     times = _times(150, 0.02)
     rng = np.random.default_rng(1)
@@ -92,7 +92,7 @@ def test_a_real_cycle_is_detected_and_its_period_found():  # ruff: ignore[missin
     assert result.cycles_observed > 10
 
 
-def test_noise_is_not_reported_as_a_cycle():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_noise_is_not_reported_as_a_cycle() -> None:
     """Verify random light curves are almost never called detected."""
     times = _times(100, 0.02)
     detected = 0
@@ -103,7 +103,7 @@ def test_noise_is_not_reported_as_a_cycle():  # ruff: ignore[missing-return-type
     assert detected <= 2  # about 1 in 100 expected
 
 
-def test_repeating_dips_are_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_repeating_dips_are_detected() -> None:
     """Verify a 5% dip every 0.5 day, seen 5 times, is detected."""
     times = _times(400, 0.0125)
     rng = np.random.default_rng(2)
@@ -119,7 +119,7 @@ def test_repeating_dips_are_detected():  # ruff: ignore[missing-return-type-undo
     assert candidate.transit_depth_mag > 0.03
 
 
-def test_a_single_dip_is_not_a_repeating_pattern():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_single_dip_is_not_a_repeating_pattern() -> None:
     """Verify one dip is reported with a note, not as a detection."""
     times = np.arange(20) * (15.0 / 1440.0)
     flux = np.ones(20)
@@ -131,7 +131,7 @@ def test_a_single_dip_is_not_a_repeating_pattern():  # ruff: ignore[missing-retu
     assert candidate.transit_depth_mag > 0.0
 
 
-def test_noise_is_not_reported_as_dips():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_noise_is_not_reported_as_dips() -> None:
     """Verify random light curves are almost never called detected dips."""
     times = _times(200, 0.0125)
     detected = 0
@@ -142,7 +142,7 @@ def test_noise_is_not_reported_as_dips():  # ruff: ignore[missing-return-type-un
     assert detected <= 2
 
 
-def test_a_seventeen_minute_light_curve_is_not_called_a_detection():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_seventeen_minute_light_curve_is_not_called_a_detection() -> None:
     """Verify 31 points over 17 minutes are not called a detection."""
     times = np.sort(np.random.default_rng(3).uniform(0.0, 17.0 / 1440.0, 31))
     flux = 1.0 + np.random.default_rng(4).normal(0.0, 0.05, 31)
@@ -151,7 +151,7 @@ def test_a_seventeen_minute_light_curve_is_not_called_a_detection():  # ruff: ig
     assert box_search(times, flux).verdict in (VERDICT_NOT_DETECTED, VERDICT_INSUFFICIENT_DATA)
 
 
-def test_cap_grid_size_leaves_a_grid_within_the_limit_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cap_grid_size_leaves_a_grid_within_the_limit_unchanged() -> None:
     """Verify a grid already at or under the cap is returned as-is."""
     grid = np.linspace(0.0, 1.0, 500)
 
@@ -160,7 +160,7 @@ def test_cap_grid_size_leaves_a_grid_within_the_limit_unchanged():  # ruff: igno
     assert result is grid
 
 
-def test_cap_grid_size_thins_an_oversized_grid_to_the_limit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_cap_grid_size_thins_an_oversized_grid_to_the_limit() -> None:
     """Verify an oversized grid is thinned to the cap, keeping its range."""
     grid = np.linspace(0.0, 1.0, 1_000_000)
 
@@ -171,7 +171,7 @@ def test_cap_grid_size_thins_an_oversized_grid_to_the_limit():  # ruff: ignore[m
     assert result[-1] == pytest.approx(1.0)
 
 
-def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search() -> None:
     """Verify a pathological span/cadence ratio does not stall a search.
 
     A real incident: Vega's light curve spanned ~121 days across two

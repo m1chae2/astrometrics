@@ -177,10 +177,10 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
 
 def run_asteroid_detection_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates record on the target record, not via the catalog_access
-    path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
+    frames: Any,  # unused; asteroid detection reads target.frames itself
+    filter_type: Any,  # unused; asteroid detection has no filter concept
+    catalog_access: Any,  # unused; candidates record on the target record, not via the catalog_access
+    path: Any,  # unused; asteroid detection reads target.frames itself
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Search a target's light frames for moving objects.

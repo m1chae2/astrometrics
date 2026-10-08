@@ -705,7 +705,7 @@ class ImageProcessing:
     image (and optional diagnostics) back out to the target library.
     """
 
-    def __init__(self, config=None, calibration_library=None, job_repository=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None, calibration_library=None, job_repository=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize the ImageProcessing class with optional dependencies."""
         from astrometricslib.drivers.calibration_library import CalibrationLibrary
         from astrometricslib.foundation.config import get_configuration
@@ -1880,7 +1880,7 @@ class ImageProcessing:
                 job_logger=job_logger,
             )
 
-            def read_siril_stdout():  # ruff: ignore[missing-return-type-private-function]
+            def read_siril_stdout() -> None:
                 progress_regex = re.compile(r"progress:.*?([0-9.]+)\s*%")
                 try:
                     with open(siril_debug_log, "w") as debug_out:
@@ -2184,7 +2184,7 @@ class ImageProcessing:
                 )
             else:
 
-                def write_commands():  # ruff: ignore[missing-return-type-private-function]
+                def write_commands() -> None:
                     self.send_commands(
                         command_pipe,
                         script,
@@ -2393,7 +2393,7 @@ class ImageProcessing:
             find_calibrated_frame_paths,
         )
 
-        def write_calibration_commands():  # ruff: ignore[missing-return-type-private-function]
+        def write_calibration_commands() -> None:
             self.send_commands(
                 command_pipe,
                 calibration_script,
@@ -2472,7 +2472,7 @@ class ImageProcessing:
             f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),
         ]
 
-        def write_stack_commands():  # ruff: ignore[missing-return-type-private-function]
+        def write_stack_commands() -> None:
             self.send_commands(
                 stack_command_pipe,
                 stack_script,

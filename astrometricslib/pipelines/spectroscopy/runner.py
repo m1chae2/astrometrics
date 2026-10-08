@@ -531,10 +531,10 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
 
 
 def run_spectroscopy_analysis(
-    target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; spectroscopy always solves `path`
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; spectroscopy has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    target: Target,
+    frames: Any,  # unused; spectroscopy always solves `path`
+    filter_type: Any,  # unused; spectroscopy has no filter concept
+    catalog_access: Any,
     path: str | None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:

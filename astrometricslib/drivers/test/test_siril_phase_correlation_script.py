@@ -13,6 +13,8 @@ Reuses the same Siril-stubbing convention as
 """
 
 import io
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -22,7 +24,7 @@ from astrometricslib.drivers import siril_interface
 
 
 @pytest.fixture
-def captured_calibration_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Any]:
     """Run process_target in phase_correlation mode with Siril stubbed out.
 
     Returns
@@ -36,10 +38,17 @@ def captured_calibration_script(tmp_path, monkeypatch):  # ruff: ignore[missing-
     """
     sent_scripts: list[list[str]] = []
 
-    def fake_send_commands(self, command_pipe, commands, job_logger=None, status_queue=None, process=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_send_commands(
+        self,  # ruff: ignore[missing-type-function-argument]
+        command_pipe,  # ruff: ignore[missing-type-function-argument]
+        commands,  # ruff: ignore[missing-type-function-argument]
+        job_logger=None,  # ruff: ignore[missing-type-function-argument]
+        status_queue=None,  # ruff: ignore[missing-type-function-argument]
+        process=None,  # ruff: ignore[missing-type-function-argument]
+    ) -> None:
         sent_scripts.append(list(commands))
 
-    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         target_folder = tmp_path / "work" / id
         for subdirectory in ("biases", "darks", "flats", "lights", "process"):
             (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
@@ -99,7 +108,7 @@ def captured_calibration_script(tmp_path, monkeypatch):  # ruff: ignore[missing-
 class _NullContext:
     """A context manager that does nothing, standing in for the Siril lock."""
 
-    def __enter__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __enter__(self) -> _NullContext:
         """Enter the no-op context.
 
         Returns
@@ -109,7 +118,7 @@ class _NullContext:
         """
         return self
 
-    def __exit__(self, *exception_details):  # ruff: ignore[missing-return-type-special-method,missing-type-args]
+    def __exit__(self, *exception_details) -> bool:  # ruff: ignore[missing-type-args]
         """Leave the no-op context without suppressing anything.
 
         Returns

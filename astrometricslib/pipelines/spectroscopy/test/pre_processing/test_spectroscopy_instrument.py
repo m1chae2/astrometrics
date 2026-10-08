@@ -25,9 +25,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrume
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
-def _build_config(  # ruff: ignore[missing-return-type-private-function]
+def _build_config(
     lines_per_mm: float, grating_distance_mm: float = 16.5, dispersion_start_px: float | None = None
-):
+) -> SpectroscopyConfig:
     """Build a `SpectroscopyConfig` for a 350-900nm sensor.
 
     Returns
@@ -51,9 +51,7 @@ def _build_config(  # ruff: ignore[missing-return-type-private-function]
     )
 
 
-def _numeric_dx_dlambda_mm_per_mm(  # ruff: ignore[missing-return-type-private-function]
-    config: SpectroscopyConfig, lambda_c_nm: float
-):
+def _numeric_dx_dlambda_mm_per_mm(config: SpectroscopyConfig, lambda_c_nm: float) -> float:
     """Independently derive dx/dlambda by numerical differentiation.
 
     Differentiates the pipeline's own exact x = L*tan(theta), lambda =

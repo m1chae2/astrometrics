@@ -181,7 +181,7 @@ class CalibrationLibrary(BaseModel):
     app_config: Any = Field(default=None, exclude=True)
     _lock: threading.RLock = PrivateAttr(default_factory=threading.RLock)
 
-    def __init__(self, app_config=None, **data):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-special-method]
+    def __init__(self, app_config=None, **data) -> None:  # ruff: ignore[missing-type-function-argument, missing-type-kwargs]
         """Initialize calibration library with optional shared config."""
         super().__init__(**data)
         if app_config is None:
@@ -195,7 +195,7 @@ class CalibrationLibrary(BaseModel):
         if self.app_config:
             self.load_library()
 
-    def load_library(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def load_library(self) -> None:
         """Load the calibration library from the JSON file."""
         if not self.app_config:
             return
@@ -210,7 +210,7 @@ class CalibrationLibrary(BaseModel):
         except OSError, ValueError, KeyError, TypeError:
             logger.exception("Could not load calibration_frames.json")
 
-    def save_library(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def save_library(self) -> None:
         """Save calibration library."""
         if not self.app_config:
             return
@@ -224,7 +224,7 @@ class CalibrationLibrary(BaseModel):
         except OSError, ValueError, TypeError:
             logger.exception("Could not save calibration_frames.json")
 
-    def serialize(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def serialize(self) -> dict[str, Any]:
         """Serialize this calibration library to a plain dict.
 
         Returns
@@ -234,7 +234,7 @@ class CalibrationLibrary(BaseModel):
         """
         return self.model_dump()
 
-    def deserialize(self, object_info):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def deserialize(self, object_info: dict[str, Any]) -> None:
         """Populate this calibration library from a serialized dict.
 
         Parameters
@@ -326,7 +326,7 @@ class CalibrationLibrary(BaseModel):
 
         return {"darks": darks, "biases": biases, "flats": flats}
 
-    def _get_iso_gain(self, header):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _get_iso_gain(self, header) -> str:  # ruff: ignore[missing-type-function-argument]
         """Extract ISO or GAIN from header.
 
         Returns
@@ -341,7 +341,7 @@ class CalibrationLibrary(BaseModel):
             iso = "800"
         return str(iso)
 
-    def _get_offset(self, header):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _get_offset(self, header) -> Any:  # ruff: ignore[missing-type-function-argument]
         """Extract the camera offset from a header.
 
         Returns
@@ -414,7 +414,7 @@ class CalibrationLibrary(BaseModel):
         """
         return record_name_for_camera(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
 
-    def add_dark_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def add_dark_frame(self, image_file) -> None:  # ruff: ignore[missing-type-function-argument]
         """Add a dark frame to the library."""
         if not image_file.lower().endswith((".fits", ".fit")):
             return
@@ -441,7 +441,7 @@ class CalibrationLibrary(BaseModel):
         except FITS_READ_ERRORS:
             logger.exception("Error adding dark frame %s", image_file)
 
-    def add_bias_frame(self, image_file):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def add_bias_frame(self, image_file) -> None:  # ruff: ignore[missing-type-function-argument]
         """Add a bias frame to the library."""
         if not image_file.lower().endswith((".fits", ".fit")):
             return
@@ -464,7 +464,7 @@ class CalibrationLibrary(BaseModel):
         except FITS_READ_ERRORS:
             logger.exception("Error adding bias frame %s", image_file)
 
-    def add_flat_frame(self, image_file, telescope="Unknown"):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def add_flat_frame(self, image_file, telescope="Unknown") -> None:  # ruff: ignore[missing-type-function-argument]
         """Add a flat frame to the library."""
         if not image_file.lower().endswith((".fits", ".fit")):
             return
@@ -497,14 +497,14 @@ class CalibrationLibrary(BaseModel):
         except FITS_READ_ERRORS:
             logger.exception("Error adding flat frame %s", image_file)
 
-    def check_for_calibration_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def check_for_calibration_frames(
         self,
-        iso=None,  # ruff: ignore[missing-type-function-argument]
-        exposure=None,  # ruff: ignore[missing-type-function-argument]
-        camera=None,  # ruff: ignore[missing-type-function-argument]
-        telescope=None,  # ruff: ignore[missing-type-function-argument]
-        filter_type=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+        iso: Any | None = None,
+        exposure: Any | None = None,
+        camera: str | None = None,
+        telescope: str | None = None,
+        filter_type: Any | None = None,
+    ) -> bool:
         """Check whether dark, bias, and flat frames all exist.
 
         Parameters
@@ -583,15 +583,15 @@ class CalibrationLibrary(BaseModel):
         camera_key = self._find_camera_key(frame_dict, camera)
         return {} if camera_key is None else frame_dict[camera_key]
 
-    def get_dark_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_dark_frames(
         self,
-        camera=None,  # ruff: ignore[missing-type-function-argument]
-        exposure=None,  # ruff: ignore[missing-type-function-argument]
-        validate_paths=True,  # ruff: ignore[missing-type-function-argument]
-        iso=None,  # ruff: ignore[missing-type-function-argument]
-        offset=None,  # ruff: ignore[missing-type-function-argument]
+        camera: str | None = None,
+        exposure: Any | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
         **kwargs,  # ruff: ignore[missing-type-kwargs]
-    ):
+    ) -> list[str]:
         """Retrieve dark frames for a camera, exposure, gain and offset.
 
         Darks taken at the given gain and camera offset are used when there
@@ -627,7 +627,7 @@ class CalibrationLibrary(BaseModel):
         except ValueError, TypeError:
             target_exp = None
 
-        def frames_at_exposure(setting_keys):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def frames_at_exposure(setting_keys):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
             collected = []
             for setting_key in setting_keys:
                 for exp_key, file_list in camera_data[setting_key].items():
@@ -662,14 +662,14 @@ class CalibrationLibrary(BaseModel):
             return [f for f in frames if os.path.exists(f)]
         return frames
 
-    def get_bias_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_bias_frames(
         self,
         camera=None,  # ruff: ignore[missing-type-function-argument]
         validate_paths=True,  # ruff: ignore[missing-type-function-argument]
         iso=None,  # ruff: ignore[missing-type-function-argument]
         offset=None,  # ruff: ignore[missing-type-function-argument]
         **kwargs,  # ruff: ignore[missing-type-kwargs]
-    ):
+    ) -> list[str]:
         """Retrieve bias frames for a camera, gain and offset.
 
         Bias frames at the given gain and camera offset are used when there
@@ -695,7 +695,7 @@ class CalibrationLibrary(BaseModel):
             return [f for f in frames if os.path.exists(f)]
         return frames
 
-    def get_flat_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_flat_frames(
         self,
         telescope=None,  # ruff: ignore[missing-type-function-argument]
         camera=None,  # ruff: ignore[missing-type-function-argument]
@@ -704,7 +704,7 @@ class CalibrationLibrary(BaseModel):
         iso=None,  # ruff: ignore[missing-type-function-argument]
         offset=None,  # ruff: ignore[missing-type-function-argument]
         **kwargs,  # ruff: ignore[missing-type-kwargs]
-    ):
+    ) -> list[str]:
         """Retrieve flats for a telescope, camera, filter, gain and offset.
 
         Flats at the given gain and camera offset are used when there are any
@@ -810,7 +810,7 @@ class CalibrationLibrary(BaseModel):
                             groups.append(group)
         return groups
 
-    def refresh_dark_frames(self, prune_missing=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def refresh_dark_frames(self, prune_missing: bool = False) -> None:
         """Rescan the dark-frames directory and re-add any FITS files found.
 
         Parameters
@@ -837,7 +837,7 @@ class CalibrationLibrary(BaseModel):
                 if os.path.isfile(file_path):
                     self.add_dark_frame(file_path)
 
-    def refresh_bias_frames(self, prune_missing=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def refresh_bias_frames(self, prune_missing: bool = False) -> None:
         """Rescan the bias-frames directory and re-add any FITS files found.
 
         Parameters
@@ -864,7 +864,7 @@ class CalibrationLibrary(BaseModel):
                 if os.path.isfile(file_path):
                     self.add_bias_frame(file_path)
 
-    def refresh_flat_frames(self, prune_missing=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def refresh_flat_frames(self, prune_missing: bool = False) -> None:
         """Rescan the flat-frames directory and re-add any FITS files found.
 
         Iterates each per-telescope subdirectory under the flats

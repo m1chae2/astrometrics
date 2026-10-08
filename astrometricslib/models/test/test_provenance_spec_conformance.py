@@ -10,6 +10,8 @@ going unnoticed. It also proves the `WasGeneratedBy` 0..1 cardinality
 rule holds in the store, not just in the schema's primary key comment.
 """
 
+from pathlib import Path
+
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.models.provenance import (
     Activity,
@@ -46,7 +48,7 @@ def field_names(model_class: type) -> set[str]:
     return set(model_class.model_fields.keys())
 
 
-def test_agent_has_exactly_the_spec_s_core_and_optional_contact_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_agent_has_exactly_the_spec_s_core_and_optional_contact_fields() -> None:
     """Check `Agent` -- one of the three core PROV-DM classes -- is intact."""
     assert field_names(Agent) == {
         "id",
@@ -61,7 +63,7 @@ def test_agent_has_exactly_the_spec_s_core_and_optional_contact_fields():  # ruf
     }
 
 
-def test_entity_has_exactly_the_spec_s_core_fields_plus_derived_from():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_entity_has_exactly_the_spec_s_core_fields_plus_derived_from() -> None:
     """Check `Entity` -- including `used_entity` for `wasDerivedFrom`."""
     assert field_names(Entity) == {
         "id",
@@ -77,7 +79,7 @@ def test_entity_has_exactly_the_spec_s_core_fields_plus_derived_from():  # ruff:
     assert field_names(ValueEntity) == field_names(Entity) | {"value"}
 
 
-def test_activity_has_exactly_the_spec_s_core_fields_plus_informant():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_activity_has_exactly_the_spec_s_core_fields_plus_informant() -> None:
     """Check `Activity` -- including `informant` for `wasInformedBy`.
 
     There is no `ActivityFlow`/`hadStep` class here on purpose: the real
@@ -99,7 +101,7 @@ def test_activity_has_exactly_the_spec_s_core_fields_plus_informant():  # ruff: 
     }
 
 
-def test_the_four_core_relations_have_exactly_the_spec_s_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_four_core_relations_have_exactly_the_spec_s_fields() -> None:
     """Check `Used`/`WasGeneratedBy`/`WasAssociatedWith`/`WasAttributedTo`."""
     assert field_names(Used) == {"role", "time", "entity", "usage_description"}
     assert field_names(WasGeneratedBy) == {"role", "activity", "generation_description"}
@@ -107,7 +109,7 @@ def test_the_four_core_relations_have_exactly_the_spec_s_fields():  # ruff: igno
     assert field_names(WasAttributedTo) == {"role", "agent"}
 
 
-def test_the_description_template_layer_has_exactly_the_spec_s_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_description_template_layer_has_exactly_the_spec_s_fields() -> None:
     """Check `ActivityDescription`/`EntityDescription`/`Usage`/`Generation`."""
     assert field_names(ActivityDescription) == {
         "id",
@@ -141,7 +143,7 @@ def test_the_description_template_layer_has_exactly_the_spec_s_fields():  # ruff
     assert field_names(GenerationDescription) == field_names(UsageDescription)
 
 
-def test_the_configuration_package_has_exactly_the_spec_s_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_configuration_package_has_exactly_the_spec_s_fields() -> None:
     """Check the parameter and config-file classes' fields."""
     assert field_names(Parameter) == {"id", "name", "value", "parameter_description"}
     assert field_names(ParameterDescription) == {
@@ -162,7 +164,7 @@ def test_the_configuration_package_has_exactly_the_spec_s_fields():  # ruff: ign
     assert field_names(WasConfiguredBy) == {"activity", "artefact_type", "parameters", "config_file"}
 
 
-def test_was_generated_by_cardinality_holds_in_the_store_not_just_in_the_schema(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_was_generated_by_cardinality_holds_in_the_store_not_just_in_the_schema(tmp_path: Path) -> None:
     """Check an entity keeps at most one generating activity, in practice.
 
     The 0..1 cardinality rule is enforced by `entity_id` being

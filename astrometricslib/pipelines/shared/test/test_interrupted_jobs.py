@@ -6,9 +6,11 @@ staging folder. These tests cover finding such jobs without touching jobs a
 live program still runs, and putting the parked stack back.
 """
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from astrometricslib.foundation.jobs import JobStore, ProcessingJob, recover_interrupted_jobs
 from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
@@ -47,7 +49,7 @@ def add_job(
         connection.execute("UPDATE processing_jobs SET updated_at = ? WHERE id = ?", (updated_at, job_id))
 
 
-def alive_unless(dead_pids: set[int]):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def alive_unless(dead_pids: set[int]) -> Callable[..., Any]:
     """Build a stand-in for `process_is_alive` that says these programs ended.
 
     Returns

@@ -7,6 +7,8 @@ writes a contiguously-numbered aligned sequence, and leaves out a frame
 that cannot be confidently aligned instead of silently misaligning it.
 """
 
+from pathlib import Path
+
 import numpy as np
 from astropy.io import fits
 
@@ -43,7 +45,7 @@ def _write_frame(path: object, data: np.ndarray, exptime: float = 0.2) -> None:
     fits.PrimaryHDU(data=data, header=header).writeto(path)
 
 
-def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path: Path) -> None:
     """Verify only one sequence's pp_-prefixed calibrated frames are found."""
     process_directory = tmp_path / "process"
     process_directory.mkdir()
@@ -62,7 +64,7 @@ def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path): 
     ]
 
 
-def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tmp_path: Path) -> None:
     """Verify a shifted frame is moved back onto the reference frame's grid."""
     process_directory = tmp_path / "process"
     process_directory.mkdir()
@@ -94,7 +96,7 @@ def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tm
     assert np.corrcoef(realigned_b[core].ravel(), reference[core].ravel())[0, 1] > 0.95
 
 
-def test_align_calibrated_frames_leaves_out_a_frame_that_does_not_match(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_align_calibrated_frames_leaves_out_a_frame_that_does_not_match(tmp_path: Path) -> None:
     """Verify an unrelated frame is left out, not forced into the stack."""
     process_directory = tmp_path / "process"
     process_directory.mkdir()
@@ -111,7 +113,7 @@ def test_align_calibrated_frames_leaves_out_a_frame_that_does_not_match(tmp_path
     assert len(aligned_paths) == 1
 
 
-def test_align_calibrated_frames_handles_an_empty_list(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_align_calibrated_frames_handles_an_empty_list(tmp_path: Path) -> None:
     """Verify no frames in means no error and an empty result out."""
     aligned_paths, counts = align_calibrated_frames([], str(tmp_path / "aligned"))
     assert aligned_paths == []

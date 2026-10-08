@@ -156,7 +156,7 @@ class MovingObjectDetector:
         The settings for how strict these tests should be.
     """
 
-    def __init__(self, config: MovingObjectConfig):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: MovingObjectConfig) -> None:
         self.config = config
 
     def detect_candidates(

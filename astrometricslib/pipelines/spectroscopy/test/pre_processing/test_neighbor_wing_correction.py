@@ -267,7 +267,7 @@ def test_a_blur_that_does_not_match_the_image_is_skipped_not_applied() -> None:
 class _ArrayImage:
     """A minimal stand-in for an image; the pipeline only reads `.data`."""
 
-    def __init__(self, data: np.ndarray):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, data: np.ndarray) -> None:
         """Hold the array the correction will read."""
         self.data = data
 

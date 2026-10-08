@@ -4,12 +4,15 @@ We create some fake photos with a dot moving across them in a straight
 line, and make sure the pipeline correctly finds it from start to finish.
 """
 
+from pathlib import Path
+
 import astropy.units as u
 import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
 from astropy.table import QTable
+from pytest_mock import MockerFixture
 
 from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import CascadeStage
@@ -23,13 +26,13 @@ _STAR_PIXEL_POSITIONS = [(20.0, 20.0), (25.0, 23.0), (30.0, 26.0), (35.0, 29.0)]
 _FRAME_TIMESTAMPS = [0.0, 600.0, 1200.0, 1800.0]
 
 
-def _write_frame_fits(  # ruff: ignore[missing-return-type-private-function]
+def _write_frame_fits(
     path,  # ruff: ignore[missing-type-function-argument]
     star_pixel_xy,  # ruff: ignore[missing-type-function-argument]
     right_ascension_deg=150.0,  # ruff: ignore[missing-type-function-argument]
     declination_deg=0.0,  # ruff: ignore[missing-type-function-argument]
     include_radec=True,  # ruff: ignore[missing-type-function-argument]
-):
+) -> None:
     """Create a fake, tiny photo with one dot in it."""
     rng = np.random.default_rng(0)
     data = rng.normal(100.0, 5.0, (64, 64)).astype(np.float32)
@@ -42,7 +45,7 @@ def _write_frame_fits(  # ruff: ignore[missing-return-type-private-function]
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _write_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_stack_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Create a fake stacked image with map coordinates."""
     header = fits.Header()
     header["NAXIS1"] = 64
@@ -62,7 +65,7 @@ def _write_stack_fits(path):  # ruff: ignore[missing-type-function-argument, mis
     fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _build_moving_target(tmp_path: Path, include_radec=True) -> Target:  # ruff: ignore[missing-type-function-argument]
     """Create a fake target with 4 photos showing a dot in a straight line.
 
     Returns
@@ -85,7 +88,7 @@ def _build_moving_target(tmp_path, include_radec=True):  # ruff: ignore[missing-
     return target
 
 
-def _light_frames(target):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _light_frames(target):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     """Build the frame pairs `AsteroidDetectionPipeline.process` expects.
 
     Returns
@@ -100,7 +103,7 @@ def _light_frames(target):  # ruff: ignore[missing-type-function-argument, missi
     ]
 
 
-def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_process_raises_when_target_has_no_stacked_image() -> None:
     """Test that we stop and complain if the target hasn't been stacked yet."""
     target = Target(id="NoStackTarget", frames=[])
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
@@ -108,7 +111,9 @@ def test_process_raises_when_target_has_no_stacked_image():  # ruff: ignore[miss
         pipeline.process(target.id, target.stacking.stacked_image, _light_frames(target))
 
 
-def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_confirms_a_moving_source_with_no_ephemeris_match(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """Test that we find a moving object even if it's not in the database."""
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 
@@ -132,7 +137,7 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(tmp_path, mock
         assert detection.picture_brightness_level > 0
 
 
-def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_matches_a_moving_source_against_a_known_body(tmp_path: Path, mocker: MockerFixture) -> None:
     """Test that we match a moving object to an asteroid in the database."""
     field_table = QTable({
         "Number": [-1],
@@ -157,7 +162,7 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path, mocker):
     assert pipeline.last_run_metrics["candidates_ephemeris_matched"] == 1
 
 
-def test_process_excludes_frames_missing_pointing_metadata(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_excludes_frames_missing_pointing_metadata(tmp_path: Path, mocker: MockerFixture) -> None:
     """Test that we safely ignore any photos that are missing location data."""
     mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=None)
 

@@ -276,9 +276,9 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
 def run_astrometry_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry always solves `path`
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    frames: Any,  # unused; astrometry always solves `path`
+    filter_type: Any,  # unused; astrometry has no filter concept
+    catalog_access: Any,
     path: str | None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:

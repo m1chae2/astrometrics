@@ -6,6 +6,8 @@ that each star ends up as one row holding both its photometry and its
 spectrum, with its normal-image position untouched.
 """
 
+from pathlib import Path
+
 from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult, StellarObject
@@ -18,12 +20,12 @@ from astrometricslib.scripts.merge_spectroscopy_star_rows import (
 class _FakeAstrometrics:
     """Minimal stand-in exposing only what this script's functions read."""
 
-    def __init__(self, config: AppConfiguration):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration) -> None:
         self.config = config
         self.catalog_access = CatalogAccess(config)
 
 
-def _make_isolated_astrometrics(tmp_path) -> _FakeAstrometrics:  # ruff: ignore[missing-type-function-argument]
+def _make_isolated_astrometrics(tmp_path: Path) -> _FakeAstrometrics:
     """Build catalog access pointed at a fresh, empty tmp_path library.
 
     Returns
@@ -65,7 +67,7 @@ def _spectral_row(star_id: str) -> StellarObject:
     )
 
 
-def test_merge_spectroscopy_rows_folds_spectrum_into_the_stars_own_row(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_merge_spectroscopy_rows_folds_spectrum_into_the_stars_own_row(tmp_path: Path) -> None:
     """Verify one row remains, with photometry, spectrum and old position."""
     astrometrics = _make_isolated_astrometrics(tmp_path)
     base_row = StellarObject(
@@ -94,7 +96,7 @@ def test_merge_spectroscopy_rows_folds_spectrum_into_the_stars_own_row(tmp_path)
     assert astrometrics.catalog_access.get_by_ids("stellar_catalog", ["Gaia DR3 1::spectroscopy"]) == []
 
 
-def test_merge_spectroscopy_rows_renames_a_row_that_has_no_base_row(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_merge_spectroscopy_rows_renames_a_row_that_has_no_base_row(tmp_path: Path) -> None:
     """Verify a spectroscopy-only row is renamed, keeping its spectrum."""
     astrometrics = _make_isolated_astrometrics(tmp_path)
     _save(astrometrics, [_spectral_row("HD 5")])

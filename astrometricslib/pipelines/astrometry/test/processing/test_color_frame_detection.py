@@ -83,7 +83,7 @@ def _make_identifier() -> StarIdentifier:
     return identifier
 
 
-def test_block_average_averages_disjoint_2x2_blocks():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_block_average_averages_disjoint_2x2_blocks() -> None:
     """Verify each output pixel is the mean of its own block."""
     data = np.array([
         [1.0, 3.0, 10.0, 30.0],
@@ -101,7 +101,7 @@ def test_block_average_averages_disjoint_2x2_blocks():  # ruff: ignore[missing-r
     assert binned[1, 1] == 60.0  # ruff: ignore[float-equality-comparison] -- mean of [50,70,50,70]
 
 
-def test_block_average_drops_a_trailing_partial_block_rather_than_padding():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_block_average_drops_a_trailing_partial_block_rather_than_padding() -> None:
     """Verify a non-multiple-of-factor dimension is cropped, not padded.
 
     Padding would invent pixel values that were never in the frame;
@@ -115,7 +115,7 @@ def test_block_average_drops_a_trailing_partial_block_rather_than_padding():  # 
     assert binned.shape == (2, 2)
 
 
-def test_rescale_source_centroids_maps_binned_coordinates_to_full_resolution():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_rescale_source_centroids_maps_binned_coordinates_to_full_resolution() -> None:
     """Verify the rescale matches _block_average's own pixel-centre convention.
 
     Output pixel j of a factor-N block average covers input pixels
@@ -131,7 +131,7 @@ def test_rescale_source_centroids_maps_binned_coordinates_to_full_resolution(): 
     assert sources[1]["y_centroid"] == 10.5  # ruff: ignore[float-equality-comparison]
 
 
-def test_rescale_source_centroids_handles_the_alternate_xcentroid_key():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_rescale_source_centroids_handles_the_alternate_xcentroid_key() -> None:
     """Verify the xcentroid/ycentroid key spelling also gets rescaled.
 
     SourceDetector.detect's output dicts use whichever spelling the
@@ -147,7 +147,7 @@ def test_rescale_source_centroids_handles_the_alternate_xcentroid_key():  # ruff
     assert sources[0]["ycentroid"] == 13.0  # ruff: ignore[float-equality-comparison]
 
 
-def test_color_frame_detection_runs_on_a_block_averaged_array():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_color_frame_detection_runs_on_a_block_averaged_array() -> None:
     """Verify the colour path hands the detector a binned copy."""
     identifier = _make_identifier()
     identifier.detector.detect.return_value = []
@@ -161,7 +161,7 @@ def test_color_frame_detection_runs_on_a_block_averaged_array():  # ruff: ignore
     assert not np.array_equal(detected_array, data)
 
 
-def test_color_frame_detection_rescales_results_to_full_resolution():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_color_frame_detection_rescales_results_to_full_resolution() -> None:
     """Verify raw and deduplicated results both land at full resolution."""
     identifier = _make_identifier()
     raw = [{"x_centroid": 1.0, "y_centroid": 1.0, "flux": 100.0}]
@@ -176,7 +176,7 @@ def test_color_frame_detection_rescales_results_to_full_resolution():  # ruff: i
     assert unique_sources[0]["x_centroid"] == 2.5  # ruff: ignore[float-equality-comparison]
 
 
-def test_color_frame_detection_does_not_widen_the_detection_kernel():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_color_frame_detection_does_not_widen_the_detection_kernel() -> None:
     """Verify the colour path leaves detector.fwhm alone.
 
     Matching the kernel to a colour frame's interpolation-broadened PSF
@@ -195,7 +195,7 @@ def test_color_frame_detection_does_not_widen_the_detection_kernel():  # ruff: i
     assert identifier.detector.fwhm == 4.0  # ruff: ignore[float-equality-comparison]
 
 
-def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm() -> None:
     """Verify a successful FWHM measurement updates the detector."""
     identifier = _make_identifier()
     identifier.detector.detect.return_value = []
@@ -212,7 +212,7 @@ def test_mono_frame_detection_matches_the_kernel_to_the_measured_fwhm():  # ruff
     identifier.detector.detect.assert_called_once_with(data)
 
 
-def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails() -> None:
     """Verify a field too sparse to measure (None) leaves fwhm untouched."""
     identifier = _make_identifier()
     identifier.detector.detect.return_value = []
@@ -228,7 +228,7 @@ def test_mono_frame_detection_keeps_the_default_fwhm_when_measurement_fails():  
     assert identifier.detector.fwhm == 4.0  # ruff: ignore[float-equality-comparison]
 
 
-def test_mono_frame_detection_survives_a_measurement_exception():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_mono_frame_detection_survives_a_measurement_exception() -> None:
     """Verify a raising FWHM measurement is swallowed, not propagated.
 
     A best-effort refinement must never turn into a hard failure of the
@@ -270,7 +270,7 @@ def test_mono_frame_detection_does_not_hide_a_bug_in_the_measurement() -> None:
         identifier.detect_stars(data, is_color_frame=False)
 
 
-def test_binning_suppresses_demosaic_false_positives_on_a_real_detector():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_binning_suppresses_demosaic_false_positives_on_a_real_detector() -> None:
     """Verify the real SourceDetector, not just the wiring around it, benefits.
 
     Locks in the mechanism this module's fix depends on: a

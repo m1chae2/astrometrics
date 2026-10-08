@@ -121,13 +121,13 @@ class Butler(AbstractButler):
     of this class for their non-FITS dataset types.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         config: Any,
         db_name: str = "astrometrics.db",
         specs: dict[str, DatasetSpec] | None = None,
         db_dir: str | None = None,
-    ):
+    ) -> None:
         """Initialize the Butler with configuration and dataset registrations.
 
         Parameters

@@ -337,7 +337,7 @@ class AsteroidDetectionPipeline:
         The settings to use. If None, it loads the default settings.
     """
 
-    def __init__(self, config: MovingObjectConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: MovingObjectConfig | None = None) -> None:
         self.config = config or MovingObjectConfigLoader.load_moving_object_config()
         # A simple dictionary to store the results of the last run. We save
         # things like "how many asteroids did we find?" so the main program

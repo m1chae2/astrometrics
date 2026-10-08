@@ -11,6 +11,7 @@ flags because of it.
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
@@ -18,7 +19,7 @@ from astrometricslib.pipelines.photometry.processing.variability_analyzer import
 _FRAME_COUNT = 40
 
 
-def _build_star(star_id: str, flux_per_frame: list[float], timestamps: list):  # ruff: ignore[missing-return-type-private-function]
+def _build_star(star_id: str, flux_per_frame: list[float], timestamps: list) -> StellarObject:
     """Build one star whose per-frame arrays all start aligned.
 
     Returns
@@ -38,7 +39,7 @@ def _build_star(star_id: str, flux_per_frame: list[float], timestamps: list):  #
     return star
 
 
-def _run(stars, timestamps):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _run(stars, timestamps) -> VariabilityAnalyzer:  # ruff: ignore[missing-type-function-argument]
     """Normalize the given stars through a configured analyzer.
 
     Returns
@@ -62,7 +63,7 @@ def _run(stars, timestamps):  # ruff: ignore[missing-type-function-argument, mis
 _UNUSABLE_FRAME_START = 30
 
 
-def _build_stars_with_unusable_tail(timestamps: list):  # ruff: ignore[missing-return-type-private-function]
+def _build_stars_with_unusable_tail(timestamps: list) -> list[Any]:
     """Build stars measured on only the first frames of the sequence.
 
     Returns
@@ -77,7 +78,7 @@ def _build_stars_with_unusable_tail(timestamps: list):  # ruff: ignore[missing-r
     return stars
 
 
-def test_every_per_frame_array_stays_the_same_length():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_per_frame_array_stays_the_same_length() -> None:
     """Verify dropped frames are removed from every per-frame array."""
     timestamps = [datetime(2026, 7, 20, 22, 0) + timedelta(minutes=5 * i) for i in range(_FRAME_COUNT)]
     stars = _build_stars_with_unusable_tail(timestamps)
@@ -94,7 +95,7 @@ def test_every_per_frame_array_stays_the_same_length():  # ruff: ignore[missing-
         assert len(light_curve.airmasses) == len(light_curve.fluxes)
 
 
-def test_arrays_stay_aligned_when_sigma_clipping_drops_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_arrays_stay_aligned_when_sigma_clipping_drops_frames() -> None:
     """Verify the per-star clipping pass filters every array alike.
 
     One star carries a single wild outlier so the clipping pass actually
@@ -117,7 +118,7 @@ def test_arrays_stay_aligned_when_sigma_clipping_drops_frames():  # ruff: ignore
         assert len(light_curve.timestamps) == len(light_curve.fluxes)
 
 
-def test_a_pre_existing_length_mismatch_is_not_silently_reindexed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_pre_existing_length_mismatch_is_not_silently_reindexed() -> None:
     """A star whose arrays never lined up must not be given a fake pairing.
 
     Some legacy or cross-session-merged stars carry an is_saturated/
@@ -149,7 +150,7 @@ def test_a_pre_existing_length_mismatch_is_not_silently_reindexed():  # ruff: ig
     assert light_curve.airmasses == []
 
 
-def test_the_surviving_saturation_flag_belongs_to_its_own_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_surviving_saturation_flag_belongs_to_its_own_frame() -> None:
     """Verify filtering preserves which frame each flag describes.
 
     Checks that the saturation flag stays with the correct frame after

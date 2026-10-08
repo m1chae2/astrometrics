@@ -306,7 +306,7 @@ def identify_long_term_variable_candidates(
 class VariabilityAnalyzer:
     """Analyzes a sequence of images to detect variable stars."""
 
-    def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None) -> None:  # ruff: ignore[missing-type-function-argument]
         self.config = config
         self.light_curves: dict[str, PhotometryResult] = {}
         self.stellar_objects: list[StellarObject] = []
@@ -606,7 +606,7 @@ class VariabilityAnalyzer:
             data, x, y, radius=radius, saturation_threshold_adu=saturation_threshold_adu
         )
 
-    def normalize_light_curves(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def normalize_light_curves(self) -> None:
         """Perform differential photometry using ensemble normalization.
 
         Identifies stable reference stars to calculate a per-frame

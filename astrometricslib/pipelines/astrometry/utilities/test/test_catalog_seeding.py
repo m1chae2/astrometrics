@@ -5,6 +5,8 @@ so that parallel workers don't overwhelm the remote server and get
 blocked. Every test here runs offline.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -21,19 +23,19 @@ from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
 class _Frame:
     """A frame record stand-in exposing only the `path` attribute used."""
 
-    def __init__(self, path):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, path) -> None:  # ruff: ignore[missing-type-function-argument]
         self.path = path
 
 
 class _Target:
     """A target stand-in exposing only `id` and `frames`."""
 
-    def __init__(self, target_id, frames):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, target_id, frames) -> None:  # ruff: ignore[missing-type-function-argument]
         self.id = target_id
         self.frames = frames
 
 
-def _write_frame(path, **header_cards: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_frame(path, **header_cards: object) -> str:  # ruff: ignore[missing-type-function-argument]
     """Write a tiny FITS frame carrying the given header cards.
 
     Returns
@@ -48,19 +50,19 @@ def _write_frame(path, **header_cards: object):  # ruff: ignore[missing-type-fun
     return str(path)
 
 
-def test_solved_wcs_is_preferred_over_mount_pointing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_solved_wcs_is_preferred_over_mount_pointing() -> None:
     """CRVAL wins: it is where the camera looked, not where the mount aimed."""
     header = {"CRVAL1": 210.5, "CRVAL2": 54.3, "RA": 1.0, "DEC": 2.0}
 
     assert _coordinate_from_header(header) == (210.5, 54.3)
 
 
-def test_decimal_pointing_is_used_when_the_frame_was_never_solved():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_decimal_pointing_is_used_when_the_frame_was_never_solved() -> None:
     """An unsolved frame still contributes its mount pointing."""
     assert _coordinate_from_header({"RA": 85.4, "DEC": -1.85}) == (85.4, -1.85)
 
 
-def test_sexagesimal_pointing_is_parsed_as_a_last_resort():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_sexagesimal_pointing_is_parsed_as_a_last_resort() -> None:
     """OBJCTRA/OBJCTDEC are hourangle/degree strings, not decimals."""
     center = _coordinate_from_header({"OBJCTRA": "20 58 41.05", "OBJCTDEC": "44 34 36.48"})
 
@@ -69,17 +71,17 @@ def test_sexagesimal_pointing_is_parsed_as_a_last_resort():  # ruff: ignore[miss
     assert center[1] == pytest.approx(44.5768, abs=1e-3)
 
 
-def test_header_without_any_pointing_yields_none():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_header_without_any_pointing_yields_none() -> None:
     """A frame with no coordinates must not invent one."""
     assert _coordinate_from_header({"EXPTIME": 30.0}) is None
 
 
-def test_separation_handles_right_ascension_wraparound():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_separation_handles_right_ascension_wraparound() -> None:
     """359.5 and 0.5 degrees are one degree apart, not 359."""
     assert _angular_separation_degrees(359.5, 0.0, 0.5, 0.0) == pytest.approx(1.0, abs=1e-6)
 
 
-def test_separation_shrinks_near_the_pole():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_separation_shrinks_near_the_pole() -> None:
     """Meridians converge, so equal RA offsets mean less sky near the pole.
 
     Polaris is in this library's own catalog, so a naive coordinate
@@ -91,7 +93,7 @@ def test_separation_shrinks_near_the_pole():  # ruff: ignore[missing-return-type
     assert near_pole < at_equator
 
 
-def test_nearby_pointings_collapse_into_one_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_nearby_pointings_collapse_into_one_field(tmp_path: Path) -> None:
     """Frames of one object drift by arcmin between sessions, not degrees."""
     frames = [
         _Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0)),
@@ -104,7 +106,7 @@ def test_nearby_pointings_collapse_into_one_field(tmp_path):  # ruff: ignore[mis
     assert field_centers[0]["frames_examined"] == 2
 
 
-def test_distinct_objects_stay_separate_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_distinct_objects_stay_separate_fields(tmp_path: Path) -> None:
     """Deduplication must not merge genuinely different pointings."""
     first = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     second = _Target("M 42", [_Frame(_write_frame(tmp_path / "b.fits", CRVAL1=83.8, CRVAL2=-5.4))])
@@ -112,7 +114,7 @@ def test_distinct_objects_stay_separate_fields(tmp_path):  # ruff: ignore[missin
     assert len(derive_field_centers([first, second])) == 2
 
 
-def test_two_targets_sharing_a_field_are_both_recorded(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_two_targets_sharing_a_field_are_both_recorded(tmp_path: Path) -> None:
     """One download can cover several targets; the report must say so.
 
     Two catalog entries for the same patch of sky -- an object and a
@@ -128,14 +130,14 @@ def test_two_targets_sharing_a_field_are_both_recorded(tmp_path):  # ruff: ignor
     assert sorted(field_centers[0]["target_ids"]) == ["NGC 4435", "NGC 4438"]
 
 
-def test_placeholder_origin_pointing_is_rejected(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_placeholder_origin_pointing_is_rejected(tmp_path: Path) -> None:
     """(0, 0) is an unset mount, not a real field in Cetus."""
     target = _Target("Sun", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=0.0, CRVAL2=0.0))])
 
     assert derive_field_centers([target]) == []
 
 
-def test_unreadable_frame_does_not_abort_the_sweep(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_unreadable_frame_does_not_abort_the_sweep(tmp_path: Path) -> None:
     """One corrupt file must not cost the whole catalog its seeding."""
     broken = tmp_path / "broken.fits"
     broken.write_bytes(b"not a FITS file")
@@ -145,7 +147,7 @@ def test_unreadable_frame_does_not_abort_the_sweep(tmp_path):  # ruff: ignore[mi
     assert len(derive_field_centers([target])) == 1
 
 
-def test_frames_examined_per_target_is_capped(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frames_examined_per_target_is_capped(tmp_path: Path) -> None:
     """Reading every frame of a large catalog costs time for nothing."""
     frames = [
         _Frame(_write_frame(tmp_path / f"f{index}.fits", CRVAL1=210.0, CRVAL2=54.0)) for index in range(6)
@@ -156,13 +158,13 @@ def test_frames_examined_per_target_is_capped(tmp_path):  # ruff: ignore[missing
     assert field_centers[0]["frames_examined"] == 2
 
 
-def test_seeding_visits_every_field_without_network(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_seeding_visits_every_field_without_network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The sweep downloads each distinct field exactly once."""
     first = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     second = _Target("M 42", [_Frame(_write_frame(tmp_path / "b.fits", CRVAL1=83.8, CRVAL2=-5.4))])
     requested = []
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
         requested.append((ra, dec))
         return 100
 
@@ -178,12 +180,12 @@ def test_seeding_visits_every_field_without_network(tmp_path, monkeypatch):  # r
     assert len(requested) == 2
 
 
-def test_a_failing_field_does_not_stop_the_others(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_failing_field_does_not_stop_the_others(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """One unreachable field must not abandon the rest of the sweep."""
     first = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     second = _Target("M 42", [_Frame(_write_frame(tmp_path / "b.fits", CRVAL1=83.8, CRVAL2=-5.4))])
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
         if ra > 200:
             raise ConnectionError("TAP service unavailable")
         return 50
@@ -199,12 +201,12 @@ def test_a_failing_field_does_not_stop_the_others(tmp_path, monkeypatch):  # ruf
     assert report["sources_cached"] == 50
 
 
-def test_a_transient_failure_is_retried(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_transient_failure_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A blip must not cost a field its catalog data."""
     target = _Target("M 101", [_Frame(_write_frame(tmp_path / "a.fits", CRVAL1=210.0, CRVAL2=54.0))])
     attempts = {"count": 0}
 
-    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _fake_seed(ra, dec, radius_deg=0.5, max_magnitude=18.0) -> int:  # ruff: ignore[missing-type-function-argument]
         attempts["count"] += 1
         if attempts["count"] == 1:
             raise TimeoutError("cone search timed out")

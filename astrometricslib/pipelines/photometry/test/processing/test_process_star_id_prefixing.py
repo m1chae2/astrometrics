@@ -8,6 +8,8 @@ call, each session's call must be able to give its stars a distinct,
 deterministic id prefix so they don't collide when recorded together.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -17,7 +19,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
 
-def _write_single_star_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_single_star_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic light frame FITS file with one Gaussian source."""
     rng = np.random.default_rng(0)
     data = rng.normal(100.0, 5.0, (64, 64)).astype(np.float32)
@@ -28,7 +30,7 @@ def _write_single_star_fits(path):  # ruff: ignore[missing-type-function-argumen
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_process_uses_plain_star_ids_by_default(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_uses_plain_star_ids_by_default(tmp_path: Path) -> None:
     """Verify process() ids default to plain Star_N without a prefix."""
     path = tmp_path / "frame.fits"
     _write_single_star_fits(path)
@@ -40,7 +42,7 @@ def test_process_uses_plain_star_ids_by_default(tmp_path):  # ruff: ignore[missi
     assert analyzer.stellar_objects[0].id == "Star_1"
 
 
-def test_process_prefixes_star_ids_when_given(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_prefixes_star_ids_when_given(tmp_path: Path) -> None:
     """Verify process() prefixes ids with id_prefix when given."""
     path = tmp_path / "frame.fits"
     _write_single_star_fits(path)
@@ -52,7 +54,7 @@ def test_process_prefixes_star_ids_when_given(tmp_path):  # ruff: ignore[missing
     assert analyzer.stellar_objects[0].id == "sess:Star_1"
 
 
-def test_process_seeded_stars_keep_their_real_identity(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_seeded_stars_keep_their_real_identity(tmp_path: Path) -> None:
     """Verify seed_stars are tracked with their own id/name.
 
     Mirrors the pixel position identify_session_stars() would produce:
@@ -85,7 +87,7 @@ def test_process_seeded_stars_keep_their_real_identity(tmp_path):  # ruff: ignor
     assert tracked.photometry.fluxes == [tracked.flux]
 
 
-def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path: Path) -> None:
     """A seed star with no usable pixel position is silently skipped."""
     path = tmp_path / "frame.fits"
     _write_single_star_fits(path)
@@ -103,7 +105,7 @@ def test_process_seeded_stars_skip_entries_missing_a_centroid(tmp_path):  # ruff
     assert analyzer.stellar_objects[0].id == "* alf Lyr"
 
 
-def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_path: Path) -> None:
     """A seed star with no detectable flux on the reference frame is dropped.
 
     Tracking a star with no signal is a waste of memory and CPU. This
@@ -127,7 +129,7 @@ def test_process_excludes_seed_stars_with_no_signal_on_the_reference_frame(tmp_p
     assert analyzer.stellar_objects[0].id == "* alf Lyr"
 
 
-def test_process_keeps_a_seed_star_with_only_marginal_signal(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_keeps_a_seed_star_with_only_marginal_signal(tmp_path: Path) -> None:
     """Verify the exclusion is a strict >0 gate, not a brightness floor.
 
     A faint but genuinely positive net flux must still be tracked --

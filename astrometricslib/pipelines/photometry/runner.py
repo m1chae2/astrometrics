@@ -524,9 +524,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
 def run_photometry_analysis(
     target: Target,
     frames,  # ruff: ignore[missing-type-function-argument]
-    filter_type,  # ruff: ignore[missing-type-function-argument]
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
-    path,  # ruff: ignore[missing-type-function-argument] -- unused; photometry works from `frames`/`target.frames`
+    filter_type: str | None,
+    catalog_access: Any,
+    path: Any,  # unused; photometry works from `frames`/`target.frames`
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Track star brightness across a target's images, session by session.

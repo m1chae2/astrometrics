@@ -10,6 +10,7 @@ leaves out saturated pixels, and rejects nonsense input.
 """
 
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -268,7 +269,7 @@ def test_combining_rejects_an_image_with_no_measurable_noise() -> None:
         combine_exposure_group_images([np.full((20, 20), 0.3)], [1.0])
 
 
-def test_rejection_maps_combine_weighted_by_frame_count(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_rejection_maps_combine_weighted_by_frame_count(tmp_path: Path) -> None:
     """The combined map is the overall fraction of values rejected."""
     first, second = tmp_path / "first.fits", tmp_path / "second.fits"
     fits.writeto(first, np.full((4, 4), 0.1, np.float32))
@@ -280,7 +281,7 @@ def test_rejection_maps_combine_weighted_by_frame_count(tmp_path) -> None:  # ru
     assert fits.getdata(tmp_path / "merged.fits")[0, 0] == pytest.approx(0.325, rel=1e-4)
 
 
-def test_rejection_maps_skip_missing_files(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_rejection_maps_skip_missing_files(tmp_path: Path) -> None:
     """A group without a rejection map is left out, not an error."""
     only = tmp_path / "only.fits"
     fits.writeto(only, np.full((4, 4), 0.2, np.float32))
@@ -290,7 +291,7 @@ def test_rejection_maps_skip_missing_files(tmp_path) -> None:  # ruff: ignore[mi
     assert not merge_rejection_maps([str(tmp_path / "none.fits")], [1], str(tmp_path / "n.fits"))
 
 
-def test_registration_sequences_keep_only_the_per_frame_lines(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_registration_sequences_keep_only_the_per_frame_lines(tmp_path: Path) -> None:
     """Only Siril's per-frame R lines are joined, in group order."""
     first, second = tmp_path / "a.seq", tmp_path / "b.seq"
     first.write_text(
@@ -326,7 +327,7 @@ def _write_raw_frames(folder, count: int, mean: float, noise: float, seed: int) 
     return frames
 
 
-def test_frame_noise_is_measured_from_a_raw_frame(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_frame_noise_is_measured_from_a_raw_frame(tmp_path: Path) -> None:
     """An unclipped frame gives its true noise and almost no zeros."""
     frame = _write_raw_frames(tmp_path, 1, mean=50.0, noise=8.0, seed=1)[0]
 
@@ -336,7 +337,7 @@ def test_frame_noise_is_measured_from_a_raw_frame(tmp_path) -> None:  # ruff: ig
     assert zero_fraction < CLIPPED_FRAME_ZERO_FRACTION
 
 
-def test_a_clipped_frame_reports_many_zeros(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_clipped_frame_reports_many_zeros(tmp_path: Path) -> None:
     """A frame whose background sits below the noise is mostly zeros."""
     frame = _write_raw_frames(tmp_path, 1, mean=0.0, noise=8.0, seed=2)[0]
 
@@ -345,7 +346,7 @@ def test_a_clipped_frame_reports_many_zeros(tmp_path) -> None:  # ruff: ignore[m
     assert zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
 
 
-def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path: Path) -> None:
     """Clipped frames read low, so they are given a clean group's noise."""
     clipped = ExposureGroup(0.5, _write_raw_frames(tmp_path, 3, mean=0.0, noise=8.0, seed=3))
     clean_quiet = ExposureGroup(2.0, _write_raw_frames(tmp_path, 3, mean=60.0, noise=6.0, seed=4))
@@ -358,7 +359,7 @@ def test_a_clipped_group_takes_the_noise_of_the_cleanest_group(tmp_path) -> None
     assert noises[0] == pytest.approx(noises[2])  # the largest clean noise
 
 
-def test_when_every_group_is_clipped_all_groups_get_the_same_noise(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_when_every_group_is_clipped_all_groups_get_the_same_noise(tmp_path: Path) -> None:
     """With no clean group to learn from, the noise is the same for all."""
     groups = [
         ExposureGroup(0.5, _write_raw_frames(tmp_path, 2, mean=0.0, noise=8.0, seed=6)),
@@ -368,7 +369,7 @@ def test_when_every_group_is_clipped_all_groups_get_the_same_noise(tmp_path) -> 
     assert group_frame_noises(groups) == [1.0, 1.0]
 
 
-def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_frame_that_cannot_be_read_raises_an_os_error(tmp_path: Path) -> None:
     """A missing file or a frame without a path is an `OSError`."""
     missing = ExposureGroup(1.0, [SimpleNamespace(path=str(tmp_path / "gone.fits"))])
     pathless = ExposureGroup(1.0, [SimpleNamespace()])
@@ -541,7 +542,7 @@ def test_groups_with_different_scales_and_saturation_combine_to_one_spectrum() -
     assert float(np.median(core)) == pytest.approx(float(np.median(edge)), rel=0.05)
 
 
-def test_measured_zero_fractions_say_which_groups_are_clipped(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_measured_zero_fractions_say_which_groups_are_clipped(tmp_path: Path) -> None:
     """`measure_group_frames` returns the zero fraction beside the noise."""
     clipped = ExposureGroup(0.5, _write_raw_frames(tmp_path, 2, mean=0.0, noise=8.0, seed=21))
     clean = ExposureGroup(5.0, _write_raw_frames(tmp_path, 2, mean=100.0, noise=8.0, seed=22))

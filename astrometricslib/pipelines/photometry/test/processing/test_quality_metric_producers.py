@@ -18,7 +18,7 @@ from astrometricslib.pipelines.photometry.processing.variability_analyzer import
 class _LightCurve:
     """A light-curve stand-in exposing the flux series used."""
 
-    def __init__(self, fluxes, normalized=None, detrended=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, fluxes, normalized=None, detrended=None) -> None:  # ruff: ignore[missing-type-function-argument]
         self.fluxes = fluxes
         self.fluxes_normalized = normalized or []
         self.fluxes_detrended = detrended or []
@@ -27,18 +27,18 @@ class _LightCurve:
 class _Star:
     """A stellar-object stand-in carrying only a light curve."""
 
-    def __init__(self, light_curve):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, light_curve) -> None:  # ruff: ignore[missing-type-function-argument]
         self.photometry = light_curve
 
 
-def test_a_perfectly_flat_star_scatters_at_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_perfectly_flat_star_scatters_at_zero() -> None:
     """No variation means no scatter."""
     stars = [_Star(_LightCurve([100.0] * 8))]
 
     assert median_light_curve_scatter_mag(stars) == pytest.approx(0.0)
 
 
-def test_scatter_is_reported_in_magnitudes():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_scatter_is_reported_in_magnitudes() -> None:
     """A known fractional scatter must convert to the right magnitude.
 
     A series alternating +/-10% about its mean has a fractional standard
@@ -55,7 +55,7 @@ def test_scatter_is_reported_in_magnitudes():  # ruff: ignore[missing-return-typ
     assert recovered_fraction == expected_fraction
 
 
-def test_the_median_resists_a_few_real_variables():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_median_resists_a_few_real_variables() -> None:
     """One genuine variable must not stand in for the field's precision."""
     steady = [_Star(_LightCurve([100.0, 101.0] * 5)) for _ in range(9)]
     variable = _Star(_LightCurve([50.0, 150.0] * 5))
@@ -63,7 +63,7 @@ def test_the_median_resists_a_few_real_variables():  # ruff: ignore[missing-retu
     assert median_light_curve_scatter_mag([*steady, variable]) < 0.1
 
 
-def test_detrended_fluxes_are_preferred():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detrended_fluxes_are_preferred() -> None:
     """Detrending is the last correction, so it is the truest series."""
     star = _Star(
         _LightCurve(
@@ -76,24 +76,24 @@ def test_detrended_fluxes_are_preferred():  # ruff: ignore[missing-return-type-u
     assert median_light_curve_scatter_mag([star]) == pytest.approx(0.0)
 
 
-def test_a_star_with_too_few_points_is_skipped():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_star_with_too_few_points_is_skipped() -> None:
     """Two points cannot describe a scatter."""
     assert median_light_curve_scatter_mag([_Star(_LightCurve([100.0, 101.0]))]) is None
 
 
-def test_non_positive_fluxes_are_ignored():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_non_positive_fluxes_are_ignored() -> None:
     """A failed measurement must not be treated as a faint one."""
     stars = [_Star(_LightCurve([100.0, 0.0, -5.0, 100.0, 100.0, 100.0]))]
 
     assert median_light_curve_scatter_mag(stars) == pytest.approx(0.0)
 
 
-def test_no_stars_yields_no_scatter():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_stars_yields_no_scatter() -> None:
     """An empty field is not an error."""
     assert median_light_curve_scatter_mag([]) is None
 
 
-def _identifier_with_separations(separations):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _identifier_with_separations(separations):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     """Build a StarIdentifier carrying known match separations.
 
     Returns
@@ -109,14 +109,14 @@ def _identifier_with_separations(separations):  # ruff: ignore[missing-type-func
     return identifier
 
 
-def test_residual_rms_is_the_quadratic_mean():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_residual_rms_is_the_quadratic_mean() -> None:
     """RMS, not a plain average: large misses must dominate."""
     identifier = _identifier_with_separations([3.0, 4.0])
 
     assert identifier.get_astrometric_residual_rms_arcsec() == pytest.approx(math.sqrt(12.5), rel=1e-3)
 
 
-def test_a_tight_solution_reports_a_small_residual():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_tight_solution_reports_a_small_residual() -> None:
     """Sub-arcsecond separations mean a good WCS."""
     identifier = _identifier_with_separations([0.2, 0.25, 0.3, 0.18])
 
@@ -126,6 +126,6 @@ def test_a_tight_solution_reports_a_small_residual():  # ruff: ignore[missing-re
     assert residual < 0.5
 
 
-def test_no_catalog_matches_yields_no_residual():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_catalog_matches_yields_no_residual() -> None:
     """A solve with nothing matched cannot report a residual."""
     assert _identifier_with_separations([]).get_astrometric_residual_rms_arcsec() is None

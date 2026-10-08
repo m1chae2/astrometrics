@@ -28,7 +28,7 @@ class SpectrumCalibrator:
         The math model that tells us how to convert pixels to colors.
     """
 
-    def __init__(self, instrument: SpectroscopyInstrument):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, instrument: SpectroscopyInstrument) -> None:
         """Initialize the calibrator with its instrument model.
 
         Parameters

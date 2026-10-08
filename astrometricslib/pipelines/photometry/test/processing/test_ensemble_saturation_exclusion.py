@@ -7,6 +7,7 @@ correctly records the resulting per-frame ensemble size and exclusions.
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
@@ -63,7 +64,7 @@ def _build_ensemble_stars(saturated_star_index: int, first_timestamp: datetime):
     return stars, timestamps
 
 
-def _run_analyzer(stars, timestamps):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _run_analyzer(stars, timestamps) -> dict[str, Any]:  # ruff: ignore[missing-type-function-argument]
     """Normalize the given stars and index compositions by frame path.
 
     Returns
@@ -80,7 +81,7 @@ def _run_analyzer(stars, timestamps):  # ruff: ignore[missing-type-function-argu
     return {c.frame_path: c for c in analyzer.frame_ensemble_composition}
 
 
-def test_saturated_comparison_star_excluded_only_in_its_saturated_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_saturated_comparison_star_excluded_only_in_its_saturated_frame() -> None:
     """Verify per-frame exclusion of a saturated comparison star."""
     stars, timestamps = _build_ensemble_stars(
         saturated_star_index=_STAR_INDEX_IN_ENSEMBLE,
@@ -99,7 +100,7 @@ def test_saturated_comparison_star_excluded_only_in_its_saturated_frame():  # ru
     assert saturated_frame.ensemble_size == clean_frame.ensemble_size - 1
 
 
-def test_frame_ensemble_composition_tracks_full_ensemble_when_unsaturated():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_frame_ensemble_composition_tracks_full_ensemble_when_unsaturated() -> None:
     """Verify ensemble_size matches the selected reference-star count."""
     stars, timestamps = _build_ensemble_stars(
         saturated_star_index=-1, first_timestamp=datetime(2026, 7, 20, 22, 0)
@@ -114,7 +115,7 @@ def test_frame_ensemble_composition_tracks_full_ensemble_when_unsaturated():  # 
         assert composition.ensemble_size == TARGET_ENSEMBLE_SIZE
 
 
-def test_the_ensemble_takes_the_brightest_eligible_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_ensemble_takes_the_brightest_eligible_stars() -> None:
     """Verify selection is brightest-first, not a mid-list slice.
 
     The old positional window skipped the brightest stars outright and
@@ -139,7 +140,7 @@ def test_the_ensemble_takes_the_brightest_eligible_stars():  # ruff: ignore[miss
     assert "Star_0" not in composition.excluded_comparison_star_ids
 
 
-def test_a_persistently_saturated_star_is_kept_out_of_the_ensemble():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_persistently_saturated_star_is_kept_out_of_the_ensemble() -> None:
     """Verify a star saturated in most frames is not a comparison star.
 
     Per-frame exclusion handles the occasional clip; a star that is

@@ -106,7 +106,7 @@ class ProvenanceStore:
         repository.
     """
 
-    def __init__(self, db_path: str, read_only: bool = False):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, db_path: str, read_only: bool = False) -> None:
         """Initialize the repository and ensure its tables exist.
 
         Parameters

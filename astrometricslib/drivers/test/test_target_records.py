@@ -16,13 +16,14 @@ import time
 from pathlib import Path
 
 import pytest
+from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics, Target
 from astrometricslib.drivers import local_database
 from astrometricslib.foundation.config import AppConfiguration
 
 
-def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing-type-function-argument]
+def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
     """Build an AppConfiguration pointed at a fresh, empty tmp_path library.
 
     Returns
@@ -40,7 +41,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     return config
 
 
-def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path: Path) -> None:
     """Fetching target A then target B no longer orphans A's in-memory edit.
 
     Reproduces the reported mechanism: within a single Astrometrics
@@ -71,7 +72,7 @@ def test_sequential_fetch_mutate_save_persists_both_targets(tmp_path):  # ruff: 
     assert reloaded_b.common_name == "Beta Mutated"
 
 
-def test_get_target_by_id_does_not_reload_catalog_on_cache_hit(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_target_by_id_does_not_reload_catalog_on_cache_hit(tmp_path: Path, mocker: MockerFixture) -> None:
     """Repeated by-id lookups of already-cached targets skip the disk read."""
     from astrometricslib.drivers.catalog_access import CatalogAccess
 
@@ -90,7 +91,7 @@ def test_get_target_by_id_does_not_reload_catalog_on_cache_hit(tmp_path, mocker)
     assert spy.call_count == calls_after_construction
 
 
-def test_get_target_by_id_discovers_new_disk_record_without_dropping_cache(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_target_by_id_discovers_new_disk_record_without_dropping_cache(tmp_path: Path) -> None:
     """A cache-miss lookup pulls in new records without dropping cache.
 
     If target_id isn't resident yet, get_target() must still find it by
@@ -118,7 +119,7 @@ def test_get_target_by_id_discovers_new_disk_record_without_dropping_cache(tmp_p
     assert still_cached_a.common_name == "Alpha Mutated"
 
 
-def test_save_targets_does_not_clobber_untouched_targets_concurrent_edit(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_targets_does_not_clobber_untouched_targets_concurrent_edit(tmp_path: Path) -> None:
     """save_targets() only merges in targets this process actually touched.
 
     Simulates a concurrent process editing "Target Charlie" on disk after
@@ -185,7 +186,7 @@ _SUBPROCESS_WORKER = textwrap.dedent(
 
 
 @pytest.mark.slow
-def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_concurrent_processes_do_not_clobber_each_others_target_edits(tmp_path: Path) -> None:
     """Two overlapping processes editing different targets don't race.
 
     "slow" constructs its astrometrics (snapshotting the whole catalog) and

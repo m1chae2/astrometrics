@@ -18,7 +18,7 @@ from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
 class MockAstrometricsImage(AstrometricsImage):
     """A mock AstrometricsImage for testing, allowing direct array input."""
 
-    def __init__(self, data: np.ndarray, header=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, data: np.ndarray, header=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize MockAstrometricsImage with given data and header."""
         self._data = data
         self._header = header or {}
@@ -35,7 +35,7 @@ class MockAstrometricsImage(AstrometricsImage):
         return self._header
 
 
-def test_flare_contamination_detected_when_extraction_start_is_saturated():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flare_contamination_detected_when_extraction_start_is_saturated() -> None:
     """A saturated dispersion start reads as flare contamination."""
     data = np.full((200, 200), 500.0)
     data[95:106, 95:106] = 65535.0
@@ -48,7 +48,7 @@ def test_flare_contamination_detected_when_extraction_start_is_saturated():  # r
     assert contaminated is True
 
 
-def test_flare_contamination_uses_the_threshold_it_is_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flare_contamination_uses_the_threshold_it_is_given() -> None:
     """The same pixels count as saturated only under a low threshold."""
     data = np.full((200, 200), 500.0)
     data[95:106, 95:106] = 20000.0
@@ -73,7 +73,7 @@ def test_flare_contamination_uses_the_threshold_it_is_given():  # ruff: ignore[m
     assert detect(65000.0) is False
 
 
-def test_flare_contamination_not_detected_on_clean_extraction_start():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_flare_contamination_not_detected_on_clean_extraction_start() -> None:
     """A clean, unsaturated dispersion start reads as no contamination."""
     data = np.full((200, 200), 500.0)
     image = MockAstrometricsImage(data=data)
@@ -85,7 +85,7 @@ def test_flare_contamination_not_detected_on_clean_extraction_start():  # ruff: 
     assert contaminated is False
 
 
-def test_max_extraction_length_uncapped_when_it_fits_the_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_max_extraction_length_uncapped_when_it_fits_the_image() -> None:
     """No cap is reported when the physics-derived length fits on sensor."""
     cap = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
         base_pos=(100.0, 100.0),
@@ -98,7 +98,7 @@ def test_max_extraction_length_uncapped_when_it_fits_the_image():  # ruff: ignor
     assert cap is None
 
 
-def test_max_extraction_length_capped_when_it_would_run_off_the_sensor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_max_extraction_length_capped_when_it_would_run_off_the_sensor() -> None:
     """A physics-derived length overshooting the sensor edge gets capped."""
     cap = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
         base_pos=(100.0, 100.0),
@@ -111,7 +111,7 @@ def test_max_extraction_length_capped_when_it_would_run_off_the_sensor():  # ruf
     assert cap == pytest.approx(99.0)
 
 
-def test_max_extraction_length_none_when_star_already_past_the_edge():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_max_extraction_length_none_when_star_already_past_the_edge() -> None:
     """No sensible cap can be reported if the anchor is already off-sensor."""
     cap = SpectroscopyCalibrationTuner._detect_max_extraction_length_px(
         base_pos=(100.0, 100.0),
@@ -124,7 +124,7 @@ def test_max_extraction_length_none_when_star_already_past_the_edge():  # ruff: 
     assert cap is None
 
 
-def test_the_spectrum_start_offset_uses_the_configs_start_wavelength():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_spectrum_start_offset_uses_the_configs_start_wavelength() -> None:
     """The spectrum start moves when the config sets another wavelength."""
     from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import calculate_pixel_offset
     from astrometricslib.utilities import CameraConfig, SpectroscopyConfig

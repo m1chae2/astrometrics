@@ -32,7 +32,7 @@ from astrometricslib.models.provenance import (
 )
 
 
-def test_agent_defaults_to_a_software_agent_with_no_contact_details():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_agent_defaults_to_a_software_agent_with_no_contact_details() -> None:
     """Check the default `AgentType` and that contact fields start `None`."""
     agent = Agent(id="agent:photometry:1.2.0", name="astrometricslib.photometry v1.2.0")
     assert agent.type == AgentType.SOFTWARE_AGENT
@@ -40,14 +40,14 @@ def test_agent_defaults_to_a_software_agent_with_no_contact_details():  # ruff: 
     assert agent.affiliation is None
 
 
-def test_agent_round_trips_through_its_camel_case_alias():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_agent_round_trips_through_its_camel_case_alias() -> None:
     """Check the stored camelCase form loads back into the same object."""
     agent = Agent(id="agent:stacking:1.3.0", name="astrometricslib.stacking v1.3.0", type=AgentType.PERSON)
     reloaded = Agent.model_validate(agent.model_dump(by_alias=True, mode="json"))
     assert reloaded == agent
 
 
-def test_entity_round_trips_its_derived_from_and_timestamps():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_entity_round_trips_its_derived_from_and_timestamps() -> None:
     """Check `usedEntity`/`generatedAtTime`/etc. survive a save and load."""
     entity = Entity(
         id="entity:stack-image:M13:abc123",
@@ -60,7 +60,7 @@ def test_entity_round_trips_its_derived_from_and_timestamps():  # ruff: ignore[m
     assert reloaded.used_entity == ["entity:raw-frame:1", "entity:raw-frame:2"]
 
 
-def test_entity_subclasses_carry_their_own_extra_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_entity_subclasses_carry_their_own_extra_field() -> None:
     """Check `Collection.entity`/`ValueEntity.value` round-trip correctly."""
     collection = Collection(id="entity:group:1", entity=["entity:a", "entity:b"])
     assert Collection.model_validate(collection.model_dump(by_alias=True, mode="json")).entity == [
@@ -75,7 +75,7 @@ def test_entity_subclasses_carry_their_own_extra_field():  # ruff: ignore[missin
     assert ValueEntity.model_validate(value.model_dump(by_alias=True, mode="json")).value == "42.0"
 
 
-def test_was_generated_by_and_was_configured_by_round_trip_their_aliases():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_was_generated_by_and_was_configured_by_round_trip_their_aliases() -> None:
     """Check the two relations with the least-obvious aliasing round-trip."""
     generated_by = WasGeneratedBy(activity="job-1", role="stacked_image", generation_description="gendesc:x")
     reloaded = WasGeneratedBy.model_validate(generated_by.model_dump(by_alias=True, mode="json"))
@@ -91,14 +91,14 @@ def test_was_generated_by_and_was_configured_by_round_trip_their_aliases():  # r
     assert reloaded_configured_by.parameters == []
 
 
-def test_used_and_was_associated_with_and_was_attributed_to_default_roles():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_used_and_was_associated_with_and_was_attributed_to_default_roles() -> None:
     """Check the three simple relation classes default their optional role."""
     assert Used(entity="entity:x").role is None
     assert WasAssociatedWith(agent="agent:x").role is None
     assert WasAttributedTo(agent="agent:x").role is None
 
 
-def test_activity_defaults_to_empty_lists_for_every_collection_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_activity_defaults_to_empty_lists_for_every_collection_field() -> None:
     """Check a minimal `Activity` has no informants, usages, or agents yet."""
     activity = Activity(id="job-1")
     assert activity.informant == []
@@ -107,7 +107,7 @@ def test_activity_defaults_to_empty_lists_for_every_collection_field():  # ruff:
     assert activity.was_configured_by == []
 
 
-def test_activity_round_trips_its_nested_relations():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_activity_round_trips_its_nested_relations() -> None:
     """Check `Used`/`WasAssociatedWith`/`WasConfiguredBy` nest and reload."""
     activity = Activity(
         id="job-1",
@@ -121,7 +121,7 @@ def test_activity_round_trips_its_nested_relations():  # ruff: ignore[missing-re
     assert reloaded == activity
 
 
-def test_activity_description_and_entity_description_round_trip_ids():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_activity_description_and_entity_description_round_trip_ids() -> None:
     """Check the description/template layer's id lists survive a round trip."""
     activity_description = ActivityDescription(
         id="activitydesc:photometry:1.2.0",
@@ -147,7 +147,7 @@ def test_activity_description_and_entity_description_round_trip_ids():  # ruff: 
     assert isinstance(value_description, EntityDescription)
 
 
-def test_usage_and_generation_description_default_to_no_entity_descriptions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_usage_and_generation_description_default_to_no_entity_descriptions() -> None:
     """Check a description with no linked entity kinds yet defaults empty."""
     usage = UsageDescription(id="usagedesc:photometry:input_frames", role="input_frames")
     generation = GenerationDescription(id="gendesc:photometry:light_curve", role="light_curve")
@@ -155,7 +155,7 @@ def test_usage_and_generation_description_default_to_no_entity_descriptions():  
     assert generation.entity_description == []
 
 
-def test_parameter_description_round_trips_its_value_type_alias():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parameter_description_round_trips_its_value_type_alias() -> None:
     """Check `valueType` -- the one required alias here -- round-trips."""
     description = ParameterDescription(
         id="paramdesc:photometry:aperture_radius", name="aperture_radius", value_type="float"
@@ -164,7 +164,7 @@ def test_parameter_description_round_trips_its_value_type_alias():  # ruff: igno
     assert reloaded.value_type == "float"
 
 
-def test_parameter_and_config_file_round_trip_their_description_link():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parameter_and_config_file_round_trip_their_description_link() -> None:
     """Check `Parameter`/`ConfigFile` keep their optional description id."""
     parameter = Parameter(id="job-1:param:aperture_radius", name="aperture_radius", value="3.5")
     assert parameter.parameter_description is None

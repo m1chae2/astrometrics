@@ -107,7 +107,7 @@ def _find_raw_fits_access_sites() -> set[str]:
     return files_with_access
 
 
-def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_new_files_call_fits_directly() -> None:
     """Verify no file outside the known list reads or writes FITS data raw.
 
     New code should call through `pipelines/shared/frame_scanning.py` or
@@ -126,7 +126,7 @@ def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-
     )
 
 
-def test_the_known_list_has_no_stale_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_known_list_has_no_stale_entries() -> None:
     """Verify every allowlisted file still has a raw fits.* call in it.
 
     A stale entry would hide the fact that a call site was fixed or

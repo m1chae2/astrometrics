@@ -8,6 +8,8 @@ crash, zero matches) when there aren't enough positioned stars on either
 side to register.
 """
 
+from typing import Any
+
 import numpy as np
 import pytest
 from astropy.wcs import WCS
@@ -43,7 +45,13 @@ def _spectral_star(star_id: str, x: float, y: float) -> StellarObject:
     return star
 
 
-def _build_matched_fields(rng, count=20, rotation_deg=0.4, translation=(3.0, -2.0), jitter_px=1.5):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _build_matched_fields(
+    rng,  # ruff: ignore[missing-type-function-argument]
+    count=20,  # ruff: ignore[missing-type-function-argument]
+    rotation_deg=0.4,  # ruff: ignore[missing-type-function-argument]
+    translation=(3.0, -2.0),  # ruff: ignore[missing-type-function-argument]
+    jitter_px=1.5,  # ruff: ignore[missing-type-function-argument]
+) -> tuple[Any, ...]:
     """Build a reference field and a rotated/translated/jittered copy.
 
     Returns
@@ -65,7 +73,7 @@ def _build_matched_fields(rng, count=20, rotation_deg=0.4, translation=(3.0, -2.
     return reference_stars, spectral_stars, reference_positions
 
 
-def test_identify_spectral_stars_via_registration_matches_rotated_translated_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_matches_rotated_translated_field() -> None:
     """A rotated/translated/jittered copy of the field matches fully."""
     rng = np.random.default_rng(0)
     reference_stars, spectral_stars, _ = _build_matched_fields(rng)
@@ -86,7 +94,7 @@ def test_identify_spectral_stars_via_registration_matches_rotated_translated_fie
         assert spectral_star.spectroscopy == expected_spectrum
 
 
-def test_copy_identity_carries_the_reference_stars_own_photometry():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_copy_identity_carries_the_reference_stars_own_photometry() -> None:
     """Identification gives a fresh detection the star's measured light curve.
 
     A spectroscopy detection otherwise only has whatever the spectral
@@ -107,7 +115,7 @@ def test_copy_identity_carries_the_reference_stars_own_photometry():  # ruff: ig
     assert detection.photometry.mean_flux == pytest.approx(42.0)
 
 
-def test_identify_spectral_stars_via_registration_leaves_extra_stars_unmatched():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_leaves_extra_stars_unmatched() -> None:
     """Spectral detections with no reference counterpart stay unmatched."""
     rng = np.random.default_rng(0)
     reference_stars, spectral_stars, _ = _build_matched_fields(rng)
@@ -126,7 +134,9 @@ def test_identify_spectral_stars_via_registration_leaves_extra_stars_unmatched()
         assert star.is_catalog_identified is False
 
 
-def test_identify_spectral_stars_via_registration_uses_translation_only_when_available(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_uses_translation_only_when_available(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """A pure-translation (fixed-mount) field matches without astroalign."""
     rng = np.random.default_rng(1)
     reference_stars, spectral_stars, _ = _build_matched_fields(
@@ -142,7 +152,7 @@ def test_identify_spectral_stars_via_registration_uses_translation_only_when_ava
     assert not any("astroalign" in record.message for record in caplog.records)
 
 
-def test_identify_spectral_stars_via_registration_translation_only_with_sparse_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_translation_only_with_sparse_field() -> None:
     """Translation voting still matches a small (~10-star) field reliably.
 
     Mirrors the real-world shape of a spectroscopy run: only a handful
@@ -160,7 +170,7 @@ def test_identify_spectral_stars_via_registration_translation_only_with_sparse_f
     assert matched_count == len(spectral_stars)
 
 
-def test_identify_spectral_stars_via_registration_too_few_stars_returns_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_too_few_stars_returns_zero() -> None:
     """Too few positioned stars on either side skips registration entirely."""
     reference_stars = [_reference_star(f"HD{i}", i * 10.0, i * 10.0) for i in range(2)]
     spectral_stars = [_spectral_star(f"Star_{i + 1}", i * 10.0, i * 10.0) for i in range(2)]
@@ -172,7 +182,7 @@ def test_identify_spectral_stars_via_registration_too_few_stars_returns_zero(): 
     assert spectral_stars[0].is_catalog_identified is False
 
 
-def test_identify_spectral_stars_via_registration_no_position_data_returns_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_spectral_stars_via_registration_no_position_data_returns_zero() -> None:
     """Spectral stars with no `star_data` centroid can't be registered."""
     reference_stars = [_reference_star(f"HD{i}", i * 10.0, i * 10.0) for i in range(6)]
     spectral_stars = [StellarObject(id=f"Star_{i + 1}") for i in range(6)]  # no star_data
@@ -182,7 +192,7 @@ def test_identify_spectral_stars_via_registration_no_position_data_returns_zero(
     assert matched_count == 0
 
 
-def test_estimate_registration_offset_recovers_the_shift_between_the_images():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_registration_offset_recovers_the_shift_between_the_images() -> None:
     """After matching, the median position difference is the image shift."""
     rng = np.random.default_rng(3)
     reference_stars, spectral_stars, _ = _build_matched_fields(
@@ -196,7 +206,7 @@ def test_estimate_registration_offset_recovers_the_shift_between_the_images():  
     assert dy == pytest.approx(6.0, abs=0.5)
 
 
-def test_estimate_registration_offset_refuses_a_rotated_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_registration_offset_refuses_a_rotated_field() -> None:
     """A rotation makes the stars disagree about the shift; report none."""
     rng = np.random.default_rng(4)
     reference_stars, spectral_stars, _ = _build_matched_fields(
@@ -208,7 +218,7 @@ def test_estimate_registration_offset_refuses_a_rotated_field():  # ruff: ignore
     assert estimate_registration_offset(spectral_stars, reference_stars) is None
 
 
-def test_estimate_registration_offset_needs_enough_pairs():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_registration_offset_needs_enough_pairs() -> None:
     """Three identified stars are too few to trust a median."""
     reference_stars = [_reference_star(f"HD{i}", 100.0 * i, 50.0 * i) for i in range(3)]
     spectral_stars = [_spectral_star(f"HD{i}", 100.0 * i + 2.0, 50.0 * i) for i in range(3)]
@@ -216,7 +226,7 @@ def test_estimate_registration_offset_needs_enough_pairs():  # ruff: ignore[miss
     assert estimate_registration_offset(spectral_stars, reference_stars) is None
 
 
-def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset() -> None:
     """A sky position lands `offset` pixels away in the shifted solution."""
     reference_wcs = WCS(naxis=2)
     reference_wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
@@ -233,7 +243,7 @@ def test_shift_wcs_to_frame_moves_a_sky_position_by_the_offset():  # ruff: ignor
     assert reference_wcs.wcs.crpix[0] == pytest.approx(1500.0)
 
 
-def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_and_repeated_names():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_and_repeated_names() -> None:
     """Stored pixel positions and repeated names must not skew the offset.
 
     Regression for M 27: the target's stars came from a second camera whose
@@ -268,7 +278,7 @@ def test_estimate_registration_offset_with_a_solution_ignores_stored_positions_a
     assert dy == pytest.approx(43.0, abs=0.01)
 
 
-def test_registration_carries_the_reference_stars_catalog_colour():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_registration_carries_the_reference_stars_catalog_colour() -> None:
     """A spectral star matched to a reference star takes on its B-V too."""
     rng = np.random.default_rng(6)
     reference_stars, spectral_stars, _ = _build_matched_fields(
@@ -283,7 +293,10 @@ def test_registration_carries_the_reference_stars_catalog_colour():  # ruff: ign
     assert any(star.is_catalog_identified for star in spectral_stars)
 
 
-def _solution_field(shift=(-163.0, 47.0), count=12):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _solution_field(
+    shift=(-163.0, 47.0),  # ruff: ignore[missing-type-function-argument]
+    count: int = 12,
+) -> tuple[WCS, list[StellarObject], list[StellarObject]]:
     """Build a plate solution, catalog stars and spectral detections.
 
     Parameters
@@ -328,7 +341,7 @@ def _solution_field(shift=(-163.0, 47.0), count=12):  # ruff: ignore[missing-typ
     return wcs, reference_stars, spectral_stars
 
 
-def test_a_bright_star_with_a_stale_stored_position_is_still_named_from_the_solution():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_bright_star_with_a_stale_stored_position_is_still_named_from_the_solution() -> None:
     """Regression for Deneb: the saturated star had a stale stored position.
 
     Geometric registration slid the fields by the other stars' offset and put
@@ -342,7 +355,7 @@ def test_a_bright_star_with_a_stale_stored_position_is_still_named_from_the_solu
     assert [star.id for star in spectral_stars[1:]] == [star.id for star in reference_stars[1:]]
 
 
-def test_the_solution_gives_each_star_one_detection_and_each_detection_one_name():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_solution_gives_each_star_one_detection_and_each_detection_one_name() -> None:
     """A trail point beside a star does not get the star's name too."""
     wcs, reference_stars, spectral_stars = _solution_field()
     trail_point = _spectral_star("Star_trail", spectral_stars[3].star_data["xcentroid"] + 5.0, 1500.0)
@@ -355,7 +368,7 @@ def test_the_solution_gives_each_star_one_detection_and_each_detection_one_name(
     assert trail_point.id == "Star_trail"
 
 
-def test_the_solution_declines_when_the_fields_do_not_share_one_shift():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_solution_declines_when_the_fields_do_not_share_one_shift() -> None:
     """Unrelated detections give None so the caller can fall back."""
     wcs, reference_stars, _ = _solution_field()
     rng = np.random.default_rng(3)
@@ -364,7 +377,7 @@ def test_the_solution_declines_when_the_fields_do_not_share_one_shift():  # ruff
     assert all(star.id.startswith("Star_") for star in unrelated)
 
 
-def test_a_detection_farther_than_the_limit_from_its_shifted_position_stays_unnamed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_detection_farther_than_the_limit_from_its_shifted_position_stays_unnamed() -> None:
     """A detection 40 px from where the star should be is not that star."""
     wcs, reference_stars, spectral_stars = _solution_field()
     spectral_stars[5].star_data["xcentroid"] += 40.0
@@ -372,7 +385,7 @@ def test_a_detection_farther_than_the_limit_from_its_shifted_position_stays_unna
     assert spectral_stars[5].id == "Star_5"
 
 
-def test_a_brighter_catalog_entry_wins_over_a_companion_a_few_pixels_away():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_brighter_catalog_entry_wins_over_a_companion_a_few_pixels_away() -> None:
     """Regression for Navi: the companion entry sat nearer by 2 px and won."""
     wcs, reference_stars, spectral_stars = _solution_field()
     primary = reference_stars[0]
@@ -386,7 +399,7 @@ def test_a_brighter_catalog_entry_wins_over_a_companion_a_few_pixels_away():  # 
     assert spectral_stars[0].id == "Bright"
 
 
-def _add_companion(reference_stars, separation_px):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _add_companion(reference_stars: list[StellarObject], separation_px: float) -> StellarObject:
     """Add a fainter catalog star a given number of pixels from the bright one.
 
     Parameters
@@ -416,7 +429,7 @@ def _add_companion(reference_stars, separation_px):  # ruff: ignore[missing-type
     return companion
 
 
-def test_two_resolved_stars_sharing_one_detection_are_both_named_and_placed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_two_resolved_stars_sharing_one_detection_are_both_named_and_placed() -> None:
     """Regression for Albireo: A and B, 17 px apart, were one detection.
 
     The blob took the nearer star's name and the other star was left out. Both
@@ -442,7 +455,7 @@ def test_two_resolved_stars_sharing_one_detection_are_both_named_and_placed():  
     assert separation == pytest.approx(17.0, abs=0.5)
 
 
-def test_a_companion_closer_than_a_zero_order_stays_one_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_companion_closer_than_a_zero_order_stays_one_star() -> None:
     """Navi's primary and companion, 4 px apart, are not split into two."""
     wcs, reference_stars, spectral_stars = _solution_field()
     _add_companion(reference_stars, 4.0)

@@ -48,7 +48,7 @@ class _AnalysisView:
         `"spectroscopy"`.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         context: AnalysisContext,
         enriched_objects: list[StellarObject],
@@ -56,7 +56,7 @@ class _AnalysisView:
         ax_image=None,  # ruff: ignore[missing-type-function-argument]
         ax_spectrum=None,  # ruff: ignore[missing-type-function-argument]
         mode: str = "spectroscopy",
-    ):
+    ) -> None:
         self.context = context
         self.stellar_objects = enriched_objects
         self.config = VisualizationConfig()
@@ -104,7 +104,7 @@ class _AnalysisView:
         self.star_patches = []
         self.rectangle_patches = []
 
-    def plot(self, block: bool = True, add_buttons: bool = True, limit: int | None = None):  # ruff: ignore[missing-return-type-private-function]
+    def plot(self, block: bool = True, add_buttons: bool = True, limit: int | None = None) -> None:
         """Launch the interactive visualization window."""
         if not self.stellar_objects:
             logger.info("No stars to display.")
@@ -139,11 +139,11 @@ class _AnalysisView:
         if block:
             plt.show()
 
-    def setup_multi_field_controls(self):  # ruff: ignore[missing-return-type-private-function]
+    def setup_multi_field_controls(self) -> None:
         """Configure interactive controls across multiple target fields."""
         pass
 
-    def _plot_active_analysis(self):  # ruff: ignore[missing-return-type-private-function]
+    def _plot_active_analysis(self) -> None:
         """Render active star 1D analysis profile (spectrum or light curve)."""
         if not self.stellar_objects:
             return
@@ -177,7 +177,7 @@ class _AnalysisView:
                 is_variable_candidate=is_var,
             )
 
-    def _update_selection(self, index: int):  # ruff: ignore[missing-return-type-private-function]
+    def _update_selection(self, index: int) -> None:
         """Handle selection of a new star."""
         self.active_star_index = index
         for i, cp in enumerate(self.star_patches):
@@ -197,7 +197,7 @@ class _AnalysisView:
         self._plot_active_analysis()
         self.fig.canvas.draw_idle()
 
-    def _handle_star_drag(self, index: int, new_x: float, new_y: float):  # ruff: ignore[missing-return-type-private-function]
+    def _handle_star_drag(self, index: int, new_x: float, new_y: float) -> None:
         """Handle dragging of a star's centroid.
 
         Parameters
@@ -261,7 +261,7 @@ class _AnalysisView:
                     return i
         return None
 
-    def _sync_crosshairs(self, panel: str, x: float, y: float):  # ruff: ignore[missing-return-type-private-function]
+    def _sync_crosshairs(self, panel: str, x: float, y: float) -> None:
         """Synchronize crosshairs between panels.
 
         Parameters

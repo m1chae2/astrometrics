@@ -12,7 +12,7 @@ from astrometricslib.pipelines.photometry.post_processing.assess_output_quality 
 )
 
 
-def test_assess_output_quality_margin_is_signed_mad_distance_from_cutoff():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_output_quality_margin_is_signed_mad_distance_from_cutoff() -> None:
     """Verify the margin is (cv - cutoff) / mad_cv, positive above cutoff."""
     assessment = assess_output_quality(coefficient_of_variation=0.10, adaptive_cutoff=0.05, mad_cv=0.01)
 
@@ -21,7 +21,7 @@ def test_assess_output_quality_margin_is_signed_mad_distance_from_cutoff():  # r
     assert assessment.is_trustworthy is True
 
 
-def test_assess_output_quality_negative_margin_below_cutoff():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_output_quality_negative_margin_below_cutoff() -> None:
     """Verify a star well below cutoff gets a confidently negative margin."""
     assessment = assess_output_quality(coefficient_of_variation=0.01, adaptive_cutoff=0.05, mad_cv=0.01)
 
@@ -30,7 +30,7 @@ def test_assess_output_quality_negative_margin_below_cutoff():  # ruff: ignore[m
     assert assessment.is_trustworthy is True
 
 
-def test_assess_output_quality_flags_low_confidence_near_the_cutoff():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_output_quality_flags_low_confidence_near_the_cutoff() -> None:
     """Verify a margin inside the threshold is low confidence, outside not."""
     mad_cv = 0.01
     cutoff = 0.05
@@ -51,7 +51,7 @@ def test_assess_output_quality_flags_low_confidence_near_the_cutoff():  # ruff: 
     assert just_outside.is_trustworthy is True
 
 
-def test_assess_output_quality_guards_against_zero_mad():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_output_quality_guards_against_zero_mad() -> None:
     """Verify a zero mad_cv doesn't raise a division error."""
     assessment = assess_output_quality(coefficient_of_variation=0.10, adaptive_cutoff=0.05, mad_cv=0.0)
 

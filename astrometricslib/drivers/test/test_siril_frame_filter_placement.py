@@ -21,6 +21,8 @@ stubbed out, capturing the command script that would have been sent.
 
 import io
 import logging
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -30,7 +32,7 @@ from astrometricslib.drivers import siril_interface
 
 
 @pytest.fixture
-def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Any]:
     """Run process_target with Siril stubbed, returning the script it built.
 
     Returns
@@ -42,11 +44,18 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
     """
     sent_commands: list[str] = []
 
-    def fake_send_commands(self, command_pipe, commands, job_logger=None, status_queue=None, process=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_send_commands(
+        self,  # ruff: ignore[missing-type-function-argument]
+        command_pipe,  # ruff: ignore[missing-type-function-argument]
+        commands,  # ruff: ignore[missing-type-function-argument]
+        job_logger=None,  # ruff: ignore[missing-type-function-argument]
+        status_queue=None,  # ruff: ignore[missing-type-function-argument]
+        process=None,  # ruff: ignore[missing-type-function-argument]
+    ) -> None:
         sent_commands.clear()
         sent_commands.extend(commands)
 
-    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         target_folder = tmp_path / "work" / id
         for subdirectory in ("biases", "darks", "flats", "lights", "process"):
             (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
@@ -123,7 +132,7 @@ def captured_siril_script(tmp_path, monkeypatch):  # ruff: ignore[missing-type-f
 class _NullContext:
     """A context manager that does nothing, standing in for the Siril lock."""
 
-    def __enter__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __enter__(self) -> _NullContext:
         """Enter the no-op context.
 
         Returns
@@ -133,7 +142,7 @@ class _NullContext:
         """
         return self
 
-    def __exit__(self, *exception_details):  # ruff: ignore[missing-return-type-special-method,missing-type-args]
+    def __exit__(self, *exception_details) -> bool:  # ruff: ignore[missing-type-args]
         """Leave the no-op context without suppressing anything.
 
         Returns
@@ -157,7 +166,7 @@ def _find_command(commands: list[str], verb: str) -> str:
     return matches[0]
 
 
-def test_standard_path_filters_on_seqapplyreg_not_stack(captured_siril_script):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_standard_path_filters_on_seqapplyreg_not_stack(captured_siril_script: Callable[..., Any]) -> None:
     """The imaging path drops frames before they are ever resampled."""
     commands = captured_siril_script(is_spectral=False, filter_wfwhm="90%", filter_round="90%")
 
@@ -209,7 +218,7 @@ def test_standard_imaging_ignores_the_spectral_star_detection(captured_siril_scr
     assert _find_command(commands, "setfindstar") == "setfindstar -relax=on"
 
 
-def test_filters_are_never_applied_twice(captured_siril_script):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_filters_are_never_applied_twice(captured_siril_script: Callable[..., Any]) -> None:
     """No single run passes a frame filter at both stages.
 
     Compounding 90% at seqapplyreg with 90% at stack keeps 81% of the
@@ -222,7 +231,7 @@ def test_filters_are_never_applied_twice(captured_siril_script):  # ruff: ignore
             assert occurrences == 1, f"{filter_flag} appears {occurrences}x (is_spectral={is_spectral})"
 
 
-def test_no_filter_options_when_none_configured(captured_siril_script):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_no_filter_options_when_none_configured(captured_siril_script: Callable[..., Any]) -> None:
     """An unfiltered run passes bare commands, not empty option strings."""
     commands = captured_siril_script(is_spectral=False, filter_wfwhm=None, filter_round=None)
 

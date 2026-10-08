@@ -73,7 +73,7 @@ def read_header(path: str) -> fits.Header:
         return hdu.header.copy()
 
 
-def read_data(path: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def read_data(path: str) -> np.ndarray | None:
     """Read the raw pixel array from the FITS file.
 
     Parameters

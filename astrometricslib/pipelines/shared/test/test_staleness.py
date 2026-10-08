@@ -6,6 +6,8 @@ verdict -- a legacy result predating this system is not the same thing
 as a result known to be current.
 """
 
+from pathlib import Path
+
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.provenance import Activity, Agent, WasAssociatedWith
@@ -18,7 +20,7 @@ from astrometricslib.pipelines.shared.staleness import (
 )
 
 
-def make_store(tmp_path) -> ProvenanceStore:  # ruff: ignore[missing-type-function-argument]
+def make_store(tmp_path: Path) -> ProvenanceStore:
     """Build a store backed by a throwaway database.
 
     Returns
@@ -37,33 +39,33 @@ def record_run(store: ProvenanceStore, job_id: str, pipeline_name: str, pipeline
     store.record_was_associated_with(job_id, WasAssociatedWith(agent=agent_id))
 
 
-def test_is_result_stale_is_unknown_with_no_job_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_is_result_stale_is_unknown_with_no_job_id(tmp_path: Path) -> None:
     """Check a result with no recorded provenance reads as unknown."""
     store = make_store(tmp_path)
     assert is_result_stale(None, "1.2.0", store) is None
 
 
-def test_is_result_stale_is_unknown_when_the_activity_has_no_agent(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_is_result_stale_is_unknown_when_the_activity_has_no_agent(tmp_path: Path) -> None:
     """Check a job id with no resolvable agent also reads as unknown."""
     store = make_store(tmp_path)
     assert is_result_stale("job-does-not-exist", "1.2.0", store) is None
 
 
-def test_is_result_stale_is_false_when_the_version_matches(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_is_result_stale_is_false_when_the_version_matches(tmp_path: Path) -> None:
     """Check a result from the current pipeline version reads as fresh."""
     store = make_store(tmp_path)
     record_run(store, "job-1", "photometry", "1.2.0")
     assert is_result_stale("job-1", "1.2.0", store) is False
 
 
-def test_is_result_stale_is_true_when_the_version_differs(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_is_result_stale_is_true_when_the_version_differs(tmp_path: Path) -> None:
     """Check a result from an older pipeline version reads as stale."""
     store = make_store(tmp_path)
     record_run(store, "job-1", "photometry", "1.2.0")
     assert is_result_stale("job-1", "1.3.0", store) is True
 
 
-def test_photometry_result_is_stale_reads_its_own_generated_by_job_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_photometry_result_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the photometry wrapper compares against the live version."""
     from astrometricslib.models.quality_summary import PHOTOMETRY_PIPELINE_VERSION
 
@@ -74,7 +76,7 @@ def test_photometry_result_is_stale_reads_its_own_generated_by_job_id(tmp_path):
     assert photometry_result_is_stale(PhotometryResult(), store) is None
 
 
-def test_spectroscopy_result_is_stale_reads_its_own_generated_by_job_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_spectroscopy_result_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the spectroscopy wrapper compares against the live version."""
     from astrometricslib.models.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 
@@ -85,7 +87,7 @@ def test_spectroscopy_result_is_stale_reads_its_own_generated_by_job_id(tmp_path
     assert SPECTROSCOPY_PIPELINE_VERSION != "0.9.0"
 
 
-def test_catalog_match_quality_is_stale_reads_its_own_generated_by_job_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_catalog_match_quality_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the astrometry wrapper compares against the live version."""
     from astrometricslib.models.quality_summary import ASTROMETRY_PIPELINE_VERSION
 

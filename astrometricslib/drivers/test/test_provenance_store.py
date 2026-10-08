@@ -6,6 +6,8 @@ is first-write-wins), the `WasGeneratedBy` 0..1 cardinality rule, and the
 join query `get_agent_for_activity` relies on.
 """
 
+from pathlib import Path
+
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.models.provenance import (
     Activity,
@@ -22,7 +24,7 @@ from astrometricslib.models.provenance import (
 )
 
 
-def make_store(tmp_path) -> ProvenanceStore:  # ruff: ignore[missing-type-function-argument]
+def make_store(tmp_path: Path) -> ProvenanceStore:
     """Build a store backed by a throwaway database.
 
     Returns
@@ -33,7 +35,7 @@ def make_store(tmp_path) -> ProvenanceStore:  # ruff: ignore[missing-type-functi
     return ProvenanceStore(str(tmp_path / "provenance.db"))
 
 
-def test_seeded_entity_descriptions_and_config_file_description_exist(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_seeded_entity_descriptions_and_config_file_description_exist(tmp_path: Path) -> None:
     """Check `_init_db` seeds the five entity kinds and the config kind."""
     store = make_store(tmp_path)
     for entity_description_id in (
@@ -55,7 +57,7 @@ def test_seeded_entity_descriptions_and_config_file_description_exist(tmp_path):
         assert store.get_entity(entity.id).entity_description == entity_description_id
 
 
-def test_creating_a_second_store_on_the_same_database_does_not_fail(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_creating_a_second_store_on_the_same_database_does_not_fail(tmp_path: Path) -> None:
     """Check `CREATE TABLE IF NOT EXISTS` is safe to run twice."""
     path = str(tmp_path / "provenance.db")
     ProvenanceStore(path)
@@ -64,7 +66,7 @@ def test_creating_a_second_store_on_the_same_database_does_not_fail(tmp_path):  
     assert second.get_agent_for_activity("job-missing") is None
 
 
-def test_recording_the_same_agent_twice_keeps_the_first_one(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_recording_the_same_agent_twice_keeps_the_first_one(tmp_path: Path) -> None:
     """Check `Agent` rows are immutable once created."""
     store = make_store(tmp_path)
     store.record_agent(Agent(id="agent:photometry:1.2.0", name="astrometricslib.photometry v1.2.0"))
@@ -76,7 +78,7 @@ def test_recording_the_same_agent_twice_keeps_the_first_one(tmp_path):  # ruff: 
     assert agent.name == "astrometricslib.photometry v1.2.0"
 
 
-def test_recording_the_same_activity_description_twice_keeps_the_first_one(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_recording_the_same_activity_description_twice_keeps_the_first_one(tmp_path: Path) -> None:
     """Check `ActivityDescription` rows are not overwritten by a later call."""
     store = make_store(tmp_path)
     store.ensure_activity_description(
@@ -92,7 +94,7 @@ def test_recording_the_same_activity_description_twice_keeps_the_first_one(tmp_p
     assert store.get_activity("job-1").activity_description == "activitydesc:photometry:1.2.0"
 
 
-def test_recording_the_same_parameter_description_twice_keeps_the_first_one(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_recording_the_same_parameter_description_twice_keeps_the_first_one(tmp_path: Path) -> None:
     """Check `ParameterDescription` is first-write-wins, not last-write."""
     store = make_store(tmp_path)
     store.record_parameter_description(
@@ -119,7 +121,7 @@ def test_recording_the_same_parameter_description_twice_keeps_the_first_one(tmp_
     )
 
 
-def test_was_generated_by_enforces_at_most_one_generating_activity(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_was_generated_by_enforces_at_most_one_generating_activity(tmp_path: Path) -> None:
     """Check a second `WasGeneratedBy` for the same entity replaces, not adds.
 
     This is the spec's 0..1 cardinality rule (an entity has at most one
@@ -142,14 +144,14 @@ def test_was_generated_by_enforces_at_most_one_generating_activity(tmp_path):  #
     assert rows == [("job-2", "second")]
 
 
-def test_get_agent_for_activity_returns_none_for_a_legacy_activity_with_no_agent(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_agent_for_activity_returns_none_for_a_legacy_activity_with_no_agent(tmp_path: Path) -> None:
     """Check an activity with no association reads as `None`, not an error."""
     store = make_store(tmp_path)
     store.record_activity(Activity(id="job-legacy"), target_id="M13")
     assert store.get_agent_for_activity("job-legacy") is None
 
 
-def test_get_activity_round_trips_informants_and_description(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_activity_round_trips_informants_and_description(tmp_path: Path) -> None:
     """Check the informant chain and description id survive a save and load."""
     store = make_store(tmp_path)
     store.record_activity(
@@ -162,13 +164,13 @@ def test_get_activity_round_trips_informants_and_description(tmp_path):  # ruff:
     assert activity.activity_description == "activitydesc:x"
 
 
-def test_get_activity_returns_none_when_not_recorded(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_activity_returns_none_when_not_recorded(tmp_path: Path) -> None:
     """Check an unknown activity id reads as `None`, not an error."""
     store = make_store(tmp_path)
     assert store.get_activity("job-does-not-exist") is None
 
 
-def test_get_lineage_returns_every_activity_for_a_target_newest_first(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_lineage_returns_every_activity_for_a_target_newest_first(tmp_path: Path) -> None:
     """Check lineage is scoped by target and ordered newest first."""
     store = make_store(tmp_path)
     store.record_activity(Activity(id="job-1", name="stacking"), target_id="M13")
@@ -181,7 +183,7 @@ def test_get_lineage_returns_every_activity_for_a_target_newest_first(tmp_path):
     assert store.get_lineage("NoSuchTarget") == []
 
 
-def test_record_entity_round_trips_a_dataset_entity_and_its_derivation(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_record_entity_round_trips_a_dataset_entity_and_its_derivation(tmp_path: Path) -> None:
     """Check `DatasetEntity` keeps its subtype and `used_entity` list."""
     store = make_store(tmp_path)
     entity = DatasetEntity(
@@ -199,7 +201,7 @@ def test_record_entity_round_trips_a_dataset_entity_and_its_derivation(tmp_path)
     assert isinstance(reloaded, DatasetEntityType)
 
 
-def test_used_relation_round_trips_role_and_usage_description(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_used_relation_round_trips_role_and_usage_description(tmp_path: Path) -> None:
     """Check `record_used` is retrievable through the activity's own record."""
     store = make_store(tmp_path)
     store.record_activity(Activity(id="job-1"), target_id="M13")
@@ -211,7 +213,7 @@ def test_used_relation_round_trips_role_and_usage_description(tmp_path):  # ruff
     # get_used, so this is a smoke check of the write path only.
 
 
-def test_was_associated_with_agent_type_round_trips(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_was_associated_with_agent_type_round_trips(tmp_path: Path) -> None:
     """Check `AgentType` survives the store's own string conversion."""
     store = make_store(tmp_path)
     store.record_agent(Agent(id="agent:x", name="x", type=AgentType.PERSON))

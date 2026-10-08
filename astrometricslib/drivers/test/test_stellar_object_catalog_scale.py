@@ -15,7 +15,7 @@ import pytest
 from astrometricslib.foundation.config import AppConfiguration
 
 
-def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing-type-function-argument]
+def _make_isolated_config(tmp_path: Path) -> AppConfiguration:
     """Build an AppConfiguration pointed at a fresh, empty tmp_path library.
 
     Returns
@@ -33,7 +33,7 @@ def _make_isolated_config(tmp_path) -> AppConfiguration:  # ruff: ignore[missing
     return config
 
 
-def test_star_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_reports_the_expected_fields(tmp_path: Path) -> None:
     """Verify summaries carry id/name/targetIds/hasSpectra/hasPhotometry.
 
     Exercises StellarCatalog.query end-to-end through a
@@ -74,7 +74,7 @@ def test_star_summaries_reports_the_expected_fields(tmp_path):  # ruff: ignore[m
     assert summaries["EmptyStar"]["hasPhotometry"] is False
 
 
-def test_star_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_filters_by_target_id(tmp_path: Path) -> None:
     """Verify target_id restricts to stars whose targetIds include it."""
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.drivers.catalog_access import CatalogAccess
@@ -92,7 +92,7 @@ def test_star_summaries_filters_by_target_id(tmp_path):  # ruff: ignore[missing-
     assert [s["id"] for s in summaries] == ["InField"]
 
 
-def test_star_summaries_target_id_substring_collision_is_still_exact(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_target_id_substring_collision_is_still_exact(tmp_path: Path) -> None:
     """A target id that is a substring of another must not false-match.
 
     target_id narrows the SQL query with a LIKE prefilter for
@@ -178,7 +178,7 @@ def test_star_summaries_without_a_limit_return_every_row(tmp_path: Path) -> None
     assert len(catalog.query(limit=None).stars) == 60
 
 
-def test_star_summaries_matches_the_model_computed_properties(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_star_summaries_matches_the_model_computed_properties(tmp_path: Path) -> None:
     """Verify the recorded columns agree with StellarObject's own properties.
 
     has_spectra/has_photometry are computed once at write time (see

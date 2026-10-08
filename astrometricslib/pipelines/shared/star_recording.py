@@ -23,7 +23,8 @@ import logging
 import math
 import re
 import sqlite3
-from typing import NamedTuple
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 from astrometricslib.foundation.errors import AstrometricsError
@@ -128,7 +129,7 @@ def _drop_unresolved_stars(
 def _reconcile_position_only_star_ids(
     stellar_objects: list,
     *,
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     target_id: str,
 ) -> list:
     """Reconcile and merge catalog IDs based on star positions.
@@ -248,7 +249,7 @@ def _reconcile_position_only_star_ids(
 
 
 def _move_catalog_row_to_new_id(
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     *,
     old_id: str,
     new_id: str,
@@ -307,7 +308,7 @@ def _move_catalog_row_to_new_id(
 def _reconcile_identified_star_ids(
     stellar_objects: list,
     *,
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     target_id: str,
 ) -> list:
     """Save a star under one name even when two catalogs name it differently.
@@ -467,9 +468,9 @@ def _reconcile_identified_star_ids(
 def record_pipeline_stars(
     stellar_objects: list,
     *,
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     target_id: str,
-    merge_function,  # ruff: ignore[missing-type-function-argument]
+    merge_function: Callable[..., Any],
     pipeline_name: str | None = None,
     already_dropped: bool = False,
 ) -> tuple[list, StarIdentificationBreakdown | None]:
@@ -540,7 +541,7 @@ def record_pipeline_stars(
     return stellar_objects, breakdown
 
 
-def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for astrometry updates to a star.
 
     Keeps any old target names but adds new ones. It also updates
@@ -566,7 +567,7 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     return existing_stellar_object
 
 
-def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for spectroscopy updates to a star.
 
     Adds new target names to the list and updates the light spectrum
@@ -603,7 +604,7 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     return existing_stellar_object
 
 
-def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for photometry updates to a star.
 
     Adds new target names, updates cross-session identity data,

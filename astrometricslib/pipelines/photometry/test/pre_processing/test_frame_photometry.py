@@ -15,7 +15,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
 )
 
 
-def test_measure_aperture_flux_pins_sum_method_exact():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_aperture_flux_pins_sum_method_exact() -> None:
     """Verifies the exact flux value produced by sum_method="exact".
 
     photutils.aperture supports several ways to decide how much of a
@@ -38,7 +38,7 @@ def test_measure_aperture_flux_pins_sum_method_exact():  # ruff: ignore[missing-
     assert is_saturated is False
 
 
-def test_measure_aperture_flux_empty_annulus_uses_local_median():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_aperture_flux_empty_annulus_uses_local_median() -> None:
     """Verifies the local-cutout-median fallback when the annulus is empty.
 
     A star near the edge of a small picture might not have any
@@ -54,7 +54,7 @@ def test_measure_aperture_flux_empty_annulus_uses_local_median():  # ruff: ignor
     assert is_saturated is False
 
 
-def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback() -> None:
     """Verifies an explicit fallback_background overrides the local median.
 
     This is the background the per-frame worker passes in (a frame-wide
@@ -72,7 +72,7 @@ def test_measure_aperture_flux_empty_annulus_honors_explicit_fallback():  # ruff
     assert is_saturated is False
 
 
-def test_locate_star_centroid_finds_shifted_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_locate_star_centroid_finds_shifted_star() -> None:
     """Verifies a star shifted from its expected position is re-located."""
     data = np.full((200, 200), 500.0)
     data[63:68, 73:78] += 4000.0  # true centroid near (75, 65)
@@ -84,19 +84,19 @@ def test_locate_star_centroid_finds_shifted_star():  # ruff: ignore[missing-retu
     assert abs(located_y - 65.0) < 1.0
 
 
-def test_locate_star_centroid_returns_none_outside_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_locate_star_centroid_returns_none_outside_frame() -> None:
     """Verifies a search window falling off the frame edge returns None."""
     data = np.full((50, 50), 500.0)
     assert locate_star_centroid(data, expected_x=5.0, expected_y=5.0) is None
 
 
-def test_locate_star_centroid_returns_none_with_no_signal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_locate_star_centroid_returns_none_with_no_signal() -> None:
     """Verifies a flat, background-only window returns None."""
     data = np.full((200, 200), 500.0)
     assert locate_star_centroid(data, expected_x=100.0, expected_y=100.0) is None
 
 
-def test_calculate_frame_offset_recovers_uniform_shift():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calculate_frame_offset_recovers_uniform_shift() -> None:
     """Verifies the median offset matches a known shift across many stars.
 
     Uses a known uniform frame-to-frame shift applied to every star.
@@ -123,7 +123,7 @@ def test_calculate_frame_offset_recovers_uniform_shift():  # ruff: ignore[missin
     assert abs(delta_y - true_shift_y) < 0.5
 
 
-def test_calculate_frame_offset_returns_zero_when_too_few_stars_located():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calculate_frame_offset_returns_zero_when_too_few_stars_located() -> None:
     """Verifies the offset defaults to (0, 0) when too few stars are located.
 
     Fewer than 5 reference stars re-located (e.g. all fell on empty

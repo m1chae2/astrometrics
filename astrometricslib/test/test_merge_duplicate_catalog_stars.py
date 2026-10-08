@@ -6,6 +6,7 @@ merge end to end on a throwaway catalog -- never the real one.
 """
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarSummary
 from astrometricslib.foundation.config import AppConfiguration
@@ -43,7 +44,7 @@ def _curve(minutes: list[int], flux: float = 10.0) -> PhotometryResult:
     )
 
 
-def test_rows_on_the_same_spot_form_a_cluster_and_neighbors_do_not():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_rows_on_the_same_spot_form_a_cluster_and_neighbors_do_not() -> None:
     """Verify a close pair clusters and a wide pair does not."""
     summaries = [
         _summary("HD 1", 250.0, 36.0),
@@ -56,7 +57,7 @@ def test_rows_on_the_same_spot_form_a_cluster_and_neighbors_do_not():  # ruff: i
     assert find_duplicate_clusters(summaries) == [["Gaia DR3 1", "HD 1"]]
 
 
-def test_survivor_prefers_hd_or_bd_then_gaia():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_survivor_prefers_hd_or_bd_then_gaia() -> None:
     """Verify the preferred name wins."""
     assert choose_survivor_id(["Gaia DR3 9", "HD 5", "2MASS J1"]) == "HD 5"
     assert choose_survivor_id(["Gaia DR3 9", "BD+36  2764"]) == "BD+36  2764"
@@ -64,7 +65,7 @@ def test_survivor_prefers_hd_or_bd_then_gaia():  # ruff: ignore[missing-return-t
     assert choose_survivor_id(["TYC 1-2-3", "2MASS J1"]) == "2MASS J1"
 
 
-def test_two_light_curves_are_joined_by_time_with_the_first_winning_ties():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_two_light_curves_are_joined_by_time_with_the_first_winning_ties() -> None:
     """Verify the union, ordering, and tie rule."""
     merged = merge_light_curves(_curve([0, 10, 20], flux=1.0), _curve([10, 30], flux=2.0))
 
@@ -72,7 +73,7 @@ def test_two_light_curves_are_joined_by_time_with_the_first_winning_ties():  # r
     assert merged.fluxes == [1.0, 1.0, 1.0, 2.0]
 
 
-def test_a_light_curve_out_of_step_with_its_times_is_not_merged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_light_curve_out_of_step_with_its_times_is_not_merged() -> None:
     """Verify a misaligned list makes the join refuse rather than guess."""
     broken = _curve([0, 10, 20])
     broken.fluxes = [1.0, 2.0]
@@ -80,7 +81,7 @@ def test_a_light_curve_out_of_step_with_its_times_is_not_merged():  # ruff: igno
     assert merge_light_curves(broken, _curve([30])) is None
 
 
-def test_merge_cluster_folds_the_duplicate_into_the_survivor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_merge_cluster_folds_the_duplicate_into_the_survivor() -> None:
     """Verify photometry is joined and targets combined, keeping the HD row."""
     survivor = StellarObject(id="HD 1", target_ids=["M 13"], photometry=_curve([0, 10]))
     duplicate = StellarObject(id="Gaia DR3 1", target_ids=["M 92"], photometry=_curve([20, 30]))
@@ -94,7 +95,7 @@ def test_merge_cluster_folds_the_duplicate_into_the_survivor():  # ruff: ignore[
     assert sorted(merged.target_ids) == ["M 13", "M 92"]
 
 
-def test_when_two_rows_have_spectra_the_longer_one_is_kept():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_when_two_rows_have_spectra_the_longer_one_is_kept() -> None:
     """Verify the spectrum with more samples survives."""
     short = SpectroscopyResult(wavelengths_angstrom=[4000.0, 4100.0], intensities=[1.0, 1.0])
     long = SpectroscopyResult(wavelengths_angstrom=[4000.0, 4100.0, 4200.0], intensities=[1.0, 1.0, 1.0])
@@ -108,7 +109,7 @@ def test_when_two_rows_have_spectra_the_longer_one_is_kept():  # ruff: ignore[mi
     assert removed == ["Gaia DR3 1"]
 
 
-def test_a_spectrum_held_only_by_the_duplicate_moves_to_the_survivor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_spectrum_held_only_by_the_duplicate_moves_to_the_survivor() -> None:
     """Verify the spectrum result is kept when only the duplicate has one."""
     spectrum = SpectroscopyResult(
         wavelengths_angstrom=[4000.0, 4100.0, 4200.0],
@@ -125,7 +126,7 @@ def test_a_spectrum_held_only_by_the_duplicate_moves_to_the_survivor():  # ruff:
     assert removed == ["Gaia DR3 1"]
 
 
-def test_two_rows_from_the_same_catalog_are_different_objects():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_two_rows_from_the_same_catalog_are_different_objects() -> None:
     """Verify two Gaia ids are never merged, however close."""
     first = StellarObject(id="Gaia DR3 1")
     second = StellarObject(id="Gaia DR3 2")
@@ -137,7 +138,7 @@ def test_two_rows_from_the_same_catalog_are_different_objects():  # ruff: ignore
     assert catalog_family("[H97b] 20710") == "[H"
 
 
-def test_end_to_end_on_an_isolated_catalog(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_end_to_end_on_an_isolated_catalog(tmp_path: Path) -> None:
     """Verify the found cluster merges and the duplicate row disappears."""
     library_path = tmp_path / "library"
     (library_path / "targets").mkdir(parents=True)

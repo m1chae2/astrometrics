@@ -117,7 +117,7 @@ def _record(catalog_access: CatalogAccess, *stars: StellarObject) -> list[Stella
     return recorded
 
 
-def test_a_gaia_star_at_a_saved_hd_position_reuses_the_hd_row(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_gaia_star_at_a_saved_hd_position_reuses_the_hd_row(catalog_access: CatalogAccess) -> None:
     """Verify the new star is saved into the HD row, not beside it."""
     _save(catalog_access, _star("HD 1"))
 
@@ -130,7 +130,9 @@ def test_a_gaia_star_at_a_saved_hd_position_reuses_the_hd_row(catalog_access):  
     assert sorted(row.target_ids) == ["M 13", "M 92"]
 
 
-def test_an_hd_star_at_a_saved_gaia_position_renames_the_row_and_keeps_its_data(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_an_hd_star_at_a_saved_gaia_position_renames_the_row_and_keeps_its_data(
+    catalog_access: CatalogAccess,
+) -> None:
     """Verify the better name survives with the saved spectrum and curve."""
     spectrum = SpectroscopyResult(
         wavelengths_angstrom=[4000.0, 4100.0, 4200.0],
@@ -153,7 +155,7 @@ def test_an_hd_star_at_a_saved_gaia_position_renames_the_row_and_keeps_its_data(
     assert row.photometry.mean_flux == pytest.approx(12.0)
 
 
-def test_two_ids_from_one_catalog_are_left_as_two_stars(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_two_ids_from_one_catalog_are_left_as_two_stars(catalog_access: CatalogAccess) -> None:
     """Verify a close double star, with two Gaia ids, is not collapsed."""
     _save(catalog_access, _star("Gaia DR3 1"))
 
@@ -163,7 +165,7 @@ def test_two_ids_from_one_catalog_are_left_as_two_stars(catalog_access):  # ruff
     assert _saved_ids(catalog_access) == ["Gaia DR3 1", "Gaia DR3 2"]
 
 
-def test_a_star_farther_than_the_tolerance_is_a_different_star(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_star_farther_than_the_tolerance_is_a_different_star(catalog_access: CatalogAccess) -> None:
     """Verify a neighbor 5 arcseconds away keeps its own name."""
     _save(catalog_access, _star("HD 1"))
 
@@ -173,7 +175,7 @@ def test_a_star_farther_than_the_tolerance_is_a_different_star(catalog_access): 
     assert _saved_ids(catalog_access) == ["Gaia DR3 9", "HD 1"]
 
 
-def test_a_spot_with_two_saved_rows_is_left_for_the_cleanup_script(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_spot_with_two_saved_rows_is_left_for_the_cleanup_script(catalog_access: CatalogAccess) -> None:
     """Verify an ambiguous match changes nothing rather than guessing."""
     _save(catalog_access, _star("HD 1"), _star("2MASS J1", arcseconds_east=0.4))
 
@@ -183,7 +185,7 @@ def test_a_spot_with_two_saved_rows_is_left_for_the_cleanup_script(catalog_acces
     assert _saved_ids(catalog_access) == ["2MASS J1", "Gaia DR3 1", "HD 1"]
 
 
-def test_a_star_that_is_already_saved_under_its_own_name_is_not_moved(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_star_that_is_already_saved_under_its_own_name_is_not_moved(catalog_access: CatalogAccess) -> None:
     """Verify saving the same name again updates the one row."""
     _save(catalog_access, _star("Gaia DR3 1"))
 
@@ -193,7 +195,7 @@ def test_a_star_that_is_already_saved_under_its_own_name_is_not_moved(catalog_ac
     assert _saved_ids(catalog_access) == ["Gaia DR3 1"]
 
 
-def test_two_new_stars_never_collapse_onto_one_saved_row(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_two_new_stars_never_collapse_onto_one_saved_row(catalog_access: CatalogAccess) -> None:
     """Verify only the first of two new stars takes the saved row."""
     _save(catalog_access, _star("HD 1"))
 
@@ -204,7 +206,7 @@ def test_two_new_stars_never_collapse_onto_one_saved_row(catalog_access):  # ruf
     assert [star.id for star in recorded] == ["HD 1", "2MASS J1"]
 
 
-def test_between_two_unpreferred_catalogs_the_saved_name_is_kept(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_between_two_unpreferred_catalogs_the_saved_name_is_kept(catalog_access: CatalogAccess) -> None:
     """Verify a 2MASS name does not replace a saved Tycho name."""
     _save(catalog_access, _star("TYC 1-2-1"))
 
@@ -214,7 +216,7 @@ def test_between_two_unpreferred_catalogs_the_saved_name_is_kept(catalog_access)
     assert _saved_ids(catalog_access) == ["TYC 1-2-1"]
 
 
-def test_a_star_across_the_zero_right_ascension_seam_is_matched(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_star_across_the_zero_right_ascension_seam_is_matched(catalog_access: CatalogAccess) -> None:
     """Verify a pair straddling 0/360 degrees is found as one star."""
     _save(catalog_access, _star("HD 1", right_ascension=359.9999))
 
@@ -233,7 +235,7 @@ def test_a_star_across_the_zero_right_ascension_seam_is_matched(catalog_access):
     assert recorded.id == "HD 1"
 
 
-def test_position_only_and_unpositioned_stars_are_ignored(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_position_only_and_unpositioned_stars_are_ignored(catalog_access: CatalogAccess) -> None:
     """Verify FIELD_J ids and stars without a position are not matched here."""
     _save(catalog_access, _star("HD 1"))
     position_only = _star("FIELD_J250.0000+36.0000")
@@ -261,7 +263,7 @@ def test_a_failed_catalog_lookup_does_not_stop_the_save() -> None:
     assert star.id == "Gaia DR3 1"
 
 
-def test_the_shared_naming_rules():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_shared_naming_rules() -> None:
     """Verify the ranking the save step and the cleanup script both use."""
     assert name_preference_rank("HD 1") == name_preference_rank("BD+36 2775") == 0
     assert name_preference_rank("Gaia DR3 1") == 1

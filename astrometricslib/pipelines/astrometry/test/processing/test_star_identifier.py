@@ -8,6 +8,7 @@ table. Covers both the plate-solved (WCS) matching path and the RA/Dec-hint
 fallback path used when plate solving is skipped.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -23,7 +24,7 @@ VEGA_RA_DEG = 279.23473479
 VEGA_DEC_DEG = 38.78368896
 
 
-def _build_simbad_table():  # ruff: ignore[missing-return-type-private-function]
+def _build_simbad_table() -> Table:
     """Build a SIMBAD region-query result with a closer galaxy listed first.
 
     The galaxy is physically closer to Vega's position than Vega's own
@@ -60,7 +61,7 @@ def _make_center_stellar_object(width: int, height: int) -> StellarObject:
     return obj
 
 
-def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch: pytest.MonkeyPatch) -> None:
     """No-WCS path: must not fall back to result_table[0]."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
@@ -77,7 +78,9 @@ def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch
     assert identified.name in ("Vega", "* alf Lyr")
 
 
-def test_hint_based_identification_stores_the_catalog_stars_own_position(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_hint_based_identification_stores_the_catalog_stars_own_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The star gets SIMBAD's position, not the (slightly off) hint."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
@@ -94,7 +97,7 @@ def test_hint_based_identification_stores_the_catalog_stars_own_position(monkeyp
     assert identified.declination == pytest.approx(VEGA_DEC_DEG, abs=1e-6)
 
 
-def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch: pytest.MonkeyPatch) -> None:
     """WCS path: nearest-neighbor matching must not consider galaxies."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
@@ -116,7 +119,7 @@ def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch)
     assert identified.is_catalog_identified is True
 
 
-def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch: pytest.MonkeyPatch) -> None:
     """A star with no SIMBAD match must not be marked catalog-identified."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
@@ -139,7 +142,7 @@ def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch): 
     assert identifier.stellar_objects[0].is_catalog_identified is False
 
 
-def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch: pytest.MonkeyPatch) -> None:
     """The public identify_stars_with_wcs() API works decoupled.
 
     Unlike process_image's attempt_plate_solving=False fallback (which only
@@ -170,7 +173,7 @@ def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch): 
         assert star.name in ("Vega", "* alf Lyr")
 
 
-def test_identify_stars_with_wcs_returns_input_unchanged_when_empty():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_stars_with_wcs_returns_input_unchanged_when_empty() -> None:
     """Verify empty input list returns empty list without error."""
     identifier = _make_star_identifier()
     fake_wcs = MagicMock()
@@ -180,7 +183,7 @@ def test_identify_stars_with_wcs_returns_input_unchanged_when_empty():  # ruff: 
     assert result == []
 
 
-def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify process_image delegates WCS-given path to public API."""
     identifier = _make_star_identifier()
     identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
@@ -188,7 +191,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch):  # ruf
     called_with = {}
     original = identifier.identify_stars_with_wcs
 
-    def _spy(stellar_objects, wcs, width, height):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _spy(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         called_with["stellar_objects"] = stellar_objects
         called_with["wcs"] = wcs
         return original(stellar_objects, wcs, width, height)
@@ -208,7 +211,7 @@ def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch):  # ruf
     assert called_with["wcs"] is fake_wcs
 
 
-def test_filter_stellar_rows_excludes_galaxy_type():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_filter_stellar_rows_excludes_galaxy_type() -> None:
     """_filter_stellar_rows drops galaxy-typed rows, keeps star-typed."""
     filtered = StarIdentifier._filter_stellar_rows(_build_simbad_table())
 
@@ -216,7 +219,9 @@ def test_filter_stellar_rows_excludes_galaxy_type():  # ruff: ignore[missing-ret
     assert filtered["main_id"][0] == "* alf Lyr"
 
 
-def test_no_stellar_matches_leaves_generic_name_and_logs_warning(monkeypatch, caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """Verify a star keeps its generic name when all SIMBAD hits are galaxies.
 
     A warning is logged so the fallback is visible in script output.
@@ -245,7 +250,7 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(monkeypatch, ca
     assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
 
 
-def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _query_gaia_region pins Gaia DR3's table explicitly.
 
     astroquery's `Gaia.cone_search_async` defaults to whichever table
@@ -269,10 +274,10 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path, monkeypatch):  # ruff: 
     captured_kwargs = {}
 
     class _FakeJob:
-        def get_results(self):  # ruff: ignore[missing-return-type-private-function]
+        def get_results(self) -> Table:
             return Table({"ra": [], "dec": []})
 
-    def _fake_cone_search_async(coordinate, *, radius=None, table_name=None, **_kw):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function, missing-type-kwargs]
+    def _fake_cone_search_async(coordinate, *, radius=None, table_name=None, **_kw):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument, missing-type-kwargs]
         captured_kwargs["table_name"] = table_name
         return _FakeJob()
 
@@ -291,19 +296,19 @@ class TestGaiaCircuitBreaker:
     local cache lookups.
     """
 
-    def setup_method(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def setup_method(self) -> None:
         """Start each test with a clean breaker (state is module-global)."""
         star_identifier_module.reset_gaia_circuit_breaker()
 
-    def teardown_method(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def teardown_method(self) -> None:
         """Leave no tripped breaker behind for other tests."""
         star_identifier_module.reset_gaia_circuit_breaker()
 
-    def test_starts_closed(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_starts_closed(self) -> None:
         """A fresh process attempts remote Gaia queries."""
         assert star_identifier_module._gaia_remote_queries_disabled() is False
 
-    def test_trips_only_at_the_configured_limit(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_trips_only_at_the_configured_limit(self) -> None:
         """Failures below the limit must not disable Gaia."""
         for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
             star_identifier_module._record_gaia_failure("test")
@@ -312,7 +317,7 @@ class TestGaiaCircuitBreaker:
         star_identifier_module._record_gaia_failure("test")
         assert star_identifier_module._gaia_remote_queries_disabled() is True
 
-    def test_success_resets_the_failure_run(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_success_resets_the_failure_run(self) -> None:
         """Intermittent failures never accumulate into a trip."""
         for _ in range(10):
             for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
@@ -321,7 +326,9 @@ class TestGaiaCircuitBreaker:
 
         assert star_identifier_module._gaia_remote_queries_disabled() is False
 
-    def test_open_breaker_skips_the_remote_cone_search(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_open_breaker_skips_the_remote_cone_search(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """With the breaker open, no network call is attempted."""
         import astroquery.gaia as gaia_module
 
@@ -344,7 +351,9 @@ class TestGaiaCircuitBreaker:
         assert coords is None
         cone_search_spy.assert_not_called()
 
-    def test_open_breaker_skips_the_cache_seed_download(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_open_breaker_skips_the_cache_seed_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The seed path is gated by the same breaker."""
         import astroquery.gaia as gaia_module
 
@@ -366,7 +375,9 @@ class TestGaiaCircuitBreaker:
         assert cached_count == 0
         launch_job_spy.assert_not_called()
 
-    def test_open_breaker_still_serves_locally_cached_gaia_data(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_open_breaker_still_serves_locally_cached_gaia_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The breaker must not disable the local cache.
 
         Cached Gaia rows are the one Gaia source that still works while
@@ -423,7 +434,7 @@ class TestGaiaCircuitBreaker:
         cone_search_spy.assert_not_called()
 
 
-def _apply_simbad_match_for_v_column(v_values, v_mask):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _apply_simbad_match_for_v_column(v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
     """Run `_apply_simbad_match` on a one-row table with the given V value.
 
     Returns
@@ -442,14 +453,14 @@ def _apply_simbad_match_for_v_column(v_values, v_mask):  # ruff: ignore[missing-
     return stellar_object
 
 
-def test_simbad_match_keeps_real_magnitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_simbad_match_keeps_real_magnitude() -> None:
     """A SIMBAD V magnitude is copied onto the star unchanged."""
     stellar_object = _apply_simbad_match_for_v_column([0.03], [False])
 
     assert stellar_object.magnitude == pytest.approx(0.03)
 
 
-def test_simbad_match_without_v_magnitude_leaves_magnitude_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_simbad_match_without_v_magnitude_leaves_magnitude_unknown() -> None:
     """A masked V value must give `None`, not a fake magnitude of 0.0.
 
     Regression test: the placeholder 0.0 was stored for every catalog star
@@ -462,14 +473,14 @@ def test_simbad_match_without_v_magnitude_leaves_magnitude_unknown():  # ruff: i
     assert stellar_object.is_catalog_identified is True
 
 
-def test_simbad_match_with_nan_v_magnitude_leaves_magnitude_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_simbad_match_with_nan_v_magnitude_leaves_magnitude_unknown() -> None:
     """A NaN V value is treated as missing rather than stored."""
     stellar_object = _apply_simbad_match_for_v_column([float("nan")], [False])
 
     assert stellar_object.magnitude is None
 
 
-def _apply_gaia_match_for_g_column(g_values, g_mask):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _apply_gaia_match_for_g_column(g_values, g_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
     """Run `_apply_gaia_match` on a one-row table with the given G value.
 
     Returns
@@ -486,14 +497,14 @@ def _apply_gaia_match_for_g_column(g_values, g_mask):  # ruff: ignore[missing-ty
     return stellar_object
 
 
-def test_gaia_match_keeps_real_magnitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_gaia_match_keeps_real_magnitude() -> None:
     """A Gaia G magnitude is copied onto the star unchanged."""
     stellar_object = _apply_gaia_match_for_g_column([15.25], [False])
 
     assert stellar_object.magnitude == pytest.approx(15.25)
 
 
-def test_gaia_match_without_g_magnitude_leaves_magnitude_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_gaia_match_without_g_magnitude_leaves_magnitude_unknown() -> None:
     """A masked G value must give `None`, not a fake magnitude of 0.0."""
     stellar_object = _apply_gaia_match_for_g_column([0.0], [True])
 
@@ -501,7 +512,7 @@ def test_gaia_match_without_g_magnitude_leaves_magnitude_unknown():  # ruff: ign
     assert stellar_object.is_catalog_identified is True
 
 
-def _apply_simbad_match_for_colour(b_values, b_mask, v_values, v_mask):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _apply_simbad_match_for_colour(b_values, b_mask, v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
     """Run `_apply_simbad_match` on a one-row table with the given B and V.
 
     Returns
@@ -521,7 +532,7 @@ def _apply_simbad_match_for_colour(b_values, b_mask, v_values, v_mask):  # ruff:
     return stellar_object
 
 
-def test_simbad_match_records_the_catalog_colour():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_simbad_match_records_the_catalog_colour() -> None:
     """B minus V is stored when SIMBAD has both."""
     stellar_object = _apply_simbad_match_for_colour([0.03], [False], [0.03], [False])
     assert stellar_object.b_minus_v == pytest.approx(0.0)
@@ -530,13 +541,13 @@ def test_simbad_match_records_the_catalog_colour():  # ruff: ignore[missing-retu
     assert stellar_object.b_minus_v == pytest.approx(0.47)
 
 
-def test_simbad_match_without_b_or_v_leaves_the_colour_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_simbad_match_without_b_or_v_leaves_the_colour_unknown() -> None:
     """A missing B or V gives `None`, never a made-up colour."""
     assert _apply_simbad_match_for_colour([12.05], [True], [11.58], [False]).b_minus_v is None
     assert _apply_simbad_match_for_colour([12.05], [False], [11.58], [True]).b_minus_v is None
 
 
-def test_block_average_matches_hand_computed_2x2_blocks():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_block_average_matches_hand_computed_2x2_blocks() -> None:
     """A known 4x4 image averages into the 2x2 blocks worked out by hand."""
     data = np.array([
         [0.0, 0.0, 2.0, 2.0],
@@ -550,7 +561,7 @@ def test_block_average_matches_hand_computed_2x2_blocks():  # ruff: ignore[missi
     assert binned == pytest.approx(np.array([[0.0, 2.0], [4.0, 6.0]]))
 
 
-def test_block_average_crops_a_size_not_divisible_by_the_factor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_block_average_crops_a_size_not_divisible_by_the_factor() -> None:
     """A non-divisible 5x5 image drops its last row/col, like the old code."""
     data = np.arange(25, dtype=float).reshape(5, 5)
 

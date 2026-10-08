@@ -21,6 +21,8 @@ import fcntl
 import logging
 import os
 import time
+from collections.abc import Generator
+from typing import TextIO
 
 from astrometricslib.foundation.errors import ConflictError
 
@@ -39,7 +41,7 @@ _held_resource_names: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
 
 
 @contextlib.contextmanager
-def file_lock(lock_path: str, blocking: bool = False):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
     """Acquire a POSIX advisory process-safe file lock via native fcntl.
 
     Parameters
@@ -84,12 +86,12 @@ def file_lock(lock_path: str, blocking: bool = False):  # ruff: ignore[missing-r
 
 
 @contextlib.contextmanager
-def acquire_resource_slot(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def acquire_resource_slot(
     app_config=None,  # ruff: ignore[missing-type-function-argument]
     resource_name: str = "",
     max_slots: int = 1,
     poll_interval_seconds: float = 0.5,
-):
+) -> Generator[None]:
     """Acquire one of a limited number of OS-level slots for a resource.
 
     Round-robins over max_slots lock files (one per resource) under

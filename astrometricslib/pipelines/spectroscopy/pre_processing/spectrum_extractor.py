@@ -512,12 +512,12 @@ class SpectrumExtractor:
         trails) are replaced by the smooth level before adding up.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         radius: int = 10,
         subtract_sky_background: bool = True,
         reject_narrow_contaminants: bool = False,
-    ):
+    ) -> None:
         """Set up the extractor.
 
         Parameters

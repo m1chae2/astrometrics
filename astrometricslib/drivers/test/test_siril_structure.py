@@ -3,12 +3,15 @@
 import gc
 import logging
 import weakref
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from astrometricslib.drivers import siril_interface
 
 
-def test_image_processing_instances_do_not_pin_after_deletion():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_image_processing_instances_do_not_pin_after_deletion() -> None:
     """Verify ImageProcessing instances are only weakly held.
 
     So they don't leak across many targets.
@@ -29,7 +32,9 @@ def test_image_processing_instances_do_not_pin_after_deletion():  # ruff: ignore
     assert weak_driver() is None
 
 
-def test_process_target_closes_logger_handler_on_completion(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_target_closes_logger_handler_on_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify process_target closes its FileHandler even on failure."""
     mock_config = MagicMock()
     mock_config.get_siril_executable.return_value = "siril"

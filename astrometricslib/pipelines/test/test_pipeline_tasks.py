@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
+from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
@@ -46,7 +47,9 @@ def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
     hdu.writeto(path, overwrite=True)
 
 
-def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_drop_unresolved_stars_separates_catalog_position_and_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Verify _drop_unresolved_stars buckets, filters, and logs correctly.
 
     Catalog-matched (SIMBAD/Gaia) and position-only (FIELD_J) stars
@@ -84,7 +87,7 @@ def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  
     assert "2 dropped" in caplog.text
 
 
-def test_drop_unresolved_stars_empty_input_returns_zero_counts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_drop_unresolved_stars_empty_input_returns_zero_counts() -> None:
     """Verify an empty input produces an empty result and all-zero counts."""
     resolved, breakdown = _drop_unresolved_stars([], target_id="EmptyTarget", pipeline_name="photometry")
 
@@ -111,7 +114,7 @@ def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
 class _StubCatalogAccess:
     """Fake catalog_access that only answers list_position_only_stars."""
 
-    def __init__(self, stars: list[StarPosition]):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, stars: list[StarPosition]) -> None:
         self._stars = stars
 
     def list_position_only_stars(self, target_id: str | None = None) -> list[StarPosition]:
@@ -127,7 +130,9 @@ class _StubCatalogAccess:
         return [star for star in self._stars if target_id in star.target_ids]
 
 
-def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Verify a star within the match radius reuses that row's id.
 
     FIELD_J{ra:.4f}{dec:+.4f} bins position to 0.36 arcsec, well inside
@@ -153,7 +158,7 @@ def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog): 
     assert "Reconciled 1 position-only" in caplog.text
 
 
-def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone() -> None:
     """Verify a distant star keeps its own freshly minted id."""
     fresh_id = "FIELD_J083344.3050-263739.9980"
     new_star = _position_only_star(fresh_id, ra=128.834305, dec=-26.62777)
@@ -174,7 +179,7 @@ def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff
     assert result[0].id == fresh_id
 
 
-def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows() -> None:
     """Verify a row belonging only to a different target is not reused.
 
     target_id is a comma-joined string, so membership must be checked
@@ -199,7 +204,7 @@ def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows(): 
     assert result[0].id == "FIELD_J083344.3050-263739.9980"
 
 
-def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_matches_a_multi_target_row() -> None:
     """Verify a comma-joined target_id matches this target among several."""
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
@@ -219,7 +224,7 @@ def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff:
     assert result[0].id == existing_id
 
 
-def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide() -> None:
     """Verify two new stars matching one existing row don't collapse onto it.
 
     Colliding two genuinely different stars onto one row would silently
@@ -244,7 +249,7 @@ def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  #
     assert len(reconciled_ids) == 2
 
 
-def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_skips_catalog_matched_stars() -> None:
     """Verify a SIMBAD/Gaia-matched star is never touched by reconciliation.
 
     Only FIELD_J-prefixed ids are ever position-derived; a real catalog
@@ -406,7 +411,7 @@ def test_target_add_frame_validation(tmp_path: Path) -> None:
     assert len(target.frames) == 2
 
 
-def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture) -> None:
     """Tests analyze_frame_spectroscopy.
 
     coordinates execution, target ID mapping, and database index saving.
@@ -466,7 +471,9 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         config_loader._instance = original_instance
 
 
-def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """Verify an unrelated star's has_spectra survives the write.
 
     Regression test: analyze_frame_spectroscopy used to load every
@@ -533,7 +540,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         config_loader._instance = original_instance
 
 
-def _write_asteroid_detection_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic light frame FITS file with Gaussian source(s).
 
     `extra_source_pixel_xy_list` adds further one-off point sources to
@@ -552,7 +559,7 @@ def _write_asteroid_detection_frame_fits(path, star_pixel_xy, extra_source_pixel
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _write_asteroid_detection_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_stack_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic stack FITS file with a real TAN WCS header."""
     header = fits.Header()
     header["NAXIS1"] = 64
@@ -572,7 +579,7 @@ def _write_asteroid_detection_stack_fits(path):  # ruff: ignore[missing-type-fun
     fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_target_analyze_target_asteroid_detection(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_asteroid_detection(tmp_path: Path, mocker: MockerFixture) -> None:
     """Verify analyze_target wires the asteroid detection pipeline.
 
     Candidates are populated on the Target, and the quality summary
@@ -612,7 +619,9 @@ def test_target_analyze_target_asteroid_detection(tmp_path, mocker):  # ruff: ig
     assert "not matched to a known body" in summary.flag_reasons[0]
 
 
-def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """Verify only surviving candidates are recorded onto the target.
 
     A cosmic-ray-like point source appearing in a single frame only
@@ -658,7 +667,7 @@ def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(tmp_
     assert result["candidates"] == target.asteroid_detection.candidates
 
 
-def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     """Well-separated star pixel positions on a grid, generous clearance.
 
     Returns
@@ -672,7 +681,7 @@ def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: 
     ]
 
 
-def _write_photometry_frame_fits(path, star_pixel_positions, date_obs):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_photometry_frame_fits(path, star_pixel_positions, date_obs) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic light frame FITS file with many Gaussian sources."""
     rng = np.random.default_rng(0)
     shape = (256, 256)
@@ -685,7 +694,9 @@ def _write_photometry_frame_fits(path, star_pixel_positions, date_obs):  # ruff:
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_target_analyze_target_photometry_runs_each_session_independently(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_runs_each_session_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify photometry splits multi-session frames, not cross-tracking.
 
     Pixel-position re-centroiding against a single reference frame only
@@ -805,7 +816,9 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     assert sum(1 for star_id in recorded_ids if star_id.startswith("SessB-")) == len(session_b_positions)
 
 
-def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify use_astrometry_seed=True threads identify_session_stars output.
 
     Bypasses real plate-solving/SIMBAD by monkeypatching
@@ -886,7 +899,9 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert summary.photometry_metrics.unresolved_star_count == 0
 
 
-def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify use_astrometry_seed=False's synthetic-id stars aren't recorded.
 
     Without astrometry seeding, every tracked star only ever gets a
@@ -938,12 +953,12 @@ class _FakeLinearWcs:
     `dispatch._stars_to_sky` calls it.
     """
 
-    def __init__(self, ra_offset: float, dec_offset: float, scale_deg_per_px: float = 0.0001):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, ra_offset: float, dec_offset: float, scale_deg_per_px: float = 0.0001) -> None:
         self.ra_offset = ra_offset
         self.dec_offset = dec_offset
         self.scale_deg_per_px = scale_deg_per_px
 
-    def wcs_pix2world(self, x_array, y_array, _origin):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def wcs_pix2world(self, x_array, y_array, _origin):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         ra = self.ra_offset + np.array(x_array) * self.scale_deg_per_px
         dec = self.dec_offset + np.array(y_array) * self.scale_deg_per_px
         return ra, dec
@@ -996,7 +1011,7 @@ def _make_test_session(session_index: int) -> object:
     )
 
 
-def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_merges_matching_stars(mocker: MockerFixture) -> None:
     """Verify a star detected in two sessions merges into one canonical entry.
 
     Session A's star at pixel (10, 10) and session B's star at pixel
@@ -1056,7 +1071,9 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     assert len(merged_star.photometry.timestamps) == 10  # 5 from each session
 
 
-def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solving(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solving(
+    mocker: MockerFixture,
+) -> None:
     """Verify session_wcs_map entry is used as-is.
 
     identify_session_stars (called upstream, per-session, by
@@ -1099,7 +1116,9 @@ def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solv
     assert len(merged) == 1
 
 
-def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_absent_from_map(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_absent_from_map(
+    mocker: MockerFixture,
+) -> None:
     """A session missing from session_wcs_map still solves the old way."""
     session_a = _make_test_session(0)
     star_a1 = _make_matching_test_star(f"{session_a.id}:Star_1", 10.0, 10.0)
@@ -1119,7 +1138,9 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
     solve_spy.assert_called_once_with(session_a, target)
 
 
-def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(
+    mocker: MockerFixture,
+) -> None:
     """Verify a canonical star only absorbs its nearest session-star match.
 
     One canonical star (from session A) and two session-B stars both
@@ -1169,7 +1190,7 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
     assert any(star.id == star_b2.id for star in merged)
 
 
-def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerFixture) -> None:
     """Verify one session's plate-solve failure only excludes that session.
 
     `AstrometryNetPlateSolveDriver.solve()` returns `None` on an ordinary
@@ -1200,7 +1221,7 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruf
     assert result_b is None  # caught, not raised -- the caller stays alive
 
 
-def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_rescale_and_merge_light_curve_removes_inter_session_step_change() -> None:
     """Verify merging rescales each session to a shared baseline first.
 
     Two sessions normalized against different local comparison-star

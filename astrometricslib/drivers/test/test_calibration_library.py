@@ -5,6 +5,8 @@ their recording behavior, and the gain/exposure compatibility checks
 used to flag a mismatched calibration master.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -17,7 +19,7 @@ from astrometricslib.drivers.calibration_library import (
 )
 
 
-def _make_small_fits(path, shape=(20, 20)):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_small_fits(path, shape=(20, 20)) -> None:  # ruff: ignore[missing-type-function-argument]
     """Generate a small dummy FITS calibration frame."""
     arr = np.zeros(shape, dtype=np.float32)
     hdu = fits.PrimaryHDU(arr)
@@ -27,7 +29,7 @@ def _make_small_fits(path, shape=(20, 20)):  # ruff: ignore[missing-type-functio
     hdu.writeto(path)
 
 
-def test_add_dark_frames(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_add_dark_frames(tmp_path: Path) -> None:
     """Verify dark frames can be registered into the library and saved."""
     calibration_frames = CalibrationLibrary()
     dark_files = [str(tmp_path / f"dark_{i}.fits") for i in (1, 2, 3)]
@@ -37,7 +39,7 @@ def test_add_dark_frames(tmp_path):  # ruff: ignore[missing-type-function-argume
     calibration_frames.save_library()
 
 
-def test_add_bias_frames(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_add_bias_frames(tmp_path: Path) -> None:
     """Verify bias frames can be registered into the library and saved."""
     calibration_frames = CalibrationLibrary()
     bias_files = [str(tmp_path / f"bias_{i}.fits") for i in (1, 2)]
@@ -47,7 +49,7 @@ def test_add_bias_frames(tmp_path):  # ruff: ignore[missing-type-function-argume
     calibration_frames.save_library()
 
 
-def test_add_flat_frames(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_add_flat_frames(tmp_path: Path) -> None:
     """Verify flat frames can be registered into the library and saved."""
     calibration_frames = CalibrationLibrary()
     flat_files = [str(tmp_path / f"flat_{i}.fits") for i in (1, 2)]
@@ -57,31 +59,31 @@ def test_add_flat_frames(tmp_path):  # ruff: ignore[missing-type-function-argume
     calibration_frames.save_library()
 
 
-def test_calibration_gain_compatible_matches():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_gain_compatible_matches() -> None:
     """Verify matching gain values are compatible."""
     assert is_calibration_gain_compatible(light_gain="100", master_gain="100")
 
 
-def test_calibration_gain_incompatible_on_mismatch():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_gain_incompatible_on_mismatch() -> None:
     """Verify any gain mismatch is flagged, independent of calibration type."""
     assert not is_calibration_gain_compatible(light_gain="100", master_gain="200")
 
 
-def test_dark_calibration_metadata_compatible_matches_within_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_metadata_compatible_matches_within_tolerance() -> None:
     """Verify a small exposure difference at matching gain is accepted."""
     assert is_dark_calibration_metadata_compatible(
         light_exposure=120.0, light_gain="100", master_exposure=120.5, master_gain="100"
     )
 
 
-def test_dark_calibration_metadata_incompatible_on_gain_mismatch():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_metadata_incompatible_on_gain_mismatch() -> None:
     """Verify any gain mismatch is flagged regardless of exposure match."""
     assert not is_dark_calibration_metadata_compatible(
         light_exposure=120.0, light_gain="100", master_exposure=120.0, master_gain="200"
     )
 
 
-def test_dark_calibration_metadata_incompatible_beyond_exposure_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_metadata_incompatible_beyond_exposure_tolerance() -> None:
     """Verify a dark's exposure difference beyond tolerance is flagged.
 
     Even at otherwise matching gain.
@@ -95,7 +97,7 @@ def test_dark_calibration_metadata_incompatible_beyond_exposure_tolerance():  # 
     )
 
 
-def test_dark_calibration_metadata_compatible_ignores_bias_like_short_exposure_only_via_gain_check():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_metadata_compatible_ignores_bias_like_short_exposure_only_via_gain_check() -> None:
     """Verify bias/flat-style short exposures flag incompatible for darks.
 
     This documents why bias/flat masters must use
@@ -120,14 +122,14 @@ def test_dark_calibration_metadata_compatible_ignores_bias_like_short_exposure_o
 # after dark subtraction.
 
 
-def test_dark_calibration_temperature_compatible_within_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_temperature_compatible_within_tolerance() -> None:
     """Verify a small temperature difference is accepted."""
     assert is_dark_calibration_temperature_compatible(
         light_temperature_c=-5.0, master_temperature_c=-6.5, temperature_tolerance_c=3.0
     )
 
 
-def test_dark_calibration_temperature_incompatible_beyond_tolerance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_temperature_incompatible_beyond_tolerance() -> None:
     """Verify the Arcturus-scale gap is flagged as incompatible.
 
     Its light frames drifted between two dark clusters roughly 10C
@@ -138,7 +140,7 @@ def test_dark_calibration_temperature_incompatible_beyond_tolerance():  # ruff: 
     )
 
 
-def test_dark_calibration_temperature_compatible_when_either_temperature_is_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dark_calibration_temperature_compatible_when_either_temperature_is_unknown() -> None:
     """Verify a missing temperature is not treated as a mismatch.
 
     A temperature that was never recorded leaves nothing to judge it
@@ -151,7 +153,7 @@ def test_dark_calibration_temperature_compatible_when_either_temperature_is_unkn
 # ---- camera offset and gain in the library key ---------------------------
 
 
-def _library(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _library(tmp_path: Path) -> CalibrationLibrary:
     """Build an empty library that saves and loads inside `tmp_path`.
 
     Returns
@@ -165,7 +167,14 @@ def _library(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-
     return CalibrationLibrary(app_config=app_config)
 
 
-def _write_frame(path, exposure=0.5, gain=0.0, offset=None, camera="ZWO CCD ASI533MM Pro", flat_filter=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_frame(
+    path,  # ruff: ignore[missing-type-function-argument]
+    exposure=0.5,  # ruff: ignore[missing-type-function-argument]
+    gain=0.0,  # ruff: ignore[missing-type-function-argument]
+    offset=None,  # ruff: ignore[missing-type-function-argument]
+    camera="ZWO CCD ASI533MM Pro",  # ruff: ignore[missing-type-function-argument]
+    flat_filter=None,  # ruff: ignore[missing-type-function-argument]
+) -> str:
     """Write a tiny FITS frame with the given camera settings.
 
     Returns
@@ -188,7 +197,7 @@ def _write_frame(path, exposure=0.5, gain=0.0, offset=None, camera="ZWO CCD ASI5
 CAMERA = "ZWO ASI 533MM Pro"
 
 
-def test_setting_key_is_plain_for_offset_zero_or_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_setting_key_is_plain_for_offset_zero_or_unknown() -> None:
     """Every key from before offset was tracked stays valid unchanged."""
     from astrometricslib.drivers.calibration_library import calibration_setting_key
 
@@ -199,7 +208,7 @@ def test_setting_key_is_plain_for_offset_zero_or_unknown():  # ruff: ignore[miss
     assert calibration_setting_key("800", "not a number") == "800"
 
 
-def test_setting_key_carries_a_nonzero_offset_and_splits_back():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_setting_key_carries_a_nonzero_offset_and_splits_back() -> None:
     """A nonzero offset joins the key and is recovered from it."""
     from astrometricslib.drivers.calibration_library import (
         calibration_setting_key,
@@ -213,7 +222,7 @@ def test_setting_key_carries_a_nonzero_offset_and_splits_back():  # ruff: ignore
     assert split_calibration_setting_key("0.0") == ("0.0", 0.0)
 
 
-def test_darks_at_different_offsets_are_filed_apart(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_darks_at_different_offsets_are_filed_apart(tmp_path: Path) -> None:
     """A dark at offset 30 does not share a slot with one at offset 0."""
     library = _library(tmp_path)
     library.add_dark_frame(_write_frame(tmp_path / "old.fits"))
@@ -222,7 +231,7 @@ def test_darks_at_different_offsets_are_filed_apart(tmp_path):  # ruff: ignore[m
     assert set(library.dark_frames["ZWO ASI 533MM Pro"]) == {"0.0", "0.0@offset=30"}
 
 
-def test_a_dark_at_the_lights_own_offset_is_chosen(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_dark_at_the_lights_own_offset_is_chosen(tmp_path: Path) -> None:
     """Each offset's lights get only that offset's dark."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old.fits")
@@ -235,7 +244,9 @@ def test_a_dark_at_the_lights_own_offset_is_chosen(tmp_path):  # ruff: ignore[mi
     assert library.get_dark_frames(camera=CAMERA, exposure=0.5, iso="0", offset=None) == [old]
 
 
-def test_darks_at_other_settings_are_used_with_a_warning_when_none_match(tmp_path, caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_darks_at_other_settings_are_used_with_a_warning_when_none_match(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """A dark at another offset beats none, and the log says so."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old.fits")
@@ -248,7 +259,7 @@ def test_darks_at_other_settings_are_used_with_a_warning_when_none_match(tmp_pat
     assert "offset 50" in caplog.text
 
 
-def test_darks_of_another_gain_are_not_mixed_in(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_darks_of_another_gain_are_not_mixed_in(tmp_path: Path) -> None:
     """Gain is honoured now: gain-100 lights get only gain-100 darks."""
     library = _library(tmp_path)
     gain_zero = _write_frame(tmp_path / "g0.fits", gain=0.0)
@@ -259,7 +270,7 @@ def test_darks_of_another_gain_are_not_mixed_in(tmp_path):  # ruff: ignore[missi
     assert library.get_dark_frames(camera=CAMERA, exposure=0.5, iso="100.0", offset="0") == [gain_hundred]
 
 
-def test_without_a_gain_every_setting_is_used_as_before(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_without_a_gain_every_setting_is_used_as_before(tmp_path: Path) -> None:
     """A caller that gives no gain still gets every dark."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old.fits")
@@ -270,7 +281,7 @@ def test_without_a_gain_every_setting_is_used_as_before(tmp_path):  # ruff: igno
     assert sorted(library.get_dark_frames(camera=CAMERA, exposure=0.5)) == sorted([old, new])
 
 
-def test_exposure_is_still_matched_within_a_tenth_of_a_second(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_exposure_is_still_matched_within_a_tenth_of_a_second(tmp_path: Path) -> None:
     """Offset selection leaves the exposure rule alone."""
     library = _library(tmp_path)
     near = _write_frame(tmp_path / "near.fits", exposure=0.55)
@@ -281,7 +292,7 @@ def test_exposure_is_still_matched_within_a_tenth_of_a_second(tmp_path):  # ruff
     assert library.get_dark_frames(camera=CAMERA, exposure=0.5, iso="0.0", offset="0") == [near]
 
 
-def test_biases_follow_the_lights_offset(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_biases_follow_the_lights_offset(tmp_path: Path) -> None:
     """Bias frames are chosen by gain and offset too."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old_bias.fits", exposure=0.0)
@@ -294,7 +305,7 @@ def test_biases_follow_the_lights_offset(tmp_path):  # ruff: ignore[missing-type
     assert sorted(library.get_bias_frames(camera=CAMERA)) == sorted([old, new])
 
 
-def test_flats_follow_the_lights_offset(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_flats_follow_the_lights_offset(tmp_path: Path) -> None:
     """Flat frames are chosen by gain and offset too."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old_flat.fits", flat_filter="Luminance")
@@ -310,7 +321,7 @@ def test_flats_follow_the_lights_offset(tmp_path):  # ruff: ignore[missing-type-
     ) == [old]
 
 
-def test_a_library_saved_before_offset_existed_still_works(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_library_saved_before_offset_existed_still_works(tmp_path: Path) -> None:
     """Old gain-only keys are read as offset 0, so no migration is needed."""
     library = _library(tmp_path)
     old = _write_frame(tmp_path / "old.fits")
@@ -319,7 +330,7 @@ def test_a_library_saved_before_offset_existed_still_works(tmp_path):  # ruff: i
     assert library.get_dark_frames(camera=CAMERA, exposure=0.5, iso="0.0", offset="0") == [old]
 
 
-def test_offset_compatibility_treats_a_missing_offset_as_zero():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_offset_compatibility_treats_a_missing_offset_as_zero() -> None:
     """Equal offsets match, different ones do not, and unknown means zero."""
     from astrometricslib.drivers.calibration_library import is_calibration_offset_compatible
 
@@ -328,7 +339,7 @@ def test_offset_compatibility_treats_a_missing_offset_as_zero():  # ruff: ignore
     assert not is_calibration_offset_compatible("30", "0")
 
 
-def test_stats_report_the_offset(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_stats_report_the_offset(tmp_path: Path) -> None:
     """The summary lists gain and offset separately."""
     library = _library(tmp_path)
     library.add_dark_frame(_write_frame(tmp_path / "new.fits", offset=30))
@@ -354,7 +365,7 @@ def test_calibration_frames_are_filed_under_the_record_spelling_of_the_camera(
     assert CalibrationLibrary()._get_camera_name({"INSTRUME": header_name}) == expected
 
 
-def test_a_camera_is_found_under_another_spelling_of_its_name():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_camera_is_found_under_another_spelling_of_its_name() -> None:
     """The config's 'Nikon D5300' finds frames filed as the header's name."""
     library = CalibrationLibrary()
     filed = {"Nikon DSLR DSC D5300": {"800": ["dark.fits"]}, "ZWO ASI 533MM Pro": {"0": ["other.fits"]}}
@@ -362,21 +373,21 @@ def test_a_camera_is_found_under_another_spelling_of_its_name():  # ruff: ignore
     assert library._get_camera_dict(filed, "ZWO CCD ASI533MM Pro") == {"0": ["other.fits"]}
 
 
-def test_a_partial_camera_name_still_matches_as_before():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_partial_camera_name_still_matches_as_before() -> None:
     """The older substring rule is kept for partial names."""
     library = CalibrationLibrary()
     filed = {"ZWO ASI 533MM Pro": {"0": ["dark.fits"]}, "Nikon DSLR DSC D5300": {"800": ["x.fits"]}}
     assert library._get_camera_dict(filed, "ASI 533") == {"0": ["dark.fits"]}
 
 
-def test_calibration_gain_compatibility_compares_numbers_not_text():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_calibration_gain_compatibility_compares_numbers_not_text() -> None:
     """A master written as 800.0 calibrates lights recorded as 800."""
     assert is_calibration_gain_compatible("800", "800.0")
     assert is_calibration_gain_compatible("0.0", "0")
     assert not is_calibration_gain_compatible("100", "800.0")
 
 
-def test_a_frame_listed_twice_is_returned_once(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_frame_listed_twice_is_returned_once(tmp_path: Path) -> None:
     """Dark, bias and flat getters drop repeated paths, keeping the order."""
     first = str(tmp_path / "first.fits")
     second = str(tmp_path / "second.fits")

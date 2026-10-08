@@ -10,7 +10,7 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
 
 
-def test_chauvenet_sigma_matches_known_reference_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_chauvenet_sigma_matches_known_reference_values() -> None:
     """Verifies chauvenet_sigma against independently-computed values.
 
     Reference values computed via
@@ -21,7 +21,7 @@ def test_chauvenet_sigma_matches_known_reference_values():  # ruff: ignore[missi
     assert chauvenet_sigma(70) == pytest.approx(2.6901, abs=1e-3)
 
 
-def test_chauvenet_sigma_increases_with_frame_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_chauvenet_sigma_increases_with_frame_count() -> None:
     """Verifies more frames yield a stricter (larger) rejection sigma.
 
     More samples make an extreme value more likely to occur by chance
@@ -34,14 +34,14 @@ def test_chauvenet_sigma_increases_with_frame_count():  # ruff: ignore[missing-r
     assert len(set(sigmas)) == len(sigmas)
 
 
-def test_chauvenet_sigma_single_frame_is_valid():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_chauvenet_sigma_single_frame_is_valid() -> None:
     """Verifies n_frames=1 (the smallest meaningful stack) doesn't error."""
     sigma = chauvenet_sigma(1)
     assert sigma > 0
 
 
 @pytest.mark.parametrize("invalid_n", [0, -1, -10])
-def test_chauvenet_sigma_rejects_non_positive_frame_counts(invalid_n):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_chauvenet_sigma_rejects_non_positive_frame_counts(invalid_n) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verifies non-positive frame counts raise rather than misbehave."""
     with pytest.raises(InvalidArgumentError):
         chauvenet_sigma(invalid_n)

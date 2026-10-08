@@ -55,7 +55,7 @@ def _make_detection(timestamp: float, brightness, picture_brightness_level) -> F
     )
 
 
-def test_build_light_curve_skips_pictures_missing_either_brightness_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_build_light_curve_skips_pictures_missing_either_brightness_value() -> None:
     """Verify pictures without both brightness numbers are left out."""
     candidate = _make_candidate([
         _make_detection(0.0, brightness=100.0, picture_brightness_level=50.0),
@@ -71,7 +71,7 @@ def test_build_light_curve_skips_pictures_missing_either_brightness_value():  # 
     assert light_curve.fluxes_normalized == [100.0 / 50.0, 120.0 / 60.0]
 
 
-def test_build_light_curve_cancels_out_a_shared_sky_brightness_change():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_build_light_curve_cancels_out_a_shared_sky_brightness_change() -> None:
     """Verify a picture-wide brightness swing doesn't survive normalization."""
     # Same true object brightness (100) in both pictures, but the second
     # picture's sky was twice as bright overall (haze, moonlight, etc.).
@@ -85,7 +85,7 @@ def test_build_light_curve_cancels_out_a_shared_sky_brightness_change():  # ruff
     assert light_curve.fluxes_normalized[0] == light_curve.fluxes_normalized[1]
 
 
-def test_find_rotation_period_recovers_a_known_cycle():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_rotation_period_recovers_a_known_cycle() -> None:
     """Verify a real repeating brightness pattern is found despite noise."""
     true_period_hours = 4.0
     start = datetime(2026, 1, 1)
@@ -118,7 +118,7 @@ def test_find_rotation_period_recovers_a_known_cycle():  # ruff: ignore[missing-
     assert periodogram.best_period_days == pytest.approx(true_period_hours / 24.0, rel=0.1)
 
 
-def test_find_rotation_period_returns_none_with_too_few_pictures():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_rotation_period_returns_none_with_too_few_pictures() -> None:
     """Verify a handful of pictures isn't enough to attempt a period search."""
     candidate = _make_candidate([
         _make_detection(0.0, brightness=100.0, picture_brightness_level=50.0),

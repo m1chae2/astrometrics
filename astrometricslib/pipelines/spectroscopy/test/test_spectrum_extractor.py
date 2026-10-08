@@ -16,7 +16,7 @@ from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 class MockAstrometricsImage(AstrometricsImage):
     """Mock AstrometricsImage that accepts a direct array input."""
 
-    def __init__(self, data: np.ndarray, header=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, data: np.ndarray, header=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize MockAstrometricsImage with given data and header."""
         self._data = data
         self._header = header or {}
@@ -33,7 +33,7 @@ class MockAstrometricsImage(AstrometricsImage):
         return self._header
 
 
-def test_extract_with_flare_mask_subpixel_centroid():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extract_with_flare_mask_subpixel_centroid() -> None:
     """Verify extract_with_flare_mask computes sub-pixel centroids.
 
     Checks center-of-mass accuracy on a simulated 2D subgrid around a
@@ -63,7 +63,7 @@ def test_extract_with_flare_mask_subpixel_centroid():  # ruff: ignore[missing-re
     assert len(profile) == 20  # max_offset - flare_offset = 30 - 10 = 20
 
 
-def test_pipeline_integration_asi533_vertical():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_pipeline_integration_asi533_vertical() -> None:
     """Verify the pipeline extraction with a ZWO ASI533MM Pro camera.
 
     Confirms extract_with_flare_mask is used when the pipeline is
@@ -122,7 +122,7 @@ def test_pipeline_integration_asi533_vertical():  # ruff: ignore[missing-return-
     assert 599.0 <= res["wavelengths"][0] <= 600.0
 
 
-def test_pipeline_integration_asi533_horizontal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_pipeline_integration_asi533_horizontal() -> None:
     """Verify the pipeline extraction with a ZWO ASI533MM Pro camera.
 
     Confirms extract_with_flare_mask is used when the pipeline is
@@ -181,7 +181,7 @@ def test_pipeline_integration_asi533_horizontal():  # ruff: ignore[missing-retur
     assert 599.0 <= res["wavelengths"][0] <= 600.0
 
 
-def test_extract_line_marks_samples_off_the_image_as_not_measured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extract_line_marks_samples_off_the_image_as_not_measured() -> None:
     """Verify a line running off the picture gives NaN there, not zero."""
     image = MockAstrometricsImage(data=np.full((100, 100), 50.0))
     extractor = SpectrumExtractor(radius=2)
@@ -192,7 +192,7 @@ def test_extract_line_marks_samples_off_the_image_as_not_measured():  # ruff: ig
     assert np.isnan(profile[20:]).all()  # rows 100-119 are off it
 
 
-def test_keep_usable_samples_drops_off_image_and_out_of_range_samples():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_keep_usable_samples_drops_off_image_and_out_of_range_samples() -> None:
     """Verify NaN and out-of-range samples are dropped."""
     from astrometricslib.pipelines.spectroscopy.pipeline import keep_usable_samples
 

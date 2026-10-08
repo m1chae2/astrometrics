@@ -11,12 +11,13 @@ import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.time import Time
+from pytest_mock import MockerFixture
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import NotFoundError
 
 
-def _make_deprecated_header_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_deprecated_header_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a FITS file with a deprecated RADECSYS header and no MJD-OBS."""
     arr = np.zeros((5, 5), dtype=np.float32)
     hdu = fits.PrimaryHDU(arr)
@@ -25,7 +26,7 @@ def _make_deprecated_header_fits(path):  # ruff: ignore[missing-type-function-ar
     hdu.writeto(path, overwrite=True)
 
 
-def _make_clean_header_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_clean_header_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a FITS file with no deprecated headers."""
     arr = np.zeros((5, 5), dtype=np.float32)
     hdu = fits.PrimaryHDU(arr)
@@ -34,7 +35,7 @@ def _make_clean_header_fits(path):  # ruff: ignore[missing-type-function-argumen
     hdu.writeto(path, overwrite=True)
 
 
-def test_deprecated_headers_are_fixed_in_memory_only(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_deprecated_headers_are_fixed_in_memory_only(tmp_path: Path) -> None:
     """Verify the header comes back fixed while the file stays as it was."""
     path = str(tmp_path / "deprecated.fits")
     _make_deprecated_header_fits(path)
@@ -54,7 +55,7 @@ def test_deprecated_headers_are_fixed_in_memory_only(tmp_path):  # ruff: ignore[
     assert "RADECSYS" in fits.getheader(path)
 
 
-def test_clean_file_is_untouched(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_clean_file_is_untouched(tmp_path: Path) -> None:
     """Verifies a file with no deprecated headers is never rewritten."""
     path = str(tmp_path / "clean.fits")
     _make_clean_header_fits(path)
@@ -67,7 +68,7 @@ def test_clean_file_is_untouched(tmp_path):  # ruff: ignore[missing-type-functio
     assert before_mtime == after_mtime
 
 
-def test_header_access_opens_clean_file_once(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_header_access_opens_clean_file_once(tmp_path: Path, mocker: MockerFixture) -> None:
     """Verify a header access on a clean file only opens the file once."""
     path = str(tmp_path / "clean_spy.fits")
     _make_clean_header_fits(path)
@@ -79,7 +80,7 @@ def test_header_access_opens_clean_file_once(tmp_path, mocker):  # ruff: ignore[
     assert spy.call_count == 1
 
 
-def test_header_access_opens_deprecated_file_once(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_header_access_opens_deprecated_file_once(tmp_path: Path, mocker: MockerFixture) -> None:
     """Verify fixing a header in memory needs no second open of the file."""
     path = str(tmp_path / "deprecated_spy.fits")
     _make_deprecated_header_fits(path)

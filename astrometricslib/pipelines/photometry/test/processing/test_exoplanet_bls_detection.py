@@ -12,14 +12,14 @@ from astrometricslib.pipelines.photometry.processing.variability_analyzer import
 )
 
 
-def test_compute_frame_airmass_direct_header():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_frame_airmass_direct_header() -> None:
     """Verify compute_frame_airmass extracts AIRMASS from FITS header."""
     header = fits.Header()
     header["AIRMASS"] = 1.35
     assert abs(compute_frame_airmass(header) - 1.35) < 1e-4
 
 
-def test_compute_frame_airmass_from_altitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_frame_airmass_from_altitude() -> None:
     """Verify compute_frame_airmass calculates airmass from altitude."""
     header = fits.Header()
     header["ALTITUDE"] = 60.0  # Zenith angle = 30 deg -> sec(30 deg) = 1.1547
@@ -27,7 +27,7 @@ def test_compute_frame_airmass_from_altitude():  # ruff: ignore[missing-return-t
     assert abs(airmass - 1.1547) < 0.01
 
 
-def test_detrend_light_curves_airmass():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detrend_light_curves_airmass() -> None:
     """Verify detrend_light_curves_airmass removes extinction trend."""
     analyzer = VariabilityAnalyzer()
     star = StellarObject(id="star_1")
@@ -48,7 +48,7 @@ def test_detrend_light_curves_airmass():  # ruff: ignore[missing-return-type-und
     assert np.std(star.photometry.fluxes_detrended) < np.std(fluxes_norm)
 
 
-def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_bls_transit_search_synthetic_transit() -> None:
     """Verify BLS transit search identifies a periodic transit dip."""
     analyzer = VariabilityAnalyzer()
     star = StellarObject(id="exo_target")
@@ -75,7 +75,7 @@ def test_bls_transit_search_synthetic_transit():  # ruff: ignore[missing-return-
     assert 0.0 < candidate.transit_confidence <= 1.0
 
 
-def test_lomb_scargle_periodogram_periodic_signal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_lomb_scargle_periodogram_periodic_signal() -> None:
     """Verify Lomb-Scargle periodogram recovers periodic variable signals."""
     analyzer = VariabilityAnalyzer()
     star = StellarObject(id="variable_target")

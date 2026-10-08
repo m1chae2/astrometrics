@@ -93,7 +93,7 @@ def _build_summary(  # ruff: ignore[missing-return-type-private-function]
         )
 
 
-def test_reference_frame_is_recorded_for_a_normal_sequence():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reference_frame_is_recorded_for_a_normal_sequence() -> None:
     """The one zero-shift frame in a well-formed sequence is the reference."""
     paths = ["/lib/a.fits", "/lib/b.fits", "/lib/c.fits"]
     frames = [FrameRecord(path=p, role="LIGHT", camera="c", exposure="1.0") for p in paths]
@@ -109,7 +109,7 @@ def test_reference_frame_is_recorded_for_a_normal_sequence():  # ruff: ignore[mi
     assert summary.stacking_metrics.registration_reference_star_count == 250
 
 
-def test_length_mismatch_does_not_name_a_reference():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_length_mismatch_does_not_name_a_reference() -> None:
     """A path/registration-fact length mismatch must not pick a wrong frame.
 
     Without the guard, positional indexing into `registration_frame_paths`
@@ -130,7 +130,7 @@ def test_length_mismatch_does_not_name_a_reference():  # ruff: ignore[missing-re
     assert summary.stacking_metrics.registration_reference_star_count is None
 
 
-def test_all_zero_shifts_does_not_fabricate_a_reference():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_all_zero_shifts_does_not_fabricate_a_reference() -> None:
     """A legacy already-aligned sequence has no identifiable reference.
 
     Every frame in a preserved `r_` sequence records dx=dy=0, so no
@@ -151,7 +151,7 @@ def test_all_zero_shifts_does_not_fabricate_a_reference():  # ruff: ignore[missi
     assert summary.stacking_metrics.registration_reference_star_count is None
 
 
-def test_the_stack_summary_records_the_camera_profile_of_its_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_stack_summary_records_the_camera_profile_of_its_frames() -> None:
     """A listed camera is recorded plainly; an unlisted one flags."""
     paths = ["/lib/a.fits", "/lib/b.fits"]
     registration_frames = [_registration_fact(dx=0.0, dy=0.0), _registration_fact(dx=1.0, dy=1.0)]

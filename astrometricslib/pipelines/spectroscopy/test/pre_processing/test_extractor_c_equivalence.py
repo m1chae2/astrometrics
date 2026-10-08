@@ -70,7 +70,7 @@ def _make_cross_section_image(
     return np.ascontiguousarray(np.broadcast_to(profile, (size, size)).astype(np.float64))
 
 
-def _assert_fits_agree(c_result, python_result):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _assert_fits_agree(c_result, python_result) -> None:  # ruff: ignore[missing-type-function-argument]
     """Assert two (center_offset, sigma) fit results agree within tolerance.
 
     Treats "both None" as agreement (both paths declined to fit) and
@@ -92,7 +92,7 @@ def _assert_fits_agree(c_result, python_result):  # ruff: ignore[missing-type-fu
     )
 
 
-def test_extractor_c_matches_python_on_randomized_realistic_cross_sections():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_randomized_realistic_cross_sections() -> None:
     """Verify the C and Python fits agree across randomized realistic inputs.
 
     Sweeps search radius, sigma, amplitude, background, sub-pixel offset,
@@ -137,7 +137,7 @@ def test_extractor_c_matches_python_on_randomized_realistic_cross_sections():  #
         assert c_result is not None, "well-conditioned synthetic cross section unexpectedly went unfit"
 
 
-def test_extractor_c_matches_python_on_flat_field():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_flat_field() -> None:
     """Verify both paths decline to fit a cross section with no source."""
     image = np.full((121, 121), 50.0)
     center = (60.0, 60.0)
@@ -148,7 +148,7 @@ def test_extractor_c_matches_python_on_flat_field():  # ruff: ignore[missing-ret
     assert c_result is None
 
 
-def test_extractor_c_matches_python_on_absorption_dip():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_absorption_dip() -> None:
     """Verify both paths decline to fit a dip (negative amplitude guess)."""
     image = np.full((121, 121), 50.0)
     image[:, 55:66] -= 30.0
@@ -161,7 +161,7 @@ def test_extractor_c_matches_python_on_absorption_dip():  # ruff: ignore[missing
 
 
 @pytest.mark.parametrize("non_finite_value", [np.nan, np.inf, -np.inf])
-def test_extractor_c_matches_python_on_non_finite_pixel(non_finite_value):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_non_finite_pixel(non_finite_value) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify a NaN/Inf pixel in the cross section makes both paths give up.
 
     A non-finite sample used to make the C extension's Levenberg-Marquardt
@@ -186,7 +186,7 @@ def test_extractor_c_matches_python_on_non_finite_pixel(non_finite_value):  # ru
         (se._MINIMUM_FIT_SIGMA_PX + 0.01, True),
     ],
 )
-def test_extractor_c_matches_python_at_minimum_sigma_floor(true_sigma, should_be_accepted):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_at_minimum_sigma_floor(true_sigma, should_be_accepted) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify both paths apply the same minimum-sigma floor at its boundary.
 
     Randomized-noise testing first found this gap in a roundabout way: on
@@ -215,7 +215,7 @@ def test_extractor_c_matches_python_at_minimum_sigma_floor(true_sigma, should_be
 @pytest.mark.parametrize(
     "dtype", [np.float64, np.float32, np.float16, np.int64, np.int32, np.uint16, np.bool_]
 )
-def test_extractor_c_matches_python_across_dtypes(dtype):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_across_dtypes(dtype) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify both paths agree regardless of the input array's dtype.
 
     fit_cross_section_gaussian always coerces to contiguous float64
@@ -237,7 +237,7 @@ def test_extractor_c_matches_python_across_dtypes(dtype):  # ruff: ignore[missin
 
 
 @pytest.mark.parametrize("search_radius", [10, 60, 100, 127, 128, 160, 200])
-def test_extractor_c_matches_python_at_production_search_radii(search_radius):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_at_production_search_radii(search_radius) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify agreement up to the largest radius the pipeline derives.
 
     pipelines/astrometry/pipeline.py caps its derived extraction_radius_px
@@ -255,7 +255,7 @@ def test_extractor_c_matches_python_at_production_search_radii(search_radius):  
     assert c_result is not None
 
 
-def test_extractor_c_matches_python_on_non_contiguous_view():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_non_contiguous_view() -> None:
     """Verify a Fortran-ordered (non-C-contiguous) array still fits correctly.
 
     fit_cross_section_gaussian must copy such a view into a contiguous
@@ -272,7 +272,7 @@ def test_extractor_c_matches_python_on_non_contiguous_view():  # ruff: ignore[mi
     assert c_result is not None
 
 
-def test_extractor_c_matches_python_on_one_dimensional_input():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extractor_c_matches_python_on_one_dimensional_input() -> None:
     """Verify a non-2D array is rejected the same way by both entry points.
 
     The C extension used to silently return None for this instead of

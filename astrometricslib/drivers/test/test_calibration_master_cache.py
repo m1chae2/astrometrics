@@ -5,6 +5,7 @@ them across targets when the camera settings match, saving time.
 """
 
 import os
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from astrometricslib.drivers import siril_interface
@@ -14,7 +15,7 @@ from astrometricslib.drivers.siril_interface import (
 )
 
 
-def _make_processor(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_processor(tmp_path: Path):  # ruff: ignore[missing-return-type-private-function]
     """Build an ImageProcessing with its work directory inside tmp_path.
 
     Returns
@@ -29,7 +30,7 @@ def _make_processor(tmp_path):  # ruff: ignore[missing-type-function-argument, m
     return processor
 
 
-def _stage_frames(target_folder, subdirectory, library_directory, count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _stage_frames(target_folder, subdirectory, library_directory, count) -> str:  # ruff: ignore[missing-type-function-argument]
     """Symlink `count` library frames into a staging subdirectory.
 
     Skips writing a library frame that already has the expected content,
@@ -65,7 +66,7 @@ def _stage_frames(target_folder, subdirectory, library_directory, count):  # ruf
     return staging
 
 
-def test_fingerprint_is_stable_for_the_same_frames(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fingerprint_is_stable_for_the_same_frames(tmp_path: Path) -> None:
     """The same library frames must fingerprint identically across runs."""
     library = str(tmp_path / "library")
     first = _stage_frames(str(tmp_path / "run_a"), "biases", library, 3)
@@ -74,7 +75,7 @@ def test_fingerprint_is_stable_for_the_same_frames(tmp_path):  # ruff: ignore[mi
     assert _calibration_source_fingerprint(first) == _calibration_source_fingerprint(second)
 
 
-def test_fingerprint_changes_when_a_frame_is_added(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fingerprint_changes_when_a_frame_is_added(tmp_path: Path) -> None:
     """A different frame set must not reuse the previous master."""
     library = str(tmp_path / "library")
     three_frames = _stage_frames(str(tmp_path / "run_a"), "biases", library, 3)
@@ -85,7 +86,7 @@ def test_fingerprint_changes_when_a_frame_is_added(tmp_path):  # ruff: ignore[mi
     assert _calibration_source_fingerprint(four_frames) != fingerprint_before
 
 
-def test_fingerprint_changes_when_a_source_frame_is_modified(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_fingerprint_changes_when_a_source_frame_is_modified(tmp_path: Path) -> None:
     """Editing a library frame must invalidate the cached master."""
     library = str(tmp_path / "library")
     staging = _stage_frames(str(tmp_path / "run"), "biases", library, 2)
@@ -99,7 +100,7 @@ def test_fingerprint_changes_when_a_source_frame_is_modified(tmp_path):  # ruff:
     assert _calibration_source_fingerprint(staging) != fingerprint_before
 
 
-def test_empty_directory_has_no_fingerprint(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_empty_directory_has_no_fingerprint(tmp_path: Path) -> None:
     """Nothing staged means nothing to cache."""
     empty = tmp_path / "biases"
     empty.mkdir()
@@ -107,7 +108,7 @@ def test_empty_directory_has_no_fingerprint(tmp_path):  # ruff: ignore[missing-t
     assert _calibration_source_fingerprint(str(empty)) is None
 
 
-def test_store_then_restore_round_trips_a_master(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_store_then_restore_round_trips_a_master(tmp_path: Path) -> None:
     """A master built by one run is reused by the next identical run."""
     processor = _make_processor(tmp_path)
     library = str(tmp_path / "library")
@@ -128,7 +129,7 @@ def test_store_then_restore_round_trips_a_master(tmp_path):  # ruff: ignore[miss
         assert handle.read() == "MASTER BIAS PIXELS"
 
 
-def test_restore_misses_when_frames_differ(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_restore_misses_when_frames_differ(tmp_path: Path) -> None:
     """A different calibration set must rebuild rather than reuse."""
     processor = _make_processor(tmp_path)
 
@@ -146,7 +147,7 @@ def test_restore_misses_when_frames_differ(tmp_path):  # ruff: ignore[missing-ty
     assert not os.path.exists(os.path.join(second_run, "process", "bias_stacked.fits"))
 
 
-def test_each_master_kind_is_cached_independently(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_each_master_kind_is_cached_independently(tmp_path: Path) -> None:
     """A cached flat must not be served when only the bias matches."""
     processor = _make_processor(tmp_path)
     shared_bias_library = str(tmp_path / "bias_library")
@@ -169,7 +170,7 @@ def test_each_master_kind_is_cached_independently(tmp_path):  # ruff: ignore[mis
     assert restored == {"bias"}
 
 
-def test_no_partial_files_are_left_in_the_cache(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_no_partial_files_are_left_in_the_cache(tmp_path: Path) -> None:
     """Atomic writes must not leave .partial files a later run could read."""
     processor = _make_processor(tmp_path)
     run = str(tmp_path / "run")
@@ -184,7 +185,7 @@ def test_no_partial_files_are_left_in_the_cache(tmp_path):  # ruff: ignore[missi
     assert not [name for name in os.listdir(cache_directory) if name.endswith(".partial")]
 
 
-def test_cache_hit_is_reported_to_the_job_log(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_cache_hit_is_reported_to_the_job_log(tmp_path: Path) -> None:
     """A reused master is visible in the job log, not silent."""
     processor = _make_processor(tmp_path)
     library = str(tmp_path / "library")

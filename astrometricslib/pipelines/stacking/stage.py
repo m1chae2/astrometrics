@@ -674,7 +674,7 @@ def _disambiguating_configuration_tag(target, target_frames) -> str:  # ruff: ig
     )
 
 
-def _record_configuration_stack(target, target_frames, stacked_path) -> bool:  # ruff: ignore[missing-type-function-argument]
+def _record_configuration_stack(target, target_frames: list[Any], stacked_path: str) -> bool:  # ruff: ignore[missing-type-function-argument]
     """Record a stack for one setup and say if it's the preferred one.
 
     This works alongside the older `stacked_image` property so that other

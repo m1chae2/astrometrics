@@ -656,7 +656,7 @@ class SpectroscopyPipeline:
         The tool that turns pixel numbers into colors.
     """
 
-    def __init__(self, config: SpectroscopyConfig | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: SpectroscopyConfig | None = None) -> None:
         """Set up the master controller.
 
         Parameters

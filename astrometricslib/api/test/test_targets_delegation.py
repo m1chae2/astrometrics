@@ -34,7 +34,7 @@ def _make_catalog() -> TargetCatalog:
     return TargetCatalog(config, catalog_access)
 
 
-def test_list_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the return value passes through unchanged."""
     catalog = _make_catalog()
     mock = MagicMock(return_value=["a target"])
@@ -44,7 +44,7 @@ def test_list_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-
     mock.assert_called_once_with(catalog)
 
 
-def test_get_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the target id is forwarded and the result passes through."""
     catalog = _make_catalog()
     target = Target(id="M13")
@@ -55,7 +55,7 @@ def test_get_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-t
     mock.assert_called_once_with(catalog, "M13")
 
 
-def test_create_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_create_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the target id is forwarded and the result passes through."""
     catalog = _make_catalog()
     target = Target(id="M13")
@@ -66,7 +66,7 @@ def test_create_delegates_to_target_records(monkeypatch):  # ruff: ignore[missin
     mock.assert_called_once_with(catalog, "M13")
 
 
-def test_delete_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_delete_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify the target id is forwarded and the result passes through."""
     catalog = _make_catalog()
     mock = MagicMock(return_value=True)
@@ -76,7 +76,7 @@ def test_delete_delegates_to_target_records(monkeypatch):  # ruff: ignore[missin
     mock.assert_called_once_with(catalog, "M13")
 
 
-def test_save_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_save_delegates_to_target_records(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify save calls through with the catalog itself."""
     catalog = _make_catalog()
     mock = MagicMock()
@@ -87,7 +87,7 @@ def test_save_delegates_to_target_records(monkeypatch):  # ruff: ignore[missing-
     mock.assert_called_once_with(catalog)
 
 
-def test_add_appends_a_new_target_and_saves(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_add_appends_a_new_target_and_saves(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify a new target is appended, tracked, and saved.
 
     Unlike the other CRUD methods, add() has real logic of its own
@@ -106,7 +106,7 @@ def test_add_appends_a_new_target_and_saves(monkeypatch):  # ruff: ignore[missin
     save_mock.assert_called_once()
 
 
-def test_add_does_not_duplicate_an_existing_target(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_add_does_not_duplicate_an_existing_target(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify adding a target already in the catalog does not duplicate it."""
     catalog = _make_catalog()
     monkeypatch.setattr(catalog, "save", MagicMock())
@@ -199,7 +199,7 @@ def test_reindex_frames_refuses_a_name_that_matches_no_target() -> None:
         catalog.reindex_frames("No Such Target")
 
 
-def test_get_frame_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_frame_delegates_to_image_conversions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify all arguments are forwarded and the result passes through."""
     catalog = _make_catalog()
     target = Target(id="M13")
@@ -241,7 +241,7 @@ def test_camera_query_delegates_with_the_full_target_list(monkeypatch: pytest.Mo
 class TestGetHeader:
     """Behavior tests for get_header's target-ownership check."""
 
-    def test_reads_the_header_when_no_target_is_given(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_reads_the_header_when_no_target_is_given(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify a bare path read skips the ownership check entirely."""
         catalog = _make_catalog()
         mock = MagicMock(return_value=[{"KEY": "VALUE"}])
@@ -252,7 +252,9 @@ class TestGetHeader:
         assert result == [{"KEY": "VALUE"}]
         mock.assert_called_once_with("/fake.fits")
 
-    def test_reads_the_header_when_the_path_belongs_to_the_target(self, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_reads_the_header_when_the_path_belongs_to_the_target(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify a path matching the target's stacked_image is accepted."""
         catalog = _make_catalog()
         target = Target(id="M13", stacked_image="/stack.fits")
@@ -263,7 +265,7 @@ class TestGetHeader:
 
         mock.assert_called_once_with("/stack.fits")
 
-    def test_raises_when_the_path_does_not_belong_to_the_target(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_raises_when_the_path_does_not_belong_to_the_target(self) -> None:
         """Verify an unrelated path is rejected before ever reading it."""
         catalog = _make_catalog()
         target = Target(id="M13")

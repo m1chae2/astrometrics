@@ -1,5 +1,7 @@
 """Tests for the shared, generic `Butler`."""
 
+from pathlib import Path
+
 import pytest
 from pydantic import BaseModel
 
@@ -28,7 +30,7 @@ class _Widget(BaseModel):
 class _FakeConfig:
     """Minimal config stand-in exposing get_library_path()."""
 
-    def __init__(self, library_path: str):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, library_path: str) -> None:
         self._library_path = library_path
 
     def get_library_path(self) -> str:
@@ -42,7 +44,7 @@ class _FakeConfig:
         return self._library_path
 
 
-def _make_butler(tmp_path, extra_columns=False) -> Butler:  # ruff: ignore[missing-type-function-argument]
+def _make_butler(tmp_path: Path, extra_columns=False) -> Butler:  # ruff: ignore[missing-type-function-argument]
     config = _FakeConfig(str(tmp_path))
     spec = DatasetSpec(
         table_name="widgets",
@@ -53,7 +55,7 @@ def _make_butler(tmp_path, extra_columns=False) -> Butler:  # ruff: ignore[missi
     return Butler(config, db_name="test.db", specs={"widget": spec})
 
 
-def test_round_trip_without_extra_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_round_trip_without_extra_columns(tmp_path: Path) -> None:
     """get_all/put_all round-trip a widget with no extra_columns configured."""
     butler = _make_butler(tmp_path, extra_columns=False)
     widget = _Widget(id="a", label="Alpha", score=1.5)
@@ -67,7 +69,7 @@ def test_round_trip_without_extra_columns(tmp_path):  # ruff: ignore[missing-typ
     assert loaded[0].score == pytest.approx(1.5)
 
 
-def test_round_trip_with_extra_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_round_trip_with_extra_columns(tmp_path: Path) -> None:
     """get_all/put round-trip a widget with an extra_columns callback."""
     butler = _make_butler(tmp_path, extra_columns=True)
     widget = _Widget(id="b", label="Beta")
@@ -79,12 +81,12 @@ def test_round_trip_with_extra_columns(tmp_path):  # ruff: ignore[missing-type-f
     assert loaded.label == "Beta"
 
 
-def test_merge_and_persist_disjoint_ids_do_not_clobber(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_merge_and_persist_disjoint_ids_do_not_clobber(tmp_path: Path) -> None:
     """Two merge_and_record calls on disjoint ids both survive."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a", label="Alpha"), _Widget(id="b", label="Beta")])
 
-    def keep_updated(existing, updated):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def keep_updated(existing, updated):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         return updated
 
     butler.merge_and_record("widget", [_Widget(id="a", label="Alpha-updated")], keep_updated)
@@ -95,12 +97,12 @@ def test_merge_and_persist_disjoint_ids_do_not_clobber(tmp_path):  # ruff: ignor
     assert loaded["b"].label == "Beta-updated"
 
 
-def test_merge_and_persist_preserves_untouched_rows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_merge_and_persist_preserves_untouched_rows(tmp_path: Path) -> None:
     """merge_and_record never deletes rows outside the given objects."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a"), _Widget(id="b")])
 
-    def keep_updated(existing, updated):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def keep_updated(existing, updated):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         return updated
 
     butler.merge_and_record("widget", [_Widget(id="a", label="only-a-touched")], keep_updated)
@@ -109,7 +111,7 @@ def test_merge_and_persist_preserves_untouched_rows(tmp_path):  # ruff: ignore[m
     assert ids == {"a", "b"}
 
 
-def test_delete_by_ids_scopes_to_targeted_rows(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_delete_by_ids_scopes_to_targeted_rows(tmp_path: Path) -> None:
     """delete_by_ids removes only the requested ids."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a"), _Widget(id="b"), _Widget(id="c")])
@@ -120,7 +122,7 @@ def test_delete_by_ids_scopes_to_targeted_rows(tmp_path):  # ruff: ignore[missin
     assert ids == {"a", "c"}
 
 
-def test_put_all_replaces_whole_table(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_put_all_replaces_whole_table(tmp_path: Path) -> None:
     """put_all deletes rows not present in the given list."""
     butler = _make_butler(tmp_path)
     butler.put_all("widget", [_Widget(id="a"), _Widget(id="b")])
@@ -131,13 +133,13 @@ def test_put_all_replaces_whole_table(tmp_path):  # ruff: ignore[missing-type-fu
     assert ids == {"a"}
 
 
-def test_get_by_ids_empty_input_returns_empty_list(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_by_ids_empty_input_returns_empty_list(tmp_path: Path) -> None:
     """get_by_ids short-circuits on an empty id list."""
     butler = _make_butler(tmp_path)
     assert butler.get_by_ids("widget", []) == []
 
 
-def test_exists(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_exists(tmp_path: Path) -> None:
     """exists() reflects whether a row is currently present."""
     butler = _make_butler(tmp_path)
     assert butler.exists("widget", {"id": "a"}) is False
@@ -146,7 +148,7 @@ def test_exists(tmp_path):  # ruff: ignore[missing-type-function-argument, missi
     assert butler.exists("widget", {"id": "a"}) is True
 
 
-def _make_indexed_butler(tmp_path) -> Butler:  # ruff: ignore[missing-type-function-argument]
+def _make_indexed_butler(tmp_path: Path) -> Butler:
     """Build a Butler whose spec declares label as an indexed column.
 
     Returns
@@ -166,7 +168,7 @@ def _make_indexed_butler(tmp_path) -> Butler:  # ruff: ignore[missing-type-funct
     return Butler(config, db_name="test.db", specs={"widget": spec})
 
 
-def test_ensure_table_creates_the_declared_index(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ensure_table_creates_the_declared_index(tmp_path: Path) -> None:
     """Verify indexed_columns produces a real SQL index, not just a column."""
     import sqlite3
 
@@ -182,7 +184,7 @@ def test_ensure_table_creates_the_declared_index(tmp_path):  # ruff: ignore[miss
     assert "idx_widgets_label" in indexes
 
 
-def test_list_projected_returns_only_the_requested_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_returns_only_the_requested_columns(tmp_path: Path) -> None:
     """Verify the result dicts carry exactly the requested columns."""
     butler = _make_indexed_butler(tmp_path)
     butler.put(_Widget(id="w1", label="alpha", score=1.5), "widget")
@@ -196,7 +198,7 @@ def test_list_projected_returns_only_the_requested_columns(tmp_path):  # ruff: i
     ]
 
 
-def test_list_projected_never_touches_data_json_unless_asked(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_never_touches_data_json_unless_asked(tmp_path: Path) -> None:
     """Verify data_json is absent from results that don't request it.
 
     The whole point of this method is avoiding the cost of parsing
@@ -211,7 +213,7 @@ def test_list_projected_never_touches_data_json_unless_asked(tmp_path):  # ruff:
     assert "data_json" not in row
 
 
-def test_list_projected_rejects_an_unregistered_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_rejects_an_unregistered_column(tmp_path: Path) -> None:
     """Verify an unknown column name raises rather than building raw SQL.
 
     columns/like can originate from caller-assembled lists, so this
@@ -223,7 +225,7 @@ def test_list_projected_rejects_an_unregistered_column(tmp_path):  # ruff: ignor
         butler.list_projected("widget", ["id", "; DROP TABLE widgets"])
 
 
-def test_list_projected_requires_at_least_one_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_requires_at_least_one_column(tmp_path: Path) -> None:
     """Verify an empty column list raises rather than selecting nothing."""
     butler = _make_indexed_butler(tmp_path)
 
@@ -231,14 +233,14 @@ def test_list_projected_requires_at_least_one_column(tmp_path):  # ruff: ignore[
         butler.list_projected("widget", [])
 
 
-def test_list_projected_on_a_missing_database_returns_empty(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_on_a_missing_database_returns_empty(tmp_path: Path) -> None:
     """Verify no database file yet is handled the same as an empty table."""
     butler = _make_indexed_butler(tmp_path)
 
     assert butler.list_projected("widget", ["id"]) == []
 
 
-def test_list_projected_like_matches_a_substring(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_like_matches_a_substring(tmp_path: Path) -> None:
     """Verify like= narrows to rows whose column contains the substring."""
     butler = _make_indexed_butler(tmp_path)
     butler.put(_Widget(id="w1", label="M 13 Field"), "widget")
@@ -250,7 +252,7 @@ def test_list_projected_like_matches_a_substring(tmp_path):  # ruff: ignore[miss
     assert rows == [{"id": "w1"}]
 
 
-def test_list_projected_like_escapes_sql_wildcard_characters(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_like_escapes_sql_wildcard_characters(tmp_path: Path) -> None:
     """Verify a literal '%' or '_' typed by a caller matches literally.
 
     Without escaping, a caller-supplied '%' or '_' would act as a SQL
@@ -267,7 +269,7 @@ def test_list_projected_like_escapes_sql_wildcard_characters(tmp_path):  # ruff:
     assert rows == [{"id": "w1"}]
 
 
-def test_list_projected_limit_caps_the_row_count(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_limit_caps_the_row_count(tmp_path: Path) -> None:
     """Verify limit= bounds how many rows are returned."""
     butler = _make_indexed_butler(tmp_path)
     for index in range(5):
@@ -278,7 +280,7 @@ def test_list_projected_limit_caps_the_row_count(tmp_path):  # ruff: ignore[miss
     assert len(rows) == 2
 
 
-def test_list_projected_rejects_an_unregistered_like_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_rejects_an_unregistered_like_column(tmp_path: Path) -> None:
     """Verify like= keys are validated the same way columns are."""
     butler = _make_indexed_butler(tmp_path)
 
@@ -286,7 +288,7 @@ def test_list_projected_rejects_an_unregistered_like_column(tmp_path):  # ruff: 
         butler.list_projected("widget", ["id"], like={"nonexistent_column": "x"})
 
 
-def test_list_projected_between_keeps_rows_inside_the_range_ends_included(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_between_keeps_rows_inside_the_range_ends_included(tmp_path: Path) -> None:
     """Verify between= keeps rows at or between the low and high values."""
     butler = _make_indexed_butler(tmp_path)
     for widget_id, score in (("w1", 1.0), ("w2", 2.0), ("w3", 3.0), ("w4", 4.0)):
@@ -297,7 +299,7 @@ def test_list_projected_between_keeps_rows_inside_the_range_ends_included(tmp_pa
     assert sorted(row["id"] for row in rows) == ["w2", "w3"]
 
 
-def test_list_projected_between_never_matches_an_empty_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_between_never_matches_an_empty_column(tmp_path: Path) -> None:
     """Verify a row whose column is empty (NULL) is left out of a range."""
     butler = _make_indexed_butler(tmp_path)
     butler.put(_Widget(id="w1", label="x", score=None), "widget")
@@ -308,7 +310,7 @@ def test_list_projected_between_never_matches_an_empty_column(tmp_path):  # ruff
     assert rows == [{"id": "w2"}]
 
 
-def test_list_projected_between_combines_with_like(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_between_combines_with_like(tmp_path: Path) -> None:
     """Verify between= and like= must both hold for a row to be returned."""
     butler = _make_indexed_butler(tmp_path)
     butler.put(_Widget(id="w1", label="M 13", score=1.0), "widget")
@@ -320,7 +322,7 @@ def test_list_projected_between_combines_with_like(tmp_path):  # ruff: ignore[mi
     assert rows == [{"id": "w1"}]
 
 
-def test_list_projected_rejects_an_unregistered_between_column(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_list_projected_rejects_an_unregistered_between_column(tmp_path: Path) -> None:
     """Verify between= names are validated like columns and like keys."""
     butler = _make_indexed_butler(tmp_path)
 
@@ -328,7 +330,7 @@ def test_list_projected_rejects_an_unregistered_between_column(tmp_path):  # ruf
         butler.list_projected("widget", ["id"], between={"1=1; --": (0.0, 1.0)})
 
 
-def _write_widgets_with_only_the_label_column(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def _write_widgets_with_only_the_label_column(tmp_path: Path) -> None:
     """Create a widgets table as an older version of the app would have.
 
     The table has an ``id``, a ``data_json`` and a ``label`` column but
@@ -347,7 +349,7 @@ def _write_widgets_with_only_the_label_column(tmp_path) -> None:  # ruff: ignore
     connection.close()
 
 
-def _make_butler_with_score_backfill(tmp_path) -> Butler:  # ruff: ignore[missing-type-function-argument]
+def _make_butler_with_score_backfill(tmp_path: Path) -> Butler:
     """Build a Butler whose spec backfills the score column from data_json.
 
     Returns
@@ -366,7 +368,7 @@ def _make_butler_with_score_backfill(tmp_path) -> Butler:  # ruff: ignore[missin
     return Butler(_FakeConfig(str(tmp_path)), db_name="test.db", specs={"widget": spec})
 
 
-def test_new_column_is_backfilled_from_data_json_even_by_a_read_only_call(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_new_column_is_backfilled_from_data_json_even_by_a_read_only_call(tmp_path: Path) -> None:
     """Verify old rows get the new column's value and it is really saved.
 
     ``list_projected`` never commits, so this also checks the backfill
@@ -384,7 +386,7 @@ def test_new_column_is_backfilled_from_data_json_even_by_a_read_only_call(tmp_pa
     ]
 
 
-def test_backfill_runs_once_and_does_not_overwrite_later_writes(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_backfill_runs_once_and_does_not_overwrite_later_writes(tmp_path: Path) -> None:
     """Verify a value written after the backfill survives later reads."""
     _write_widgets_with_only_the_label_column(tmp_path)
     butler = _make_butler_with_score_backfill(tmp_path)
@@ -396,7 +398,7 @@ def test_backfill_runs_once_and_does_not_overwrite_later_writes(tmp_path):  # ru
     assert {row["id"]: row["score"] for row in rows} == {"w1": 99.0, "w2": 2.5}
 
 
-def test_ensure_table_creates_one_index_over_a_tuple_of_columns(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ensure_table_creates_one_index_over_a_tuple_of_columns(tmp_path: Path) -> None:
     """Verify a tuple in indexed_columns makes a single multi-column index.
 
     A query that reads only those columns is then answered from the index

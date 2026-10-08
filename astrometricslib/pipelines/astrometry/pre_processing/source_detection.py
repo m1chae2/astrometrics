@@ -105,7 +105,7 @@ def measure_star_radius_px(data: np.ndarray, x_centroid: float, y_centroid: floa
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
-    def __init__(self, fwhm: float = 4.0, threshold_sigma: float = 5.0):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, fwhm: float = 4.0, threshold_sigma: float = 5.0) -> None:
         """Set up the star finder.
 
         Parameters

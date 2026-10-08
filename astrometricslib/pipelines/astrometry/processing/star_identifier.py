@@ -452,7 +452,7 @@ def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
-    def __init__(self, config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration | None = None) -> None:
         """Set up the tools.
 
         Parameters
@@ -1555,7 +1555,7 @@ class StarIdentifier:
             # _build_stellar_objects_from_sources -- it is at least unique
             # and non-empty.
 
-    def _identify_stars_with_simbad(  # ruff: ignore[missing-return-type-private-function]
+    def _identify_stars_with_simbad(
         self,
         wcs: WCS | None,
         center_ra: float | None = None,
@@ -1563,7 +1563,7 @@ class StarIdentifier:
         width: int = 1000,
         height: int = 1000,
         target_name: str | None = None,
-    ):
+    ) -> None:
         """Ask SIMBAD for stars in the image area and match them up.
 
         If we successfully mapped the image, we name every star. If the map
@@ -1852,7 +1852,7 @@ class StarIdentifier:
         return brightest_index
 
     @staticmethod
-    def _filter_stellar_rows(result_table):  # ruff: ignore[missing-type-function-argument, missing-return-type-static-method]
+    def _filter_stellar_rows(result_table):  # ruff: ignore[missing-return-type-static-method, missing-type-function-argument]
         """Filter the SIMBAD results to only include individual stars.
 
         This removes galaxies, nebulae, and star clusters. Our algorithm only
@@ -1870,7 +1870,7 @@ class StarIdentifier:
             logger.warning("SIMBAD result has no OTYPE column; cannot exclude non-stellar catalog matches.")
             return result_table
 
-        def _is_masked(value):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def _is_masked(value):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
             return value is None or (hasattr(value, "mask") and bool(value.mask))
 
         stellar_mask = []
@@ -1892,7 +1892,7 @@ class StarIdentifier:
         stellar_mask = np.array(stellar_mask, dtype=bool)
         return result_table[stellar_mask]
 
-    def _apply_simbad_match(self, stellar_object, match, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _apply_simbad_match(self, stellar_object, match, ra, dec) -> None:  # ruff: ignore[missing-type-function-argument]
         """Copy the star details from SIMBAD into our star object."""
         main_id = "Unknown"
         for col in ["main_id", "MAIN_ID", "ID", "id"]:
@@ -1950,7 +1950,7 @@ class StarIdentifier:
             dec,
         )
 
-    def _apply_gaia_match(self, stellar_object: StellarObject, match: Any, ra: float, dec: float):  # ruff: ignore[missing-return-type-private-function]
+    def _apply_gaia_match(self, stellar_object: StellarObject, match: Any, ra: float, dec: float) -> None:
         """Copy the star details from Gaia into our star object."""
         source_id = None
         for col in ["DESIGNATION", "designation", "source_id", "SOURCE_ID"]:

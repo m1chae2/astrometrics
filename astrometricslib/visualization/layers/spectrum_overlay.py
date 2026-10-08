@@ -27,7 +27,7 @@ class SpectrumOverlay:
         raw and corrected (see `add_quantum_efficiency_correction_toggle`).
     """
 
-    def __init__(self, axis, fig, config: VisualizationConfig, corrected_axis=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, axis, fig, config: VisualizationConfig, corrected_axis=None) -> None:  # ruff: ignore[missing-type-function-argument]
         self.ax = axis
         self.ax_corrected = corrected_axis
         self.fig = fig
@@ -44,7 +44,7 @@ class SpectrumOverlay:
         self.active_quantum_efficiency_corrected_intensities = None
         self.active_response_corrected_intensities = None
 
-    def render_spectrum(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def render_spectrum(
         self,
         index: int,
         star_name: str,
@@ -53,7 +53,7 @@ class SpectrumOverlay:
         intensities,  # ruff: ignore[missing-type-function-argument]
         quantum_efficiency_corrected_intensities=None,  # ruff: ignore[missing-type-function-argument]
         response_corrected_intensities=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+    ) -> None:
         """Plot the 1D extracted spectrum.
 
         Stores the active star's data so the corrected-view toggle and
@@ -162,7 +162,7 @@ class SpectrumOverlay:
             )
         return None, "No Correction Available"
 
-    def _render_active_spectrum(self):  # ruff: ignore[missing-return-type-private-function]
+    def _render_active_spectrum(self) -> None:
         """Draw the active star's spectrum on whichever axes are in use."""
         self.balmer_line_artists = []
         self.balmer_label_artists = []
@@ -191,7 +191,7 @@ class SpectrumOverlay:
         if self.balmer_lines_visible and wavelengths is not None:
             self.draw_spectral_lines(self.active_spectral_type, wavelengths)
 
-    def add_balmer_toggle(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def add_balmer_toggle(self) -> None:
         """Add the Balmer line toggle button to the plot."""
         bbox = self.ax.get_position()
         width, height = 0.25, 0.04
@@ -207,7 +207,7 @@ class SpectrumOverlay:
         )
         self.balmer_button.on_clicked(self.toggle_balmer_lines)
 
-    def add_quantum_efficiency_correction_toggle(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def add_quantum_efficiency_correction_toggle(self) -> None:
         """Add the raw/corrected toggle button to the plot.
 
         Only useful in single-axis mode (`self.ax_corrected is None`):
@@ -252,7 +252,7 @@ class SpectrumOverlay:
             return "Show Normalized Flux"
         return "Show QE-Corrected Intensity"
 
-    def toggle_quantum_efficiency_corrected_view(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def toggle_quantum_efficiency_corrected_view(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Toggle between raw counts and the best available correction."""
         self.quantum_efficiency_corrected_view_active = not self.quantum_efficiency_corrected_view_active
         if self.quantum_efficiency_toggle_button is not None:
@@ -261,7 +261,7 @@ class SpectrumOverlay:
         self._render_active_spectrum()
         self.fig.canvas.draw_idle()
 
-    def toggle_balmer_lines(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def toggle_balmer_lines(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Toggle Balmer line visibility.
 
         Draws or clears vertical Balmer line overlays on the plot.
@@ -279,7 +279,7 @@ class SpectrumOverlay:
 
         self.fig.canvas.draw_idle()
 
-    def clear_spectral_lines(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def clear_spectral_lines(self) -> None:
         """Remove spectral line artists from the plot."""
         for artist in self.balmer_line_artists + self.balmer_label_artists:
             try:
@@ -290,7 +290,7 @@ class SpectrumOverlay:
         self.balmer_line_artists = []
         self.balmer_label_artists = []
 
-    def draw_spectral_lines(self, spectral_type: str, wavelengths: np.ndarray):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def draw_spectral_lines(self, spectral_type: str, wavelengths: np.ndarray) -> None:
         """Draws vertical lines for common absorption features.
 
         Drawn on every axis currently showing a spectrum (both the raw

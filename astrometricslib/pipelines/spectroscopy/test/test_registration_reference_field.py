@@ -7,6 +7,7 @@ frame centre are left out, from both the target's own stars and the fallback
 set, and that nothing is ruled out when the frame centre is unknown.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -229,7 +230,7 @@ def test_unflagged_anonymous_detections_and_unplaced_stars_are_not_references() 
     assert candidates == []
 
 
-def test_a_solved_position_is_preferred_over_the_header(tmp_path) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_solved_position_is_preferred_over_the_header(tmp_path: Path) -> None:
     """The hint from a plate-solved stack wins; the header is the fallback."""
     from astropy.io import fits
 

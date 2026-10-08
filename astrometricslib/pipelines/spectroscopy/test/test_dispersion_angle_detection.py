@@ -51,7 +51,7 @@ from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 class MockAstrometricsImage(AstrometricsImage):
     """Mock AstrometricsImage that accepts a direct array input."""
 
-    def __init__(self, data: np.ndarray):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, data: np.ndarray) -> None:
         """Initialize MockAstrometricsImage with given data."""
         self._data = data
         self._header = {}
@@ -94,9 +94,9 @@ def _build_pipeline(orientation: str) -> SpectroscopyPipeline:
     return SpectroscopyPipeline(config=config)
 
 
-def _build_tilted_trace(  # ruff: ignore[missing-return-type-private-function]
+def _build_tilted_trace(
     orientation: str, star_pos: tuple[float, float], offset_px: float, length_px: float, true_slope: float
-):
+) -> np.ndarray:
     """Build a synthetic image with a known-tilted trace.
 
     Returns
@@ -200,9 +200,9 @@ def _build_pipeline_asi533(orientation: str) -> SpectroscopyPipeline:
     return SpectroscopyPipeline(config=config)
 
 
-def _build_tilted_trace_from_anchor(  # ruff: ignore[missing-return-type-private-function]
+def _build_tilted_trace_from_anchor(
     orientation: str, star_pos: tuple[float, float], offset_px: float, length_px: float, true_slope: float
-):
+) -> np.ndarray:
     """Build a synthetic image whose trace runs straight through the star.
 
     This is the physically correct model for a real optical tilt, and

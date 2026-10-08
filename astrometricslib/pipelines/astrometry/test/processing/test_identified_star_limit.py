@@ -14,7 +14,7 @@ from astrometricslib.pipelines.astrometry.processing.star_identifier import (
 )
 
 
-def _build_identifier(configured_limit: int | None):  # ruff: ignore[missing-return-type-private-function]
+def _build_identifier(configured_limit: int | None) -> StarIdentifier:
     """Build a StarIdentifier whose detector returns 500 fake sources.
 
     Parameters
@@ -40,7 +40,7 @@ def _build_identifier(configured_limit: int | None):  # ruff: ignore[missing-ret
     return identifier
 
 
-def test_every_detected_star_is_identified_by_default():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_detected_star_is_identified_by_default() -> None:
     """Verify no ceiling applies when configuration reports none."""
     identifier = _build_identifier(None)
 
@@ -52,7 +52,7 @@ def test_every_detected_star_is_identified_by_default():  # ruff: ignore[missing
     assert identifier.sources_detected == 500
 
 
-def test_a_configured_ceiling_is_honoured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_configured_ceiling_is_honoured() -> None:
     """Verify the configured limit caps identification, brightest first."""
     identifier = _build_identifier(50)
 
@@ -66,7 +66,7 @@ def test_a_configured_ceiling_is_honoured():  # ruff: ignore[missing-return-type
     assert identifier.sources_detected == 500
 
 
-def test_an_explicit_argument_overrides_configuration():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_explicit_argument_overrides_configuration() -> None:
     """Verify the call argument wins over the configured value."""
     identifier = _build_identifier(50)
 
@@ -79,7 +79,7 @@ def test_an_explicit_argument_overrides_configuration():  # ruff: ignore[missing
     assert len(stellar_objects) == 10
 
 
-def test_an_explicit_zero_removes_a_configured_ceiling():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_explicit_zero_removes_a_configured_ceiling() -> None:
     """Verify 0 means no limit even when configuration sets one."""
     identifier = _build_identifier(50)
 
@@ -92,7 +92,7 @@ def test_an_explicit_zero_removes_a_configured_ceiling():  # ruff: ignore[missin
     assert len(stellar_objects) == 500
 
 
-def test_the_ceiling_is_larger_than_the_plate_solver_subset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_ceiling_is_larger_than_the_plate_solver_subset() -> None:
     """Verify the two limits stay independent of one another.
 
     The solver's list is deliberately small; that must not become the

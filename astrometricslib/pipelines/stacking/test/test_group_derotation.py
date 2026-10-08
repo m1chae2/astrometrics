@@ -7,6 +7,8 @@ be trusted is left alone, and that nothing is rotated when no group's tilt
 can be trusted.
 """
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -104,7 +106,7 @@ def test_rotating_by_the_measured_angle_straightens_the_streak() -> None:
     assert brightest_column == pytest.approx(150, abs=2)
 
 
-def _stub_measurements(monkeypatch, angles_and_contrasts):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _stub_measurements(monkeypatch: pytest.MonkeyPatch, angles_and_contrasts: list[tuple[Any, ...]]) -> None:
     """Make `measure_trail_angle_degrees` return canned answers in call order.
 
     Parameters
@@ -120,7 +122,7 @@ def _stub_measurements(monkeypatch, angles_and_contrasts):  # ruff: ignore[missi
     monkeypatch.setattr(module, "measure_trail_angle_degrees", lambda *args, **kwargs: next(answers))
 
 
-def test_groups_are_rotated_onto_the_most_clearly_measured_tilt(monkeypatch) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_groups_are_rotated_onto_the_most_clearly_measured_tilt(monkeypatch: pytest.MonkeyPatch) -> None:
     """Three groups at different tilts end up at the clearest one's tilt."""
     images = [
         _tilted_streak(300, 150.0, 150.0, 1.0),
@@ -141,7 +143,7 @@ def test_groups_are_rotated_onto_the_most_clearly_measured_tilt(monkeypatch) -> 
         assert brightest_column == pytest.approx(150, abs=6)
 
 
-def test_a_group_below_the_contrast_floor_is_left_unrotated(monkeypatch) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_group_below_the_contrast_floor_is_left_unrotated(monkeypatch: pytest.MonkeyPatch) -> None:
     """A noisy group's own tilt is not trusted, and it is reported as None."""
     faint = _tilted_streak(300, 150.0, 150.0, 9.0)
     clear = _tilted_streak(300, 150.0, 150.0, 0.0)
@@ -155,7 +157,7 @@ def test_a_group_below_the_contrast_floor_is_left_unrotated(monkeypatch) -> None
     assert np.array_equal(rotated[0], faint.astype(np.float32))
 
 
-def test_nothing_is_rotated_when_no_group_can_be_trusted(monkeypatch) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_nothing_is_rotated_when_no_group_can_be_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every group failing its tilt measurement leaves the images untouched."""
     images = [_tilted_streak(300, 150.0, 150.0, 2.0), _tilted_streak(300, 150.0, 150.0, 5.0)]
     _stub_measurements(monkeypatch, [(2.0, 1.0), (5.0, 2.0)])

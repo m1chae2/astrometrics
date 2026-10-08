@@ -9,6 +9,7 @@ model's field crashes the save or degrades safely.
 """
 
 import json
+from pathlib import Path
 
 import astropy.units as u
 import numpy as np
@@ -19,7 +20,7 @@ from astrometricslib.foundation.storage.butler import Butler, DatasetSpec
 from astrometricslib.foundation.storage.local_database import safe_json_dumps
 
 
-def test_safe_json_dumps_handles_numpy_scalars_and_arrays():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_json_dumps_handles_numpy_scalars_and_arrays() -> None:
     """Numpy scalar and array values must round-trip as plain JSON types."""
     payload = {
         "an_int": np.int64(7),
@@ -30,14 +31,14 @@ def test_safe_json_dumps_handles_numpy_scalars_and_arrays():  # ruff: ignore[mis
     assert decoded == {"an_int": 7, "a_float": 3.5, "an_array": [1.0, 2.0, 3.0]}
 
 
-def test_safe_json_dumps_handles_astropy_quantity():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_json_dumps_handles_astropy_quantity() -> None:
     """A Quantity must serialize with its unit preserved, not crash."""
     payload = {"separation": 12.5 * u.arcsec}
     decoded = json.loads(safe_json_dumps(payload))
     assert decoded == {"separation": {"value": 12.5, "unit": "arcsec"}}
 
 
-def test_safe_json_dumps_handles_pandas_series_and_dataframe():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_json_dumps_handles_pandas_series_and_dataframe() -> None:
     """A pandas Series/DataFrame must serialize to plain lists, not crash."""
     payload = {
         "series": pd.Series([1.0, 2.0, 3.0]),
@@ -51,7 +52,7 @@ def test_safe_json_dumps_handles_pandas_series_and_dataframe():  # ruff: ignore[
 class _FakeConfig:
     """Minimal config stand-in exposing get_library_path()."""
 
-    def __init__(self, library_path: str):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, library_path: str) -> None:
         self._library_path = library_path
 
     def get_library_path(self) -> str:
@@ -65,7 +66,7 @@ class _FakeConfig:
         return self._library_path
 
 
-def test_stellar_object_with_scientific_types_in_any_fields_round_trips(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_stellar_object_with_scientific_types_in_any_fields_round_trips(tmp_path: Path) -> None:
     """A star carrying numpy/Quantity/pandas values in its Any-typed fields.
 
     (flux, magnitude, star_data) must save and reload through the real

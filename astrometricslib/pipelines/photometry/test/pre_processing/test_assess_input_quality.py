@@ -13,7 +13,7 @@ from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality im
 )
 
 
-def test_assess_input_quality_computes_coverage_fraction():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_input_quality_computes_coverage_fraction() -> None:
     """Verify coverage_fraction is frames_measured / frames_available."""
     assessment = assess_input_quality(
         frames_measured=8,
@@ -26,7 +26,7 @@ def test_assess_input_quality_computes_coverage_fraction():  # ruff: ignore[miss
     assert assessment.is_low_coverage is False
 
 
-def test_assess_input_quality_zero_frames_available_gives_zero_coverage():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_input_quality_zero_frames_available_gives_zero_coverage() -> None:
     """Verify a zero denominator falls back to 0.0 coverage, not a crash."""
     assessment = assess_input_quality(
         frames_measured=0,
@@ -39,7 +39,7 @@ def test_assess_input_quality_zero_frames_available_gives_zero_coverage():  # ru
     assert assessment.is_low_coverage is True
 
 
-def test_assess_input_quality_flags_low_coverage_below_threshold():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_input_quality_flags_low_coverage_below_threshold() -> None:
     """Verify coverage above vs. below the threshold flags correctly."""
     just_above = assess_input_quality(
         frames_measured=int(LOW_COVERAGE_THRESHOLD * 100) + 1,
@@ -58,7 +58,7 @@ def test_assess_input_quality_flags_low_coverage_below_threshold():  # ruff: ign
     assert just_below.is_low_coverage is True
 
 
-def test_assess_input_quality_flags_unstable_tracking_above_drift_threshold():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_assess_input_quality_flags_unstable_tracking_above_drift_threshold() -> None:
     """Verify drift above/below threshold, and missing drift, flags right."""
     unstable = assess_input_quality(
         frames_measured=10,

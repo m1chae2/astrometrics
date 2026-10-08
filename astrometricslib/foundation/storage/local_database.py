@@ -29,7 +29,7 @@ class NumpyEncoder(json.JSONEncoder):
     packages, but that plain `json.dumps` cannot serialize on its own.
     """
 
-    def default(self, obj):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def default(self, obj: Any) -> Any:
         """Serialize scientific datatypes and datetimes to plain Python types.
 
         Parameters

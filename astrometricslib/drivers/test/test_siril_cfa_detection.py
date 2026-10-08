@@ -7,13 +7,15 @@ merely guessed. Every stacked product came out 3-channel RGB instead of
 2D mono.
 """
 
+from pathlib import Path
+
 import numpy as np
 from astropy.io import fits
 
 from astrometricslib.drivers.siril_interface import _frames_use_color_filter_array
 
 
-def _write_frame(directory, name, bayer_pattern=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_frame(directory, name, bayer_pattern=None) -> Path:  # ruff: ignore[missing-type-function-argument]
     """Write a small FITS frame, optionally declaring a Bayer pattern.
 
     Returns
@@ -29,28 +31,28 @@ def _write_frame(directory, name, bayer_pattern=None):  # ruff: ignore[missing-t
     return path
 
 
-def test_monochrome_frames_without_bayer_keyword_are_not_cfa(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_monochrome_frames_without_bayer_keyword_are_not_cfa(tmp_path: Path) -> None:
     """A mono frame declares no BAYERPAT, so no CFA flags may be applied."""
     _write_frame(tmp_path, "light_00001.fits")
 
     assert _frames_use_color_filter_array(str(tmp_path)) is False
 
 
-def test_frames_declaring_a_bayer_pattern_are_cfa(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frames_declaring_a_bayer_pattern_are_cfa(tmp_path: Path) -> None:
     """A color sensor writes BAYERPAT; debayering it is correct."""
     _write_frame(tmp_path, "light_00001.fits", bayer_pattern="RGGB")
 
     assert _frames_use_color_filter_array(str(tmp_path)) is True
 
 
-def test_blank_bayer_keyword_is_treated_as_monochrome(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_blank_bayer_keyword_is_treated_as_monochrome(tmp_path: Path) -> None:
     """An empty BAYERPAT names no pattern, so no debayering is applied."""
     _write_frame(tmp_path, "light_00001.fits", bayer_pattern="   ")
 
     assert _frames_use_color_filter_array(str(tmp_path)) is False
 
 
-def test_unreadable_frame_does_not_decide_the_stack(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_unreadable_frame_does_not_decide_the_stack(tmp_path: Path) -> None:
     """A corrupt first frame is skipped in favour of a readable one."""
     (tmp_path / "aaa_broken.fits").write_bytes(b"not a FITS file")
     _write_frame(tmp_path, "bbb_light.fits", bayer_pattern="RGGB")
@@ -58,17 +60,17 @@ def test_unreadable_frame_does_not_decide_the_stack(tmp_path):  # ruff: ignore[m
     assert _frames_use_color_filter_array(str(tmp_path)) is True
 
 
-def test_missing_directory_defaults_to_monochrome(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_missing_directory_defaults_to_monochrome(tmp_path: Path) -> None:
     """Absent frames must not cause a guessed debayer; mono is the default."""
     assert _frames_use_color_filter_array(str(tmp_path / "does_not_exist")) is False
 
 
-def test_empty_directory_defaults_to_monochrome(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_empty_directory_defaults_to_monochrome(tmp_path: Path) -> None:
     """No frames means no evidence of a CFA sensor."""
     assert _frames_use_color_filter_array(str(tmp_path)) is False
 
 
-def test_subdirectories_are_ignored(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_subdirectories_are_ignored(tmp_path: Path) -> None:
     """Only files are inspected; a stray subdirectory cannot break this."""
     (tmp_path / "aaa_subdir").mkdir()
     _write_frame(tmp_path, "bbb_light.fits", bayer_pattern="GRBG")
@@ -76,7 +78,7 @@ def test_subdirectories_are_ignored(tmp_path):  # ruff: ignore[missing-type-func
     assert _frames_use_color_filter_array(str(tmp_path)) is True
 
 
-def test_a_bayerpat_stored_in_hdu1_is_still_found(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_bayerpat_stored_in_hdu1_is_still_found(tmp_path: Path) -> None:
     """Regression test for the second live HDU0/HDU1 bug this function had.
 
     Before this was routed through `fits_access.frame_uses_color_filter_array`,

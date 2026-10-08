@@ -7,6 +7,8 @@ along with the function itself, since measuring FWHM this way means
 detecting stars first (the same SourceDetector step astrometry uses).
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -18,7 +20,7 @@ from astrometricslib.pipelines.astrometry.pre_processing.fwhm import (
 )
 
 
-def test_measure_image_fwhm_matches_known_gaussian_sigma(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_measure_image_fwhm_matches_known_gaussian_sigma(tmp_path: Path) -> None:
     """Verify measured FWHM is close to synthetic Gaussian stars' true FWHM.
 
     Cross-checked manually during development: for true_sigma=3.0
@@ -41,7 +43,7 @@ def test_measure_image_fwhm_matches_known_gaussian_sigma(tmp_path):  # ruff: ign
     assert measured == pytest.approx(expected, rel=0.15)
 
 
-def test_measure_image_fwhm_returns_none_for_empty_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_measure_image_fwhm_returns_none_for_empty_field(tmp_path: Path) -> None:
     """Verify a field with no detectable stars returns None, not raise."""
     data = np.random.default_rng(0).normal(100, 5, (100, 100)).astype(np.float32)
     path = tmp_path / "empty.fits"
@@ -49,7 +51,7 @@ def test_measure_image_fwhm_returns_none_for_empty_field(tmp_path):  # ruff: ign
     assert measure_image_fwhm(str(path)) is None
 
 
-def test_measure_fwhm_from_data_ignores_a_trail_attached_to_a_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_fwhm_from_data_ignores_a_trail_attached_to_a_star() -> None:
     """Verify a star's own dispersed trail doesn't inflate its FWHM.
 
     A slitless spectrograph disperses every star's light into a trail
@@ -75,7 +77,7 @@ def test_measure_fwhm_from_data_ignores_a_trail_attached_to_a_star():  # ruff: i
     assert measured == pytest.approx(expected, rel=0.25)
 
 
-def test_measure_fwhm_from_data_ignores_noise_peaks_next_to_one_bright_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_fwhm_from_data_ignores_noise_peaks_next_to_one_bright_star() -> None:
     """Verify faint noise peaks don't skew the FWHM away from the real star.
 
     A field with only one or two genuinely bright stars (again, the

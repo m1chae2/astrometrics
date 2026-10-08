@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import time
+from typing import Any
 
 from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 
@@ -21,12 +22,12 @@ SIGMA_GRID: list[tuple[float, float]] = [(2.0, 2.0), (2.5, 2.5), (3.0, 3.0), (3.
 FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
 
 
-def resolve_target_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def resolve_target_frames(
     target,  # ruff: ignore[missing-type-function-argument]
     camera: str,
     filter_type_names: tuple[str, ...],
     date_prefix: str | None = None,
-):
+) -> list[Any]:
     """Select a target's light frames matching camera/filter criteria.
 
     Excludes derived products (stacked, starless, or starmask

@@ -10,7 +10,9 @@ from astrometricslib.models.stellar_source import PhotometryResult, StellarObjec
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 
 
-def _make_star(star_id: str, fluxes_normalized: list[float], fluxes_detrended: list[float] | None = None):  # ruff: ignore[missing-return-type-private-function]
+def _make_star(
+    star_id: str, fluxes_normalized: list[float], fluxes_detrended: list[float] | None = None
+) -> StellarObject:
     star = StellarObject(id=star_id)
     star.photometry = PhotometryResult(
         fluxes_normalized=fluxes_normalized,
@@ -19,7 +21,7 @@ def _make_star(star_id: str, fluxes_normalized: list[float], fluxes_detrended: l
     return star
 
 
-def test_identify_variable_stars_flags_only_field_outliers():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_variable_stars_flags_only_field_outliers() -> None:
     """Verify a star far outside the field scatter distribution is flagged.
 
     A quiet field of stars all near 1% scatter, plus one genuinely
@@ -44,7 +46,7 @@ def test_identify_variable_stars_flags_only_field_outliers():  # ruff: ignore[mi
     assert quiet_star.photometry.output_quality.margin_in_mad_units < 0
 
 
-def test_identify_variable_stars_uses_detrended_flux_when_present():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_variable_stars_uses_detrended_flux_when_present() -> None:
     """Verify CV is computed from fluxes_detrended, not fluxes_normalized.
 
     A star whose raw normalized flux carries an airmass-extinction
@@ -63,7 +65,7 @@ def test_identify_variable_stars_uses_detrended_flux_when_present():  # ruff: ig
     assert star.photometry.coefficient_of_variation == pytest.approx(0.0)
 
 
-def test_identify_variable_stars_adaptive_cutoff_is_not_capped_at_ten_percent():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_identify_variable_stars_adaptive_cutoff_is_not_capped_at_ten_percent() -> None:
     """Verify a noisy field's adaptive cutoff isn't overridden by a flat 10%.
 
     When the field's own scatter is already elevated (e.g. poor

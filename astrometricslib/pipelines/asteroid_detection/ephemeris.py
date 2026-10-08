@@ -29,7 +29,7 @@ class EphemerisCrossMatcher:
         The settings for how close a match has to be to count.
     """
 
-    def __init__(self, config: MovingObjectConfig):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: MovingObjectConfig) -> None:
         self.config = config
 
     def query_field(

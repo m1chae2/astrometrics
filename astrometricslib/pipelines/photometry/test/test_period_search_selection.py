@@ -68,7 +68,7 @@ def _star(
     )
 
 
-def test_the_targets_own_star_comes_first_then_the_brightest():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_targets_own_star_comes_first_then_the_brightest() -> None:
     """Verify the target star comes first, then falling brightness."""
     stars = [
         _star("HD 1", mean_flux=50.0, arcseconds_from_center=900.0),
@@ -82,7 +82,7 @@ def test_the_targets_own_star_comes_first_then_the_brightest():  # ruff: ignore[
     assert [star.id for star in chosen] == ["HD 2", "HD 3", "HD 1"]
 
 
-def test_only_stars_with_enough_measurements_are_chosen():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_only_stars_with_enough_measurements_are_chosen() -> None:
     """Verify a star with too few points is never chosen."""
     too_few = MINIMUM_POINTS_FOR_PERIOD_SEARCH - 1
     stars = [
@@ -95,7 +95,7 @@ def test_only_stars_with_enough_measurements_are_chosen():  # ruff: ignore[missi
     assert [star.id for star in chosen] == ["HD 2"]
 
 
-def test_a_position_only_star_is_never_the_targets_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_position_only_star_is_never_the_targets_star() -> None:
     """Verify a position-only star is never the target's star."""
     stars = [
         _star("FIELD_J250.4225+36.4604", mean_flux=1.0, arcseconds_from_center=1.0, identified=False),
@@ -109,7 +109,7 @@ def test_a_position_only_star_is_never_the_targets_star():  # ruff: ignore[missi
     assert [star.id for star in chosen] == ["HD 2", "FIELD_J250.4225+36.4604"]
 
 
-def test_without_target_coordinates_only_the_brightest_are_chosen():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_without_target_coordinates_only_the_brightest_are_chosen() -> None:
     """Verify an unknown target position gives just the brightest stars."""
     stars = [_star(f"HD {number}", mean_flux=float(number)) for number in range(1, 16)]
 
@@ -136,7 +136,7 @@ def catalog_access(tmp_path: Path) -> CatalogAccess:
     return CatalogAccess(config)
 
 
-def test_results_are_saved_without_disturbing_the_rest_of_the_row(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_results_are_saved_without_disturbing_the_rest_of_the_row(catalog_access: CatalogAccess) -> None:
     """Verify the search adds a periodogram and changes nothing else."""
     stars = [_star("HD 1", mean_flux=50.0, arcseconds_from_center=2.0), _star("HD 2", mean_flux=40.0)]
     catalog_access.merge_and_record("stellar_catalog", stars, lambda _existing, updated: updated)
@@ -181,7 +181,7 @@ def test_one_stars_failed_search_does_not_stop_the_others(
     assert working.photometry.periodogram is not None
 
 
-def test_nothing_is_saved_when_no_star_can_be_searched(catalog_access):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_nothing_is_saved_when_no_star_can_be_searched(catalog_access: CatalogAccess) -> None:
     """Verify a run with no usable light curves does nothing."""
     stars = [_star("HD 1", mean_flux=50.0, points=2)]
 

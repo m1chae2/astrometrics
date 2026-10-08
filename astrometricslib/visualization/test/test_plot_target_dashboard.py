@@ -4,6 +4,7 @@ Description: Verifies standalone stellar plotting, target plotting,
 error checking, and layout generation.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
@@ -24,7 +25,7 @@ from astrometricslib.visualization.helpers import (
 )
 
 
-def test_plot_stellar_photometry_renders_light_curve():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_photometry_renders_light_curve() -> None:
     """Verify plot_stellar_photometry returns a figure.
 
     Tests basic photometry rendering when light curve data is present.
@@ -44,7 +45,7 @@ def test_plot_stellar_photometry_renders_light_curve():  # ruff: ignore[missing-
     plt.close(fig)
 
 
-def test_plot_stellar_photometry_raises_on_missing_light_curve():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_photometry_raises_on_missing_light_curve() -> None:
     """Verify plot_stellar_photometry raises InvalidArgumentError.
 
     Tests error handling for missing photometry data.
@@ -56,7 +57,7 @@ def test_plot_stellar_photometry_raises_on_missing_light_curve():  # ruff: ignor
         plot_stellar_photometry(mock_star)
 
 
-def test_plot_stellar_spectroscopy_renders_spectrum():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_spectroscopy_renders_spectrum() -> None:
     """Verify plot_stellar_spectroscopy returns a figure.
 
     Tests basic spectroscopy rendering when spectrum data is present.
@@ -75,7 +76,7 @@ def test_plot_stellar_spectroscopy_renders_spectrum():  # ruff: ignore[missing-r
     plt.close(fig)
 
 
-def test_plot_stellar_spectroscopy_raises_on_missing_spectrum():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_spectroscopy_raises_on_missing_spectrum() -> None:
     """Verify plot_stellar_spectroscopy raises InvalidArgumentError.
 
     Tests error handling for missing spectrum data.
@@ -87,7 +88,7 @@ def test_plot_stellar_spectroscopy_raises_on_missing_spectrum():  # ruff: ignore
         plot_stellar_spectroscopy(mock_star)
 
 
-def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_target_dashboard_raises_on_missing_stacked_image() -> None:
     """Verify plot_target_dashboard raises InvalidArgumentError.
 
     Tests target validation when stacked image is missing.
@@ -101,7 +102,7 @@ def test_plot_target_dashboard_raises_on_missing_stacked_image():  # ruff: ignor
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
 
 
-def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_target_dashboard_raises_on_no_catalog_stars() -> None:
     """Verify plot_target_dashboard raises InvalidArgumentError.
 
     Tests star list validation when no catalog stars are present.
@@ -122,7 +123,7 @@ def test_plot_target_dashboard_raises_on_no_catalog_stars():  # ruff: ignore[mis
         plot_target_dashboard(mock_target, mock_astrometrics.stars)
 
 
-def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify dynamic figure layout generation.
 
     Tests 3-panel, 2-panel, and 1-panel dynamic layout cases.
@@ -196,7 +197,7 @@ def test_plot_target_dashboard_dynamic_layout_cases(monkeypatch):  # ruff: ignor
     plt.close(fig_bare)
 
 
-def test_plot_stellar_analysis_renders_both_panels():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_analysis_renders_both_panels() -> None:
     """Verify plot_stellar_analysis renders both photometry and spectroscopy.
 
     Tests 2-panel figure generation when both data types are available.
@@ -226,7 +227,7 @@ def test_plot_stellar_analysis_renders_both_panels():  # ruff: ignore[missing-re
     plt.close(fig_alias)
 
 
-def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_stellar_analysis_raises_on_empty_star() -> None:
     """Verify plot_stellar_analysis raises InvalidArgumentError on empty star.
 
     Tests error handling when neither photometry nor spectroscopy is present.
@@ -239,7 +240,7 @@ def test_plot_stellar_analysis_raises_on_empty_star():  # ruff: ignore[missing-r
         plot_stellar_analysis(mock_star)
 
 
-def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side() -> None:
     """Verify plot_target_spectroscopy draws three panels, not a toggle.
 
     The image panel, plus a raw-counts panel and a separate calibrated
@@ -284,7 +285,7 @@ def test_plot_target_spectroscopy_renders_raw_and_calibrated_panels_side_by_side
     plt.close(fig)
 
 
-def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_plot_target_dashboard_draws_asteroid_candidates_on_the_star_field(tmp_path: Path) -> None:
     """Verify a target's asteroid candidates are drawn on the astrometry panel.
 
     Uses a real stacked-image FITS file (with a real WCS) rather than

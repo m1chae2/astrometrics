@@ -128,7 +128,7 @@ mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
 sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 
-def pytest_configure(config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def pytest_configure(config) -> None:  # ruff: ignore[missing-type-function-argument]
     """Register custom markers to stop pytest from printing warnings."""
     config.addinivalue_line("markers", "slow: marks tests as slow subprocess integration tests")
 

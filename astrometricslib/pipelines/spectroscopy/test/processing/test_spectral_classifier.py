@@ -33,7 +33,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier impor
 )
 
 
-def test_bundled_reference_templates_are_well_formed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_bundled_reference_templates_are_well_formed() -> None:
     """Verify every shipped template loads, and its data makes sense."""
     templates = _get_reference_templates()
 
@@ -45,7 +45,7 @@ def test_bundled_reference_templates_are_well_formed():  # ruff: ignore[missing-
         assert np.all(flux >= 0), f"{spectral_type} flux must be non-negative"
 
 
-def test_a_template_matched_against_itself_wins_with_high_confidence():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_template_matched_against_itself_wins_with_high_confidence() -> None:
     """Verify self-matching (plus noise) picks the correct type."""
     templates = _get_reference_templates()
     wavelength, flux = templates["G0V"]
@@ -58,7 +58,7 @@ def test_a_template_matched_against_itself_wins_with_high_confidence():  # ruff:
     assert result["confidence"] > 0.95
 
 
-def test_ranked_types_puts_the_winner_first_and_sums_to_one():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ranked_types_puts_the_winner_first_and_sums_to_one() -> None:
     """Verify the probability-ranked list agrees with the single best match."""
     templates = _get_reference_templates()
     wavelength, flux = templates["K0V"]
@@ -75,7 +75,7 @@ def test_ranked_types_puts_the_winner_first_and_sums_to_one():  # ruff: ignore[m
     assert abs(sum(probabilities) - 1.0) < 1e-9
 
 
-def test_rank_by_probability_matches_a_hand_computed_softmax():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_rank_by_probability_matches_a_hand_computed_softmax() -> None:
     """Pins the softmax weights, now computed via `scipy.special.softmax`."""
     rms_by_type = {"A0V": 0.02, "A2V": 0.05, "F0V": 0.20}
     correlation_by_type = {"A0V": 0.99, "A2V": 0.97, "F0V": 0.80}
@@ -92,7 +92,7 @@ def test_rank_by_probability_matches_a_hand_computed_softmax():  # ruff: ignore[
         assert entry["probability"] == pytest.approx(expected[entry["spectral_type"]])
 
 
-def test_a_hot_blue_star_is_not_confused_for_a_cool_red_one():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_hot_blue_star_is_not_confused_for_a_cool_red_one() -> None:
     """Verify a clear hot/cool pair lands on the right side of the sequence."""
     templates = _get_reference_templates()
 
@@ -105,7 +105,7 @@ def test_a_hot_blue_star_is_not_confused_for_a_cool_red_one():  # ruff: ignore[m
     assert cool_result["spectral_type"] in ("M5V", "M0V", "K5V")
 
 
-def test_too_few_points_returns_unknown_without_crashing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_too_few_points_returns_unknown_without_crashing() -> None:
     """Verify a handful of points isn't enough to attempt a match."""
     result = classify_spectral_type(
         wavelength_angstrom=np.array([5000.0, 5010.0, 5020.0]),
@@ -118,7 +118,7 @@ def test_too_few_points_returns_unknown_without_crashing():  # ruff: ignore[miss
     assert result["ranked_types"] == []
 
 
-def test_a_flat_spectrum_returns_unknown_without_crashing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_flat_spectrum_returns_unknown_without_crashing() -> None:
     """Verify a constant signal (zero variance) doesn't blow up the math."""
     wavelength = np.linspace(3600.0, 7500.0, 200)
     flat_intensity = np.full_like(wavelength, 500.0)
@@ -130,7 +130,7 @@ def test_a_flat_spectrum_returns_unknown_without_crashing():  # ruff: ignore[mis
     assert result["ranked_types"] == []
 
 
-def test_a_spectrum_covering_too_little_of_the_range_is_not_classified():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_spectrum_covering_too_little_of_the_range_is_not_classified() -> None:
     """Verify a spectrum that stops early gets no type."""
     wavelength, flux = _get_reference_templates()["G0V"]
     keep = wavelength <= 4500.0  # only 1500 A of the spectrum, less than the 2500 A needed
@@ -142,7 +142,7 @@ def test_a_spectrum_covering_too_little_of_the_range_is_not_classified():  # ruf
     assert "covers only" in result["reason"]
 
 
-def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match() -> None:
     """Verify an odd tilt gets a poor-match flag."""
     wavelength, flux = _get_reference_templates()["G0V"]
     # A bump no star has, strong enough to be a poor match (0.176 here) but
@@ -155,7 +155,7 @@ def test_a_spectrum_unlike_every_reference_is_flagged_as_a_poor_match():  # ruff
     assert result["rms"] > 0.15
 
 
-def test_the_score_separates_types_that_correlation_cannot():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_score_separates_types_that_correlation_cannot() -> None:
     """Verify an A0V spectrum is far from F6V by score though they correlate.
 
     This is the failure the score replaced: with correlation, an A0V
@@ -181,7 +181,7 @@ def test_the_score_separates_types_that_correlation_cannot():  # ruff: ignore[mi
     assert by_type["F6V"]["rms"] > 0.15  # the score can
 
 
-def test_nearest_reference_type_reads_catalog_spectral_types():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_nearest_reference_type_reads_catalog_spectral_types() -> None:
     """Verify catalog spectral types map to a reference."""
     assert nearest_reference_type("A0Va") == "A0V"
     assert nearest_reference_type("K0") == "K0V"
@@ -193,7 +193,7 @@ def test_nearest_reference_type_reads_catalog_spectral_types():  # ruff: ignore[
     assert nearest_reference_type(None) is None
 
 
-def test_the_score_does_not_depend_on_the_overall_brightness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_score_does_not_depend_on_the_overall_brightness() -> None:
     """Verify a spectrum five times brighter gets the same score."""
     wavelength, flux = _get_reference_templates()["G0V"]
     tilted = flux * (1.0 + 0.1 * np.sin(wavelength / 700.0))  # a shape that is not exactly G0V
@@ -205,7 +205,7 @@ def test_the_score_does_not_depend_on_the_overall_brightness():  # ruff: ignore[
     assert bright["rms"] == pytest.approx(faint["rms"], rel=1e-6)
 
 
-def test_the_score_is_a_fraction_of_the_average_brightness():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_score_is_a_fraction_of_the_average_brightness() -> None:
     """Verify a wiggle 5% of the average in size scores about 0.035.
 
     A sine wave of amplitude 0.05 has a root-mean-square size of

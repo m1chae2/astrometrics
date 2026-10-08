@@ -72,7 +72,7 @@ def _as_the_instrument_would_record(spectral_type: str) -> tuple[np.ndarray, np.
     return wavelength_angstrom, flux * quantum_efficiency * response.value_at(wavelength_angstrom)
 
 
-def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type() -> None:
     """Verify a G0V-like extracted spectrum gets classified onto the star."""
     pipeline = _build_pipeline()
     wavelength_angstrom, counts = _as_the_instrument_would_record("G0V")
@@ -96,7 +96,7 @@ def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type(): 
     assert isinstance(star.spectroscopy.probable_spectral_features, list)
 
 
-def test_a_camera_with_no_instrument_response_gets_no_spectral_type():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_camera_with_no_instrument_response_gets_no_spectral_type() -> None:
     """Verify a spectrum is not classified when its tilt cannot be removed."""
     pipeline = _build_pipeline(camera_name="TestCam")
     wavelength_angstrom, flux = _get_reference_templates()["G0V"]
@@ -117,7 +117,7 @@ def test_a_camera_with_no_instrument_response_gets_no_spectral_type():  # ruff: 
     assert "instrument response" in star.spectroscopy.self_determined_spectral_type_note
 
 
-def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_apply_result_to_stellar_object_handles_unclassifiable_data() -> None:
     """Verify a too-short extracted spectrum doesn't crash the pipeline."""
     pipeline = _build_pipeline()
     star = StellarObject(id="TestStar")
@@ -138,7 +138,7 @@ def test_apply_result_to_stellar_object_handles_unclassifiable_data():  # ruff: 
     assert star.spectroscopy.probable_spectral_features == []
 
 
-def test_the_pipeline_finds_its_camera_data_once_when_it_is_built():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_pipeline_finds_its_camera_data_once_when_it_is_built() -> None:
     """Verify the curve, response and profile are resolved at construction."""
     known = _build_pipeline()
     assert known.camera_profile.camera_name == "ZWO ASI533MM Pro"

@@ -19,13 +19,13 @@ class ImageOverlay:
         Styling configuration object.
     """
 
-    def __init__(self, axis, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, axis, config) -> None:  # ruff: ignore[missing-type-function-argument]
         self.ax = axis
         self.config = config
 
-    def render(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def render(
         self, data: np.ndarray | None, percentile: float = 99.5, title: str = "FITS Image with Detected Stars"
-    ):
+    ) -> None:
         """Display the 2D FITS pixel array with percentile clipping."""
         if data is None:
             self.ax.set_title(title)

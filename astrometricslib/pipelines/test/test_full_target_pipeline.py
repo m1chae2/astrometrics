@@ -44,7 +44,9 @@ class _StubConfig:
         return self._library_path
 
 
-def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(monkeypatch, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """A full pipeline run must not solve/record a target's stars twice.
 
     Regression test for the duplicate-astrometry bug: stacking used to
@@ -110,7 +112,9 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(monkeypat
     assert len(catalog_access.saved) == 3
 
 
-def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(monkeypatch, tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Regression test for the M 13 incident.
 
     A photometry crash used to throw away that same run's

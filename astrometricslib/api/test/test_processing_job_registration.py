@@ -6,6 +6,8 @@ job is recorded and closed out correctly on the success, no-output and error
 paths.
 """
 
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,7 +21,7 @@ from astrometricslib.pipelines.stacking import stage as stacking_tasks
 
 
 @pytest.fixture
-def isolated_job_logging(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_job_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """Point the job database and job log files at a throwaway folder.
 
     Yields
@@ -75,7 +77,9 @@ def _pipelines() -> ProcessingPipelines:
     return ProcessingPipelines(AppConfiguration(), MagicMock(), targets=MagicMock())
 
 
-def test_a_successful_stack_records_a_completed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_successful_stack_records_a_completed_job(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a successful stack is recorded as a completed job."""
     monkeypatch.setattr(stacking_tasks, "stack_frames", lambda *args, **kwargs: "/fake/stack.fits")
     result = _pipelines().stack(_target("StackJobTarget"))
@@ -88,7 +92,9 @@ def test_a_successful_stack_records_a_completed_job(isolated_job_logging, monkey
     assert jobs[0].progress_current == 100
 
 
-def test_a_stack_with_no_output_records_a_failed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_stack_with_no_output_records_a_failed_job(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a stack that finishes without an output file is marked failed.
 
     Stacking can return `None` without raising, so this outcome must be
@@ -104,7 +110,9 @@ def test_a_stack_with_no_output_records_a_failed_job(isolated_job_logging, monke
     assert jobs[0].status == "failed"
 
 
-def test_a_stacking_error_records_a_failed_job_and_still_raises(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_stacking_error_records_a_failed_job_and_still_raises(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a stacking exception is recorded but never swallowed."""
 
     def _explode(*args: object, **kwargs: object) -> object:

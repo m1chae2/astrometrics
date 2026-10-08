@@ -71,7 +71,7 @@ def assert_result_keys(result: dict, mode: str) -> None:
     )
 
 
-def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_counts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_counts() -> None:
     """Verify "nothing matched this filter" is a normal empty run.
 
     `process_input` produces an empty, `has_work=False` `Result` before
@@ -100,7 +100,7 @@ def test_photometry_with_no_frames_for_the_filter_returns_completed_with_zero_co
     assert any("No frames found for filter" in reason for reason in summary.flag_reasons)
 
 
-def test_an_unknown_analysis_mode_is_rejected_by_name():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_unknown_analysis_mode_is_rejected_by_name() -> None:
     """Verify the error message for an unknown mode is unchanged.
 
     The split replaces the `match` statement with a lookup table, and the
@@ -115,7 +115,7 @@ def test_an_unknown_analysis_mode_is_rejected_by_name():  # ruff: ignore[missing
         )
 
 
-def test_every_analysis_mode_has_a_recorded_key_set():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_analysis_mode_has_a_recorded_key_set() -> None:
     """Verify this file covers every mode the dispatcher accepts.
 
     If someone adds a fifth analysis mode, this fails and points them at

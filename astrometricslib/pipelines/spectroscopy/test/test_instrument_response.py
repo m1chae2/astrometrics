@@ -44,7 +44,7 @@ def _known_tilt(wavelength_angstrom: np.ndarray) -> np.ndarray:
     return np.exp(-(((wavelength_angstrom - 5300.0) / 2500.0) ** 2))
 
 
-def test_a_derived_response_recovers_a_known_tilt():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_derived_response_recovers_a_known_tilt() -> None:
     """Verify dividing out the derived response returns the reference shape."""
     wavelength, flux = _blurred("A0V")
     observed = flux * _known_tilt(wavelength)
@@ -58,7 +58,7 @@ def test_a_derived_response_recovers_a_known_tilt():  # ruff: ignore[missing-ret
     assert np.percentile(np.abs(ratio - 1.0), 90) < 0.05
 
 
-def test_the_response_is_not_applied_outside_its_valid_range():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_response_is_not_applied_outside_its_valid_range() -> None:
     """Verify samples outside the fitted range become NaN."""
     wavelength, flux = _blurred("A0V")
     response = derive_instrument_response(wavelength, flux * _known_tilt(wavelength), "A0V", "TestCam", "x")
@@ -70,14 +70,14 @@ def test_the_response_is_not_applied_outside_its_valid_range():  # ruff: ignore[
     assert np.isfinite(corrected[(wavelength >= 4200.0) & (wavelength <= 8000.0)]).all()
 
 
-def test_an_unknown_reference_type_is_rejected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_unknown_reference_type_is_rejected() -> None:
     """Verify asking for a reference that is not bundled is an error."""
     wavelength, flux = _blurred("A0V")
     with pytest.raises(InvalidArgumentError):
         derive_instrument_response(wavelength, flux, "Z9Z", "TestCam", "x")
 
 
-def test_a_response_is_stored_for_the_asi533_and_matches_camera_names_loosely():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_response_is_stored_for_the_asi533_and_matches_camera_names_loosely() -> None:
     """Verify the shipped response loads, whatever the spacing in the name."""
     spaced = load_instrument_response("ZWO ASI 533MM Pro")
     unspaced = load_instrument_response("ZWO ASI533MM Pro")
@@ -88,7 +88,7 @@ def test_a_response_is_stored_for_the_asi533_and_matches_camera_names_loosely():
     assert load_instrument_response("Some Other Camera") is None
 
 
-def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record() -> None:
     """Verify a K2V reference seen through the instrument is classified K2V."""
     wavelength, flux = _blurred("K2V")
     response = load_instrument_response("ZWO ASI 533MM Pro")
@@ -107,7 +107,7 @@ def test_analysis_recovers_the_type_of_a_spectrum_the_instrument_would_record():
     assert len(analysis.features) == 8
 
 
-def test_analysis_without_a_response_does_not_classify_but_still_tests_features():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_analysis_without_a_response_does_not_classify_but_still_tests_features() -> None:
     """Verify an unknown camera gets features but no spectral type."""
     wavelength, flux = _blurred("A0V")
 
@@ -118,7 +118,7 @@ def test_analysis_without_a_response_does_not_classify_but_still_tests_features(
     assert len(analysis.features) == 8
 
 
-def test_the_fit_range_can_be_widened_to_the_full_reference_range():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_fit_range_can_be_widened_to_the_full_reference_range() -> None:
     """Verify a response can be fitted over the camera's full range."""
     wavelength, flux = _blurred("A0V")
     observed = flux * _known_tilt(wavelength)
@@ -132,7 +132,7 @@ def test_the_fit_range_can_be_widened_to_the_full_reference_range():  # ruff: ig
     assert np.isfinite(corrected[(wavelength >= 4200.0) & (wavelength <= 10000.0)]).all()
 
 
-def test_the_references_cover_the_cameras_full_range():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_references_cover_the_cameras_full_range() -> None:
     """Verify every bundled reference runs from 3000 to 10000 A."""
     for spectral_type, (wavelength, flux) in _get_reference_templates().items():
         assert wavelength[0] == pytest.approx(3000.0), spectral_type

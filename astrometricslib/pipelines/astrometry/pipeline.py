@@ -27,7 +27,7 @@ class AstrometryPipeline:
     and identifies the objects.
     """
 
-    def __init__(self, app_config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, app_config: AppConfiguration | None = None) -> None:
         """Set up the pipeline using the program's settings.
 
         Parameters

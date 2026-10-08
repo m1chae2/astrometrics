@@ -4,13 +4,17 @@ Description: Verifies overall Target access and creation via the high-level
 Astrometrics high-level interface.
 """
 
+from pathlib import Path
+
+import pytest
+
 from astrometricslib import Astrometrics
 from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.tasks import analyze_target
 
 
-def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_astrometrics_target_access(tmp_path: Path) -> None:
     """Verify the interface retrieves targets created through the API.
 
     Targets created via `TargetCatalog.create` must show up again on a
@@ -39,7 +43,9 @@ def test_astrometrics_target_access(tmp_path):  # ruff: ignore[missing-type-func
         config.update_config({"Image Library": {"path": original_path}})
 
 
-def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_astrometrics_keeps_no_copy_of_the_star_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify `Astrometrics` neither loads nor holds the whole star catalog.
 
     Two real production incidents came from this. `Astrometrics.__init__`
@@ -61,7 +67,7 @@ def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch): 
         dataset_types_read: list[str] = []
         original_get = CatalogAccess.get
 
-        def _counting_get(self, dataset_type, selector):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def _counting_get(self, dataset_type, selector):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
             dataset_types_read.append(dataset_type)
             return original_get(self, dataset_type, selector)
 
@@ -75,7 +81,7 @@ def test_astrometrics_keeps_no_copy_of_the_star_catalog(tmp_path, monkeypatch): 
         config.update_config({"Image Library": {"path": original_path}})
 
 
-def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path: Path) -> None:
     """Verifies target RA/Dec are backfilled from the WCS center when unset.
 
     If the target's RA and Dec are unpopulated or zero, they should be
@@ -130,7 +136,7 @@ def test_astrometry_pulls_solved_coordinates_when_unpopulated(tmp_path):  # ruff
         config.update_config({"Image Library": {"path": original_path}})
 
 
-def test_plot_fits_star_field_handles_none_image_data():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_plot_fits_star_field_handles_none_image_data() -> None:
     """Verify plot_fits_star_field handles None image_data gracefully."""
     import matplotlib.pyplot as plt
 

@@ -68,7 +68,7 @@ def _entry(features: list[dict[str, object]], name_part: str) -> dict[str, objec
     return next(entry for entry in features if name_part in str(entry["feature"]))
 
 
-def test_a_clear_dip_at_a_named_wavelength_is_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_clear_dip_at_a_named_wavelength_is_detected() -> None:
     """Verify a strong, clean dip at H-alpha is detected and measured."""
     h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
     wavelength, intensity = _spectrum_with_dip(
@@ -85,7 +85,7 @@ def test_a_clear_dip_at_a_named_wavelength_is_detected():  # ruff: ignore[missin
     assert features[0] is detected  # most convincing first
 
 
-def test_a_flat_noisy_spectrum_has_no_detections():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_flat_noisy_spectrum_has_no_detections() -> None:
     """Verify noise alone is not called a feature."""
     rng = np.random.default_rng(seed=2)
     wavelength = np.arange(3500.0, 8000.0, 5.0)
@@ -96,7 +96,7 @@ def test_a_flat_noisy_spectrum_has_no_detections():  # ruff: ignore[missing-retu
     assert all(entry["verdict"] != VERDICT_DETECTED for entry in features)
 
 
-def test_every_named_feature_gets_an_entry_and_uncovered_ones_say_so():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_named_feature_gets_an_entry_and_uncovered_ones_say_so() -> None:
     """Verify lines the spectrum does not reach are reported as such."""
     wavelength, intensity = _spectrum_with_dip(center=6563.0, depth=0.3, half_width=25.0)
     keep = wavelength >= 5300.0
@@ -109,7 +109,7 @@ def test_every_named_feature_gets_an_entry_and_uncovered_ones_say_so():  # ruff:
     assert "p_value" not in _entry(features, "H-beta")
 
 
-def test_too_narrow_a_wavelength_range_returns_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_too_narrow_a_wavelength_range_returns_nothing() -> None:
     """Verify a spectrum too short to measure anything is safe."""
     wavelength = np.array([5000.0, 5001.0, 5002.0])
     intensity = np.array([1.0, 0.9, 1.0])
@@ -117,7 +117,7 @@ def test_too_narrow_a_wavelength_range_returns_nothing():  # ruff: ignore[missin
     assert detect_named_features(wavelength, intensity) == []
 
 
-def test_a_shallow_dip_is_not_reported_however_clean_the_spectrum():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_shallow_dip_is_not_reported_however_clean_the_spectrum() -> None:
     """Verify a dip under 1% of the continuum is never called a detection."""
     wavelength, intensity = _spectrum_with_dip(
         center=6563.0, depth=0.005, half_width=25.0, noise_fraction=0.0002
@@ -126,7 +126,7 @@ def test_a_shallow_dip_is_not_reported_however_clean_the_spectrum():  # ruff: ig
     assert _entry(detect_named_features(wavelength, intensity), "H-alpha")["verdict"] != VERDICT_DETECTED
 
 
-def test_an_a_type_reference_expects_deeper_balmer_lines_than_a_k_type():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_a_type_reference_expects_deeper_balmer_lines_than_a_k_type() -> None:
     """Verify the expected depth comes from the reference spectrum."""
     a_type = expected_feature_depth("A0V", "Hydrogen Balmer series (H-beta)")
     k_type = expected_feature_depth("K5V", "Hydrogen Balmer series (H-beta)")
@@ -137,7 +137,7 @@ def test_an_a_type_reference_expects_deeper_balmer_lines_than_a_k_type():  # ruf
     assert a_type > k_type
 
 
-def test_a_reference_type_adds_expected_depth_and_a_probability():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_reference_type_adds_expected_depth_and_a_probability() -> None:
     """Verify a reference type adds an expected depth and probability."""
     wavelength, intensity = _spectrum_with_dip(center=4861.0, depth=0.25, half_width=25.0)
 
@@ -151,7 +151,7 @@ def test_a_reference_type_adds_expected_depth_and_a_probability():  # ruff: igno
     assert without_type["probability_present"] is None
 
 
-def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_dip_the_noise_could_hide_is_inconclusive() -> None:
     """Verify a dip too big to ignore but too weak to call is inconclusive.
 
     A 10% dip in 6% noise (seed 2) gives a p-value between the "possible"
@@ -175,7 +175,7 @@ def test_a_dip_the_noise_could_hide_is_inconclusive():  # ruff: ignore[missing-r
     assert entry["depth"] >= INCONCLUSIVE_MINIMUM_DEPTH
 
 
-def test_a_quiet_spectrum_with_no_dip_has_no_inconclusive_features():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_quiet_spectrum_with_no_dip_has_no_inconclusive_features() -> None:
     """Verify a clean, featureless spectrum has no inconclusive features."""
     wavelength, intensity = _spectrum_with_dip(
         center=6563.0, depth=0.0, half_width=25.0, noise_fraction=0.002
@@ -186,7 +186,7 @@ def test_a_quiet_spectrum_with_no_dip_has_no_inconclusive_features():  # ruff: i
     assert all(entry["verdict"] != VERDICT_INCONCLUSIVE for entry in features)
 
 
-def test_inconclusive_features_sort_between_possible_and_not_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_inconclusive_features_sort_between_possible_and_not_detected() -> None:
     """Verify the list runs most convincing first."""
     h_alpha = next(f for f in NAMED_FEATURES if "H-alpha" in f["name"])
     wavelength, intensity = _spectrum_with_dip(
@@ -211,7 +211,7 @@ def test_inconclusive_features_sort_between_possible_and_not_detected():  # ruff
     assert verdict_positions == sorted(verdict_positions)
 
 
-def test_no_feature_core_is_narrower_than_twenty_angstroms():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_feature_core_is_narrower_than_twenty_angstroms() -> None:
     """Verify every core is wide enough to keep the continuum off the dip.
 
     Na D was 15 A and missed a 28% dip at 5900 A on a real spectrum; see
@@ -220,7 +220,7 @@ def test_no_feature_core_is_narrower_than_twenty_angstroms():  # ruff: ignore[mi
     assert all(float(feature["window_angstrom"]) >= 20.0 for feature in NAMED_FEATURES)
 
 
-def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart() -> None:
     """A lone H-gamma dip must not also be reported as the G band.
 
     The G band (4300 A) is 40 A from H-gamma (4340 A), less than the
@@ -241,7 +241,7 @@ def test_one_dip_is_not_credited_to_two_lines_too_close_to_tell_apart():  # ruff
     assert g_band["blended_with"] == h_gamma["feature"]
 
 
-def test_a_real_g_band_away_from_h_gamma_is_still_detected():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_real_g_band_away_from_h_gamma_is_still_detected() -> None:
     """A dip at the G band that H-gamma cannot also claim keeps its verdict."""
     wavelength, intensity = _spectrum_with_dip(center=4285.0, depth=0.3, half_width=20.0)
 
@@ -252,7 +252,7 @@ def test_a_real_g_band_away_from_h_gamma_is_still_detected():  # ruff: ignore[mi
     assert g_band["blended_with"] is None
 
 
-def test_a_feature_that_was_not_detected_is_never_marked_as_blended():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_feature_that_was_not_detected_is_never_marked_as_blended() -> None:
     """Only a feature that would have been reported can be blended away."""
     wavelength, intensity = _spectrum_with_dip(center=6563.0, depth=0.3, half_width=25.0)
 
@@ -261,7 +261,7 @@ def test_a_feature_that_was_not_detected_is_never_marked_as_blended():  # ruff: 
     assert all(entry.get("blended_with") is None for entry in features)
 
 
-def test_an_a_type_star_gives_a_shared_dip_to_h_gamma_despite_distance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_a_type_star_gives_a_shared_dip_to_h_gamma_despite_distance() -> None:
     """The reference type's expected depths break the tie, not the distance.
 
     A dip at 4314 A is 14 A from the G band and 26 A from H-gamma, but an
@@ -279,7 +279,7 @@ def test_an_a_type_star_gives_a_shared_dip_to_h_gamma_despite_distance():  # ruf
     assert g_band["blended_with"] == h_gamma["feature"]
 
 
-def test_a_k_type_star_gives_a_shared_dip_to_the_g_band_despite_distance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_k_type_star_gives_a_shared_dip_to_the_g_band_despite_distance() -> None:
     """A K giant expects the G band, not H-gamma, so the G band keeps it.
 
     A dip at 4322 A is 18 A from H-gamma and 22 A from the G band.
@@ -313,14 +313,14 @@ def _blurred_line_spectrum(
     return wavelength, intensity * (1.0 + rng.normal(0.0, noise_fraction, size=intensity.size))
 
 
-def test_the_continuum_bands_start_beyond_the_wings_of_a_blurred_line():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_continuum_bands_start_beyond_the_wings_of_a_blurred_line() -> None:
     """Bands start 1.5 resolution elements out, or a half-window if more."""
     assert _shoulder_edges(25.0, 49.0) == (73.5, 148.5)
     assert _shoulder_edges(35.0, 45.0) == (67.5, 172.5)
     assert _shoulder_edges(25.0, 10.0) == (25.0, 100.0)
 
 
-def test_a_line_blurred_to_the_instrument_resolution_reads_its_true_depth():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_line_blurred_to_the_instrument_resolution_reads_its_true_depth() -> None:
     """A 49 A wide dip of depth 0.20 reads as its core average.
 
     With continuum bands starting at the core's edge (25 A) the wings were
@@ -336,7 +336,7 @@ def test_a_line_blurred_to_the_instrument_resolution_reads_its_true_depth():  # 
     assert entry["depth"] == pytest.approx(true_core_depth, rel=0.08)
 
 
-def test_the_wings_of_a_line_do_not_inflate_its_uncertainty():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_wings_of_a_line_do_not_inflate_its_uncertainty() -> None:
     """A line's depth uncertainty stays that of the noise.
 
     The uncertainty comes from how the continuum band samples scatter about
@@ -356,7 +356,7 @@ def test_the_wings_of_a_line_do_not_inflate_its_uncertainty():  # ruff: ignore[m
     assert lined["verdict"] == VERDICT_DETECTED
 
 
-def test_controls_cover_the_blue_but_never_reach_a_feature_core():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_controls_cover_the_blue_but_never_reach_a_feature_core() -> None:
     """Controls lie in the blue too, and clear of every named feature's core.
 
     With continuum bands kept fully clear of features no control lay below
@@ -375,7 +375,7 @@ def test_controls_cover_the_blue_but_never_reach_a_feature_core():  # ruff: igno
         assert np.all(np.abs(controls - rest) > CENTER_SEARCH_TOLERANCE_ANGSTROM + 25.0 + window)
 
 
-def test_the_gaussian_fallback_p_value_matches_a_hand_computed_normal_tail():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_gaussian_fallback_p_value_matches_a_hand_computed_normal_tail() -> None:
     """Too few controls for a Gumbel fit falls back to a standard normal tail.
 
     Pins the values now computed via `scipy.stats.norm` in place of the
@@ -407,7 +407,7 @@ def _spectrum_with_hump(
     return _spectrum_with_dip(center, -height, half_width, noise_fraction, seed)
 
 
-def test_a_bump_at_a_named_wavelength_is_detected_as_emission():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_bump_at_a_named_wavelength_is_detected_as_emission() -> None:
     """A Be star's H-alpha emission is reported, with its height."""
     wavelength, intensity = _spectrum_with_hump(6563.0, 0.25, 25.0)
 
@@ -422,7 +422,7 @@ def test_a_bump_at_a_named_wavelength_is_detected_as_emission():  # ruff: ignore
     assert features[0] is h_alpha
 
 
-def test_a_dip_is_still_reported_as_absorption():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_dip_is_still_reported_as_absorption() -> None:
     """Every measured feature says which way it points."""
     wavelength, intensity = _spectrum_with_dip(6563.0, 0.3, 25.0)
 
@@ -432,7 +432,7 @@ def test_a_dip_is_still_reported_as_absorption():  # ruff: ignore[missing-return
     assert all(entry["kind"] == "absorption" for entry in features if entry["verdict"] != VERDICT_NOT_COVERED)
 
 
-def test_a_flat_spectrum_has_no_emission_either():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_flat_spectrum_has_no_emission_either() -> None:
     """Testing both directions does not make noise look like emission."""
     wavelength, intensity = _spectrum_with_hump(6563.0, 0.0, 25.0, noise_fraction=0.005)
 
@@ -441,7 +441,7 @@ def test_a_flat_spectrum_has_no_emission_either():  # ruff: ignore[missing-retur
     assert all(entry["verdict"] != VERDICT_DETECTED for entry in features)
 
 
-def test_testing_both_directions_costs_a_factor_of_two_in_the_p_value():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_testing_both_directions_costs_a_factor_of_two_in_the_p_value() -> None:
     """The p-value pays for both directions: twice the one-sided value."""
     wavelength, intensity = _spectrum_with_dip(6563.0, 0.06, 25.0, noise_fraction=0.02, seed=3)
 
@@ -451,7 +451,7 @@ def test_testing_both_directions_costs_a_factor_of_two_in_the_p_value():  # ruff
     assert entry["p_value"] == pytest.approx(min(1.0, 2.0 * entry["p_value_one_sided"]))
 
 
-def test_features_of_opposite_kinds_are_not_blended_into_one_dip():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_features_of_opposite_kinds_are_not_blended_into_one_dip() -> None:
     """A bump and a dip close together are two features."""
     entries = [
         {
@@ -478,7 +478,7 @@ def test_features_of_opposite_kinds_are_not_blended_into_one_dip():  # ruff: ign
     assert entries[1]["verdict"] == VERDICT_DETECTED
 
 
-def test_only_h_alpha_and_h_beta_are_tested_for_emission():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_only_h_alpha_and_h_beta_are_tested_for_emission() -> None:
     """A bump at H-gamma is not called emission (blanketed spectra)."""
     wavelength, intensity = _spectrum_with_hump(4340.0, 0.25, 20.0)
 

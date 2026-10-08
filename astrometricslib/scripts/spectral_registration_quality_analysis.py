@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
@@ -48,7 +49,7 @@ SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
 ZERO_ORDER_FWHM_BOX_RADIUS_PX = 15
 
 
-def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def resolve_spec_frames(target, camera: str, date_prefix: str | None = None) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
     """Select a target's SPEC (Star Analyzer 200) light frames.
 
     Excludes derived products (stacked, starless, or starmask
@@ -124,7 +125,7 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
     return result.stdout + result.stderr
 
 
-def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  # ruff: ignore[missing-type-function-argument]
+def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> float | None:
     """Measure the FWHM of the brightest detected star in a stacked image.
 
     For an SA200 stack this is the zero-order star -- the point
@@ -179,7 +180,7 @@ def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  #
         return None
 
 
-def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore[missing-type-function-argument]
+def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
     """Sweep filter_wfwhm settings, measuring the zero-order star's FWHM.
 
     Tests whether field-star-population filtering (previously gated

@@ -56,7 +56,7 @@ def _extract_spectrum_data(star: Any) -> dict[str, Any]:
     return {}
 
 
-def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def plot_fits_star_field(
     image_data: np.ndarray | None = None,
     stellar_objects: list | None = None,
     ax: plt.Axes | None = None,
@@ -67,7 +67,7 @@ def plot_fits_star_field(  # ruff: ignore[missing-return-type-undocumented-publi
     limit: int | None = None,
     fits_path: str | None = None,
     target: Any | None = None,
-):
+) -> plt.Axes:
     """Render a 2D FITS image with star selection circles and text labels.
 
     Parameters

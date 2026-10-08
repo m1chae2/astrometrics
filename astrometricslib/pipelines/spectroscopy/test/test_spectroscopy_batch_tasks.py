@@ -8,6 +8,8 @@ orchestration -- without depending on solve-field or real
 multiprocessing dispatch.
 """
 
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -26,7 +28,7 @@ from astrometricslib.utilities import parallel_batch
 
 
 @pytest.fixture
-def isolated_config(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_config(tmp_path: Path) -> Iterator[AppConfiguration]:
     """Swap the process-wide config singleton for a fresh, tmp_path-scoped one.
 
     `_process_single_spectroscopy_frame_worker_v2` constructs its own
@@ -74,7 +76,7 @@ def isolated_config(tmp_path):  # ruff: ignore[missing-type-function-argument, m
     config_loader._instance = original_instance
 
 
-def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     w = WCS(naxis=2)
     w.wcs.crpix = [128, 128]
     w.wcs.cdelt = [-scale_deg_per_px, scale_deg_per_px]
@@ -83,7 +85,7 @@ def _make_wcs_header(ra_center=279.0, dec_center=38.0, scale_deg_per_px=0.0001):
     return w.to_header()
 
 
-def _write_frame_fits(path, date_obs, with_own_wcs=False):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_frame_fits(path, date_obs, with_own_wcs=False) -> None:  # ruff: ignore[missing-type-function-argument]
     rng = np.random.default_rng(0)
     # Tall enough for the spectrum trail: with the default vertical
     # dispersion it starts about 335 pixels below the star and runs on
@@ -100,7 +102,7 @@ def _write_frame_fits(path, date_obs, with_own_wcs=False):  # ruff: ignore[missi
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _make_seed_star(star_id="* alf Lyr", name="Vega", ra=279.0, dec=38.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_seed_star(star_id="* alf Lyr", name="Vega", ra=279.0, dec=38.0) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
     star = StellarObject(id=star_id, name=name)
     star.right_ascension = ra
     star.declination = dec
@@ -112,7 +114,7 @@ def _make_seed_star(star_id="* alf Lyr", name="Vega", ra=279.0, dec=38.0):  # ru
 class TestProjectSessionStarsToFramePixels:
     """Unit tests for _project_session_stars_to_frame_pixels."""
 
-    def test_projects_stars_with_known_sky_position(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_projects_stars_with_known_sky_position(self) -> None:
         """Verify a star with a sky position gets a pixel centroid."""
         wcs = WCS(_make_wcs_header())
         star = _make_seed_star()
@@ -125,7 +127,7 @@ class TestProjectSessionStarsToFramePixels:
         assert "xcentroid" in projected[0].star_data
         assert "ycentroid" in projected[0].star_data
 
-    def test_skips_stars_with_no_sky_position(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_skips_stars_with_no_sky_position(self) -> None:
         """Verify a star with no ra/dec is silently skipped."""
         wcs = WCS(_make_wcs_header())
         star = StellarObject(id="Unidentified")
@@ -135,7 +137,7 @@ class TestProjectSessionStarsToFramePixels:
 
         assert projected == []
 
-    def test_mutation_of_projected_star_does_not_leak_back(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_mutation_of_projected_star_does_not_leak_back(self) -> None:
         """Verify mutating a projected copy never mutates the session star."""
         wcs = WCS(_make_wcs_header())
         star = _make_seed_star()
@@ -149,7 +151,7 @@ class TestProjectSessionStarsToFramePixels:
 class TestMergeBatchSummaries:
     """Unit tests for _merge_batch_summaries."""
 
-    def test_merges_succeeded_failed_and_results(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_merges_succeeded_failed_and_results(self) -> None:
         """Verify multiple sessions' summaries concatenate into one."""
         from astrometricslib.utilities import parallel_batch
 
@@ -170,7 +172,9 @@ class TestMergeBatchSummaries:
 class TestProcessSingleSpectroscopyFrameWorkerV2:
     """Unit tests for _process_single_spectroscopy_frame_worker_v2."""
 
-    def test_prefers_frame_own_header_wcs_over_session_wcs(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_prefers_frame_own_header_wcs_over_session_wcs(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
         """Verify a frame's own header WCS wins over the session's WCS."""
         config = isolated_config
         frame_path = tmp_path / "frame.fits"
@@ -193,7 +197,9 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
         recorded = catalog_access.get("stellar_catalog", {}) or []
         assert any(star.id == "* alf Lyr" for star in recorded)
 
-    def test_uses_session_wcs_when_frame_has_no_own_header_wcs(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_uses_session_wcs_when_frame_has_no_own_header_wcs(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
         """Verify the session WCS is used when a frame has none of its own."""
         frame_path = tmp_path / "frame.fits"
         _write_frame_fits(frame_path, "2026-01-01T00:00:00", with_own_wcs=False)
@@ -208,7 +214,9 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
         assert result["status"] == "success"
         assert result["stars_processed"] == 1
 
-    def test_falls_back_to_independent_analysis_when_no_seed_stars(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_falls_back_to_independent_analysis_when_no_seed_stars(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
         """Verify an empty seed list falls back to the independent flow."""
         frame_path = tmp_path / "frame.fits"
         _write_frame_fits(frame_path, "2026-01-01T00:00:00")
@@ -226,7 +234,9 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
         assert result["status"] == "success"
         assert result["dispersion_angles"] == []
 
-    def test_falls_back_when_no_wcs_available_at_all(self, tmp_path, isolated_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_falls_back_when_no_wcs_available_at_all(
+        self, tmp_path: Path, isolated_config: AppConfiguration
+    ) -> None:
         """Verify no usable WCS anywhere falls back to the independent flow."""
         frame_path = tmp_path / "frame.fits"
         _write_frame_fits(frame_path, "2026-01-01T00:00:00", with_own_wcs=False)
@@ -251,7 +261,9 @@ class TestProcessSingleSpectroscopyFrameWorkerV2:
 class TestProcessSpectroscopyFramesBySession:
     """Unit tests for process_spectroscopy_frames_by_session."""
 
-    def test_identifies_once_per_session_and_dispatches_that_sessions_frames(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_identifies_once_per_session_and_dispatches_that_sessions_frames(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify each session identifies once, dispatches its own frames."""
         monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
         config = AppConfiguration()
@@ -300,7 +312,7 @@ class TestProcessSpectroscopyFramesBySession:
 
         dispatched_batches = []
 
-        def _fake_run_parallel_batch(item_ids, worker_function, worker_arguments=(), **_kw):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
+        def _fake_run_parallel_batch(item_ids, worker_function, worker_arguments=(), **_kw):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument, missing-type-kwargs]
             from astrometricslib.utilities import parallel_batch
 
             dispatched_batches.append((list(item_ids), worker_arguments))
@@ -334,7 +346,7 @@ class TestProcessSpectroscopyFramesBySession:
         } in dispatched_paths
         assert len(summary.succeeded) == 4
 
-    def test_excludes_frames_with_no_timestamp(self, tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def test_excludes_frames_with_no_timestamp(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify a frame with no timestamp is excluded from sessions."""
         monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
         config = AppConfiguration()
@@ -364,7 +376,7 @@ class TestProcessSpectroscopyFramesBySession:
         assert summary.succeeded == []
 
 
-def _make_session(session_id, frame_paths):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _make_session(session_id, frame_paths) -> SimpleNamespace:  # ruff: ignore[missing-type-function-argument]
     return SimpleNamespace(id=session_id, frame_paths=frame_paths)
 
 
@@ -377,7 +389,7 @@ class TestAttachSpectroscopyQualitySummary:
     the library run, not built by the backend after the fact.
     """
 
-    def test_aggregates_dispersion_and_trail_width_across_frames(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_aggregates_dispersion_and_trail_width_across_frames(self) -> None:
         """Verify per-frame quality inputs aggregate into one summary."""
         target = Target(id="QualitySummaryTestTarget")
 
@@ -420,7 +432,7 @@ class TestAttachSpectroscopyQualitySummary:
         assert breakdown[0].frames_clipped == 0
         assert target.quality.spectroscopy.upstream_quality_summary_reference == "raw_frames"
 
-    def test_records_the_camera_profile_of_the_frames_that_were_processed(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_records_the_camera_profile_of_the_frames_that_were_processed(self) -> None:
         """The summary names the camera of the session's frames."""
         frames = [
             FrameRecord(path="a.fits", role="LIGHT", camera="ZWO ASI 533MM Pro", exposure="1.0"),
@@ -438,7 +450,7 @@ class TestAttachSpectroscopyQualitySummary:
         assert recorded.camera_profile.profile_name == "ZWO ASI533MM Pro"
         assert recorded.flagged is False
 
-    def test_flags_target_when_zero_order_saturation_significant(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_flags_target_when_zero_order_saturation_significant(self) -> None:
         """Verify significant zero-order saturation flags with a reason."""
         target = Target(id="SaturationFlagTestTarget")
 
@@ -463,7 +475,7 @@ class TestAttachSpectroscopyQualitySummary:
         assert target.quality.spectroscopy.flagged is True
         assert "zero-order saturated" in target.quality.spectroscopy.flag_reasons[0]
 
-    def test_flags_target_when_spectral_classification_uncertain(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_flags_target_when_spectral_classification_uncertain(self) -> None:
         """Verify per-frame classification concerns aggregate and flag."""
         target = Target(id="ClassificationConcernTestTarget")
 
@@ -521,7 +533,7 @@ class TestAttachSpectroscopyQualitySummary:
             for reason in target.quality.spectroscopy.flag_reasons
         )
 
-    def test_frames_clipped_counts_failed_paths_per_session(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_frames_clipped_counts_failed_paths_per_session(self) -> None:
         """Verify frames_clipped only counts that session's own failures."""
         target = Target(id="ClippedFramesTestTarget")
 
@@ -553,7 +565,7 @@ class TestAttachSpectroscopyQualitySummary:
         assert breakdown_by_session[session_b.id].frames_contributed == 1
         assert breakdown_by_session[session_b.id].frames_clipped == 0
 
-    def test_no_saturation_data_does_not_flag_or_crash(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_no_saturation_data_does_not_flag_or_crash(self) -> None:
         """Verify an empty run builds a summary without flagging or raising."""
         target = Target(id="NoDataTestTarget")
 
@@ -597,7 +609,7 @@ def _make_catalog_star(
 class TestSelectTemporalTrackingStars:
     """Unit tests for select_temporal_tracking_stars."""
 
-    def test_puts_the_star_nearest_the_target_first_then_bright_verified_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_puts_the_star_nearest_the_target_first_then_bright_verified_stars(self) -> None:
         """Verify the primary star leads, then verified stars by brightness."""
         target_star = _make_catalog_star("* alf Lyr", 279.234, 38.783, magnitude=0.03)
         faint = _make_catalog_star("HD 1", 279.5, 38.9, magnitude=9.0)
@@ -607,7 +619,7 @@ class TestSelectTemporalTrackingStars:
 
         assert [star.id for star in chosen] == ["* alf Lyr", "HD 2", "HD 1"]
 
-    def test_never_chooses_position_only_or_unverified_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_never_chooses_position_only_or_unverified_stars(self) -> None:
         """Verify field stubs and unverified stars are left out."""
         target_star = _make_catalog_star("* alf Lyr", 279.234, 38.783)
         field_stub = _make_catalog_star("FIELD_J279.2400+38.7900", 279.24, 38.79, identified=False)
@@ -623,7 +635,7 @@ class TestSelectTemporalTrackingStars:
 
         assert [star.id for star in chosen] == ["* alf Lyr"]
 
-    def test_caps_the_number_of_stars(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_caps_the_number_of_stars(self) -> None:
         """Verify no more than the limit are returned from a crowded field."""
         stars = [_make_catalog_star(f"HD {i}", 279.0 + i * 0.01, 38.0, magnitude=5.0 + i) for i in range(40)]
 
@@ -632,7 +644,7 @@ class TestSelectTemporalTrackingStars:
         assert len(chosen) == 7
         assert chosen[0].id == "HD 0"
 
-    def test_without_a_target_position_only_verified_stars_are_used(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def test_without_a_target_position_only_verified_stars_are_used(self) -> None:
         """Verify no target position means no primary star."""
         stars = [
             _make_catalog_star("HD 2", 10.0, 10.0, magnitude=7.0),

@@ -6,6 +6,7 @@ an internet connection.
 
 import astropy.units as u
 from astropy.table import QTable
+from pytest_mock import MockerFixture
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage, FrameDetection
 from astrometricslib.models.moving_object_config import MovingObjectConfig
@@ -56,7 +57,7 @@ def _make_field_table() -> QTable:
     })
 
 
-def test_match_candidate_finds_close_known_body():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_match_candidate_finds_close_known_body() -> None:
     """Test that we match a dot to a known asteroid when they are close."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig(ephemeris_cross_match_radius_arcsec=10.0))
     candidate = _make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED)
@@ -69,7 +70,7 @@ def test_match_candidate_finds_close_known_body():  # ruff: ignore[missing-retur
     assert match.angular_separation_arcsec < 10.0
 
 
-def test_match_candidate_returns_none_when_nothing_within_radius():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_match_candidate_returns_none_when_nothing_within_radius() -> None:
     """Test that we don't match an asteroid if it's too far away."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig(ephemeris_cross_match_radius_arcsec=1.0))
     candidate = _make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED, right_ascension_deg=160.0)
@@ -78,14 +79,16 @@ def test_match_candidate_returns_none_when_nothing_within_radius():  # ruff: ign
     assert matcher.match_candidate(candidate, field_table) is None
 
 
-def test_match_candidate_returns_none_for_empty_field_table():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_match_candidate_returns_none_for_empty_field_table() -> None:
     """Test that we handle it correctly if the database is empty."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig())
     candidate = _make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED)
     assert matcher.match_candidate(candidate, None) is None
 
 
-def test_cross_match_candidates_only_queries_rate_linearity_confirmed_candidates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_cross_match_candidates_only_queries_rate_linearity_confirmed_candidates(
+    mocker: MockerFixture,
+) -> None:
     """Test we only check the database for objects that passed the others."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig(ephemeris_cross_match_radius_arcsec=10.0))
     confirmed_candidate = _make_candidate(CascadeStage.RATE_LINEARITY_CONFIRMED)
@@ -110,7 +113,7 @@ def test_cross_match_candidates_only_queries_rate_linearity_confirmed_candidates
     assert updated_candidates[1].ephemeris_match is None
 
 
-def test_cross_match_candidates_skips_query_when_no_confirmed_candidates(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_cross_match_candidates_skips_query_when_no_confirmed_candidates(mocker: MockerFixture) -> None:
     """Test that we skip the database if we found no good moving objects."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig())
     rejected_candidate = _make_candidate(CascadeStage.REJECTED_STATIONARY_SKY)
@@ -128,7 +131,7 @@ def test_cross_match_candidates_skips_query_when_no_confirmed_candidates(mocker)
     cone_search_mock.assert_not_called()
 
 
-def test_query_field_returns_none_on_query_failure(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_query_field_returns_none_on_query_failure(mocker: MockerFixture) -> None:
     """Test that the program doesn't crash if the database is offline."""
     matcher = EphemerisCrossMatcher(MovingObjectConfig())
     mocker.patch("astroquery.imcce.Skybot.cone_search", side_effect=RuntimeError("network error"))

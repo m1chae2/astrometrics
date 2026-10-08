@@ -256,7 +256,7 @@ def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
 
     sort_order = sorted(range(len(combined_timestamps)), key=lambda i: combined_timestamps[i])
 
-    def _reordered(values):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _reordered(values):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         return [values[i] for i in sort_order] if len(values) == len(sort_order) else list(values)
 
     return PhotometryResult(

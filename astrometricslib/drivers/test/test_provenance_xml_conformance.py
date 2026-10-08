@@ -8,6 +8,8 @@ stacking -> astrometry -> photometry lineage, exports it through the
 W3C PROV-XML schema, vendored here so the check works offline.
 """
 
+from pathlib import Path
+
 from lxml import etree
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
@@ -54,13 +56,13 @@ def build_sample_lineage(store: ProvenanceStore) -> None:
     store.record_was_associated_with("job-photometry", WasAssociatedWith(agent="agent:photometry:1.2.0"))
 
 
-def test_the_vendored_schema_itself_loads_without_a_network_fetch():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_vendored_schema_itself_loads_without_a_network_fetch() -> None:
     """Check the schema and its includes resolve from vendored copies."""
     schema = load_schema()
     assert schema is not None
 
 
-def test_a_sample_stacking_astrometry_photometry_lineage_validates(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_sample_stacking_astrometry_photometry_lineage_validates(tmp_path: Path) -> None:
     """Check a real multi-stage lineage exports as schema-valid PROV-XML."""
     store = ProvenanceStore(str(tmp_path / "provenance.db"))
     build_sample_lineage(store)
@@ -71,7 +73,7 @@ def test_a_sample_stacking_astrometry_photometry_lineage_validates(tmp_path):  #
     schema.assertValid(etree.fromstring(document_xml.encode()))
 
 
-def test_an_empty_target_still_exports_a_schema_valid_empty_document(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_an_empty_target_still_exports_a_schema_valid_empty_document(tmp_path: Path) -> None:
     """Check a target with no recorded lineage exports a valid document."""
     store = ProvenanceStore(str(tmp_path / "provenance.db"))
 
@@ -81,7 +83,7 @@ def test_an_empty_target_still_exports_a_schema_valid_empty_document(tmp_path): 
     schema.assertValid(etree.fromstring(document_xml.encode()))
 
 
-def test_the_exported_document_actually_contains_the_expected_relations(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_the_exported_document_actually_contains_the_expected_relations(tmp_path: Path) -> None:
     """Check the export is not just schema-valid but structurally faithful.
 
     Schema validity alone would pass for a document missing half the

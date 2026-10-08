@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 
@@ -282,7 +283,7 @@ class AppConfiguration:
     Uses pathlib for robust cross-platform path management.
     """
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         # Get the directory of the current script
         self.base_dir = Path(__file__).parent.absolute()
         self.app_config = _TomlSectionedConfig(after_reload=self._populate_defaults)
@@ -412,7 +413,7 @@ class AppConfiguration:
                 if key not in self.app_config[section]:
                     self.app_config.set(section, key, value)
 
-    def load_configuration(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def load_configuration(self) -> None:
         """Load the configuration from the best available candidate.
 
         Creates one with defaults if missing.
@@ -437,7 +438,7 @@ class AppConfiguration:
             self._populate_defaults()
             self.save_configuration()
 
-    def get_siril_executable(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_siril_executable(self) -> str | None:
         """Retrieve the Siril executable path from the configuration.
 
         Returns
@@ -571,7 +572,7 @@ class AppConfiguration:
         high = self.get_value("Processing.Siril", "rejection_sigma_high", fallback="3.0")
         return (float(low), float(high))
 
-    def get_stack_filter_wfwhm_percentile(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_stack_filter_wfwhm_percentile(self) -> str | None:
         """Return the configured -filter-wfwhm value, or None if disabled.
 
         Returns
@@ -581,7 +582,7 @@ class AppConfiguration:
         """
         return self.get_value("Processing.Siril", "filter_wfwhm_percentile", fallback="") or None
 
-    def get_stack_filter_round_percentile(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_stack_filter_round_percentile(self) -> str | None:
         """Return the configured -filter-round value, or None if disabled.
 
         Returns
@@ -591,7 +592,7 @@ class AppConfiguration:
         """
         return self.get_value("Processing.Siril", "filter_round_percentile", fallback="") or None
 
-    def get_stack_weight(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_stack_weight(self) -> str | None:
         """Return the configured Siril -weight= mode, or None if disabled.
 
         Returns
@@ -752,7 +753,7 @@ class AppConfiguration:
         val = self.get_value("Processing.Siril", "auto_open_gui", fallback="false")
         return str(val).lower() == "true"
 
-    def get_telescope_hostname(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_telescope_hostname(self) -> str:
         """Retrieve the telescope hostname from the configuration.
 
         Returns
@@ -763,7 +764,7 @@ class AppConfiguration:
         """
         return self.app_config.get("Observatory.Telescope", "hostname", fallback="localhost")
 
-    def get_indi_host(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_indi_host(self) -> str:
         """Return the INDI server host, i.e. the telescope hostname.
 
         Returns
@@ -784,7 +785,7 @@ class AppConfiguration:
         val = self.app_config.get("Observatory.Telescope", "indi_port", fallback="7624")
         return int(val)
 
-    def get_camera_config(self, camera_name=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def get_camera_config(self, camera_name: str | None = None) -> dict[str, Any]:
         """Return the configuration section for a named camera.
 
         Parameters
@@ -836,7 +837,7 @@ class AppConfiguration:
 
         return {}
 
-    def get_available_cameras(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_available_cameras(self) -> list[str]:
         """Return a list of available camera names from configuration.
 
         Returns
@@ -865,7 +866,7 @@ class AppConfiguration:
             return []
         return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
 
-    def get_all_config(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_all_config(self) -> dict[str, Any]:
         """Return the entire configuration as a dictionary of sections.
 
         Returns
@@ -878,7 +879,7 @@ class AppConfiguration:
             config_dict[section] = dict(self.app_config[section])
         return config_dict
 
-    def get_value(self, section, key, fallback=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def get_value(self, section, key, fallback=None) -> Any:  # ruff: ignore[missing-type-function-argument]
         """Safe wrapper for getting a config value.
 
         Returns
@@ -993,7 +994,7 @@ class AppConfiguration:
         val = self.app_config.get("Observatory.Telescope", "focal_ratio", fallback="0.0")
         return float(val)
 
-    def get(self, *args, **kwargs):  # ruff: ignore[missing-type-args, missing-type-kwargs, missing-return-type-undocumented-public-function]
+    def get(self, *args, **kwargs) -> Any:  # ruff: ignore[missing-type-args, missing-type-kwargs]
         """Proxy to internal ConfigParser get method.
 
         Returns
@@ -1004,7 +1005,7 @@ class AppConfiguration:
         """
         return self.app_config.get(*args, **kwargs)
 
-    def update_config(self, new_config_dict):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def update_config(self, new_config_dict) -> None:  # ruff: ignore[missing-type-function-argument]
         """Update the configuration with the provided dictionary and saves it.
 
         Args: new_config_dict: Dictionary { "SectionName": { "Key": "Value" } }
@@ -1239,7 +1240,7 @@ class AppConfiguration:
         except ValueError, configparser.Error:
             return 90.0
 
-    def get_target_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_target_workers(self) -> str:
         """Return the configured target worker count, or "auto" for sizing.
 
         Returns
@@ -1281,7 +1282,7 @@ class AppConfiguration:
                 )
         return int(self.get_value("Processing.Parallelism", "max_concurrent_jobs", fallback="2"))
 
-    def get_photometry_workers(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_photometry_workers(self) -> str:
         """Return the photometry worker count per target, or "auto".
 
         Returns

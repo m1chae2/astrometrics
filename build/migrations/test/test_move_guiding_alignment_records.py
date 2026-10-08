@@ -34,7 +34,8 @@ def _make_logs_database(path: Path, with_source_column: bool = True) -> None:
     connection.execute(
         "CREATE TABLE guiding_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, "
         "target_name TEXT, timestamp REAL NOT NULL, dra REAL NOT NULL, ddec REAL NOT NULL, "
-        f"pulse_ra REAL DEFAULT 0.0, pulse_dec REAL DEFAULT 0.0, snr REAL, rms_ra REAL, rms_dec REAL, star_mass REAL{source_column})"
+        "pulse_ra REAL DEFAULT 0.0, pulse_dec REAL DEFAULT 0.0, snr REAL, rms_ra REAL, rms_dec REAL, "
+        f"star_mass REAL{source_column})"
     )
     if with_source_column:
         connection.execute(

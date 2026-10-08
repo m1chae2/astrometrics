@@ -8,16 +8,19 @@ wheels, and weather/environmental telemetry.
 # https://github.com/indilib/pyindi-client/tree/master
 #   sudo apt-add-repository ppa:mutlaqja/ppa
 #   sudo apt-get -y install python3-indi-client
-
 import logging
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 import astropy.units as u
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 from pydantic import BaseModel, ConfigDict, Field
+
+from astrometricslib import AppConfiguration
+from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
 from .indi import coordinate_utils
 from .indi.camera_controller import CameraController
@@ -106,11 +109,11 @@ class IndiClient(PyIndi.BaseClient):
     is never invoked.
     """
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         """Initialize the INDI client."""
         super().__init__()
 
-    def newDevice(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newDevice(self, device: PyIndi.BaseDevice) -> None:
         """Handle a new INDI device.
 
         No-op hook; override in a subclass to react to a device
@@ -118,7 +121,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def removeDevice(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def removeDevice(self, device: PyIndi.BaseDevice) -> None:
         """Handle a removed INDI device.
 
         No-op hook; override in a subclass to react to a device leaving
@@ -126,7 +129,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def newProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newProperty(self, property: PyIndi.Property) -> None:
         """Handle an INDI property being created.
 
         No-op hook; override in a subclass to react to a property
@@ -135,7 +138,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def removeProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def removeProperty(self, property: PyIndi.Property) -> None:
         """Handle a removed INDI property.
 
         No-op hook; override in a subclass to react to a property being
@@ -143,7 +146,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def updateProperty(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def updateProperty(self, property: PyIndi.Property) -> None:
         """Route an updated INDI property to its per-type callback.
 
         Casts the generic property into the specific type its callback
@@ -163,7 +166,7 @@ class IndiClient(PyIndi.BaseClient):
                 getattr(self, callback_name)(wrapper_class(property))
                 return
 
-    def newMessage(self, device, id):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newMessage(self, device: PyIndi.BaseDevice, id: int) -> None:
         """Handle a new INDI message.
 
         No-op hook; override in a subclass to react to a device's log
@@ -171,7 +174,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def newLight(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newLight(self, property: PyIndi.Property) -> None:
         """Handle an updated INDI light property.
 
         No-op hook; override in a subclass. Reached via
@@ -180,7 +183,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def newNumber(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newNumber(self, property: PyIndi.Property) -> None:
         """Handle an updated INDI number property.
 
         No-op hook; override in a subclass. Reached via
@@ -189,7 +192,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def newSwitch(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newSwitch(self, property: PyIndi.Property) -> None:
         """Handle an updated INDI switch property.
 
         No-op hook; override in a subclass. Reached via
@@ -198,7 +201,7 @@ class IndiClient(PyIndi.BaseClient):
         """
         pass
 
-    def newText(self, property):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def newText(self, property: PyIndi.Property) -> None:
         """Handle an updated INDI text property.
 
         No-op hook; override in a subclass. Reached via
@@ -211,7 +214,7 @@ class IndiClient(PyIndi.BaseClient):
 class IndiInterface(IndiClient):
     """Connect wayfindinglib to an INDI server."""
 
-    def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration) -> None:
         """Initialize the interface to an INDI server.
 
         Parameters
@@ -327,7 +330,7 @@ class IndiInterface(IndiClient):
         if hasattr(self, "connection_manager"):
             self.connection_manager.hostname = self.hostname
 
-    def reload_connection(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def reload_connection(self) -> None:
         """Force a reload of the configuration and reconnection.
 
         Useful when hostname changes.
@@ -359,7 +362,7 @@ class IndiInterface(IndiClient):
             # Not connected, try connecting with new config
             self.connect_to_server()
 
-    def connect_to_server(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def connect_to_server(self) -> IndiInterface | None:
         """Connect to an INDI server.
 
         Returns
@@ -405,7 +408,7 @@ class IndiInterface(IndiClient):
 
         return self
 
-    def _ensure_connection(self):  # ruff: ignore[missing-return-type-private-function]
+    def _ensure_connection(self) -> None:
         """Lazily ensures that we are connected to the INDI server."""
         now = time.time()
         connection_manager = self.connection_manager
@@ -473,7 +476,7 @@ class IndiInterface(IndiClient):
             self.connect_to_server()
             self.connection_manager.record_connection_result(self.isServerConnected())
 
-    def _is_server_responsive(self):  # ruff: ignore[missing-return-type-private-function]
+    def _is_server_responsive(self) -> bool:
         """Check if the INDI server is reachable and responsive.
 
         Sends a handshake and delegates to ConnectionManager
@@ -487,7 +490,7 @@ class IndiInterface(IndiClient):
         """
         return self.connection_manager.is_server_responsive()
 
-    def serverDisconnected(self, code):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def serverDisconnected(self, code: int) -> None:
         """Handle the server-disconnected callback."""
         logger.warning("INDI Server disconnected (code %s)", code)
         self._reset_status()
@@ -512,7 +515,7 @@ class IndiInterface(IndiClient):
             "TRACK_MODE": None,
         }
 
-    def connect_to_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def connect_to_telescope(self) -> PyIndi.BaseDevice | None:
         """Connect to a telescope and grab key parameters.
 
         Returns
@@ -673,7 +676,7 @@ class IndiInterface(IndiClient):
             "TRACK_MODE": mode[0].removeprefix("TRACK_") if mode else None,
         }
 
-    def _find_telescope_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_telescope_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the telescope device.
 
         Returns
@@ -683,7 +686,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_telescope()
 
-    def _find_powerbox_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_powerbox_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find powerbox.
 
         Returns
@@ -693,7 +696,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_powerbox()
 
-    def _find_focuser_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_focuser_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find focuser.
 
         Returns
@@ -703,7 +706,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_focuser()
 
-    def _find_enclosure_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_enclosure_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the roll-off-roof/dome device.
 
         Returns
@@ -713,7 +716,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_enclosure()
 
-    def get_enclosure_state(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_enclosure_state(self) -> EnclosureState:
         """Return the enclosure's current motion state.
 
         Returns
@@ -783,7 +786,7 @@ class IndiInterface(IndiClient):
         """
         return self.switch_controller.set_variable_value(self._find_powerbox_device(), name, value)
 
-    def get_weather_readings(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_weather_readings(self) -> dict[str, tuple[float, datetime]]:
         """Return the powerbox's `WEATHER_PARAMETERS` as sensor readings.
 
         Returns
@@ -794,7 +797,7 @@ class IndiInterface(IndiClient):
         """
         return self.weather_controller.get_readings(self._find_powerbox_device())
 
-    def _find_filterwheel_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_filterwheel_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find filter wheel.
 
         Returns
@@ -829,7 +832,7 @@ class IndiInterface(IndiClient):
         """
         return self.filter_wheel_controller.resolve_name(self._find_filterwheel_device(), filter_name)
 
-    def _find_guide_camera_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_guide_camera_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find guide camera.
 
         Returns
@@ -839,11 +842,11 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_guide_camera()
 
-    def _refresh_device_map(self):  # ruff: ignore[missing-return-type-private-function]
+    def _refresh_device_map(self) -> None:
         """Refresh the internal device map from the client's list."""
         self.device_discovery.refresh_device_map()
 
-    def _find_device_with_property(self, property_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _find_device_with_property(self, property_name: str) -> PyIndi.BaseDevice | None:
         """Search connected devices for one with the given property.
 
         Returns
@@ -853,7 +856,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_device_with_property(property_name)
 
-    def coordinate_dms_to_decimal(self, coordinate):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def coordinate_dms_to_decimal(self, coordinate: str) -> float:
         """Convert a sexagesimal (D:M:S) coordinate to decimal.
 
         Returns
@@ -863,7 +866,7 @@ class IndiInterface(IndiClient):
         """
         return coordinate_utils.coordinate_dms_to_decimal(coordinate)
 
-    def coordinate_decimal_to_dms(self, coordinate):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def coordinate_decimal_to_dms(self, coordinate: float) -> str:
         """Convert a decimal coordinate to sexagesimal (D:M:S).
 
         Returns
@@ -873,7 +876,7 @@ class IndiInterface(IndiClient):
         """
         return coordinate_utils.coordinate_decimal_to_dms(coordinate)
 
-    def get_environmentals(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_environmentals(self) -> None:
         """Retrieve environmental telemetry from the powerbox/weather.
 
         Fetches temperature and humidity and updates the status
@@ -893,7 +896,7 @@ class IndiInterface(IndiClient):
         if "HUMIDITY" not in self.status or self.status["HUMIDITY"] == "Unknown":
             self.status["HUMIDITY"] = "-"
 
-    def _refresh_filter_status(self):  # ruff: ignore[missing-return-type-private-function]
+    def _refresh_filter_status(self) -> None:
         """Poll the filter wheel for the current slot and update status."""
         if self.status.get("CONNECTION_STATUS") != "Connected":
             return
@@ -1087,7 +1090,7 @@ class IndiInterface(IndiClient):
         except INDI_ERRORS as extract_error:
             logger.debug("Failed to extract target from text property: %s", extract_error)
 
-    def get_coordinates(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_coordinates(self) -> None:
         """Get the coordinates the telescope is pointing at."""
         # Connect to telescope device
         telescope = self.connect_to_telescope()
@@ -1169,7 +1172,9 @@ class IndiInterface(IndiClient):
         self.status["ALTITUDE"] = self.coordinate_decimal_to_dms(alt_deg)
         self.status["AZIMUTH"] = self.coordinate_decimal_to_dms(az_deg)
 
-    def _validate_altitude_limits(self, telescope, ra: float, dec: float):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _validate_altitude_limits(
+        self, telescope: PyIndi.BaseDevice, ra: float, dec: float
+    ) -> tuple[float, float, float] | None:
         return self.mount_controller.validate_altitude_limits(telescope, ra, dec)
 
     def get_observer_location(self) -> tuple[float, float, float] | None:
@@ -1236,7 +1241,7 @@ class IndiInterface(IndiClient):
             track_mode=self.status.get("TRACK_MODE"),
         )
 
-    def set_filterwheel_position(self, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_filterwheel_position(self, filter_name: str) -> bool:
         """Set the active filter by slot number or text name.
 
         Handles fuzzy matching for standard filters.
@@ -1255,7 +1260,7 @@ class IndiInterface(IndiClient):
             self.status["FILTER"] = filter_name
         return success
 
-    def slew(self, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def slew(self, ra: float, dec: float) -> bool:
         """Slew the telescope to the given RA/Dec coordinates.
 
         Returns
@@ -1265,7 +1270,7 @@ class IndiInterface(IndiClient):
         """
         return self.mount_controller.slew(self.connect_to_telescope(), ra, dec)
 
-    def park(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def park(self) -> bool:
         """Park the telescope mount.
 
         Returns
@@ -1641,7 +1646,7 @@ class IndiInterface(IndiClient):
                 names.append(name)
         return names
 
-    def get_device_properties(self, device_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def get_device_properties(self, device_name: str) -> dict[str, Any]:
         """Retrieve all properties for a device in a structured format.
 
         Returns
@@ -1729,7 +1734,9 @@ class IndiInterface(IndiClient):
 
         return result
 
-    def set_property(self, device_name, property_name, element_name, value):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_property(
+        self, device_name: str, property_name: str, element_name: str, value: float | str | bool
+    ) -> bool:
         """Set a specific element of an INDI property.
 
         Returns
@@ -1780,7 +1787,7 @@ class IndiInterface(IndiClient):
 
         return False
 
-    def _enforce_default_tracking_off(self, telescope_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _enforce_default_tracking_off(self, telescope_device: PyIndi.BaseDevice) -> None:
         """Force tracking OFF.
 
         Does not call connect_to_telescope to avoid recursion.
@@ -1793,7 +1800,7 @@ class IndiInterface(IndiClient):
         except INDI_ERRORS as tracking_error:
             logger.warning("Error enforcing default tracking: %s", tracking_error)
 
-    def unpark(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def unpark(self) -> bool:
         """Unparks the telescope.
 
         Returns
@@ -1806,7 +1813,7 @@ class IndiInterface(IndiClient):
             return False
         return self.mount_controller.unpark(telescope)
 
-    def set_tracking(self, enabled):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_tracking(self, enabled: bool) -> bool:
         """Set the tracking state.
 
         Returns
@@ -1819,7 +1826,7 @@ class IndiInterface(IndiClient):
             return False
         return self.mount_controller.set_tracking(telescope, enabled)
 
-    def set_slew_rate(self, rate_index):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_slew_rate(self, rate_index: int) -> bool:
         """Set the manual-slew rate.
 
         Returns
@@ -1832,7 +1839,7 @@ class IndiInterface(IndiClient):
             return False
         return self.mount_controller.set_slew_rate(telescope, rate_index)
 
-    def _set_coord_mode(self, telescope_device, mode="TRACK"):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _set_coord_mode(self, telescope_device: PyIndi.BaseDevice, mode: str = "TRACK") -> bool:
         """Set the ON_COORD_SET switch (TRACK / SLEW / SYNC).
 
         mode: 'TRACK', 'SLEW', 'SYNC'
@@ -1844,7 +1851,7 @@ class IndiInterface(IndiClient):
         """
         return self.mount_controller._set_coord_mode(telescope_device, mode)
 
-    def sync_coordinates(self, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def sync_coordinates(self, ra: float, dec: float) -> bool:
         """Sync the telescope to the specified coordinates.
 
         Uses ON_COORD_SET = SYNC.
@@ -1859,7 +1866,7 @@ class IndiInterface(IndiClient):
             return False
         return self.mount_controller.sync_coordinates(telescope, ra, dec)
 
-    def get_focuser_position(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_focuser_position(self) -> int:
         """Get the current focuser absolute position.
 
         Returns
@@ -1873,7 +1880,7 @@ class IndiInterface(IndiClient):
             return 0
         return self.focuser_controller.get_position(device)
 
-    def focus_move(self, steps):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def focus_move(self, steps: int) -> bool:
         """Move the focuser.
 
         Positive or Negative steps. If device supports
@@ -1891,7 +1898,7 @@ class IndiInterface(IndiClient):
             return False
         return self.focuser_controller.move_relative(device, steps)
 
-    def pulse_guide(self, direction, duration_ms):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def pulse_guide(self, direction: str, duration_ms: float) -> bool:
         """Send a pulse guide command to the telescope/mount.
 
         direction: 'N', 'S', 'W', 'E' duration_ms: Duration in milliseconds
@@ -1927,7 +1934,7 @@ class IndiInterface(IndiClient):
             self._external_pulses.clear()
         return pulses
 
-    def guide_expose(self, exposure_seconds, gain=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def guide_expose(self, exposure_seconds: float, gain: float | None = None) -> bool:
         """Take an exposure with the guide camera.
 
         REQ: BKD-1.3: The backend SHALL provide a generic interface
@@ -1969,7 +1976,7 @@ class IndiInterface(IndiClient):
         """
         return self.camera_controller.get_last_image(self._find_main_camera_device())
 
-    def _find_main_camera_device(self):  # ruff: ignore[missing-return-type-private-function]
+    def _find_main_camera_device(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the main imaging camera.
 
         Returns
@@ -1979,7 +1986,7 @@ class IndiInterface(IndiClient):
         """
         return self.device_discovery.find_main_camera()
 
-    def capture_image(self, exposure_seconds):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def capture_image(self, exposure_seconds: float) -> bool:
         """Take an exposure with the main camera.
 
         Returns
@@ -1990,7 +1997,7 @@ class IndiInterface(IndiClient):
         device = self._find_main_camera_device()
         return self.camera_controller.expose(device, exposure_seconds)
 
-    def move(self, direction, start=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def move(self, direction: str, start: bool = True) -> bool:
         """Start or stops manual movement in a direction.
 
         direction: 'N', 'S', 'E', 'W', 'NW', 'NE', 'SW', 'SE' or 'STOP'

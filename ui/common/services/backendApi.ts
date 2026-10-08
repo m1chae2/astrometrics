@@ -386,7 +386,7 @@ export function getBackendBase(): string {
 
 /**
  * Builds a full absolute backend URL from a relative path.
- * @param path The API path (e.g., '/api/status').
+ * @param path The route's path, such as `BACKEND_ROUTES.rpc`.
  * @return The full absolute URL.
  */
 export function getBackendUrl(path: string): string {

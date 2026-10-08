@@ -1,29 +1,28 @@
-"""One place to record a long-running job and capture its log messages.
+"""Purpose: Run a long piece of work as a recorded job, and collect its log.
 
-A "job" here is any piece of work slow enough that the user interface
-wants to show progress for it -- stacking a target, running an analysis,
-downloading frames from the telescope. For each one we do the same three
-things:
+Description: A "job" is any piece of work slow enough that the user
+interface wants to show progress for it: stacking a target, running an
+analysis, downloading frames from the telescope. For each one the same
+three things happen:
 
-1. Write a row into the logs database so the job appears in the job list.
-2. Attach log handlers so the messages the work prints along the way get
-   saved to that job's own log file and database rows.
-3. Take those handlers back off again when the work finishes.
+1. A row is written into the logs database (`JobStore`), so the job
+   appears in the job list.
+2. The job's log file and database rows are registered with the job log
+   router (`astrometricslib.foundation.logging.JobLogRouter`). The work
+   runs inside a log context that names the job, so every message any
+   module of either library writes during the work reaches them.
+3. When the work ends, the job is marked finished and its log sinks are
+   unregistered and closed.
 
-Step 3 is the one that is easy to get wrong. The handlers get attached to
-the shared "astrometricslib" logger, which every module in the library
-logs through. If they are left attached, this job's log file keeps
-collecting messages from every job that runs afterwards. And if the
-handlers are never closed, each run leaves an open file behind -- Python
-keeps every logger it has ever created, so a long batch run slowly runs
-out of file handles.
+No handler is attached to a shared logger and no logger level is changed,
+so nothing can be left behind when a job ends. The program decides how
+loud logging is, through `configure_logging`.
 
-This module existed as four separate hand-written copies before, in
-`analyze_target`, the pipeline's stacking job wrapper, the backend's
-analysis orchestrator, and the wayfinding library's transfer task. None
-of the four closed their handlers, and only one of them detached from
-both loggers.
-"""
+This module also holds `background_job`, the marker for methods that a
+server runs in the background, `run_as_background_job`, which runs them,
+and `close_interrupted_jobs`, which closes the jobs a program left open
+when it ended.
+""" 
 
 import dataclasses
 import logging
@@ -38,7 +37,10 @@ from datetime import datetime
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.foundation.logging import get_job_log_router, log_context
+from astrometricslib.foundation.jobs.models import ProcessingJob
+from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
+from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
+from astrometricslib.foundation.logging import active_job_ids, get_job_log_router, log_context
 
 logger = logging.getLogger(__name__)
 
@@ -85,34 +87,32 @@ class JobHandle:
     ----------
     job_id : `str` or `None`
         Unique id for this job, or `None` if nothing was recorded.
-    job_logger : `logging.Logger` or `None`
-        Logger writing to this job's own log file and database rows.
     log_file_path : `str` or `None`
         Where this job's log file is being written.
     job_type : `str` or `None`
         What kind of job this is, such as "stacking".
     target_id : `str` or `None`
         Which target the job is working on.
+    reached_terminal_status : `bool`
+        Whether the work has already said how the job ended.
     terminal_status : `str` or `None`
         How the job ended ("completed" or "failed") once the work has said
         so, otherwise `None`.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         job_id: str | None = None,
-        job_logger: logging.Logger | None = None,
         log_file_path: str | None = None,
-        logger_interface: object | None = None,
+        job_store: JobStore | None = None,
         job_type: str | None = None,
         target_id: str | None = None,
-    ):
+    ) -> None:
         self.job_id = job_id
-        self.job_logger = job_logger
         self.log_file_path = log_file_path
         self.job_type = job_type
         self.target_id = target_id
-        self._logger_interface = logger_interface
+        self._job_store = job_store
         self.reached_terminal_status = False
         self.terminal_status: str | None = None
 
@@ -137,13 +137,17 @@ class JobHandle:
     def info(self, message: str) -> None:
         """Write an informational line to this job's log.
 
+        The line goes through this module's logger. The job log router
+        delivers it to the job's log file and rows, because the work runs
+        inside the job's log context.
+
         Parameters
         ----------
         message : `str`
             The line to write.
         """
-        if self.job_logger:
-            self.job_logger.info(message)
+        if self.job_id:
+            logger.info("%s", message)
 
     def error(self, message: str) -> None:
         """Write an error line to this job's log.
@@ -153,8 +157,8 @@ class JobHandle:
         message : `str`
             The line to write.
         """
-        if self.job_logger:
-            self.job_logger.error(message)
+        if self.job_id:
+            logger.error("%s", message)
 
     def mark(
         self,
@@ -194,10 +198,10 @@ class JobHandle:
             self.reached_terminal_status = True
             self.terminal_status = status
 
-        if not (self._logger_interface and self.job_id):
+        if not (self._job_store and self.job_id):
             return
         try:
-            stored_job = self._logger_interface.get_job(self.job_id)
+            stored_job = self._job_store.get_job(self.job_id)
             if stored_job:
                 stored_job.status = status
                 stored_job.progress_current = progress_current
@@ -208,9 +212,15 @@ class JobHandle:
                 if output_metrics is not None:
                     stored_job.output_metrics = output_metrics
                 stored_job.updated_at = datetime.now().isoformat()
-                self._logger_interface.upsert_job(stored_job)
+                self._job_store.upsert_job(stored_job)
         except sqlite3.Error as update_error:
             logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
+
+
+#: The library packages whose messages reach a job's log even when the work
+#: that wrote them lost the job's log context, such as a worker thread that
+#: was started without copying it.
+JOB_LOG_PACKAGES: tuple[str, ...] = ("astrometricslib", "wayfindinglib")
 
 
 @contextmanager
@@ -218,83 +228,67 @@ def capture_job_logs(
     *,
     job_id: str,
     log_file_path: str | None,
-    logger_interface: object | None = None,
-    package_logger_name: str = "astrometricslib",
-) -> Generator[logging.Logger]:
-    """Send this job's log messages to its own log file and database rows.
+    job_store: JobStore | None = None,
+) -> Generator[None]:
+    """Send the log messages written during a block to one job's log.
 
     This is the half every caller needs, whether the job row was just
-    created here or already existed. The job's handlers receive two kinds of
-    message: those the caller writes by hand to the job's own logger, and those
-    that every module deeper in the work logs. The second kind reaches them
-    through the job log router, because the work runs inside a log context
-    that names this job. Without it, the job's log would only contain the
-    handful of milestone lines the caller wrote, and none of the decisions the
-    work actually made along the way.
+    created here or already existed. The job's log file and database rows
+    are registered with the job log router, and the block runs inside a log
+    context that names the job. Every message any module writes inside the
+    block, through its own ``logging.getLogger(__name__)`` logger, then
+    reaches the job's log. Callers write their own milestone lines the same
+    way.
 
-    On the way out the handlers are unregistered *and closed*. A handler that
-    is only removed stops receiving messages but leaves its file open, and an
-    unclosed handler is a file handle held for the life of the process.
+    On the way out the log sinks are unregistered *and closed*. A file
+    handler that is only removed stops receiving messages but leaves its
+    file open, and an unclosed handler is a file handle held for the life of
+    the process.
 
     Parameters
     ----------
     job_id : `str`
-        Identifies the job, and names its private logger.
+        Identifies the job.
     log_file_path : `str` or `None`
         Where to write this job's log file. `None` skips the file and
         keeps only the database rows.
-    logger_interface : `Any`, optional
-        Somewhere to write log rows to, such as a `LoggerInterface` or the
-        backend job service's repository. `None` skips the database rows.
-    package_logger_name : `str`, optional
-        The shared logger whose messages are captured even when they lost the
-        job context. Defaults to "astrometricslib"; the wayfinding library
-        passes its own.
+    job_store : `JobStore`, optional
+        Where to write the job's log rows. `None` skips the database rows.
+        The rows are also skipped when the block already runs inside the
+        same job, whose own capture writes them.
 
     Yields
     ------
-    job_logger : `logging.Logger`
-        The job's own logger, for writing milestone messages.
+    None
+        The block runs with the job's log context.
     """
-    from astrometricslib.drivers.logger_interface import DbLogHandler
-
-    job_logger = logging.getLogger(f"job_{job_id}")
-    job_logger.propagate = False
-    job_logger.setLevel(logging.INFO)
-
-    attached_handlers: list[logging.Handler] = []
+    sinks: list[logging.Handler] = []
     if log_file_path:
         log_directory = os.path.dirname(log_file_path)
         if log_directory:
             os.makedirs(log_directory, exist_ok=True)
         file_handler = logging.FileHandler(log_file_path)
         file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        attached_handlers.append(file_handler)
-    if logger_interface is not None:
-        attached_handlers.append(DbLogHandler(logger_interface, job_id=job_id))
+        sinks.append(file_handler)
+    if job_store is not None and job_id not in active_job_ids():
+        sinks.append(DbLogHandler(job_store, job_id=job_id))
 
-    for handler in attached_handlers:
-        job_logger.addHandler(handler)
-    # The router sends each record that carries this job's id to the handlers.
-    # No handler is attached to a shared logger, so none can be left behind.
+    # The router sends each record that carries this job's id to the sinks.
+    # Nothing is attached to a shared logger, so nothing can be left behind.
     router = get_job_log_router()
-    router.register(job_id, attached_handlers, (package_logger_name,))
-    logging.getLogger(package_logger_name).setLevel(logging.INFO)
-
+    sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
     try:
         with log_context(job_id=job_id):
-            yield job_logger
+            yield
     finally:
-        router.unregister(job_id)
-        for handler in attached_handlers:
-            job_logger.removeHandler(handler)
+        for handler in router.unregister(sink_key):
             try:
                 handler.close()
             except OSError as close_error:
                 logger.debug("Could not close a job log handler: %s", close_error)
 
 
-def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, object]:
+def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, JobStore]:
     """Write a "started" row for a new job into the logs database.
 
     Returns
@@ -303,17 +297,14 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
         The new job's unique id.
     log_file_path : `str`
         Where this job's log file should be written.
-    logger_interface : `Any`
-        The open connection to the logs database.
+    job_store : `JobStore`
+        The logs database the row was written to.
     """
-    from astrometricslib.drivers.logger_interface import LoggerInterface
     from astrometricslib.foundation.config import get_configuration
-    from astrometricslib.utilities.pipeline_models import ProcessingJob
-    from astrometricslib.utilities.process_identity import current_process_identity
 
     configuration = get_configuration()
-    logger_interface = LoggerInterface(configuration.get_logs_db_path())
-    _recover_interrupted_jobs(configuration)
+    job_store = JobStore(str(configuration.get_logs_db_path()))
+    close_interrupted_jobs(configuration)
     owner_pid, owner_started_at = current_process_identity()
     job_id = str(uuid.uuid4())
 
@@ -323,7 +314,7 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
     os.makedirs(log_directory, exist_ok=True)
     log_file_path = log_file or str(log_directory / f"{job_type}_{safe_target}_{timestamp}.log")
 
-    logger_interface.upsert_job(
+    job_store.upsert_job(
         ProcessingJob(
             id=job_id,
             target_id=target_id,
@@ -338,20 +329,101 @@ def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> t
             owner_started_at=owner_started_at,
         )
     )
-    return job_id, log_file_path, logger_interface
+    return job_id, log_file_path, job_store
 
 
-def _recover_interrupted_jobs(configuration: Any) -> None:
-    """Close jobs that a program left open, before a new job is recorded.
+InterruptedJobCleanup = Callable[[list[ProcessingJob], JobStore, Any], None]
+"""A function that tidies up after some kinds of interrupted job.
+
+It receives the jobs just closed, the job store, and the application
+configuration.
+"""
+
+_interrupted_job_cleanups: list[InterruptedJobCleanup] = []
+
+
+def register_interrupted_job_cleanup(cleanup: InterruptedJobCleanup) -> None:
+    """Add a function that tidies up after jobs a program left open.
+
+    `close_interrupted_jobs` calls each registered function with the jobs it
+    closed. The stacking stage uses this to put back a stack that a restack
+    left parked in a staging folder. A function registered twice runs once.
 
     Parameters
     ----------
-    configuration : `AppConfiguration`
-        Where the logs database and the stacks folder are found.
+    cleanup : `InterruptedJobCleanup`
+        The function to call.
     """
-    from astrometricslib.pipelines.shared.interrupted_jobs import close_interrupted_jobs
+    if cleanup not in _interrupted_job_cleanups:
+        _interrupted_job_cleanups.append(cleanup)
 
-    close_interrupted_jobs(configuration)
+
+def recover_interrupted_jobs(
+    job_store: JobStore,
+    configuration: Any,
+    is_process_alive: Callable[[int, str], bool] = process_is_alive,
+) -> list[ProcessingJob]:
+    """Close the jobs a program left open, then run the registered cleanups.
+
+    Parameters
+    ----------
+    job_store : `JobStore`
+        The logs database that holds the job list.
+    configuration : `AppConfiguration`
+        Passed on to the cleanup functions, which find their folders in it.
+    is_process_alive : `Callable`, optional
+        Says whether a program, given its number and start time, still runs.
+        Tests pass a stand-in.
+
+    Returns
+    -------
+    interrupted : `list` [`ProcessingJob`]
+        The jobs that were closed.
+    """
+    interrupted = job_store.interrupt_orphaned_jobs(is_process_alive)
+    for job in interrupted:
+        logger.warning(
+            "Closed %s job %s for '%s': the program running it ended before it finished.",
+            job.job_type,
+            job.id,
+            job.target_id,
+        )
+    if interrupted:
+        for cleanup in list(_interrupted_job_cleanups):
+            cleanup(interrupted, job_store, configuration)
+    return interrupted
+
+
+def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJob]:
+    """Close the jobs a program left open, using the app's own settings.
+
+    A program calls this when it starts, and the job runner calls it before
+    each new job is recorded, so a stuck job does not stay in the list until
+    someone notices it. It never raises: tidying the job list must not stop a
+    program from starting or new work from running.
+
+    Parameters
+    ----------
+    configuration : `AppConfiguration`, optional
+        Where the logs database is found. Defaults to the app's
+        configuration.
+
+    Returns
+    -------
+    interrupted : `list` [`ProcessingJob`]
+        The jobs that were closed. Empty if there were none or the job list
+        could not be read.
+    """
+    try:
+        if configuration is None:
+            from astrometricslib.foundation.config import get_configuration
+
+            configuration = get_configuration()
+        return recover_interrupted_jobs(JobStore(str(configuration.get_logs_db_path())), configuration)
+    except (AstrometricsError, sqlite3.Error, OSError) as recovery_error:
+        logger.warning("Could not close interrupted jobs: %s", recovery_error)
+        return []
+
 
 
 @contextmanager
@@ -363,12 +435,11 @@ def registered_job(
     log_file: str | None = None,
     completed_message: str | None = None,
     failed_message: str | None = None,
-    package_logger_name: str = "astrometricslib",
 ) -> Generator[JobHandle]:
     """Record a job, capture its log messages, and always clean up after it.
 
     Wrap the slow work in this. On the way out the job is marked finished
-    and the log handlers are removed and closed, whether the work
+    and the job's log sinks are unregistered and closed, whether the work
     succeeded, failed, or raised.
 
     If the work raises, the job is marked "failed" and the error is passed
@@ -397,8 +468,6 @@ def registered_job(
         Line to write to the job log when the work finishes successfully.
     failed_message : `str`, optional
         Line to write to the job log when the work fails.
-    package_logger_name : `str`, optional
-        The shared logger to capture messages from.
 
     Yields
     ------
@@ -433,22 +502,16 @@ def registered_job(
     with ExitStack() as log_capture:
         if enabled:
             try:
-                job_id, log_file_path, logger_interface = _create_job_row(
+                job_id, log_file_path, job_store = _create_job_row(
                     job_type=job_type, target_id=target_id, log_file=log_file
                 )
-                job_logger = log_capture.enter_context(
-                    capture_job_logs(
-                        job_id=job_id,
-                        log_file_path=log_file_path,
-                        logger_interface=logger_interface,
-                        package_logger_name=package_logger_name,
-                    )
+                log_capture.enter_context(
+                    capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_store)
                 )
                 handle = JobHandle(
                     job_id=job_id,
-                    job_logger=job_logger,
                     log_file_path=log_file_path,
-                    logger_interface=logger_interface,
+                    job_store=job_store,
                     job_type=job_type,
                     target_id=target_id,
                 )
@@ -481,7 +544,7 @@ def _to_plain(value: Any) -> Any:
     """Convert a result into plain, JSON-safe data.
 
     `ProcessingJob.output_metrics` is stored via `json.dumps` (see
-    `LoggerInterface.upsert_job`), which chokes on pydantic models and
+    `JobStore.upsert_job`), which chokes on pydantic models and
     dataclasses -- both of which pipeline results are made of throughout
     this library (`BatchRunSummary`, the various `*QualitySummary`
     models). Recurses through dicts/lists so a pydantic model or

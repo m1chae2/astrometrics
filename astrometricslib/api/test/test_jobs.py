@@ -13,11 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib.api.jobs import MAXIMUM_JOBS, MAXIMUM_LOG_LINES, MAXIMUM_TEXT_LENGTH, Jobs
-from astrometricslib.drivers.logger_interface import LoggerInterface
+from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.provenance import Activity
-from astrometricslib.utilities.pipeline_models import ProcessingJob
+from astrometricslib.foundation.jobs.models import ProcessingJob
 
 
 def _job(
@@ -55,7 +55,7 @@ def database(tmp_path: Path) -> Path:
         The database file.
     """
     path = tmp_path / "log.db"
-    store = LoggerInterface(str(path))
+    store = JobStore(str(path))
     store.upsert_job(_job("job-a", "M 13", "stacking", "completed", 1))
     store.upsert_job(_job("job-b", "M 13", "analysis", "failed", 2, "Plate solve failed " * 100))
     store.upsert_job(_job("job-c", "M 57", "stacking", "running", 3))
@@ -115,7 +115,7 @@ def test_a_job_updated_just_now_is_active(tmp_path: Path) -> None:
     path = tmp_path / "fresh.db"
     fresh = _job("job-f", "M 57", "stacking", "running", 0)
     fresh.created_at = fresh.updated_at = datetime.now().isoformat()
-    LoggerInterface(str(path)).upsert_job(fresh)
+    JobStore(str(path)).upsert_job(fresh)
     job = Jobs(SimpleNamespace(get_logs_db_path=lambda: str(path)), None).query(active_only=True)["jobs"][0]
     assert job["is_active"] is True
     assert job["looks_stale"] is False
@@ -211,7 +211,7 @@ def test_queries_do_not_change_the_database(database: Path, jobs: Jobs) -> None:
 
 def test_read_only_store_cannot_write(database: Path) -> None:
     """A read-only job store refuses a write with an error."""
-    store = LoggerInterface(str(database), read_only=True)
+    store = JobStore(str(database), read_only=True)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
         store.upsert_job(_job("job-z", "M 1", "stacking", "completed", 9))
     assert store.get_job("job-z") is None

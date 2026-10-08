@@ -82,7 +82,7 @@ from astrometricslib.models.target import (
     TargetQualitySummaries,
     TargetStackingResult,
 )
-from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
+from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
     IntrospectionEndpoint,

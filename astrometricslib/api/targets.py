@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.job_logging import background_job, registered_job
+from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import ReindexReport, TargetQueryResult, TargetReindexChange

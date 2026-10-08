@@ -28,18 +28,22 @@ from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.job_logging import (
-    background_job,
-    capture_job_logs,
-    get_current_job,
-    registered_job,
-    run_as_background_job,
-)
-from astrometricslib.drivers.logger_interface import DbLogHandler, LoggerInterface
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.jobs import (
+    DbLogHandler,
+    JobStore,
+    ProcessingJob,
+    background_job,
+    capture_job_logs,
+    close_interrupted_jobs,
+    get_current_job,
+    register_interrupted_job_cleanup,
+    registered_job,
+    run_as_background_job,
+)
 from astrometricslib.foundation.errors import (
     RPC_CODES,
     AstrometricsError,
@@ -143,7 +147,7 @@ from astrometricslib.models.target import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.interrupted_jobs import close_interrupted_jobs
+from astrometricslib.pipelines.shared.interrupted_jobs import restore_interrupted_stacks
 from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
@@ -153,7 +157,6 @@ from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.observing_night import observing_night_id
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
-from astrometricslib.utilities.pipeline_models import ProcessingJob
 
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
@@ -187,6 +190,10 @@ logging.getLogger(__name__).addHandler(logging.NullHandler())
 # Every program that uses the library works offline: astropy uses its bundled
 # Earth-rotation table instead of downloading a new one.
 configure_offline_iers()
+
+# A restack that a program left half done has parked the old stack. Closing
+# the job puts it back.
+register_interrupted_job_cleanup(restore_interrupted_stacks)
 
 _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
@@ -339,7 +346,7 @@ __all__ = [
     "InputQualityReport",
     "InvalidArgumentError",
     "Jobs",
-    "LoggerInterface",
+    "JobStore",
     "MovingObjectConfig",
     "NotFoundError",
     "NumpyEncoder",

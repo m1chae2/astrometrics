@@ -225,17 +225,18 @@ class JobLogRouter(logging.Handler):
     A sink is a list of handlers, usually a file handler and a database
     handler, registered for one job id. The router reads the job ids from the
     record's context, so it needs no per-job attach and detach on a logger.
+    One job may have several sinks at once, for example the job's own log and
+    the log of one Siril run inside it.
 
     Work that has lost its context, such as a worker thread that was started
     without copying it, cannot be told apart. A record from such work is sent
-    to every registered job, but only if its logger belongs to one of the
-    packages the job registered for (`package_logger_names`).
+    to every registered sink, but only if its logger belongs to one of the
+    packages the sink registered for (`package_logger_names`).
     """
 
     def __init__(self) -> None:
         super().__init__(level=logging.NOTSET)
-        self._sinks: dict[str, list[logging.Handler]] = {}
-        self._packages: dict[str, tuple[str, ...]] = {}
+        self._sinks: dict[str, tuple[str, list[logging.Handler], tuple[str, ...]]] = {}
         self._sinks_lock = threading.Lock()
         self.addFilter(ContextFilter())
 
@@ -244,7 +245,7 @@ class JobLogRouter(logging.Handler):
         job_id: str,
         handlers: Iterable[logging.Handler],
         package_logger_names: Iterable[str] = ("astrometricslib",),
-    ) -> None:
+    ) -> str:
         """Start sending a job's records to some handlers.
 
         Parameters
@@ -255,19 +256,25 @@ class JobLogRouter(logging.Handler):
             Where to write the job's records.
         package_logger_names : `~collections.abc.Iterable` [`str`], optional
             Loggers whose records, when they carry no job context, are also
-            written to this job.
-        """
-        with self._sinks_lock:
-            self._sinks[job_id] = list(handlers)
-            self._packages[job_id] = tuple(package_logger_names)
+            written to this sink.
 
-    def unregister(self, job_id: str) -> list[logging.Handler]:
-        """Stop sending records to a job's handlers.
+        Returns
+        -------
+        sink_key : `str`
+            Names this sink. Pass it to `unregister`.
+        """
+        sink_key = uuid.uuid4().hex
+        with self._sinks_lock:
+            self._sinks[sink_key] = (job_id, list(handlers), tuple(package_logger_names))
+        return sink_key
+
+    def unregister(self, sink_key: str) -> list[logging.Handler]:
+        """Stop sending records to one sink's handlers.
 
         Parameters
         ----------
-        job_id : `str`
-            The job's id.
+        sink_key : `str`
+            The key `register` returned.
 
         Returns
         -------
@@ -275,8 +282,8 @@ class JobLogRouter(logging.Handler):
             The handlers that were registered, so the caller can close them.
         """
         with self._sinks_lock:
-            self._packages.pop(job_id, None)
-            return self._sinks.pop(job_id, [])
+            _, handlers, _ = self._sinks.pop(sink_key, ("", [], ()))
+            return handlers
 
     def emit(self, record: logging.LogRecord) -> None:
         """Pass a record to the handlers of each job it belongs to.
@@ -286,15 +293,21 @@ class JobLogRouter(logging.Handler):
         record : `logging.LogRecord`
             The record to route.
         """
-        job_ids = getattr(record, "job_ids", ())
+        job_ids = set(getattr(record, "job_ids", ()))
+        package = record.name.split(".")[0]
         with self._sinks_lock:
             if job_ids:
-                sinks = [handler for job_id in job_ids for handler in self._sinks.get(job_id, ())]
+                sinks = [
+                    handler
+                    for job_id, handlers, _ in self._sinks.values()
+                    if job_id in job_ids
+                    for handler in handlers
+                ]
             else:
                 sinks = [
                     handler
-                    for job_id, handlers in self._sinks.items()
-                    if record.name.split(".")[0] in self._packages[job_id]
+                    for _, handlers, packages in self._sinks.values()
+                    if package in packages
                     for handler in handlers
                 ]
         for handler in sinks:

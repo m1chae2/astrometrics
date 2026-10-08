@@ -579,7 +579,7 @@ class Activity(BaseModel):
     """One pipeline run.
 
     `id` is always the same id the existing job-tracking system
-    (`astrometricslib.drivers.job_logging.registered_job`) already
+    (`astrometricslib.foundation.jobs.runner.registered_job`) already
     assigned that run -- there is no separate id scheme.
 
     Attributes

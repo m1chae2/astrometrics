@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.drivers.logger_interface import LoggerInterface
+from astrometricslib.foundation.jobs.store import LoggerInterface
 from astrometricslib.foundation.errors import InvalidArgumentError
 
 

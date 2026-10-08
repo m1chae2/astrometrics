@@ -48,9 +48,9 @@ def _read_jobs(logs_database_path: str, target_id: str) -> list:
     jobs : `list`
         The stored `ProcessingJob` records, newest first.
     """
-    from astrometricslib.drivers.logger_interface import LoggerInterface
+    from astrometricslib.foundation.jobs.store import JobStore
 
-    return LoggerInterface(logs_database_path).get_jobs_by_target(target_id)
+    return JobStore(logs_database_path).get_jobs_by_target(target_id)
 
 
 def _target(target_id: str) -> Target:

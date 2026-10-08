@@ -415,7 +415,7 @@ def check_spectral_frames(
     """
     import os
 
-    from astrometricslib.drivers.job_logging import get_current_job
+    from astrometricslib.foundation.jobs.runner import get_current_job
     from astrometricslib.models.quality_reports import SpectralFrameCheckReport
     from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
     from astrometricslib.pipelines.shared.quality.frame_selection import select_library_frames

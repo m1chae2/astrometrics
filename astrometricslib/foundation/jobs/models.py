@@ -1,8 +1,8 @@
-"""Domain models for tracking background processing tasks.
+"""Purpose: The records that describe a background job.
 
-These models provide type safety and schema validation for job
-tracking in memory and within the storage layer, within the
-Astrometrics ecosystem.
+Description: `ProcessingJob` is one row of the job list that `JobStore`
+keeps. `ProcessStatus` is the short reply a caller gets when it starts a
+processing run.
 """
 
 from typing import Any
@@ -46,7 +46,7 @@ class ProcessingJob(BaseModel):
     owner_started_at : `str` or `None`
         When that program started. With `owner_pid` it tells whether the
         program is still the one that took the job (see
-        `astrometricslib.utilities.process_identity`).
+        `astrometricslib.foundation.jobs.process_identity`).
     """
 
     model_config = ConfigDict(populate_by_name=True)

@@ -39,7 +39,7 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib.drivers.job_logging import registered_job
+from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 from astrometricslib.models.processing_results import ProcessTargetResult

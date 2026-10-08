@@ -224,7 +224,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # capture_job_logs attaches handlers to both this job's own logger
         # and the shared "astrometricslib" logger that every module deeper
         # in the pipeline logs through, then removes and closes them again
-        # when the work finishes. See astrometricslib.drivers.job_logging.
+        # when the work finishes. See astrometricslib.foundation.jobs.runner.
         from astrometricslib import capture_job_logs
 
         job = self._job_service.get_job(job_id) if self._job_service else None

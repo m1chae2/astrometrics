@@ -1,6 +1,6 @@
-"""Tell one running program from another, and tell whether one is still alive.
+"""Purpose: Tell one running program from another, and whether one still runs.
 
-Every job the app records names the program that is running it, so that a job
+Description: Every job the app records names the program that is running it, so that a job
 left open by a program that crashed or was stopped can be recognised and
 closed. A program's number (its process ID) alone is not enough: the
 operating system reuses numbers, so a new, unrelated program can later get

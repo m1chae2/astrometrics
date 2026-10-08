@@ -358,7 +358,7 @@ class IngestionService(BaseBackgroundService):
         # (the name `_log` below writes through) and the shared
         # "astrometricslib" logger, and writes rows to the jobs database so
         # the ingest dialog's log panel has something to show instead of
-        # "No logs available.". See astrometricslib.drivers.job_logging.
+        # "No logs available.". See astrometricslib.foundation.jobs.runner.
         with capture_job_logs(
             job_id=job_id,
             log_file_path=log_file_path,

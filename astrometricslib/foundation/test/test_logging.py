@@ -183,10 +183,11 @@ def test_the_router_sends_a_record_to_the_jobs_it_belongs_to() -> None:
     """Send each job its own records; a nested job writes to both logs."""
     router = get_job_log_router()
     outer, inner, other = StringIO(), StringIO(), StringIO()
+    sink_keys = []
     for job_id, stream in (("outer", outer), ("inner", inner), ("other", other)):
         handler = logging.StreamHandler(stream)
         handler.setFormatter(logging.Formatter("%(message)s"))
-        router.register(job_id, [handler])
+        sink_keys.append(router.register(job_id, [handler]))
     logger = logging.getLogger("astrometricslib.router_test")
     logger.setLevel(logging.INFO)
     try:
@@ -195,8 +196,8 @@ def test_the_router_sends_a_record_to_the_jobs_it_belongs_to() -> None:
             with log_context(job_id="inner"):
                 logger.info("in inner")
     finally:
-        for job_id in ("outer", "inner", "other"):
-            router.unregister(job_id)
+        for sink_key in sink_keys:
+            router.unregister(sink_key)
     assert outer.getvalue().splitlines() == ["in outer", "in inner"]
     assert inner.getvalue().splitlines() == ["in inner"]
     assert other.getvalue() == ""
@@ -207,8 +208,8 @@ def test_unregistering_stops_delivery_and_returns_the_handlers() -> None:
     router = get_job_log_router()
     stream = StringIO()
     handler = logging.StreamHandler(stream)
-    router.register("gone", [handler])
-    assert router.unregister("gone") == [handler]
+    sink_key = router.register("gone", [handler])
+    assert router.unregister(sink_key) == [handler]
     logger = logging.getLogger("astrometricslib.router_test")
     logger.setLevel(logging.INFO)
     with log_context(job_id="gone"):

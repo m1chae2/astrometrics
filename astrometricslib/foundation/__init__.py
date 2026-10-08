@@ -10,6 +10,10 @@ MCP servers, and the scripts all need, so none of them has to own it:
 * `config`: the application configuration loader.
 * `astropy_setup`: makes astropy use its bundled Earth-rotation (IERS) table
   offline, and loads that table ahead of first use.
+* `jobs`: the job framework: the job list and job log lines (`JobStore`),
+  recording a job and collecting its log (`registered_job`,
+  `capture_job_logs`), background jobs, and closing jobs a program left
+  open.
 * `storage`: generic storage plumbing: SQLite connections, a keyed model store
   (the `Butler`), and file-based locks between programs.
 

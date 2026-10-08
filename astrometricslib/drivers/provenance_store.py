@@ -4,18 +4,18 @@
 `astrometricslib.models.provenance` -- which activity, using which
 software version and which inputs, produced a given data product.
 
-It lives in the same physical database as `LoggerInterface`'s job
+It lives in the same physical database as `JobStore`'s job
 tracking (`AppConfiguration.get_logs_db_path()`), since an `Activity` is
 a superset of what a job row already tracks (a job's id becomes the
 Activity's id, its start/end become the Activity's start/end), but it
-is a separate module with its own tables: `LoggerInterface` is live,
+is a separate module with its own tables: `JobStore` is live,
 operational job tracking (status, progress, log text); this is the
 historical provenance graph.
 
 Every public `record_*` method fails soft -- it logs and returns rather
 than raising -- so a storage problem here can never turn a pipeline run
 that otherwise succeeded into a failure. This mirrors
-`astrometricslib.drivers.job_logging.JobHandle`'s own philosophy.
+`astrometricslib.foundation.jobs.runner.JobHandle`'s own philosophy.
 """
 
 import logging
@@ -126,7 +126,7 @@ class ProvenanceStore:
     def _connect(self, timeout: float = 30.0) -> sqlite3.Connection:
         """Open a connection to astrometrics_log.db with WAL mode.
 
-        Mirrors `LoggerInterface._connect`: WAL lets readers and
+        Mirrors `JobStore._connect`: WAL lets readers and
         writers proceed concurrently, and the busy timeout makes a
         concurrent writer retry briefly instead of immediately raising
         "database is locked".

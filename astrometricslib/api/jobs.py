@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
-from astrometricslib.drivers.logger_interface import LoggerInterface
+from astrometricslib.foundation.jobs.store import JobStore
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
-from astrometricslib.utilities.pipeline_models import ProcessingJob
+from astrometricslib.foundation.jobs.models import ProcessingJob
 
 __all__ = ["Jobs"]
 
@@ -242,15 +242,15 @@ class Jobs:
             if detail == "summary" and not job_id:
                 return {"detail": "summary", "count": 0, "jobs": [], "note": UNTRUSTED_TEXT_NOTE}
             raise NotFoundError("The logs database does not exist yet, so no jobs are recorded.")
-        logger_interface = LoggerInterface(self._database_path, read_only=True)
+        job_store = JobStore(self._database_path, read_only=True)
 
         if detail == "lineage":
-            return self._lineage(logger_interface, job_id, target_id, limit)
+            return self._lineage(job_store, job_id, target_id, limit)
         if detail in ("log_tail", "result"):
-            return self._one_job(logger_interface, job_id, detail, lines)
+            return self._one_job(job_store, job_id, detail, lines)
         if job_id:
-            return self._one_job(logger_interface, job_id, "summary", lines)
-        jobs = logger_interface.query_jobs(target_id, job_type, status, active_only, limit)
+            return self._one_job(job_store, job_id, "summary", lines)
+        jobs = job_store.query_jobs(target_id, job_type, status, active_only, limit)
         return {
             "detail": "summary",
             "count": len(jobs),
@@ -259,13 +259,13 @@ class Jobs:
         }
 
     def _one_job(
-        self, logger_interface: LoggerInterface, job_id: str, detail: str, lines: int
+        self, job_store: JobStore, job_id: str, detail: str, lines: int
     ) -> dict[str, Any]:
         """Answer for one job: its summary, log tail or stored result.
 
         Parameters
         ----------
-        logger_interface : `LoggerInterface`
+        job_store : `JobStore`
             A read-only job store.
         job_id : `str`
             The job to read.
@@ -284,12 +284,12 @@ class Jobs:
         NotFoundError
             If there is no such job.
         """
-        job = logger_interface.get_job(job_id)
+        job = job_store.get_job(job_id)
         if job is None:
             raise NotFoundError(f"No job with id {job_id!r}.", details={"job_id": job_id})
         answer: dict[str, Any] = {"detail": detail, "job": self._summarize(job), "note": UNTRUSTED_TEXT_NOTE}
         if detail == "log_tail":
-            entries, total = logger_interface.get_recent_log_entries_for_job(job_id, lines)
+            entries, total = job_store.get_recent_log_entries_for_job(job_id, lines)
             answer["log_lines"] = [
                 {"time": entry["created_at"], "level": entry["level"], "text": _shorten(entry["message"])}
                 for entry in entries
@@ -302,13 +302,13 @@ class Jobs:
         return answer
 
     def _lineage(
-        self, logger_interface: LoggerInterface, job_id: str | None, target_id: str | None, limit: int
+        self, job_store: JobStore, job_id: str | None, target_id: str | None, limit: int
     ) -> dict[str, Any]:
         """Answer with the pipeline runs that produced a target's data.
 
         Parameters
         ----------
-        logger_interface : `LoggerInterface`
+        job_store : `JobStore`
             A read-only job store, used to find the target of ``job_id``.
         job_id : `str` or `None`
             A job whose target to use when ``target_id`` is not given.
@@ -328,7 +328,7 @@ class Jobs:
             If no target is given and the job names none.
         """
         if not target_id and job_id:
-            job = logger_interface.get_job(job_id)
+            job = job_store.get_job(job_id)
             target_id = job.target_id if job else None
         if not target_id:
             raise InvalidArgumentError(

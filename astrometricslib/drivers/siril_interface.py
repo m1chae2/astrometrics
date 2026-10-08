@@ -1745,7 +1745,7 @@ class ImageProcessing:
 
         db_handler = None
         if self.job_repository is not None:
-            from astrometricslib.drivers.logger_interface import DbLogHandler
+            from astrometricslib.foundation.jobs.store import DbLogHandler
 
             db_handler = DbLogHandler(self.job_repository, job_id=job_id)
             job_logger.addHandler(db_handler)

@@ -1800,26 +1800,6 @@ export interface WeatherSample {
 }
 
 /**
- * Observatory-side context for one observing night.
- *
- * Composition over TargetSession (astrometricslib) by ID reference --
- * target_session_id is nullable and linked post-hoc, since
- * ObservationSession is recorded live during the night while TargetSession
- * is only derivable afterward, once frames exist. The ID reference also
- * serves as the quality-data conduit: session_operations.py's
- * find_quality_contributions_for_session follows it to read
- * astrometricslib's quality records directly, with no separate API.
- */
-export interface ObservationSession {
-  id: string;
-  targetSessionId?: string | null;
-  sequencePlanId?: string | null;
-  guidingSamples?: GuidingSample[];
-  weatherSamples?: WeatherSample[];
-  createdAt: string;
-}
-
-/**
  * Every RPC method the backend serves, from backend/public_interface.py.
  */
 export const RPC_METHODS = [

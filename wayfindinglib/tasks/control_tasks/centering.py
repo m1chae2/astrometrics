@@ -84,16 +84,14 @@ def _centering_image_path(context: ControlContext) -> Path:
     Parameters
     ----------
     context : `ControlContext`
-        Supplies the configuration.
+        Supplies the storage layer, which knows the library folder.
 
     Returns
     -------
     path : `pathlib.Path`
         ``centering/latest.fits`` inside the wayfinding library's folder.
     """
-    from wayfindinglib.drivers import local_database
-
-    folder = local_database._wayfinding_library_path(context.config) / "centering"
+    folder = context.butler.library_path / "centering"
     folder.mkdir(parents=True, exist_ok=True)
     return folder / "latest.fits"
 

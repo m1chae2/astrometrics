@@ -4,10 +4,10 @@ Description: Defines and exposes low-level drivers including the INDI
 interface, its simulator, and the StellarMate remote-transfer driver.
 
 Resolution is lazy (module `__getattr__`, PEP 562) rather than a
-top-level import: `local_database.py` and `butler.py` are also
-submodules of this package, needed by Observation Planning for
-recording alone, and eagerly importing INDI hardware modules here
-would mean importing either one transitively imports device drivers --
+top-level import: `butler.py` is also a submodule of this package,
+needed by Observation Planning for recording alone, and eagerly
+importing INDI hardware modules here would mean importing it
+transitively imports device drivers --
 directly undermining "Planning Is Hardware-Free"
 (`Wayfinding_Library_Architecture.md` §2.3.4). Since Python must execute
 a package's `__init__.py` before any of its submodules are reachable,
@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def __getattr__(name: str) -> type:
     """Lazily resolve driver classes, keeping sibling imports hardware-free.
 
     Returns

@@ -668,9 +668,7 @@ class ControlContext:
         directory : `str`
             ``ekos_logs`` inside the wayfinding library's data folder.
         """
-        from wayfindinglib.drivers import local_database
-
-        return str(local_database._wayfinding_library_path(self.config) / "ekos_logs")
+        return str(self.butler.library_path / "ekos_logs")
 
     # -- Record writes shared by several children and tasks --------------
 

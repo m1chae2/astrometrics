@@ -1,8 +1,10 @@
-"""Purpose: Calibration inventory models the app's calibration view shows.
+"""Purpose: Calibration library inventory models.
 
 Description: `CalibrationEntry` and `CalibrationStats` describe how many
-dark, bias and flat frames the library holds for each camera setting.
-The backend returns them and the UI's types are generated from them.
+dark, bias and flat frames the calibration library holds for each camera
+setting. They give the shape of what `CalibrationLibrary.get_stats`
+returns. The backend returns that data and the UI's types are generated
+from these models.
 """
 
 import logging

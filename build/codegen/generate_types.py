@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -126,8 +127,6 @@ from wayfindinglib.models.session.telemetry import (
     MountPointingModel,
     PolarAlignmentStatus,
 )
-from wayfindinglib.observation import CalibrationEntry, CalibrationStats
-from wayfindinglib.observationlib.observation_session import ObservationSession
 
 
 def get_ts_type(py_type: Any) -> str:
@@ -435,7 +434,6 @@ def render_types() -> str:
         ),
         generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
-        generate_interface(ObservationSession, "ObservationSession"),
         generate_public_interface(),
     ]
 

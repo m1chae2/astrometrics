@@ -1,37 +1,25 @@
-"""Purpose: wayfindinglib's data access layer.
+"""Purpose: wayfindinglib's single storage path.
 
-Description: Follows the same Rubin Observatory Butler pattern
-astrometricslib uses. A thin get/put/exists dataset-type dispatcher over
-wayfindinglib/drivers/local_database.py. Deliberately its own minimal
-abstract base rather than subclassing astrometricslib's four-method
-AbstractCatalogAccess (astrometricslib/data_access/catalog_access.py) --
-get_local_path is a FITS-file-path concern that doesn't apply to a
-single SQLite-backed pydantic model.
+Description: `DiskButler` is the one place wayfindinglib reads and writes
+its own records. It follows the Rubin Observatory Butler pattern that
+astrometricslib uses: a small get/put/exists interface keyed by a dataset
+type name. It implements astrometricslib's shared `AbstractButler` and
+hands every call to astrometricslib's generic SQLite `Butler`, which keeps
+one table per dataset type in wayfindinglib's own ``wayfinding.db`` file.
+That file lives in wayfindinglib's own library folder, kept apart from
+astrometricslib's library folder.
 
-"observation_session" routes to `local_database.save_wayfinding_session`/
-`get_wayfinding_session`, serving
-`wayfindinglib.models.session.observation_session.ObservationSession`
-(the session with its queue, telescope_id, camera_id, divergence
-records, etc.) under its own table. That table is separate from the
-single-target, telemetry-only
-`observationlib.observation_session.ObservationSession` served by
-`local_database`'s `save_observation_session` functions.
-`observationlib.session_recorder.ObservationSessionRecorder` calls
-those functions directly, without going through this Butler.
-Every other dataset type -- observation_package,
-site_profile, enclosure, guider_calibration, focus_model,
-delegation_policy, safety_rule_set, commissioning_run -- is dispatched
-generically via `_GENERIC_DATASET_TYPES` to
-`local_database.save_model`/`load_models`/`get_model`, keyed by the `id`
-field in `selector`.
+Each dataset type maps to a table and a pydantic model class in
+`_DATASET_TYPES`. A record's key is its ``id`` field, except for
+``calibration_stats``, whose key is ``camera_id``.
 """
 
-from abc import ABC, abstractmethod
+import configparser
+from pathlib import Path
 from typing import Any
 
+from astrometricslib import AbstractButler, DatasetSpec, InvalidArgumentError
 from astrometricslib import Butler as _GenericButler
-from astrometricslib import DatasetSpec, InvalidArgumentError
-from wayfindinglib.drivers import local_database
 from wayfindinglib.models.equipment_and_site.calibration import CalibrationStats
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.equipment_and_site.focus_model import FocusModel
@@ -48,7 +36,8 @@ from wayfindinglib.models.session.guiding_run import GuidingRunSummary
 from wayfindinglib.models.session.observation_session import ObservationSession
 from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
-_GENERIC_DATASET_TYPES: dict[str, tuple[str, type]] = {
+_DATASET_TYPES: dict[str, tuple[str, type]] = {
+    "observation_session": ("wayfinding_observation_sessions", ObservationSession),
     "observation_package": ("observation_packages", ObservationPackage),
     "site_profile": ("site_profiles", SiteProfile),
     "enclosure": ("enclosures", Enclosure),
@@ -66,9 +55,9 @@ _GENERIC_DATASET_TYPES: dict[str, tuple[str, type]] = {
 }
 """Maps a dataset_type string to its (table_name, model_class).
 
-`calibration_stats` uses `camera_id` as its selector key, matching
-`CalibrationStats.camera_id` being the natural key for one camera's
-inventory (`Wayfinding_Library_Architecture.md` §2.2.2).
+`calibration_stats` uses `camera_id` as its key, because one record
+holds the calibration inventory of one camera
+(`Wayfinding_Library_Architecture.md` §2.2.2).
 """
 
 _ID_FIELD_FOR: dict[str, str] = {"calibration_stats": "camera_id"}
@@ -76,26 +65,38 @@ _ID_FIELD_FOR: dict[str, str] = {"calibration_stats": "camera_id"}
 key is not `id` -- everything else defaults to `id`."""
 
 
-class AbstractButler(ABC):
-    """Minimal get/put/exists data access layer for wayfindinglib."""
+def _wayfinding_library_path(app_config: Any) -> Path:
+    """Return wayfindinglib's own library folder, creating it if needed.
 
-    @abstractmethod
-    def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
-        """Retrieve the dataset a selector identifies."""
+    The folder comes from the ``path`` option of the
+    ``[Wayfinding Library]`` configuration section. A relative path is
+    taken relative to the project root. Without that option the folder
+    is ``wayfindinglib/library`` under the project root.
 
-    @abstractmethod
-    def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
-        """Record a dataset under a given type, identified by a selector."""
+    Parameters
+    ----------
+    app_config : `AppConfiguration`
+        The application configuration.
 
-    @abstractmethod
-    def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
-        """Check whether the dataset a selector identifies exists."""
+    Returns
+    -------
+    path : `Path`
+        Absolute path to the folder.
+    """
+    try:
+        path = Path(app_config.app_config.get("Wayfinding Library", "path"))
+        if not path.is_absolute():
+            path = (app_config.get_project_root() / path).absolute()
+    except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+        path = app_config.get_project_root() / "wayfindinglib" / "library"
+    path.mkdir(parents=True, exist_ok=True)
+    return path.absolute()
 
 
 class DiskButler(AbstractButler):
     """Local SQLite-backed Butler implementation for wayfindinglib."""
 
-    def __init__(self, app_config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, app_config: Any = None) -> None:
         """Initialize the Butler with an application configuration.
 
         Parameters
@@ -112,36 +113,37 @@ class DiskButler(AbstractButler):
         self.__generic: _GenericButler | None = None
 
     @property
-    def _generic(self) -> _GenericButler:
-        """Lazily build the shared generic Butler on first use.
+    def library_path(self) -> Path:
+        """Wayfindinglib's own library folder, created if needed.
 
-        Deferred rather than built in `__init__` so constructing a
-        `DiskButler` with a dummy/sentinel `config` (as some tests do,
-        to exercise standalone-mode error paths without ever calling
-        get/put) doesn't eagerly resolve a real library path.
+        Holds ``wayfinding.db`` and the files wayfindinglib keeps next to
+        it, such as downloaded Ekos logs and the latest centering frame.
+        """
+        return _wayfinding_library_path(self.config)
+
+    @property
+    def _generic(self) -> _GenericButler:
+        """Build the shared generic Butler on first use.
+
+        Built here rather than in `__init__` so that a `DiskButler` made
+        with a stand-in `config` (as some tests do, to check error paths
+        without ever calling get or put) does not look up a real library
+        folder.
         """
         if self.__generic is None:
-            self.__generic = self._build_generic_butler(self.config)
-        return self.__generic
-
-    @staticmethod
-    def _build_generic_butler(app_config: Any) -> _GenericButler:
-        db_dir = str(local_database._wayfinding_library_path(app_config))
-        specs: dict[str, DatasetSpec] = {
-            "observation_session": DatasetSpec(
-                table_name=local_database._WAYFINDING_SESSION_TABLE_NAME,
-                model_class=ObservationSession,
-                serializer=lambda obj: obj.model_dump(mode="json", by_alias=True),
-            ),
-        }
-        for dataset_type, (table_name, model_class) in _GENERIC_DATASET_TYPES.items():
-            specs[dataset_type] = DatasetSpec(
-                table_name=table_name,
-                model_class=model_class,
-                id_field=_ID_FIELD_FOR.get(dataset_type, "id"),
-                serializer=lambda obj: obj.model_dump(mode="json", by_alias=True),
+            specs = {
+                dataset_type: DatasetSpec(
+                    table_name=table_name,
+                    model_class=model_class,
+                    id_field=_ID_FIELD_FOR.get(dataset_type, "id"),
+                    serializer=lambda obj: obj.model_dump(mode="json", by_alias=True),
+                )
+                for dataset_type, (table_name, model_class) in _DATASET_TYPES.items()
+            }
+            self.__generic = _GenericButler(
+                self.config, db_name="wayfinding.db", db_dir=str(self.library_path), specs=specs
             )
-        return _GenericButler(app_config, db_name="wayfinding.db", db_dir=db_dir, specs=specs)
+        return self.__generic
 
     def get(self, dataset_type: str, selector: dict[str, Any]) -> Any:
         """Retrieve the dataset a selector identifies.
@@ -149,31 +151,30 @@ class DiskButler(AbstractButler):
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to retrieve: "observation_session",
-            or one of the generic types in `_GENERIC_DATASET_TYPES`.
+            The dataset kind to read, one of the keys of `_DATASET_TYPES`.
         selector : `dict`
-            Data ID fields identifying which dataset instance to load;
-            expects a "session_id" key for "observation_session", or an
-            "id" key (or the dataset's natural key, e.g. "camera_id" for
-            "calibration_stats") for generic types.
+            Names the record: a ``"session_id"`` key for
+            ``"observation_session"``, otherwise an ``"id"`` key (or the
+            record's own key field, ``"camera_id"`` for
+            ``"calibration_stats"``).
 
         Returns
         -------
         dataset : `Any`
-            The hydrated dataset instance, or `None` if not found.
+            The record, or `None` if there is none.
 
         Raises
         ------
         InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
+        if dataset_type not in _DATASET_TYPES:
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         if dataset_type == "observation_session":
-            return self._generic.get("observation_session", {"id": selector.get("session_id", "")})
-        if dataset_type in _GENERIC_DATASET_TYPES:
-            id_field = _ID_FIELD_FOR.get(dataset_type, "id")
-            model_id = selector.get("id") or selector.get(id_field, "")
-            return self._generic.get(dataset_type, {"id": model_id})
-        raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
+            return self._generic.get(dataset_type, {"id": selector.get("session_id", "")})
+        id_field = _ID_FIELD_FOR.get(dataset_type, "id")
+        model_id = selector.get("id") or selector.get(id_field, "")
+        return self._generic.get(dataset_type, {"id": model_id})
 
     def get_all(self, dataset_type: str) -> list[Any]:
         """Retrieve every recorded instance of a dataset type.
@@ -181,8 +182,7 @@ class DiskButler(AbstractButler):
         Parameters
         ----------
         dataset_type : `str`
-            ``"observation_session"``, or one of the generic types in
-            `_GENERIC_DATASET_TYPES`.
+            The dataset kind to read, one of the keys of `_DATASET_TYPES`.
 
         Returns
         -------
@@ -194,41 +194,31 @@ class DiskButler(AbstractButler):
         InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
-        if dataset_type == "observation_session":
-            return self._generic.get_all("observation_session")
-        if dataset_type not in _GENERIC_DATASET_TYPES:
-            raise InvalidArgumentError(f"Unknown generic dataset type: {dataset_type}")
+        if dataset_type not in _DATASET_TYPES:
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         return self._generic.get_all(dataset_type)
 
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
-        """Record a dataset under a given type, identified by a selector.
+        """Record a dataset under a given type.
 
         Parameters
         ----------
         obj : `Any`
             The model instance to record.
         dataset_type : `str`
-            Identifier of the dataset kind being written:
-            "observation_session", or one of the generic types in
-            `_GENERIC_DATASET_TYPES`.
+            The dataset kind to write, one of the keys of `_DATASET_TYPES`.
         selector : `dict`
-            Unused for "observation_session" -- the session's own `id`
-            field is the primary key. Unused for generic types -- the
-            object's own natural key (`obj.id`, or `obj.camera_id` for
-            "calibration_stats") is the primary key.
+            Not used: the record's own key field (``obj.id``, or
+            ``obj.camera_id`` for ``"calibration_stats"``) is its key.
 
         Raises
         ------
         InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
-        if dataset_type == "observation_session":
-            self._generic.put(obj, "observation_session")
-            return
-        if dataset_type in _GENERIC_DATASET_TYPES:
-            self._generic.put(obj, dataset_type)
-            return
-        raise InvalidArgumentError(f"Write operation not supported on dataset type: {dataset_type}")
+        if dataset_type not in _DATASET_TYPES:
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
+        self._generic.put(obj, dataset_type)
 
     def exists(self, dataset_type: str, selector: dict[str, Any]) -> bool:
         """Check whether the dataset a selector identifies exists.
@@ -236,21 +226,20 @@ class DiskButler(AbstractButler):
         Parameters
         ----------
         dataset_type : `str`
-            Identifier of the dataset kind to check.
+            The dataset kind to check.
         selector : `dict`
-            Expects a "session_id" key for "observation_session", or an
-            "id" key (or the dataset's natural key) for generic types.
+            Names the record, as for `get`.
 
         Returns
         -------
         exists : `bool`
-            `True` if a matching dataset is found.
+            `True` if a matching record is found.
 
         Raises
         ------
         InvalidArgumentError
             Raised if `dataset_type` is not recognized.
         """
-        if dataset_type != "observation_session" and dataset_type not in _GENERIC_DATASET_TYPES:
+        if dataset_type not in _DATASET_TYPES:
             raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
         return self.get(dataset_type, selector) is not None

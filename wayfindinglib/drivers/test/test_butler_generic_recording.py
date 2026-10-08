@@ -3,7 +3,7 @@
 Description: Verifies get/put/exists/get_all round-trip real SQLite
 recording (not mocked) for the dataset types introduced by the
 three-function redesign, that "observation_session" round-trips
-through get_all() via its own hand-written storage path, that a
+through get_all(), that a
 genuinely unrecognized type still raises, and that a model with
 `date`/`datetime`/StrEnum fields survives a round trip through
 model_dump(mode="json").
@@ -96,20 +96,13 @@ def test_guide_star_loss_event_round_trips(isolated_butler):  # ruff: ignore[mis
     assert loaded.recovered is False
 
 
-def test_generic_persistence_handles_bare_date_fields(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify a bare `date` field survives model_dump(mode="json").
+def test_generic_persistence_handles_bare_date_fields(isolated_butler: DiskButler) -> None:
+    """Verify a bare `date` field survives a round trip through the Butler.
 
-    ObservationSession.night_date is `date`, not `datetime` -- the
-    specific gap mode="python" plus the existing NumpyEncoder does not
-    cover, since `isinstance(a_date, datetime)` is False (date is
-    datetime's base class, not the reverse) and json.dumps would
-    otherwise raise TypeError. Exercised directly against
-    local_database.save_model/get_model, the functions that actually
-    perform the mode="json" dump; ObservationSession itself is not a
-    generic-registry dataset type (it keeps its own hand-written path).
+    ObservationSession.night_date is a `date`, not a `datetime`. The
+    Butler stores records with ``model_dump(mode="json")``, which turns
+    the date into a string before it reaches the JSON encoder.
     """
-    from wayfindinglib.drivers import local_database
-
     session = ObservationSession(
         id="session1",
         night_date=date(2026, 8, 10),
@@ -118,15 +111,29 @@ def test_generic_persistence_handles_bare_date_fields(isolated_butler):  # ruff:
         camera_id="c1",
         status=SessionStatus.PLANNED,
     )
-    local_database.save_model(
-        isolated_butler.config, "observation_sessions_generic_test", "session1", session
-    )
-    loaded = local_database.get_model(
-        isolated_butler.config, "observation_sessions_generic_test", ObservationSession, "session1"
-    )
+    isolated_butler.put(session, "observation_session", {"session_id": "session1"})
+    loaded = isolated_butler.get("observation_session", {"session_id": "session1"})
     assert loaded is not None
     assert loaded.night_date == date(2026, 8, 10)
     assert loaded.status == SessionStatus.PLANNED
+
+
+def test_disk_butler_implements_the_shared_abstract_butler(isolated_butler: DiskButler) -> None:
+    """Verify DiskButler implements astrometricslib's shared AbstractButler."""
+    from astrometricslib import AbstractButler
+
+    assert isinstance(isolated_butler, AbstractButler)
+
+
+def test_library_path_is_the_configured_folder(isolated_butler: DiskButler, tmp_path: object) -> None:
+    """Verify library_path is the configured folder and holds the database."""
+    isolated_butler.put(
+        SiteProfile(id="site1", name="A", latitude_deg=1.0, longitude_deg=1.0),
+        "site_profile",
+        {"id": "site1"},
+    )
+    assert isolated_butler.library_path == tmp_path / "wayfinding_library"
+    assert (isolated_butler.library_path / "wayfinding.db").is_file()
 
 
 def test_get_all_returns_every_persisted_instance(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
@@ -180,9 +187,7 @@ def test_get_all_returns_every_persisted_observation_session(isolated_butler):  
     Added for `post_session_reconciliation`, which recomputes a
     camera's `CalibrationStats` from every terminal session and
     therefore needs to enumerate all of them, not just look one up by
-    id -- unlike the generic dataset types, "observation_session" has
-    its own hand-written storage path (`local_database
-    .load_wayfinding_sessions`), which `get_all` now also delegates to.
+    id.
     """
     isolated_butler.put(
         ObservationSession(

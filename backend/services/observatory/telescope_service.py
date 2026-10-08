@@ -190,7 +190,7 @@ class TelescopeService:
         """
         return self.wayfinder.control.equipment.connect()
 
-    def slew_to_coordinates(self, ra: float, dec: float) -> bool:
+    def slew_coordinates(self, ra: float, dec: float) -> bool:
         """Command the telescope to slew to the specified coordinates.
 
         Parameters
@@ -220,7 +220,7 @@ class TelescopeService:
         except ValueError as e:
             raise InvalidArgumentError(str(e)) from e
 
-    def slew_to_target_by_name(self, target_name: str) -> bool:
+    def slew_target(self, target_name: str) -> bool:
         """Resolve a target name from the library and slew to it.
 
         REQ: AGENT-2.1

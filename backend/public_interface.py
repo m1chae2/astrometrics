@@ -77,6 +77,7 @@ RPC_METHODS: tuple[str, ...] = (
     "telescope:set_slew_rate",
     "telescope:set_tracking",
     "telescope:slew_coordinates",
+    "telescope:slew_target",
     "telescope:status",
     "telescope:sync",
     "telescope:is_syncing",
@@ -95,7 +96,6 @@ RPC_METHODS: tuple[str, ...] = (
     "telescope:get_performance_envelope",
     "telescope:get_guiding_spectrum",
     # Equipment set-up and control mode
-    "observatory:slew_to_target",
     "observatory:list_cameras",
     "observatory:get_equipment_configuration",
     "observatory:set_active_camera",

@@ -141,7 +141,7 @@ class TestUseCasesIntegration:
             "/api/rpc",
             json={
                 "jsonrpc": "2.0",
-                "method": "observatory:slew_to_target",
+                "method": "telescope:slew_target",
                 "params": {"target_name": "M31"},
                 "id": "5.1",
             },

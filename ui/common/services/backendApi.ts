@@ -174,7 +174,7 @@ export interface ActionRegistry {
     // Equipment Configuration
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
-    "observatory:slew_to_target": { payload: { target_name: string }; response: boolean };
+    "telescope:slew_target": { payload: { target_name: string }; response: boolean };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
     "telescope:apply_promotion_decision": {
         payload: { capability: string; new_state: string; evidence_note?: string };
@@ -457,7 +457,7 @@ const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'astronomy:spectral_class_summary',
     'astronomy:stars_by_spectral_class',
     'images:last',
-    'observatory:slew_to_target',
+    'telescope:slew_target',
 ]);
 
 /**

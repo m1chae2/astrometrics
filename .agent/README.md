@@ -18,23 +18,22 @@ This includes:
 
 ### MCP Servers
 
-#### 1. Astrometrics Core MCP Server (`astrometrics-core`)
-- **Location**: `scripts/mcp/astrometrics_core_mcp_server.py`
-- **Purpose**: Pure offline library tools (e.g. FITS image analysis, offline plate-solving, offline spectroscopy wave calibration).
-- **Invocation**: `.venv/bin/python scripts/mcp/astrometrics_core_mcp_server.py`
-- **Primary Tools**: `core_fits_metadata_inspector`, `core_run_offline_image_analysis`, `core_tune_spectroscopy_calibration`, `core_extract_wavelength_profile`.
+The project runs five MCP servers. For an AI client they look things up, calculate and measure, and one tool (`observatory_remote_sync_frames`) brings frames from the telescope into the library. None commands a device. The servers are started from `.mcp.json` (a developer session) or `.claude/companion.mcp.json` (a read-only companion session).
 
-#### 2. Astrometrics Backend MCP Server (`astrometrics-backend`)
-- **Location**: `scripts/mcp/astrometrics_mcp_server.py`
-- **Purpose**: Service, state, and active hardware management (e.g., active task queues, backend logs, health diagnostics, dynamic reflected control/planning RPCs).
-- **Invocation**: `.venv/bin/python scripts/mcp/astrometrics_mcp_server.py`
-- **Primary Tools**: `backend_read_logs`, `backend_diagnose_system`, `backend_restart_backend`, `backend_inspect_device_reservations`, `backend_run_backend_tests`.
+| Server | Start command | What it offers an AI |
+|---|---|---|
+| `astrometricslib-core` | `.venv/bin/python -m mcp_servers.astrometrics_core` | Lookups and calculations on targets, stars, calibration, stacks and frames |
+| `wayfindinglib-core` | `.venv/bin/python -m mcp_servers.wayfinding_core` | Observatory status, equipment state, past-night analysis, planning. No device commands |
+| `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view, show a notification |
+| `astrometrics-gaps` | `.venv/bin/python -m mcp_servers.gaps` | Report what the tools cannot do |
+| `astrometrics-ui` | `node ui/mcp/dist/index.js` | Developer profile only: UI tests, type check, build, accessibility |
 
-#### 3. Astrometrics UI MCP Server (`astrometrics-ui`)
-- **Location**: `ui/mcp/src/index.ts` (launcher `scripts/mcp/astrometrics_ui_mcp_server.sh`)
-- **Purpose**: Native Node.js/TypeScript toolset for GUI test suites, type checking, lints, and automated ARIA accessibility audits.
-- **Invocation**: `scripts/mcp/astrometrics_ui_mcp_server.sh`
-- **Primary Tools**: `ui_run_tests`, `ui_diagnose_code`, `ui_audit_accessibility`.
+Each server reads a `tool_manifest.json` and offers only the tools it allows for the chosen profile (`ASTROMETRICS_MCP_PROFILE`, default `investigator`). See `mcp_servers/README.md`.
+
+- `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json` from one list of servers, and `ui/mcp/src/profileRules.ts` from `mcp_servers/common/profile.py`. Run it after a manifest or the profile rules change. Do not edit those files by hand.
+- The Python servers need the optional `mcp` extra (`pip install -e ".[mcp]"`), which `build/linux/setup_venv.sh` installs.
+- `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent.
+- `.venv/bin/python -m mcp_servers.gaps.review list` shows the gaps an AI reported.
 
 #### Chrome DevTools MCP Server
 - **Location**: `mcp_servers.json`

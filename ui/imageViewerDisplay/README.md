@@ -21,7 +21,7 @@ Center column: `TargetViewerManager` — displays the processed image. The
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may
   update the processed image when complete. The Stack action runs the full
-  stacking stage (`stack_frames`), the same one the batch script runs, so it
+  stacking stage (`processing.stack`), the same one the batch script runs, so it
   also saves the quality summary and the processed image.
 
 Data flow summary

@@ -99,7 +99,8 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:set_slew_rate": ("wayfinder.control.mount", "set_slew_rate"),
     "telescope:set_tracking": ("wayfinder.control.mount", "set_tracking"),
     # The UI sends RA in hours; the service makes a SkyPosition.
-    "telescope:slew_coordinates": ("telescope_service", "slew_to_coordinates"),
+    "telescope:slew_coordinates": ("telescope_service", "slew_coordinates"),
+    "telescope:slew_target": ("telescope_service", "slew_target"),
     # The service adds the guiding history and alignment state to
     # `control.mount.status`.
     "telescope:status": ("telescope_service", "get_status"),
@@ -124,7 +125,6 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "telescope:get_performance_envelope": ("wayfinder.control.history", "get_performance_envelope"),
     "telescope:get_guiding_spectrum": ("guiding_service", "analyze_guiding_spectrum"),
     # Equipment set-up and control mode
-    "observatory:slew_to_target": ("telescope_service", "slew_to_target_by_name"),
     "observatory:list_cameras": ("equipment_service", "list_camera_profiles"),
     "observatory:get_equipment_configuration": ("equipment_service", "get_equipment_configuration"),
     "observatory:set_active_camera": ("equipment_service", "set_active_camera"),

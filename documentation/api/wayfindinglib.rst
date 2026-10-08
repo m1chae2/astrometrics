@@ -8,7 +8,6 @@ Wayfinding Library (`wayfindinglib`)
 
 .. automodapi:: wayfindinglib
    :no-inheritance-diagram:
-   :skip: AstrometryHardwareError
    :skip: IndiInterface
    :skip: SimulatorIndiInterface
 

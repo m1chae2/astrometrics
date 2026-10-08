@@ -2,6 +2,10 @@
 
 This folder holds standalone command-line scripts: batch processing over the whole catalog, one-time data migrations and cleanups, and empirical validation/analysis of pipeline behavior against real stored data. Each script is meant to be run directly (`python <script>.py [args]`), not imported by the library or the backend.
 
+## Import rule
+
+A script here may import astrometricslib's internal modules. It never imports another script: code that two scripts share lives in the library. For example, `merge_duplicate_into_survivor` lives in `pipelines/shared/catalog_star_identity.py`, and `backup_catalog_database` lives in `drivers/local_database.py`. The import-linter contract "a library script never imports another script" in `pyproject.toml` checks this rule.
+
 ## Batch processing
 
 - `run_all_target_processing.py` — runs the full pipeline (stacking, astrometry, photometry, spectroscopy, asteroid detection) on every target in the catalog. A stack whose frames, calibration frames and settings are unchanged since it was made is skipped; `--force-restack` rebuilds every stack.

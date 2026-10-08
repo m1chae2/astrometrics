@@ -16,8 +16,8 @@ never changes anything. These structures are what those lookups return:
   data: how many frames each target gained or lost.
 
 Only the fields that belong to the chosen ``detail`` are filled; the rest
-stay `None`. Rows are plain dictionaries because the user interface and the
-AI clients read them as they are.
+stay `None`. Rows are plain dictionaries, so a caller can pass them on as
+JSON unchanged.
 """
 
 from typing import Any

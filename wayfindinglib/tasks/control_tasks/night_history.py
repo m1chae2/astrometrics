@@ -8,8 +8,8 @@ the arguments for a ``kind`` of question, picks the right analysis,
 shrinks the answer to plain data, and guarantees that the reply fits under
 a size limit.
 
-The limit matters because the MCP server cuts any reply at 40,000
-characters, in the middle of the data. Several of the methods can produce
+The limit matters because a caller that relays the reply as text may
+cut it at 40,000 characters, in the middle of the data. Several of the methods can produce
 more than that: a single Ekos session can hold hundreds of mount positions,
 and a list of every guiding run is about 40,000 characters today. Here the
 reply is measured, and if it is too big it is shrunk in steps until it fits,
@@ -104,7 +104,7 @@ def to_plain(value: Any) -> Any:
 
 
 def reply_size(payload: Any) -> int:
-    """Measure a reply the way the MCP server will send it.
+    """Measure a reply as the number of characters of its JSON text.
 
     Parameters
     ----------

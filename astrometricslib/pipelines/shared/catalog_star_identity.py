@@ -12,10 +12,15 @@ save step (`star_recording`) and the one-time cleanup script
   stars, however close), and
 * which name to keep.
 
-They live here so the two can never disagree.
+They live here so the two can never disagree. The module also holds the
+rule for merging one row's data into another, which the cleanup scripts
+share.
 """
 
 import re
+from typing import Any
+
+from astrometricslib.models.stellar_source import StellarObject
 
 # Two catalog rows closer than this on the sky are the same star. On the
 # real catalog, pairs of non-position-only rows within 1 arcsecond number
@@ -85,3 +90,68 @@ def choose_survivor_id(ids: list[str]) -> str:
         first id alphabetically.
     """
     return min(sorted(ids), key=name_preference_rank)
+
+
+# Fields that identify the row itself or are recomputed fresh by every
+# pipeline run regardless of what is already on disk -- never gap-filled
+# from a duplicate, either because overwriting them from an arbitrary
+# cluster member would be wrong (id/name) or because a value here says
+# nothing about which duplicate is "more complete" (is_catalog_identified
+# is always False for a FIELD_J row by construction).
+MERGE_EXCLUDED_FIELDS = frozenset({"id", "name", "target_ids", "is_catalog_identified"})
+
+
+def is_empty_value(value: Any) -> bool:
+    """Report whether a StellarObject field value counts as "not yet set".
+
+    Parameters
+    ----------
+    value : `Any`
+        A field value read off a `StellarObject`.
+
+    Returns
+    -------
+    is_empty : `bool`
+        `True` if this value carries no real information yet, so a
+        duplicate's own value for the same field is worth copying in.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ""
+    if isinstance(value, list | dict):
+        return len(value) == 0
+    if hasattr(value, "fluxes"):  # PhotometryResult
+        return len(value.fluxes) == 0
+    return False
+
+
+def merge_duplicate_into_survivor(survivor: StellarObject, duplicate: StellarObject) -> None:
+    """Copy a duplicate's non-empty fields onto the survivor, in place.
+
+    Every declared `StellarObject` field is covered generically rather
+    than hand-listed, so a field added to the model later is merged
+    correctly without this function needing to be updated to match --
+    the alternative (an explicit per-field list) is exactly the kind
+    of thing that quietly drifts out of sync with the model it mirrors.
+    Only fills a gap; a survivor's own non-empty value is never
+    overwritten, so merging can only add data, never lose it.
+
+    Parameters
+    ----------
+    survivor : `StellarObject`
+        The row that will be kept, mutated in place.
+    duplicate : `StellarObject`
+        The row about to be deleted; nothing it uniquely holds is lost.
+    """
+    for field_name in duplicate.target_ids:
+        if field_name not in survivor.target_ids:
+            survivor.target_ids.append(field_name)
+
+    for field_name in type(survivor).model_fields:
+        if field_name in MERGE_EXCLUDED_FIELDS:
+            continue
+        if is_empty_value(getattr(survivor, field_name)):
+            duplicate_value = getattr(duplicate, field_name)
+            if not is_empty_value(duplicate_value):
+                setattr(survivor, field_name, duplicate_value)

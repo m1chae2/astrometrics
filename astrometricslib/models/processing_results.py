@@ -2,7 +2,7 @@
 
 `ProcessingPipelines` stacks a target, makes its preview picture again, and
 runs the analysis stages. Each of those returns one of these structures, so a
-caller (a script, the backend, an AI client) reads named fields instead of
+caller reads named fields instead of
 guessing at the keys of a dictionary.
 
 - `StackResult` says which frames were chosen and, unless only a plan was

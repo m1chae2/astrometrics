@@ -260,8 +260,12 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "__init__.py" = ["unused-import"] # re-exports for package public API
 "astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
 "wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
-"wayfindinglib/**" = ["banned-api"] # wayfindinglib reaches into its own layers; its use of astrometricslib is checked by import-linter
-"astrometricslib/**" = ["banned-api"] # Layer 1 (api/) and lower layers reach into each other directly by design
+# Each library, its tests and its scripts/ may import that library's own
+# internals. wayfindinglib (scripts/ included) may use only astrometricslib's
+# public API; import-linter checks that, since a per-file ignore here cannot
+# exempt one library's names and keep the other's.
+"wayfindinglib/**" = ["banned-api"]
+"astrometricslib/**" = ["banned-api"]
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
@@ -290,7 +294,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "backend/tests/test_indi_worker.py" = ["banned-api"]
 "backend/tests/test_passive_alignment_and_guiding.py" = ["banned-api"]
 "backend/tests/test_pointing_and_guiding_analytics.py" = ["banned-api"]
-"documentation/notebooks/astrometrics/scripts/m13_analysis_pipeline.py" = ["banned-api"]
 "documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/03_stacking_and_calibration.ipynb" = ["print"]
@@ -301,7 +304,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "documentation/notebooks/astrometrics/user_guide/08_visualization.ipynb" = ["print"]
 "documentation/notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/control/adding_remote_images.ipynb" = ["print"]
-"documentation/notebooks/wayfinding/control/scripts/remote_image_ingestion.py" = ["banned-api"]
 "documentation/notebooks/wayfinding/control/telescope_slewing_and_tracking.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/execution/observation_execution.ipynb" = ["print"]
 "documentation/notebooks/wayfinding/execution/scripts/observatory_session_recorder.py" = ["banned-api"]
@@ -347,6 +349,14 @@ forbidden_modules = [
     "astrometricslib.visualization",
 ]
 allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "a library script never imports another script"
+type = "independence"
+# Code that two scripts share belongs in the library. The script tests sit
+# in `scripts/test/`, which is not a package, so they fall outside this
+# check.
+modules = ["astrometricslib.scripts.*", "wayfindinglib.scripts.*"]
 
 [[tool.importlinter.contracts]]
 name = "the MCP servers use only the public API of astrometricslib and wayfindinglib"

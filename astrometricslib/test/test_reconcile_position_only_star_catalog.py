@@ -9,9 +9,11 @@ isolated catalog database -- never the real one.
 from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
+from astrometricslib.pipelines.shared.catalog_star_identity import (
+    is_empty_value,
+    merge_duplicate_into_survivor,
+)
 from astrometricslib.scripts.reconcile_position_only_star_catalog import (
-    _is_empty_value,
-    _merge_duplicate_into_survivor,
     apply_clusters,
     cluster_position_only_stars,
     find_position_only_clusters,
@@ -90,16 +92,16 @@ def test_cluster_position_only_stars_handles_zero_and_one_star():  # ruff: ignor
 
 def test_is_empty_value_covers_every_shape_of_empty():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """Verify None, blanks, empty lists, and empty light curves are empty."""
-    assert _is_empty_value(None)
-    assert _is_empty_value("")
-    assert _is_empty_value("   ")
-    assert _is_empty_value([])
-    assert _is_empty_value({})
-    assert _is_empty_value(PhotometryResult())
-    assert not _is_empty_value("Vega")
-    assert not _is_empty_value(0.0)
-    assert not _is_empty_value([1])
-    assert not _is_empty_value(PhotometryResult(fluxes=[1.0]))
+    assert is_empty_value(None)
+    assert is_empty_value("")
+    assert is_empty_value("   ")
+    assert is_empty_value([])
+    assert is_empty_value({})
+    assert is_empty_value(PhotometryResult())
+    assert not is_empty_value("Vega")
+    assert not is_empty_value(0.0)
+    assert not is_empty_value([1])
+    assert not is_empty_value(PhotometryResult(fluxes=[1.0]))
 
 
 def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff: ignore[missing-return-type-undocumented-public-function]
@@ -114,7 +116,7 @@ def test_merge_duplicate_into_survivor_fills_gaps_without_overwriting():  # ruff
     duplicate.spectral_type = "A0V"
     duplicate.target_ids = ["M42", "M43"]
 
-    _merge_duplicate_into_survivor(survivor, duplicate)
+    merge_duplicate_into_survivor(survivor, duplicate)
 
     assert survivor.magnitude == 12.5  # ruff: ignore[float-equality-comparison]
     assert survivor.photometry.fluxes == [1.0, 2.0, 3.0]
@@ -128,7 +130,7 @@ def test_merge_duplicate_into_survivor_never_touches_identity_fields():  # ruff:
     duplicate = StellarObject(id="FIELD_JB", name="FIELD_JB")
     duplicate.is_catalog_identified = True
 
-    _merge_duplicate_into_survivor(survivor, duplicate)
+    merge_duplicate_into_survivor(survivor, duplicate)
 
     assert survivor.id == "FIELD_JA"
     assert survivor.name == "FIELD_JA"

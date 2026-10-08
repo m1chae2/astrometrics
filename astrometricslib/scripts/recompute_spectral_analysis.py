@@ -35,6 +35,7 @@ import sys
 import numpy as np
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
@@ -51,7 +52,6 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
-from astrometricslib.scripts.reconcile_position_only_star_catalog import _backup_catalog_database
 
 logger = logging.getLogger(__name__)
 
@@ -359,7 +359,7 @@ def run_recompute(argv: list[str] | None = None) -> int:
         print("\nDry run: nothing was written. Re-run with --apply to save these results.")
         return 0
 
-    backup_path = _backup_catalog_database(astrometrics)
+    backup_path = backup_catalog_database(astrometrics.config)
     if backup_path is None:
         print(
             "\nCould not create a safety backup of the catalog database; aborting without writing anything."

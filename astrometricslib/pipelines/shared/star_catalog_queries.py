@@ -723,9 +723,9 @@ def run_star_query(
         cap = None if limit is None else max(1, min(int(limit), QUERY_LIMITS["overlay"]))
         overlay = build_overlay(storage, query.target_id, cap)
         return StarQueryResult(detail=detail, total_matching=len(overlay), offset=0, overlay=overlay)
-    # The radius cap protects a capped answer, meant for a person or an AI
-    # client. A program that asks for every match (limit=None), such as the
-    # sky map, may search a wider circle.
+    # The radius cap protects a capped answer, meant to be read in full.
+    # A program that asks for every match (limit=None), such as the sky
+    # map, may search a wider circle.
     if selector == "region" and (
         query.radius_deg <= 0 or (limit is not None and query.radius_deg > QUERY_MAXIMUM_RADIUS_DEGREES)
     ):

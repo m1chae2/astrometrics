@@ -37,9 +37,9 @@ import logging
 import sys
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
-from astrometricslib.scripts.reconcile_position_only_star_catalog import _backup_catalog_database
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def run_merge(argv: list[str] | None = None) -> int:
         print("\nDry run: nothing was written. Re-run with --apply to merge these rows.")
         return 0
 
-    backup_path = _backup_catalog_database(astrometrics)
+    backup_path = backup_catalog_database(astrometrics.config)
     if backup_path is None:
         print(
             "\nCould not create a safety backup of the catalog database; aborting without writing anything."

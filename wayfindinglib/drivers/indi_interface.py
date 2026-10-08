@@ -1,4 +1,4 @@
-"""Description: INDI Driver Interface for Astrometrics.
+"""Description: INDI driver interface for wayfindinglib.
 
 Provides connectivity to INDI server and handles mounts, focusers, filter
 wheels, and weather/environmental telemetry.
@@ -209,7 +209,7 @@ class IndiClient(PyIndi.BaseClient):
 
 
 class IndiInterface(IndiClient):
-    """Interface Astrometrics with an INDI server."""
+    """Connect wayfindinglib to an INDI server."""
 
     def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
         """Initialize the interface to an INDI server.

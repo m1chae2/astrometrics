@@ -9,13 +9,16 @@ is everything that knows what a target or a stellar object actually is.
 import json
 import logging
 import os
+import shutil
 import sqlite3
+import time
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.foundation.storage.local_database import connect_db as _connect_db
 from astrometricslib.foundation.storage.local_database import safe_json_dumps as _safe_json_dumps
 
 __all__ = [
+    "backup_catalog_database",
     "load_targets",
     "save_target",
 ]
@@ -129,3 +132,29 @@ def save_target(app_config: AppConfiguration | None = None, target: Target | Non
     finally:
         conn.close()
     return db_path
+
+
+def backup_catalog_database(app_config: AppConfiguration) -> str | None:
+    """Copy the catalog database aside before a script writes to it.
+
+    Parameters
+    ----------
+    app_config : `AppConfiguration`
+        Provides the library path the database lives under.
+
+    Returns
+    -------
+    backup_path : `str` or `None`
+        Where the copy was written, or `None` if the source database
+        doesn't exist yet (nothing to back up) or the copy failed.
+    """
+    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
+    if not os.path.exists(db_path):
+        return None
+    backup_path = f"{db_path}.{time.strftime('%Y%m%d_%H%M%S')}.bak"
+    try:
+        shutil.copy2(db_path, backup_path)
+    except OSError:
+        logger.exception("Could not back up %s before writing", db_path)
+        return None
+    return backup_path

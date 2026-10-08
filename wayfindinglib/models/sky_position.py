@@ -3,7 +3,7 @@
 Description: `SkyPosition` is the plain coordinate pair the mount
 commands take (`control.mount.slew` and `control.mount.sync`). Both
 values are in degrees, so the name of each field says its unit. The
-model turns into JSON directly, so RPC and MCP callers can pass one as
+model turns into JSON directly, so a remote caller can pass one as
 ``{"ra_deg": ..., "dec_deg": ...}``.
 """
 

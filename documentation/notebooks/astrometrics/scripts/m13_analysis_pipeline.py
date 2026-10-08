@@ -21,7 +21,7 @@ Run directly:
 import logging
 import sys
 
-from astrometricslib import Astrometrics, FilterType
+from astrometricslib import Astrometrics, FilterType, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,6 @@ def run_pipeline(target_id: str = "M 13") -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
+    configure_logging("m13_analysis_pipeline", level=logging.INFO, log_dir="", console_stream=sys.stdout)
     target_arg = sys.argv[1] if len(sys.argv) > 1 else "M 13"
     run_pipeline(target_arg)

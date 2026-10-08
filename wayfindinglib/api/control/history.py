@@ -58,8 +58,8 @@ class HistoryControl(ControlChild):
         """Analyse or list past observing nights, in replies of bounded size.
 
         One front door for the observatory's history. It only reads. The
-        reply is measured and shrunk if needed, so it never exceeds the
-        MCP reply limit.
+        reply is measured and shrunk if needed, so it never exceeds
+        40,000 characters of JSON.
 
         Parameters
         ----------

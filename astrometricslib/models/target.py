@@ -506,8 +506,8 @@ class RenderedImage(BaseModel):
 class ViewableImage(BaseModel):
     """A picture a client should show as an image, not as text.
 
-    `Visualization.render_fits(kind="image")` returns it. An MCP client
-    receives the PNG as an image block, with the description beside it.
+    `Visualization.render_fits(kind="image")` returns it. It holds the PNG
+    picture and a text description to show beside it.
     """
 
     # The PNG file.

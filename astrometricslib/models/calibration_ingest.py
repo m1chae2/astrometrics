@@ -7,7 +7,7 @@ find them and they are good. These structures answer two questions:
 - `CalibrationIngestReport` says what a rescan of the library added, and
   for flats, how good each newly added set is.
 
-Both are plain data, so scripts, the backend and the MCP tools can show
+Both are plain data, so any caller can show
 them without re-deriving anything.
 """
 

@@ -3,9 +3,9 @@
 Description: Every error that the code raises on purpose belongs to one of
 the categories below. A category says what kind of problem happened and so
 what the caller can do about it: fix the input, retry, check a device, or
-check the disk. Adapters (the RPC router, the MCP servers) turn an error
-into an `ErrorInfo`, a small record that travels as JSON to the user
-interface or to an AI agent.
+check the disk. A program that serves the libraries to other programs
+turns an error into an `ErrorInfo`, a small record that travels as JSON
+to whoever made the call.
 
 No category inherits from a built-in exception such as `ValueError` or
 `KeyError`. Code that catches a category therefore never catches an error

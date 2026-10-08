@@ -1310,7 +1310,7 @@ class ObservationPlanning:
         if "estimate" in sections:
             from wayfindinglib.drivers.catalog.deep_star_catalog_builder import estimate_catalog_size
 
-            # Under a job already (the MCP server runs this as one), join it
+            # Under a job already (a caller may run this as one), join it
             # rather than listing the same work twice.
             with registered_job(
                 enabled=register_job and get_current_job() is None,

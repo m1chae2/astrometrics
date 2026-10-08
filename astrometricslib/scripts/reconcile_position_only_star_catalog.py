@@ -38,26 +38,15 @@ need.
 
 import argparse
 import logging
-import os
-import shutil
 import sys
-import time
-from typing import Any
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.catalog_access import StarPosition
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.drivers.local_database import backup_catalog_database
 from astrometricslib.pipelines.astrometry.processing.star_identifier import CATALOG_MATCH_RADIUS_ARCSEC
+from astrometricslib.pipelines.shared.catalog_star_identity import merge_duplicate_into_survivor
 
 logger = logging.getLogger(__name__)
-
-# Fields that identify the row itself or are recomputed fresh by every
-# pipeline run regardless of what is already on disk -- never gap-filled
-# from a duplicate, either because overwriting them from an arbitrary
-# cluster member would be wrong (id/name) or because a value here says
-# nothing about which duplicate is "more complete" (is_catalog_identified
-# is always False for a FIELD_J row by construction).
-_MERGE_EXCLUDED_FIELDS = frozenset({"id", "name", "target_ids", "is_catalog_identified"})
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -91,31 +80,6 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Explicitly request a preview. This is already the default.",
     )
     return parser
-
-
-def _is_empty_value(value: Any) -> bool:
-    """Report whether a StellarObject field value counts as "not yet set".
-
-    Parameters
-    ----------
-    value : `Any`
-        A field value read off a `StellarObject`.
-
-    Returns
-    -------
-    is_empty : `bool`
-        `True` if this value carries no real information yet, so a
-        duplicate's own value for the same field is worth copying in.
-    """
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return value.strip() == ""
-    if isinstance(value, list | dict):
-        return len(value) == 0
-    if hasattr(value, "fluxes"):  # PhotometryResult
-        return len(value.fluxes) == 0
-    return False
 
 
 def cluster_position_only_stars(stars: list[StarPosition]) -> list[list[StarPosition]]:
@@ -171,37 +135,6 @@ def cluster_position_only_stars(stars: list[StarPosition]) -> list[list[StarPosi
     for star, label in zip(stars, labels, strict=True):
         clusters.setdefault(int(label), []).append(star)
     return list(clusters.values())
-
-
-def _merge_duplicate_into_survivor(survivor: StellarObject, duplicate: StellarObject) -> None:
-    """Copy a duplicate's non-empty fields onto the survivor, in place.
-
-    Every declared `StellarObject` field is covered generically rather
-    than hand-listed, so a field added to the model later is merged
-    correctly without this function needing to be updated to match --
-    the alternative (an explicit per-field list) is exactly the kind
-    of thing that quietly drifts out of sync with the model it mirrors.
-    Only fills a gap; a survivor's own non-empty value is never
-    overwritten, so merging can only add data, never lose it.
-
-    Parameters
-    ----------
-    survivor : `StellarObject`
-        The row that will be kept, mutated in place.
-    duplicate : `StellarObject`
-        The row about to be deleted; nothing it uniquely holds is lost.
-    """
-    for field_name in duplicate.target_ids:
-        if field_name not in survivor.target_ids:
-            survivor.target_ids.append(field_name)
-
-    for field_name in type(survivor).model_fields:
-        if field_name in _MERGE_EXCLUDED_FIELDS:
-            continue
-        if _is_empty_value(getattr(survivor, field_name)):
-            duplicate_value = getattr(duplicate, field_name)
-            if not _is_empty_value(duplicate_value):
-                setattr(survivor, field_name, duplicate_value)
 
 
 def find_position_only_clusters(
@@ -282,7 +215,7 @@ def apply_clusters(
                 duplicate = hydrated.get(duplicate_id)
                 if duplicate is None:
                     continue
-                _merge_duplicate_into_survivor(survivor, duplicate)
+                merge_duplicate_into_survivor(survivor, duplicate)
 
             astrometrics.catalog_access.merge_and_record(
                 "stellar_catalog", [survivor], lambda _existing, updated: updated
@@ -291,32 +224,6 @@ def apply_clusters(
             rows_removed += len(duplicate_ids)
 
     return rows_removed
-
-
-def _backup_catalog_database(astrometrics: Astrometrics) -> str | None:
-    """Copy the catalog database aside before this script writes to it.
-
-    Parameters
-    ----------
-    astrometrics : `Astrometrics`
-        Provides the library path the database lives under.
-
-    Returns
-    -------
-    backup_path : `str` or `None`
-        Where the copy was written, or `None` if the source database
-        doesn't exist yet (nothing to back up) or the copy failed.
-    """
-    db_path = os.path.join(str(astrometrics.config.get_library_path()), "astrometrics.db")
-    if not os.path.exists(db_path):
-        return None
-    backup_path = f"{db_path}.{time.strftime('%Y%m%d_%H%M%S')}.bak"
-    try:
-        shutil.copy2(db_path, backup_path)
-    except OSError:
-        logger.exception("Could not back up %s before writing", db_path)
-        return None
-    return backup_path
 
 
 def run_reconciliation(argv: list[str] | None = None) -> int:
@@ -364,7 +271,7 @@ def run_reconciliation(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    backup_path = _backup_catalog_database(astrometrics)
+    backup_path = backup_catalog_database(astrometrics.config)
     if backup_path is None:
         print(
             "\nCould not create a safety backup of the catalog database; aborting without writing anything."

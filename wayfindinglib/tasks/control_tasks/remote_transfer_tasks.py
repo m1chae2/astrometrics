@@ -5,14 +5,11 @@ directory listing, and FITS file download operations over the
 StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`
 §2.5.1's Observatory Control module list.
 
-Originally relocated from astrometricslib per the cross-library litmus
-test (`Wayfinding_Library_Architecture.md` Design Invariant 4): pulling
-files off a telescope host requires a telescope to be present, so it
+Pulling files off a telescope host needs a telescope, so this code
 belongs in the observatory-control library rather than the science
-library. Frame indexing is delegated back to astrometricslib's public
-astrometrics (`Astrometrics.processing`) rather than to its internal
-`data_access` modules, which is the dependency direction this library
-already uses elsewhere.
+library (`Wayfinding_Library_Architecture.md`, Design Invariant 4). Frame
+indexing goes through astrometricslib's public API
+(`Astrometrics.targets.reindex_frames`), never its internal modules.
 """
 
 from __future__ import annotations

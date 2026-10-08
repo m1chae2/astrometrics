@@ -42,15 +42,13 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.drivers.local_database import backup_catalog_database
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import (
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
     catalog_family,
     choose_survivor_id,
-)
-from astrometricslib.scripts.reconcile_position_only_star_catalog import (
-    _backup_catalog_database,
-    _merge_duplicate_into_survivor,
+    merge_duplicate_into_survivor,
 )
 
 logger = logging.getLogger(__name__)
@@ -216,7 +214,7 @@ def merge_cluster(stars: dict[str, StellarObject], survivor_id: str) -> tuple[St
             return "the light curves cannot be joined safely"
 
     for other in others:
-        _merge_duplicate_into_survivor(survivor, other)
+        merge_duplicate_into_survivor(survivor, other)
     if merged_curve is not None:
         survivor.photometry = merged_curve
     return survivor, [star.id for star in others]
@@ -291,7 +289,7 @@ def run_merge(argv: list[str] | None = None) -> int:
         print("\nDry run: nothing was written. Re-run with --apply to merge these rows.")
         return 0
 
-    backup_path = _backup_catalog_database(astrometrics)
+    backup_path = backup_catalog_database(astrometrics.config)
     if backup_path is None:
         print(
             "\nCould not create a safety backup of the catalog database; aborting without writing anything."

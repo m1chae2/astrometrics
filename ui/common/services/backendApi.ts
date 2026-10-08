@@ -29,7 +29,9 @@ import {
     AlignmentSessionSummary,
     AlignmentTargetSession,
     PerformanceEnvelope,
-    ObjectVisibility
+    ObjectVisibility,
+    RpcMethod,
+    BACKEND_ROUTES
 } from '../types/backendTypes';
 
 import {
@@ -82,12 +84,11 @@ export interface EquipmentConfigurationResult {
     fovHeightDeg: number;
 }
 
-// Strongly typed ActionRegistry to map RPC action names to their payload and response models.
 // Result of a bulk delegation-state change (observatory:enter_monitoring_mode /
 // observatory:enter_controller_mode). Not a pydantic model, so not part of the
 // auto-generated backendTypes.ts -- kept in sync by hand with
 // wayfindinglib/tasks/control_tasks/capability_promotion.py's BulkDelegationOutcome
-// and backend/routers/rpc_router.py's _serialize_bulk_delegation_outcome.
+// and backend/services/observatory/equipment_service.py's _outcome_as_dict.
 export interface BulkDelegationOutcome {
     applied: Record<string, string>;
     rejected: Record<string, string>;
@@ -114,6 +115,23 @@ export interface TargetCameraIndex {
     }>;
 }
 
+/** The shared workspace state that follows the user between devices (handoff:*). */
+export interface HandoffState {
+    active_mode: string;
+    selected_target: string | null;
+    coordinates: Record<string, any>;
+    telemetry: Record<string, any>;
+    origin_device: string;
+    updated_at: number;
+}
+
+/**
+ * The payload and response of every RPC method the backend serves.
+ *
+ * The keys must be exactly the generated `RpcMethod` names from
+ * backend/public_interface.py; `ActionRegistryMatchesBackend` below fails to
+ * compile when they differ.
+ */
 export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
@@ -138,9 +156,8 @@ export interface ActionRegistry {
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { object_id: string }; response: boolean };
-    "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };
-    "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
-    "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
+    "astronomy:save": { payload: Record<string, never>; response: void };
+    "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
     "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
     "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
     "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
@@ -157,6 +174,7 @@ export interface ActionRegistry {
     // Equipment Configuration
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
+    "observatory:slew_to_target": { payload: { target_name: string }; response: boolean };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
     "telescope:apply_promotion_decision": {
         payload: { capability: string; new_state: string; evidence_note?: string };
@@ -181,13 +199,13 @@ export interface ActionRegistry {
     "system:cameras": { payload: Record<string, never>; response: string[] };
     "system:filters": { payload: Record<string, never>; response: string[] };
     "system:pulse": { payload: Record<string, never>; response: SystemPulse };
+    "system:notifications": { payload: { unread_only?: boolean }; response: Record<string, any>[] };
     "system:frontend_log": { payload: { level: string; message: string; stack?: string; componentStack?: string }; response: void };
 
 
     // Telescope
     "telescope:status": { payload: Record<string, never>; response: TelescopeStatus };
     "telescope:connect": { payload: Record<string, never>; response: boolean };
-    "telescope:slew": { payload: { target_name: string }; response: boolean };
     "telescope:slew_coordinates": { payload: { ra: number; dec: number }; response: boolean };
     "telescope:park": { payload: Record<string, never>; response: boolean };
     "telescope:unpark": { payload: Record<string, never>; response: boolean };
@@ -303,7 +321,30 @@ export interface ActionRegistry {
     "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
     "ui:editor_get": { payload: Record<string, never>; response: { code: string } };
     "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
+    "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
+    "ui:inspect_variable": { payload: { variable_name: string }; response: void };
+
+    // Hand-off of the workspace to a paired phone
+    "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
+    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string }; response: HandoffState };
+    "handoff:beam": { payload: { target?: string; mode?: string }; response: Record<string, any> };
+    "handoff:list_devices": { payload: Record<string, never>; response: Array<Record<string, any>> };
+    "handoff:send_alert": { payload: { title: string; message: string; priority?: string; ring_device?: boolean; device_id?: string }; response: Record<string, any> };
+    "handoff:share_file": { payload: { file_path: string; device_id?: string }; response: Record<string, any> };
 }
+
+/** `true` when the two key unions are exactly the same. */
+type SameKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/** Accepts only `true`, so a `false` check fails to compile. */
+type MustBeTrue<T extends true> = T;
+
+/**
+ * Fails to compile when `ActionRegistry` names a method the backend does not
+ * serve, or misses one it does. Regenerate backendTypes.ts with
+ * build/codegen/generate-types.sh after changing backend/public_interface.py.
+ */
+export type ActionRegistryMatchesBackend = MustBeTrue<SameKeys<keyof ActionRegistry, RpcMethod>>;
 
 /**
  * Resolves the backend base URL according to defined priority rules.
@@ -404,7 +445,7 @@ export const DEFAULT_RPC_TIMEOUT_MS = 45000;
 export const EXTENDED_RPC_TIMEOUT_MS = 90000;
 
 /** Actions that perform heavy database aggregations, plate solving, or frame analysis. */
-const HEAVY_ACTIONS: ReadonlySet<string> = new Set([
+const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
     'telescope:get_performance_envelope',
@@ -412,55 +453,43 @@ const HEAVY_ACTIONS: ReadonlySet<string> = new Set([
     'processing:stack',
     'processing:status',
     'astronomy:visible',
-    'astronomy:get_visible_targets',
     'astronomy:target_data_availability',
     'astronomy:spectral_class_summary',
     'astronomy:stars_by_spectral_class',
     'images:last',
-    'telescope:start_alignment',
     'observatory:slew_to_target',
-    'observatory:slew_to_coordinates',
 ]);
 
 /**
  * Idempotent read actions that are safe to deduplicate (in-flight request coalescing)
  * and safe to automatically retry on transient network or timeout failures.
  */
-const IDEMPOTENT_READ_ACTIONS: ReadonlySet<string> = new Set([
+const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
     'telescope:list_alignment_sessions',
     'execution:list_sessions',
-    'telescope:list_sessions',
     'telescope:get_session_alignment',
     'telescope:get_cumulative_tracking_data',
     'telescope:get_performance_envelope',
     'planetarium:get_constellation_lines',
     'planetarium:get_sources',
-    'planetarium:get_online_catalog_status',
     'planetarium:get_deep_catalog_status',
     'target:list',
-    'targets:list',
     'target:get',
     'target:get_targets',
     'target:get_camera_index',
     'target:get_frames',
     'target:get_frames_grouped',
-    'target:get_header',
     'target:get_frame_header',
     'astronomy:list',
     'astronomy:count',
     'astronomy:get',
     'astronomy:get_status',
-    'astronomy:get_target_status',
     'astronomy:visible',
-    'astronomy:get_visible_targets',
     'astronomy:target_data_availability',
     'astronomy:spectral_class_summary',
     'astronomy:stars_by_spectral_class',
-    'observatory:get_telescope_status',
     'observatory:get_equipment_configuration',
     'observatory:list_cameras',
-    'system:get_status',
-    'config:get',
 ]);
 
 /** In-flight request map for coalescing identical concurrent idempotent read queries. */
@@ -528,7 +557,7 @@ async function executeRpcAttempt<A extends keyof ActionRegistry>(
     }
 
     try {
-        const url = getBackendUrl('/api/rpc');
+        const url = getBackendUrl(BACKEND_ROUTES.rpc);
         const requestId = Math.floor(Math.random() * 1000000).toString();
 
         const response = await fetch(url, {
@@ -745,7 +774,7 @@ export async function getSessionToken(): Promise<string> {
 async function resolveSessionToken(): Promise<string> {
 
     try {
-        const response = await fetch(getBackendUrl('/api/session-token'));
+        const response = await fetch(getBackendUrl(BACKEND_ROUTES.sessionToken));
         if (response.ok) {
             const body = await response.json();
             const token = String(body.token ?? '');
@@ -847,7 +876,21 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
         }
     }
 
-    const prefix = isFramePath ? '/static/frames/' : '/static/';
+    const prefix = `${isFramePath ? BACKEND_ROUTES.staticFrames : BACKEND_ROUTES.staticLibrary}/`;
     const rawUrl = `${base}${prefix}${relPath}`;
     return encodeURI(decodeURI(rawUrl));
+}
+
+/**
+ * Downloads an image or FITS file the backend serves under `/static`, or a
+ * local `file://` path in the desktop app.
+ *
+ * This file and socketClient.ts are the only places the app may call `fetch`
+ * or open a WebSocket, so every other module downloads files through here.
+ * @param url The file's address, from `resolveImageSrc`.
+ * @param signal Cancels the download when signalled.
+ * @return The HTTP response.
+ */
+export async function fetchImageFile(url: string, signal?: AbortSignal): Promise<Response> {
+    return fetch(url, { method: 'GET', signal });
 }

@@ -1,7 +1,10 @@
 """Auto-generate TypeScript interfaces and enums from backend Pydantic models.
 
 Enforces synchronization between backend data models and frontend
-TypeScript contracts.
+TypeScript contracts. It also writes the backend's public interface from
+`backend.public_interface`: the list of RPC method names (`RPC_METHODS`,
+`RpcMethod`) and the paths of the other routes (`BACKEND_ROUTES`), so the
+UI can only name methods and routes the backend serves.
 """
 
 import os
@@ -79,6 +82,7 @@ from astrometricslib.models.target import (
     TargetStackingResult,
 )
 from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
+from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
     IntrospectionEndpoint,
     IntrospectionMethod,
@@ -283,6 +287,41 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     return "\n".join(lines)
 
 
+def generate_public_interface() -> str:
+    """Generate the TypeScript list of the backend's methods and routes.
+
+    Returns
+    -------
+    text : `str`
+        ``RPC_METHODS`` and its ``RpcMethod`` type, then
+        ``BACKEND_ROUTES``, one path per route name.
+    """
+    lines = [
+        "/**",
+        " * Every RPC method the backend serves, from backend/public_interface.py.",
+        " */",
+        "export const RPC_METHODS = [",
+    ]
+    lines.extend(f'  "{method}",' for method in RPC_METHODS)
+    lines.extend([
+        "] as const;",
+        "",
+        "/** The name of one RPC method the backend serves. */",
+        "export type RpcMethod = (typeof RPC_METHODS)[number];",
+        "",
+        "/**",
+        " * The path of every other route the backend serves, by name, from",
+        " * backend/public_interface.py.",
+        " */",
+        "export const BACKEND_ROUTES = {",
+    ])
+    for route in ROUTES:
+        lines.append(f"  /** {route.purpose} */")
+        lines.append(f'  {route.name}: "{route.path}",')
+    lines.append("} as const;")
+    return "\n".join(lines)
+
+
 def render_types() -> str:
     """Render the TypeScript text for every backend model the UI uses.
 
@@ -292,7 +331,8 @@ def render_types() -> str:
         The full text of ``ui/common/types/backendTypes.ts``.
     """
     header = """/**
- * @fileoverview Auto-generated TypeScript interfaces from Pydantic models.
+ * @fileoverview Auto-generated TypeScript interfaces from Pydantic models,
+ * and the backend's public interface (its RPC methods and routes).
  */
 """
 
@@ -396,6 +436,7 @@ def render_types() -> str:
         generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
         generate_interface(ObservationSession, "ObservationSession"),
+        generate_public_interface(),
     ]
 
     content = header + "\n" + "\n\n".join(interfaces) + "\n"

@@ -15,7 +15,7 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import InvalidArgumentError
+from astrometricslib import InvalidArgumentError, parse_coordinate_string
 from wayfindinglib import (
     AlignmentAttempt,
     AlignmentTargetSession,
@@ -151,13 +151,13 @@ class AlignmentService:
         reply = self._observatory.history.query(kind="alignment", limit=50, register_job=False)
         return reply["sessions"]
 
-    def get_session_data(self, session_id: str) -> dict[str, Any]:
+    def get_session_data(self, session_id: str = "") -> dict[str, Any]:
         """Fetch alignment attempts and polar alignment data for a session.
 
         Parameters
         ----------
-        session_id : `str`
-            Session identifier or date string.
+        session_id : `str`, optional
+            Session identifier or date string. Empty by default.
 
         Returns
         -------
@@ -319,26 +319,29 @@ class AlignmentService:
             except sqlite3.Error as p_err:
                 logger.debug("Error polling polar alignment: %s", p_err)
 
-    def start_alignment(self, target_ra: float, target_dec: float) -> bool:
+    def start_alignment(self, target_ra: str, target_dec: str) -> bool:
         """Start centering the mount on a sky position, in the background.
 
         Parameters
         ----------
-        target_ra : `float`
-            Target right ascension, in decimal degrees.
-        target_dec : `float`
-            Target declination, in decimal degrees.
+        target_ra : `str`
+            Target right ascension as text, such as ``"12h 00m 00s"``.
+        target_dec : `str`
+            Target declination as text, such as ``"+45d 00m 00s"``.
 
         Returns
         -------
         started : `bool`
             `True` if the centering thread was started, `False` if a run
-            is already active.
+            is already active. A coordinate that cannot be read raises
+            `InvalidArgumentError` instead.
         """
+        ra_deg = parse_coordinate_string(target_ra, is_ra=True)
+        dec_deg = parse_coordinate_string(target_dec, is_ra=False)
         if self.is_active():
             logger.warning("Alignment already in progress")
             return False
-        position = SkyPosition(ra_deg=target_ra % 360.0, dec_deg=target_dec)
+        position = SkyPosition(ra_deg=ra_deg % 360.0, dec_deg=dec_deg)
         self._run_started_at = time.time()
 
         def run() -> None:

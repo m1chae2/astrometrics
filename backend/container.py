@@ -33,7 +33,8 @@ class Container:
     dependencies are properly wired and shared across the application.
     """
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
+        """Start with every service unset; `init_resources` builds them."""
         # Core Infrastructure
         self.config_service = None
         self.indi_driver = None
@@ -51,6 +52,8 @@ class Container:
         self.telescope_service = None
         self.notification_service = None
         self.handoff_service = None
+        self.settings_service = None
+        self.equipment_service = None
         self.scripting_service = None
         self.ingestion_service = None
         self.system_status_service = None
@@ -153,6 +156,10 @@ class Container:
 
         self.wayfinder.control.driver = self.indi_driver
 
+        from backend.services.infrastructure.settings_service import SettingsService
+
+        self.settings_service = SettingsService(self.config_service, driver=self.indi_driver)
+
         # 4. Initialize Infrastructure Services
         from backend.services.infrastructure.socket_manager import SocketManager
 
@@ -175,13 +182,22 @@ class Container:
         self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
 
         # 5. Initialize Domain Services with proper DI
+        from backend.services.observatory.alignment_service import AlignmentService
+
+        self.alignment_service = AlignmentService(
+            observatory_api=self.wayfinder.control, logger_interface=self.job_repository
+        )
         self.telescope_service = TelescopeService(
-            driver=self.indi_driver,
             guiding_service=self.guiding_service,
             target_service=self.target_service,
             wayfinder=self.wayfinder,
             astrometrics_service=self.astrometrics_service,
+            alignment_service=self.alignment_service,
         )
+
+        from backend.services.observatory.equipment_service import EquipmentService
+
+        self.equipment_service = EquipmentService(observatory_api=self.wayfinder.control)
 
         from astrometricslib import ImageProcessing
 
@@ -228,13 +244,6 @@ class Container:
         from backend.services.observatory.execution_service import ExecutionService
 
         self.execution_service = ExecutionService(wayfinder=self.wayfinder)
-
-        from backend.services.observatory.alignment_service import AlignmentService
-
-        self.alignment_service = AlignmentService(
-            observatory_api=self.wayfinder.control, logger_interface=self.job_repository
-        )
-        self.telescope_service._alignment_service = self.alignment_service
 
         from backend.services.observatory.mosaic_service import MosaicService
 

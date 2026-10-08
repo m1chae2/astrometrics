@@ -311,10 +311,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 details={"target_id": target_id},
             )
 
-        # Only the test double of `Astrometrics` carries an image pipeline;
-        # the real library runs its own inside `process_target`.
-        pipeline = getattr(self.astrometrics, "image_pipeline", None)
-
         target = self._target_service.get_targets(target_id) if self._target_service else None
 
         # Classify each path via its real FrameRecord.filter where the
@@ -389,10 +385,10 @@ class AnalysisOrchestrator(BaseBackgroundService):
                 len(spec_paths),
             )
             spectroscopy_result = self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, pipeline, filter_type or "SPEC", logger=job_logger
+                job_id, target_id, spec_paths, filter_type or "SPEC", logger=job_logger
             )
             photometry_result = self._run_photometry_analysis(
-                job_id, target_id, light_paths, pipeline, filter_type, logger=job_logger
+                job_id, target_id, light_paths, filter_type, logger=job_logger
             )
             return {
                 "status": "finished",
@@ -402,12 +398,12 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         if spec_paths:
             return self._run_spectroscopy_analysis(
-                job_id, target_id, spec_paths, pipeline, filter_type or "SPEC", logger=job_logger
+                job_id, target_id, spec_paths, filter_type or "SPEC", logger=job_logger
             )
 
         if light_paths or type == "photometry":
             return self._run_photometry_analysis(
-                job_id, target_id, light_paths, pipeline, filter_type, logger=job_logger
+                job_id, target_id, light_paths, filter_type, logger=job_logger
             )
 
         raise InvalidArgumentError(
@@ -424,7 +420,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
             if job_id in self._jobs:
                 self._jobs[job_id]["progress"] = {"current": current, "total": total}
 
-    def _run_spectroscopy_analysis(self, job_id, target_id, paths, pipeline, filter_type=None, logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _run_spectroscopy_analysis(
+        self,
+        job_id: str,
+        target_id: str,
+        paths: list[str],
+        filter_type: str | None = None,
+        logger: logging.Logger | None = None,
+    ) -> dict[str, Any]:
         """Pipeline for spectroscopy extraction.
 
         Groups frames into observing sessions, identifies each
@@ -461,24 +464,6 @@ class AnalysisOrchestrator(BaseBackgroundService):
         target = self._target_service.get_targets(target_id)
         if not target:
             target = self._target_service.create_target(target_id)
-
-        # If astrometrics is a Mock, support the mock pipeline
-        # expectation in tests
-        from unittest.mock import Mock
-
-        if isinstance(self.astrometrics, Mock):
-            context = pipeline.process(paths[0] if paths else "", attempt_plate_solving=False)
-            valid_objects = self.astrometrics.spectroscopy_pipeline.process(
-                context, limit=10, auto_detect_angle=True
-            )
-            for star in valid_objects:
-                self._stellar_service.find_or_create_by_position(
-                    star.right_ascension, star.declination, name=getattr(star, "name", None)
-                )
-            self._stellar_service.save_objects()
-            results["starsProcessed"] += len(valid_objects)
-            results["spectraExtracted"] += len(valid_objects)
-            return results
 
         def _on_frame_complete(path, frame_result, completed_count, total_count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
             self._update_job_progress(job_id, target_id, completed_count, total_count, filter_type="SPEC")
@@ -580,7 +565,14 @@ class AnalysisOrchestrator(BaseBackgroundService):
 
         return results
 
-    def _run_photometry_analysis(self, job_id, target_id, paths, pipeline, filter_type=None, logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _run_photometry_analysis(
+        self,
+        job_id: str,
+        target_id: str,
+        paths: list[str],
+        filter_type: str | None = None,
+        logger: logging.Logger | None = None,
+    ) -> dict[str, Any]:
         """Pipeline for multi-frame aperture photometry.
 
         Measures stellar brightness,. performs plate solving on reference/light

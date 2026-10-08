@@ -423,7 +423,6 @@ forbidden_modules = [
     "backend.services.infrastructure.api_doc_generator",
     "backend.services.infrastructure.astrometrics_service",
     "backend.services.infrastructure.base_service",
-    "backend.services.infrastructure.decorators",
     "backend.services.infrastructure.fallback_static_files",
     "backend.services.infrastructure.handoff_service",
     "backend.services.infrastructure.indi_worker",

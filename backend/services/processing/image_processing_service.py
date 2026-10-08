@@ -57,6 +57,17 @@ class ImageProcessingService(BaseBackgroundService):
         LOG_DIR = str(self._config_service.get_logs_path())
         self._notification_service = notification_service
 
+    def get_calibration_stats(self) -> dict[str, Any]:
+        """Count the calibration frames in the library.
+
+        Returns
+        -------
+        stats : `dict` [`str`, `Any`]
+            ``"darks"``, ``"biases"`` and ``"flats"``, each a list of
+            per-group counts.
+        """
+        return self._calibration_library.get_stats()
+
     def get_processing_status(self, target_id: str) -> dict:
         """Verify if a target has any running stacking jobs.
 

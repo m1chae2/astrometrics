@@ -9,7 +9,8 @@ import logging
 
 import pytest
 
-from backend.routers.rpc_router import _log_frontend_message, rpc_registry
+from backend.routers.rpc_router import rpc_registry
+from backend.services.infrastructure.frontend_log import log_frontend_message
 
 
 def test_the_method_is_registered() -> None:
@@ -26,7 +27,7 @@ def test_the_message_is_logged_at_the_requested_level(
 ) -> None:
     """Each level maps to a logging level; an unknown one is an error."""
     with caplog.at_level(logging.DEBUG, logger="frontend"):
-        _log_frontend_message(level, "something happened")
+        log_frontend_message(level, "something happened")
     assert [record.levelno for record in caplog.records] == [expected]
     assert "something happened" in caplog.records[0].getMessage()
 
@@ -34,6 +35,6 @@ def test_the_message_is_logged_at_the_requested_level(
 def test_the_stacks_are_added_to_the_message(caplog: pytest.LogCaptureFixture) -> None:
     """The JavaScript and React stacks follow the message."""
     with caplog.at_level(logging.DEBUG, logger="frontend"):
-        _log_frontend_message("error", "boom", stack="at foo (a.js:1)", componentStack="in Widget")
+        log_frontend_message("error", "boom", stack="at foo (a.js:1)", componentStack="in Widget")
     text = caplog.records[0].getMessage()
     assert text.splitlines() == ["boom", "at foo (a.js:1)", "in Widget"]

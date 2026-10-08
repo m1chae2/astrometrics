@@ -96,6 +96,27 @@ class GuidingService:
         logger.info("Stopped guiding loop")
         return True
 
+    def capture_frame(self, exposure: float = 1.0, gain: float | None = None) -> bool:
+        """Take one exposure with the guide camera.
+
+        This is a single picture, not the continuous loop `start_guiding`
+        runs.
+
+        Parameters
+        ----------
+        exposure : `float`, optional
+            Exposure time in seconds. Defaults to 1.0.
+        gain : `float`, optional
+            Guide-camera gain. `None` (default) keeps the camera's current
+            gain.
+
+        Returns
+        -------
+        captured : `bool`
+            `True` if the camera accepted the exposure command.
+        """
+        return bool(self._observatory.guiding.expose(exposure, gain=gain))
+
     def get_status(self) -> dict[str, Any]:
         """Report the guiding going on now.
 

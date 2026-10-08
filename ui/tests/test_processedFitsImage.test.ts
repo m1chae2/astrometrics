@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../common/services/backendApi', () => ({
   callBackend: vi.fn(),
   resolveImageSrc: (path: string) => `http://backend/static/frames${path}`,
+  fetchImageFile: (url: string, signal?: AbortSignal) => fetch(url, { method: 'GET', signal }),
 }));
 vi.mock('../common/utils/reportError', () => ({ reportError: vi.fn() }));
 

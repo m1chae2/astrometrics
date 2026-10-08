@@ -107,35 +107,50 @@ def test_handoff_service_beam_executes_cli(
     ]
 
 
-def test_handoff_endpoints_via_testclient(client: TestClient) -> None:
-    """Verify GET and POST /api/handoff/state endpoints via FastAPI client.
+def _call(client: TestClient, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Call one RPC method through ``/api/rpc`` and return the reply body.
 
-    Ensures the HTTP delivery layer serializes and updates the workspace
-    continuity state properly.
+    Parameters
+    ----------
+    client : `~fastapi.testclient.TestClient`
+        The test client.
+    method : `str`
+        The RPC method name.
+    params : `dict`, optional
+        The method's parameters.
+
+    Returns
+    -------
+    body : `dict`
+        The JSON-RPC reply.
     """
-    # Fetch initial state
-    res = client.get("/api/handoff/state")
-    assert res.status_code == 200
-    initial_state = res.json()
+    response = client.post(
+        "/api/rpc", json={"jsonrpc": "2.0", "method": method, "params": params or {}, "id": method}
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_handoff_state_methods_via_rpc(client: TestClient) -> None:
+    """Check ``handoff:get_state`` and ``handoff:update_state`` over RPC.
+
+    Ensures the RPC layer serializes and updates the workspace continuity
+    state properly.
+    """
+    initial_state = _call(client, "handoff:get_state")["result"]["data"]
     assert "active_mode" in initial_state
 
-    # Update state via POST
     payload: dict[str, Any] = {
         "active_mode": "Planetarium",
         "selected_target": "Vega",
         "coordinates": {"ra_hours": 18.61, "dec_degrees": 38.78},
         "origin_device": "mobile",
     }
-    res_post = client.post("/api/handoff/state", json=payload)
-    assert res_post.status_code == 200
-    posted_state = res_post.json()
+    posted_state = _call(client, "handoff:update_state", payload)["result"]["data"]
     assert posted_state["selected_target"] == "Vega"
     assert posted_state["active_mode"] == "Planetarium"
 
-    # Verify updated state is returned by GET
-    res_get = client.get("/api/handoff/state")
-    assert res_get.status_code == 200
-    assert res_get.json()["selected_target"] == "Vega"
+    assert _call(client, "handoff:get_state")["result"]["data"]["selected_target"] == "Vega"
 
 
 def test_list_paired_devices(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -264,36 +279,26 @@ def test_share_file_to_device(
     ]
 
 
-def test_device_alert_endpoints_via_testclient(client: TestClient) -> None:
-    """Verify GET /devices and POST /alert endpoints via FastAPI TestClient.
+def test_device_and_alert_methods_via_rpc(client: TestClient) -> None:
+    """Check ``handoff:list_devices`` and ``handoff:send_alert`` over RPC."""
+    assert isinstance(_call(client, "handoff:list_devices")["result"]["data"], list)
 
-    Ensures the HTTP layer exposes device discovery and alert dispatching.
-    """
-    # GET /api/handoff/devices
-    res_devices = client.get("/api/handoff/devices")
-    assert res_devices.status_code == 200
-    assert isinstance(res_devices.json(), list)
-
-    # POST /api/handoff/alert
     payload = {
         "title": "Sequence Completed",
         "message": "Target M42: 30 exposures stacked successfully",
         "priority": "normal",
         "ring_device": False,
     }
-    res_alert = client.post("/api/handoff/alert", json=payload)
-    assert res_alert.status_code == 200
-    data = res_alert.json()
+    data = _call(client, "handoff:send_alert", payload)["result"]["data"]
     assert data["success"] is True
     assert data["alert"]["title"] == "Sequence Completed"
 
 
-def test_share_file_endpoint_reports_missing_file_as_404(client: TestClient) -> None:
-    """Verify the REST route sends a missing file as a 404 ErrorInfo reply."""
-    res = client.post("/api/handoff/share-file", json={"file_path": "/nonexistent/photo.png"})
+def test_share_file_method_reports_a_missing_file_as_not_found(client: TestClient) -> None:
+    """Check ``handoff:share_file`` reports a missing file as not_found."""
+    reply = _call(client, "handoff:share_file", {"file_path": "/nonexistent/photo.png"})
 
-    assert res.status_code == 404
-    error = res.json()["error"]
+    error = reply["error"]["data"]
     assert error["code"] == "not_found"
     assert "does not exist" in error["message"]
     assert error["requestId"]

@@ -1,5 +1,6 @@
 /**
- * @fileoverview Auto-generated TypeScript interfaces from Pydantic models.
+ * @fileoverview Auto-generated TypeScript interfaces from Pydantic models,
+ * and the backend's public interface (its RPC methods and routes).
  */
 
 /**
@@ -1817,3 +1818,197 @@ export interface ObservationSession {
   weatherSamples?: WeatherSample[];
   createdAt: string;
 }
+
+/**
+ * Every RPC method the backend serves, from backend/public_interface.py.
+ */
+export const RPC_METHODS = [
+  "system:health",
+  "system:frontend_log",
+  "system:completions",
+  "system:get_config",
+  "system:save_config",
+  "system:introspection",
+  "system:cameras",
+  "system:filters",
+  "system:pulse",
+  "system:notifications",
+  "system:save",
+  "terminal:execute",
+  "terminal:get_workspace",
+  "terminal:completions",
+  "terminal:list_recipes",
+  "terminal:get_recipe",
+  "terminal:list_scripts",
+  "terminal:read_script",
+  "terminal:save_script",
+  "terminal:reset_workspace",
+  "docs:list_topics",
+  "docs:search_topics",
+  "docs:get_topic",
+  "ui:editor_get",
+  "ui:editor_set",
+  "ui:navigate",
+  "ui:inspect_variable",
+  "handoff:get_state",
+  "handoff:update_state",
+  "handoff:beam",
+  "handoff:list_devices",
+  "handoff:send_alert",
+  "handoff:share_file",
+  "guiding:status",
+  "guiding:start",
+  "guiding:stop",
+  "guiding:capture_frame",
+  "telescope:connect",
+  "telescope:abort_motion",
+  "telescope:apply_promotion_decision",
+  "telescope:focus_move",
+  "telescope:get_focuser_position",
+  "telescope:manual_move",
+  "telescope:park",
+  "telescope:set_filter",
+  "telescope:set_slew_rate",
+  "telescope:set_tracking",
+  "telescope:slew_coordinates",
+  "telescope:status",
+  "telescope:sync",
+  "telescope:is_syncing",
+  "telescope:unpark",
+  "telescope:indi_devices",
+  "telescope:indi_properties",
+  "telescope:set_indi_property",
+  "telescope:alignment_start",
+  "telescope:alignment_stop",
+  "telescope:list_alignment_sessions",
+  "telescope:get_session_alignment",
+  "telescope:get_cumulative_tracking_data",
+  "telescope:sync_logs",
+  "telescope:get_pointing_model",
+  "telescope:get_performance_envelope",
+  "telescope:get_guiding_spectrum",
+  "observatory:slew_to_target",
+  "observatory:list_cameras",
+  "observatory:get_equipment_configuration",
+  "observatory:set_active_camera",
+  "observatory:enter_monitoring_mode",
+  "observatory:enter_controller_mode",
+  "ingestion:start",
+  "ingestion:status",
+  "ingestion:scan",
+  "ingestion:stats",
+  "ingestion:list_files",
+  "ingestion:reindex",
+  "processing:stack",
+  "processing:siril_open",
+  "processing:cancel",
+  "processing:status",
+  "processing:list_jobs",
+  "processing:active_jobs",
+  "processing:get_job",
+  "processing:delete_job",
+  "processing:jobs_for_target",
+  "processing:job_log_tail",
+  "analysis:analyze_image",
+  "analysis:get_results",
+  "analysis:cancel",
+  "target:list",
+  "target:get",
+  "target:get_targets",
+  "target:create",
+  "target:update",
+  "target:delete",
+  "target:add_data",
+  "target:refresh",
+  "target:get_files",
+  "target:get_camera_index",
+  "target:get_frames",
+  "target:get_frames_grouped",
+  "target:get_frame_header",
+  "astronomy:list",
+  "astronomy:count",
+  "astronomy:target_data_availability",
+  "astronomy:spectral_class_summary",
+  "astronomy:stars_by_spectral_class",
+  "astronomy:get",
+  "astronomy:save",
+  "astronomy:delete",
+  "astronomy:analyze_periodicity",
+  "astronomy:get_stellar_objects",
+  "astronomy:get_overlay_stars",
+  "astronomy:get_status",
+  "astronomy:visible",
+  "planetarium:get_sources",
+  "planetarium:get_targets",
+  "planetarium:get_visibility",
+  "planetarium:get_observer_location",
+  "planetarium:get_catalog_sources",
+  "planetarium:list_catalog_drivers",
+  "planetarium:get_deep_catalog_status",
+  "planetarium:get_constellation_lines",
+  "imaging:capture",
+  "imaging:get_active_jobs",
+  "images:get_target_frame",
+  "images:get_light_frame_data",
+  "images:convert_fits",
+  "images:get_fits_header",
+  "images:delete",
+  "images:last",
+  "calibration:get_stats",
+  "mosaic:preview",
+  "mosaic:create",
+  "execution:list_sessions",
+  "execution:get_session",
+  "execution:abort_session",
+  "execution:reconcile_session",
+  "execution:record_divergence",
+  "sequencer:get_queue",
+  "sequencer:create_plan",
+  "sequencer:add",
+  "sequencer:remove",
+  "sequencer:reorder",
+  "sequencer:begin",
+  "sequencer:modify",
+] as const;
+
+/** The name of one RPC method the backend serves. */
+export type RpcMethod = (typeof RPC_METHODS)[number];
+
+/**
+ * The path of every other route the backend serves, by name, from
+ * backend/public_interface.py.
+ */
+export const BACKEND_ROUTES = {
+  /** Answers every RPC method in RPC_METHODS. */
+  rpc: "/api/rpc",
+  /** Says whether start-up warm-up has finished. */
+  ready: "/api/ready",
+  /** Gives the WebSocket token to the app. */
+  sessionToken: "/api/session-token",
+  /** Tells a companion phone how to connect. */
+  pairingInfo: "/api/pairing-info",
+  /** Says the backend is running. */
+  root: "/",
+  /** Streams live events and telemetry to the app. */
+  eventsSocket: "/ws/events",
+  /** Runs the plain Python terminal. */
+  terminalSocket: "/ws/terminal",
+  /** Drives one interactive Matplotlib figure. */
+  figureSocket: "/ws/figure/{figure_id}",
+  /** Serves the Matplotlib figure script. */
+  figureScript: "/figure/mpl.js",
+  /** Serves the page of one interactive figure. */
+  figurePage: "/figure/{figure_id}",
+  /** Downloads a figure as an image. */
+  figureDownload: "/figure/{figure_id}/download.{fmt}",
+  /** Serves raw frames, then stacks, by their path in the frames folder. */
+  staticFrames: "/static/frames",
+  /** Serves files by their path in the library folder. */
+  staticLibrary: "/static",
+  /** Serves Matplotlib's figure styles. */
+  figureStatic: "/mpl_static",
+  /** Serves Matplotlib's toolbar icons. */
+  figureImages: "/_images",
+  /** Serves Matplotlib's toolbar icons to a figure page. */
+  figurePageImages: "/figure/_images",
+} as const;

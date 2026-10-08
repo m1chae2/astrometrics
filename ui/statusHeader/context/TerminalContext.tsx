@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback, ReactNode } from 'react';
-import { getBackendBase, withSessionToken } from '../../common/services/backendApi';
+import { openTerminalSocket, TerminalSocket } from '../../common/utils/socketClient';
 import { fetchSystemCompletions } from '../../common/services/systemService';
 import { useToast } from '../../common/hooks/useToast';
 import { on as onEvent } from '../../common/utils/eventBus';
@@ -21,14 +21,14 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     const [history, setHistory] = useState<string[]>([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
 
-    const wsRef = useRef<WebSocket | null>(null);
+    const wsRef = useRef<TerminalSocket | null>(null);
     const lastTabTime = useRef<number>(0);
     const { show: showToast } = useToast();
 
     // WebSocket Setup
     useEffect(() => {
         let cancelled = false;
-        let ws: WebSocket | null = null;
+        let socket: TerminalSocket | null = null;
 
         // Defer connection by one tick so React StrictMode's immediate cleanup
         // can set `cancelled = true` and clear the timer before the socket is
@@ -36,48 +36,33 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         const timerId = setTimeout(async () => {
             if (cancelled) return;
 
-            let url = getBackendBase();
-            if (!url) url = 'http://127.0.0.1:5000';
-            url = url.replace(/^http/, 'ws');
-            url = url.replace(/\/$/, '');
-            url += '/ws/terminal';
-
-            // The backend rejects handshakes without the session token.
-            url = await withSessionToken(url);
-
-            // Resolving the token is async, so the effect may have been torn
-            // down (StrictMode remount, navigation) while it was in flight.
-            if (cancelled) return;
-
             try {
-                ws = new WebSocket(url);
-                wsRef.current = ws;
-
-                ws.onopen = () => {
-                    setOutput((prev) => [...prev, '>>> Connected to Astrometrics Terminal']);
-                };
-
-                ws.onmessage = (event) => {
-                    const msg = event.data;
-                    if (msg.startsWith('Traceback')) {
-                        showToast('Script Error', 'error');
-                    }
-                    setOutput((prev) => [...prev, msg]);
-                };
-
-                ws.onclose = (event) => {
-                    // Avoid logging simple disconnects during development hot-reloads
-                    if (event.code !== 1000 && event.code !== 1001) {
-                        setOutput((prev) => [...prev, '>>> Disconnected']);
-                    }
-                };
-
-                ws.onerror = () => {
-                    if (ws && (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED)) {
-                        return;
-                    }
-                    setOutput((prev) => [...prev, '>>> Connection Error']);
-                };
+                // Resolving the token is async, so the effect may be torn down
+                // (StrictMode remount, navigation) while it is in flight.
+                socket = await openTerminalSocket(
+                    {
+                        onOpen: () => {
+                            setOutput((prev) => [...prev, '>>> Connected to Astrometrics Terminal']);
+                        },
+                        onMessage: (msg) => {
+                            if (msg.startsWith('Traceback')) {
+                                showToast('Script Error', 'error');
+                            }
+                            setOutput((prev) => [...prev, msg]);
+                        },
+                        onClose: (code) => {
+                            // Avoid logging simple disconnects during development hot-reloads
+                            if (code !== 1000 && code !== 1001) {
+                                setOutput((prev) => [...prev, '>>> Disconnected']);
+                            }
+                        },
+                        onError: () => {
+                            setOutput((prev) => [...prev, '>>> Connection Error']);
+                        },
+                    },
+                    () => cancelled,
+                );
+                wsRef.current = socket;
             } catch (e) {
                 console.error(e);
                 setOutput((prev) => [...prev, '>>> Failed to connect']);
@@ -87,15 +72,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
         return () => {
             cancelled = true;
             clearTimeout(timerId);
-            if (ws) {
-                ws.onopen = null;
-                ws.onmessage = null;
-                ws.onclose = null;
-                ws.onerror = null;
-                if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-                    ws.close();
-                }
-            }
+            socket?.close();
         };
     }, [showToast]);
 
@@ -109,8 +86,7 @@ export const TerminalProvider: React.FC<{ children: ReactNode }> = ({ children }
     }, []);
 
     const sendCommand = useCallback((cmd: string) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-        wsRef.current.send(cmd);
+        if (!wsRef.current || !wsRef.current.send(cmd)) return;
         setOutput((prev) => [...prev, `> ${cmd}`]);
     }, []);
 

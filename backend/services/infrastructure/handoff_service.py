@@ -2,7 +2,9 @@
 
 Tracks the active workspace state (mode, selected target, coordinates,
 mount state) and synchronizes state across desktop and mobile companion
-clients via REST endpoints and real-time WebSocket events.
+clients via the ``handoff:*`` RPC methods and real-time WebSocket events.
+It also lets an agent move the desktop app to another screen
+(``ui:navigate``) or show a terminal variable (``ui:inspect_variable``).
 """
 
 import logging
@@ -119,6 +121,30 @@ class HandoffService:
             self._socket_manager.broadcast_ui_event_sync("handoff", snapshot)
 
         return snapshot
+
+    def navigate(self, mode: str, target: str | None = None) -> None:
+        """Ask every open app window to switch to another screen.
+
+        Parameters
+        ----------
+        mode : `str`
+            The screen to show, such as ``"Planetarium"``.
+        target : `str`, optional
+            A target to select on that screen.
+        """
+        if self._socket_manager:
+            self._socket_manager.broadcast_ui_event_sync("navigate-mode", {"mode": mode, "target": target})
+
+    def inspect_variable(self, variable_name: str) -> None:
+        """Ask every open app window to show a terminal variable.
+
+        Parameters
+        ----------
+        variable_name : `str`
+            The name of a variable in the terminal's workspace.
+        """
+        if self._socket_manager:
+            self._socket_manager.broadcast_ui_event_sync("inspect-variable", {"variable_name": variable_name})
 
     def beam_to_device(
         self,

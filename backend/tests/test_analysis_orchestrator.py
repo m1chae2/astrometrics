@@ -79,10 +79,7 @@ class TestRunSpectroscopyAnalysis:
         orchestrator._config_service.get_library_path.return_value = str(tmp_path)
 
         results = orchestrator._run_spectroscopy_analysis(
-            "job1",
-            "OrchestratorWiringTestTarget",
-            ["/lib/a.fits", "/lib/b.fits", "/unmatched.fits"],
-            pipeline=MagicMock(),
+            "job1", "OrchestratorWiringTestTarget", ["/lib/a.fits", "/lib/b.fits", "/unmatched.fits"]
         )
 
         call_args = run_spectroscopy_by_session.call_args
@@ -132,9 +129,7 @@ class TestMasterSpectralStackAnalysis:
         stacked_path = "/lib/Target_SPEC_Stacked.fits"
         orchestrator, process_target, run_by_session = self._make_setup(stacked_path)
 
-        results = orchestrator._run_spectroscopy_analysis(
-            "job1", "MasterStackTestTarget", [stacked_path], pipeline=MagicMock()
-        )
+        results = orchestrator._run_spectroscopy_analysis("job1", "MasterStackTestTarget", [stacked_path])
 
         process_target.assert_called_once()
         assert process_target.call_args.kwargs["stages"] == ["spectroscopy"]
@@ -148,7 +143,7 @@ class TestMasterSpectralStackAnalysis:
         orchestrator, process_target, run_by_session = self._make_setup(stacked_path)
 
         results = orchestrator._run_spectroscopy_analysis(
-            "job1", "MasterStackTestTarget", [stacked_path, "/lib/a.fits"], pipeline=MagicMock()
+            "job1", "MasterStackTestTarget", [stacked_path, "/lib/a.fits"]
         )
 
         process_target.assert_called_once()

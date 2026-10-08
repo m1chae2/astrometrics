@@ -180,16 +180,6 @@ class TelescopeService:
         rows = nearest.get("targets") or []
         return (rows[0].get("common_name") or rows[0]["id"]) if rows else None
 
-    def get_telescope_status(self) -> dict[str, Any]:
-        """Alias of get_status for reflected tool calls.
-
-        Returns
-        -------
-        result : `dict`
-            Current telescope status fields.
-        """
-        return self.get_status()
-
     def connect(self) -> bool:
         """Connect to the telescope hardware via the high-level interface.
 
@@ -250,16 +240,6 @@ class TelescopeService:
             raise InvalidArgumentError("target_name must not be empty")
 
         return self.wayfinder.control.mount.slew(target_name)
-
-    def slew_to_target(self, target_name: str) -> bool:
-        """Reflected tool execution alias for slew_to_target_by_name.
-
-        Returns
-        -------
-        result : `bool`
-            `True` if the slew command succeeded.
-        """
-        return self.slew_to_target_by_name(target_name)
 
     def park_telescope(self) -> bool:
         """Command the telescope to park via the high-level interface.

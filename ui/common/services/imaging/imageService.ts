@@ -1,4 +1,4 @@
-import { callBackend, resolveImageSrc } from '../backendApi';
+import { callBackend, fetchImageFile, resolveImageSrc } from '../backendApi';
 import { reportError } from '../../utils/reportError';
 import { dataUrlToBlob } from '../../utils/dataUrl';
 
@@ -56,7 +56,7 @@ export async function fetchProcessedImage(
             if (!src) {
                 return null;
             }
-            const response = await fetch(src, { method: 'GET', signal });
+            const response = await fetchImageFile(src, signal);
             if (response.status === 404 || response.status === 204) {
                 return null;
             }
@@ -85,7 +85,7 @@ export async function fetchProcessedImage(
         if (!src) {
             return null;
         }
-        const response = await fetch(src, { method: 'GET', signal });
+        const response = await fetchImageFile(src, signal);
         if (response.status === 404 || response.status === 204) {
             return null;
         }
@@ -119,7 +119,7 @@ export async function fetchTargetFrame(
         index
     });
     const src = resolveImageSrc(path);
-    const response = await fetch(src, { method: 'GET', signal });
+    const response = await fetchImageFile(src, signal);
     if (!response.ok) {
         throw new Error(`Failed to fetch target frame blob from path ${src}: ${response.status} ${response.statusText}`);
     }

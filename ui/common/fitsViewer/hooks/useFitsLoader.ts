@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ParsedFitsCache, PARSED_FITS_CACHE_LIMIT } from '../parsedFitsCache';
+import { fetchImageFile } from '../../services/backendApi';
 
 /**
  * What the main thread knows about a decoded FITS image.
@@ -126,7 +127,7 @@ export const useFitsLoader = (
                         while (n--) u8arr[n] = bstr.charCodeAt(n);
                         blob = new Blob([u8arr], { type: mime });
                     } else {
-                        const resp = await fetch(imageUrl!, { signal: abortController.signal });
+                        const resp = await fetchImageFile(imageUrl!, abortController.signal);
                         blob = await resp.blob();
                     }
 
@@ -167,7 +168,7 @@ export const useFitsLoader = (
                 // Fetch Data if not provided as blob
                 let blob = imageBlob;
                 if (!blob && imageUrl) {
-                    const resp = await fetch(imageUrl, { signal: abortController.signal });
+                    const resp = await fetchImageFile(imageUrl, abortController.signal);
                     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     blob = await resp.blob();
                 }

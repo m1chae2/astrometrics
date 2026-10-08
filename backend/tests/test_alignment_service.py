@@ -17,7 +17,7 @@ import pytest
 
 from astrometricslib import InvalidArgumentError
 from backend.services.observatory.alignment_service import CENTERING_MAX_ITERATIONS, AlignmentService
-from wayfindinglib import ObservatoryControl, SkyPosition
+from wayfindinglib import ObservatoryControl
 from wayfindinglib.api.control.history import HistoryControl
 from wayfindinglib.api.control.mount import MountControl
 
@@ -86,15 +86,16 @@ def test_start_then_cancel_alignment_runs_and_stops_the_centering() -> None:
     observatory.mount.abort_motion.side_effect = lambda: released.set()
     service = AlignmentService(observatory_api=observatory, logger_interface=_Logs())
 
-    assert service.start_alignment(target_ra=370.0, target_dec=20.0) is True
+    assert service.start_alignment(target_ra="0h 40m 00s", target_dec="+20d 00m 00s") is True
     assert service.is_active() is True
-    assert service.start_alignment(target_ra=10.0, target_dec=20.0) is False
+    assert service.start_alignment(target_ra="1h 00m 00s", target_dec="+20d 00m 00s") is False
     assert service.get_attempts()["alignmentAttempts"][-1]["status"] == "solving"
 
     assert service.cancel_alignment() is True
     assert service.is_active() is False
     (position,), options = observatory.mount.slew.call_args
-    assert position == SkyPosition(ra_deg=10.0, dec_deg=20.0)
+    assert position.ra_deg == pytest.approx(10.0)
+    assert position.dec_deg == pytest.approx(20.0)
     assert options == {"center": True, "max_iterations": CENTERING_MAX_ITERATIONS}
 
 
@@ -107,34 +108,13 @@ def test_cancel_without_a_run_reports_false() -> None:
     observatory.mount.abort_motion.assert_not_called()
 
 
-def test_rpc_start_alignment_parses_coordinate_strings_to_degrees() -> None:
-    """The ``telescope:alignment_start`` wrapper turns strings into degrees."""
-    from backend.routers.rpc_router import _start_alignment
+def test_start_alignment_raises_on_unparseable_coordinates() -> None:
+    """A coordinate that cannot be read is reported, and nothing starts."""
+    observatory = _autospec_control()
+    service = AlignmentService(observatory_api=observatory)
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        mock_alignment_service = MagicMock()
-        mock_alignment_service.start_alignment.return_value = True
-        mock_container = MagicMock(alignment_service=mock_alignment_service)
-        monkeypatch.setattr("backend.routers.rpc_router.container", mock_container)
+    with pytest.raises(InvalidArgumentError):
+        service.start_alignment(target_ra="", target_dec="+45d 00m 00s")
 
-        result = _start_alignment(target_ra="12h 00m 00s", target_dec="+45d 00m 00s")
-
-    assert result is True
-    ra_deg, dec_deg = mock_alignment_service.start_alignment.call_args.args
-    assert ra_deg == pytest.approx(180.0, abs=1e-4)
-    assert dec_deg == pytest.approx(45.0, abs=1e-4)
-
-
-def test_rpc_start_alignment_raises_on_unparseable_coordinates() -> None:
-    """The wrapper reports a parse failure instead of starting."""
-    from backend.routers.rpc_router import _start_alignment
-
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        mock_alignment_service = MagicMock()
-        mock_container = MagicMock(alignment_service=mock_alignment_service)
-        monkeypatch.setattr("backend.routers.rpc_router.container", mock_container)
-
-        with pytest.raises(InvalidArgumentError):
-            _start_alignment(target_ra="", target_dec="+45d 00m 00s")
-
-    mock_alignment_service.start_alignment.assert_not_called()
+    assert service.is_active() is False
+    observatory.mount.slew.assert_not_called()

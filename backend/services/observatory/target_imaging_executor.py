@@ -186,6 +186,23 @@ class TargetImagingExecutor:
         self._wayfinder.planning.edit_queue(self._session_id, order=order)
         return True
 
+    def create_plan(self, target_name: str, items: list[dict[str, Any]]) -> Any:
+        """Build an imaging sequence plan for a library target.
+
+        Parameters
+        ----------
+        target_name : `str`
+            The id of the library target the plan is for.
+        items : `list` [`dict`]
+            The plan items, each with ``count``, ``exposure`` and ``filter``.
+
+        Returns
+        -------
+        plan : `SequencePlan`
+            The sequence plan from the wayfinding library's planning.
+        """
+        return self._wayfinder.planning.create_plan("sequence", target=target_name, plan_items=items)
+
     def get_queue(self) -> list[dict[str, Any]]:
         """Return the queue as the sequences the app shows.
 

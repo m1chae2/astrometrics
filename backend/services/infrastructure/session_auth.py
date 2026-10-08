@@ -41,6 +41,30 @@ def _resolve_session_token() -> str:
 
 SESSION_TOKEN = _resolve_session_token()
 
+#: The origins the app's own windows are served from. The CORS middleware
+#: and the WebSocket origin check both use this list.
+ALLOWED_ORIGINS: list[str] = [
+    "http://localhost:5173",  # Vite dev server
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
+    "http://localhost:8000",  # Development server
+    "http://127.0.0.1:8000",
+    "http://localhost:5000",  # Backend server
+    "http://127.0.0.1:5000",
+    "http://localhost:3000",
+    "app://.",  # Electron
+]
+
+#: Other origins the CORS middleware allows: this computer and the local
+#: network (for a companion phone), plus the Capacitor phone app.
+LAN_ORIGIN_REGEX = (
+    r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$|"
+    r"^capacitor://localhost$"
+)
+
 
 def is_origin_allowed(origin: str | None, allowed_origins: list[str]) -> bool:
     """Report whether a WebSocket handshake's `Origin` is acceptable.

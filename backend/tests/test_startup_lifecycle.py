@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
-from backend import main_backend
+from backend import main_backend, startup
 
 
 def test_importing_the_backend_module_builds_nothing() -> None:
@@ -49,10 +49,10 @@ def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch) -> None:  
         """Stand in for the telemetry loop."""
 
     monkeypatch.setattr(main_backend, "container", fake_container)
-    monkeypatch.setattr(main_backend, "_attach_log_handlers", lambda: calls.append("attach"))
-    monkeypatch.setattr(main_backend, "_detach_log_handlers", lambda: calls.append("detach"))
-    monkeypatch.setattr(main_backend, "periodic_telemetry_loop", idle_loop)
-    monkeypatch.setattr(main_backend, "_warm_sky_catalog", lambda: calls.append("warm"))
+    monkeypatch.setattr(main_backend, "attach_log_handlers", lambda: calls.append("attach"))
+    monkeypatch.setattr(main_backend, "detach_log_handlers", lambda: calls.append("detach"))
+    monkeypatch.setattr(startup, "periodic_telemetry_loop", idle_loop)
+    monkeypatch.setattr(startup, "warm_start_up_caches", lambda: calls.append("warm"))
 
     with TestClient(main_backend.app):
         assert calls[:2] == ["init", "attach"]

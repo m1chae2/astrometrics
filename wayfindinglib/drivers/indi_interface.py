@@ -223,7 +223,7 @@ class IndiInterface(IndiClient):
         """
         super().__init__()
         self.config = config
-        self._sync_config()
+        self.sync_configuration()
         self.device_map = {}
         self._has_initialized_defaults = False
 
@@ -316,8 +316,12 @@ class IndiInterface(IndiClient):
             except INDI_ERRORS as e:
                 logger.debug("Failed to query device name on removeDevice: %s", e)
 
-    def _sync_config(self):  # ruff: ignore[missing-return-type-private-function]
-        """Sync local state (hostname) from config."""
+    def sync_configuration(self) -> None:
+        """Read the telescope hostname from the configuration again.
+
+        Points the INDI client at that host. It does not reconnect; see
+        `reload_connection` for that.
+        """
         self.hostname = self.config.get_telescope_hostname()
         self.setServer(self.hostname, 7624)
         if hasattr(self, "connection_manager"):
@@ -332,7 +336,7 @@ class IndiInterface(IndiClient):
         # Force refresh config in the injected object (it might have
         # been updated via API). But usually the config object stays
         # the same, its state changes.
-        self._sync_config()
+        self.sync_configuration()
 
         # If we are already connected, we might need to disconnect
         # first if host changed
@@ -367,7 +371,7 @@ class IndiInterface(IndiClient):
         # If we are not connected, try to sync config in case
         # hostname changed
         if not self.isServerConnected():
-            self._sync_config()
+            self.sync_configuration()
 
         if not self.connection_manager.is_host_resolvable(self.getHost(), self.getPort()):
             # Skips the client's own connect call, which would wait about five

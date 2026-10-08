@@ -1,5 +1,5 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
-import { getBackendBase } from './common/services/backendApi';
+import { callBackend } from './common/services/backendApi';
 import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
@@ -241,11 +241,11 @@ const AppContent: React.FC = () => {
       } catch {
         // Ignore localStorage access failures
       }
-      fetch(`${getBackendBase()}/api/handoff/state`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active_mode: detail, origin_device: 'desktop' }),
-      }).catch(() => {});
+      callBackend(
+        'handoff:update_state',
+        { active_mode: detail, origin_device: 'desktop' },
+        { silent: true },
+      ).catch(() => {});
     };
     window.addEventListener('astrometrics:modeChange', onModeChange);
 

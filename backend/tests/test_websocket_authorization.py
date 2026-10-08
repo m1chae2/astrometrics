@@ -166,11 +166,9 @@ def test_figure_page_and_websocket(client: TestClient) -> None:
     assert download_resp.status_code == 404
 
     # Origin http://127.0.0.1:5000 and http://localhost:5000 must be allowed
-    from backend.main_backend import origins
-
-    assert "http://127.0.0.1:5000" in origins
-    assert "http://localhost:5000" in origins
-    assert session_auth.is_origin_allowed("http://127.0.0.1:5000", origins)
+    assert "http://127.0.0.1:5000" in session_auth.ALLOWED_ORIGINS
+    assert "http://localhost:5000" in session_auth.ALLOWED_ORIGINS
+    assert session_auth.is_origin_allowed("http://127.0.0.1:5000", session_auth.ALLOWED_ORIGINS)
 
     # Unauthorized WS without token should be disconnected
     with pytest.raises(WebSocketDisconnect):

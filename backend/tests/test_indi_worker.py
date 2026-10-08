@@ -12,7 +12,9 @@ during its blocking calls, so any blocking call on it freezes the whole
 backend unless PyIndi runs in a process of its own.
 """
 
+import multiprocessing
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -56,7 +58,7 @@ class _DummySession:
         """
         return []
 
-    def echo_after_delay(self, value, delay_seconds: float) -> Any:  # ruff: ignore[missing-type-function-argument]
+    def echo_after_delay(self, value: object, delay_seconds: float) -> Any:
         """Sleep `delay_seconds`, then return `value`.
 
         Returns
@@ -83,7 +85,9 @@ class _DummySession:
         raise ValueError("deliberate test failure")
 
 
-def _dummy_worker_main(testing: bool, command_queue, result_queue, parent_pid: int) -> None:  # ruff: ignore[missing-type-function-argument]
+def _dummy_worker_main(
+    testing: bool, command_queue: multiprocessing.Queue, result_queue: multiprocessing.Queue, parent_pid: int
+) -> None:
     """Worker entry point used only by these tests.
 
     Builds a `_DummySession` instead of a real
@@ -95,7 +99,7 @@ def _dummy_worker_main(testing: bool, command_queue, result_queue, parent_pid: i
 
 
 @pytest.fixture
-def worker_client():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def worker_client() -> Iterator[IndiWorkerClient]:
     """Build a real `IndiWorkerClient` backed by `_dummy_worker_main`.
 
     Yields
@@ -122,7 +126,7 @@ def test_the_worker_process_does_not_start_until_the_first_call() -> None:
         client.stop()
 
 
-def test_concurrent_calls_correlate_to_the_right_response(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_concurrent_calls_correlate_to_the_right_response(worker_client: IndiWorkerClient) -> None:
     """Several in-flight calls each get back their own result, not another's.
 
     Dispatches calls whose delays finish in a different order than they were
@@ -160,7 +164,7 @@ def test_a_wedged_call_times_out_and_the_worker_is_restarted(worker_client: Indi
     assert worker_client.call_sync("echo_after_delay", "still alive", 0.0, timeout=10.0) == "still alive"
 
 
-def test_a_dead_worker_is_respawned_transparently_on_the_next_call(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_dead_worker_is_respawned_transparently_on_the_next_call(worker_client: IndiWorkerClient) -> None:
     """If the worker process has already died, the next call just works.
 
     Simulates the worker crashing on its own (distinct from the
@@ -175,7 +179,9 @@ def test_a_dead_worker_is_respawned_transparently_on_the_next_call(worker_client
     assert worker_client.call_sync("echo_after_delay", 42, 0.0, timeout=10.0) == 42
 
 
-def test_indi_worker_proxy_forwards_any_method_name_by_attribute_access(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_indi_worker_proxy_forwards_any_method_name_by_attribute_access(
+    worker_client: IndiWorkerClient,
+) -> None:
     """IndiWorkerProxy stands in for a real session via plain attribute access.
 
     This is what `Indi*Driver` adapters call -- see
@@ -187,7 +193,9 @@ def test_indi_worker_proxy_forwards_any_method_name_by_attribute_access(worker_c
     assert proxy.echo_after_delay("via proxy", 0.0) == "via proxy"
 
 
-def test_a_plain_data_attribute_comes_back_as_its_value_not_a_callable(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_a_plain_data_attribute_comes_back_as_its_value_not_a_callable(
+    worker_client: IndiWorkerClient,
+) -> None:
     """`getattr(driver, "status", {})`-style reads get the real value back.
 
     `hardware_operations.py` and `alignment_service.py` both read
@@ -209,7 +217,7 @@ def test_a_plain_data_attribute_comes_back_as_its_value_not_a_callable(worker_cl
     assert getattr(proxy, "status", {}) == {"TEMPERATURE": "12.3"}
 
 
-def test_the_device_listing_works_through_the_worker_proxy(worker_client) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_the_device_listing_works_through_the_worker_proxy(worker_client: IndiWorkerClient) -> None:
     """`IndiDiagnostics` uses only methods the proxy can forward.
 
     The proxy returns a forwarding function for any attribute name, so code

@@ -7,15 +7,24 @@ captured frames associated with targets.
 
 import logging
 import os
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
     FITS_READ_ERRORS,
+    AppConfiguration,
     AstrometricsError,
     ConfigurationError,
     ExternalServiceError,
     NotFoundError,
 )
 from backend.services.infrastructure.base_service import BaseBackgroundService
+from wayfindinglib import Wayfinder
+
+if TYPE_CHECKING:
+    from backend.services.data.stellar_service import StellarService
+    from backend.services.data.target_service import TargetService
+    from backend.services.processing.image_processing_service import ImageProcessingService
+    from backend.services.processing.job_service import JobService
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +37,16 @@ class IngestionService(BaseBackgroundService):
     captured frames associated with targets.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
-        target_service=None,  # ruff: ignore[missing-type-function-argument]
-        config_service=None,  # ruff: ignore[missing-type-function-argument]
-        calibration_library=None,  # ruff: ignore[missing-type-function-argument]
-        stellar_service=None,  # ruff: ignore[missing-type-function-argument]
-        job_service=None,  # ruff: ignore[missing-type-function-argument]
-        image_processing_service=None,  # ruff: ignore[missing-type-function-argument]
-        wayfinder=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+        target_service: TargetService | None = None,
+        config_service: AppConfiguration | None = None,
+        calibration_library: Any = None,
+        stellar_service: StellarService | None = None,
+        job_service: JobService | None = None,
+        image_processing_service: ImageProcessingService | None = None,
+        wayfinder: Wayfinder | None = None,
+    ) -> None:
         super().__init__(job_service=job_service)
         self._target_service = target_service
         self._config_service = config_service
@@ -67,7 +76,7 @@ class IngestionService(BaseBackgroundService):
         matches = self._wayfinder.control.remote.list("folders", folder_name=folder_name)
         return matches[0] if matches else None
 
-    def scan_remote_targets(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def scan_remote_targets(self) -> list[Any]:
         """Return list of folders in remote Pictures.
 
         Returns
@@ -108,7 +117,7 @@ class IngestionService(BaseBackgroundService):
                 files_by_folder[remote_folder] = files
         return files_by_folder
 
-    def get_remote_stats(self, folder):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def get_remote_stats(self, folder: str) -> dict[str, Any]:
         """Return file count for a remote folder resolving the name first.
 
         REQ: IMG-6.1
@@ -215,7 +224,7 @@ class IngestionService(BaseBackgroundService):
         job_id = self.start_ingestion(payload)
         return {"jobId": job_id}
 
-    def start_ingestion(self, payload):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def start_ingestion(self, payload: dict[str, Any]) -> str:
         """Start an ingestion background task.
 
         Returns
@@ -243,7 +252,7 @@ class IngestionService(BaseBackgroundService):
             target_name, "ingestion", self._run_ingestion, payload, log_file_path=log_file
         )
 
-    def start_reindex(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def start_reindex(self) -> str:
         """Start a full library re-indexing background task.
 
         REQ: BKD-5.3
@@ -368,7 +377,14 @@ class IngestionService(BaseBackgroundService):
             self._job_service.update_job(job_id, status_message=message)
         logger.info("[Job %s] %s", job_id, message)
 
-    def _run_ingestion(self, job_id, target_id, payload, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-kwargs, missing-return-type-private-function]
+    def _run_ingestion(
+        self,
+        job_id: str,
+        target_id: str,
+        payload: dict[str, Any],
+        log_file_path: str | None = None,
+        **kwargs: object,
+    ) -> bool:
         """Background worker for frame ingestion.
 
         Downloads and sorts frames from a remote or local source.
@@ -401,7 +417,7 @@ class IngestionService(BaseBackgroundService):
         ):
             return self._run_ingestion_body(job_id, target_id, payload)
 
-    def _run_ingestion_body(self, job_id, target_id, payload):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _run_ingestion_body(self, job_id: str, target_id: str, payload: dict[str, Any]) -> bool:
         """Do the actual ingestion work inside an already-captured job log.
 
         Returns
@@ -483,7 +499,7 @@ class IngestionService(BaseBackgroundService):
 
                     self._log(job_id, f"Downloading {rf} into the calibration library...")
 
-                    def calibration_log_callback(msg):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+                    def calibration_log_callback(msg: str) -> None:
                         nonlocal downloaded_count
                         self._log(job_id, msg)
                         # rsync reports one "Downloading: <file>" line per
@@ -532,7 +548,7 @@ class IngestionService(BaseBackgroundService):
                 try:
                     downloaded_count = 0
 
-                    def ingest_log_callback(msg):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+                    def ingest_log_callback(msg: str) -> None:
                         nonlocal downloaded_count
                         self._log(job_id, msg)
                         # rsync reports one "Downloading: <file>" line per

@@ -10,6 +10,7 @@ import subprocess  # ruff: ignore[suspicious-subprocess-import]
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend import main_backend, startup
@@ -38,7 +39,7 @@ def test_importing_the_backend_module_builds_nothing() -> None:
     assert result.stdout.strip().splitlines()[-1] == "False None"
 
 
-def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch) -> None:  # ruff: ignore[missing-type-function-argument]
+def test_the_lifespan_starts_the_services_and_stops_them(monkeypatch: pytest.MonkeyPatch) -> None:
     """Entering the app starts everything in order; leaving stops it."""
     calls: list[str] = []
     fake_container = MagicMock()

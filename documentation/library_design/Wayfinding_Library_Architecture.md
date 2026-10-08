@@ -1,6 +1,6 @@
 # Wayfinding Library: Architecture and Design
 
-*Version 2.12 · 2026-10-07 · Status: current*
+*Version 2.13 · 2026-10-08 · Status: current*
 
 ## Overview
 

@@ -8,6 +8,10 @@ the shared container, and a test client for the web app.
 
 import os
 import sys
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
+from pytest_mock import MockerFixture
 
 # Set the testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
@@ -33,9 +37,12 @@ sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 import pytest
 from fastapi.testclient import TestClient
 
+if TYPE_CHECKING:
+    from backend.container import Container
+
 
 @pytest.fixture(scope="session", autouse=True)
-def initialized_container():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def initialized_container() -> Iterator[Container]:
     """Build the shared container once for the whole test session.
 
     Importing `backend.main_backend` builds nothing; the server's lifespan
@@ -56,7 +63,7 @@ def initialized_container():  # ruff: ignore[missing-return-type-undocumented-pu
 
 
 @pytest.fixture
-def client():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def client() -> TestClient:
     """FastAPI test client fixture.
 
     Returns
@@ -70,7 +77,7 @@ def client():  # ruff: ignore[missing-return-type-undocumented-public-function]
 
 
 @pytest.fixture
-def mock_container(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def mock_container(mocker: MockerFixture) -> Container:
     """Fixture to mock the DI container and its services.
 
     Returns

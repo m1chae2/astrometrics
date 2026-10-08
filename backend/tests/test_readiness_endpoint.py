@@ -27,7 +27,9 @@ def unfinished_warmup() -> Iterator[None]:
         startup.sky_catalog_warmup_finished.clear()
 
 
-def test_ready_endpoint_reports_503_until_warmup_finishes(client: TestClient, unfinished_warmup: None):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ready_endpoint_reports_503_until_warmup_finishes(
+    client: TestClient, unfinished_warmup: None
+) -> None:
     """The shell must keep waiting while the catalog is still loading."""
     response = client.get("/api/ready")
     assert response.status_code == 503
@@ -40,7 +42,7 @@ def test_ready_endpoint_reports_503_until_warmup_finishes(client: TestClient, un
     assert response.json() == {"ready": True}
 
 
-def test_warmup_marks_ready_after_loading_the_catalog(mocker, unfinished_warmup: None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_warmup_marks_ready_after_loading_the_catalog(mocker: MockerFixture, unfinished_warmup: None) -> None:
     """A successful warm-up queries the sky engine, then releases the gate."""
     fake_container = mocker.patch.object(startup, "container")
 
@@ -50,7 +52,7 @@ def test_warmup_marks_ready_after_loading_the_catalog(mocker, unfinished_warmup:
     assert startup.sky_catalog_warmup_finished.is_set()
 
 
-def test_failed_warmup_still_marks_ready(mocker, unfinished_warmup: None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_failed_warmup_still_marks_ready(mocker: MockerFixture, unfinished_warmup: None) -> None:
     """A broken warm-up means a slow first load, not a locked-out app."""
     fake_container = mocker.patch.object(startup, "container")
     fake_container.wayfinder.planning.get_sources.side_effect = RuntimeError("catalog unreadable")

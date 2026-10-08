@@ -579,7 +579,7 @@ class StellarService:
         with self._period_search_slots:
             return self.astrometrics.stars.analyze_periodicity(object_id)
 
-    def add_object(self, new_object: StellarObject):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def add_object(self, new_object: StellarObject) -> None:
         """Add or update a stellar object."""
         self.astrometrics.stars.create(
             new_object.id,

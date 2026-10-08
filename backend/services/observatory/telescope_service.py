@@ -21,7 +21,7 @@ class TelescopeService:
     high-level interface. REQ: BKD-1: Hardware Abstraction & Control
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         driver: Any = None,
         guiding_service: Any = None,
@@ -29,7 +29,7 @@ class TelescopeService:
         wayfinder: Any = None,
         astrometrics_service: Any = None,
         alignment_service: Any = None,
-    ):
+    ) -> None:
         """Initialize the service and Wayfinder high-level interface.
 
         Parameters

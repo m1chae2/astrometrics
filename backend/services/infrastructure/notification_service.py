@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """Track and retrieve notifications about job completions."""
 
-    def __init__(self, storage_path: str = "backend/notifications.json"):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, storage_path: str = "backend/notifications.json") -> None:
         self.storage_path = storage_path
         self._ensure_storage()
 
-    def _ensure_storage(self):  # ruff: ignore[missing-return-type-private-function]
+    def _ensure_storage(self) -> None:
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
         if not os.path.exists(self.storage_path):
             with open(self.storage_path, "w") as f:

@@ -18,7 +18,7 @@ LOG_DIR = None  # Will be initialized from config
 class ImageProcessingService(BaseBackgroundService):
     """Service for managing background image processing tasks."""
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         siril_driver: Any = None,
         target_service: Any = None,
@@ -27,7 +27,7 @@ class ImageProcessingService(BaseBackgroundService):
         notification_service: Any = None,
         job_service: Any = None,
         astrometrics_service: Any = None,
-    ):
+    ) -> None:
         """Initialize the image processing orchestration service.
 
         Parameters

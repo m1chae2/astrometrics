@@ -31,7 +31,7 @@ class TargetService:
     astrolib high-level interfaces. # REQ: BKD-5
     """
 
-    def __init__(self, config: Any, astrometrics: Any = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, config: Any, astrometrics: Any = None) -> None:
         """Initialize TargetService.
 
         Wires it to the high-level interface library high-level interface.

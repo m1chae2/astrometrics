@@ -61,7 +61,7 @@ class JobService:
         self.repository.upsert_job(job)
         return job
 
-    def update_job(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def update_job(
         self,
         job_id: str,
         status: str | None = None,
@@ -69,7 +69,7 @@ class JobService:
         status_message: str | None = None,
         input_metrics: dict[str, Any] | None = None,
         output_metrics: dict[str, Any] | None = None,
-    ):
+    ) -> None:
         """Update job state in the database."""
         job = self.repository.get_job(job_id)
         if not job:

@@ -3,9 +3,13 @@
 import os
 import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from backend.services.infrastructure.astrometrics_service import AstrometricsService
+    from backend.services.processing.job_service import JobService
 
 
 class BaseBackgroundService:
@@ -15,7 +19,12 @@ class BaseBackgroundService:
     tracking and optional recording via `JobService`.
     """
 
-    def __init__(self, max_workers: int | None = None, job_service=None, astrometrics_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        job_service: JobService | None = None,
+        astrometrics_service: AstrometricsService | None = None,
+    ) -> None:
         self._executor = ThreadPoolExecutor(max_workers=max_workers or os.cpu_count() or 4)
         # Unified job tracking: {job_id: {"future": Future, "type": str,
         # "target_id": str, "status": str}}
@@ -24,7 +33,7 @@ class BaseBackgroundService:
         self._job_service = job_service
         self._astrometrics_service = astrometrics_service
 
-    def _update_central_processing_jobs(self):  # ruff: ignore[missing-return-type-private-function]
+    def _update_central_processing_jobs(self) -> None:
         """Update high-level interfaceservice with active jobs."""
         if self._astrometrics_service and self._job_service:
             active = self._job_service.get_active_jobs()
@@ -206,7 +215,7 @@ class BaseBackgroundService:
                     return future.cancel()
         return False
 
-    def stream_log(self, job_id: str, log_file: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def stream_log(self, job_id: str, log_file: str) -> Iterator[str]:
         """Yield log lines from `log_file` as they are written.
 
         REQ: IMG-5.3

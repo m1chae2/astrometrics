@@ -4,13 +4,27 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astropy.io import fits
 
-from astrometricslib import FITS_READ_ERRORS, AstrometricsError, FilterType, InvalidArgumentError
+from astrometricslib import (
+    FITS_READ_ERRORS,
+    AppConfiguration,
+    Astrometrics,
+    AstrometricsError,
+    FilterType,
+    InvalidArgumentError,
+)
 from backend.services.infrastructure.base_service import BaseBackgroundService
+
+if TYPE_CHECKING:
+    from backend.services.data.stellar_service import StellarService
+    from backend.services.data.target_service import TargetService
+    from backend.services.infrastructure.notification_service import NotificationService
+    from backend.services.processing.job_service import JobService
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +70,15 @@ class AnalysisOrchestrator(BaseBackgroundService):
     Handles spectroscopy extraction and photometry analysis.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
-        config_service=None,  # ruff: ignore[missing-type-function-argument]
-        stellar_service=None,  # ruff: ignore[missing-type-function-argument]
-        target_service=None,  # ruff: ignore[missing-type-function-argument]
-        notification_service=None,  # ruff: ignore[missing-type-function-argument]
-        job_service=None,  # ruff: ignore[missing-type-function-argument]
-        astrometrics=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+        config_service: AppConfiguration | None = None,
+        stellar_service: StellarService | None = None,
+        target_service: TargetService | None = None,
+        notification_service: NotificationService | None = None,
+        job_service: JobService | None = None,
+        astrometrics: Astrometrics | None = None,
+    ) -> None:
         super().__init__(job_service=job_service)
         self._config_service = config_service
         self._stellar_service = stellar_service
@@ -80,9 +94,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
         # already-running check below.
         self._analyze_submit_lock = threading.Lock()
 
-    def analyze_image(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def analyze_image(
         self, target_id: str, image_files: Any, filter_type: str | None = None, type: str = "photometry"
-    ):
+    ) -> dict[str, Any]:
         """Start a background analysis job.
 
         Returns
@@ -276,7 +290,7 @@ class AnalysisOrchestrator(BaseBackgroundService):
         elif isinstance(image_files, dict):
             # Flatten nested structure:
             # Tele -> Cam -> ISO -> Exp -> Filter -> List
-            def flatten(d, current_filter=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            def flatten(d: dict[str, Any], current_filter: str | None = None) -> Iterator[Any]:
                 for k, v in d.items():
                     if isinstance(v, dict):
                         yield from flatten(
@@ -406,7 +420,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
             details={"target_id": target_id, "filter_type": filter_type},
         )
 
-    def _update_job_progress(self, job_id, target_id, current, total, filter_type=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _update_job_progress(
+        self, job_id: str, target_id: str, current: int, total: int, filter_type: str | None = None
+    ) -> None:
         if self._job_service:
             progress_pct = int((current / total) * 100) if total > 0 else 0
             self._job_service.update_job(job_id, progress=progress_pct)
@@ -460,7 +476,9 @@ class AnalysisOrchestrator(BaseBackgroundService):
         if not target:
             target = self._target_service.create_target(target_id)
 
-        def _on_frame_complete(path, frame_result, completed_count, total_count):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def _on_frame_complete(
+            path: str, frame_result: dict[str, Any], completed_count: int, total_count: int
+        ) -> None:
             self._update_job_progress(job_id, target_id, completed_count, total_count, filter_type="SPEC")
 
         # Stage one: the master stacked spectral image. It is a generated

@@ -21,7 +21,7 @@ class SocketManager:
         except RuntimeError as exc:
             logger.debug("No event loop available at construction time: %s", exc)
 
-    async def connect(self, websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    async def connect(self, websocket: WebSocket) -> None:
         """Accept `websocket` and register it as an active connection."""
         await websocket.accept()
         # Capture the running loop if not already set
@@ -30,7 +30,7 @@ class SocketManager:
         self.active_connections.append(websocket)
         logger.info("Client connected. Active connections: %s", len(self.active_connections))
 
-    def disconnect(self, websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def disconnect(self, websocket: WebSocket) -> None:
         """Remove `websocket` from the active connection list."""
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
@@ -53,14 +53,14 @@ class SocketManager:
         for dead in dead_connections:
             self.disconnect(dead)
 
-    async def dispatch_ui_event(self, action: str, payload: dict | None = None):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    async def dispatch_ui_event(self, action: str, payload: dict | None = None) -> None:
         """Send a standardized UI event to all connected clients."""
         if payload is None:
             payload = {}
         event = {"type": "UI_EVENT", "action": action, "payload": payload}
         await self.broadcast(event)
 
-    def broadcast_log(self, message: str, level: str = "INFO"):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def broadcast_log(self, message: str, level: str = "INFO") -> None:
         """Broadcast a log message to all connected clients.
 
         Safe to call from any thread.
@@ -100,11 +100,11 @@ class SocketManager:
 class SocketLoggingHandler(logging.Handler):
     """Custom logging handler that broadcasts logs via SocketManager."""
 
-    def __init__(self, socket_manager: SocketManager):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, socket_manager: SocketManager) -> None:
         super().__init__()
         self.socket_manager = socket_manager
 
-    def emit(self, record):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def emit(self, record: logging.LogRecord) -> None:
         """Format `record` and broadcast it to connected clients."""
         try:
             msg = self.format(record)

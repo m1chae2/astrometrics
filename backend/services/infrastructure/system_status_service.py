@@ -5,12 +5,15 @@ frequent UI polling, plus richer health/introspection models used by
 the maintenance and scripting endpoints.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from wayfindinglib import AlignmentTargetSession
 from wayfindinglib.models.session.telemetry import IndiStatus, PolarAlignmentStatus
+
+if TYPE_CHECKING:
+    from backend.services.infrastructure.astrometrics_service import AstrometricsService
 
 
 class TelescopePulse(BaseModel):
@@ -58,7 +61,7 @@ class SystemStatusService:
     REQ: BKD-SystemPulse (New)
     """
 
-    def __init__(self, astrometrics_service) -> None:  # ruff: ignore[missing-type-function-argument]
+    def __init__(self, astrometrics_service: AstrometricsService) -> None:
         self._astrometrics_service = astrometrics_service
         self._last_vram_check = 0.0
         self._cached_vram = "Unknown (Non-NVIDIA or driver missing)"

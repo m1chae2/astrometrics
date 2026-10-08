@@ -5,7 +5,9 @@ for its header must return an empty list instead of raising, so opening such
 a target does not log an error or show a failed request each time.
 """
 
+from collections.abc import Callable
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -13,7 +15,7 @@ from astrometricslib import NotFoundError
 from backend.services.data.target_service import TargetService
 
 
-def _service(get_header) -> TargetService:  # ruff: ignore[missing-type-function-argument]
+def _service(get_header: Callable[..., Any]) -> TargetService:
     """Build a service whose target API uses the given `get_header`.
 
     Returns

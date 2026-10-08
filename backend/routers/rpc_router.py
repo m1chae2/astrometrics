@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from astrometricslib import (
     ConfigurationError,
@@ -396,7 +397,7 @@ def _log_rpc_failure(method: str, exc: Exception, info: ErrorInfo) -> None:
 
 
 @router.post("/rpc")
-async def handle_rpc(request: RPCRequest):  # ruff: ignore[missing-return-type-undocumented-public-function]
+async def handle_rpc(request: RPCRequest) -> JSONResponse:
     """Serve the unified entrypoint for all frontend JSON-RPC calls.
 
     Invokes the appropriate service method and envelopes the result.

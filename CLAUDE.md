@@ -16,10 +16,11 @@ Guidelines and operational rules for Claude Code operating on the `astrometrics`
 - **Reading level (prose docs and code comments/docstrings alike)**: high school level for the UI tier (`ui/`, `backend/`, `electron/`), first-year college engineering/science level for everything else (`astrometricslib/`, `wayfindinglib/`, and other non-UI-tier code). Plain vocabulary, short sentences, spell out unfamiliar terms on first use. Per-language structural conventions (numpydoc sections, JSDoc tags, naming) are unaffected — this is about vocabulary/complexity, not format.
 
 ## 2. Architecture & Unidirectional Layering Rules
-- **Domain Library Layer (`astrometricslib/`, `wayfindinglib/`)**: Pure algorithms, spherical trig, and FITS processing. NEVER import from `backend.services`, `backend.container`, or `backend.routers`.
+- **Domain Library Layer (`astrometricslib/`, `wayfindinglib/`)**: Pure algorithms, spherical trig, and FITS processing. NEVER import `backend` or `mcp_servers`. `astrometricslib` never imports `wayfindinglib`.
 - **Application Service Layer (`backend/services/`)**: Stateful orchestration, DB, hardware drivers. NEVER import from `backend.container` or `backend.routers`.
-- **Delivery Layer (`backend/routers/`)**: HTTP and WebSocket serialization (`/api/rpc`). Thin delivery layer; delegates business logic to services.
-- **Frontend Layer (`ui/`)**: React/Vite/Electron desktop client. Communicates with backend exclusively via `callBackend(method, params)` -> `/api/rpc`.
+- **Delivery Layer (`backend/routers/`)**: HTTP and WebSocket serialization (`/api/rpc`). Registration only; business logic lives in services. Start-up work lives in `backend/startup.py`.
+- **MCP Layer (`mcp_servers/`)**: The AI-agent adapters. They use only the libraries' public API; the backend server calls the running backend over `/api/rpc` and imports only the backend's guard functions. The backend never imports `mcp_servers`.
+- **Frontend Layer (`ui/`, `electron/`)**: React/Vite/Electron desktop client. Uses only the backend's public interface, declared in `backend/public_interface.py`: the RPC methods (`callBackend(method, params)` -> `/api/rpc`) and the routes listed there (the `/ws/events` and `/ws/terminal` WebSockets, the `/static` image and FITS files, the `/figure` Matplotlib pages, and `/api/ready`, `/api/session-token`, `/api/pairing-info`). Only `ui/common/services/backendApi.ts` and `ui/common/utils/socketClient.ts` may call `fetch` or open a WebSocket (ESLint enforces it). After changing the declaration, run `build/codegen/generate-types.sh`.
 
 ## 3. Data & Resource Safety
 - **FITS Access**: ALWAYS use `memmap=False` (or `AstrometricsImage`) to prevent file handle and memory leaks.
@@ -34,18 +35,19 @@ Prefer executing pre-existing lifecycle scripts under `build/linux/` instead of 
 - **Environment Setup**: `build/linux/setup_venv.sh`
 
 ## 5. Model Context Protocol (MCP) Tool Integration
-Four MCP servers provide direct tooling for AI agents. Claude Code has access via the MCP server configuration:
+The MCP servers live in `mcp_servers/` (the UI server in `ui/mcp/`). Claude Code has access via the MCP server configuration; each server offers only the tools its `tool_manifest.json` allows for the active profile:
 
 ### Server Hierarchy
 1. **`astrometricslib-core`**: Pure domain library functions (catalog targets, FITS image processing, stacking, astrometry/plate-solving, photometry, spectroscopy, and star catalogs).
 2. **`wayfindinglib-core`**: Observatory control, telescope status, tracking, slewing, focusing, guiding, and observation planning.
-3. **`astrometrics-backend`**: Live backend diagnostics, `/api/rpc` probing, health checks, and supervised Python execution.
+3. **`astrometrics-backend`**: Live backend status (`app_status`), view switching and notifications (`app_controls`), and documentation (`docs_get`). `backend_call_rpc` and `electron_run_python` are withheld from every profile.
 4. **`astrometrics-ui`**: Frontend TypeScript diagnostics, Vitest runners, build checks, and accessibility audits.
+5. **`astrometrics-gaps`**: Where an agent reports what its tools cannot do.
 
 ### Bug Triage Decision Matrix (Frontend vs. Backend vs. Domain)
-- **Diagnose API & UI Stalls**: Call `backend_call_rpc(method, params)`.
-  - If `backend_call_rpc` succeeds with low latency (<200ms), the backend is healthy; the bug is in frontend React state, hooks, or networking.
-  - If `backend_call_rpc` errors, hangs, or returns 500, the bug is in the backend route or container service.
+- **Diagnose API & UI Stalls**: Call `app_status()`.
+  - If it answers quickly and every section is healthy, the backend is fine; the bug is in frontend React state, hooks, or networking.
+  - If it errors, hangs, or a section reports an error, the bug is in the backend route or container service.
 - **Diagnose Backend Health**: Call `app_status()`. Confirms whether the FastAPI server and container are responding.
 - **Diagnose Domain Calculations**: Call `astrometricslib-core` or `wayfindinglib-core` tools directly on disk data.
 - **Diagnose Frontend Code & Builds**: Call `ui_diagnose_code`, `ui_run_tests`, or `ui_build_check`.

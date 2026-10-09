@@ -9,6 +9,9 @@ the moon rising).
 import statistics
 from typing import Any
 
+from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import describe_background_splits
+
 __all__ = [
     "DEFAULT_GAP_RATIO_THRESHOLD",
     "detect_background_split",
@@ -191,3 +194,73 @@ def find_dominant_background_subset_by_exposure(
         if split_summary:
             split_summaries.append({**split_summary, "exposure_seconds": group.exposure_seconds})
     return [frame for frame in frames if id(frame) in kept_ids], excluded, split_summaries
+
+
+# The name the background check goes by in a stack's gate record.
+BACKGROUND_GATE_NAME = "background_homogeneity"
+
+# A split needs a side with more than one frame to show what normal spread
+# looks like (see `detect_background_split`), so a group of fewer than three
+# measured frames cannot be judged at all.
+MINIMUM_MEASURED_FRAMES_TO_JUDGE = 3
+
+
+def background_homogeneity_gate(
+    frames: list[Any], split_summaries: list[dict[str, Any]] | None, enabled: bool = True
+) -> GateResult:
+    """Record whether the background check could judge any exposure length.
+
+    A frame whose background could not be measured is skipped by the check,
+    and an exposure length with fewer than three measured frames cannot show a
+    split. If no exposure length can be judged, nothing was checked, and the
+    gate says so instead of passing.
+
+    Parameters
+    ----------
+    frames : `list` [`Any`]
+        The frames handed to `find_dominant_background_subset_by_exposure`.
+    split_summaries : `list` [`dict`] or `None`
+        What that function found: one entry per exposure length with a split.
+    enabled : `bool`, optional
+        Whether the check is switched on in the settings.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``failed`` when a split was found, ``not_checked`` when the check is
+        off or no exposure length could be judged, otherwise ``passed``.
+    """
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import split_frames_by_exposure
+
+    source = (
+        f"gap ratio {DEFAULT_GAP_RATIO_THRESHOLD:g}; "
+        f"at least {MINIMUM_MEASURED_FRAMES_TO_JUDGE} measured frames"
+    )
+    if not enabled:
+        return unchecked_gate(
+            BACKGROUND_GATE_NAME, "the background check is turned off in the settings", source
+        )
+    if split_summaries:
+        return failed_gate(
+            BACKGROUND_GATE_NAME,
+            "background split: " + describe_background_splits(split_summaries) or "",
+            limit=DEFAULT_GAP_RATIO_THRESHOLD,
+            limit_source=source,
+        )
+    judged = 0
+    for group in split_frames_by_exposure(frames) if frames else []:
+        measured = [f for f in group.frames if f.measurements.background_level is not None]
+        if len(measured) >= MINIMUM_MEASURED_FRAMES_TO_JUDGE:
+            judged += 1
+    if judged == 0:
+        return unchecked_gate(
+            BACKGROUND_GATE_NAME,
+            "no exposure length had enough frames with a measured background to check for a split",
+            source,
+        )
+    return passed_gate(
+        BACKGROUND_GATE_NAME,
+        limit=DEFAULT_GAP_RATIO_THRESHOLD,
+        limit_source=source,
+        detail=f"{judged} exposure length(s) checked, no split",
+    )

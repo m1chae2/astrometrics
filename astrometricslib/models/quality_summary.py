@@ -287,6 +287,10 @@ class StackingPipelineQualityMetrics(BaseModel):
     spectral_registration_flags: list[ExcludedFrame] = Field(
         default_factory=list, alias="spectralRegistrationFlags"
     )
+    # Whether the spectral registration check actually ran. An empty flag
+    # list means "all clear" only when this is true: the check is skipped
+    # when its three per-frame lists do not line up.
+    spectral_registration_checked: bool = Field(default=False, alias="spectralRegistrationChecked")
 
     # Technical details about the stacking run itself, such as whether
     # the process timed out or if color-conversion (debayering) was applied.

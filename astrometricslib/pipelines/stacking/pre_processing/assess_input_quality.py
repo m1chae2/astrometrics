@@ -9,7 +9,17 @@ own flag reasons.
 
 from typing import Any
 
+from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.stacking_quality import StackingInputQuality
+from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
+    BRIGHT_FLAT_ISSUE_PREFIX,
+    FAINT_FLAT_ISSUE_PREFIX,
+    MAXIMUM_FLAT_LEVEL_FRACTION,
+    MAXIMUM_FLAT_NOISE_FRACTION,
+    MINIMUM_FLAT_LEVEL_FRACTION,
+    NOISY_FLAT_ISSUE_PREFIX,
+    UNREADABLE_FLATS_ISSUE,
+)
 
 # The reasons the pre-checks record on a frame they set aside. Stage code
 # writes them; this module counts them.
@@ -18,6 +28,118 @@ BACKGROUND_EXCLUSION_REASON = "background-homogeneity split"
 # A frame moved aside for clouds or trailed stars has a reason that starts
 # with this text (see `frame_quarantine`), followed by what was measured.
 QUARANTINE_EXCLUSION_REASON_PREFIX = "moved to _excluded"
+
+
+FLAT_LEVEL_GATE_NAME = "flat_level"
+FLAT_NOISE_GATE_NAME = "flat_noise"
+CALIBRATION_METADATA_GATE_NAME = "calibration_metadata"
+
+
+def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
+    """Build the gates for the flat frames and the calibration metadata.
+
+    A stack that used no flats cannot fail the flat checks, and that is not
+    the same as passing them, so those gates are ``not_checked`` with the
+    reason. The same goes for the metadata check when no calibration frame
+    was applied. A failed gate's sentence is the same text the input quality
+    lists as a flag reason, so the two never disagree.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported. Read: ``flat_calibration``,
+        ``calibration_applied`` and ``calibration_mismatch_flags``.
+
+    Returns
+    -------
+    gates : `list` [`GateResult`]
+        The ``flat_level``, ``flat_noise`` and ``calibration_metadata`` gates.
+    """
+    gates: list[GateResult] = []
+    flat = diagnostics.get("flat_calibration") or {}
+    issues = list(flat.get("issues", []))
+    level_source = (
+        f"{MINIMUM_FLAT_LEVEL_FRACTION:.0%} to {MAXIMUM_FLAT_LEVEL_FRACTION:.0%} "
+        "of full scale (design estimate)"
+    )
+    noise_source = f"master flat noise at most {MAXIMUM_FLAT_NOISE_FRACTION:.1%} (derived from stack noise)"
+    if not flat:
+        no_flats = "the stack used no flat frames"
+        gates.append(unchecked_gate(FLAT_LEVEL_GATE_NAME, no_flats, level_source))
+        gates.append(unchecked_gate(FLAT_NOISE_GATE_NAME, no_flats, noise_source))
+    else:
+        level_issues = [
+            i for i in issues if i.startswith((FAINT_FLAT_ISSUE_PREFIX, BRIGHT_FLAT_ISSUE_PREFIX))
+        ]
+        noise_issues = [i for i in issues if i.startswith(NOISY_FLAT_ISSUE_PREFIX)]
+        unreadable = UNREADABLE_FLATS_ISSUE in issues
+        measured_level = flat.get("level_fraction")
+        measured_noise = flat.get("noise_fraction")
+        if unreadable:
+            gates.append(
+                failed_gate(
+                    FLAT_LEVEL_GATE_NAME,
+                    f"flat calibration: {UNREADABLE_FLATS_ISSUE}",
+                    limit_source=level_source,
+                )
+            )
+            gates.append(unchecked_gate(FLAT_NOISE_GATE_NAME, UNREADABLE_FLATS_ISSUE, noise_source))
+        else:
+            if level_issues:
+                gates.append(
+                    failed_gate(
+                        FLAT_LEVEL_GATE_NAME,
+                        f"flat calibration: {level_issues[0]}",
+                        measured_value=measured_level,
+                        limit_source=level_source,
+                    )
+                )
+            else:
+                gates.append(passed_gate(FLAT_LEVEL_GATE_NAME, measured_level, limit_source=level_source))
+            if noise_issues:
+                gates.append(
+                    failed_gate(
+                        FLAT_NOISE_GATE_NAME,
+                        f"flat calibration: {noise_issues[0]}",
+                        measured_value=measured_noise,
+                        limit=MAXIMUM_FLAT_NOISE_FRACTION,
+                        limit_source=noise_source,
+                    )
+                )
+            elif measured_noise is None:
+                gates.append(
+                    unchecked_gate(
+                        FLAT_NOISE_GATE_NAME, "the flat noise could not be estimated", noise_source
+                    )
+                )
+            else:
+                gates.append(
+                    passed_gate(
+                        FLAT_NOISE_GATE_NAME, measured_noise, MAXIMUM_FLAT_NOISE_FRACTION, noise_source
+                    )
+                )
+
+    applied = diagnostics.get("calibration_applied") or {}
+    mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
+    if not any(applied.values()):
+        gates.append(
+            unchecked_gate(
+                CALIBRATION_METADATA_GATE_NAME,
+                "no calibration frame was applied, so there was nothing to compare",
+            )
+        )
+    elif mismatches:
+        gates.append(
+            failed_gate(
+                CALIBRATION_METADATA_GATE_NAME,
+                f"{len(mismatches)} calibration metadata mismatch(es)",
+                measured_value=float(len(mismatches)),
+                limit=0.0,
+            )
+        )
+    else:
+        gates.append(passed_gate(CALIBRATION_METADATA_GATE_NAME, 0.0, 0.0))
+    return gates
 
 
 def describe_background_splits(background_split: dict | list[dict] | None) -> str | None:

@@ -127,8 +127,8 @@ def test_stage_hands_the_quarantine_gate_to_the_summary_builder() -> None:
     with patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)):
         _driver, summary_builder = run_stage(make_target())
 
-    gates = summary_builder.call_args.kwargs["gate_results"]
-    assert [(gate.name, gate.status) for gate in gates] == [("frame_quarantine", GateStatus.PASSED)]
+    gates = {gate.name: gate for gate in summary_builder.call_args.kwargs["gate_results"]}
+    assert gates["frame_quarantine"].status is GateStatus.PASSED
 
 
 def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,8 +139,8 @@ def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pyt
 
     _driver, summary_builder = run_stage(make_target())
 
-    gates = summary_builder.call_args.kwargs["gate_results"]
-    assert [(gate.name, gate.status) for gate in gates] == [("frame_quarantine", GateStatus.NOT_CHECKED)]
+    gates = {gate.name: gate for gate in summary_builder.call_args.kwargs["gate_results"]}
+    assert gates["frame_quarantine"].status is GateStatus.NOT_CHECKED
 
 
 def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:

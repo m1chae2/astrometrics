@@ -60,6 +60,14 @@ MAXIMUM_FLAT_LEVEL_FRACTION = 0.90
 # The smoothing width is kept between these limits, in pixels. Below 1
 # pixel the blur does nothing useful. Above 8 pixels it starts to blur dust
 # shadows (typically tens of pixels wide) and to follow noise structure.
+# The start of each sentence `assess_flats` puts in `issues`. The gates in
+# `assess_input_quality` tell the issues apart by these, so the text and the
+# gates cannot drift apart.
+FAINT_FLAT_ISSUE_PREFIX = "flats are faint:"
+BRIGHT_FLAT_ISSUE_PREFIX = "flats are bright:"
+NOISY_FLAT_ISSUE_PREFIX = "master flat noise is"
+UNREADABLE_FLATS_ISSUE = "no flat frame could be read"
+
 MINIMUM_SMOOTHING_SIGMA_PIXELS = 1.0
 MAXIMUM_SMOOTHING_SIGMA_PIXELS = 8.0
 
@@ -272,20 +280,20 @@ def assess_flats(flat_paths: list[str]) -> FlatAssessment:
     frame_count = len(flat_paths)
     first = _read_frame(flat_paths[0]) if flat_paths else None
     if first is None:
-        return FlatAssessment(frame_count, issues=["no flat frame could be read"])
+        return FlatAssessment(frame_count, issues=[UNREADABLE_FLATS_ISSUE])
 
     issues: list[str] = []
     full_scale = _full_scale(first)
     level_fraction = float(np.nanmean(first)) / full_scale
     if level_fraction < MINIMUM_FLAT_LEVEL_FRACTION:
         issues.append(
-            f"flats are faint: {level_fraction:.1%} of full scale, below "
+            f"{FAINT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale, below "
             f"{MINIMUM_FLAT_LEVEL_FRACTION:.0%}, so their noise is high"
         )
     saturated = float(np.mean(first >= _SATURATED_FRACTION_OF_FULL_SCALE * full_scale))
     if level_fraction > MAXIMUM_FLAT_LEVEL_FRACTION or saturated > 0.001:
         issues.append(
-            f"flats are bright: {level_fraction:.1%} of full scale with {saturated:.2%} of "
+            f"{BRIGHT_FLAT_ISSUE_PREFIX} {level_fraction:.1%} of full scale with {saturated:.2%} of "
             "pixels saturated, so the response may not be linear"
         )
 
@@ -313,7 +321,7 @@ def assess_flats(flat_paths: list[str]) -> FlatAssessment:
         sigma = smoothing_sigma_for_noise(noise_fraction)
         if sigma is not None:
             issues.append(
-                f"master flat noise is {noise_fraction:.2%} from {frame_count} frame(s), above the "
+                f"{NOISY_FLAT_ISSUE_PREFIX} {noise_fraction:.2%} from {frame_count} frame(s), above the "
                 f"{MAXIMUM_FLAT_NOISE_FRACTION:.1%} limit; take more flats"
             )
     return FlatAssessment(frame_count, level_fraction, noise_fraction, sigma, issues)

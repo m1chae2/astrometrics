@@ -205,15 +205,21 @@ def stack_frames(
     from astrometricslib.models.quality_summary import ExcludedFrame
 
     excluded_frames: list[ExcludedFrame] = []
+    gate_results: list[GateResult] = []
 
     # Ensure all frames have the same camera gain setting. Stacking frames
     # with different gains messes up the noise calculation, because each
     # gain setting has a different amount of read noise and dark current.
     # To protect the final image, we find the most common gain setting
     # and throw out any frames that don't match it.
-    from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import find_dominant_gain_subset
+    from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
+        find_dominant_gain_subset,
+        gain_homogeneity_gate,
+    )
 
+    frames_before_gain_check = target_frames
     target_frames, excluded_by_gain = find_dominant_gain_subset(target_frames)
+    gate_results.append(gain_homogeneity_gate(frames_before_gain_check, excluded_by_gain))
     if excluded_by_gain:
         logger.warning(
             "Excluding %s frame(s) with a minority gain setting from the stack for target '%s': %s",
@@ -263,7 +269,6 @@ def stack_frames(
         GATE_NAME as QUARANTINE_GATE_NAME,
     )
 
-    gate_results: list[GateResult] = []
     if has_spectral:
         gate_results.append(
             unchecked_gate(
@@ -299,7 +304,9 @@ def stack_frames(
     from astrometricslib.foundation.config import get_configuration
 
     background_split = None
-    if get_configuration().get_background_homogeneity_check_enabled():
+    background_check_enabled = get_configuration().get_background_homogeneity_check_enabled()
+    frames_before_background_check = target_frames
+    if background_check_enabled:
         from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
         from astrometricslib.pipelines.shared.quality.background_measurement import (
             measure_frame_background_level,
@@ -356,6 +363,16 @@ def stack_frames(
             raise ProcessingError(
                 "Target has no frames available to stack after background-homogeneity filtering."
             )
+
+    from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
+        background_homogeneity_gate,
+    )
+
+    gate_results.append(
+        background_homogeneity_gate(
+            frames_before_background_check, background_split, background_check_enabled
+        )
+    )
 
     _report_stage(15, f"Frame checks done, {len(target_frames)} frames kept")
 
@@ -1070,6 +1087,7 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
     if len(frame_paths) == len(seq_frames) == len(zero_order_stars) and frame_paths:
         flagged = evaluate_spectral_registration_quality(frame_paths, seq_frames, zero_order_stars)
         summary.stacking_metrics.spectral_registration_flags = [ExcludedFrame(**entry) for entry in flagged]
+        summary.stacking_metrics.spectral_registration_checked = True
 
 
 def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore[missing-type-function-argument]
@@ -1155,10 +1173,12 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
     """
     from astrometricslib.pipelines.stacking.post_processing.assess_output_quality import (
         assess_output_quality,
+        output_quality_gates,
     )
 
     metrics = summary.stacking_metrics
-    summary.output_quality = assess_output_quality(metrics)
+    summary.output_quality = assess_output_quality(metrics, summary.quality_processing_applied)
+    output_gates = output_quality_gates(metrics, summary.quality_processing_applied)
     flag_reasons = [*summary.input_quality.flag_reasons, *summary.output_quality.flag_reasons]
     for group in metrics.exposure_groups:
         if group.left_out_reason:
@@ -1168,6 +1188,8 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
 
     summary.flagged = bool(flag_reasons)
     summary.flag_reasons = flag_reasons
+    for output_gate in output_gates:
+        summary.record_gate(output_gate)
 
 
 def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
@@ -1230,7 +1252,9 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     _finalize_stack_quality_flags(summary)
     # Recorded after the flags are rebuilt above, so a failed gate's reason is
     # not wiped by that rebuild.
-    for gate_result in gate_results or []:
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
+
+    for gate_result in [*(gate_results or []), *calibration_gates(diagnostics)]:
         summary.record_gate(gate_result)
     clipped_groups = diagnostics.get("clipped_exposure_groups", [])
     if clipped_groups:

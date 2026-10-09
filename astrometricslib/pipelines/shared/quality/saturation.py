@@ -66,7 +66,14 @@ def compute_saturated_pixel_fraction(data: np.ndarray, saturation_threshold: flo
     return float(np.count_nonzero(data >= saturation_threshold) / data.size)
 
 
-def is_saturation_significant(saturated_fraction: float, flag_threshold: float = 0.001) -> bool:
+# The share of saturated pixels (0.1%) above which a frame or stack is flagged.
+# A guess so far: it has not been checked against real stacks.
+DEFAULT_SATURATION_FLAG_THRESHOLD = 0.001
+
+
+def is_saturation_significant(
+    saturated_fraction: float, flag_threshold: float = DEFAULT_SATURATION_FLAG_THRESHOLD
+) -> bool:
     """Decide if there are enough overexposed pixels to warn the user about it.
 
     Parameters

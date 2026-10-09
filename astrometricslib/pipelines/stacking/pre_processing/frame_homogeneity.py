@@ -7,7 +7,14 @@ file finds and drops the images that don't match the rest.
 
 from typing import Any
 
+from astrometricslib.models.gate_result import GateResult, passed_gate, unchecked_gate
 from astrometricslib.utilities.iso_text import canonical_iso_text
+
+# The name the gain check goes by in a stack's gate record.
+GAIN_GATE_NAME = "gain_homogeneity"
+
+# What `canonical_iso_text` writes for a frame that records no gain.
+_UNKNOWN_GAIN_TEXTS = frozenset({"", "None"})
 
 
 def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
@@ -41,3 +48,38 @@ def find_dominant_gain_subset(frames: list[Any]) -> tuple[list[Any], list[Any]]:
     dominant_subset = groups[dominant_gain]
     excluded = [f for f in frames if canonical_iso_text(f.iso) != dominant_gain]
     return dominant_subset, excluded
+
+
+def gain_homogeneity_gate(frames: list[Any], excluded: list[Any]) -> GateResult:
+    """Record whether the gain check had a gain to compare.
+
+    Setting aside the frames of a minority gain corrects the stack, so it
+    does not fail the gate. What would make the check meaningless is no frame
+    recording its gain at all: every frame then falls in one "unknown" group
+    and the check passes by default. That case is ``not_checked``.
+
+    Parameters
+    ----------
+    frames : `list` [`Any`]
+        The frames handed to `find_dominant_gain_subset`.
+    excluded : `list` [`Any`]
+        The frames it set aside.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` when no frame records a gain, otherwise ``passed``
+        with the number of frames set aside.
+    """
+    source = "frames of the most common gain are kept; the rest are set aside"
+    known = [frame for frame in frames if canonical_iso_text(frame.iso) not in _UNKNOWN_GAIN_TEXTS]
+    if not known:
+        return unchecked_gate(
+            GAIN_GATE_NAME, "no frame records its gain setting, so gains could not be compared", source
+        )
+    return passed_gate(
+        GAIN_GATE_NAME,
+        measured_value=float(len(excluded)),
+        limit_source=source,
+        detail=f"{len(excluded)} frame(s) of a minority gain set aside; {len(frames) - len(excluded)} kept",
+    )

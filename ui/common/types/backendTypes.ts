@@ -1521,6 +1521,7 @@ export interface StackingPipelineQualityMetrics {
   expectedStackFwhmPx?: number | null;
   fwhmDegraded?: boolean;
   spectralRegistrationFlags?: ExcludedFrame[];
+  spectralRegistrationChecked?: boolean;
   stackingDurationSeconds?: number | null;
   timedOut?: boolean;
   debayerApplied?: boolean | null;

@@ -37,10 +37,10 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.stats import rankdata
 
 from astrometricslib import Astrometrics
 from astrometricslib.models.known_variability import KnownVariability, combine_known_variability
+from astrometricslib.pipelines.photometry.post_processing.variability_skill import area_under_curve
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
     DEFAULT_VARIABILITY_SIGMA_THRESHOLD,
     adaptive_cv_cutoff,
@@ -252,31 +252,6 @@ class SeparationResult:
     overall_auc: float | None
     matched_auc: float | None
     groups_used: int
-
-
-def area_under_curve(positives: Sequence[float], negatives: Sequence[float]) -> float | None:
-    """Work out the chance a positive has a higher value than a negative.
-
-    Parameters
-    ----------
-    positives : `Sequence` [`float`]
-        Values for the stars that really vary.
-    negatives : `Sequence` [`float`]
-        Values for the stars the catalogs do not list.
-
-    Returns
-    -------
-    auc : `float` or `None`
-        The Mann-Whitney probability (ties count half), or `None` if either
-        group is empty.
-    """
-    if not len(positives) or not len(negatives):
-        return None
-    combined = np.concatenate([positives, negatives])
-    ranks = rankdata(combined)
-    positive_rank_sum = float(np.sum(ranks[: len(positives)]))
-    count = len(positives)
-    return (positive_rank_sum - count * (count + 1) / 2.0) / (count * len(negatives))
 
 
 def measure_separation(

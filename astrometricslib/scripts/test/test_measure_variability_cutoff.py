@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.models.known_variability import KnownVariability
+from astrometricslib.pipelines.photometry.post_processing.variability_skill import area_under_curve
 from astrometricslib.scripts import measure_variability_cutoff as measure
 
 KNOWN = KnownVariability.KNOWN_VARIABLE
@@ -67,10 +68,10 @@ def make_field(
 
 def test_the_auc_is_one_for_perfect_separation_and_half_for_none() -> None:
     """Higher positives give 1, equal groups 0.5, lower positives 0."""
-    assert measure.area_under_curve([5, 6, 7], [1, 2, 3]) == pytest.approx(1.0)
-    assert measure.area_under_curve([1, 2, 3], [1, 2, 3]) == pytest.approx(0.5)
-    assert measure.area_under_curve([1, 2, 3], [5, 6, 7]) == pytest.approx(0.0)
-    assert measure.area_under_curve([], [1]) is None
+    assert area_under_curve([5, 6, 7], [1, 2, 3]) == pytest.approx(1.0)
+    assert area_under_curve([1, 2, 3], [1, 2, 3]) == pytest.approx(0.5)
+    assert area_under_curve([1, 2, 3], [5, 6, 7]) == pytest.approx(0.0)
+    assert area_under_curve([], [1]) is None
 
 
 def test_the_measure_sees_skill_when_known_variables_really_vary_more() -> None:

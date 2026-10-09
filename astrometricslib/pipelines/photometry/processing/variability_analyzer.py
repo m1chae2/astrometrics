@@ -232,6 +232,12 @@ def _adaptive_cv_cutoff(cv_list: list[float], sigma_threshold: float) -> Adaptiv
     return AdaptiveCVCutoff(cutoff=cutoff, median_cv=median_cv, mad_cv=mad_cv)
 
 
+# The public name of `_adaptive_cv_cutoff`, for code outside this module that
+# needs the same cutoff the pipeline uses (for example the script that checks
+# it against the catalogs).
+adaptive_cv_cutoff = _adaptive_cv_cutoff
+
+
 def _flag_variable_stars_by_adaptive_cutoff(
     stellar_objects: list[StellarObject], sigma_threshold: float
 ) -> list[StellarObject]:

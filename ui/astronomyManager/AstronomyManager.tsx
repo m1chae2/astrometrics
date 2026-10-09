@@ -17,6 +17,29 @@ import { selectLightCurveSeries } from './utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './styles/astronomyManager.css';
 
+/** localStorage key under which Planetarium (and the image viewer) hand a star to this panel. */
+const HANDED_OFF_STAR_KEY = 'planetariumSelectedStar';
+
+/**
+ * Reads the star another view asked this panel to open, if any.
+ *
+ * A `?star=` address parameter wins. Otherwise the star stored by the
+ * Planetarium's "Open in Astronomy Manager" action is used. That stored
+ * value is cleared once the panel has mounted (see `AstronomyManager`), so it
+ * only applies to the visit it was meant for and does not override the default
+ * first-star selection on later launches.
+ *
+ * @returns The star id to open, or an empty string when none was handed off.
+ */
+const readHandedOffStar = (): string => {
+  const params = new URLSearchParams(window.location.search);
+  try {
+    return params.get('star') || localStorage.getItem(HANDED_OFF_STAR_KEY) || '';
+  } catch {
+    return params.get('star') || '';
+  }
+};
+
 /**
  * AstronomyManager Component
  *
@@ -32,18 +55,26 @@ import './styles/astronomyManager.css';
  */
 export const AstronomyManager: React.FC = () => {
   const [selectedSpectrum, setSelectedSpectrum] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('star') || localStorage.getItem('planetariumSelectedStar') || '';
+    return readHandedOffStar();
   });
   // Seed pendingId with the same pre-selected star so useSpectrumData fetches
   // it immediately on mount -- otherwise a star arriving pre-selected (e.g.
   // via ?star= or the Planetarium hand-off) shows as selected in the list
   // but never triggers a data fetch, since fetching is driven by pendingId.
   const [pendingId, setPendingId] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('star') || localStorage.getItem('planetariumSelectedStar') || '';
+    return readHandedOffStar();
   });
   const [selectedTimestamps, setSelectedTimestamps] = useState<Set<string>>(new Set());
+
+  // The hand-off applies to this visit only; clear it so a later launch
+  // starts on the first star of the first target instead.
+  useEffect(() => {
+    try {
+      localStorage.removeItem(HANDED_OFF_STAR_KEY);
+    } catch {
+      // Storage unavailable: nothing was stored to clear.
+    }
+  }, []);
 
   // Two ways to browse the catalog: drill into a target's own stars, or
   // browse by catalog spectral classification with stars ranked by how

@@ -89,3 +89,15 @@ def test_catalog_gate_is_not_checked_when_no_lookup_was_attempted() -> None:
     gate = gates_for(remote_catalog_queries_attempted=0)[rg.CATALOG_LOOKUP_GATE_NAME]
 
     assert gate.status is GateStatus.NOT_CHECKED
+
+
+def test_a_breaker_that_was_already_open_means_no_lookup_was_made_not_a_failure() -> None:
+    """With the breaker open and no lookup attempted, the run did not fail."""
+    gate = gates_for(
+        remote_catalog_circuit_breaker_tripped=True,
+        remote_catalog_queries_attempted=0,
+        remote_catalog_queries_failed=0,
+    )[rg.CATALOG_LOOKUP_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED
+    assert "already marked unreachable" in gate.detail

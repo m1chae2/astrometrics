@@ -54,7 +54,18 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
     )
     attempted = metrics.remote_catalog_queries_attempted
     failed = metrics.remote_catalog_queries_failed
-    if metrics.remote_catalog_circuit_breaker_tripped:
+    if metrics.remote_catalog_circuit_breaker_tripped and attempted == 0:
+        # The breaker was already open when the run began (it is shared by the
+        # whole process), so no lookup was made. The run did not cause this and
+        # did not check the catalogs.
+        gates.append(
+            unchecked_gate(
+                CATALOG_LOOKUP_GATE_NAME,
+                "the catalog service was already marked unreachable, so no lookup was made",
+                lookup_source,
+            )
+        )
+    elif metrics.remote_catalog_circuit_breaker_tripped:
         gates.append(
             failed_gate(
                 CATALOG_LOOKUP_GATE_NAME,

@@ -31,7 +31,7 @@ The summary keeps one record per check in `gates`. Each gate is `passed`, `faile
 |---|---|---|
 | `plate_solve` | The image was not solved to sky coordinates | Never |
 | `source_detection` | No star was detected | Never |
-| `catalog_lookup` | The catalog circuit breaker tripped, or half or more of the lookups failed | No lookup was attempted |
+| `catalog_lookup` | Lookups were made and the catalog circuit breaker tripped, or half or more of them failed | No lookup was attempted, including when the breaker was already open from earlier failures in the same process |
 
 `source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. There is no gate yet on how well the solution fits the stars (the residual RMS) or on how many stars matched: both numbers are recorded but have no limit, and a limit has to be derived from the plate scale and star width and checked on real data (Gap 5 of the audit plan).
 

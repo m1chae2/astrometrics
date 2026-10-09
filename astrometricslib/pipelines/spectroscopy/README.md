@@ -63,3 +63,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
 
 `catalog_agreement`, `feature_significance` and `spectra_extracted` are new flags: before, a disagreement with the catalog or an uncalibrated p-value showed only on the star's own record, and a run with no spectra was not flagged at all. The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path. Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.
+
+## What the emission-line detector can see
+
+Measured on 228 stored spectra of stars not known to emit (`scripts/validate_emission_line_detector.py`, 2026-10-09): the detector reports a false "detected" line in 1 of them (0.4%) and calls none an emission-line source. It is also insensitive. A box-shaped line added to those spectra is reported as detected only about half the time (44% to 47%) when its height is 1.6 times the spectrum's median brightness, and 2% to 6% of the time at 0.4 to 0.8 times. So a "not seen" from this detector means only that no strong line is there; it is built for a bright nebula such as M 57 and will pass a faint emitter. The thresholds (5 error bars detected, 3 unclear) were set on M 57 only and have not been tuned on any other nebula.

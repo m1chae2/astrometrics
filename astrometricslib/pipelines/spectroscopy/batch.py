@@ -14,6 +14,11 @@ from typing import Any
 
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+    merge_spectrum_facts,
+    spectroscopy_run_gates,
+    spectrum_facts,
+)
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -283,7 +288,9 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         pipeline_type="spectroscopy",
         catalog_access=astrometrics.catalog_access,
     )
-    result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
+    fallback_stars = analysis_outcome.get("stellar_objects") or []
+    result["stars_processed"] = len(fallback_stars)
+    result["spectrum_facts"] = spectrum_facts(fallback_stars)
     result["status"] = "success"
     return result
 
@@ -358,6 +365,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         "trail_widths": [],
         "zero_order_saturation_fractions": [],
         "spectral_classification_concerns": [],
+        "spectrum_facts": {},
     }
     try:
         from astrometricslib import Astrometrics
@@ -408,6 +416,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         )
 
         result["stars_processed"] = len(stellar_objects)
+        result["spectrum_facts"] = spectrum_facts(stellar_objects)
         result["dispersion_angles"] = [
             obj.spectroscopy.dispersion_angle
             for obj in stellar_objects
@@ -572,6 +581,15 @@ def _attach_spectroscopy_quality_summary(
     all_trail_widths = []
     all_zero_order_fractions = []
     all_spectral_classification_concerns = []
+    all_spectrum_facts = merge_spectrum_facts(
+        frame_result.get("spectrum_facts") for frame_result in summary.results.values()
+    )
+    # Every star a worker processed has a spectrum; this count does not
+    # depend on the optional per-check counts above.
+    all_spectrum_facts["spectra"] = max(
+        all_spectrum_facts["spectra"],
+        sum(int(frame_result.get("stars_processed") or 0) for frame_result in summary.results.values()),
+    )
     for frame_result in summary.results.values():
         all_dispersion_angles.extend(frame_result.get("dispersion_angles") or [])
         all_trail_widths.extend(frame_result.get("trail_widths") or [])
@@ -617,14 +635,10 @@ def _attach_spectroscopy_quality_summary(
             flagged_spectral_classifications=all_spectral_classification_concerns,
         ),
     )
-    if zero_order_flagged:
-        target.quality.spectroscopy.flagged = True
-        target.quality.spectroscopy.flag_reasons.append("zero-order saturated in at least one processed star")
-    if all_spectral_classification_concerns:
-        target.quality.spectroscopy.flagged = True
-        target.quality.spectroscopy.flag_reasons.append(
-            f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
-        )
+    for gate in spectroscopy_run_gates(
+        all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns
+    ):
+        target.quality.spectroscopy.record_gate(gate)
 
     from astrometricslib.pipelines.shared.applied_camera_profile import (
         camera_name_for_paths,

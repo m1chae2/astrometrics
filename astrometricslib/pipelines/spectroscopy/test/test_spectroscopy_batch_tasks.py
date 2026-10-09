@@ -440,7 +440,16 @@ class TestAttachSpectroscopyQualitySummary:
             FrameRecord(path="other.fits", role="LIGHT", camera="Acme Imager 9000", exposure="1.0"),
         ]
         target = Target(id="CameraProfileTestTarget", frames=frames)
-        summary = parallel_batch.BatchRunSummary(succeeded=["a.fits", "b.fits"], failed=[], results={})
+        results = {
+            path: {
+                "status": "success",
+                "stars_processed": 1,
+                "zero_order_saturation_fractions": [0.0],
+                "spectrum_facts": {"spectra": 1},
+            }
+            for path in ("a.fits", "b.fits")
+        }
+        summary = parallel_batch.BatchRunSummary(succeeded=["a.fits", "b.fits"], failed=[], results=results)
         session = _make_session("Target:2026-01-01:0.0:0", ["a.fits", "b.fits"])
 
         batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
@@ -449,6 +458,18 @@ class TestAttachSpectroscopyQualitySummary:
         assert recorded.camera_profile is not None
         assert recorded.camera_profile.profile_name == "ZWO ASI533MM Pro"
         assert recorded.flagged is False
+
+    def test_flags_a_batch_in_which_no_frame_produced_a_spectrum(self) -> None:
+        """Frames that yielded no spectrum no longer read as clean."""
+        target = Target(id="NoSpectrumTestTarget")
+        summary = parallel_batch.BatchRunSummary(succeeded=["a.fits"], failed=[], results={})
+        session = _make_session("Target:2026-01-01:0.0:0", ["a.fits"])
+
+        batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
+
+        recorded = target.quality.spectroscopy
+        assert recorded.flagged is True
+        assert "no star produced a spectrum" in recorded.flag_reasons
 
     def test_flags_target_when_zero_order_saturation_significant(self) -> None:
         """Verify significant zero-order saturation flags with a reason."""
@@ -565,15 +586,17 @@ class TestAttachSpectroscopyQualitySummary:
         assert breakdown_by_session[session_b.id].frames_contributed == 1
         assert breakdown_by_session[session_b.id].frames_clipped == 0
 
-    def test_no_saturation_data_does_not_flag_or_crash(self) -> None:
-        """Verify an empty run builds a summary without flagging or raising."""
+    def test_an_empty_run_builds_a_summary_and_says_nothing_was_checked(self) -> None:
+        """An empty run builds a summary flagged as having no spectrum."""
         target = Target(id="NoDataTestTarget")
 
         summary = parallel_batch.BatchRunSummary(succeeded=[], failed=[], results={})
 
         batch._attach_spectroscopy_quality_summary(target, summary, [])
 
-        assert target.quality.spectroscopy.flagged is False
+        assert target.quality.spectroscopy.flagged is True
+        assert target.quality.spectroscopy.flag_reasons == ["no star produced a spectrum"]
+        assert target.quality.spectroscopy.gate("zero_order_saturation").status.value == "not_checked"
         assert target.quality.spectroscopy.spectroscopy_metrics.zero_order_saturated_pixel_fraction is None
         assert target.quality.spectroscopy.spectroscopy_metrics.median_trail_width_px is None
 

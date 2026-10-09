@@ -27,6 +27,10 @@ from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+    spectroscopy_run_gates,
+    spectrum_facts,
+)
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
 )
@@ -503,14 +507,10 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 flagged_spectral_classifications=flagged_spectral_classifications,
             ),
         )
-        if zero_order_flagged:
-            summary.flagged = True
-            summary.flag_reasons.append("zero-order saturated in at least one processed star")
-        if flagged_spectral_classifications:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"spectral classification uncertain for {len(flagged_spectral_classifications)} star(s)"
-            )
+        for gate in spectroscopy_run_gates(
+            spectrum_facts(stellar_objects), zero_order_fractions, flagged_spectral_classifications
+        ):
+            summary.record_gate(gate)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
 

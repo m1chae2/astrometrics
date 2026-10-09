@@ -48,3 +48,18 @@ session does not lose the frames already processed.
   `frame_analysis.py`) drive a star or a session through the three stages
   above. They implement the "how this runs in practice" section, not a
   fourth stage.
+
+## The gate record
+
+Besides each star's own quality records, a run keeps one record per run-level check in the summary's `gates` (built in `post_processing/run_gates.py`, by both `runner.py` and `batch.py`). Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. The tests in `test/post_processing/test_run_gates.py` give every gate input that must fail it.
+
+| Gate | Fails when | Not checked when |
+|---|---|---|
+| `spectra_extracted` | No star produced a spectrum | Never |
+| `zero_order_saturation` | 0.1% or more of a zero-order image is saturated | No zero-order saturation was measured |
+| `spectral_classification` | A star's type is low-confidence or ambiguous | No star was given a type |
+| `catalog_agreement` | A measured type disagrees with the catalog type | No star had a catalog type to compare with |
+| `feature_significance` | A star's feature p-values fell back to assuming Gaussian noise | No star had its features tested |
+| `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
+
+`catalog_agreement`, `feature_significance` and `spectra_extracted` are new flags: before, a disagreement with the catalog or an uncalibrated p-value showed only on the star's own record, and a run with no spectra was not flagged at all. The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path. Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.

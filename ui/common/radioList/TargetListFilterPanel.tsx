@@ -26,9 +26,8 @@ type FilterTab = 'catalog' | 'camera';
 
 /**
  * Two-tab filter for the target list: pick a catalog ("By catalog"), then
- * optionally a camera ("By camera"). Both choices apply together. A summary
- * line shows what is active, and a toggle sorts the list by name or by the
- * most recently imaged.
+ * optionally a camera ("By camera"). Both choices apply together. A toggle
+ * sorts the list by name or by the most recently imaged.
  *
  * @param {TargetListFilterPanelProps} props - Options, selections and change handlers.
  * @return {React.ReactElement} The filter panel body.
@@ -62,10 +61,6 @@ export const TargetListFilterPanel: React.FC<TargetListFilterPanelProps> = ({
         })),
     ];
 
-    const activeFilters = [selectedCatalog, selectedCamera].filter(
-        (choice, index) => index === 0 || choice !== CAMERA_ALL
-    );
-
     return (
         <div className="target-list-filter-panel">
             <div className="astronomy-display__mode-toggle" role="tablist">
@@ -98,9 +93,6 @@ export const TargetListFilterPanel: React.FC<TargetListFilterPanelProps> = ({
             />
 
             <div className="target-list-filter-panel__summary">
-                <span className="target-list-filter-panel__chips" title="Active filters">
-                    {activeFilters.join(' · ')}
-                </span>
                 <div className="astronomy-display__mode-toggle" role="group" aria-label="Sort order">
                     {([SORT_ALPHABETICAL, SORT_NEWEST] as SortChoice[]).map((choice) => (
                         <button

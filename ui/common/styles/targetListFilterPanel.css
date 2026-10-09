@@ -1,5 +1,5 @@
 /* Top panel of the shared target list: catalog / camera tabs, the option
-   list for the active tab, and a summary + sort row. */
+   list for the active tab, and a sort row. */
 
 .target-list-filter-panel {
     display: flex;
@@ -18,12 +18,4 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-}
-
-.target-list-filter-panel__chips {
-    font-size: 0.75rem;
-    color: var(--text-dim, #9aa5b5);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }

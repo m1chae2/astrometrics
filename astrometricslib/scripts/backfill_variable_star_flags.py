@@ -45,6 +45,7 @@ from astrometricslib.models.known_variability import (
     is_confirmed_constant,
 )
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.star_kinds import StarKind, kind_of_star_id, stored_position_degrees
 from astrometricslib.pipelines.shared.variable_star_catalogs import (
     GAIA_CATALOG,
     VSX_CATALOG,
@@ -53,11 +54,6 @@ from astrometricslib.pipelines.shared.variable_star_catalogs import (
     gaia_flags_from_matches,
     run_crossmatch,
     vsx_types_from_matches,
-)
-from astrometricslib.scripts.backfill_simbad_object_types import (
-    StarKind,
-    kind_of_star_id,
-    stored_position_degrees,
 )
 
 # How many stars go in one cross-match request. XMatch takes far more; this

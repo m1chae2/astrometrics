@@ -17,8 +17,9 @@ from astropy.table import MaskedColumn, Table
 from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.known_variability import KnownVariability
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.star_kinds import StarKind
 from astrometricslib.scripts import backfill_simbad_object_types as backfill
-from astrometricslib.scripts.backfill_simbad_object_types import Outcome, StarKind
+from astrometricslib.scripts.backfill_simbad_object_types import Outcome
 
 ALGOL = ("* bet Per", 47.04221855625, 40.95564667027778, "*|**|EB*|IR|NIR|SB*|UV|V*|X")
 VEGA = ("* alf Lyr", 279.23473479, 38.78368896, "*|**|IR|NIR|PM*|UV|X")

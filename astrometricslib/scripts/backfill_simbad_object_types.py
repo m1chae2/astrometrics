@@ -59,6 +59,7 @@ from astrometricslib.models.known_variability import (
 )
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
+from astrometricslib.pipelines.shared.star_kinds import StarKind, kind_of_star_id, stored_position_degrees
 
 logger = logging.getLogger(__name__)
 
@@ -79,20 +80,6 @@ CONSECUTIVE_FAILURE_LIMIT = 3
 
 # Pause between requests, in seconds, to stay polite to the service.
 DEFAULT_PAUSE_SECONDS = 0.5
-
-_GAIA_PREFIX = "Gaia DR3 "
-# The id given to a Gaia star with no source number: made from its position.
-_SYNTHETIC_GAIA_PREFIX = "Gaia DR3 J"
-_POSITION_ONLY_PREFIX = "FIELD_J"
-_SPECTROSCOPY_COPY_SUFFIX = "::spectroscopy"
-
-
-class StarKind(StrEnum):
-    """How a star's id can be looked up in SIMBAD."""
-
-    SIMBAD_NAME = "simbad_name"
-    GAIA_SOURCE = "gaia_source"
-    SKIPPED = "skipped"
 
 
 class Outcome(StrEnum):
@@ -136,30 +123,6 @@ class BackfillReport:
     failed_requests: int = 0
     stopped_early: bool = False
     saved: int = 0
-
-
-def kind_of_star_id(star_id: str) -> StarKind:
-    """Say how a star's id can be looked up in SIMBAD.
-
-    Parameters
-    ----------
-    star_id : `str`
-        The star's id in the catalog.
-
-    Returns
-    -------
-    kind : `StarKind`
-        ``GAIA_SOURCE`` for a Gaia DR3 source number, ``SKIPPED`` for ids that
-        carry no identity (position-only, made-up Gaia ids, spectroscopy
-        copies), and ``SIMBAD_NAME`` for everything else.
-    """
-    if star_id.endswith(_SPECTROSCOPY_COPY_SUFFIX) or star_id.startswith(_POSITION_ONLY_PREFIX):
-        return StarKind.SKIPPED
-    if star_id.startswith(_SYNTHETIC_GAIA_PREFIX):
-        return StarKind.SKIPPED
-    if star_id.startswith(_GAIA_PREFIX) and star_id[len(_GAIA_PREFIX) :].isdigit():
-        return StarKind.GAIA_SOURCE
-    return StarKind.SIMBAD_NAME
 
 
 def quote_adql(text: str) -> str:
@@ -219,30 +182,6 @@ def build_query(kind: StarKind, identifiers: Sequence[str]) -> str:
             f"WHERE ident.id IN ({id_list})"
         )
     raise ValueError(f"Cannot build a query for a {kind.value} star.")
-
-
-def stored_position_degrees(star: StellarObject) -> tuple[float, float] | None:
-    """Read a star's stored position in degrees.
-
-    Parameters
-    ----------
-    star : `StellarObject`
-        The star.
-
-    Returns
-    -------
-    position : `tuple` [`float`, `float`] or `None`
-        Right ascension and declination, or `None` if the star has no usable
-        numeric position.
-    """
-    try:
-        right_ascension = float(star.right_ascension)
-        declination = float(star.declination)
-    except TypeError, ValueError:
-        return None
-    if right_ascension != right_ascension or declination != declination:  # NaN
-        return None
-    return right_ascension, declination
 
 
 def separation_arcsec(first: tuple[float, float], second: tuple[float, float]) -> float:

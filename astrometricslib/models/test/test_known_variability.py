@@ -14,6 +14,7 @@ from astrometricslib.models.known_variability import (
     KnownVariability,
     classify_simbad_object_types,
     describe_known_variability,
+    variable_object_types_in,
 )
 from astrometricslib.models.stellar_source import StellarObject
 
@@ -109,3 +110,11 @@ def test_a_star_reads_its_known_variability_from_its_stored_types() -> None:
 
     assert star.known_variability is KnownVariability.KNOWN_VARIABLE
     assert "simbadObjectTypes" in star.model_dump(by_alias=True)
+
+
+def test_the_helper_lists_the_codes_that_made_a_star_variable() -> None:
+    """The codes are returned in order, firm and candidate alike."""
+    assert variable_object_types_in("*|**|EB*|SB*|V*|V*?") == ["EB*", "V*", "V*?"]
+    assert variable_object_types_in("*|IR|NIR") == []
+    assert variable_object_types_in(None) == []
+    assert variable_object_types_in(b"RR*") == ["RR*"]

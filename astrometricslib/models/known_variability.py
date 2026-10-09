@@ -138,6 +138,30 @@ def classify_simbad_object_types(object_types: str | bytes | None) -> KnownVaria
     return KnownVariability.NOT_LISTED
 
 
+def variable_object_types_in(object_types: str | bytes | None) -> list[str]:
+    """List the variable and candidate-variable codes in a star's object types.
+
+    Parameters
+    ----------
+    object_types : `str`, `bytes` or `None`
+        SIMBAD object-type codes joined with ``|``, or nothing.
+
+    Returns
+    -------
+    codes : `list` [`str`]
+        The codes that made the star a known or suspected variable, in the
+        order given. Empty when there are none.
+    """
+    if isinstance(object_types, bytes):
+        object_types = object_types.decode("utf-8", errors="replace")
+    codes = [code.strip() for code in (object_types or "").split(_OBJECT_TYPE_SEPARATOR)]
+    return [
+        code
+        for code in codes
+        if code in KNOWN_VARIABLE_OBJECT_TYPES or code in SUSPECTED_VARIABLE_OBJECT_TYPES
+    ]
+
+
 def describe_known_variability(status: KnownVariability) -> str:
     """Say what a known-variability answer means, in one sentence.
 

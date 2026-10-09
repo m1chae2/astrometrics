@@ -68,6 +68,12 @@ class _FakeSimbad:
             raise self._result
         return self._result
 
+    def query_tap(self, adql_query: str) -> Any:
+        self.events.append(("query_tap", adql_query))
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
 
 @pytest.fixture
 def fake_client(monkeypatch: pytest.MonkeyPatch) -> _FakeSimbad:
@@ -340,3 +346,23 @@ def test_concurrent_queries_do_not_interleave_configuration(
 def test_the_driver_implements_the_simbad_interface() -> None:
     """`AstroquerySimbadDriver` is a `SimbadDriver`."""
     assert isinstance(AstroquerySimbadDriver(), SimbadDriver)
+
+
+def test_query_tap_sends_the_query_without_touching_the_column_selection(fake_client: _FakeSimbad) -> None:
+    """A TAP query names its own columns, so no votable fields are added."""
+    result = AstroquerySimbadDriver().query_tap("SELECT main_id FROM basic")
+
+    assert result == "table"
+    assert fake_client.events == [("query_tap", "SELECT main_id FROM basic")]
+
+
+def test_a_tap_failure_is_reported_as_an_external_service_error_and_frees_the_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable TAP service raises our error and frees the lock."""
+    monkeypatch.setattr(simbad_module, "_client", _FakeSimbad(result=ConnectionError("SIMBAD unreachable")))
+
+    with pytest.raises(ExternalServiceError):
+        AstroquerySimbadDriver().query_tap("SELECT main_id FROM basic")
+
+    assert not simbad_module.SIMBAD_LOCK.locked()

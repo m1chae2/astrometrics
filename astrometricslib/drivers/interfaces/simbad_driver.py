@@ -59,3 +59,23 @@ class SimbadDriver(ABC):
         result_table : `astropy.table.Table` or `None`
             The matching row, or `None` if the name did not resolve.
         """
+
+    @abstractmethod
+    def query_tap(self, adql_query: str) -> Any:
+        """Run an ADQL query against SIMBAD's TAP service.
+
+        ADQL is the SQL-like language astronomy services use. This is the way
+        to look up many objects in one request, which a loop of
+        `query_object` calls cannot do without sending one request per star.
+
+        Parameters
+        ----------
+        adql_query : `str`
+            The query, for example a ``SELECT`` over SIMBAD's ``basic``,
+            ``ident`` and ``alltypes`` tables.
+
+        Returns
+        -------
+        result_table : `astropy.table.Table` or `None`
+            The rows, or `None` if SIMBAD returned nothing.
+        """

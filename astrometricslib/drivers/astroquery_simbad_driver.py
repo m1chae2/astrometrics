@@ -205,3 +205,30 @@ class AstroquerySimbadDriver(SimbadDriver):
                 raise ExternalServiceError(
                     "The SIMBAD name lookup failed.", details={"object_name": object_name}
                 ) from query_error
+
+    def query_tap(self, adql_query: str) -> Any:
+        """Run an ADQL query against SIMBAD's TAP service.
+
+        Parameters
+        ----------
+        adql_query : `str`
+            The query to run.
+
+        Returns
+        -------
+        result_table : `astropy.table.Table` or `None`
+            The rows, or `None` if SIMBAD returned nothing.
+
+        Raises
+        ------
+        ExternalServiceError
+            If SIMBAD could not be reached or its reply could not be read.
+        """
+        with SIMBAD_LOCK:
+            client = _get_client()
+            try:
+                return client.query_tap(adql_query)
+            except ONLINE_QUERY_ERRORS as query_error:
+                raise ExternalServiceError(
+                    "The SIMBAD TAP query failed.", details={"query_length": len(adql_query)}
+                ) from query_error

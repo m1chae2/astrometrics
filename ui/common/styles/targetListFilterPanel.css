@@ -8,9 +8,10 @@
 }
 
 /* Only a handful of options, so the list takes its own height instead of
-   filling the panel. */
+   filling the panel. The cap fits the six catalog options (about 32px each)
+   without a scrollbar. A longer camera list scrolls past it. */
 .target-list-filter-panel__options {
-    max-height: 144px;
+    max-height: 208px;
 }
 
 .target-list-filter-panel__summary {

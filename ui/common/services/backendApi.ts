@@ -145,6 +145,7 @@ export interface ActionRegistry {
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
+    "target:send_to_phone": { payload: { target_id: string }; response: { path: string; method: string; device?: string } };
     "target:refresh": { payload: { target_id: string; prune_missing?: boolean }; response: void };
     "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
 

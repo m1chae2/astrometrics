@@ -1,9 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchTargetObject, addTargetData, fetchTargetFrameHeader, fetchTargetFiles } from '../../common/services/targetService';
-import { fetchAvailableCameras } from '../../common/services/systemService';
+import { fetchTargetObject, sendTargetToPhone, fetchTargetFrameHeader, fetchTargetFiles } from '../../common/services/targetService';
 import { reportError } from '../../common/utils/reportError';
-import { on as onEvent, emit as emitEvent } from '../../common/utils/eventBus';
-import { CameraSelectionDialog } from './CameraSelectionDialog';
+import { on as onEvent } from '../../common/utils/eventBus';
 import { FrameFilterGroup, TargetDetails } from './targetDetails/TargetDetails';
 import { SectionPanel } from '../../common/components/SectionPanel';
 import { ListActions } from '../../common/components/ListActions';
@@ -36,7 +34,7 @@ export interface TargetDetailsManagerProps {
 /**
  * Manager component for target details.
  * Orchestrates fetching target data, parsing FITS headers for exposure times,
- * grouping frames by filter, and handling new image additions via the system file picker.
+ * grouping frames by filter, and sending the target's picture to a phone.
  *
  * @param props - TargetDetailsManagerProps controlling the currently viewed target and edit handlers.
  */
@@ -57,11 +55,6 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   const [filterGroups, setFilterGroups] = useState<FrameFilterGroup[]>([]);
   const [ra, setRa] = useState<string>('');
   const [dec, setDec] = useState<string>('');
-
-  // Camera Selection State
-  const [availableCameras, setAvailableCameras] = useState<string[]>([]);
-  const [showCameraDialog, setShowCameraDialog] = useState<boolean>(false);
-  const [selectedAddCamera, setSelectedAddCamera] = useState<string>('');
 
   const cacheRef = useRef<Map<string, unknown>>(new Map());
 
@@ -176,12 +169,6 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
   }, [selectedTarget]);
 
   useEffect(() => {
-    // Fetch available cameras on mount
-    fetchAvailableCameras().then(cams => {
-      setAvailableCameras(cams);
-      if (cams.length > 0) setSelectedAddCamera(cams[0]);
-    });
-
     // Clear cache when targets are updated elsewhere in the app.
     const detach = onEvent('targetsUpdated', () => {
       try {
@@ -228,54 +215,15 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
     };
   }, [selectedTarget, updateTargetState]);
 
-  /** Opens a file picker and adds selected images to the target. */
-  const processAddImage = async (): Promise<void> => {
+  /** Opens LocalSend with this target's JPEG picture ready to send. */
+  const handleSendToPhone = async (): Promise<void> => {
     if (!selectedTarget) return;
     try {
-      let paths: string[];
-
-      if (window.astrometrics?.dialog?.openFile) {
-        // Browser File objects don't expose a filesystem path under this
-        // app's contextIsolation: true / nodeIntegration: false Electron
-        // config, so the native dialog is the only way to get real
-        // absolute paths the backend can resolve on disk.
-        const filePaths = await window.astrometrics.dialog.openFile({
-          properties: ['openFile', 'multiSelections'],
-        });
-        if (!filePaths || filePaths.length === 0) return;
-        paths = filePaths;
-      } else {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.multiple = true;
-        input.accept = '*/*';
-
-        const promise: Promise<FileList | null> = new Promise((resolve) => {
-          input.onchange = () => resolve(input.files);
-          input.click();
-        });
-
-        const files = await promise;
-        if (!files || files.length === 0) return;
-
-        paths = Array.from(files).map((f) => f.name);
-      }
-
-      await addTargetData(paths, selectedTarget, selectedAddCamera);
-      setShowCameraDialog(false);
-
-      const obj = await fetchTargetObject(selectedTarget).catch(() => null);
-      if (obj) {
-        updateTargetState(obj);
-      }
-      emitEvent('targetsUpdated');
+      await sendTargetToPhone(selectedTarget);
     } catch (err) {
-      reportError(err, 'backend');
+      // The backend call has already shown the error toast.
+      reportError(err, 'TargetDetailsManager');
     }
-  };
-
-  const handleAddImageRequest = () => {
-    setShowCameraDialog(true);
   };
 
   return (
@@ -297,20 +245,12 @@ export const TargetDetailsManager: React.FC<TargetDetailsManagerProps> = ({
 
       <SectionPanel title="Target Controls" className="flex-auto">
         <ListActions>
-          <button className="btn" onClick={handleAddImageRequest}>Add Processed Image</button>
+          <button className="btn" onClick={handleSendToPhone} disabled={!selectedTarget}>Send to Phone</button>
           <button className="btn" onClick={onSaveTarget}>Save Target</button>
           <button className="btn" onClick={onDeleteTarget}>Delete Target</button>
         </ListActions>
       </SectionPanel>
 
-      <CameraSelectionDialog
-        isOpen={showCameraDialog}
-        onClose={() => setShowCameraDialog(false)}
-        onConfirm={processAddImage}
-        availableCameras={availableCameras}
-        selectedCamera={selectedAddCamera}
-        onSelectCamera={setSelectedAddCamera}
-      />
     </div>
   );
 };

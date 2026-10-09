@@ -160,6 +160,7 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "target:update": ("target_service", "update_target"),
     "target:delete": ("target_service", "delete_target"),
     "target:add_data": ("target_service", "add_target_data"),
+    "target:send_to_phone": ("target_service", "send_to_phone"),
     "target:refresh": ("target_service", "refresh_target_images_by_id"),
     "target:get_files": ("target_service", "get_file_list"),
     "target:get_camera_index": ("target_service", "get_camera_index"),

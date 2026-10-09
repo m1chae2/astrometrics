@@ -177,6 +177,7 @@ if TYPE_CHECKING:
         parse_iso_time,
         select_library_frames,
     )
+    from astrometricslib.pipelines.shared.stack_preview_path import preview_path_for
 
 # A library only writes log messages. A program decides where they go, by
 # calling `configure_logging`. The null handler stops Python from printing a
@@ -204,6 +205,7 @@ _DEFERRED_EXPORTS = {
     "reject_unused_arguments": "astrometricslib.pipelines.shared.api_arguments",
     "resolve_target": "astrometricslib.pipelines.shared.api_arguments",
     "to_epoch_seconds": "astrometricslib.pipelines.shared.api_arguments",
+    "preview_path_for": "astrometricslib.pipelines.shared.stack_preview_path",
     "select_library_frames": "astrometricslib.pipelines.shared.quality.frame_selection",
     "StellarCatalog": "astrometricslib.api.stars",
     "TargetCatalog": "astrometricslib.api.targets",
@@ -417,6 +419,7 @@ __all__ = [
     "observing_night_id",
     "parse_coordinate_string",
     "parse_iso_time",
+    "preview_path_for",
     "registered_job",
     "reject_unused_arguments",
     "require_mounted_storage",

@@ -1943,6 +1943,7 @@ export const RPC_METHODS = [
   "target:update",
   "target:delete",
   "target:add_data",
+  "target:send_to_phone",
   "target:refresh",
   "target:get_files",
   "target:get_camera_index",

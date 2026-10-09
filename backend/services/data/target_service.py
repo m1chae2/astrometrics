@@ -17,11 +17,16 @@ from astrometricslib import (
     NotFoundError,
     ReindexReport,
     Target,
+    preview_path_for,
 )
 from backend.services.data.deletion_archive import archive_record_before_delete
 from backend.services.data.image_service import ImageService
+from backend.services.infrastructure.phone_share import send_file_to_phone
 
 logger = logging.getLogger(__name__)
+
+PICTURE_SUFFIXES = (".jpg", ".jpeg")
+"""File endings of a picture that can be sent as it is."""
 
 
 class TargetService:
@@ -195,6 +200,47 @@ class TargetService:
             return {"status": "success"}
         frame = next((frame for frame in target.frames if frame.path == path), None)
         return {"status": "success", "frame": frame}
+
+    def send_to_phone(self, target_id: str) -> dict[str, str]:
+        """Send a target's JPEG picture to the user's phone.
+
+        The picture is the stack's JPEG preview, the same picture the Image
+        Viewer shows as a stretched FITS file. See
+        `send_file_to_phone` for how it reaches the phone and what it raises
+        when no phone link works.
+
+        Parameters
+        ----------
+        target_id : `str`
+            The target whose picture to send, such as ``"M 57"``.
+
+        Returns
+        -------
+        result : `dict`
+            ``path`` (the file sent), ``method`` (``"gsconnect"`` or
+            ``"localsend"``) and, for GSConnect, the phone's ``device`` name.
+
+        Raises
+        ------
+        NotFoundError
+            If the target does not exist, has no stack, or its JPEG picture
+            is missing from the disk.
+        """
+        target = self.astrometrics.targets.get(target_id)
+        if not target:
+            raise NotFoundError(f"No target named {target_id!r}.")
+        picture = target.stacking.processed_image
+        if picture and picture.lower().endswith(PICTURE_SUFFIXES):
+            path = picture
+        elif target.stacking.stacked_image:
+            # The viewer shows the stretched FITS. The stack's JPEG sits
+            # beside the stack under a name the library decides.
+            path = preview_path_for(target.stacking.stacked_image)
+        else:
+            raise NotFoundError(f"{target_id} has no stack to send a picture of.")
+        if not os.path.isfile(path):
+            raise NotFoundError(f"The JPEG picture for {target_id} is missing.", details={"path": path})
+        return {"path": path, **send_file_to_phone(path)}
 
     def refresh_target_images(self, target: Target, prune_missing: bool = False) -> None:
         """Force a library rescan on the FITS directory catalog.

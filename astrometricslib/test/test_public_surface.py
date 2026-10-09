@@ -42,6 +42,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "reject_unused_arguments",
     "resolve_target",
     "to_epoch_seconds",
+    "preview_path_for",
     "AbstractButler",
     "AbstractCatalogAccess",
     "Activity",

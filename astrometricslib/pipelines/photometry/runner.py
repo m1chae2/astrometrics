@@ -19,6 +19,7 @@ from astrometricslib.pipelines.photometry.batch import (
     _run_variability_analysis_for_session,
     search_periods_and_save,
 )
+from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -32,18 +33,6 @@ from astrometricslib.pipelines.shared.star_recording import (
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
-
-# The percentage of rejected frames needed to trigger a quality warning flag.
-# Normal processing naturally rejects a small number of frames (around 7.2%
-# based on past runs). If we trigger a warning for anything less, we get
-# too many false alarms. Setting the limit to 0.25 (25%) helps us catch
-# real issues (like passing clouds) that need a human to check.
-MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
-
-# The minimum number of rejected frames needed to trigger a quality warning.
-# This prevents false alarms when dealing with a small number of frames
-# (under 20), where a single rejected frame could cause a high percentage.
-MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 
 
 def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCandidate]:
@@ -448,37 +437,27 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_contributed_total = sum(
             contribution.frames_contributed for contribution in photometry_session_breakdown
         )
-        rejection_fraction = (
-            len(all_rejected_files) / frames_contributed_total if frames_contributed_total else 0.0
-        )
-        if (
-            len(all_rejected_files) >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
-            and rejection_fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
+        star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
+        for gate in photometry_run_gates(
+            frames_contributed=frames_contributed_total,
+            rejected_frame_count=len(all_rejected_files),
+            frames_without_timestamp=len(photometry_frames_without_timestamp),
+            session_count=len(photometry_sessions),
+            session_empty_reasons=session_empty_reasons,
+            sessions_missing_wcs=sessions_missing_wcs,
+            no_work_reason=payload.get("no_work_reason"),
+            ensemble_sizes=[
+                composition.ensemble_size for composition in payload["all_frame_ensemble_composition"]
+            ],
+            registration_drifts_px=[
+                photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
+                for photometry in star_photometry
+            ],
+            stars_with_scatter=sum(
+                1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
+            ),
         ):
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(all_rejected_files)} of {frames_contributed_total} frame(s) "
-                f"({rejection_fraction:.0%}) rejected as global ensemble outliers, which is high "
-                "enough to suspect the comparison ensemble or the observing conditions"
-            )
-        if photometry_frames_without_timestamp:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(photometry_frames_without_timestamp)} frame(s) excluded for missing capture timestamp"
-            )
-        if session_empty_reasons:
-            summary.flagged = True
-            summary.flag_reasons.extend(session_empty_reasons)
-        if sessions_missing_wcs:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
-                f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
-            )
-        no_work_reason = payload.get("no_work_reason")
-        if no_work_reason:
-            summary.flagged = True
-            summary.flag_reasons.append(no_work_reason)
+            summary.record_gate(gate)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_for_paths,

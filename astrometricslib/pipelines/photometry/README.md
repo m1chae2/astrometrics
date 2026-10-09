@@ -20,3 +20,20 @@ This part of the code measures how bright stars are in a series of pictures, and
 - `runner.py` and `batch.py` — the code that runs the steps above in order, for one target, and combines the results.
 
 See each subfolder's own README for more detail on that step.
+
+## The gate record
+
+Besides each star's own quality records, a run keeps one record per run-level check in the summary's `gates` (built in `post_processing/run_gates.py`). Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. The tests in `test/post_processing/test_run_gates.py` give every gate input that must fail it.
+
+| Gate | Fails when | Not checked when |
+|---|---|---|
+| `ensemble_frame_rejection` | Five or more frames, and a quarter of all frames, were rejected as outliers | Fewer than five frames |
+| `capture_timestamps` | A frame has no capture time | Never |
+| `session_content` | A session produced no light curves | The run had no sessions |
+| `session_plate_solve` | A session could not be plate-solved for cross-session matching | There is only one session |
+| `photometry_work` | The run found nothing to do (the reason is given) | Never |
+| `comparison_ensemble` | A frame was normalized against fewer than ten comparison stars | No frame was normalized |
+| `registration_drift` | Frame alignment drifted more than 20 pixels, so tracking was probably lost | No star recorded its drift |
+| `scatter_population` | Never | Fewer than ten stars have a measured scatter, so the variable-star cutoff is not reliable |
+
+`registration_drift` and `comparison_ensemble` are new flags: before, a lost-tracking night or a thin comparison ensemble only showed on each star's own record or in the log. The limits for `scatter_population` and the 7.4 multiplier in the variable-star cutoff are not yet backed by a measured false-alarm rate (Gap 2 of the audit plan).

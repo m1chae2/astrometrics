@@ -9,6 +9,7 @@ cross-session mechanics live in `batch.py` -- this file is the thin
 
 import logging
 import sqlite3
+import statistics
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
@@ -21,6 +22,7 @@ from astrometricslib.pipelines.photometry.batch import (
 )
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
     label_known_variability,
+    split_scatter_by_catalog_status,
 )
 from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
@@ -443,6 +445,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             contribution.frames_contributed for contribution in photometry_session_breakdown
         )
         star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
+        known_variable_cvs, unlisted_cvs = split_scatter_by_catalog_status(
+            result.stellar_objects, request.catalog_access
+        )
+        cutoffs = [
+            photometry.output_quality.adaptive_cutoff
+            for photometry in star_photometry
+            if photometry.output_quality
+        ]
         for gate in photometry_run_gates(
             frames_contributed=frames_contributed_total,
             rejected_frame_count=len(all_rejected_files),
@@ -461,6 +471,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             stars_with_scatter=sum(
                 1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
             ),
+            known_variable_cvs=known_variable_cvs,
+            unlisted_cvs=unlisted_cvs,
+            cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
         ):
             summary.record_gate(gate)
 

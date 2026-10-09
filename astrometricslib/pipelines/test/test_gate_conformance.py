@@ -68,6 +68,8 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "registration_drift": ALL_THREE,
         # Too few stars only makes the cutoff unreliable; it never fails.
         "scatter_population": frozenset({PASSED, NOT_CHECKED}),
+        "variability_discrimination": ALL_THREE,
+        "detectable_amplitude": ALL_THREE,
     },
     "spectroscopy": {
         "spectra_extracted": frozenset({PASSED, FAILED}),

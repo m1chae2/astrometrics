@@ -132,14 +132,16 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     return cv_list
 
 
-# A math multiplier used to find stars that are behaving very differently
-# from the rest of the group. Setting this to 7.4 flags roughly the top 3%
-# of stars that vary the most.
-#
-# We set this slightly low (meaning it will catch a few false alarms) on
-# purpose.
-# It's better to flag a normal star by mistake than to accidentally ignore
-# a brand-new supernova!
+# The multiplier in the variable-star cutoff, median + 7.4 x MAD of the
+# field's scatter. It was chosen to flag "roughly the top 3%" of stars, and
+# set slightly low on purpose so a new supernova is not missed. Measured on
+# the library on 2026-10-09 (`scripts/measure_variability_cutoff.py`): it
+# flags 5.2% of stars, 3.8% of the stars the catalogs list as variable and
+# 5.2% of the stars they do not list, and the scatter separates the two no
+# better than chance (AUC 0.46 between stars of similar brightness). The
+# multiplier is therefore not what limits the search: the photometry's own
+# scatter (median 0.29 mag across targets) hides most variables. See the
+# `variability_discrimination` and `detectable_amplitude` gates.
 DEFAULT_VARIABILITY_SIGMA_THRESHOLD = 7.4
 
 

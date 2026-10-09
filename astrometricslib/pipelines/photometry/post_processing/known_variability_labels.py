@@ -13,7 +13,7 @@ from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.known_variability import KnownVariability, describe_known_variability
-from astrometricslib.models.stellar_source import VariableCandidate
+from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -55,3 +55,54 @@ def label_known_variability(candidates: Iterable[VariableCandidate], catalog_acc
         candidate.known_variability_note = describe_known_variability(
             star.known_variability, star.known_variability_catalogs
         )
+
+
+def split_scatter_by_catalog_status(
+    stars: Iterable[StellarObject], catalog_access: Any, chunk_size: int = 2000
+) -> tuple[list[float], list[float]]:
+    """Split the scatter of a run's stars by what the catalogs say about them.
+
+    Parameters
+    ----------
+    stars : `Iterable` [`StellarObject`]
+        The run's stars.
+    catalog_access : `CatalogAccess` or `None`
+        Loads the saved stars, whose catalog answers are read. With `None`,
+        or if the lookup fails, both lists are empty.
+    chunk_size : `int`, optional
+        How many stars are loaded in one request.
+
+    Returns
+    -------
+    cvs : `tuple` [`list` [`float`], `list` [`float`]]
+        Two lists: the scatter (coefficient of variation) of the stars a
+        catalog lists as variable, and of the stars that were asked and are
+        not listed. Stars
+        with no saved row, no scatter, or no catalog answer are in neither.
+    """
+    scatter = {
+        star.id: star.photometry.coefficient_of_variation
+        for star in stars
+        if star.photometry is not None and star.photometry.coefficient_of_variation is not None
+    }
+    if catalog_access is None or not scatter:
+        return [], []
+    known: list[float] = []
+    unlisted: list[float] = []
+    identifiers = list(scatter)
+    try:
+        for start in range(0, len(identifiers), chunk_size):
+            for saved in catalog_access.get_by_ids(
+                "stellar_catalog", identifiers[start : start + chunk_size]
+            ):
+                status = saved.known_variability
+                if status is KnownVariability.KNOWN_VARIABLE:
+                    known.append(scatter[saved.id])
+                elif status is KnownVariability.NOT_LISTED:
+                    unlisted.append(scatter[saved.id])
+    except (AstrometricsError, *DATA_ERRORS):
+        logger.warning(
+            "Could not look up the saved catalog rows to check the variability statistic.", exc_info=True
+        )
+        return [], []
+    return known, unlisted

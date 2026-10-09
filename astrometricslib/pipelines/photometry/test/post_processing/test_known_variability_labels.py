@@ -112,3 +112,45 @@ def test_no_candidates_makes_no_request() -> None:
     catalog = SimpleNamespace(get_by_ids=lambda *args: (_ for _ in ()).throw(AssertionError("asked")))
 
     label_known_variability([], catalog)
+
+
+def test_the_scatter_of_a_run_is_split_by_what_the_catalogs_say() -> None:
+    """Listed and unlisted stars are split; the unasked are dropped."""
+    from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
+        split_scatter_by_catalog_status,
+    )
+
+    def with_scatter(star_id: str, scatter: float, **row: str) -> StellarObject:
+        star = StellarObject(id=star_id, **row)
+        star.photometry.coefficient_of_variation = scatter
+        return star
+
+    run = [
+        with_scatter("V", 0.4, simbadObjectTypes="*|V*"),
+        with_scatter("U", 0.1, simbadObjectTypes="*|IR"),
+        with_scatter("Asked-nothing", 0.2),
+        with_scatter("Missing", 0.3),
+    ]
+    catalog = FakeCatalog([
+        StellarObject(id="V", simbadObjectTypes="*|V*"),
+        StellarObject(id="U", simbadObjectTypes="*|IR"),
+        StellarObject(id="Asked-nothing"),
+    ])
+
+    known, unlisted = split_scatter_by_catalog_status(run, catalog)
+
+    assert known == [0.4]
+    assert unlisted == [0.1]
+
+
+def test_no_catalog_or_a_failed_lookup_gives_empty_groups() -> None:
+    """The check is simply not made; it never breaks the run."""
+    from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
+        split_scatter_by_catalog_status,
+    )
+
+    star = StellarObject(id="V")
+    star.photometry.coefficient_of_variation = 0.4
+
+    assert split_scatter_by_catalog_status([star], None) == ([], [])
+    assert split_scatter_by_catalog_status([star], FakeCatalog([], fail=True)) == ([], [])

@@ -40,16 +40,20 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "ensemble_sizes": [60, 58, 61, 60],
         "registration_drifts_px": [3.0, 5.0, None],
         "stars_with_scatter": 80,
+        # Catalogued variables clearly scatter more than the others here.
+        "known_variable_cvs": [0.3 + 0.01 * index for index in range(20)],
+        "unlisted_cvs": [0.05 + 0.001 * index for index in range(60)],
+        "cutoff_cv": 0.04,
     }
     inputs.update(changes)
     return {gate.name: gate for gate in rg.photometry_run_gates(**inputs)}
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
-    """Nothing wrong gives eight passes and no failure."""
+    """Nothing wrong gives ten passes and no failure."""
     gates = good_run()
 
-    assert len(gates) == 8
+    assert len(gates) == 10
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
 
 
@@ -152,3 +156,48 @@ def test_the_real_validate_output_records_the_gates_for_a_run_with_no_work() -> 
         rg.SCATTER_POPULATION_GATE_NAME,
     ):
         assert summary.gate(name).status is GateStatus.NOT_CHECKED
+
+
+def test_the_discrimination_gate_goes_red_when_scatter_cannot_see_known_variables() -> None:
+    """Known variables no noisier than the rest give a failed gate."""
+    same = [0.05 + 0.001 * index for index in range(60)]
+    gate = good_run(known_variable_cvs=same[:20], unlisted_cvs=same[20:])[
+        rg.VARIABILITY_DISCRIMINATION_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.FAILED
+    assert "does not pick out the 20 stars the catalogs list as variable" in gate.detail
+
+
+def test_the_discrimination_gate_passes_when_known_variables_stand_out() -> None:
+    """Catalogued variables with clearly more scatter pass."""
+    gate = good_run()[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(1.0)
+
+
+def test_the_discrimination_gate_is_not_checked_without_enough_catalogued_stars() -> None:
+    """Too few known variables or unlisted stars cannot show skill."""
+    few_known = good_run(known_variable_cvs=[0.4] * 5)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+    few_unlisted = good_run(unlisted_cvs=[0.05] * 10)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+    nothing = good_run(known_variable_cvs=[], unlisted_cvs=[])[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+
+    assert few_known.status is GateStatus.NOT_CHECKED
+    assert few_unlisted.status is GateStatus.NOT_CHECKED
+    assert nothing.status is GateStatus.NOT_CHECKED
+
+
+def test_the_amplitude_gate_goes_red_when_the_cutoff_hides_small_variables() -> None:
+    """A 30% scatter cutoff needs a variable of about 0.9 mag."""
+    gate = good_run(cutoff_cv=0.3)[rg.DETECTABLE_AMPLITUDE_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.measured_value == pytest.approx(0.92, abs=0.01)
+    assert "smaller variables cannot be flagged" in gate.detail
+
+
+def test_the_amplitude_gate_passes_for_a_sensitive_run_and_skips_a_run_with_no_cutoff() -> None:
+    """A 4% cutoff sees about 0.12 mag; no cutoff is not checked."""
+    assert good_run()[rg.DETECTABLE_AMPLITUDE_GATE_NAME].status is GateStatus.PASSED
+    assert good_run(cutoff_cv=None)[rg.DETECTABLE_AMPLITUDE_GATE_NAME].status is GateStatus.NOT_CHECKED

@@ -15,6 +15,12 @@ a pass. The failed gates' sentences are the run's flag reasons.
 from collections.abc import Sequence
 
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
+    MINIMUM_KNOWN_VARIABLES,
+    MINIMUM_UNLISTED_STARS,
+    discrimination,
+    minimum_detectable_amplitude_mag,
+)
 from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
     UNSTABLE_TRACKING_DRIFT_PX,
 )
@@ -40,6 +46,13 @@ MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 # needs. A design estimate, not validated on real fields.
 MINIMUM_STARS_FOR_SCATTER_POPULATION = MINIMUM_ENSEMBLE_SIZE
 
+# The largest peak-to-peak amplitude, in magnitudes, a run's cutoff may demand
+# of a sinusoidal variable before the run is called blind to most variables.
+# A design estimate, not validated: pulsating, rotating and young-star
+# variables are mostly below about 0.3 mag, while eclipsing binaries, Cepheids,
+# RR Lyrae and Miras are larger.
+MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
+
 ENSEMBLE_REJECTION_GATE_NAME = "ensemble_frame_rejection"
 CAPTURE_TIMESTAMP_GATE_NAME = "capture_timestamps"
 SESSION_CONTENT_GATE_NAME = "session_content"
@@ -48,6 +61,8 @@ PHOTOMETRY_WORK_GATE_NAME = "photometry_work"
 COMPARISON_ENSEMBLE_GATE_NAME = "comparison_ensemble"
 REGISTRATION_DRIFT_GATE_NAME = "registration_drift"
 SCATTER_POPULATION_GATE_NAME = "scatter_population"
+VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
+DETECTABLE_AMPLITUDE_GATE_NAME = "detectable_amplitude"
 
 
 def photometry_run_gates(
@@ -62,6 +77,9 @@ def photometry_run_gates(
     ensemble_sizes: Sequence[int],
     registration_drifts_px: Sequence[float | None],
     stars_with_scatter: int,
+    known_variable_cvs: Sequence[float] = (),
+    unlisted_cvs: Sequence[float] = (),
+    cutoff_cv: float | None = None,
 ) -> list[GateResult]:
     """Build the gates for one photometry run.
 
@@ -88,11 +106,19 @@ def photometry_run_gates(
         none was recorded for it.
     stars_with_scatter : `int`
         Stars with at least three usable points, so with a measured scatter.
+    known_variable_cvs : `Sequence` [`float`], optional
+        The scatter (CV) of each star with a light curve that a catalog lists
+        as variable.
+    unlisted_cvs : `Sequence` [`float`], optional
+        The scatter of each star with a light curve that no catalog lists.
+    cutoff_cv : `float` or `None`, optional
+        The run's variable-star cutoff on the scatter, or `None` if it has
+        none.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Eight gates, in a fixed order.
+        Ten gates, in a fixed order.
     """
     gates: list[GateResult] = []
 
@@ -264,4 +290,66 @@ def photometry_run_gates(
                 population_source,
             )
         )
+
+    skill_source = (
+        f"at least {MINIMUM_KNOWN_VARIABLES} catalogued variables and "
+        f"{MINIMUM_UNLISTED_STARS} unlisted stars; AUC above chance at the 5% level"
+    )
+    skill = discrimination(known_variable_cvs, unlisted_cvs)
+    if skill is None:
+        gates.append(
+            unchecked_gate(
+                VARIABILITY_DISCRIMINATION_GATE_NAME,
+                f"the field has {len(known_variable_cvs)} star(s) the catalogs list as variable and "
+                f"{len(unlisted_cvs)} they do not, too few to check that the scatter "
+                "statistic can see variables",
+                skill_source,
+            )
+        )
+    elif skill.sees_known_variables:
+        gates.append(
+            passed_gate(VARIABILITY_DISCRIMINATION_GATE_NAME, skill.auc, skill.required_auc, skill_source)
+        )
+    else:
+        gates.append(
+            failed_gate(
+                VARIABILITY_DISCRIMINATION_GATE_NAME,
+                f"the scatter statistic does not pick out the {skill.known_variables} stars "
+                f"the catalogs list as variable (AUC {skill.auc:.2f}, needs "
+                f"{skill.required_auc:.2f}), so variable candidates from this run are not reliable",
+                skill.auc,
+                skill.required_auc,
+                skill_source,
+            )
+        )
+
+    amplitude_source = f"at most {MAXIMUM_DETECTABLE_AMPLITUDE_MAG:g} mag peak to peak (design estimate)"
+    if cutoff_cv is None:
+        gates.append(
+            unchecked_gate(
+                DETECTABLE_AMPLITUDE_GATE_NAME, "the run has no variable-star cutoff", amplitude_source
+            )
+        )
+    else:
+        amplitude = minimum_detectable_amplitude_mag(cutoff_cv)
+        if amplitude > MAXIMUM_DETECTABLE_AMPLITUDE_MAG:
+            gates.append(
+                failed_gate(
+                    DETECTABLE_AMPLITUDE_GATE_NAME,
+                    f"a variable would have to change by about {amplitude:.2f} mag peak to peak "
+                    "to clear this run's cutoff, so smaller variables cannot be flagged",
+                    amplitude,
+                    MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                    amplitude_source,
+                )
+            )
+        else:
+            gates.append(
+                passed_gate(
+                    DETECTABLE_AMPLITUDE_GATE_NAME,
+                    amplitude,
+                    MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                    amplitude_source,
+                )
+            )
     return gates

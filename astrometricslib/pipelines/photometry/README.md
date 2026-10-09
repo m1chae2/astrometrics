@@ -35,9 +35,17 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `comparison_ensemble` | A frame was normalized against fewer than ten comparison stars | No frame was normalized |
 | `registration_drift` | Frame alignment drifted more than 20 pixels, so tracking was probably lost | No star recorded its drift |
 | `scatter_population` | Never | Fewer than ten stars have a measured scatter, so the variable-star cutoff is not reliable |
+| `variability_discrimination` | Among the field's stars with a light curve, the scatter of those the catalogs list as variable is not clearly higher than that of the others (AUC not above chance at the 5% level) | Fewer than 10 catalogued variables or 30 unlisted stars in the field |
+| `detectable_amplitude` | The run's cutoff means a variable must change by more than about 0.3 mag peak to peak to be flagged | The run has no cutoff |
 
 `registration_drift` and `comparison_ensemble` are new flags: before, a lost-tracking night or a thin comparison ensemble only showed on each star's own record or in the log. The limits for `scatter_population` and the 7.4 multiplier in the variable-star cutoff are not yet backed by a measured false-alarm rate (Gap 2 of the audit plan).
 
 ## Known variables
 
 Each variable candidate carries `knownVariability` and a one-sentence `knownVariabilityNote`, filled in from the saved catalog row by `post_processing/known_variability_labels.py`: whether SIMBAD, Gaia DR3 or VSX (whichever have been asked) already list the star as variable. A candidate the catalogs list is not a discovery. `unknown` means no catalog was asked about the star, which is not the same as `not_listed_as_variable`; the note names the catalogs that were consulted and the ones that were not.
+
+## What the variable-star flag can see
+
+Measured on the library on 2026-10-09 (`scripts/measure_variability_cutoff.py`, 46,259 stars with light curves in 32 targets, 2,374 of them listed as variable by SIMBAD, Gaia DR3 or VSX): at the pipeline's multiplier of 7.4, the cutoff flags 5.2% of stars, but only 3.8% of the catalogued variables, against 5.2% of the stars no catalog lists. The scatter statistic separates the two no better than chance (AUC 0.46 between stars of similar brightness; 0.5 is chance), including for strong-amplitude types, and the median scatter of a light curve is 8% even among the brightest fifth of stars. The recorded median scatter per target ranges from 0.009 to 0.9 mag (median 0.29). So a flag in most of these runs is not evidence of the kind of variable the catalogs know; the gates `variability_discrimination` and `detectable_amplitude` say so for each run. Raising the multiplier trims the false flags but does not change this: the scatter of the photometry, not the multiplier, is the limit. The "top 3%" the multiplier was chosen for was never measured; it flags 5.2%.
+
+Period searches are judged against every search made on the target (see `processing/family_wise_correction.py`) with a noise model that keeps correlated noise (see `processing/periodicity_search.py`): on simulated red noise with nothing real in it, the old point shuffle called 97% to 100% of light curves significant at the 5% level, the block shuffle about 5% to 10%.

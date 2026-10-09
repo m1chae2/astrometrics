@@ -83,6 +83,7 @@ class FakeCatalog:
     def __init__(self, stars: list[StellarObject]) -> None:
         self.stars = {star.id: star for star in stars}
         self.saved: list[list[StellarObject]] = []
+        self.with_photometry: set[str] = set()
 
     def list_star_summaries(self, target_id: str | None = None) -> list[SimpleNamespace]:
         """List the stars in short form.
@@ -92,7 +93,10 @@ class FakeCatalog:
         summaries : `list`
             One entry with an ``id`` per star.
         """
-        return [SimpleNamespace(id=star_id) for star_id in self.stars]
+        return [
+            SimpleNamespace(id=star_id, has_photometry=star_id in self.with_photometry)
+            for star_id in self.stars
+        ]
 
     def get_by_ids(self, table: str, ids: list[str]) -> list[StellarObject]:
         """Load stars by id.
@@ -261,3 +265,15 @@ def test_stars_are_looked_up_in_batches() -> None:
     backfill.run_backfill(FakeCatalog(stars), service, log=no_log)
 
     assert len(service.calls) == 4
+
+
+def test_only_stars_with_a_light_curve_can_be_chosen() -> None:
+    """With the photometry option, only stars with light curves are used."""
+    catalog = small_catalog()
+    catalog.with_photometry = {"FIELD_J000000+000000", "HD 1"}
+
+    report = backfill.run_backfill(
+        catalog, fake_service(), include_position_only=True, only_with_photometry=True, log=no_log
+    )
+
+    assert report.candidates == 2

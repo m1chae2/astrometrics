@@ -199,6 +199,7 @@ def run_backfill(
     target_id: str | None = None,
     limit: int | None = None,
     include_position_only: bool = False,
+    only_with_photometry: bool = False,
     apply: bool = False,
     pause_seconds: float = 0.0,
     make_backup: Callable[[], Any] | None = None,
@@ -218,6 +219,10 @@ def run_backfill(
         Stop after this many candidate stars.
     include_position_only : `bool`, optional
         Also look up stars known only by position.
+    only_with_photometry : `bool`, optional
+        Only the stars that have a light curve. Together with
+        `include_position_only` this labels the stars the variability cutoff
+        is checked on without looking up the far more numerous others.
     apply : `bool`, optional
         Save the results. Without it nothing is written.
     pause_seconds : `float`, optional
@@ -248,8 +253,8 @@ def run_backfill(
 
     report = FlagReport()
     summaries = catalog_access.list_star_summaries(target_id=target_id)
-    ids = [summary.id for summary in summaries]
-    log(f"{len(ids)} star(s) in the catalog.")
+    ids = [summary.id for summary in summaries if summary.has_photometry or not only_with_photometry]
+    log(f"{len(ids)} star(s) in the catalog" + (" with a light curve." if only_with_photometry else "."))
 
     backed_up = False
     consecutive_failures = 0
@@ -391,6 +396,11 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Also look up stars known only by position (far more numerous).",
     )
     parser.add_argument(
+        "--only-with-photometry",
+        action="store_true",
+        help="Only stars that have a light curve (the ones the variability cutoff check uses).",
+    )
+    parser.add_argument(
         "--pause-seconds",
         type=float,
         default=DEFAULT_PAUSE_SECONDS,
@@ -425,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
             target_id=arguments.target,
             limit=arguments.limit,
             include_position_only=arguments.include_position_only,
+            only_with_photometry=arguments.only_with_photometry,
             apply=arguments.apply,
             pause_seconds=arguments.pause_seconds,
             make_backup=lambda: backup_catalog_database(astrometrics.config),

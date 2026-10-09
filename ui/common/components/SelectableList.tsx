@@ -146,7 +146,14 @@ export const SelectableList: React.FC<SelectableListProps> = ({
                                     name={`selection-${className}`}
                                     value={item.value}
                                     checked={isSelected}
-                                    onChange={() => onSelect(item.value)}
+                                    // A radio's change event never fires for the radio that is
+                                    // already checked, so picking the highlighted row again would do
+                                    // nothing. Callers that act on a pick (the Planetarium slews to
+                                    // the star) need that second pick, and a list pre-checks its
+                                    // first row before anything was really chosen. A click event
+                                    // fires either way, and arrow-key moves send one too.
+                                    onClick={() => onSelect(item.value)}
+                                    onChange={() => {}}
                                 />
                                 <span className="radio__indicator"></span>
                             </span>

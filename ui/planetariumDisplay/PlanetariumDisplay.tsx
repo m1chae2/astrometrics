@@ -44,6 +44,11 @@ import { useReportModeReady } from '../common/utils/appBootReadiness';
 import '../common/styles/segmentedToggle.css';
 import './styles/planetariumDisplay.css';
 
+// Field of view, in degrees, the sky map zooms to when a star is picked from
+// the star list or handed over from the Astronomy Manager. Wide enough to
+// show the star's neighbours, tight enough that the star is easy to find.
+const STAR_PICK_FOV_DEG = 1.0;
+
 /**
  * Root panel component for the Planetarium Display.
  *
@@ -63,6 +68,9 @@ export const PlanetariumDisplay: React.FC = () => {
   // click, so CelestialSkyMap can tell the two apart: a list pick slews the
   // camera to the target, a canvas click just selects it in place.
   const [slewRequestId, setSlewRequestId] = useState<number>(0);
+  // Whether the pending slew should also turn tracking on. Set in the same
+  // update that bumps slewRequestId, so the map sees the two together.
+  const [trackOnSlew, setTrackOnSlew] = useState<boolean>(false);
 
   // Get telescope connection and telemetry
   const { telescopeConnection, telemetry } = useTelescopeStatus();
@@ -266,6 +274,7 @@ export const PlanetariumDisplay: React.FC = () => {
   const handleSelectObject = useCallback((id: string) => {
     setSelectedTargetId(id);
     setPendingTarget(id);
+    setTrackOnSlew(false);
     setSlewRequestId(prev => prev + 1);
 
     // First try libraryTargets (local catalog targets)
@@ -331,6 +340,8 @@ export const PlanetariumDisplay: React.FC = () => {
    * may not contain the handed-off star, so the RA/Dec and flags carried in
    * the hand-off itself are used directly instead.
    *
+   * Also zooms the map to `STAR_PICK_FOV_DEG` and turns tracking on.
+   *
    * @param {PlanetariumSource} source - The star to center on and select.
    * @returns {void}
    */
@@ -339,6 +350,8 @@ export const PlanetariumDisplay: React.FC = () => {
     setSelectedSource(source);
     setSelectedTargetId(source.id);
     setPendingTarget(source.id);
+    setCurrentFOV(STAR_PICK_FOV_DEG);
+    setTrackOnSlew(true);
     setSlewRequestId(prev => prev + 1);
   }, [setSelectedTargetId, setPendingTarget]);
 
@@ -592,6 +605,7 @@ export const PlanetariumDisplay: React.FC = () => {
         }}
         selectedTargetId={selectedTargetId}
         slewRequestId={slewRequestId}
+        trackOnSlew={trackOnSlew}
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}

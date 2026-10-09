@@ -91,6 +91,12 @@ interface Props {
    * this counter triggers the one-time slew to the newly selected object.
    */
   slewRequestId: number;
+  /**
+   * Whether the slew that a change to `slewRequestId` starts should also turn
+   * on tracking, so the map keeps the picked object centered as the sky turns.
+   * Read only when `slewRequestId` changes.
+   */
+  trackOnSlew?: boolean;
   /** Callback invoked (throttled) when the viewport center changes during pan. */
   onCenterChange: (ra: number, dec: number) => void;
   /** Sensor FOV width in degrees from the active equipment configuration. */
@@ -159,6 +165,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   onRightClickSource,
   selectedTargetId,
   slewRequestId,
+  trackOnSlew = false,
   onCenterChange,
   sensorFovWidthDeg,
   sensorFovHeightDeg,
@@ -299,8 +306,9 @@ export const CelestialSkyMap: React.FC<Props> = ({
   }, [selectedTargetId]);
 
   // Keyboard listener to toggle tracking mode on 't' keypress.
-  // Engaging tracking requires a star or target to already be selected —
-  // selecting one only recenters the view, it never auto-engages tracking.
+  // Engaging tracking requires a star or target to already be selected.
+  // A canvas click only selects; a list pick turns tracking on only when the
+  // parent asks for it (`trackOnSlew`).
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === 't') {
@@ -326,8 +334,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
 
   // Initial camera orientation. Slews to the pre-selected object (if any) so a
   // restored session opens looking at it, but never auto-engages continuous
-  // tracking — tracking is always a deliberate, separate choice made with the
-  // 't' key, whether the selection came from a restored session or a fresh one.
+  // tracking: a restored session leaves it off until the 't' key or a list pick.
   const hasInitializedZenith = useRef<boolean>(false);
   useEffect(() => {
     if (!hasInitializedZenith.current && currentLST !== undefined) {
@@ -364,7 +371,7 @@ export const CelestialSkyMap: React.FC<Props> = ({
   // Slews the viewport only when the caller bumps slewRequestId — i.e. an
   // explicit pick from the target list. A canvas click selects a source
   // without moving the camera; the camera only moves here, or continuously
-  // once the user opts into tracking with the 't' key. This only sets the
+  // once tracking is on (the 't' key, or a pick that asks for `trackOnSlew`). This only sets the
   // animation loop's target az/alt (targetAzRef/targetAltRef); the render
   // loop's existing lerp (see the trackingMode block below) eases the camera
   // there smoothly. Guarded on hasInitializedZenith so it never fires before
@@ -379,8 +386,14 @@ export const CelestialSkyMap: React.FC<Props> = ({
       const targetAltAz = getAltAz(targetRA, targetDec, currentLSTRef.current, observerLat);
       targetAzRef.current = targetAltAz.az;
       targetAltRef.current = targetAltAz.alt;
+      if (trackOnSlew) {
+        setTrackingMode(true);
+      }
     }
     previousSlewRequestIdRef.current = slewRequestId;
+    // trackOnSlew is read only when slewRequestId changes; the parent sets both
+    // in the same update, so the value seen here belongs to this request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slewRequestId, center, observerLat]);
 
   // Throttled notification handler for coordinate changes

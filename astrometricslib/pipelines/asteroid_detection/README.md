@@ -34,3 +34,19 @@ The summary keeps one record per check in `gates`, built in `run_gates.py`. Each
 | `unmatched_movers` | A mover moved in a straight line but matched no known asteroid (worth a manual look) | No mover was confirmed |
 
 A failed SkyBoT query used to look the same as a field with no known asteroids. The pipeline now counts the queries it makes and the ones that fail (`ephemerisQueriesAttempted`, `ephemerisQueriesFailed` in the metrics). Two things are not yet covered: the false-mover rate of the rejection cascade and its recovery of injected movers (Gap 2), and whether the field is near the ecliptic enough for a real asteroid to appear. `NGC 2403` and `M 81` sit far from it, so a clean run there only confirms "found nothing".
+
+## What the detector can find
+
+Measured on 2026-10-09 (`scripts/validate_asteroid_detection.py`; synthetic fields of 8 frames 300 s apart at 1.8 arcsec per pixel, with a mover of the given peak brightness above the sky noise, 12 fields per cell):
+
+| peak brightness | 5 arcsec/h | 20 arcsec/h | 60 arcsec/h | 150 arcsec/h |
+|---|---|---|---|---|
+| 3 sigma | 0% | 0% | 0% | 0% |
+| 5 sigma | 0% | 0% | 0% | 8% |
+| 8 sigma | 0% | 50% | 50% | 92% |
+| 12 sigma | 0% | 42% | 83% | 83% |
+| 20 sigma | 0% | 50% | 92% | 100% |
+
+Two limits show. A mover is not found below about 8 sigma at its peak. And a slow mover is not found at any brightness: at 5 arcsec/h an object moves only 1.6 pixels in the 40 minutes of this sequence, less than the 1.5 pixel tolerance within which a track is called stationary, so it is rejected as a star. At 20 arcsec/h only about half are found even when bright, so a main-belt asteroid near opposition (about 30 arcsec/h) is borderline for a short sequence. A longer sequence moves a slow object farther and helps.
+
+In 60 synthetic fields with no mover, no track was confirmed. Real fields are noisier: on frames of targets far from the ecliptic, where an unmatched confirmed mover is almost certainly not an asteroid, NGC 2403 (35 frames) gave one confirmed mover that matched no known asteroid and M 101 (40 frames) gave none. The synthetic frames share one pointing, so these numbers test detection and chaining, not the error in each real frame's position.

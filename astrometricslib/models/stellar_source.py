@@ -12,7 +12,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
-from astrometricslib.models.known_variability import KnownVariability, classify_simbad_object_types
+from astrometricslib.models.known_variability import (
+    KnownVariability,
+    catalogs_consulted,
+    combine_known_variability,
+    is_confirmed_constant,
+)
 from astrometricslib.models.photometry_quality import (
     InputQualityAssessment as PhotometryInputQuality,
 )
@@ -560,6 +565,15 @@ class StellarObject(BaseModel):
     # record, was named from Gaia alone, or was saved before this was
     # recorded. See `known_variability`.
     simbad_object_types: str = Field(default="", alias="simbadObjectTypes")
+    # What Gaia DR3's `phot_variable_flag` says about this star ("VARIABLE",
+    # "CONSTANT", "NOT_AVAILABLE"), or "NO_GAIA_MATCH" when Gaia was asked and
+    # has no entry (the brightest stars are not in Gaia DR3). Empty when Gaia
+    # was never asked. See `known_variability`.
+    gaia_variable_flag: str = Field(default="", alias="gaiaVariableFlag")
+    # The AAVSO Variable Star Index type of this star ("EA/SD", "DCEP", or
+    # "CST" for a star checked and found constant), "NOT_IN_VSX", or
+    # "LISTED_WITHOUT_TYPE". Empty when VSX was never asked.
+    vsx_variability_type: str = Field(default="", alias="vsxVariabilityType")
     # How confidently this star was matched to its SIMBAD/Gaia entry --
     # see CatalogMatchQuality. `None` for a star that was never matched
     # (a FIELD_J... position-only id).
@@ -567,17 +581,47 @@ class StellarObject(BaseModel):
 
     @property
     def known_variability(self) -> KnownVariability:
-        """Say whether SIMBAD already lists this star as a variable star.
+        """Say whether the catalogs already list this star as a variable star.
 
-        Worked out from `simbad_object_types` each time, so it is not stored.
+        Joins SIMBAD, Gaia DR3 and VSX (see `combine_known_variability`), using
+        whichever have been asked. Worked out each time, so it is not stored.
 
         Returns
         -------
         known_variability : `KnownVariability`
-            ``UNKNOWN`` when the star has no SIMBAD object types. This says
-            what SIMBAD records, not whether the star varies.
+            ``UNKNOWN`` when no catalog has been asked. This says what the
+            catalogs record, not whether the star varies.
         """
-        return classify_simbad_object_types(self.simbad_object_types)
+        return combine_known_variability(
+            self.simbad_object_types, self.gaia_variable_flag, self.vsx_variability_type
+        )
+
+    @property
+    def known_variability_catalogs(self) -> list[str]:
+        """Name the catalogs that have been asked about this star.
+
+        Returns
+        -------
+        catalogs : `list` [`str`]
+            Any of ``"SIMBAD"``, ``"Gaia DR3"``, ``"VSX"``.
+        """
+        return catalogs_consulted(
+            self.simbad_object_types, self.gaia_variable_flag, self.vsx_variability_type
+        )
+
+    @property
+    def is_confirmed_constant(self) -> bool:
+        """Say whether a catalog positively calls this star constant.
+
+        Returns
+        -------
+        is_constant : `bool`
+            True for Gaia's ``CONSTANT`` or a VSX ``CST`` entry, with no
+            catalog listing or suspecting the star as variable.
+        """
+        return is_confirmed_constant(
+            self.simbad_object_types, self.gaia_variable_flag, self.vsx_variability_type
+        )
 
     @computed_field(alias="variabilityScore")
     @property

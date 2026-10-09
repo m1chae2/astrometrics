@@ -302,6 +302,8 @@ export interface Spectrum {
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
   simbadObjectTypes?: string;
+  gaiaVariableFlag?: string;
+  vsxVariabilityType?: string;
   catalogMatchQuality?: CatalogMatchQuality | null;
   /** How much this star's brightness jumps around, on a display scale. */
   variabilityScore?: number | null;

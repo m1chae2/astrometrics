@@ -10,10 +10,18 @@ import pytest
 
 from astrometricslib.models.known_variability import (
     KNOWN_VARIABLE_OBJECT_TYPES,
+    NO_GAIA_MATCH,
+    NOT_IN_VSX,
     SUSPECTED_VARIABLE_OBJECT_TYPES,
+    VSX_LISTED_WITHOUT_TYPE,
     KnownVariability,
+    catalogs_consulted,
+    classify_gaia_variable_flag,
     classify_simbad_object_types,
+    classify_vsx_type,
+    combine_known_variability,
     describe_known_variability,
+    is_confirmed_constant,
     variable_object_types_in,
 )
 from astrometricslib.models.stellar_source import StellarObject
@@ -93,10 +101,16 @@ def test_the_two_sets_are_disjoint_and_well_formed() -> None:
     assert all(code.endswith("?") for code in SUSPECTED_VARIABLE_OBJECT_TYPES)
 
 
-def test_every_answer_has_a_description_that_claims_only_simbads_record() -> None:
-    """The sentences name SIMBAD, so they never claim more than it shows."""
-    for status in KnownVariability:
-        assert "SIMBAD" in describe_known_variability(status)
+def test_the_description_names_the_catalogs_that_were_consulted() -> None:
+    """The sentence claims no more than was asked, and names the rest."""
+    simbad_only = describe_known_variability(KnownVariability.NOT_LISTED)
+    assert simbad_only == "Not listed as variable in SIMBAD. Gaia DR3 or VSX not checked."
+
+    all_three = describe_known_variability(KnownVariability.NOT_LISTED, ["SIMBAD", "Gaia DR3", "VSX"])
+    assert all_three == "Not listed as variable in SIMBAD, Gaia DR3 or VSX."
+
+    assert "SIMBAD or VSX" in describe_known_variability(KnownVariability.KNOWN_VARIABLE, ["SIMBAD", "VSX"])
+    assert "nothing is known" in describe_known_variability(KnownVariability.UNKNOWN, [])
 
 
 def test_a_star_with_no_recorded_types_is_unknown() -> None:
@@ -118,3 +132,86 @@ def test_the_helper_lists_the_codes_that_made_a_star_variable() -> None:
     assert variable_object_types_in("*|IR|NIR") == []
     assert variable_object_types_in(None) == []
     assert variable_object_types_in(b"RR*") == ["RR*"]
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        ("VARIABLE", KnownVariability.KNOWN_VARIABLE),
+        ("CONSTANT", KnownVariability.NOT_LISTED),
+        ("NOT_AVAILABLE", KnownVariability.NOT_LISTED),
+        (NO_GAIA_MATCH, KnownVariability.NOT_LISTED),
+        ("", KnownVariability.UNKNOWN),
+        (None, KnownVariability.UNKNOWN),
+    ],
+)
+def test_gaia_flags_are_read_and_an_unasked_catalog_is_unknown(
+    flag: str | None, expected: KnownVariability
+) -> None:
+    """Only VARIABLE lists a star; any other answer means Gaia does not."""
+    assert classify_gaia_variable_flag(flag) is expected
+
+
+@pytest.mark.parametrize(
+    ("vsx_type", "expected"),
+    [
+        ("EA/SD", KnownVariability.KNOWN_VARIABLE),
+        ("DCEP", KnownVariability.KNOWN_VARIABLE),
+        ("RRAB:", KnownVariability.KNOWN_VARIABLE),
+        ("CST", KnownVariability.NOT_LISTED),
+        ("CST:", KnownVariability.NOT_LISTED),
+        (NOT_IN_VSX, KnownVariability.NOT_LISTED),
+        (VSX_LISTED_WITHOUT_TYPE, KnownVariability.SUSPECTED_VARIABLE),
+        ("", KnownVariability.UNKNOWN),
+        (None, KnownVariability.UNKNOWN),
+    ],
+)
+def test_vsx_types_are_read_and_a_constant_star_is_not_a_variable(
+    vsx_type: str | None, expected: KnownVariability
+) -> None:
+    """VSX lists constant stars too; type CST must never read as variable."""
+    assert classify_vsx_type(vsx_type) is expected
+
+
+def test_the_catalogs_are_joined_with_the_strongest_answer_winning() -> None:
+    """Any catalog listing the star wins; unasked catalogs are only unknown."""
+    algol_types = "*|**|EB*|SB*|V*"
+    assert combine_known_variability(algol_types, "", "") is KnownVariability.KNOWN_VARIABLE
+    assert combine_known_variability("*|IR", "VARIABLE", "") is KnownVariability.KNOWN_VARIABLE
+    assert combine_known_variability("*|IR", "CONSTANT", "DCEP") is KnownVariability.KNOWN_VARIABLE
+    assert (
+        combine_known_variability("*|IR", "", VSX_LISTED_WITHOUT_TYPE) is KnownVariability.SUSPECTED_VARIABLE
+    )
+    assert combine_known_variability("*|IR", "CONSTANT", "CST") is KnownVariability.NOT_LISTED
+    assert combine_known_variability("", "", "") is KnownVariability.UNKNOWN
+
+
+def test_catalogs_consulted_lists_only_the_ones_that_were_asked() -> None:
+    """The list is in a fixed order and leaves out unasked catalogs."""
+    assert catalogs_consulted("*|IR", "", NOT_IN_VSX) == ["SIMBAD", "VSX"]
+    assert catalogs_consulted("", "", "") == []
+    assert catalogs_consulted("*", NO_GAIA_MATCH, "CST") == ["SIMBAD", "Gaia DR3", "VSX"]
+
+
+def test_a_confirmed_constant_needs_a_positive_statement_and_no_variable_listing() -> None:
+    """Silence is not constancy: only Gaia CONSTANT or VSX CST counts."""
+    assert is_confirmed_constant("*|IR", "CONSTANT", "") is True
+    assert is_confirmed_constant("*|IR", "", "CST") is True
+    assert is_confirmed_constant("*|IR", "", NOT_IN_VSX) is False
+    assert is_confirmed_constant("*|IR", NO_GAIA_MATCH, "") is False
+    assert is_confirmed_constant("*|IR", "CONSTANT", "") is True
+    # A variable listing anywhere overrides a constant statement elsewhere.
+    assert is_confirmed_constant("*|V*", "CONSTANT", "CST") is False
+    assert is_confirmed_constant("*|IR", "CONSTANT", "EA") is False
+    # An uncertain constant ("CST:") is not enough.
+    assert is_confirmed_constant("*|IR", "", "CST:") is False
+
+
+def test_a_star_joins_its_three_catalog_fields() -> None:
+    """The star's property and helpers follow the stored fields."""
+    star = StellarObject(simbadObjectTypes="*|IR", gaiaVariableFlag="CONSTANT", vsxVariabilityType="CST")
+
+    assert star.known_variability is KnownVariability.NOT_LISTED
+    assert star.known_variability_catalogs == ["SIMBAD", "Gaia DR3", "VSX"]
+    assert star.is_confirmed_constant is True
+    assert StellarObject(vsxVariabilityType="EA/SD").known_variability is KnownVariability.KNOWN_VARIABLE

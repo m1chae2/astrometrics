@@ -72,6 +72,10 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "scatter_population": frozenset({PASSED, NOT_CHECKED}),
         "variability_discrimination": ALL_THREE,
         "detectable_amplitude": ALL_THREE,
+        # Checks made on a period result (not the run's summary): the hold-out
+        # and the alias test.
+        "holdout_nights": ALL_THREE,
+        "alias_ambiguity": ALL_THREE,
     },
     "spectroscopy": {
         "spectra_extracted": frozenset({PASSED, FAILED}),

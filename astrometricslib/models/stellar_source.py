@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.gate_result import GateResult
 from astrometricslib.models.known_variability import (
     KnownVariability,
     catalogs_consulted,
@@ -206,6 +207,13 @@ class PeriodogramResult(BaseModel):
     )
     searches_in_family: int | None = Field(default=None, alias="searchesInFamily")
     uncorrected_verdict: str = Field(default="", alias="uncorrectedVerdict")
+    # The checks made on a "detected" or "possible" result against data it
+    # was not found from (see `period_checks`): each failed check lowered the
+    # verdict one level. `unconfirmed` is true when a check could not be made
+    # (for example too few nights to leave one out); that does not lower the
+    # verdict, but the result has not been confirmed on held-out data.
+    verdict_checks: list[GateResult] = Field(default_factory=list, alias="verdictChecks")
+    unconfirmed: bool = Field(default=False, alias="unconfirmed")
 
 
 class TransitCandidate(BaseModel):
@@ -265,6 +273,13 @@ class TransitCandidate(BaseModel):
     )
     searches_in_family: int | None = Field(default=None, alias="searchesInFamily")
     uncorrected_verdict: str = Field(default="", alias="uncorrectedVerdict")
+    # The checks made on a "detected" or "possible" result against data it
+    # was not found from (see `period_checks`): each failed check lowered the
+    # verdict one level. `unconfirmed` is true when a check could not be made
+    # (for example too few nights to leave one out); that does not lower the
+    # verdict, but the result has not been confirmed on held-out data.
+    verdict_checks: list[GateResult] = Field(default_factory=list, alias="verdictChecks")
+    unconfirmed: bool = Field(default=False, alias="unconfirmed")
 
 
 class PhotometryResult(BaseModel):

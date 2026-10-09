@@ -560,12 +560,8 @@ def _correct_for_the_number_of_searches(analyzer: Any, searched: list[StellarObj
     target_id : `str`
         The target, for the log.
     """
-    from astrometricslib.pipelines.photometry.processing.family_wise_correction import (
-        apply_family_wise_correction,
-        count_family,
-        needs_repeat,
-        shuffles_needed,
-    )
+    from astrometricslib.pipelines.photometry.processing.family_wise_correction import count_family
+    from astrometricslib.pipelines.photometry.processing.period_checks import apply_verdict_checks
 
     def all_results() -> list[Any]:
         """Collect the run's cycle and dip results.
@@ -585,8 +581,40 @@ def _correct_for_the_number_of_searches(analyzer: Any, searched: list[StellarObj
         return collected
 
     family_size = count_family(all_results())
-    if family_size < 2:
-        return
+    if family_size >= 2:
+        _repeat_and_correct_family(analyzer, searched, family_size, target_id, all_results)
+    # The held-out and alias checks apply to every "detected" or "possible"
+    # result, whether or not the run searched several stars.
+    for star in searched:
+        time_days, fluxes = analyzer.light_curve_arrays(star)
+        apply_verdict_checks(star.photometry.periodogram, time_days, fluxes)
+        apply_verdict_checks(star.photometry.transit_candidate, time_days, fluxes)
+
+
+def _repeat_and_correct_family(
+    analyzer: Any, searched: list[StellarObject], family_size: int, target_id: str, all_results: Any
+) -> None:
+    """Repeat searches that need it, then judge every verdict on the family.
+
+    Parameters
+    ----------
+    analyzer : `VariabilityAnalyzer`
+        Runs the repeated searches.
+    searched : `list` [`StellarObject`]
+        The stars that were searched.
+    family_size : `int`
+        How many searches the run made.
+    target_id : `str`
+        The target, for the log.
+    all_results : `Callable`
+        Collects the run's current results.
+    """
+    from astrometricslib.pipelines.photometry.processing.family_wise_correction import (
+        apply_family_wise_correction,
+        needs_repeat,
+        shuffles_needed,
+    )
+
     shuffles = shuffles_needed(family_size)
     for star in searched:
         try:

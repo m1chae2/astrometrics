@@ -522,6 +522,8 @@ export interface PeriodogramResult {
   familyWiseFalseAlarmProbability?: number | null;
   searchesInFamily?: number | null;
   uncorrectedVerdict?: string;
+  verdictChecks?: GateResult[];
+  unconfirmed?: boolean;
 }
 
 /**
@@ -553,6 +555,8 @@ export interface TransitCandidate {
   familyWiseFalseAlarmProbability?: number | null;
   searchesInFamily?: number | null;
   uncorrectedVerdict?: string;
+  verdictChecks?: GateResult[];
+  unconfirmed?: boolean;
 }
 
 /**

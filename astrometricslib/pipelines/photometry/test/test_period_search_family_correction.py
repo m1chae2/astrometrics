@@ -85,6 +85,19 @@ class FakeAnalyzer:
         star.photometry.periodogram = result
         return result
 
+    @staticmethod
+    def light_curve_arrays(star: StellarObject) -> tuple[Any, Any]:
+        """Give the (empty) light curve of a star with no measurements.
+
+        Returns
+        -------
+        arrays : `tuple`
+            Two empty arrays.
+        """
+        import numpy as np
+
+        return np.array([]), np.array([])
+
     def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any:
         """Repeat a dip search.
 

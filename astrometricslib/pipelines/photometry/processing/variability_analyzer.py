@@ -1224,6 +1224,21 @@ class VariabilityAnalyzer:
         return result
 
     @staticmethod
+    def light_curve_arrays(star: StellarObject) -> tuple[np.ndarray, np.ndarray]:
+        """Give a star's measurement times and brightness as arrays.
+
+        The public name of `_light_curve_arrays`, for the checks that need the
+        same arrays the searches used.
+
+        Returns
+        -------
+        time_days, fluxes : `tuple` [`np.ndarray`, `np.ndarray`]
+            Days since the first measurement, and the detrended brightness
+            (or the normalized brightness when no detrended one exists).
+        """
+        return VariabilityAnalyzer._light_curve_arrays(star)
+
+    @staticmethod
     def _light_curve_arrays(star: StellarObject) -> tuple[np.ndarray, np.ndarray]:
         """Give a star's measurement times and brightness as arrays.
 

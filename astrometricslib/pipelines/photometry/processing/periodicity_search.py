@@ -108,11 +108,22 @@ _SLOW_SEARCH_WORK_LIMIT = 400_000
 _REDUCED_SHUFFLE_COUNT = 150
 
 # The autocorrelation (how much each measurement resembles the one `lag`
-# steps later) below which the correlation is called gone, which sets the
-# block length of the noise-only versions. 0.2 is a common convention and a
-# design choice, checked on simulated red noise (see
-# `test_periodicity_search.py`), not derived.
+# steps later) below which the correlation is called gone. 0.2 is a common
+# convention and a design choice.
 _CORRELATION_GONE_BELOW = 0.2
+
+# How many correlation lengths one block spans. Measured on 60 simulated
+# light curves of pure correlated noise (AR(1), three nights of 25
+# measurements, 99 noise-only versions), the share called significant at the
+# 5% level, which should be about 5%:
+#
+#   blocks of      1 lag   2 lags   3 lags   4 lags
+#   phi = 0.70      28%      7%       2%       2%
+#   phi = 0.95      37%     10%       3%       2%
+#
+# (A plain point shuffle gave 97% and 100%.) One or two lags is too
+# permissive; three is slightly conservative, which is the safe side.
+_BLOCK_LENGTH_IN_CORRELATION_LENGTHS = 3
 
 # The longest block, as a fraction of the measurements. A block longer than
 # a quarter of the data leaves too few blocks to shuffle into new orders.
@@ -294,10 +305,10 @@ def _insufficient_note(time_days: np.ndarray) -> str:
 def correlation_block_length(flux: np.ndarray) -> int:
     """Choose how many consecutive measurements move together in the null.
 
-    The block length is the first lag at which the light curve's
-    autocorrelation falls below `_CORRELATION_GONE_BELOW`, so the blocks are
-    as long as the correlation. White noise has none beyond lag zero, which
-    gives 1 (the plain point shuffle).
+    The correlation length is the first lag at which the light curve's
+    autocorrelation falls below `_CORRELATION_GONE_BELOW`. The block is
+    `_BLOCK_LENGTH_IN_CORRELATION_LENGTHS` of those long. A light curve with
+    no correlation beyond lag zero gives 1, the plain point shuffle.
 
     Parameters
     ----------
@@ -319,7 +330,7 @@ def correlation_block_length(flux: np.ndarray) -> int:
     for lag in range(1, longest + 1):
         correlation = float(np.dot(centred[:-lag], centred[lag:])) / variance
         if correlation < _CORRELATION_GONE_BELOW:
-            return lag
+            return 1 if lag == 1 else min(longest, _BLOCK_LENGTH_IN_CORRELATION_LENGTHS * lag)
     return longest
 
 

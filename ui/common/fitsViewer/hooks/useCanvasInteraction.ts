@@ -41,6 +41,10 @@ export const useCanvasInteraction = (
     const initialPinchDistRef = useRef<number | null>(null);
     const initialZoomRef = useRef(1);
 
+    // True once the user zooms or pans by hand. Until then the view stays
+    // fitted to the container as the container changes size.
+    const userAdjustedViewRef = useRef(false);
+
     /**
      * Applies the current pan and zoom values to the canvas and overlay transform styles.
      */
@@ -98,6 +102,7 @@ export const useCanvasInteraction = (
         e.preventDefault();
         const container = containerRef.current;
         if (!container) return;
+        userAdjustedViewRef.current = true;
 
         const rect = container.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
@@ -157,6 +162,7 @@ export const useCanvasInteraction = (
 
     const onPointerMove = (e: React.PointerEvent) => {
         if (!isDraggingRef.current) return;
+        userAdjustedViewRef.current = true;
         const dx = e.clientX - lastPointerRef.current.x;
         const dy = e.clientY - lastPointerRef.current.y;
         lastPointerRef.current = { x: e.clientX, y: e.clientY };
@@ -183,6 +189,7 @@ export const useCanvasInteraction = (
     const zoomBy = (factor: number) => {
         const container = containerRef.current;
         if (!container) return;
+        userAdjustedViewRef.current = true;
 
         const cW = container.clientWidth;
         const cH = container.clientHeight;
@@ -214,6 +221,7 @@ export const useCanvasInteraction = (
     const zoomToScale = (newScale: number) => {
         const container = containerRef.current;
         if (!container) return;
+        userAdjustedViewRef.current = true;
 
         const cW = container.clientWidth;
         const cH = container.clientHeight;
@@ -254,6 +262,7 @@ export const useCanvasInteraction = (
         const scaleX = cW / drawnSize.w;
         const scaleY = cH / drawnSize.h;
         const fitScale = Math.min(scaleX, scaleY) * 0.95; // 95% to leave a small margin
+        userAdjustedViewRef.current = false;
 
         zoomRef.current = fitScale;
 
@@ -303,6 +312,11 @@ export const useCanvasInteraction = (
     // is drawn but invisible. Nothing re-triggers the fit once the container
     // is hidden, so watch for it regaining real dimensions (becoming visible
     // again) and recompute the fit then.
+    //
+    // The container can also still be growing to its final size when the
+    // image first loads (the panels settle after the app starts), which
+    // leaves the image fitted to a smaller box than the one it ends up in.
+    // So refit on any resize until the user has zoomed or panned by hand.
     const wasZeroSizeRef = useRef(true);
     useEffect(() => {
         const containerElement = containerRef.current;
@@ -312,7 +326,8 @@ export const useCanvasInteraction = (
             const entry = entries[0];
             if (!entry) return;
             const isZeroSize = entry.contentRect.width === 0 || entry.contentRect.height === 0;
-            if (!isZeroSize && wasZeroSizeRef.current && drawnSize.w > 0 && drawnSize.h > 0) {
+            const shouldRefit = wasZeroSizeRef.current || !userAdjustedViewRef.current;
+            if (!isZeroSize && shouldRefit && drawnSize.w > 0 && drawnSize.h > 0) {
                 resetView();
             }
             wasZeroSizeRef.current = isZeroSize;

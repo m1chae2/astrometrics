@@ -28,10 +28,12 @@ from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
 from astrometricslib.pipelines.stacking.pre_processing import flat_calibration
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
 from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
+    BACKGROUND_GATE_NAME,
     background_homogeneity_gate,
     find_dominant_background_subset_by_exposure,
 )
 from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import (
+    GAIN_GATE_NAME,
     find_dominant_gain_subset,
     gain_homogeneity_gate,
 )
@@ -80,6 +82,7 @@ def test_gain_gate_is_not_checked_when_no_frame_records_its_gain() -> None:
     gate = gain_homogeneity_gate(frames, excluded)
 
     assert len(kept) == 10
+    assert gate.name == GAIN_GATE_NAME
     assert gate.status is GateStatus.NOT_CHECKED
 
 
@@ -90,6 +93,7 @@ def test_gain_gate_passes_and_counts_the_minority_it_set_aside() -> None:
 
     gate = gain_homogeneity_gate(frames, excluded)
 
+    assert gate.name == GAIN_GATE_NAME
     assert gate.status is GateStatus.PASSED
     assert gate.measured_value == pytest.approx(1.0)
     assert "1 frame(s)" in gate.detail
@@ -119,6 +123,7 @@ def test_background_gate_fails_on_a_cloud_ramp() -> None:
 
     gate = background_homogeneity_gate(frames, splits)
 
+    assert gate.name == BACKGROUND_GATE_NAME
     assert gate.status is GateStatus.FAILED
     assert gate.detail.startswith("background split:")
 
@@ -129,6 +134,7 @@ def test_background_gate_passes_on_steady_frames() -> None:
 
     gate = background_homogeneity_gate(frames, splits)
 
+    assert gate.name == BACKGROUND_GATE_NAME
     assert gate.status is GateStatus.PASSED
     assert "1 exposure length(s) checked" in gate.detail
 
@@ -139,6 +145,7 @@ def test_background_gate_is_not_checked_when_no_background_was_measured() -> Non
 
     gate = background_homogeneity_gate(frames, splits)
 
+    assert gate.name == BACKGROUND_GATE_NAME
     assert gate.status is GateStatus.NOT_CHECKED
 
 
@@ -148,6 +155,7 @@ def test_background_gate_is_not_checked_with_too_few_measured_frames() -> None:
 
     gate = background_homogeneity_gate(frames, splits)
 
+    assert gate.name == BACKGROUND_GATE_NAME
     assert gate.status is GateStatus.NOT_CHECKED
 
 
@@ -157,6 +165,7 @@ def test_background_gate_is_not_checked_when_the_setting_is_off() -> None:
 
     gate = background_homogeneity_gate(frames, splits, enabled=False)
 
+    assert gate.name == BACKGROUND_GATE_NAME
     assert gate.status is GateStatus.NOT_CHECKED
     assert "turned off" in gate.detail
 

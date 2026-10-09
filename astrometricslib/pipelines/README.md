@@ -27,13 +27,16 @@ a catalog. This doc's convention operates one level lower than that summary —
 per star, not per batch — and composes underneath it, not instead of it.
 
 **Gates.** A summary also carries `gates`: one `GateResult`
-(`models/gate_result.py`) for each quality check that has been moved onto the
-record. A gate is `passed`, `failed` or `not_checked`. A check that could not
-run (for example, a session with too few frames to judge) is `not_checked` and
-never reads as a pass. Record a gate with `summary.record_gate(...)`; a failed
-gate flags the run and adds its sentence to `flag_reasons`. Checks that have
-not been moved over yet still report only through `flag_reasons`. Stacking's
-frame quarantine and astrometry's plate solve are the first two on the record.
+(`models/gate_result.py`) for each run-level quality check. A gate is
+`passed`, `failed` or `not_checked`. A check that could not run (for example, a
+session with too few frames to judge) is `not_checked` and never reads as a
+pass. Record a gate with `summary.record_gate(...)`; a failed gate flags the run
+and adds its sentence to `flag_reasons`. All five pipelines record their
+run-level checks this way; each pipeline's README lists its gates. The records
+kept on each star or spectrum, and a few stacking checks (edge crop, exposure
+saturation), are not gates yet.
+
+**Adding a gate.** Build it from a module-level constant whose name ends in `GATE_NAME` (a gate built from a bare string cannot be found), add it to `GATE_REGISTRY` in `test/test_gate_conformance.py` with the statuses it can reach, and write tests that make it `failed` and `not_checked`, each naming the gate in the same test function. That test fails if any of these is missing. It reads the code without running it, so it catches a forgotten gate or test, not a weak one.
 
 ## The internal convention: pre-processing / processing / post-processing
 

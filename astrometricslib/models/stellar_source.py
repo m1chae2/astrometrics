@@ -759,6 +759,13 @@ class VariableCandidate(BaseModel):
     coefficient_of_variation: float = Field(..., alias="coefficientOfVariation", ge=0.0)
     ra: float = Field(..., ge=0.0, le=360.0, alias="ra")
     dec: float = Field(..., ge=-90.0, le=90.0, alias="dec")
+    # Whether the catalogs already list this star as variable (SIMBAD, Gaia
+    # DR3 and VSX, whichever have been asked): a `KnownVariability` value.
+    # "unknown" means no catalog has been asked, which is not the same as
+    # "not listed". A candidate listed as variable is not a discovery.
+    known_variability: str = Field(default="unknown", alias="knownVariability")
+    # One sentence saying what that answer rests on, naming the catalogs.
+    known_variability_note: str = Field(default="", alias="knownVariabilityNote")
 
     @computed_field(alias="score")
     @property

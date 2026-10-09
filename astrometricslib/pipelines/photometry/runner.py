@@ -19,6 +19,9 @@ from astrometricslib.pipelines.photometry.batch import (
     _run_variability_analysis_for_session,
     search_periods_and_save,
 )
+from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
+    label_known_variability,
+)
 from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -297,6 +300,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # light curves, recomputing a long-term CV) cannot retroactively
         # change an already-built VariableCandidate.
         candidates_formatted = _format_variable_candidates(all_candidates)
+        label_known_variability(candidates_formatted, catalog_access)
 
         sessions_missing_wcs: list[str] = []
         cross_session_match_count = 0
@@ -318,6 +322,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_stellar_objects = per_session_results[0][0].stellar_objects
 
         long_term_candidates_formatted = _format_variable_candidates(long_term_candidates)
+        label_known_variability(long_term_candidates_formatted, catalog_access)
 
         all_stellar_objects, star_id_breakdown = record_pipeline_stars(
             all_stellar_objects,

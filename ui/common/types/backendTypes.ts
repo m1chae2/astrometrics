@@ -1020,6 +1020,8 @@ export interface VariableCandidate {
   coefficientOfVariation: number;
   ra: number;
   dec: number;
+  knownVariability?: string;
+  knownVariabilityNote?: string;
   /** How confident the code is that this star is truly variable. */
   score?: number;
 }

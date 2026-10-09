@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.known_variability import KnownVariability, classify_simbad_object_types
 from astrometricslib.models.photometry_quality import (
     InputQualityAssessment as PhotometryInputQuality,
 )
@@ -552,10 +553,31 @@ class StellarObject(BaseModel):
     target_ids: list[str] = Field(default_factory=list, alias="targetIds")
     session_matches: list[StellarSessionMatch] = Field(default_factory=list, alias="sessionMatches")
     is_catalog_identified: bool = Field(default=False, alias="isCatalogIdentified")
+    # Every object type SIMBAD lists for this star, joined with "|" (for
+    # example "*|**|EB*|SB*|V*"). The full list is kept, not just SIMBAD's
+    # single main type: the main type of Algol, a textbook eclipsing binary,
+    # is "SB*" (spectroscopic binary). Empty when the star has no SIMBAD
+    # record, was named from Gaia alone, or was saved before this was
+    # recorded. See `known_variability`.
+    simbad_object_types: str = Field(default="", alias="simbadObjectTypes")
     # How confidently this star was matched to its SIMBAD/Gaia entry --
     # see CatalogMatchQuality. `None` for a star that was never matched
     # (a FIELD_J... position-only id).
     catalog_match_quality: CatalogMatchQuality | None = Field(default=None, alias="catalogMatchQuality")
+
+    @property
+    def known_variability(self) -> KnownVariability:
+        """Say whether SIMBAD already lists this star as a variable star.
+
+        Worked out from `simbad_object_types` each time, so it is not stored.
+
+        Returns
+        -------
+        known_variability : `KnownVariability`
+            ``UNKNOWN`` when the star has no SIMBAD object types. This says
+            what SIMBAD records, not whether the star varies.
+        """
+        return classify_simbad_object_types(self.simbad_object_types)
 
     @computed_field(alias="variabilityScore")
     @property

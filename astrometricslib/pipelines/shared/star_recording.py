@@ -564,6 +564,10 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     existing_stellar_object.b_minus_v = updated_stellar_object.b_minus_v
     existing_stellar_object.spectral_type = updated_stellar_object.spectral_type
     existing_stellar_object.stellar_spectral_type = updated_stellar_object.stellar_spectral_type
+    # A run that did not reach SIMBAD (or matched through Gaia) has an empty
+    # type; it must not erase one an earlier run found.
+    if updated_stellar_object.simbad_object_types:
+        existing_stellar_object.simbad_object_types = updated_stellar_object.simbad_object_types
     return existing_stellar_object
 
 

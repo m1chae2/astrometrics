@@ -35,6 +35,7 @@ from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriv
 from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.models.known_variability import KnownVariability, classify_simbad_object_types
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
@@ -350,6 +351,57 @@ def _brightest_pixel(data: Any) -> float | None:
     except TypeError, ValueError:
         return None
     return peak if math.isfinite(peak) else None
+
+
+def _read_simbad_object_types(match: Any) -> str:
+    """Read every object type SIMBAD lists for a matched star.
+
+    The all-types column is used when the result has one. A result with only
+    the main type cannot show that a star is *not* listed as variable (the
+    main type of the eclipsing binary Algol is "SB*"), so then only a main
+    type that is itself a variable type is kept, and anything else is
+    treated as unknown.
+
+    Parameters
+    ----------
+    match : `astropy.table.Row`
+        One row of a SIMBAD result.
+
+    Returns
+    -------
+    object_types : `str`
+        The types joined with ``|``, or an empty string when the row has no
+        usable type.
+    """
+
+    def read(*columns: str) -> str | None:
+        """Read the first present, unmasked column as text.
+
+        Returns
+        -------
+        text : `str` or `None`
+            The value, or `None` when no column is present and unmasked.
+        """
+        for column in columns:
+            if column not in match.colnames:
+                continue
+            value = match[column]
+            if value is None or (hasattr(value, "mask") and bool(value.mask)):
+                continue
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            text = str(value).strip()
+            if text:
+                return text
+        return None
+
+    all_types = read("alltypes.otypes", "ALLTYPES.OTYPES", "otypes")
+    if all_types is not None:
+        return all_types
+    main_type = read("otype", "OTYPE", "main_type")
+    if main_type is not None and classify_simbad_object_types(main_type) is not KnownVariability.NOT_LISTED:
+        return main_type
+    return ""
 
 
 def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
@@ -827,7 +879,18 @@ class StarIdentifier:
                 coord,
                 radius=f"{radius_deg}d",
                 # "ids" carries the common names used to label a star.
-                votable_fields=("flux(V)", "flux(B)", "sp_type", "ids", "ra(d)", "dec(d)", "otype"),
+                # "alltypes" lists every object type, not just the main one:
+                # the main type of the eclipsing binary Algol is "SB*".
+                votable_fields=(
+                    "flux(V)",
+                    "flux(B)",
+                    "sp_type",
+                    "ids",
+                    "ra(d)",
+                    "dec(d)",
+                    "otype",
+                    "alltypes",
+                ),
                 row_limit=5000,  # Prevent massive result sets
             )
         except ExternalServiceError, ValueError:
@@ -1929,6 +1992,7 @@ class StarIdentifier:
         magnitude = _read_catalog_magnitude(match, ["V", "FLUX_V", "flux_v", "flux(V)"])
         blue_magnitude = _read_catalog_magnitude(match, ["B", "FLUX_B", "flux_b", "flux(B)"])
 
+        stellar_object.simbad_object_types = _read_simbad_object_types(match)
         stellar_object.name = common_name if common_name else str(main_id)
         stellar_object.id = str(main_id)
         stellar_object.spectral_type = str(spectral_type)

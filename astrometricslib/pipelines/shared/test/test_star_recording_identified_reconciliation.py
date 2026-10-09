@@ -270,3 +270,27 @@ def test_the_shared_naming_rules() -> None:
     assert name_preference_rank("2MASS J1") == 2
     assert choose_survivor_id(["2MASS J1", "Gaia DR3 1", "HD 1"]) == "HD 1"
     assert catalog_family("HD  151086") == "HD"
+
+
+def test_astrometry_merge_keeps_object_types_when_the_new_run_has_none() -> None:
+    """A run that missed SIMBAD must not erase earlier object types."""
+    from astrometricslib.models.stellar_source import StellarObject
+    from astrometricslib.pipelines.shared.star_recording import merge_astrometry_stellar_object
+
+    saved = StellarObject(id="Algol", simbadObjectTypes="*|EB*|V*")
+    gaia_only = StellarObject(id="Algol")
+
+    merged = merge_astrometry_stellar_object(saved, gaia_only)
+
+    assert merged.simbad_object_types == "*|EB*|V*"
+
+
+def test_astrometry_merge_takes_new_object_types() -> None:
+    """A run that found types updates the saved ones."""
+    from astrometricslib.models.stellar_source import StellarObject
+    from astrometricslib.pipelines.shared.star_recording import merge_astrometry_stellar_object
+
+    saved = StellarObject(id="Algol", simbadObjectTypes="*")
+    found = StellarObject(id="Algol", simbadObjectTypes="*|EB*|V*")
+
+    assert merge_astrometry_stellar_object(saved, found).simbad_object_types == "*|EB*|V*"

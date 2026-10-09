@@ -34,3 +34,7 @@ The summary keeps one record per check in `gates`. Each gate is `passed`, `faile
 | `catalog_lookup` | The catalog circuit breaker tripped, or half or more of the lookups failed | No lookup was attempted |
 
 `source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. There is no gate yet on how well the solution fits the stars (the residual RMS) or on how many stars matched: both numbers are recorded but have no limit, and a limit has to be derived from the plate scale and star width and checked on real data (Gap 5 of the audit plan).
+
+## SIMBAD object types
+
+When a detected star is matched to SIMBAD, the star keeps every object type SIMBAD lists for it (`simbad_object_types`, such as `*|**|EB*|SB*|V*`), and `StellarObject.known_variability` reads them (see `models/known_variability.py`). The full list matters: the single main type of Algol, a textbook eclipsing binary, is only `SB*`, so a check on the main type alone would call it "not listed as variable". If a result carries only the main type, it is kept only when that type is itself a variable type; otherwise the star is recorded as unknown. Stars named from Gaia alone have no SIMBAD types and are unknown. Stars saved before this was recorded are also unknown until a backfill runs.

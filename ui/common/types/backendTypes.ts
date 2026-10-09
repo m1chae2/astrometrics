@@ -301,6 +301,7 @@ export interface Spectrum {
   targetIds?: string[];
   sessionMatches?: StellarSessionMatch[];
   isCatalogIdentified?: boolean;
+  simbadObjectTypes?: string;
   catalogMatchQuality?: CatalogMatchQuality | null;
   /** How much this star's brightness jumps around, on a display scale. */
   variabilityScore?: number | null;

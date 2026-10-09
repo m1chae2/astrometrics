@@ -31,6 +31,10 @@ class EphemerisCrossMatcher:
 
     def __init__(self, config: MovingObjectConfig) -> None:
         self.config = config
+        # A failed query returns `None`, the same as a field with no known
+        # asteroids, so the two are counted here to tell them apart.
+        self.queries_attempted = 0
+        self.queries_failed = 0
 
     def query_field(
         self,
@@ -62,6 +66,7 @@ class EphemerisCrossMatcher:
 
         coordinate = SkyCoord(center_right_ascension_deg * u.deg, center_declination_deg * u.deg)
         epoch = Time(epoch_unix, format="unix")
+        self.queries_attempted += 1
         try:
             field_table = Skybot.cone_search(
                 coordinate,
@@ -73,6 +78,7 @@ class EphemerisCrossMatcher:
         except (RuntimeError, *ONLINE_QUERY_ERRORS) as query_error:
             # astroquery raises RuntimeError when the service reports an error.
             logger.warning("SkyBoT cone-search query failed: %s", query_error)
+            self.queries_failed += 1
             return None
 
         if field_table is None or len(field_table) == 0:

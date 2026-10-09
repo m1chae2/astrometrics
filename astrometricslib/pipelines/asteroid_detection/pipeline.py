@@ -343,6 +343,9 @@ class AsteroidDetectionPipeline:
         # things like "how many asteroids did we find?" so the main program
         # can show a summary to the user later.
         self.last_run_metrics: dict[str, int] = {}
+        # How many SkyBoT questions the last run asked and how many failed.
+        self._ephemeris_queries_attempted = 0
+        self._ephemeris_queries_failed = 0
 
     def process(
         self, target_id: str, stacked_image_path: str, frames: list[tuple[str, float]]
@@ -405,6 +408,8 @@ class AsteroidDetectionPipeline:
             "  [Asteroid Detection] Chaining completed: %s track candidates generated.", len(candidates)
         )
 
+        self._ephemeris_queries_attempted = 0
+        self._ephemeris_queries_failed = 0
         candidates = self._cross_match_ephemeris(candidates, frame_detections, stack_wcs, stack_header)
 
         self.last_run_metrics = {
@@ -423,6 +428,8 @@ class AsteroidDetectionPipeline:
             "candidates_ephemeris_matched": sum(
                 1 for candidate in candidates if candidate.cascade_stage == CascadeStage.EPHEMERIS_MATCHED
             ),
+            "ephemeris_queries_attempted": self._ephemeris_queries_attempted,
+            "ephemeris_queries_failed": self._ephemeris_queries_failed,
         }
         return candidates
 
@@ -575,6 +582,9 @@ class AsteroidDetectionPipeline:
         epoch_unix = statistics.mean(detection.timestamp for detection in frame_detections)
 
         cross_matcher = EphemerisCrossMatcher(self.config)
-        return cross_matcher.cross_match_candidates(
+        matched_candidates = cross_matcher.cross_match_candidates(
             candidates, center_right_ascension_deg, center_declination_deg, epoch_unix, radius_deg
         )
+        self._ephemeris_queries_attempted = cross_matcher.queries_attempted
+        self._ephemeris_queries_failed = cross_matcher.queries_failed
+        return matched_candidates

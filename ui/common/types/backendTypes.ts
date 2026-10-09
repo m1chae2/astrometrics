@@ -1805,6 +1805,8 @@ export interface AsteroidDetectionPipelineQualityMetrics {
   candidatesPersistenceConfirmed: number;
   candidatesRateLinearityConfirmed: number;
   candidatesEphemerisMatched: number;
+  ephemerisQueriesAttempted?: number;
+  ephemerisQueriesFailed?: number;
 }
 
 /**

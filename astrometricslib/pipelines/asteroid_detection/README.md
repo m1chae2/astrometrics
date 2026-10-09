@@ -21,3 +21,16 @@ This pipeline searches a sequence of images of the same field for objects that m
 This pipeline finds and classifies moving objects; it does not stack, plate-solve, or catalog-identify the fixed stars in the same images — it depends on astrometry's per-frame star detection but does not duplicate astrometry's own plate-solving.
 
 This README describes the overall flow. For exact behavior, read the code — the code is always the source of truth.
+
+## The gate record
+
+The summary keeps one record per check in `gates`, built in `run_gates.py`. Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. A search that finds nothing says little unless it could have found something, so the first gate records whether it could. The tests in `test/test_run_gates.py` give each gate input that must fail it.
+
+| Gate | Fails when | Not checked when |
+|---|---|---|
+| `search_frames` | Never | Fewer frames could be searched than a track needs (`min_frames_for_persistence`), so no mover could have been found |
+| `pointing_metadata` | A frame lacks RA, Dec or image size in its header | No frame was considered |
+| `ephemeris_cross_match` | The known-asteroid database (SkyBoT) could not be reached | No mover was confirmed, or the database was never asked |
+| `unmatched_movers` | A mover moved in a straight line but matched no known asteroid (worth a manual look) | No mover was confirmed |
+
+A failed SkyBoT query used to look the same as a field with no known asteroids. The pipeline now counts the queries it makes and the ones that fail (`ephemerisQueriesAttempted`, `ephemerisQueriesFailed` in the metrics). Two things are not yet covered: the false-mover rate of the rejection cascade and its recovery of injected movers (Gap 2), and whether the field is near the ecliptic enough for a real asteroid to appear. `NGC 2403` and `M 81` sit far from it, so a clean run there only confirms "found nothing".

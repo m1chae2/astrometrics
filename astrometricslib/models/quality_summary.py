@@ -554,6 +554,12 @@ class AsteroidDetectionPipelineQualityMetrics(BaseModel):
     # by checking a database of predicted asteroid positions
     # ("ephemeris" means a table of where something will be over time).
     candidates_ephemeris_matched: int = Field(alias="candidatesEphemerisMatched")
+    # How many times the known-asteroid database (SkyBoT) was asked about the
+    # field, and how many of those questions failed. A failed question looks
+    # the same as an empty field, so without these a network error would make
+    # every real mover seem unknown.
+    ephemeris_queries_attempted: int = Field(default=0, alias="ephemerisQueriesAttempted")
+    ephemeris_queries_failed: int = Field(default=0, alias="ephemerisQueriesFailed")
 
 
 class AsteroidDetectionQualitySummary(PipelineQualitySummaryBase):

@@ -22,3 +22,15 @@ This pipeline answers two questions about a single image: where in the sky is it
 This pipeline identifies stars and solves the sky position of an image. It does not measure star brightness (that is photometry) or star spectra (that is spectroscopy) — those pipelines depend on astrometry's output but live elsewhere.
 
 This README describes the overall flow. For exact behavior, read the code — the code is always the source of truth.
+
+## The gate record
+
+The summary keeps one record per check in `gates`. Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. `plate_solve` is built in `runner.py`; `source_detection` and `catalog_lookup` are built in `post_processing/run_gates.py`. The tests in `test/test_plate_solve_gate.py` and `test/post_processing/test_run_gates.py` give each gate input that must fail it.
+
+| Gate | Fails when | Not checked when |
+|---|---|---|
+| `plate_solve` | The image was not solved to sky coordinates | Never |
+| `source_detection` | No star was detected | Never |
+| `catalog_lookup` | The catalog circuit breaker tripped, or half or more of the lookups failed | No lookup was attempted |
+
+`source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. There is no gate yet on how well the solution fits the stars (the residual RMS) or on how many stars matched: both numbers are recorded but have no limit, and a limit has to be derived from the plate scale and star width and checked on real data (Gap 5 of the audit plan).

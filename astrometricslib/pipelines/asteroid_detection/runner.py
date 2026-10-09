@@ -11,10 +11,12 @@ the shared star catalog.
 from typing import Any
 
 from astrometricslib.models.moving_object import CascadeStage
+from astrometricslib.models.moving_object_config import MovingObjectConfigLoader
 from astrometricslib.models.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
 )
+from astrometricslib.pipelines.asteroid_detection.run_gates import asteroid_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -125,23 +127,18 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             target_session_breakdown=asteroid_detection_session_breakdown,
             asteroid_detection_metrics=AsteroidDetectionPipelineQualityMetrics(**metrics),
         )
-        if metrics.get("frames_excluded_missing_pointing_metadata", 0) > 0:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{metrics['frames_excluded_missing_pointing_metadata']} frame(s) excluded for "
-                "missing RA/DEC/NAXIS pointing metadata"
-            )
         candidates_awaiting_recovery = sum(
             1
             for candidate in result.candidates
             if candidate.cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
         )
-        if candidates_awaiting_recovery > 0:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{candidates_awaiting_recovery} candidate(s) confirmed as movers but not "
-                "matched to a known body -- worth a manual look"
-            )
+        moving_object_config = request.options.get("moving_object_config") or (
+            MovingObjectConfigLoader.load_moving_object_config()
+        )
+        for gate in asteroid_run_gates(
+            metrics, moving_object_config.min_frames_for_persistence, candidates_awaiting_recovery
+        ):
+            summary.record_gate(gate)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             most_common_camera_name,

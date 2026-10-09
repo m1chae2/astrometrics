@@ -16,6 +16,7 @@ from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
+from astrometricslib.pipelines.astrometry.post_processing.run_gates import astrometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -250,6 +251,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             # flag stays in the metrics for anyone who needs to tell them
             # apart.
             summary.record_gate(failed_gate(PLATE_SOLVE_GATE_NAME, "plate solve failed"))
+        for gate in astrometry_run_gates(summary.astrometry_metrics):
+            summary.record_gate(gate)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_from_header,

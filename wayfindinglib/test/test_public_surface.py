@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 import wayfindinglib
-from astrometricslib import AppConfiguration, InvalidArgumentError
+from astrometricslib import AppConfiguration, ExternalServiceError, InvalidArgumentError, NotFoundError
 from wayfindinglib import ObservationExecution, ObservationPlanning, ObservatoryControl, SkyPosition
 from wayfindinglib.drivers.butler import DiskButler
 
@@ -318,3 +318,27 @@ def test_remote_list_refuses_arguments_its_kind_does_not_use(
     """`control.remote.list` refuses an argument its kind does not use."""
     with pytest.raises(InvalidArgumentError, match=message):
         control.remote.list(kind, **arguments)
+
+
+@pytest.mark.parametrize(
+    ("is_reachable", "error_type", "message"),
+    [
+        (False, ExternalServiceError, "not reachable"),
+        (True, NotFoundError, "No folder named"),
+    ],
+)
+def test_remote_list_files_tells_unreachable_from_missing_folder(
+    control: ObservatoryControl,
+    monkeypatch: pytest.MonkeyPatch,
+    is_reachable: bool,
+    error_type: type[Exception],
+    message: str,
+) -> None:
+    """An unlisted folder is reported as offline or as absent, as it is."""
+    from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
+
+    monkeypatch.setattr(tasks, "list_remote_targets", lambda context: [])
+    monkeypatch.setattr(tasks, "matching_remote_folder", lambda context, name, folders: None)
+    monkeypatch.setattr(tasks, "check_remote_connection", lambda context: is_reachable)
+    with pytest.raises(error_type, match=message):
+        control.remote.list("files", folder_name="NGC 7331")

@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from astrometricslib import (
+    ExternalServiceError,
     InvalidArgumentError,
     NotFoundError,
     Target,
@@ -105,6 +106,9 @@ class RemoteControl(ControlChild):
             argument is given that `kind` does not use.
         NotFoundError
             If `folder_name` matches no folder on the observatory computer.
+        ExternalServiceError
+            If no folder matches because the observatory computer cannot
+            be reached.
         """
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
 
@@ -115,6 +119,8 @@ class RemoteControl(ControlChild):
                 self._context, folder_name, tasks.list_remote_targets(self._context)
             )
             if folder is None:
+                if not tasks.check_remote_connection(self._context):
+                    raise ExternalServiceError("The observatory computer is not reachable.")
                 raise NotFoundError(f"No folder named {folder_name!r} on the observatory computer.")
             if sizes:
                 return tasks.list_remote_files_with_sizes(self._context, folder)

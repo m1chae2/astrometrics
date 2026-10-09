@@ -83,12 +83,15 @@ export const scanRemoteTargets = async (): Promise<RemoteScanResponse> => {
 
 /**
  * Fetches file count stats for a remote target folder on the telescope.
+ *
+ * Runs automatically when a target is selected, and a target with no folder
+ * on the telescope is normal, so errors are silent and read as zero files.
  */
 export const fetchRemoteFolderStats = async (
     folder: string
 ): Promise<{ fileCount: number; resolvedFolder?: string }> => {
     try {
-        const result = await callBackend('ingestion:stats', { folder });
+        const result = await callBackend('ingestion:stats', { folder }, { silent: true });
         return result || { fileCount: 0 };
     } catch {
         return { fileCount: 0 };
@@ -102,7 +105,7 @@ export const fetchRemoteFiles = async (
     folder: string
 ): Promise<{ files: string[]; resolvedFolder?: string }> => {
     try {
-        const result = await callBackend('ingestion:list_files', { folder });
+        const result = await callBackend('ingestion:list_files', { folder }, { silent: true });
         return result || { files: [] };
     } catch {
         return { files: [] };

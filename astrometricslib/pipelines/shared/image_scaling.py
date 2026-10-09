@@ -225,6 +225,47 @@ _WHITE_FRACTION_OF_FULL_BRIGHTNESS = 0.98
 _WHITE_COUNT_STRIDE = 4
 
 
+def stretch_like_autostretch(values: np.ndarray, arr: np.ndarray, sky_level: float) -> np.ndarray | None:
+    """Stretch brightness values the way the normal autostretch would.
+
+    The curve is the one `white_fraction_after_autostretch` describes, set from
+    the sky and the brightest pixel of `arr`. The values to stretch need not
+    be `arr` itself. This lets a caller ask what the normal stretch would do to
+    one part of an image, such as a single object.
+
+    Parameters
+    ----------
+    values : `numpy.ndarray`
+        The linear brightness values to stretch, of any shape.
+    arr : `numpy.ndarray`
+        The whole image, 2-D. Its sky and brightest pixel set the curve.
+    sky_level : `float`
+        The brightness, strictly between 0 and 1, the sky would land on.
+
+    Returns
+    -------
+    stretched : `numpy.ndarray` or `None`
+        `values` after the stretch, between 0 and 1 and the same shape as
+        `values`. `None` when the image has no measurable sky to anchor the
+        stretch to.
+    """
+    sky = measure_sky(arr)
+    if sky is None:
+        return None
+    median, sigma, peak = sky
+    black_point = max(median + _AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
+    if peak <= black_point:
+        return None
+    normalized_median = (median - black_point) / (peak - black_point)
+    if not 0.0 < normalized_median < 1.0 or not 0.0 < sky_level < 1.0:
+        return None
+    midtones = _solve_midtones_balance(normalized_median, sky_level)
+    return _midtones_transfer_function(
+        np.clip((np.asarray(values, dtype=np.float64) - black_point) / (peak - black_point), 0.0, 1.0),
+        midtones,
+    )
+
+
 def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float | None:
     """Find what share of an image an autostretch would push to white.
 
@@ -247,24 +288,13 @@ def white_fraction_after_autostretch(arr: np.ndarray, sky_level: float) -> float
         The share of pixels, between 0 and 1, that would come out white.
         `None` when the image has no measurable sky to anchor the stretch to.
     """
-    sky = measure_sky(arr)
-    if sky is None:
-        return None
-    median, sigma, peak = sky
-    black_point = max(median + _AUTOSTRETCH_SHADOWS_CLIP_SIGMA * sigma, float(np.nanmin(arr)))
-    if peak <= black_point:
-        return None
-    normalized_median = (median - black_point) / (peak - black_point)
-    if not 0.0 < normalized_median < 1.0 or not 0.0 < sky_level < 1.0:
-        return None
-    midtones = _solve_midtones_balance(normalized_median, sky_level)
     sample = arr[::_WHITE_COUNT_STRIDE, ::_WHITE_COUNT_STRIDE]
     sample = sample[np.isfinite(sample)]
     if sample.size == 0:
         return None
-    stretched = _midtones_transfer_function(
-        np.clip((sample - black_point) / (peak - black_point), 0.0, 1.0), midtones
-    )
+    stretched = stretch_like_autostretch(sample, arr, sky_level)
+    if stretched is None:
+        return None
     return float(np.mean(stretched >= _WHITE_FRACTION_OF_FULL_BRIGHTNESS))
 
 

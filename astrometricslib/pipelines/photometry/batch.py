@@ -542,6 +542,64 @@ def _add_period_results_to_saved_star(
     return existing_star
 
 
+def _correct_for_the_number_of_searches(analyzer: Any, searched: list[StellarObject], target_id: str) -> None:
+    """Judge the run's period-search verdicts against every search made.
+
+    Each search's false-alarm probability holds for one search; the run made
+    one cycle search and one dip search per star. A "detected" or "possible"
+    result at the floor of its noise comparison is repeated with enough
+    noise-only versions to be resolved, then every verdict is recomputed on
+    its family-wise probability (see `family_wise_correction`).
+
+    Parameters
+    ----------
+    analyzer : `VariabilityAnalyzer`
+        Runs the repeated searches.
+    searched : `list` [`StellarObject`]
+        The stars that were searched; their results are corrected in place.
+    target_id : `str`
+        The target, for the log.
+    """
+    from astrometricslib.pipelines.photometry.processing.family_wise_correction import (
+        apply_family_wise_correction,
+        count_family,
+        needs_repeat,
+        shuffles_needed,
+    )
+
+    def all_results() -> list[Any]:
+        """Collect the run's cycle and dip results.
+
+        Returns
+        -------
+        results : `list`
+            Every non-empty result, two at most per star.
+        """
+        collected = []
+        for star in searched:
+            collected.extend(
+                result
+                for result in (star.photometry.periodogram, star.photometry.transit_candidate)
+                if result
+            )
+        return collected
+
+    family_size = count_family(all_results())
+    if family_size < 2:
+        return
+    shuffles = shuffles_needed(family_size)
+    for star in searched:
+        try:
+            if needs_repeat(star.photometry.periodogram, family_size):
+                analyzer.run_lomb_scargle_periodogram(star, shuffle_count=shuffles)
+            if needs_repeat(star.photometry.transit_candidate, family_size):
+                analyzer.run_bls_transit_search(star, shuffle_count=shuffles)
+        except (AstrometricsError, *DATA_ERRORS) as search_error:
+            logger.warning("[%s] Repeating the search for %s failed: %s", target_id, star.id, search_error)
+    apply_family_wise_correction(all_results(), family_size)
+    logger.info("[%s] Judged %s period searches together.", target_id, family_size)
+
+
 def search_periods_and_save(
     stellar_objects: list[StellarObject],
     target: Target,
@@ -588,6 +646,8 @@ def search_periods_and_save(
             continue
         if periodogram is not None or transit_candidate is not None:
             searched.append(star)
+
+    _correct_for_the_number_of_searches(analyzer, searched, target.id)
 
     if searched:
         catalog_access.merge_and_record("stellar_catalog", searched, _add_period_results_to_saved_star)

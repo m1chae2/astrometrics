@@ -517,6 +517,11 @@ export interface PeriodogramResult {
   cyclesObserved?: number | null;
   searchedMinPeriodDays?: number | null;
   searchedMaxPeriodDays?: number | null;
+  shuffleCount?: number | null;
+  nullBlockLength?: number | null;
+  familyWiseFalseAlarmProbability?: number | null;
+  searchesInFamily?: number | null;
+  uncorrectedVerdict?: string;
 }
 
 /**
@@ -543,6 +548,11 @@ export interface TransitCandidate {
   note?: string;
   searchedMinPeriodDays?: number | null;
   searchedMaxPeriodDays?: number | null;
+  shuffleCount?: number | null;
+  nullBlockLength?: number | null;
+  familyWiseFalseAlarmProbability?: number | null;
+  searchesInFamily?: number | null;
+  uncorrectedVerdict?: string;
 }
 
 /**

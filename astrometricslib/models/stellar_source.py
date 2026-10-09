@@ -189,6 +189,23 @@ class PeriodogramResult(BaseModel):
     # The shortest and longest period the search could test.
     searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
     searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
+    # How many noise-only versions of the light curve the false-alarm
+    # probability was measured against, and how many consecutive measurements
+    # moved together in them (1 is a plain shuffle; more keeps correlated
+    # noise). The smallest probability that can be reported is 1/(count + 1).
+    shuffle_count: int | None = Field(default=None, alias="shuffleCount")
+    null_block_length: int | None = Field(default=None, alias="nullBlockLength")
+    # The false-alarm probability for the whole family of searches made on
+    # this target: the chance that at least one of `searches_in_family`
+    # searches would look this strong by chance (see
+    # `family_wise_correction`). `verdict` is judged on this; the verdict
+    # before the correction is kept in `uncorrected_verdict`. All empty for a
+    # result that was not part of a family.
+    family_wise_false_alarm_probability: float | None = Field(
+        default=None, alias="familyWiseFalseAlarmProbability"
+    )
+    searches_in_family: int | None = Field(default=None, alias="searchesInFamily")
+    uncorrected_verdict: str = Field(default="", alias="uncorrectedVerdict")
 
 
 class TransitCandidate(BaseModel):
@@ -231,6 +248,23 @@ class TransitCandidate(BaseModel):
     note: str = Field(default="", alias="note")
     searched_min_period_days: float | None = Field(default=None, alias="searchedMinPeriodDays")
     searched_max_period_days: float | None = Field(default=None, alias="searchedMaxPeriodDays")
+    # How many noise-only versions of the light curve the false-alarm
+    # probability was measured against, and how many consecutive measurements
+    # moved together in them (1 is a plain shuffle; more keeps correlated
+    # noise). The smallest probability that can be reported is 1/(count + 1).
+    shuffle_count: int | None = Field(default=None, alias="shuffleCount")
+    null_block_length: int | None = Field(default=None, alias="nullBlockLength")
+    # The false-alarm probability for the whole family of searches made on
+    # this target: the chance that at least one of `searches_in_family`
+    # searches would look this strong by chance (see
+    # `family_wise_correction`). `verdict` is judged on this; the verdict
+    # before the correction is kept in `uncorrected_verdict`. All empty for a
+    # result that was not part of a family.
+    family_wise_false_alarm_probability: float | None = Field(
+        default=None, alias="familyWiseFalseAlarmProbability"
+    )
+    searches_in_family: int | None = Field(default=None, alias="searchesInFamily")
+    uncorrected_verdict: str = Field(default="", alias="uncorrectedVerdict")
 
 
 class PhotometryResult(BaseModel):

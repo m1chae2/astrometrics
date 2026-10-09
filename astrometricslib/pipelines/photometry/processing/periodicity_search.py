@@ -22,10 +22,15 @@ from three checks:
 3. Were enough repeats seen? A pattern seen fewer than three times is at
    most ``possible``.
 
-Shuffling removes any slow drift in the data, so a light curve with drift
-(clouds, changing airmass) can look more significant than it is. The
-verdicts are a guard against reading noise as a finding, not a proof that
-a pattern is real.
+A point-by-point shuffle removes any slow drift or correlated noise in the
+data, so a light curve with drift (clouds, changing airmass) would look more
+significant than it is. The shuffle therefore moves blocks of consecutive
+measurements, with the block length taken from the light curve's own
+autocorrelation (see `correlation_block_length`). For white noise the block
+is one measurement, which is the plain shuffle; for red noise the blocks keep
+the correlation inside them, so the false-alarm probability is honest about
+it. The verdicts are a guard against reading noise as a finding, not a proof
+that a pattern is real.
 """
 
 import math
@@ -101,6 +106,17 @@ _SHUFFLE_COUNT = 300
 # cutoff for "detected", and take about half as long.
 _SLOW_SEARCH_WORK_LIMIT = 400_000
 _REDUCED_SHUFFLE_COUNT = 150
+
+# The autocorrelation (how much each measurement resembles the one `lag`
+# steps later) below which the correlation is called gone, which sets the
+# block length of the noise-only versions. 0.2 is a common convention and a
+# design choice, checked on simulated red noise (see
+# `test_periodicity_search.py`), not derived.
+_CORRELATION_GONE_BELOW = 0.2
+
+# The longest block, as a fraction of the measurements. A block longer than
+# a quarter of the data leaves too few blocks to shuffle into new orders.
+_LONGEST_BLOCK_FRACTION = 0.25
 
 # How many box widths the transit search tries, from the shortest a
 # dip can be seen at (two measurements wide) up to the longest allowed
@@ -275,7 +291,102 @@ def _insufficient_note(time_days: np.ndarray) -> str:
     )
 
 
-def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramResult:
+def correlation_block_length(flux: np.ndarray) -> int:
+    """Choose how many consecutive measurements move together in the null.
+
+    The block length is the first lag at which the light curve's
+    autocorrelation falls below `_CORRELATION_GONE_BELOW`, so the blocks are
+    as long as the correlation. White noise has none beyond lag zero, which
+    gives 1 (the plain point shuffle).
+
+    Parameters
+    ----------
+    flux : `np.ndarray`
+        The brightness, in time order.
+
+    Returns
+    -------
+    block_length : `int`
+        At least 1, and at most `_LONGEST_BLOCK_FRACTION` of the measurements.
+    """
+    flux = np.asarray(flux, dtype=float)
+    count = flux.size
+    longest = max(1, int(count * _LONGEST_BLOCK_FRACTION))
+    centred = flux - np.mean(flux)
+    variance = float(np.dot(centred, centred))
+    if count < 8 or variance <= 0.0:
+        return 1
+    for lag in range(1, longest + 1):
+        correlation = float(np.dot(centred[:-lag], centred[lag:])) / variance
+        if correlation < _CORRELATION_GONE_BELOW:
+            return lag
+    return longest
+
+
+def null_flux(flux: np.ndarray, random_generator: np.random.Generator, block_length: int) -> np.ndarray:
+    """Make one noise-only version of a light curve by moving blocks.
+
+    The measurements keep their times; the brightness values are cut into
+    consecutive blocks of `block_length` (the first and last may be shorter),
+    and the blocks are put back in a random order, so the correlation inside
+    each block survives. A block length of 1 is a plain shuffle.
+
+    Parameters
+    ----------
+    flux : `np.ndarray`
+        The brightness, in time order.
+    random_generator : `numpy.random.Generator`
+        The source of randomness.
+    block_length : `int`
+        How many consecutive measurements move together.
+
+    Returns
+    -------
+    shuffled : `np.ndarray`
+        The same values in a new order.
+    """
+    if block_length <= 1:
+        return random_generator.permutation(flux)
+    offset = int(random_generator.integers(0, block_length))
+    cut_points = [point for point in range(offset, flux.size, block_length) if point > 0]
+    blocks = np.split(flux, cut_points) if cut_points else [flux]
+    order = random_generator.permutation(len(blocks))
+    return np.concatenate([blocks[index] for index in order])
+
+
+FALSE_ALARM_FOR_DETECTION = _FALSE_ALARM_FOR_DETECTION
+
+
+def verdict_from_false_alarm(
+    false_alarm: float, cycles: float, events: int | None = None, dip_points: int | None = None
+) -> str:
+    """Turn a false-alarm probability and repeat counts into a verdict.
+
+    The public name of the rule the searches use, so a later correction of the
+    probability can be judged by the same rule.
+
+    Parameters
+    ----------
+    false_alarm : `float`
+        The false-alarm probability.
+    cycles : `float`
+        How many full cycles of the period fit in the observed time.
+    events : `int`, optional
+        For a dip search, how many separate dips were seen.
+    dip_points : `int`, optional
+        For a dip search, how many measurements fell inside dips.
+
+    Returns
+    -------
+    verdict : `str`
+        `VERDICT_DETECTED`, `VERDICT_POSSIBLE` or `VERDICT_NOT_DETECTED`.
+    """
+    return _verdict_from(false_alarm, cycles, events, dip_points)
+
+
+def lomb_scargle_search(
+    time_days: np.ndarray, flux: np.ndarray, shuffle_count: int | None = None, block_length: int | None = None
+) -> PeriodogramResult:
     """Search a light curve for a smooth repeating cycle.
 
     Parameters
@@ -284,6 +395,12 @@ def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramR
         The measurement times, in days.
     flux : `np.ndarray`
         The brightness at each time.
+    shuffle_count : `int`, optional
+        How many noise-only versions to compare with. By default 300, or 150
+        for a long light curve.
+    block_length : `int`, optional
+        How many consecutive measurements move together in the noise-only
+        versions. By default chosen from the light curve's own correlation.
 
     Returns
     -------
@@ -320,14 +437,15 @@ def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramR
 
     # A fixed seed makes repeated searches of the same data agree.
     random_generator = np.random.default_rng(time_days.size)
-    shuffles = (
+    shuffles = shuffle_count or (
         _SHUFFLE_COUNT
         if time_days.size * frequency.size <= _SLOW_SEARCH_WORK_LIMIT
         else _REDUCED_SHUFFLE_COUNT
     )
+    block = block_length or correlation_block_length(flux)
     at_least_as_strong = 0
     for _ in range(shuffles):
-        shuffled_power = LombScargle(time_days, random_generator.permutation(flux)).power(
+        shuffled_power = LombScargle(time_days, null_flux(flux, random_generator, block)).power(
             frequency, assume_regular_frequency=True
         )
         at_least_as_strong += int(np.max(shuffled_power) >= best_power)
@@ -339,6 +457,8 @@ def lomb_scargle_search(time_days: np.ndarray, flux: np.ndarray) -> PeriodogramR
         power=best_power,
         false_alarm_probability=float(false_alarm),
         verdict=_verdict_from(false_alarm, cycles),
+        shuffle_count=shuffles,
+        null_block_length=block,
         cycles_observed=float(cycles),
         searched_min_period_days=grid.minimum_period_days,
         searched_max_period_days=grid.maximum_period_days,
@@ -364,7 +484,9 @@ def _robust_point_scatter(flux: np.ndarray) -> float:
     return max(spread / math.sqrt(2.0), 1e-6)
 
 
-def box_search(time_days: np.ndarray, flux: np.ndarray) -> TransitCandidate:
+def box_search(
+    time_days: np.ndarray, flux: np.ndarray, shuffle_count: int | None = None, block_length: int | None = None
+) -> TransitCandidate:
     """Search a light curve for a repeating flat-bottomed dip.
 
     Parameters
@@ -374,6 +496,12 @@ def box_search(time_days: np.ndarray, flux: np.ndarray) -> TransitCandidate:
     flux : `np.ndarray`
         The brightness at each time. It is divided by its median first,
         so depths are fractions of the normal brightness.
+    shuffle_count : `int`, optional
+        How many noise-only versions to compare with. By default 300, or 150
+        for a long light curve.
+    block_length : `int`, optional
+        How many consecutive measurements move together in the noise-only
+        versions. By default chosen from the light curve's own correlation.
 
     Returns
     -------
@@ -430,13 +558,16 @@ def box_search(time_days: np.ndarray, flux: np.ndarray) -> TransitCandidate:
 
     random_generator = np.random.default_rng(time_days.size)
     periods = results.period
-    shuffles = (
+    shuffles = shuffle_count or (
         _SHUFFLE_COUNT if time_days.size * periods.size <= _SLOW_SEARCH_WORK_LIMIT else _REDUCED_SHUFFLE_COUNT
     )
+    block = block_length or correlation_block_length(normalized)
     at_least_as_strong = 0
     for _ in range(shuffles):
         shuffled = BoxLeastSquares(
-            time_days, random_generator.permutation(normalized), dy=np.full_like(normalized, point_scatter)
+            time_days,
+            null_flux(normalized, random_generator, block),
+            dy=np.full_like(normalized, point_scatter),
         )
         at_least_as_strong += int(
             np.max(shuffled.power(periods, durations, objective="snr").power) >= best_power
@@ -463,6 +594,8 @@ def box_search(time_days: np.ndarray, flux: np.ndarray) -> TransitCandidate:
         transit_count=event_count,
         points_in_transit=dip_points,
         verdict=verdict,
+        shuffle_count=shuffles,
+        null_block_length=block,
         note=note,
         searched_min_period_days=minimum_period,
         searched_max_period_days=grid.maximum_period_days,

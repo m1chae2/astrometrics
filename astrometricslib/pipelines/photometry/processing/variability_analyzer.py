@@ -1144,7 +1144,7 @@ class VariabilityAnalyzer:
             else:
                 star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
 
-    def run_bls_transit_search(self, star: StellarObject) -> Any | None:
+    def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any | None:
         """Look for a repeating, box-shaped dip in brightness.
 
         A planet passing in front of its star and one star of an
@@ -1153,6 +1153,14 @@ class VariabilityAnalyzer:
         the two apart. See `periodicity_search` for how the result is
         judged: the strongest dip always exists, so the returned candidate
         carries a verdict saying whether it stands out from noise.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star whose light curve is searched.
+        shuffle_count : `int`, optional
+            How many noise-only versions to compare with; the search picks
+            a default when omitted.
 
         Returns
         -------
@@ -1168,16 +1176,26 @@ class VariabilityAnalyzer:
         time_days, fluxes = self._light_curve_arrays(star)
         if fluxes.size < MINIMUM_POINTS_FOR_TRANSIT_SEARCH or np.mean(fluxes) <= 0:
             return None
-        candidate = box_search(time_days, fluxes)
+        candidate = box_search(time_days, fluxes, shuffle_count=shuffle_count)
         star.photometry.transit_candidate = candidate
         return candidate
 
-    def run_lomb_scargle_periodogram(self, star: StellarObject) -> Any | None:
+    def run_lomb_scargle_periodogram(
+        self, star: StellarObject, shuffle_count: int | None = None
+    ) -> Any | None:
         """Look for regular repeating patterns in the star's brightness.
 
         See `periodicity_search` for how the result is judged: the
         strongest cycle always exists, so the returned result carries a
         verdict saying whether it stands out from noise.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star whose light curve is searched.
+        shuffle_count : `int`, optional
+            How many noise-only versions to compare with; the search picks
+            a default when omitted.
 
         Returns
         -------
@@ -1193,7 +1211,7 @@ class VariabilityAnalyzer:
         time_days, fluxes = self._light_curve_arrays(star)
         if fluxes.size < MINIMUM_POINTS_FOR_PERIOD_SEARCH:
             return None
-        result = lomb_scargle_search(time_days, fluxes)
+        result = lomb_scargle_search(time_days, fluxes, shuffle_count=shuffle_count)
         star.photometry.periodogram = result
         return result
 

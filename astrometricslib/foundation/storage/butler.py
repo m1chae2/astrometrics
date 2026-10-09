@@ -14,6 +14,7 @@ this class.
 import json
 import logging
 import os
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -360,6 +361,74 @@ class Butler(AbstractButler):
                 params.append(limit)
             cursor.execute(query, params)
             return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def count_grouped(
+        self,
+        dataset_type: str,
+        columns: list[str],
+        skip_id_pattern: re.Pattern[str] | None = None,
+    ) -> list[tuple[dict[str, Any], int]]:
+        """Count rows for each distinct combination of the given columns.
+
+        The database does the counting, so no row is turned into a Python
+        object. On a 270,000-star catalog that is a fraction of the time
+        that building one object per row takes.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            Registered dataset type to query.
+        columns : `list` [`str`]
+            Columns to group by. Each must be ``"id"`` or a key in the
+            dataset's `DatasetSpec.extra_column_types`.
+        skip_id_pattern : `re.Pattern`, optional
+            Rows whose id this pattern finds are left out of the counts.
+            Every row is counted when omitted.
+
+        Returns
+        -------
+        groups : `list` [`tuple` [`dict`, `int`]]
+            One entry per distinct combination: the column values (keyed
+            by column name) and how many rows have them.
+
+        Raises
+        ------
+        InvalidArgumentError
+            If `columns` is empty, or names anything outside ``id`` and
+            this dataset's registered extra columns.
+        """
+        spec = self._spec(dataset_type)
+        allowed_columns = {"id", *spec.extra_column_types.keys()}
+        if not columns:
+            raise InvalidArgumentError("count_grouped requires at least one column")
+        unknown = [column for column in columns if column not in allowed_columns]
+        if unknown:
+            raise InvalidArgumentError(
+                f"count_grouped: unknown column(s) {unknown} for dataset type {dataset_type!r}; "
+                f"expected one of {sorted(allowed_columns)}"
+            )
+
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            return []
+        conn = connect_db(db_path)
+        try:
+            cursor = conn.cursor()
+            self._ensure_table(cursor, spec)
+            query = f"SELECT {', '.join(columns)}, COUNT(*) FROM {spec.table_name}"
+            if skip_id_pattern is not None:
+                conn.create_function(
+                    "id_matches_skip_pattern",
+                    1,
+                    lambda row_id: bool(skip_id_pattern.search(str(row_id))),
+                    deterministic=True,
+                )
+                query += " WHERE NOT id_matches_skip_pattern(id)"
+            query += f" GROUP BY {', '.join(columns)}"
+            cursor.execute(query)
+            return [(dict(zip(columns, row[:-1], strict=True)), int(row[-1])) for row in cursor.fetchall()]
         finally:
             conn.close()
 

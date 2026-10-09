@@ -8,6 +8,7 @@ worry about where the data actually lives.
 import logging
 import math
 import os
+import re
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -26,14 +27,23 @@ from astrometricslib.foundation.storage.butler import DatasetSpec
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "POSITION_ONLY_STAR_ID_PREFIX",
+    "UNRESOLVED_DETECTION_ID",
     "AbstractCatalogAccess",
     "CatalogAccess",
     "FrameSelector",
+    "StarGroupCount",
     "StarPosition",
     "StarSummary",
 ]
 
 logger = logging.getLogger(__name__)
+
+UNRESOLVED_DETECTION_ID = re.compile(r":Star_\d+$")
+"""The end of the id photometry gives each point source it finds in a single
+frame: the session id (``"{target}:{night}:{gain}:{offset}"``) joined with
+``":Star_<n>"``. These detections are kept in the star catalog, but they are
+working records, not real catalog stars. One imaging session can leave
+thousands of them."""
 
 
 class FrameSelector(BaseModel):
@@ -113,6 +123,21 @@ class StarSummary(BaseModel):
     # with no known brightness or spectral type keeps the defaults.
     magnitude: float | None = None
     spectral_type: str = ""
+
+
+class StarGroupCount(BaseModel):
+    """How many stars share one target list, spectral type and data flags.
+
+    Counting stars by target or by spectral class only needs these four
+    facts, so the database can group stars by them and count each group.
+    That avoids building one object per star.
+    """
+
+    target_ids: list[str] = Field(default_factory=list)
+    spectral_type: str = ""
+    has_spectra: bool = False
+    has_photometry: bool = False
+    count: int = 0
 
 
 class StarPosition(BaseModel):
@@ -311,6 +336,44 @@ class AbstractCatalogAccess(ABC):
             The full file path.
         """
         pass
+
+    def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:
+        """Count stars by target list, spectral type and data flags.
+
+        This default builds the counts from `list_star_summaries`.
+        `CatalogAccess` overrides it to let the database do the counting.
+
+        Parameters
+        ----------
+        include_unresolved : `bool`, optional
+            Also count single-frame detections. Defaults to `False`.
+
+        Returns
+        -------
+        groups : `list` [`StarGroupCount`]
+            One entry per distinct combination, with how many stars have it.
+        """
+        grouped: dict[tuple[tuple[str, ...], str, bool, bool], int] = {}
+        for summary in self.list_star_summaries():
+            if not include_unresolved and UNRESOLVED_DETECTION_ID.search(summary.id):
+                continue
+            key = (
+                tuple(summary.target_ids),
+                summary.spectral_type or "",
+                bool(summary.has_spectra),
+                bool(summary.has_photometry),
+            )
+            grouped[key] = grouped.get(key, 0) + 1
+        return [
+            StarGroupCount(
+                target_ids=list(target_ids),
+                spectral_type=spectral_type,
+                has_spectra=has_spectra,
+                has_photometry=has_photometry,
+                count=count,
+            )
+            for (target_ids, spectral_type, has_spectra, has_photometry), count in grouped.items()
+        ]
 
     @abstractmethod
     def list_star_summaries(
@@ -853,6 +916,39 @@ class CatalogAccess(AbstractCatalogAccess):
             found_id for found_id in self.existing_star_ids([name]) if found_id not in matching_ids
         )
         return matching_ids
+
+    def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:
+        """Count stars by target list, spectral type and data flags.
+
+        The database groups and counts the rows, so no star is turned into
+        a Python object. A real 270,000-star catalog gives a few thousand
+        groups.
+
+        Parameters
+        ----------
+        include_unresolved : `bool`, optional
+            Also count single-frame detections. Defaults to `False`.
+
+        Returns
+        -------
+        groups : `list` [`StarGroupCount`]
+            One entry per distinct combination, with how many stars have it.
+        """
+        grouped_rows = self._generic.count_grouped(
+            "stellar_catalog",
+            ["target_id", "spectral_type", "has_spectra", "has_photometry"],
+            skip_id_pattern=None if include_unresolved else UNRESOLVED_DETECTION_ID,
+        )
+        return [
+            StarGroupCount(
+                target_ids=_split_target_ids(row["target_id"]),
+                spectral_type=row["spectral_type"] or "",
+                has_spectra=bool(row["has_spectra"]),
+                has_photometry=bool(row["has_photometry"]),
+                count=count,
+            )
+            for row, count in grouped_rows
+        ]
 
     def list_star_summaries(
         self, target_id: str | None = None, limit: int | None = None

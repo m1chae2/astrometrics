@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.api.stars import StellarCatalog
+from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.stellar_source import StellarObject
 
@@ -99,6 +100,11 @@ def catalog() -> StellarCatalog:
         ]
 
     access = SimpleNamespace(list_star_summaries=summaries, list_stars_in_region=region)
+    # The fake has no database to group in, so it counts the way any storage
+    # without its own grouped count does.
+    access.count_star_groups = lambda include_unresolved=False: AbstractCatalogAccess.count_star_groups(
+        access, include_unresolved
+    )
     return StellarCatalog(None, access)
 
 

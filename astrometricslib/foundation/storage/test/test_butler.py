@@ -425,3 +425,35 @@ def test_ensure_table_creates_one_index_over_a_tuple_of_columns(tmp_path: Path) 
     connection.close()
 
     assert "COVERING INDEX idx_widgets_score_label_id" in plan_text
+
+
+def test_count_grouped_counts_rows_per_column_combination(tmp_path: Path) -> None:
+    """Verify rows sharing the grouped columns are counted together."""
+    butler = _make_indexed_butler(tmp_path)
+    for widget_id, label in (("w1", "alpha"), ("w2", "alpha"), ("w3", "beta")):
+        butler.put(_Widget(id=widget_id, label=label), "widget")
+
+    groups = butler.count_grouped("widget", ["label"])
+
+    assert sorted((group["label"], count) for group, count in groups) == [("alpha", 2), ("beta", 1)]
+
+
+def test_count_grouped_leaves_out_ids_matching_the_skip_pattern(tmp_path: Path) -> None:
+    """Verify rows whose id matches `skip_id_pattern` are not counted."""
+    import re
+
+    butler = _make_indexed_butler(tmp_path)
+    for widget_id in ("keep", "session:Star_7", "Star_7"):
+        butler.put(_Widget(id=widget_id, label="alpha"), "widget")
+
+    groups = butler.count_grouped("widget", ["label"], skip_id_pattern=re.compile(r":Star_\d+$"))
+
+    assert [(group["label"], count) for group, count in groups] == [("alpha", 2)]
+
+
+def test_count_grouped_rejects_unknown_columns(tmp_path: Path) -> None:
+    """Verify a column outside the dataset's registered set is refused."""
+    butler = _make_indexed_butler(tmp_path)
+
+    with pytest.raises(InvalidArgumentError, match="unknown column"):
+        butler.count_grouped("widget", ["data_json"])

@@ -18,11 +18,11 @@ The storage reads only what each question needs. Summary rows come from the
 indexed columns, so no full star record is loaded to list or count stars.
 """
 
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from astrometricslib.drivers.catalog_access import UNRESOLVED_DETECTION_ID
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult, TargetStarCount
 from astrometricslib.models.stellar_source import (
@@ -81,13 +81,6 @@ POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
 catalog. Must match `POSITION_ONLY_STAR_ID_PREFIX` in
 `astrometricslib/drivers/catalog_access.py`."""
 
-_UNRESOLVED_DETECTION_ID = re.compile(r":Star_\d+$")
-"""The end of the id photometry gives each point source it finds in a single
-frame: the session id (``"{target}:{night}:{gain}:{offset}"``) joined with
-``":Star_<n>"``. These detections are kept in the star catalog, but they are
-working records, not real catalog stars. One imaging session can leave
-thousands of them."""
-
 
 def is_unresolved_detection(star_id: str) -> bool:
     """Tell whether a star id belongs to a single-frame photometry detection.
@@ -104,7 +97,7 @@ def is_unresolved_detection(star_id: str) -> bool:
         gives a point source it found in one frame. A curated catalog id
         such as ``"HD 1234"`` or ``"Star_12"`` gives `False`.
     """
-    return bool(_UNRESOLVED_DETECTION_ID.search(star_id))
+    return bool(UNRESOLVED_DETECTION_ID.search(star_id))
 
 
 @dataclass
@@ -464,21 +457,6 @@ def library_stats(storage: Any) -> dict[str, Any]:
     }
 
 
-def _library_summaries(storage: Any, include_unresolved: bool) -> list[Any]:
-    """Read every star's indexed summary, without single-frame detections.
-
-    Returns
-    -------
-    summaries : `list` [`StarSummary`]
-        Every star, or every star but the single-frame detections when
-        ``include_unresolved`` is `False`.
-    """
-    summaries = storage.list_star_summaries()
-    if include_unresolved:
-        return summaries
-    return [summary for summary in summaries if not is_unresolved_detection(summary.id)]
-
-
 def spectral_class_counts(storage: Any, include_unresolved: bool = False) -> list[dict[str, Any]]:
     """Count the library's stars by catalog spectral class.
 
@@ -497,10 +475,10 @@ def spectral_class_counts(storage: Any, include_unresolved: bool = False) -> lis
         no catalog type are not counted.
     """
     counts: dict[str, int] = {}
-    for summary in _library_summaries(storage, include_unresolved):
-        letter = spectral_class_letter(summary.spectral_type or "")
+    for group in storage.count_star_groups(include_unresolved):
+        letter = spectral_class_letter(group.spectral_type)
         if letter:
-            counts[letter] = counts.get(letter, 0) + 1
+            counts[letter] = counts.get(letter, 0) + group.count
     return [
         {"spectralClass": letter, "label": SPECTRAL_CLASS_LABELS[letter], "count": counts[letter]}
         for letter in SPECTRAL_CLASS_LABELS
@@ -511,8 +489,9 @@ def spectral_class_counts(storage: Any, include_unresolved: bool = False) -> lis
 def target_star_counts(storage: Any, include_unresolved: bool = False) -> dict[str, TargetStarCount]:
     """Count each target's stars and say what data they have.
 
-    One pass over every star's indexed summary, so a target list can show
-    a star count and spectra and photometry marks for every target at once.
+    One grouped count over the stars' indexed columns, so a target list can
+    show a star count and spectra and photometry marks for every target
+    at once.
 
     Parameters
     ----------
@@ -527,12 +506,12 @@ def target_star_counts(storage: Any, include_unresolved: bool = False) -> dict[s
         One entry per target id that at least one star belongs to.
     """
     counts: dict[str, TargetStarCount] = {}
-    for summary in _library_summaries(storage, include_unresolved):
-        for target_id in summary.target_ids or []:
+    for group in storage.count_star_groups(include_unresolved):
+        for target_id in group.target_ids:
             entry = counts.setdefault(target_id, TargetStarCount())
-            entry.star_count += 1
-            entry.has_spectra = entry.has_spectra or bool(summary.has_spectra)
-            entry.has_photometry = entry.has_photometry or bool(summary.has_photometry)
+            entry.star_count += group.count
+            entry.has_spectra = entry.has_spectra or group.has_spectra
+            entry.has_photometry = entry.has_photometry or group.has_photometry
     return counts
 
 

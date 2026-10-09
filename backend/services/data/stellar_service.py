@@ -107,6 +107,9 @@ class StellarService:
         self._period_search_slots = threading.BoundedSemaphore(_MAXIMUM_CONCURRENT_PERIOD_SEARCHES)
         self._catalog_answers: dict[str, tuple[float, int, Any]] = {}
         self._catalog_answers_lock = threading.Lock()
+        # One lock per question, so two requests for the same slow answer
+        # make one scan between them instead of racing two.
+        self._catalog_compute_locks: dict[str, threading.Lock] = {}
         self._announced_catalog_version: int | None = None
         self._socket_manager = None
 
@@ -150,6 +153,9 @@ class StellarService:
         unchanged. `_CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS` is only a
         backstop for a write that counter missed.
 
+        Only one thread computes a given answer at a time; others asking for
+        the same answer wait for it rather than starting a second scan.
+
         The first answer computed for a new catalog version broadcasts a
         ``"catalog:changed"`` UI event (see `set_socket_manager`), so a
         connected client can refetch instead of polling on a timer.
@@ -166,24 +172,30 @@ class StellarService:
         answer : `Any`
             The cached or newly computed answer.
         """
-        current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
-        now = time.monotonic()
         with self._catalog_answers_lock:
-            cached = self._catalog_answers.get(key)
-            if cached is not None:
-                cached_at, cached_version, answer = cached
-                if (
-                    cached_version == current_version
-                    and now - cached_at < _CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS
-                ):
-                    return answer
+            compute_lock = self._catalog_compute_locks.setdefault(key, threading.Lock())
 
-        answer = compute()
+        # A request that arrives while the same answer is being computed
+        # waits here, then finds the finished answer in the cache.
+        with compute_lock:
+            current_version = self.astrometrics.catalog_access.get_dataset_version("stellar_catalog")
+            now = time.monotonic()
+            with self._catalog_answers_lock:
+                cached = self._catalog_answers.get(key)
+                if cached is not None:
+                    cached_at, cached_version, answer = cached
+                    if (
+                        cached_version == current_version
+                        and now - cached_at < _CATALOG_ANSWER_CACHE_FALLBACK_MAX_AGE_SECONDS
+                    ):
+                        return answer
 
-        with self._catalog_answers_lock:
-            self._catalog_answers[key] = (now, current_version, answer)
-            announce = self._announced_catalog_version != current_version
-            self._announced_catalog_version = current_version
+            answer = compute()
+
+            with self._catalog_answers_lock:
+                self._catalog_answers[key] = (now, current_version, answer)
+                announce = self._announced_catalog_version != current_version
+                self._announced_catalog_version = current_version
         if announce:
             self._notify_catalog_changed()
         return answer

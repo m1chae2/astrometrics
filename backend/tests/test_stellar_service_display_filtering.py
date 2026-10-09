@@ -146,6 +146,41 @@ def test_warming_the_cache_answers_the_first_requests() -> None:
     assert service.astrometrics.stars.query.call_count == 2
 
 
+def test_simultaneous_requests_for_one_answer_share_one_scan() -> None:
+    """A request that arrives mid-scan waits instead of starting a second."""
+    service = _service()
+    service.astrometrics.catalog_access.get_dataset_version.return_value = 1
+    scan_started = threading.Event()
+    release_scan = threading.Event()
+
+    def slow_query(**_: object) -> StarQueryResult:
+        """Hold the scan open until the test lets it finish.
+
+        Returns
+        -------
+        answer : `StarQueryResult`
+            An empty class count.
+        """
+        scan_started.set()
+        release_scan.wait(timeout=5)
+        return StarQueryResult(detail="class_counts", classes=[])
+
+    service.astrometrics.stars.query.side_effect = slow_query
+    answers: list[object] = []
+    first = threading.Thread(target=lambda: answers.append(service.get_spectral_class_summary()))
+    second = threading.Thread(target=lambda: answers.append(service.get_spectral_class_summary()))
+
+    first.start()
+    assert scan_started.wait(timeout=5)
+    second.start()
+    release_scan.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert service.astrometrics.stars.query.call_count == 1
+    assert len(answers) == 2
+
+
 def test_cached_answers_expire_after_the_fallback_window(mocker: MockerFixture) -> None:
     """A write the version counter missed is caught by the time limit."""
     service = _service()

@@ -15,6 +15,8 @@ A script here may import astrometricslib's internal modules. It never imports an
 ## One-time migrations and cleanups
 
 - `migrate_config_to_toml.py` — migrates the old INI configuration file and JSON camera profiles into the current TOML configuration format.
+- `measure_variability_cutoff.py` — read-only. Checks the photometry pipeline's variable-star cutoff (`median + k x MAD`, k = 7.4) against the catalogs: for each multiplier, the share of stars the catalogs list as variable that it flags, the share of unlisted stars, and an AUC for how well scatter separates the two, overall and between stars of similar brightness. On the library (2026-10-09) the scatter separates them no better than chance.
+- `report_gate_limits.py` — read-only. For every numeric quality limit, the spread of the saved values across all targets and how many targets are beyond the limit; also the spread of numbers with no limit yet (such as the astrometric residual), which a limit would have to be derived from.
 - `merge_duplicate_catalog_stars.py`, `merge_spectroscopy_star_rows.py`, `reconcile_position_only_star_catalog.py` — fold duplicate or split stellar catalog rows for the same real star back into one row.
 - `backfill_focal_length.py` — fills in a missing `FOCALLEN` header value on frames captured before the pipeline started requiring it.
 - `move_stacks_to_stacks_path.py` — moves the pipeline's existing output (stacks, group stacks, rejection maps, previews, processed pictures) from the frames folder to the `stacks_path` folder, and rewrites the paths in the database. Dry run by default; the backend must be stopped for `--apply`.

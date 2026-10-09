@@ -26,6 +26,15 @@ a `StarIdentificationMetrics` mixin for the ones that identify stars against
 a catalog. This doc's convention operates one level lower than that summary —
 per star, not per batch — and composes underneath it, not instead of it.
 
+**Gates.** A summary also carries `gates`: one `GateResult`
+(`models/gate_result.py`) for each quality check that has been moved onto the
+record. A gate is `passed`, `failed` or `not_checked`. A check that could not
+run (for example, a session with too few frames to judge) is `not_checked` and
+never reads as a pass. Record a gate with `summary.record_gate(...)`; a failed
+gate flags the run and adds its sentence to `flag_reasons`. Checks that have
+not been moved over yet still report only through `flag_reasons`. Stacking's
+frame quarantine and astrometry's plate solve are the first two on the record.
+
 ## The internal convention: pre-processing / processing / post-processing
 
 Spectroscopy (`pipelines/spectroscopy/`) is the first pipeline organized this

@@ -1346,6 +1346,45 @@ export interface SkySource {
 }
 
 /**
+ * The three possible answers of a quality check.
+ */
+export enum GateStatus {
+  PASSED = "passed",
+  FAILED = "failed",
+  NOT_CHECKED = "not_checked"
+}
+
+/**
+ * What one quality check found on one run.
+ *
+ * Parameters
+ * ----------
+ * name : `str`
+ * A short, stable name for the gate, such as ``"flat_noise"``. Tests and
+ * the UI match on it, so it must not be reworded once in use.
+ * status : `GateStatus`
+ * Whether the check passed, failed, or could not be run.
+ * measured_value : `float` or `None`
+ * The number the check measured, if it measures one.
+ * limit : `float` or `None`
+ * The limit the measured value was compared with, if there is one.
+ * limit_source : `str` or `None`
+ * Where the limit came from, such as ``"camera profile (measured)"`` or
+ * ``"validated on M 57 only"``.
+ * detail : `str`
+ * One plain sentence. For a failed gate it says what is wrong. For a
+ * ``not_checked`` gate it says why the check could not run.
+ */
+export interface GateResult {
+  name: string;
+  status: GateStatus;
+  measuredValue?: number | null;
+  limit?: number | null;
+  limitSource?: string | null;
+  detail?: string;
+}
+
+/**
  * A record of a single picture that was skipped, and the reason why.
  */
 export interface ExcludedFrame {
@@ -1509,6 +1548,7 @@ export interface StackQualitySummary {
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
+  gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
@@ -1555,6 +1595,7 @@ export interface AstrometryQualitySummary {
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
+  gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
@@ -1614,6 +1655,7 @@ export interface PhotometryQualitySummary {
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
+  gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
@@ -1672,6 +1714,7 @@ export interface SpectroscopyQualitySummary {
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
+  gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;
@@ -1778,6 +1821,7 @@ export interface AsteroidDetectionQualitySummary {
   qualityProcessingApplied?: boolean;
   flagged?: boolean;
   flagReasons?: string[];
+  gates?: GateResult[];
   createdAt?: string;
   provenanceActivityId?: string | null;
   upstreamEntityId?: string | null;

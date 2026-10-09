@@ -38,6 +38,7 @@ from typing import Any
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.excluded_frames import SetAsideFrame
+from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
@@ -64,6 +65,9 @@ __all__ = [
 ]
 
 MANIFEST_FILE_NAME = "excluded_frames.json"
+
+# The name the quarantine step goes by in a stack's gate record.
+GATE_NAME = "frame_quarantine"
 """The record, inside each `_excluded` folder, of the frames moved there."""
 
 MINIMUM_FRAMES_TO_JUDGE = 8
@@ -188,11 +192,24 @@ class QuarantineReport:
         One sentence for each batch the step left alone, with the reason.
     unreadable : `list` [`str`]
         Frames that could not be measured. They stay where they are.
+    batches_judged : `int`
+        Batches with enough readable frames to be judged and acted on.
+    batches_too_small : `int`
+        Batches with too few frames, or too few readable ones, to judge.
+    batches_over_cap : `int`
+        Batches judged but left alone because more than the allowed share
+        looked bad. The bad frames stay in the stack.
     """
 
     moved: list[QuarantineDecision] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
+    # How each session (batch) of frames ended up. A batch is judged only if
+    # it has enough readable frames; otherwise it is not checked at all, which
+    # is different from being checked and found clean.
+    batches_judged: int = 0
+    batches_too_small: int = 0
+    batches_over_cap: int = 0
 
     def reasons_by_path(self) -> dict[str, str]:
         """Return the recorded reason for each moved frame.
@@ -383,6 +400,7 @@ def find_frames_to_quarantine(
     report = QuarantineReport()
     for batch in split_into_batches(frames):
         if len(batch) < MINIMUM_FRAMES_TO_JUDGE:
+            report.batches_too_small += 1
             report.notes.append(
                 f"{len(batch)} frame(s) of one session are too few to judge "
                 f"(at least {MINIMUM_FRAMES_TO_JUDGE} needed); none moved."
@@ -390,16 +408,71 @@ def find_frames_to_quarantine(
             continue
         measurements, unreadable = _measure_frames(batch, measure)
         report.unreadable.extend(unreadable)
+        if len(measurements) < MINIMUM_FRAMES_TO_JUDGE:
+            report.batches_too_small += 1
+            report.notes.append(
+                f"Only {len(measurements)} of {len(batch)} frame(s) of one session could be read "
+                f"(at least {MINIMUM_FRAMES_TO_JUDGE} needed to judge); none moved."
+            )
+            continue
         decisions = judge_batch(measurements)
         allowed = int(MAXIMUM_QUARANTINED_FRACTION * len(measurements))
         if len(decisions) > allowed:
+            report.batches_over_cap += 1
             report.notes.append(
                 f"{len(decisions)} of {len(measurements)} frames in one session look bad, more than the "
                 f"{allowed} allowed; none moved. The batch itself may be poor."
             )
             continue
+        report.batches_judged += 1
         report.moved.extend(decisions)
     return report
+
+
+def quarantine_gate(report: QuarantineReport) -> GateResult:
+    """Turn a quarantine report into the stack's gate record.
+
+    The three outcomes are kept apart on purpose:
+
+    - ``failed``: a batch had more bad frames than the cap allows, so none
+      were moved and the bad frames are in the stack.
+    - ``not_checked``: no batch had enough readable frames to judge, so
+      nothing was checked.
+    - ``passed``: at least one batch was judged and none was over the cap.
+      Batches too small to judge are named in the detail.
+
+    Parameters
+    ----------
+    report : `QuarantineReport`
+        What `find_frames_to_quarantine` found.
+
+    Returns
+    -------
+    gate : `GateResult`
+        The result, named ``frame_quarantine``.
+    """
+    source = (
+        f"at least {MINIMUM_FRAMES_TO_JUDGE} frames per session; "
+        f"at most {MAXIMUM_QUARANTINED_FRACTION:.0%} moved"
+    )
+    if report.batches_over_cap:
+        return failed_gate(
+            GATE_NAME,
+            f"{report.batches_over_cap} session(s) had too many bad frames to move safely; "
+            "the bad frames are still in the stack",
+            limit=MAXIMUM_QUARANTINED_FRACTION,
+            limit_source=source,
+        )
+    if report.batches_judged == 0:
+        return unchecked_gate(
+            GATE_NAME,
+            "no session had enough readable frames to check for clouds or trails",
+            limit_source=source,
+        )
+    detail = f"{report.batches_judged} session(s) checked, {len(report.moved)} frame(s) moved"
+    if report.batches_too_small:
+        detail += f"; {report.batches_too_small} session(s) too small to check"
+    return passed_gate(GATE_NAME, limit=MAXIMUM_QUARANTINED_FRACTION, limit_source=source, detail=detail)
 
 
 def _unused_destination(directory: str, file_name: str) -> str:

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from astrometricslib.foundation.enums import FilterType
+from astrometricslib.models.gate_result import GateStatus, failed_gate
 from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
@@ -118,3 +119,44 @@ def test_stage_skips_the_quarantine_step_when_the_setting_is_off(monkeypatch: py
         run_stage(make_target())
 
     quarantine_step.assert_not_called()
+
+
+def test_stage_hands_the_quarantine_gate_to_the_summary_builder() -> None:
+    """A clean, judged session reaches the summary as a passed gate."""
+    report = QuarantineReport(batches_judged=1)
+    with patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)):
+        _driver, summary_builder = run_stage(make_target())
+
+    gates = summary_builder.call_args.kwargs["gate_results"]
+    assert [(gate.name, gate.status) for gate in gates] == [("frame_quarantine", GateStatus.PASSED)]
+
+
+def test_stage_records_a_switched_off_quarantine_as_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the setting off, the summary says the step did not run."""
+    from astrometricslib.foundation.config import get_configuration
+
+    monkeypatch.setattr(get_configuration(), "get_quarantine_bad_frames_enabled", lambda: False)
+
+    _driver, summary_builder = run_stage(make_target())
+
+    gates = summary_builder.call_args.kwargs["gate_results"]
+    assert [(gate.name, gate.status) for gate in gates] == [("frame_quarantine", GateStatus.NOT_CHECKED)]
+
+
+def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
+    """The real builder keeps a failed gate's reason after the flag rebuild."""
+    summary = stacking_tasks._build_stack_quality_summary(
+        target=make_target(),
+        is_spectral=False,
+        frames_submitted=10,
+        target_frames=make_target().frames,
+        excluded_frames=[],
+        diagnostics={},
+        background_split=None,
+        stacked_path=None,
+        gate_results=[failed_gate("frame_quarantine", "too many bad frames; still in the stack")],
+    )
+
+    assert summary.flagged is True
+    assert "too many bad frames; still in the stack" in summary.flag_reasons
+    assert summary.gate("frame_quarantine").status is GateStatus.FAILED

@@ -11,6 +11,7 @@ from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
@@ -28,6 +29,9 @@ from astrometricslib.pipelines.shared.star_recording import (
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+
+# The name the plate-solve check goes by in an astrometry run's gate record.
+PLATE_SOLVE_GATE_NAME = "plate_solve"
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +240,16 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 unresolved_star_count=star_id_breakdown.unresolved,
             ),
         )
-        if not summary.astrometry_metrics.plate_solve_succeeded:
-            summary.flagged = True
-            summary.flag_reasons.append("plate solve failed")
+        if summary.astrometry_metrics.plate_solve_succeeded:
+            summary.record_gate(
+                passed_gate(PLATE_SOLVE_GATE_NAME, detail="the image was solved to sky coordinates")
+            )
+        else:
+            # An image with no solution has no sky coordinates, whether or
+            # not a solve was tried, so both cases flag the run. The attempt
+            # flag stays in the metrics for anyone who needs to tell them
+            # apart.
+            summary.record_gate(failed_gate(PLATE_SOLVE_GATE_NAME, "plate solve failed"))
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_from_header,

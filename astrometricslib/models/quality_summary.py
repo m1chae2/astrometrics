@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 
 
@@ -152,6 +153,12 @@ class PipelineQualitySummaryBase(BaseModel):
     quality_processing_applied: bool = Field(default=True, alias="qualityProcessingApplied")
     flagged: bool = Field(default=False, alias="flagged")
     flag_reasons: list[str] = Field(default_factory=list, alias="flagReasons")
+    # One record per quality check that this pipeline has moved onto the gate
+    # record (see `gate_result.py`). Unlike `flag_reasons`, it also shows
+    # the checks that passed and the ones that could not run. Empty on a
+    # summary saved before gates were recorded, and for checks a pipeline
+    # has not yet moved over, which still report only through `flag_reasons`.
+    gates: list[GateResult] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="createdAt")
     # The id of the IVOA provenance Activity (see
     # astrometricslib.models.provenance) this run was recorded as --
@@ -166,6 +173,42 @@ class PipelineQualitySummaryBase(BaseModel):
     # run has no upstream entity (for example stacking itself, or a run
     # with no provenance recorded).
     upstream_entity_id: str | None = Field(default=None, alias="upstreamEntityId")
+
+    def record_gate(self, result: GateResult) -> None:
+        """Add one gate's result, keeping `flagged` and `flag_reasons` in step.
+
+        A failed gate flags the run and adds its sentence to `flag_reasons`
+        (once, even if the same sentence is already there). A passed gate
+        and a gate that was not checked are only recorded; they never flag
+        the run. A second result with the same name replaces the first, so
+        re-running a check does not leave two answers.
+
+        Parameters
+        ----------
+        result : `GateResult`
+            The gate's result.
+        """
+        self.gates = [existing for existing in self.gates if existing.name != result.name]
+        self.gates.append(result)
+        if result.status is GateStatus.FAILED:
+            self.flagged = True
+            if result.detail and result.detail not in self.flag_reasons:
+                self.flag_reasons.append(result.detail)
+
+    def gate(self, name: str) -> GateResult | None:
+        """Look up a recorded gate by name.
+
+        Parameters
+        ----------
+        name : `str`
+            The gate's name.
+
+        Returns
+        -------
+        result : `GateResult` or `None`
+            The gate's result, or `None` if no gate of that name was recorded.
+        """
+        return next((result for result in self.gates if result.name == name), None)
 
 
 # ---------------------------------------------------------------------------

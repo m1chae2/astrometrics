@@ -13,6 +13,7 @@ from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
 from astrometricslib.foundation.jobs.runner import get_current_job
+from astrometricslib.models.gate_result import GateResult, unchecked_gate
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -258,9 +259,26 @@ def stack_frames(
     # back. Spectral frames are skipped: their streaks are the spectra
     # themselves.
     from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+        GATE_NAME as QUARANTINE_GATE_NAME,
+    )
 
+    gate_results: list[GateResult] = []
+    if has_spectral:
+        gate_results.append(
+            unchecked_gate(
+                QUARANTINE_GATE_NAME, "spectral frames are not checked: their streaks are the spectra"
+            )
+        )
+    elif not get_configuration().get_quarantine_bad_frames_enabled():
+        gate_results.append(
+            unchecked_gate(QUARANTINE_GATE_NAME, "frame quarantine is turned off in the settings")
+        )
     if not has_spectral and get_configuration().get_quarantine_bad_frames_enabled():
-        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import quarantine_bad_frames
+        from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+            quarantine_bad_frames,
+            quarantine_gate,
+        )
 
         target_frames, quarantine_report = quarantine_bad_frames(target, target_frames)
         excluded_frames.extend(
@@ -269,6 +287,7 @@ def stack_frames(
         )
         for note in quarantine_report.notes:
             logger.info("Quarantine check for target '%s': %s", target.id, note)
+        gate_results.append(quarantine_gate(quarantine_report))
         if not target_frames:
             raise ProcessingError("Target has no frames available to stack after quarantining bad frames.")
 
@@ -449,6 +468,7 @@ def stack_frames(
         diagnostics=diagnostics,
         background_split=background_split,
         stacked_path=stacked_path,
+        gate_results=gate_results,
     )
 
     if has_spectral:
@@ -1159,6 +1179,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     diagnostics: dict,
     background_split: dict | list[dict] | None,
     stacked_path: str | None,
+    gate_results: list[GateResult] | None = None,
 ):
     """Gather diagnostic data into a final `StackQualitySummary`.
 
@@ -1207,6 +1228,10 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
             _check_spectral_registration_quality(summary, stacked_path, diagnostics)
 
     _finalize_stack_quality_flags(summary)
+    # Recorded after the flags are rebuilt above, so a failed gate's reason is
+    # not wiped by that rebuild.
+    for gate_result in gate_results or []:
+        summary.record_gate(gate_result)
     clipped_groups = diagnostics.get("clipped_exposure_groups", [])
     if clipped_groups:
         exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped_groups)

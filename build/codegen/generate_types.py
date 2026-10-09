@@ -23,6 +23,7 @@ from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -408,6 +409,8 @@ def render_types() -> str:
         generate_interface(VisibilitySpan, "VisibilitySpan"),
         generate_interface(ObjectVisibility, "ObjectVisibility"),
         generate_interface(SkySource, "SkySource"),
+        generate_enum(GateStatus, "GateStatus"),
+        generate_interface(GateResult, "GateResult"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
         generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),

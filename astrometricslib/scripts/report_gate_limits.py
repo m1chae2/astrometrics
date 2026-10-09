@@ -163,6 +163,13 @@ METRICS: tuple[Metric, ...] = (
     Metric("astrometry", "sources detected", _quality("astrometry", "astrometryMetrics", "sourcesDetected")),
     Metric(
         "astrometry",
+        "catalog-matched stars",
+        _quality("astrometry", "astrometryMetrics", "catalogMatchedStarCount"),
+        20.0,
+        fires_above=False,
+    ),
+    Metric(
+        "astrometry",
         "catalog lookups failed / attempted",
         lambda t: ratio(
             dig(t, "quality", "astrometry", "astrometryMetrics", "remoteCatalogQueriesFailed"),

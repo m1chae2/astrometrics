@@ -1590,6 +1590,8 @@ export interface AstrometryPipelineQualityMetrics {
   plateSolveSucceeded: boolean;
   simbadMatchedCount: number;
   astrometricResidualRmsArcsec?: number | null;
+  plateScaleArcsecPerPixel?: number | null;
+  starFwhmPx?: number | null;
   remoteCatalogQueriesAttempted?: number;
   remoteCatalogQueriesFailed?: number;
   remoteCatalogCircuitBreakerTripped?: boolean;

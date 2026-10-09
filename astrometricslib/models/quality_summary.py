@@ -356,6 +356,14 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     # average errors so they don't cancel out). Lower is better.
     astrometric_residual_rms_arcsec: float | None = Field(default=None, alias="astrometricResidualRmsArcsec")
 
+    # The size of one pixel on the sky, in arcseconds, from the solved
+    # coordinates, and the width (FWHM) of the stars in the image, in pixels.
+    # They let the residual above be judged against the equipment: a fit
+    # should be much better than a star is wide. `None` when the image was
+    # not solved or the stars could not be measured.
+    plate_scale_arcsec_per_pixel: float | None = Field(default=None, alias="plateScaleArcsecPerPixel")
+    star_fwhm_px: float | None = Field(default=None, alias="starFwhmPx")
+
     # Tracks whether there were connection issues when trying to look up
     # star names in online databases (like SIMBAD or Gaia).
     remote_catalog_queries_attempted: int = Field(default=0, alias="remoteCatalogQueriesAttempted")

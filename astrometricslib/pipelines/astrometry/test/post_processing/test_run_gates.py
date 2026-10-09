@@ -4,6 +4,8 @@ Each gate has to fail on a run that is truly bad, pass on a good one, and
 read "not checked" when it could not look.
 """
 
+import pytest
+
 from astrometricslib.models.gate_result import GateStatus
 from astrometricslib.models.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.pipelines.astrometry.post_processing import run_gates as rg
@@ -30,6 +32,10 @@ def make_metrics(**changes: object) -> AstrometryPipelineQualityMetrics:
         "remote_catalog_queries_attempted": 10,
         "remote_catalog_queries_failed": 0,
         "remote_catalog_circuit_breaker_tripped": False,
+        "catalog_matched_star_count": 150,
+        "astrometric_residual_rms_arcsec": 1.0,
+        "plate_scale_arcsec_per_pixel": 1.9,
+        "star_fwhm_px": 3.0,
     }
     fields.update(changes)
     return AstrometryPipelineQualityMetrics(**fields)
@@ -47,7 +53,7 @@ def gates_for(**changes: object) -> dict:
 
 
 def test_a_healthy_run_passes_both_gates() -> None:
-    """Stars found and lookups working give two passes."""
+    """A good solve, stars found and lookups working give all passes."""
     gates = gates_for()
 
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
@@ -101,3 +107,49 @@ def test_a_breaker_that_was_already_open_means_no_lookup_was_made_not_a_failure(
 
     assert gate.status is GateStatus.NOT_CHECKED
     assert "already marked unreachable" in gate.detail
+
+
+def test_the_residual_gate_goes_red_when_the_fit_misses_by_more_than_half_a_star() -> None:
+    """A 5 arcsec residual with 1.9 arcsec pixels and 3 pixel stars is 88%."""
+    gate = gates_for(astrometric_residual_rms_arcsec=5.0)[rg.RESIDUAL_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.measured_value == pytest.approx(5.0 / (1.9 * 3.0))
+    assert "may be wrong" in gate.detail
+
+
+def test_the_residual_gate_passes_a_good_fit_with_the_ratio_on_record() -> None:
+    """A 1 arcsec residual is 18% of a star's width."""
+    gate = gates_for()[rg.RESIDUAL_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(1.0 / (1.9 * 3.0))
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        {"astrometric_residual_rms_arcsec": None},
+        {"plate_scale_arcsec_per_pixel": None},
+        {"star_fwhm_px": None},
+    ],
+)
+def test_the_residual_gate_is_not_checked_when_a_number_it_needs_is_missing(missing: dict) -> None:
+    """Without the residual, plate scale or star width, the fit is unjudged."""
+    assert gates_for(**missing)[rg.RESIDUAL_GATE_NAME].status is GateStatus.NOT_CHECKED
+
+
+def test_the_matches_gate_goes_red_when_too_few_stars_were_matched() -> None:
+    """Nineteen matched stars is one short of the minimum."""
+    gate = gates_for(catalog_matched_star_count=19)[rg.MATCHED_STARS_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert "only 19 star(s)" in gate.detail
+    assert gates_for(catalog_matched_star_count=20)[rg.MATCHED_STARS_GATE_NAME].status is GateStatus.PASSED
+
+
+def test_the_matches_gate_is_not_checked_when_the_image_was_not_solved() -> None:
+    """An unsolved image has no matches to count; plate_solve reports it."""
+    gate = gates_for(plate_solve_succeeded=False, catalog_matched_star_count=0)[rg.MATCHED_STARS_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED

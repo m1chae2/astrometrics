@@ -108,6 +108,53 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
         logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
 
 
+def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:
+    """Read the pixel size on the sky from a solved coordinate system.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solved coordinates.
+
+    Returns
+    -------
+    scale : `float` or `None`
+        Arcseconds per pixel, or `None` when there is no usable solution.
+    """
+    if wcs is None:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        return float(sum(proj_plane_pixel_scales(wcs)) / 2.0 * 3600.0)
+    except ValueError, TypeError, AttributeError:
+        return None
+
+
+def _measure_star_fwhm_px(image: Any) -> float | None:
+    """Measure how wide the stars of an image are.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The analyzed image.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        The median star width in pixels, or `None` if it could not be measured.
+    """
+    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
+
+    path = getattr(image, "path", None)
+    if not path:
+        return None
+    try:
+        return measure_image_fwhm(path)
+    except (*FITS_READ_ERRORS, *DATA_ERRORS):
+        return None
+
+
 class AstrometryPipelineAdapter(AnalysisPipeline):
     """Adapts `AstrometryPipeline` to the shared `AnalysisPipeline`."""
 
@@ -230,6 +277,8 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 sources_detected=result.context.sources_detected,
                 solve_attempted=result.context.solve_attempted,
                 astrometric_residual_rms_arcsec=result.context.astrometric_residual_rms_arcsec,
+                plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
+                star_fwhm_px=_measure_star_fwhm_px(result.context.image),
                 plate_solve_succeeded=result.context.wcs is not None,
                 simbad_matched_count=result.payload["simbad_matched_count"],
                 remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),

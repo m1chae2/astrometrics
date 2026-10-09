@@ -31,9 +31,11 @@ The summary keeps one record per check in `gates`. Each gate is `passed`, `faile
 |---|---|---|
 | `plate_solve` | The image was not solved to sky coordinates | Never |
 | `source_detection` | No star was detected | Never |
+| `catalog_matches` | Fewer than 20 stars were matched to a catalog, too few for the fit to be reliable | The image was not solved |
+| `astrometric_residual` | The plate solution misses its stars by more than half a star's width (residual in arcseconds against the plate scale times the star width) | The residual, the plate scale or the star width was not measured |
 | `catalog_lookup` | Lookups were made and the catalog circuit breaker tripped, or half or more of them failed | No lookup was attempted, including when the breaker was already open from earlier failures in the same process |
 
-`source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. There is no gate yet on how well the solution fits the stars (the residual RMS) or on how many stars matched: both numbers are recorded but have no limit, and a limit has to be derived from the plate scale and star width and checked on real data (Gap 5 of the audit plan).
+`source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. The two limits are design estimates, tied to the equipment: the residual is judged against the star width in pixels times the plate scale, both recorded with each run. On the library (2026-10-09) the 8 saved solves with a plate scale had residuals of 0.14 to 0.44 of a star's width, so the half-width limit catches a failed solve and does not rank good ones; and the four solves with fewer than 20 matched stars (4, 6, 11 and 19) are among the five with the largest residuals (5.8 to 9.0 arcsec).
 
 ## SIMBAD object types
 

@@ -56,6 +56,8 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
     "astrometry": {
         "plate_solve": frozenset({PASSED, FAILED}),
         "source_detection": frozenset({PASSED, FAILED}),
+        "astrometric_residual": ALL_THREE,
+        "catalog_matches": ALL_THREE,
         "catalog_lookup": ALL_THREE,
     },
     "photometry": {

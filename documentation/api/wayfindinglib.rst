@@ -13,6 +13,7 @@ Wayfinding Library (`wayfindinglib`)
 
 .. automodapi:: wayfindinglib.api.control.control
    :no-inheritance-diagram:
+   :skip: ObservatoryControl
 
 .. automodapi:: wayfindinglib.api.control.mount
    :no-inheritance-diagram:

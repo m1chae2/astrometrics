@@ -38,33 +38,30 @@ _IDS_PER_QUERY = 900
 class DatasetSpec:
     """Registration record for one dataset type's generic storage shape.
 
-    Attributes
-    ----------
-    table_name : `str`
-        SQLite table backing this dataset type.
-    model_class : `type`
-        Pydantic model class used to hydrate rows via
-        ``model_class.model_validate(...)``. Instances must implement
-        ``.serialize()`` for the value written to ``data_json``.
-    id_field : `str`, optional
-        Attribute name on the model instance holding its primary key.
-        Default ``"id"``.
-    extra_column_types : `dict` [`str`, `str`], optional
-        Additional indexed SQL columns beyond ``(id, data_json)``,
-        mapping column name to SQL type (e.g. ``{"ra": "TEXT"}``).
-        Lets existing on-disk schemas (targets' name/ra/dec, stellar
-        objects' target_id/name/ra/dec/magnitude) survive without a
-        migration.
-    extra_columns : callable, optional
-        ``extra_columns(model_instance) -> {"ra": ..., "dec": ...}``,
-        matching the keys in `extra_column_types`.
+    Each field below is documented where it is declared.
     """
 
     table_name: str
+    """SQLite table backing this dataset type."""
+
     model_class: type
+    """Pydantic model class used to hydrate rows via
+    ``model_class.model_validate(...)``. Instances must implement
+    ``.serialize()`` for the value written to ``data_json``."""
+
     id_field: str = "id"
+    """Attribute name on the model instance holding its primary key."""
+
     extra_column_types: dict[str, str] = field(default_factory=dict)
+    """Additional indexed SQL columns beyond ``(id, data_json)``, mapping
+    column name to SQL type (for example ``{"ra": "TEXT"}``). Lets existing
+    on-disk schemas (targets' name/ra/dec, stellar objects'
+    target_id/name/ra/dec/magnitude) survive without a migration."""
+
     extra_columns: Callable[[Any], dict[str, Any]] | None = None
+    """Function ``extra_columns(model_instance) -> {"ra": ..., "dec": ...}``
+    whose keys match `extra_column_types`."""
+
     indexed_columns: tuple[str | tuple[str, ...], ...] = ()
     """Names from `extra_column_types` that should get a real SQL index,
     for callers that filter or project on them via `list_projected`

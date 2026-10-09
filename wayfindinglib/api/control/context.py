@@ -22,7 +22,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from wayfindinglib.data_access.delegation_policy_reader import get_delegation_policy
 from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
@@ -381,7 +382,9 @@ class ControlContext:
             from wayfindinglib.drivers.interfaces.registry import build_remote_transfer_driver_registry
 
             driver_name = self.config.get_remote_transfer_driver_name()
-            driver_class = build_remote_transfer_driver_registry()[driver_name]
+            driver_class = cast(
+                "Callable[..., RemoteTransferDriver]", build_remote_transfer_driver_registry()[driver_name]
+            )
             if driver_name != "stellarmate":
                 raise NotImplementedError(
                     f"No constructor wiring yet for remote transfer driver '{driver_name}'"
@@ -423,7 +426,7 @@ class ControlContext:
 
             telescope = self.active_telescope()
             protocol = telescope.guiding_protocol if telescope else "phd2"
-            registry = build_guiding_driver_registry()
+            registry = cast("dict[str, Callable[..., GuidingDriver]]", build_guiding_driver_registry())
             if protocol not in registry:
                 raise ConfigurationError(
                     f"No guiding driver for guiding_protocol '{protocol}'. Choose from {sorted(registry)}."

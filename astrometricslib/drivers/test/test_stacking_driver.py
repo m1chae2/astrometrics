@@ -8,8 +8,9 @@ result, and that the pipeline's runner works with an engine that is not Siril
 at all, and that each driver interface is abstract and implemented.
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -161,8 +162,9 @@ def test_the_driver_interfaces_cannot_be_built_without_their_methods() -> None:
     from astrometricslib.drivers.interfaces import PlateSolveDriver, SimbadDriver, StackingDriver
 
     for interface in (StackingDriver, PlateSolveDriver, SimbadDriver):
+        build = cast("Callable[[], object]", interface)
         with pytest.raises(TypeError):
-            interface()
+            build()
 
 
 def test_the_concrete_drivers_implement_their_interfaces() -> None:

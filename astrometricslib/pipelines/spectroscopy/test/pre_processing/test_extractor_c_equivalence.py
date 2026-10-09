@@ -23,6 +23,7 @@ import os
 import numpy as np
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from astrometricslib.pipelines.spectroscopy.pre_processing import spectrum_extractor as se
 
 _REQUIRE_C_EXTENSION = os.environ.get("ASTROMETRICS_REQUIRE_C_EXTENSION") == "1"
@@ -281,5 +282,5 @@ def test_extractor_c_matches_python_on_one_dimensional_input() -> None:
     """
     one_dimensional_image = _make_cross_section_image(121, 60.0, 3.0, 800.0, 50.0)[0]
 
-    with pytest.raises(ValueError, match="2-D"):
+    with pytest.raises((ValueError, InvalidArgumentError), match="2-D"):
         se.fit_cross_section_gaussian(one_dimensional_image, (60.0, 0.0), (1.0, 0.0), 10.0)

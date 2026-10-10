@@ -5,13 +5,26 @@ first version took the brightest detected source, which on a rebuilt Vega
 stack was a bright star at the frame edge, not Vega. These tests pin the
 rule that replaced it: the source nearest the frame centre, or the position
 the caller gives.
+
+They also check the file writer: the stored response must carry the
+``reference_airmass`` the pipeline needs for its airmass correction.
 """
+
+import json
+from pathlib import Path
 
 import pytest
 
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.scripts.derive_instrument_response import select_standard_star
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import InstrumentResponse
+from astrometricslib.scripts.derive_instrument_response import (
+    DATA_DIR,
+    build_response_payload,
+    response_file_name,
+    select_standard_star,
+    write_response_file,
+)
 
 IMAGE_SHAPE = (3008, 3008)
 
@@ -54,3 +67,60 @@ def test_a_given_position_is_used_even_when_nothing_was_detected_there() -> None
 
     assert star.star_data["xcentroid"] == pytest.approx(1494.0)
     assert star.star_data["ycentroid"] == pytest.approx(1502.0)
+
+
+def _fitted_response(reference_airmass: float | None) -> InstrumentResponse:
+    """Build a response like the script's fit would give.
+
+    Parameters
+    ----------
+    reference_airmass : `float` or `None`
+        The airmass of the standard star's observation.
+
+    Returns
+    -------
+    response : `InstrumentResponse`
+        A response with made-up coefficients.
+    """
+    return InstrumentResponse(
+        camera_name="ZWO ASI 533MM Pro",
+        coefficients=(0.5, 0.3, -0.8, -0.3, 10.9),
+        minimum_wavelength_angstrom=4200.0,
+        maximum_wavelength_angstrom=8000.0,
+        reference_type="A0V",
+        source="test star",
+        reference_airmass=reference_airmass,
+    )
+
+
+def test_the_payload_includes_the_reference_airmass() -> None:
+    """The stored fields carry the airmass the response was derived at."""
+    payload = build_response_payload(_fitted_response(1.15))
+
+    assert payload["reference_airmass"] == pytest.approx(1.15)
+    assert payload["coefficients"] == [0.5, 0.3, -0.8, -0.3, 10.9]
+
+
+def test_the_payload_has_the_same_keys_as_the_stored_response_file() -> None:
+    """The writer's keys match the stored response file's keys."""
+    stored_file = DATA_DIR / response_file_name("ZWO ASI 533MM Pro")
+    stored = json.loads(stored_file.read_text())
+
+    assert set(build_response_payload(_fitted_response(1.15))) == set(stored)
+
+
+def test_the_written_file_holds_the_reference_airmass(tmp_path: Path) -> None:
+    """The file written to disk holds the `reference_airmass` value."""
+    path = write_response_file(_fitted_response(1.32), tmp_path)
+
+    assert path == tmp_path / "instrument_response_zwo_asi_533mm_pro.json"
+    assert json.loads(path.read_text())["reference_airmass"] == pytest.approx(1.32)
+
+
+def test_an_unknown_airmass_is_written_as_null(tmp_path: Path) -> None:
+    """With no airmass the key is still present, and holds `null`."""
+    path = write_response_file(_fitted_response(None), tmp_path)
+
+    written = json.loads(path.read_text())
+    assert "reference_airmass" in written
+    assert written["reference_airmass"] is None

@@ -140,6 +140,12 @@ The pipeline copies the record onto the star's saved result as
 `SpectroscopyResult.extinction_correction` (an `ExtinctionCorrectionRecord`).
 It is empty (`None`) when no instrument response was applied.
 
+`scripts/recompute_spectral_analysis.py` applies this same correction when
+it re-analyzes a stored spectrum, using the same function. The script has no
+frame header, so it takes the target airmass from the stored
+`extinction_correction` record. A spectrum saved without that record is left
+uncorrected, and the new record says why.
+
 The stored curve is the mean Kitt Peak curve, a dry site at 2 km altitude.
 A site at lower altitude has somewhat more extinction in the blue. The
 correction depends on the difference between two airmasses, so the error from

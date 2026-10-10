@@ -12,7 +12,15 @@ with a known grating distance. They then run the tuner's extraction, dip
 search, and fit, and compare the result with the known truth. Each case runs
 once with leading samples dropped and once with none dropped, on both
 extraction paths (plain dispersion line and flare mask).
+
+Two later cases are covered too. A noisy frame at a realistic brightness
+(3000 ADU continuum, Poisson noise) must give few dip candidates, contain the
+three true lines, and finish the search over groups of three in seconds. And
+the sub-sample dip centres (parabolic refinement) must bring the fitted
+grating distance closer to the truth than the whole-sample positions do.
 """
+
+import time
 
 import numpy as np
 import pytest
@@ -24,6 +32,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.optics_physics import
     calculate_pixel_offset,
 )
 from astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner import (
+    _MAX_DIP_CANDIDATES,
     SpectroscopyCalibrationTuner,
 )
 from astrometricslib.test.synthetic import SyntheticSpectralFrame, make_spectral_frame
@@ -105,8 +114,8 @@ def _true_line_offsets_px() -> np.ndarray:
     )
 
 
-def _build_frame(angle_deg: float) -> SyntheticSpectralFrame:
-    """Draw a noise-free spectral frame with the Balmer lines in place.
+def _build_frame(angle_deg: float, add_noise: bool = False, seed: int = 0) -> SyntheticSpectralFrame:
+    """Draw a spectral frame with the Balmer lines in place.
 
     The generator spaces lines with a straight-line wavelength model, so
     each line is given a made-up wavelength of `column offset * 10 A`.
@@ -122,6 +131,11 @@ def _build_frame(angle_deg: float) -> SyntheticSpectralFrame:
     ----------
     angle_deg : `float`
         The trail tilt, in degrees.
+    add_noise : `bool`, optional
+        If `True`, add Poisson and read noise (the trail is 3000 ADU per
+        column). The default is a noise-free frame.
+    seed : `int`, optional
+        Seed for the noise.
 
     Returns
     -------
@@ -137,7 +151,8 @@ def _build_frame(angle_deg: float) -> SyntheticSpectralFrame:
         trail_length_px=900,
         lines=tuple((float(offset) * dispersion_a_per_px, 0.4) for offset in column_offsets_px),
         shape=(256, 1000),
-        add_noise=False,
+        add_noise=add_noise,
+        seed=seed,
     )
 
 
@@ -362,3 +377,118 @@ def test_calibrate_at_distances_matches_calibrate_for_unit_steps() -> None:
 
     np.testing.assert_allclose(by_distance, by_offset)
     np.testing.assert_array_equal(returned_pixels, pixels)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_noisy_adu_frame_gives_few_candidates_and_finishes_quickly(seed: int) -> None:
+    """A noisy 3000 ADU frame gives at most 12 dips and a fast fit.
+
+    The frame has Poisson and read noise on a 3000 ADU continuum, like a
+    real exposure. The old dip search used a prominence of 0.001 in camera
+    counts and reported about 60 dips here, so the search over groups of
+    three (about 34,000 groups) ran for minutes. The test checks that the
+    candidates number at most `_MAX_DIP_CANDIDATES`, that each true line has
+    a candidate within 1 pixel, that the search takes under 10 seconds, and
+    that the fit still recovers the true grating distance to 0.2 percent.
+
+    Parameters
+    ----------
+    seed : `int`
+        Seed for the frame's noise.
+    """
+    frame = _build_frame(0.0, add_noise=True, seed=seed)
+    pipeline = _build_pipeline(START_PX_WITH_DROPS, 0.0, use_flare_mask=False)
+    _, smoothed, sample_distances_px = SpectroscopyCalibrationTuner._extract_smoothed_spectrum(
+        pipeline, ArrayImage(frame.image), frame.zero_order_xy
+    )
+
+    started = time.perf_counter()
+    dips = SpectroscopyCalibrationTuner._detect_absorption_dips(smoothed)
+    centers = SpectroscopyCalibrationTuner._refine_dip_centers(smoothed, dips)
+    _, fitted_distance_mm, _ = SpectroscopyCalibrationTuner._fit_grating_distance(
+        centers, sample_distances_px, pipeline, TARGET_WAVELENGTHS_NM
+    )
+    elapsed_s = time.perf_counter() - started
+
+    assert 3 <= len(dips) <= _MAX_DIP_CANDIDATES
+    candidate_distances_px = SpectroscopyCalibrationTuner._positions_to_distances_px(
+        centers, sample_distances_px
+    )
+    for true_offset in _true_line_offsets_px():
+        assert np.min(np.abs(candidate_distances_px - true_offset)) < 1.0
+    assert elapsed_s < 10.0
+    assert fitted_distance_mm == pytest.approx(TRUE_GRATING_DISTANCE_MM, rel=2e-3)
+
+
+@pytest.mark.parametrize(
+    ("use_flare_mask", "distance_tolerance_fraction", "position_tolerance_px"),
+    [(False, 2e-4, 0.05), (True, 3e-4, 0.1)],
+    ids=["dispersion-line", "flare-mask"],
+)
+@pytest.mark.parametrize("angle_deg", [0.0, 3.0], ids=["level", "tilted"])
+def test_refined_dip_centres_improve_the_fitted_distance(
+    angle_deg: float, use_flare_mask: bool, distance_tolerance_fraction: float, position_tolerance_px: float
+) -> None:
+    """Sub-sample dip centres bring the fit within 0.02 percent of the truth.
+
+    Whole-sample dip positions are up to half a pixel off, which left a
+    0.08 percent error in the fitted grating distance. With the parabolic
+    refinement the plain extraction is within 0.02 percent and its dips
+    within 0.05 pixel of the true lines. The flare-mask extraction keeps a
+    constant offset of about 0.08 pixel from its anchor (the same for every
+    line and tilt), so its limits are a little wider. In every case the
+    refined fit must be closer to the truth than the whole-sample fit.
+
+    Parameters
+    ----------
+    angle_deg : `float`
+        The trail tilt, in degrees.
+    use_flare_mask : `bool`
+        Whether the pipeline uses the flare-mask extraction path.
+    distance_tolerance_fraction : `float`
+        The largest allowed relative error of the refined distance.
+    position_tolerance_px : `float`
+        The largest allowed error of a refined dip position, in pixels.
+    """
+    frame = _build_frame(angle_deg)
+    pipeline = _build_pipeline(START_PX_WITH_DROPS, angle_deg, use_flare_mask)
+    _, smoothed, sample_distances_px = SpectroscopyCalibrationTuner._extract_smoothed_spectrum(
+        pipeline, ArrayImage(frame.image), frame.zero_order_xy
+    )
+    dips = SpectroscopyCalibrationTuner._detect_absorption_dips(smoothed)
+    assert len(dips) == 3
+    centers = SpectroscopyCalibrationTuner._refine_dip_centers(smoothed, dips)
+
+    _, whole_sample_distance_mm, _ = SpectroscopyCalibrationTuner._fit_grating_distance(
+        dips, sample_distances_px, pipeline, TARGET_WAVELENGTHS_NM
+    )
+    _, refined_distance_mm, refined_combo = SpectroscopyCalibrationTuner._fit_grating_distance(
+        centers, sample_distances_px, pipeline, TARGET_WAVELENGTHS_NM
+    )
+
+    whole_sample_error = abs(whole_sample_distance_mm / TRUE_GRATING_DISTANCE_MM - 1.0)
+    refined_error = abs(refined_distance_mm / TRUE_GRATING_DISTANCE_MM - 1.0)
+    assert refined_error < distance_tolerance_fraction
+    assert refined_error < whole_sample_error
+    refined_offsets_px = SpectroscopyCalibrationTuner._positions_to_distances_px(
+        refined_combo, sample_distances_px
+    )
+    np.testing.assert_allclose(
+        refined_offsets_px, _true_line_offsets_px(), atol=position_tolerance_px, rtol=0.0
+    )
+
+    summary = SpectroscopyCalibrationTuner._build_calibration_summary(
+        "TestCam",
+        round(float(refined_distance_mm), 2),
+        300.0,
+        0.0,
+        angle_deg,
+        sample_distances_px,
+        refined_combo,
+        TARGET_WAVELENGTHS_NM,
+        pipeline,
+        use_flare_mask,
+        None,
+    )
+    for line, offset_px in zip(summary["detailed_calibration"], refined_offsets_px, strict=True):
+        assert line["pixel_offset"] == pytest.approx(offset_px)

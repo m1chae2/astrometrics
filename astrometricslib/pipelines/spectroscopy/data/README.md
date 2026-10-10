@@ -152,8 +152,11 @@ that `cross_trail_blur_zwo_asi_533mm_pro.json` logs for the 40 Vega frames of
 same set of frames. The stored coefficients came from a fit with a fixed 60 A
 band around every line, so they still carry some of Vega's line wings.
 Re-running the derivation script fits them with the wider bands. The script
-does not yet write `reference_airmass`, so add it to the JSON by hand after
-re-deriving.
+writes `reference_airmass` into the JSON. It reads the value from the
+stack's `AIRMASS` header card, or from the `--reference-airmass` option when
+the stack has no such card. With neither, it stores `null`, and the pipeline
+skips the airmass correction (see `pre_processing/README.md`). The script
+refuses a value outside 1 to 10.
 
 ### Validity
 

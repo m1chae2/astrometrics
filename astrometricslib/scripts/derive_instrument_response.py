@@ -12,6 +12,15 @@ data folder.
 Options let you choose another target, reference type or camera. Run it
 again after any change to the grating, camera or telescope, since the
 response belongs to one setup.
+
+The file also records ``reference_airmass``, the airmass of the standard
+star's observation. Airmass is how much air the light crossed (1.0 straight
+overhead). The response includes the air's dimming at that airmass, and the
+pipeline needs the number to correct a target seen at another airmass (see
+`astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction`).
+The script reads it from the stack's ``AIRMASS`` header card. If the stack
+has none, pass ``--reference-airmass``. With neither, the file stores
+``null`` and the pipeline skips the airmass correction.
 """
 
 import argparse
@@ -27,9 +36,14 @@ from astrometricslib import Astrometrics
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
-from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline, _frame_airmass
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
+    MAXIMUM_VALID_AIRMASS,
+    MINIMUM_VALID_AIRMASS,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,
+    InstrumentResponse,
     derive_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -113,6 +127,71 @@ def select_standard_star(
     return best_star
 
 
+def build_response_payload(response: InstrumentResponse) -> dict[str, object]:
+    """Give the fields of a response as they are stored in its JSON file.
+
+    The keys match what `load_instrument_response` reads.
+
+    Parameters
+    ----------
+    response : `InstrumentResponse`
+        The fitted response.
+
+    Returns
+    -------
+    payload : `dict` [`str`, `object`]
+        The response as plain values. ``reference_airmass`` is the airmass of
+        the standard star's observation, or `None` (stored as ``null``) when
+        it is not known.
+    """
+    return {
+        "camera_name": response.camera_name,
+        "coefficients": list(response.coefficients),
+        "minimum_wavelength_angstrom": response.minimum_wavelength_angstrom,
+        "maximum_wavelength_angstrom": response.maximum_wavelength_angstrom,
+        "reference_type": response.reference_type,
+        "source": response.source,
+        "reference_airmass": response.reference_airmass,
+    }
+
+
+def response_file_name(camera_name: str) -> str:
+    """Give the name of the JSON file that stores a camera's response.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera's name, for example ``ZWO ASI 533MM Pro``.
+
+    Returns
+    -------
+    file_name : `str`
+        ``instrument_response_`` plus the lowercase camera name with every
+        run of other characters turned into one underscore, then ``.json``.
+    """
+    return "instrument_response_" + re.sub(r"[^a-z0-9]+", "_", camera_name.lower()).strip("_") + ".json"
+
+
+def write_response_file(response: InstrumentResponse, directory: Path = DATA_DIR) -> Path:
+    """Write a response to its JSON file.
+
+    Parameters
+    ----------
+    response : `InstrumentResponse`
+        The fitted response.
+    directory : `pathlib.Path`, optional
+        The folder to write into. Defaults to the spectroscopy data folder.
+
+    Returns
+    -------
+    path : `pathlib.Path`
+        The file that was written.
+    """
+    path = directory / response_file_name(response.camera_name)
+    path.write_text(json.dumps(build_response_payload(response), indent=2) + "\n")
+    return path
+
+
 def run_derivation(argv: list[str] | None = None) -> int:
     """Extract the standard star's spectrum and store the fitted response.
 
@@ -125,8 +204,8 @@ def run_derivation(argv: list[str] | None = None) -> int:
     -------
     exit_code : `int`
         ``0`` on success, ``1`` when the target has no master spectral
-        stack, no source is near the frame centre, or nothing could be
-        extracted.
+        stack, no source is near the frame centre, nothing could be
+        extracted, or the reference airmass is outside 1 to 10.
     """
     parser = argparse.ArgumentParser(description="Derive the instrument response from a standard star.")
     parser.add_argument("--target", default="Vega", help="Catalog target holding the standard star.")
@@ -158,6 +237,16 @@ def run_derivation(argv: list[str] | None = None) -> int:
         help=(
             "The standard star's zero-order pixel position. By default the detected source nearest "
             "the frame centre is used; give this when the detector does not list the star."
+        ),
+    )
+    parser.add_argument(
+        "--reference-airmass",
+        type=float,
+        default=None,
+        help=(
+            "The airmass the standard star was observed at. By default the stack's AIRMASS header "
+            "card is used. Give this when the stack has none; without either, the response is stored "
+            "with no reference airmass and the pipeline skips the airmass correction."
         ),
     )
     arguments = parser.parse_args(argv)
@@ -215,6 +304,27 @@ def run_derivation(argv: list[str] | None = None) -> int:
         f"Resolution element {resolution_element_angstrom:.1f} A "
         f"({'measured from the trail width' if is_resolution_measured else 'fallback, no trail width'})."
     )
+    reference_airmass = (
+        arguments.reference_airmass
+        if arguments.reference_airmass is not None
+        else _frame_airmass(context.image)
+    )
+    if (
+        reference_airmass is not None
+        and not MINIMUM_VALID_AIRMASS <= reference_airmass <= MAXIMUM_VALID_AIRMASS
+    ):
+        print(
+            f"Reference airmass {reference_airmass} is outside {MINIMUM_VALID_AIRMASS:.0f} to "
+            f"{MAXIMUM_VALID_AIRMASS:.0f}. Nothing was written."
+        )
+        return 1
+    if reference_airmass is None:
+        print(
+            "No reference airmass: the stack has no AIRMASS header card and --reference-airmass was not "
+            "given. The response is stored without one, so the pipeline will skip the airmass correction."
+        )
+    else:
+        print(f"Reference airmass {reference_airmass:.3f}.")
     response = derive_instrument_response(
         np.array(spectroscopy.wavelengths_angstrom),
         np.array(intensity),
@@ -227,20 +337,9 @@ def run_derivation(argv: list[str] | None = None) -> int:
         ),
         wavelength_range_angstrom=fit_range_angstrom,
         resolution_element_angstrom=resolution_element_angstrom,
+        reference_airmass=reference_airmass,
     )
-    file_name = (
-        "instrument_response_" + re.sub(r"[^a-z0-9]+", "_", response.camera_name.lower()).strip("_") + ".json"
-    )
-    payload = {
-        "camera_name": response.camera_name,
-        "coefficients": list(response.coefficients),
-        "minimum_wavelength_angstrom": response.minimum_wavelength_angstrom,
-        "maximum_wavelength_angstrom": response.maximum_wavelength_angstrom,
-        "reference_type": response.reference_type,
-        "source": response.source,
-    }
-    (DATA_DIR / file_name).write_text(json.dumps(payload, indent=2) + "\n")
-    print(f"Wrote {DATA_DIR / file_name}")
+    print(f"Wrote {write_response_file(response)}")
     return 0
 
 

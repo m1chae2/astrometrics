@@ -57,14 +57,31 @@ star with known absorption lines (Vega, for example) and works in these
 steps:
 
 1. Extract the star's spectrum with the normal pipeline and smooth it.
-2. Find the dark valleys (absorption lines) in the smoothed spectrum.
+2. Find the dark valleys (absorption lines) in the smoothed spectrum:
+   1. Divide the spectrum by a running median 101 samples wide (its
+      continuum, the slowly changing brightness under the lines). A valley's
+      depth is then a fraction of the continuum, so the same thresholds work
+      for a spectrum of 3000 ADU (the camera's counts) or 3 ADU.
+   2. Keep a valley only if its depth is at least 1 percent of the continuum
+      (the search lowers this to 0.1 percent when fewer than three valleys
+      pass) and at least 5 times the local noise. The noise is the median
+      absolute deviation of what is left after the continuum is removed,
+      scaled to a standard deviation.
+   3. Keep the 12 deepest valleys. This caps the search in step 4, which
+      tries every group of three: 12 valleys give 220 groups, and a noisy
+      spectrum with 60 valleys gave about 34,000.
+   4. Refine each valley's position to a fraction of a sample. A parabola
+      through the lowest sample and its two neighbours gives the position of
+      its lowest point, which is within 0.5 sample of the sample itself and
+      within 0.1 sample of the true centre for a smooth valley.
 3. Look up where each valley sits. The tuner reads the position from
    `sample_distances_px`, the distance from the zero-order star, in pixels,
    that the pipeline recorded for each kept sample. It does not count
    samples from a fixed start, because the pipeline drops leading samples
    that are off the image or shorter than the camera's shortest wavelength.
    Counting from a fixed start would shift every valley by the number of
-   dropped samples and bias the fitted distance.
+   dropped samples and bias the fitted distance. A refined position between
+   two samples gets a distance between their two recorded distances.
 4. Try every group of three valleys against the Balmer lines H-delta,
    H-gamma and H-beta (hydrogen lines at 410.17, 434.05 and 486.13 nm). For
    each group, solve for the grating distance that makes the grating
@@ -81,7 +98,13 @@ steps:
 `utilities/test/test_calibration_tuner_sample_distances.py` builds frames
 with the Balmer lines at known positions and checks that the tuner recovers
 those positions to 0.5 pixel and the grating distance to 1 percent, with and
-without leading samples dropped. For exact behavior, read the code.
+without leading samples dropped. The same file checks that a noisy frame
+(3000 ADU continuum, Poisson noise) gives at most 12 candidates including the
+three true lines and finishes the search in under 10 seconds, and that the
+refined positions bring the fitted distance within 0.02 percent of the truth
+on the plain extraction path. The flare-mask path keeps a constant offset of
+about 0.08 pixel from its zero-order anchor, which leaves it within 0.03
+percent. For exact behavior, read the code.
 
 ## The gate record
 

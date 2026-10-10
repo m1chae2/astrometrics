@@ -13,6 +13,17 @@ script repairs without re-extracting anything from the images:
    `analyze_spectrum`: the instrument's response is removed before
    matching reference spectra, and each feature gets a p-value, an
    expected depth and a verdict.
+4. The pipeline scales the response-corrected flux for the difference
+   between the target's airmass and the airmass of the standard star the
+   response was fitted to (see
+   `pre_processing.atmospheric_extinction`). Airmass is how much air the
+   light crossed (1.0 straight overhead). The script applies the same
+   correction with the same function, so a recomputed spectrum matches the
+   one the pipeline would give. The target's airmass is the one the
+   pipeline recorded in the spectrum's ``extinction_correction`` record
+   when it read the frame header. A spectrum saved before that record
+   existed has no airmass here, so the correction is skipped and the skip
+   is recorded.
 
 Check first, then apply::
 
@@ -36,9 +47,16 @@ import numpy as np
 
 from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.local_database import backup_catalog_database
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import (
+    ExtinctionCorrectionRecord,
+    SpectroscopyResult,
+    StellarObject,
+)
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
+    apply_extinction_correction,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     InstrumentResponse,
     apply_instrument_response,
@@ -114,6 +132,25 @@ def find_measured_samples(
     if start >= _MINIMUM_ZERO_RUN_SAMPLES:
         measured[:start] = False
     return measured
+
+
+def _recorded_target_airmass(spectroscopy: SpectroscopyResult) -> float | None:
+    """Read the airmass the pipeline recorded for a stored spectrum.
+
+    Parameters
+    ----------
+    spectroscopy : `SpectroscopyResult`
+        The star's stored spectrum.
+
+    Returns
+    -------
+    airmass : `float` or `None`
+        The target airmass in the spectrum's extinction record, or `None`
+        when the spectrum has no such record (it was saved before the
+        pipeline recorded one) or the record has no airmass.
+    """
+    record = spectroscopy.extinction_correction
+    return record.target_airmass if record is not None else None
 
 
 def recompute_star(
@@ -216,6 +253,17 @@ def recompute_star(
         if response is not None
         else None
     )
+    # Scale to the response star's airmass, as pipeline.py does. The frame
+    # header is not available here, so the airmass is the one recorded with
+    # the spectrum when it was extracted.
+    extinction_record = None
+    if response_corrected_intensity is not None and response is not None:
+        response_corrected_intensity, extinction_record = apply_extinction_correction(
+            np.array(spectroscopy.wavelengths_angstrom),
+            response_corrected_intensity,
+            _recorded_target_airmass(spectroscopy),
+            response.reference_airmass,
+        )
 
     analysis = analyze_spectrum(
         np.array(spectroscopy.wavelengths_angstrom),
@@ -232,6 +280,12 @@ def recompute_star(
         ),
         resolution_profile=resolution_profile,
         possible_neighbor_contamination=spectroscopy.possible_neighbor_contamination,
+        extinction_correction=extinction_record,
+    )
+    spectroscopy.extinction_correction = (
+        ExtinctionCorrectionRecord.model_validate(analysis.extinction_correction)
+        if analysis.extinction_correction is not None
+        else None
     )
     spectroscopy.emission_lines = analysis.emission_lines
     spectroscopy.is_emission_line_source = analysis.is_emission_line_source

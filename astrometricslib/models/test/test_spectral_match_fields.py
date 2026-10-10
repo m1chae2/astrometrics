@@ -178,3 +178,28 @@ def test_the_verdicts_are_sent_with_the_star() -> None:
     assert data["spectroscopy"]["isClassAmbiguous"] is None
     assert "selfDeterminedSpectralTypeConfidence" not in data["spectroscopy"]
     assert "candidateSeparation" not in data["spectroscopy"]
+
+
+def test_a_star_saved_before_the_new_verdicts_still_loads() -> None:
+    """A record with the older output-quality shape is read, not refused.
+
+    The 68 stars with spectra in the library on 2026-10-10 carried
+    ``isLowConfidence`` and no ``isPoorMatch`` or ``isClassAmbiguous``.
+    Requiring those two fields made every pipeline that records stars for
+    their targets stop with a validation error.
+    """
+    from astrometricslib.models.spectroscopy_quality import OutputQualityAssessment
+
+    older = {
+        "catalogAgrees": None,
+        "isAmbiguous": False,
+        "isLowConfidence": False,
+        "isSubtypeFinerThanResolution": None,
+        "isTrustworthy": True,
+    }
+
+    assessment = OutputQualityAssessment.model_validate(older)
+
+    assert assessment.is_poor_match is None
+    assert assessment.is_class_ambiguous is None
+    assert assessment.is_trustworthy is True

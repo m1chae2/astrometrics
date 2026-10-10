@@ -298,8 +298,12 @@ class OutputQualityAssessment(BaseModel):
     # The winning type's relative RMS is above `NO_GOOD_MATCH_RMS`, so the
     # closest reference still fits badly (see `is_classification_poor_match`).
     # `False` for an unclassified star -- that is a separate "nothing to
-    # compare" case, not a shaky match.
-    is_poor_match: bool = Field(alias="isPoorMatch")
+    # compare" case, not a shaky match. `None` in a record saved before
+    # 2026-10-10, which carries the older `isLowConfidence` judgement instead;
+    # `scripts/recompute_spectral_analysis.py` re-judges such records. Without
+    # the default, loading one of the 68 stars stored that way stopped every
+    # pipeline that records stars for its target.
+    is_poor_match: bool | None = Field(default=None, alias="isPoorMatch")
     # (Subtype level.) The best and second-best reference types are less than
     # `AMBIGUOUS_RMS_GAP` apart in relative RMS (see
     # `is_classification_ambiguous`). `False` when fewer than two references
@@ -308,8 +312,9 @@ class OutputQualityAssessment(BaseModel):
     # The best reference and the best reference of a different spectral
     # class letter are less than `AMBIGUOUS_RMS_GAP` apart in relative RMS
     # (see `is_classification_class_ambiguous`), so the class letter itself
-    # is uncertain. `False` when no other class was compared.
-    is_class_ambiguous: bool = Field(alias="isClassAmbiguous")
+    # is uncertain. `False` when no other class was compared. `None` in a
+    # record saved before 2026-10-10 (see `is_poor_match`).
+    is_class_ambiguous: bool | None = Field(default=None, alias="isClassAmbiguous")
     # Whether the classifier's own top two candidates are closer together
     # than the instrument's resolution can actually distinguish. `None`
     # until the Angstrom-per-subtype-step conversion this needs has been

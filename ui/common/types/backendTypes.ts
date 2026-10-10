@@ -697,9 +697,9 @@ export interface InputQualityAssessment {
  * spectrum actually produced.
  */
 export interface OutputQualityAssessment {
-  isPoorMatch: boolean;
+  isPoorMatch?: boolean | null;
   isAmbiguous: boolean;
-  isClassAmbiguous: boolean;
+  isClassAmbiguous?: boolean | null;
   isSubtypeFinerThanResolution?: boolean | null;
   catalogAgrees?: boolean | null;
   isTrustworthy: boolean;

@@ -251,9 +251,11 @@ def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any
     Each session normalizes against its own comparison stars, so the
     star's level in one session is only comparable to its level in
     another if the two comparison groups behave alike. This summary keeps
-    the numbers a reader needs to judge that: the comparison star count,
-    the typical flux of the comparison ensemble, and the star's median
-    and scatter of normalized flux.
+    the numbers a reader needs to judge that: the comparison star count
+    and ids, how many stars were turned away as comparison stars, the
+    scatter of the comparison stars themselves, the typical flux of the
+    comparison ensemble, and the star's median and scatter of normalized
+    flux.
 
     Parameters
     ----------
@@ -262,8 +264,10 @@ def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any
     analyzer : `VariabilityAnalyzer`
         The analyzer that normalized the session. Its
         `frame_ensemble_composition` and `frame_reference_flux` supply the
-        comparison star count and the ensemble flux. Either may be absent
-        on a stand-in object; the matching fields are then `None`.
+        comparison star count and the ensemble flux, and `comparison_set`
+        supplies the comparison star ids, their scatter and the rejected
+        count. Any may be absent on a stand-in object; the matching
+        fields are then empty or `None`.
     light_curve : `PhotometryResult`
         The star's light curve from this session, before any merge.
 
@@ -292,6 +296,7 @@ def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any
     ensemble_fluxes = [
         float(flux) for flux in (getattr(analyzer, "frame_reference_flux", None) or {}).values() if flux > 0
     ]
+    comparison_set = getattr(analyzer, "comparison_set", None)
     return SessionPhotometrySummary(
         session_id=session_id,
         point_count=int(normalized.size),
@@ -299,6 +304,9 @@ def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any
         normalized_flux_scatter=scatter,
         comparison_star_count=int(np.median(ensemble_sizes)) if ensemble_sizes else None,
         ensemble_median_flux=float(np.median(ensemble_fluxes)) if ensemble_fluxes else None,
+        comparison_star_ids=list(comparison_set.star_ids) if comparison_set is not None else [],
+        comparison_scatter_mag=comparison_set.scatter_mag if comparison_set is not None else None,
+        comparison_rejected_count=comparison_set.rejected_count if comparison_set is not None else None,
     )
 
 

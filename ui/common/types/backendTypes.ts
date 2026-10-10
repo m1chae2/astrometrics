@@ -576,6 +576,9 @@ export interface SessionPhotometrySummary {
   normalizedFluxScatter?: number | null;
   comparisonStarCount?: number | null;
   ensembleMedianFlux?: number | null;
+  comparisonStarIds?: string[];
+  comparisonScatterMag?: number | null;
+  comparisonRejectedCount?: number | null;
 }
 
 /**
@@ -1627,6 +1630,10 @@ export interface AstrometryPipelineQualityMetrics {
   plateSolveSucceeded: boolean;
   simbadMatchedCount: number;
   astrometricResidualRmsArcsec?: number | null;
+  catalogMatchSeparationRmsArcsec?: number | null;
+  plateSolveFitResidualRmsArcsec?: number | null;
+  plateSolveMatchedStarCount?: number | null;
+  astrometryFlags?: string[];
   plateScaleArcsecPerPixel?: number | null;
   starFwhmPx?: number | null;
   remoteCatalogQueriesAttempted?: number;
@@ -1788,6 +1795,8 @@ export interface FrameDetection {
   declinationDeg: number;
   brightness?: number | null;
   pictureBrightnessLevel?: number | null;
+  astrometricErrorArcsec?: number | null;
+  exposureSeconds?: number | null;
 }
 
 /**
@@ -1798,6 +1807,11 @@ export interface MovingObjectTrack {
   declinationRateArcsecPerHour: number;
   totalRateArcsecPerHour: number;
   linearFitRSquared: number;
+  residualRmsRightAscensionArcsec?: number | null;
+  residualRmsDeclinationArcsec?: number | null;
+  astrometricErrorArcsec?: number | null;
+  residualLimitArcsec?: number | null;
+  astrometricErrorAssumed?: boolean | null;
   fitStartTimestamp: number;
   fitEndTimestamp: number;
 }
@@ -1828,6 +1842,8 @@ export enum CascadeStage {
 export interface EphemerisMatch {
   designation: string;
   angularSeparationArcsec: number;
+  firstDetectionSeparationArcsec?: number | null;
+  lastDetectionSeparationArcsec?: number | null;
 }
 
 /**

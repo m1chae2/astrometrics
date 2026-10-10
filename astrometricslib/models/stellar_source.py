@@ -306,11 +306,25 @@ class SessionPhotometrySummary(BaseModel):
     # robust standard deviation (1.4826 x the median absolute deviation),
     # in the same unitless scale as the normalized flux.
     normalized_flux_scatter: float | None = Field(default=None, alias="normalizedFluxScatter")
-    # The typical number of comparison stars used per frame, and the
-    # median of the per-frame ensemble median fluxes (the divisor of the
-    # normalization), in the session's raw flux units (counts).
+    # The number of comparison stars used per frame (the same for every
+    # frame, because the set is fixed), and the median over frames of the
+    # ensemble level (the divisor of the normalization), in the session's
+    # raw flux units (ADU per second).
     comparison_star_count: int | None = Field(default=None, alias="comparisonStarCount")
     ensemble_median_flux: float | None = Field(default=None, alias="ensembleMedianFlux")
+    # The ids of the comparison stars the session used. The set was chosen
+    # once and is the same for every frame of the session. Empty for a
+    # session recorded before the set was fixed.
+    comparison_star_ids: list[str] = Field(default_factory=list, alias="comparisonStarIds")
+    # How much the comparison stars' own normalized light curves scatter, in
+    # magnitudes: the median over the set of 2.5 log10(1 + CV), with CV the
+    # standard deviation of a star's normalized flux over its mean. `None`
+    # when the session has no usable set.
+    comparison_scatter_mag: float | None = Field(default=None, alias="comparisonScatterMag")
+    # How many stars were turned away as comparison stars: candidates whose
+    # scatter exceeded what their errors allow, and stars a catalog lists as
+    # variable. `None` for a session recorded before the set was vetted.
+    comparison_rejected_count: int | None = Field(default=None, alias="comparisonRejectedCount")
 
 
 class PhotometryResult(BaseModel):

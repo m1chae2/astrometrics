@@ -4,9 +4,10 @@ A photometry run produces light curves for many stars from one or more
 sessions of frames. Whether the run as a whole can be trusted depends on a
 few checks: were many frames thrown out as outliers, did every frame have a
 capture time (and which time scale do the times use), could every session be
-used, did the comparison stars hold up in every frame, did the telescope keep
-tracking, are there enough stars to say what "normal" scatter looks like, and
-how large does the measurement say the error of each point is.
+used, was the comparison set large enough and the same in every frame, did
+the telescope keep tracking, are there enough stars to say what "normal"
+scatter looks like, and how large does the measurement say the error of each
+point is.
 
 Each check is returned as a `GateResult`. A check that could not look (for
 example, no star recorded its alignment drift) is ``not_checked``; it is not
@@ -25,7 +26,10 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
 from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
     UNSTABLE_TRACKING_DRIFT_PX,
 )
-from astrometricslib.pipelines.photometry.processing.variability_analyzer import MINIMUM_ENSEMBLE_SIZE
+from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
+    MINIMUM_COMPARISON_STARS,
+    ComparisonSetResult,
+)
 
 # The percentage of rejected frames needed to trigger a quality warning flag.
 # Normal processing naturally rejects a small number of frames (around 7.2%
@@ -43,9 +47,9 @@ MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 # to say what the field's normal scatter is. The variable-star cutoff is the
 # median plus a multiple of the median absolute deviation (MAD) of every
 # star's scatter; with only a handful of stars those two numbers describe
-# the handful, not the field. The same minimum the comparison ensemble
-# needs. A design estimate, not validated on real fields.
-MINIMUM_STARS_FOR_SCATTER_POPULATION = MINIMUM_ENSEMBLE_SIZE
+# the handful, not the field. A design estimate, not validated on real
+# fields.
+MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
 
 # The largest peak-to-peak amplitude, in magnitudes, a run's cutoff may demand
 # of a sinusoidal variable before the run is called blind to most variables.
@@ -80,7 +84,7 @@ def photometry_run_gates(
     session_empty_reasons: Sequence[str],
     sessions_missing_wcs: Sequence[str],
     no_work_reason: str | None,
-    ensemble_sizes: Sequence[int],
+    comparison_sets: Sequence[ComparisonSetResult],
     registration_drifts_px: Sequence[float | None],
     stars_with_scatter: int,
     known_variable_cvs: Sequence[float] = (),
@@ -112,8 +116,10 @@ def photometry_run_gates(
         Sessions that could not be plate-solved for cross-session matching.
     no_work_reason : `str` or `None`
         Why the run found nothing to do, if it did not.
-    ensemble_sizes : `Sequence` [`int`]
-        The number of comparison stars measured in each frame.
+    comparison_sets : `Sequence` [`ComparisonSetResult`]
+        One record for each session that had stars to normalize: the
+        comparison stars it used, the number of them used in each frame,
+        and the scatter of their normalized light curves.
     registration_drifts_px : `Sequence` [`float` or `None`]
         Each star's largest frame-to-frame alignment offset, or `None` when
         none was recorded for it.
@@ -251,38 +257,7 @@ def photometry_run_gates(
     else:
         gates.append(passed_gate(PHOTOMETRY_WORK_GATE_NAME, detail="the run had frames to measure"))
 
-    ensemble_source = f"at least {MINIMUM_ENSEMBLE_SIZE} comparison stars measured in every frame"
-    if not ensemble_sizes:
-        gates.append(
-            unchecked_gate(
-                COMPARISON_ENSEMBLE_GATE_NAME,
-                "no frame was normalized against a comparison ensemble",
-                ensemble_source,
-            )
-        )
-    else:
-        smallest = min(ensemble_sizes)
-        thin = sum(1 for size in ensemble_sizes if size < MINIMUM_ENSEMBLE_SIZE)
-        if thin:
-            gates.append(
-                failed_gate(
-                    COMPARISON_ENSEMBLE_GATE_NAME,
-                    f"{thin} of {len(ensemble_sizes)} frame(s) were normalized against fewer than "
-                    f"{MINIMUM_ENSEMBLE_SIZE} comparison stars (the smallest had {smallest})",
-                    float(smallest),
-                    float(MINIMUM_ENSEMBLE_SIZE),
-                    ensemble_source,
-                )
-            )
-        else:
-            gates.append(
-                passed_gate(
-                    COMPARISON_ENSEMBLE_GATE_NAME,
-                    float(smallest),
-                    float(MINIMUM_ENSEMBLE_SIZE),
-                    ensemble_source,
-                )
-            )
+    gates.append(_comparison_ensemble_gate(comparison_sets))
 
     drift_source = (
         f"alignment offset of at most {UNSTABLE_TRACKING_DRIFT_PX:g} px (half of the centroid search box)"
@@ -402,6 +377,75 @@ def photometry_run_gates(
         _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)
     )
     return gates
+
+
+def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) -> GateResult:
+    """Report the comparison set of each session, and whether it held still.
+
+    The gate fails when a session's comparison set has fewer than
+    `MINIMUM_COMPARISON_STARS` stars, or when the number of comparison stars
+    differs from one frame of a session to another (a set that should be
+    fixed for the session is not). Otherwise it passes. Its detail gives the
+    size of each set, says that each set is fixed across its session, and
+    gives the scatter of the comparison stars' own normalized light curves
+    with the scatter their errors predict, in magnitudes.
+
+    Parameters
+    ----------
+    comparison_sets : `Sequence` [`ComparisonSetResult`]
+        One record for each session that had stars to normalize.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` when no session was normalized. Otherwise ``failed``
+        or ``passed``, with the size of the smallest set as its measured
+        value.
+    """
+    source = f"at least {MINIMUM_COMPARISON_STARS} comparison stars, the same set in every frame of a session"
+    if not comparison_sets:
+        return unchecked_gate(
+            COMPARISON_ENSEMBLE_GATE_NAME, "no session was normalized against a comparison set", source
+        )
+    sizes = [len(record.star_ids) for record in comparison_sets]
+    smallest = min(sizes)
+    thin = sum(1 for size in sizes if size < MINIMUM_COMPARISON_STARS)
+    moving = sum(1 for record in comparison_sets if not record.is_fixed)
+    if thin or moving:
+        problems = []
+        if thin:
+            problems.append(
+                f"{thin} of {len(sizes)} session(s) had fewer than {MINIMUM_COMPARISON_STARS} "
+                f"comparison stars (the smallest had {smallest})"
+            )
+        if moving:
+            problems.append(
+                f"{moving} session(s) used a different number of comparison stars in different frames"
+            )
+        return failed_gate(
+            COMPARISON_ENSEMBLE_GATE_NAME,
+            "; ".join(problems),
+            float(smallest),
+            float(MINIMUM_COMPARISON_STARS),
+            source,
+        )
+    scatters = [record.scatter_mag for record in comparison_sets if record.scatter_mag is not None]
+    expected = [
+        record.expected_error_mag for record in comparison_sets if record.expected_error_mag is not None
+    ]
+    detail = (
+        f"comparison set sizes {', '.join(str(size) for size in sizes)}; each set is the same in every "
+        "frame of its session"
+    )
+    if scatters:
+        detail += f"; ensemble scatter {max(scatters):.4f} mag (worst session)"
+        if expected:
+            detail += f", errors predict {max(expected):.4f} mag"
+    rejected = sum(record.rejected_count for record in comparison_sets)
+    detail += f"; {rejected} star(s) turned away"
+    return passed_gate(
+        COMPARISON_ENSEMBLE_GATE_NAME, float(smallest), float(MINIMUM_COMPARISON_STARS), source, detail
+    )
 
 
 def _flux_uncertainty_gate(

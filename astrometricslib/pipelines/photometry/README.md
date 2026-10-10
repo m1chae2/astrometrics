@@ -6,7 +6,7 @@ This part of the code measures how bright stars are in a series of pictures, and
 
 1. **Collect the pictures.** The pipeline looks at every picture taken of a target and groups them into observing sessions. A session is one continuous night (or run) of pictures taken with the same setup. The pipeline leaves out pictures taken through a spectroscopy filter, since measuring a star's total brightness does not make sense on a dispersed spectrum image.
 2. **Measure each star's brightness, frame by frame.** For each session, the pipeline uses the first picture to find every star in the field. It then compares every later picture in that session against the first one: it shifts each star by the picture's overall drift, re-centers it on its own brightness-weighted centroid, measures how much light it collected in a circle at that exact position, and records that as one point in the star's brightness history. Each point also gets its 1-sigma uncertainty (see "Uncertainties" below). The time of that point starts from the picture's `DATE-OBS` header and is converted to the middle of the exposure in BJD_TDB (see "Times" below). A picture with no readable `DATE-OBS` is rejected, not given the current time. This step lives in `pre_processing/`.
-3. **Compare stars against each other.** A single star's raw brightness bounces around from picture to picture for reasons that have nothing to do with the star itself: clouds, changing air quality, small changes in tracking. To remove that noise, the pipeline picks a group of steady comparison stars in the same field and uses them to correct every star's brightness, frame by frame. It then drops any frame that still looks wrong after that correction. This step lives in `processing/`.
+3. **Compare stars against each other.** A single star's raw brightness bounces around from picture to picture for reasons that have nothing to do with the star itself: clouds, changing air quality, small changes in tracking. To remove that noise, the pipeline picks one fixed group of up to 20 steady comparison stars per session (bright but not the very brightest, unsaturated in every picture, not listed as variable by a catalog, and checked for constancy). It builds a weighted average of their brightness for each picture and divides every star's brightness by it. It then drops any frame that still looks wrong after that correction. It does not fit a star's own brightness against airmass. This step lives in `processing/` (`comparison_ensemble.py` chooses the group).
 4. **Decide which stars are actually variable.** Once brightness is corrected, the pipeline compares how much each star's brightness varies against how much an ordinary, non-variable star in the same field varies. A star that varies much more than that baseline is flagged as a possible variable star. This also lives in `processing/`.
 5. **Look for repeating patterns.** For stars with enough data points, the pipeline also searches for a period: a repeating pattern in brightness over time, such as an eclipsing binary star or a transiting planet. The searches weight each point by its uncertainty and measure time in BJD_TDB days when the star has them. This also lives in `processing/`.
 6. **Judge how much to trust the results.** Two separate quality checks run alongside the steps above. One checks how good the raw data behind a star's brightness history was (`pre_processing/`). The other checks how confident the pipeline is in a star's variability result (`post_processing/`).
@@ -32,22 +32,22 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `session_content` | A session produced no light curves | The run had no sessions |
 | `session_plate_solve` | A session could not be plate-solved for cross-session matching | There is only one session |
 | `photometry_work` | The run found nothing to do (the reason is given) | Never |
-| `comparison_ensemble` | A frame was normalized against fewer than ten comparison stars | No frame was normalized |
+| `comparison_ensemble` | A session's comparison set has fewer than five stars, or the number of comparison stars differs from one frame of a session to another (the set must be fixed). The detail on a pass gives the set sizes, says each set is the same in every frame, and quotes the ensemble scatter in magnitudes next to the scatter the errors predict | No session was normalized |
 | `registration_drift` | Frame alignment drifted more than 20 pixels, so tracking was probably lost | No star recorded its drift |
 | `scatter_population` | Never | Fewer than ten stars have a measured scatter, so the variable-star cutoff is not reliable |
 | `variability_discrimination` | Among the field's stars with a light curve, the scatter of those the catalogs list as variable is not clearly higher than that of the others (AUC not above chance at the 5% level) | Fewer than 10 catalogued variables or 30 unlisted stars in the field |
 | `detectable_amplitude` | The run's cutoff means a variable must change by more than about 0.3 mag peak to peak to be flagged | The run has no cutoff |
 | `flux_uncertainty` | Never. It passes with the median per-point error in magnitudes as its measured value | No light curve carries errors, or the camera's gain is unknown and the errors assume 1 electron per ADU (the detail still quotes the median error) |
 
-`registration_drift` and `comparison_ensemble` are new flags: before, a lost-tracking night or a thin comparison ensemble only showed on each star's own record or in the log. The limits for `scatter_population` and the 7.4 multiplier in the variable-star cutoff are not yet backed by a measured false-alarm rate (Gap 2 of the audit plan).
+`registration_drift` and `comparison_ensemble` report a lost-tracking night and a thin or unstable comparison set at the level of the run. The limits for `scatter_population` and the 7.4 multiplier in the variable-star cutoff are not yet backed by a measured false-alarm rate (Gap 2 of the audit plan).
 
 ## Uncertainties
 
 Every flux comes with a 1-sigma uncertainty (one standard deviation), so a later step can weight a point by how well it was measured.
 
 - `fluxErrors` goes with `fluxes`, in ADU per second (ADU is analog-to-digital unit, one step of the stored pixel value).
-- `fluxesNormalizedErrors` goes with `fluxesNormalized`. It has no unit. It combines the star's own error with the error of the comparison-star level it was divided by.
-- `fluxesDetrendedErrors` goes with `fluxesDetrended`. It has no unit. It is the normalized error scaled by the same factor as the value.
+- `fluxesNormalizedErrors` goes with `fluxesNormalized`. It has no unit. It combines the star's own error with the error of the comparison-star level it was divided by (`1 / sqrt(sum of weights)` for the weighted mean).
+- `fluxesDetrendedErrors` goes with `fluxesDetrended`. It has no unit. `fluxesDetrended` equals `fluxesNormalized`, and its errors equal the normalized errors, unless the optional ensemble airmass correction is on (see `processing/README.md`). The pipeline never fits a star's own flux against airmass.
 
 The CCD equation (the noise budget of a camera sensor) gives the flux error, in electrons:
 
@@ -72,7 +72,7 @@ The conversion needs two inputs:
 
 ## Change between sessions
 
-Within a session, a star's normalized flux is its flux divided by the median flux of the session's comparison stars, so it has no units. The pipeline picks the comparison stars separately for each session: the brightest unsaturated stars that appear in most pictures, up to 100. Two sessions can therefore use different comparison stars, and a difference in a star's level between them can come from the comparison stars and not from the star.
+Within a session, a star's normalized flux is its flux divided by a weighted mean of the session's comparison stars, so it has no units (the exact definition is in `processing/README.md`). The pipeline picks the comparison stars separately for each session, and each session keeps the same stars for every picture. Two sessions can therefore use different comparison stars, and a difference in a star's level between them can come from the comparison stars and not from the star.
 
 For that reason, the merge across sessions (`batch.py`, `_merge_light_curves`) does not rescale any flux. It joins the sessions in time order, for both `fluxesNormalized` and `fluxesDetrended`. The airmass detrend runs on one session at a time and keeps the session's mean level, so the joined detrended values keep each session's trend removal and each session's level.
 
@@ -86,17 +86,26 @@ The merge also records one `sessionSummaries` entry per session on the light cur
 | `pointCount` | Usable (positive) normalized points in the session |
 | `medianNormalizedFlux` | The star's median normalized flux in the session (no units) |
 | `normalizedFluxScatter` | 1.4826 times the median absolute deviation of the star's normalized flux in the session (no units) |
-| `comparisonStarCount` | The typical number of comparison stars per picture |
-| `ensembleMedianFlux` | The median, over pictures, of the comparison group's median flux (counts) |
+| `comparisonStarCount` | The number of comparison stars per picture (the same for every picture) |
+| `ensembleMedianFlux` | The median, over pictures, of the comparison signal (ADU per second) |
+| `comparisonStarIds` | The ids of the session's comparison stars |
+| `comparisonScatterMag` | The scatter of the comparison stars' own normalized light curves, in magnitudes (median over the set of `2.5 log10(1 + CV)`) |
+| `comparisonRejectedCount` | The candidates the constancy check dropped plus the stars left out for being listed as variable |
 
 `identify_long_term_variable_candidates` (`processing/variability_analyzer.py`) reads these entries. For a star with at least two sessions of three or more points, it computes:
 
 - the amplitude, `2.5 log10(highest session median / lowest session median)`, in magnitudes (`betweenSessionAmplitudeMag`);
 - the significance, the difference of those two medians divided by their combined expected error (`betweenSessionSignificance`, no units). The expected error of one median is `1.2533 x normalizedFluxScatter / sqrt(pointCount)`.
 
-It flags the star when the significance is above 3 and the amplitude is at least 0.02 mag. The within-session scatter (the coefficient of variation) is not changed by this search. A flag means that the star's level differs between sessions by more than its own scatter explains. It does not rule out the comparison stars as the cause. Compare the amplitude with the amplitudes of the other stars in the field, and with the `comparisonStarCount` and `ensembleMedianFlux` of each session, before treating a flag as a variable star.
+It flags the star when the significance is above 3 and the amplitude is at least 0.02 mag. The within-session scatter (the coefficient of variation) is not changed by this search. A flag means that the star's level differs between sessions by more than its own scatter explains. It does not rule out the comparison stars as the cause. Compare the amplitude with the amplitudes of the other stars in the field, and with the `comparisonStarCount`, `comparisonStarIds`, `comparisonScatterMag` and `ensembleMedianFlux` of each session, before treating a flag as a variable star.
 
 No run gate checks this amplitude yet. The `detectable_amplitude` gate below describes only the within-session cutoff, so a run can pass it and still be unable to see a small change between sessions.
+
+## Comparison stars: measured and designed
+
+Measured (synthetic sessions with known truth, `test/test_comparison_ensemble_injection.py`): the pipeline recovers a 1 percent, 2 hour dip to within 3 percent of its depth, rejects a comparison candidate that carries a 5 percent sinusoid, matches the comparison scatter to the propagated error within 20 percent, and removes a 3 percent frame-to-frame transparency change from every curve.
+
+Designed (no real field has checked them): the brightness band of 2 to 30 percent, the minimum of 5 and the cap of 20 comparison stars, the 3-sigma consistency limit, and the rule that a usable frame has at least half the typical number of measured stars. The cap and the optional ensemble airmass correction are arguments of `VariabilityAnalyzer`; no configuration file sets them.
 
 ## Known variables
 

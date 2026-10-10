@@ -132,6 +132,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "all_rejected_files": [],
             "unreadable_date_obs_frames": [],
             "all_frame_ensemble_composition": [],
+            "all_comparison_sets": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -272,6 +273,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # reason (`ExcludedFrame`). Reported through `capture_timestamps`.
         all_unreadable_date_obs_frames = []
         all_frame_ensemble_composition = []
+        # One comparison-set record per session that had stars to normalize
+        # (see `ComparisonSetResult`), for the `comparison_ensemble` gate.
+        all_comparison_sets = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
@@ -340,13 +344,15 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_rejected_files.extend(analyzer.rejected_files)
             all_unreadable_date_obs_frames.extend(analyzer.frames_without_usable_date_obs)
             all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
+            if analyzer.comparison_set is not None:
+                all_comparison_sets.append(analyzer.comparison_set)
 
         # Captured before cross-session merging/re-flagging below so
         # each candidate reflects its own session's local adaptive
         # cutoff -- VariableCandidate copies plain float values, so
-        # later mutating the underlying StellarObjects (merging
-        # light curves, recomputing a long-term CV) cannot retroactively
-        # change an already-built VariableCandidate.
+        # later mutating the underlying StellarObjects (merging light
+        # curves, adding the between-session amplitude fields) cannot
+        # retroactively change an already-built VariableCandidate.
         candidates_formatted = _format_variable_candidates(all_candidates)
         label_known_variability(candidates_formatted, catalog_access)
 
@@ -403,6 +409,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "all_rejected_files": all_rejected_files,
                 "unreadable_date_obs_frames": all_unreadable_date_obs_frames,
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
+                "all_comparison_sets": all_comparison_sets,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
@@ -522,9 +529,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             session_empty_reasons=session_empty_reasons,
             sessions_missing_wcs=sessions_missing_wcs,
             no_work_reason=payload.get("no_work_reason"),
-            ensemble_sizes=[
-                composition.ensemble_size for composition in payload["all_frame_ensemble_composition"]
-            ],
+            comparison_sets=payload.get("all_comparison_sets", []),
             registration_drifts_px=[
                 photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
                 for photometry in star_photometry

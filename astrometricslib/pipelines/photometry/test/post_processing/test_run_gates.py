@@ -21,7 +21,38 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
     TIME_BASIS_UTC_START,
 )
+from astrometricslib.pipelines.photometry.processing.comparison_ensemble import ComparisonSetResult
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
+
+
+def comparison_set(size: int = 12, frames: int = 40, **changes: Any) -> ComparisonSetResult:
+    """Build the comparison-set record of a healthy session.
+
+    Parameters
+    ----------
+    size : `int`, optional
+        The number of comparison stars in the set.
+    frames : `int`, optional
+        The number of frames of the session.
+    **changes
+        Fields of `ComparisonSetResult` to replace.
+
+    Returns
+    -------
+    record : `ComparisonSetResult`
+        A set with ``size`` stars used in every one of ``frames`` frames.
+    """
+    fields: dict[str, Any] = {
+        "star_ids": tuple(f"Star_{index}" for index in range(size)),
+        "rejected_ids": ("Star_90",),
+        "scatter_mag": 0.0012,
+        "expected_error_mag": 0.0011,
+        "candidate_count": size + 1,
+        "uses_errors": True,
+        "frame_sizes": (size,) * frames,
+    }
+    fields.update(changes)
+    return ComparisonSetResult(**fields)
 
 
 def good_run(**changes: Any) -> dict[str, GateResult]:
@@ -45,7 +76,7 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "session_empty_reasons": [],
         "sessions_missing_wcs": [],
         "no_work_reason": None,
-        "ensemble_sizes": [60, 58, 61, 60],
+        "comparison_sets": [comparison_set(12), comparison_set(15)],
         "registration_drifts_px": [3.0, 5.0, None],
         "stars_with_scatter": 80,
         # Catalogued variables clearly scatter more than the others here.
@@ -159,14 +190,41 @@ def test_work_gate_goes_red_when_the_run_found_nothing_to_do() -> None:
     assert gate.detail == "no frames for the requested filter"
 
 
-def test_ensemble_gate_goes_red_when_a_frame_had_too_few_comparison_stars() -> None:
-    """A frame with four comparison stars fails; none recorded is unchecked."""
-    failed = good_run(ensemble_sizes=[60, 4, 58])[rg.COMPARISON_ENSEMBLE_GATE_NAME]
+def test_ensemble_gate_goes_red_when_a_session_had_too_few_comparison_stars() -> None:
+    """A set of four stars fails; no session normalized is not checked."""
+    failed = good_run(comparison_sets=[comparison_set(12), comparison_set(4)])[
+        rg.COMPARISON_ENSEMBLE_GATE_NAME
+    ]
     assert failed.status is GateStatus.FAILED
     assert failed.measured_value == pytest.approx(4.0)
+    assert failed.limit == pytest.approx(5.0)
+    assert "fewer than 5 comparison stars (the smallest had 4)" in failed.detail
 
-    unchecked = good_run(ensemble_sizes=[])[rg.COMPARISON_ENSEMBLE_GATE_NAME]
+    unchecked = good_run(comparison_sets=[])[rg.COMPARISON_ENSEMBLE_GATE_NAME]
     assert unchecked.status is GateStatus.NOT_CHECKED
+
+
+def test_ensemble_gate_goes_red_when_the_set_changes_within_a_session() -> None:
+    """A session that used different numbers of comparison stars fails."""
+    moving = comparison_set(12, frame_sizes=(12,) * 20 + (11,) * 20)
+
+    gate = good_run(comparison_sets=[comparison_set(12), moving])[rg.COMPARISON_ENSEMBLE_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert "different number of comparison stars in different frames" in gate.detail
+
+
+def test_ensemble_gate_reports_the_set_size_that_it_is_fixed_and_the_scatter() -> None:
+    """A passing gate gives set sizes, that they are fixed, and the scatter."""
+    gate = good_run()[rg.COMPARISON_ENSEMBLE_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(12.0)
+    assert "comparison set sizes 12, 15" in gate.detail
+    assert "the same in every frame of its session" in gate.detail
+    assert "ensemble scatter 0.0012 mag" in gate.detail
+    assert "errors predict 0.0011 mag" in gate.detail
+    assert "2 star(s) turned away" in gate.detail
 
 
 def test_drift_gate_goes_red_on_lost_tracking() -> None:

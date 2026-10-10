@@ -11,6 +11,7 @@ from astrometricslib.foundation.errors import ExternalServiceError
 from astrometricslib.models.known_variability import KnownVariability
 from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
+    is_listed_as_variable,
     label_known_variability,
 )
 
@@ -154,3 +155,21 @@ def test_no_catalog_or_a_failed_lookup_gives_empty_groups() -> None:
 
     assert split_scatter_by_catalog_status([star], None) == ([], [])
     assert split_scatter_by_catalog_status([star], FakeCatalog([], fail=True)) == ([], [])
+
+
+def test_a_star_is_listed_as_variable_only_when_a_catalog_says_so() -> None:
+    """Known and suspected variables are listed; others are not.
+
+    The comparison-star choice leaves listed stars out. A star no catalog
+    was asked about is not listed, so the comparison set still tests it for
+    constancy itself.
+    """
+    variable = StellarObject(id="variable", simbad_object_types="*|EB*|V*")
+    suspected = StellarObject(id="suspected", simbad_object_types="*|V*?")
+    constant = StellarObject(id="constant", gaia_variable_flag="CONSTANT")
+    unasked = StellarObject(id="unasked")
+
+    assert is_listed_as_variable(variable)
+    assert is_listed_as_variable(suspected)
+    assert not is_listed_as_variable(constant)
+    assert not is_listed_as_variable(unasked)

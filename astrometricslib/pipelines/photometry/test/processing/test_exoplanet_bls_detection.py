@@ -27,8 +27,13 @@ def test_compute_frame_airmass_from_altitude() -> None:
     assert abs(airmass - 1.1547) < 0.01
 
 
-def test_detrend_light_curves_airmass() -> None:
-    """Verify detrend_light_curves_airmass removes extinction trend."""
+def test_detrend_light_curves_airmass_does_not_fit_the_stars_own_flux() -> None:
+    """Verify detrending does not remove a trend in a star's own flux.
+
+    A star's flux that falls with airmass is left as it is. The ensemble
+    division, not a fit to this star, removes what the whole field shares.
+    A transit or half a pulsation cycle would be kept the same way.
+    """
     analyzer = VariabilityAnalyzer()
     star = StellarObject(id="star_1")
     star.photometry = PhotometryResult()
@@ -43,9 +48,7 @@ def test_detrend_light_curves_airmass() -> None:
 
     analyzer.detrend_light_curves_airmass()
 
-    assert len(star.photometry.fluxes_detrended) == 6
-    # Detrended fluxes should have lower variance than original trend
-    assert np.std(star.photometry.fluxes_detrended) < np.std(fluxes_norm)
+    assert star.photometry.fluxes_detrended == fluxes_norm
 
 
 def test_bls_transit_search_synthetic_transit() -> None:

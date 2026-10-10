@@ -57,6 +57,30 @@ def label_known_variability(candidates: Iterable[VariableCandidate], catalog_acc
         )
 
 
+def is_listed_as_variable(star: StellarObject) -> bool:
+    """Say whether a catalog lists, or suspects, a star as variable.
+
+    The comparison-star choice uses this to keep such stars out of the
+    comparison set: a star a catalog calls variable cannot be assumed
+    constant. The answer is read from the catalog columns the star already
+    carries, so it needs no lookup. A star no catalog was asked about is not
+    listed, because the answer is unknown and the constancy check of the
+    comparison set still tests it.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star to check.
+
+    Returns
+    -------
+    is_listed : `bool`
+        `True` when the combined SIMBAD, Gaia DR3 and VSX answer is known
+        variable or suspected variable.
+    """
+    return star.known_variability in (KnownVariability.KNOWN_VARIABLE, KnownVariability.SUSPECTED_VARIABLE)
+
+
 def split_scatter_by_catalog_status(
     stars: Iterable[StellarObject], catalog_access: Any, chunk_size: int = 2000
 ) -> tuple[list[float], list[float]]:

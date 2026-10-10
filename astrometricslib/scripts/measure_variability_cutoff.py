@@ -21,11 +21,12 @@ It reads the catalog database and writes nothing.
 
     python -m astrometricslib.scripts.measure_variability_cutoff
 
-Limits: the stored CV of a star is its latest (a long-term CV after sessions
-are merged), while the pipeline builds a cutoff per session, so the cutoff
-here is built per target; targets with fewer than ``--minimum-stars`` stars
-are left out because a median and MAD of a handful of stars mean little; and a
-star is counted under the target it is saved against.
+Limits: the stored CV of a star is a within-session scatter (the
+cross-session merge does not recompute it), while the pipeline builds a
+cutoff per session, so the cutoff here is built per target; targets with
+fewer than ``--minimum-stars`` stars are left out because a median and MAD of
+a handful of stars mean little; and a star is counted under the target it is
+saved against.
 """
 
 import argparse

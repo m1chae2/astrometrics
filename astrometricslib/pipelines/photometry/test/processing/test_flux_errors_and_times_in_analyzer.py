@@ -250,53 +250,44 @@ def test_the_clipped_measurement_takes_its_error_and_time_with_it(
 def test_the_normalized_error_follows_the_propagation_formula(
     analyzer_with_a_spike: VariabilityAnalyzer,
 ) -> None:
-    """The normalized error adds the star's and the ensemble's in quadrature.
+    """The normalized error adds the star's and the ensemble's errors.
 
-    The ensemble is the 100 brightest stars (the target ensemble size). Its
-    level is their median flux in the frame, and its error is the quadrature
-    sum of their flux errors divided by 100. The check picks a frame in which
-    every member kept its measurement, and a star that kept every frame.
+    The ensemble level ``N`` and its error ``sigma_N`` are the analyzer's
+    own, for a frame in which a star that is not a comparison star kept its
+    measurement. The error of the ratio is
+    ``sqrt((sigma_F / N)**2 + (F * sigma_N / N**2)**2)``. The weighted
+    ensemble itself is rebuilt independently in
+    `test_comparison_ensemble_injection`.
     """
     analyzer = analyzer_with_a_spike
-    members = sorted(analyzer.stellar_objects, key=lambda star: -star.flux)[:100]
-    full_stars = [star for star in analyzer.stellar_objects if len(star.photometry.timestamps) == FRAME_COUNT]
-    timestamp = next(
-        stamp
-        for stamp in members[0].photometry.timestamps
-        if all(stamp in member.photometry.timestamps for member in members)
-    )
-
-    def value_at(star: StellarObject, values: list) -> float:
-        """Pick the entry of a per-frame list for the chosen frame.
-
-        Returns
-        -------
-        value : `float`
-            The entry at the chosen timestamp.
-        """
-        return values[star.photometry.timestamps.index(timestamp)]
-
-    member_fluxes = [value_at(member, member.photometry.fluxes) for member in members]
-    member_errors = [value_at(member, member.photometry.flux_errors) for member in members]
-    level = float(np.median(member_fluxes))
-    level_error = float(np.sqrt(np.sum(np.square(member_errors))) / len(members))
-    star = full_stars[-1]
-    flux, flux_error = value_at(star, star.photometry.fluxes), value_at(star, star.photometry.flux_errors)
+    assert analyzer.comparison_set is not None
+    assert len(analyzer.comparison_set.star_ids) >= 5
+    outsiders = [
+        star
+        for star in analyzer.stellar_objects
+        if star.id not in analyzer.comparison_set.star_ids and len(star.photometry.timestamps) == FRAME_COUNT
+    ]
+    star = outsiders[-1]
+    index = FRAME_COUNT // 2
+    timestamp = star.photometry.timestamps[index]
+    level = analyzer.frame_reference_flux[timestamp]
+    level_error = analyzer.frame_reference_flux_error[timestamp]
+    flux, flux_error = star.photometry.fluxes[index], star.photometry.flux_errors[index]
 
     expected = np.hypot(flux_error / level, flux * level_error / level**2)
 
-    assert analyzer.frame_reference_flux[timestamp] == pytest.approx(level)
-    assert analyzer.frame_reference_flux_error[timestamp] == pytest.approx(level_error)
-    assert value_at(star, star.photometry.fluxes_normalized_errors) == pytest.approx(expected)
-    assert value_at(star, star.photometry.fluxes_normalized) == pytest.approx(flux / level)
+    assert star.photometry.fluxes_normalized_errors[index] == pytest.approx(expected)
+    assert star.photometry.fluxes_normalized[index] == pytest.approx(flux / level)
 
 
-def test_the_detrended_error_is_scaled_like_the_detrended_flux() -> None:
-    """Detrending multiplies the error by the factor it multiplies the flux by.
+def test_detrending_leaves_the_normalized_light_curve_and_its_errors_unchanged() -> None:
+    """No star's own flux is fitted against airmass.
 
-    The star has an airmass that rises over the run, so the airmass fit is
-    not skipped. For every point, error over value is the same before and
-    after detrending.
+    The star has an airmass that rises over the run and a normalized flux
+    that falls with it. An older version fitted a quadratic of the star's
+    own flux against airmass and divided it out, which flattened the fall and
+    would flatten a transit or half a pulsation cycle the same way. Now the
+    detrended values and errors equal the normalized ones.
     """
     count = 20
     start = datetime(2026, 5, 24, 4, 0, 0)
@@ -316,11 +307,8 @@ def test_the_detrended_error_is_scaled_like_the_detrended_flux() -> None:
 
     analyzer.detrend_light_curves_airmass()
 
-    detrended = np.array(light_curve.fluxes_detrended)
-    detrended_errors = np.array(light_curve.fluxes_detrended_errors)
-    assert detrended_errors.size == count
-    assert detrended_errors / detrended == pytest.approx(0.01 / normalized, rel=1e-9)
-    assert not np.allclose(detrended, normalized)
+    assert light_curve.fluxes_detrended == pytest.approx(list(normalized), rel=1e-12)
+    assert light_curve.fluxes_detrended_errors == pytest.approx([0.01] * count, rel=1e-12)
 
 
 @pytest.fixture(scope="module")

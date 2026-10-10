@@ -79,8 +79,9 @@ and the target design. Some of the paths they name have since moved, for example
 - Nothing in the UI passes `stretchParameters` yet. No current UI flow shows a raw FITS file with
   stretching on.
 - `astrometricslib/pipelines/spectroscopy/processing/spectral_classifier.py` keeps its own
-  `POOR_MATCH_RMS_THRESHOLD` and spectral-letter order beside the ones in
-  `models/stellar_source.py`.
+  spectral-letter order (`_SPECTRAL_LETTER_ORDER`) and ladder-position code beside `LADDER_ORDER`
+  and `ladder_position` in `models/stellar_source.py`. The match limits (`NO_GOOD_MATCH_RMS`,
+  `UNRELIABLE_MATCH_RMS`, `AMBIGUOUS_RMS_GAP`) are defined once, in `models/stellar_source.py`.
 - The UI keeps its own `PlanetariumSource` type instead of the generated `SkySource`. The two
   differ in UI-only fields and in which fields may be empty.
 - Positions that Ekos writes when it syncs the mount itself are in JNow. Their conversion is not
@@ -365,7 +366,7 @@ follow section 4, and no row adds a function beyond those listed there.
 | `backend/mcp/tool_registry.py` `app_status` | Decodes INDI mount properties | `control.mount.status` |
 | `ui/planetariumDisplay/utils/alignmentClustering.ts` | Groups plate-solve attempts into sessions, then computes RMS jitter and drift rates | `control.history.query(kind="alignment")`, built on the existing `get_alignment_sessions` so that "alignment session" has one definition. The RA average must wrap at 0h/24h. |
 | `ui/planetariumDisplay/layers/TrackingRiskOverlay.ts` | Scores mount risk by sky position (meridian side, high declination, low altitude) and by measured RMS | A field on the `PerformanceEnvelope` model that `control.history.get_performance_envelope` returns. The UI only colors it. |
-| `ui/astronomyManager/utils/starDisplayFormat.ts` | Applies spectral-match thresholds: poor fit, disagreement with the catalog, separation between candidates | Fields on the spectroscopy result: `is_poor_match`, `differs_from_catalog`, `candidate_separation` |
+| `ui/astronomyManager/utils/starDisplayFormat.ts` | Formats the library's spectral-match verdicts and applies no limit of its own: poor fit, disagreement with the catalog, and the RMS gap between the best reference and the runner-up | Fields on the spectroscopy result: `is_poor_match`, `differs_from_catalog`, `rms_gap_to_second_best`, `is_ambiguous`, `rms_gap_to_next_class`, `is_class_ambiguous` |
 | `ui/common/hooks/targetListFiltering.ts` | Classifies targets by name (solar system body, Messier, NGC, IC, comet) | An `object_type` field on `Target` and a `TargetCatalog.query(object_type=...)` filter, built on `is_solar_system_target` |
 | `ui/common/fitsViewer/mtfStretchGL.ts` | Computes auto-stretch parameters with a different method from the library: background 0.05 instead of 0.25, standard deviation instead of the median absolute deviation | Stretch parameters as fields on the `ViewableImage` that `render_fits` returns. The UI keeps the GPU drawing. |
 | `ui/planetariumDisplay/hooks/useEquipmentConfiguration.ts`, `StarOverlay.ts`, `StellarAnalysisDetails.tsx` | Compute plate scale and field of view, and hold copied magnitude limits and minimum point counts | Fields from `control.equipment.status` and `StellarCatalog.query` (`has_catalog_magnitude`, `can_run_period_search`) |

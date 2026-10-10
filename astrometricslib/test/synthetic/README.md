@@ -108,7 +108,10 @@ The generator matches `SpectrumExtractor` for horizontal dispersion.
   uses the same rule (`slope = -tan(angle_degrees)`). A positive angle moves
   the trail toward smaller row numbers as x grows.
 - The offset `d` of a sample from the zero order is the column offset
-  `x - x0`, not the distance along the tilted line.
+  `x - x0`, not the distance along the tilted line. The extractor's
+  `sample_distances_px` records the distance along the trail, so for a tilted
+  trail it is larger than this column offset by a factor of
+  `1 / cos(angle_deg)`.
 - There is no trail at or left of the zero order. The trail ends at
   `x0 + trail_length_px`.
 - The cross-profile is a Gaussian along each column, with standard deviation

@@ -15,7 +15,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import StarPosition
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    ANCHOR_RULE_SIGNAL_TO_NOISE,
+    StarPosition,
+)
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
 
@@ -156,6 +159,48 @@ def test_stars_whose_centroid_is_refused_are_counted_per_star(
 
     assert list(analyzer.centroid_fallback_counts.values()) == [3]
     assert list(analyzer.centroid_fallback_counts) == [analyzer.stellar_objects[0].id]
+
+
+def test_the_analyzer_summarizes_the_per_star_centroid_offsets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The session summary holds the offsets, the fallback share and the rule.
+
+    The stand-in worker leaves every star at its reference position with a
+    shift of zero, and refuses the first star's centroid in every frame. The
+    summary then covers 3 frames and one measurement per tracked star per
+    frame, 3 of which fell back, with offsets of zero. The reference frame
+    holds 16 bright stars, so the anchors come from the signal-to-noise rule.
+    """
+    paths = [_write_frame(tmp_path / f"f{index}.fits", GOOD_DATES[index], index) for index in range(4)]
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.photometry.processing.variability_analyzer._process_single_frame_worker",
+        _fake_worker,
+    )
+    analyzer = VariabilityAnalyzer()
+
+    analyzer.process(paths, max_workers=1)
+    summary = analyzer.centroid_shift_summary()
+
+    assert summary is not None
+    assert summary.frame_count == 3
+    tracked_stars = len(analyzer.stellar_objects)
+    assert summary.measurement_count == 3 * tracked_stars
+    assert summary.fallback_count == 3
+    assert summary.fallback_fraction == pytest.approx(3 / (3 * tracked_stars))
+    assert summary.median_offset_px == pytest.approx(0.0)
+    assert summary.p95_offset_px == pytest.approx(0.0)
+    assert summary.anchor_rule == ANCHOR_RULE_SIGNAL_TO_NOISE
+    assert summary.anchor_count == STAR_COUNT
+
+
+def test_a_one_frame_session_has_no_centroid_summary(tmp_path: Path) -> None:
+    """With only the reference frame there is nothing to summarize."""
+    analyzer = VariabilityAnalyzer()
+
+    analyzer.process([_write_frame(tmp_path / "f0.fits", GOOD_DATES[0], 0)], max_workers=1)
+
+    assert analyzer.centroid_shift_summary() is None
 
 
 @pytest.mark.parametrize("bad_date", [None, "not a date"])

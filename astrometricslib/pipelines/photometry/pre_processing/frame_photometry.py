@@ -18,6 +18,9 @@ Three rules keep the measured light curves honest:
   position and the frame result records why.
 * A frame whose ``DATE-OBS`` is missing or unreadable is rejected with a
   reason (see `read_observation_time`). It never gets the wall-clock time.
+* The frame's global shift is measured on stars chosen for being bright
+  enough to centroid but not saturated (see `select_alignment_anchors`),
+  never on noise peaks.
 * Every flux comes with its 1-sigma uncertainty, from the CCD equation (see
   `aperture_flux_error_adu`). The uncertainty uses the camera's gain and
   read noise (see `detector_noise`). The flux values themselves do not
@@ -26,8 +29,10 @@ Three rules keep the measured light curves honest:
 
 import logging
 import math
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -77,15 +82,37 @@ class ObservationTimeError(ValueError):
     """
 
 
+# A FITS date and time with an optional time zone suffix: ``Z`` or a UTC
+# offset such as ``+02:00``, ``-0530`` or ``+02``. INDI and Ekos write no
+# suffix (UTC is understood), so the suffix is an accepted extra, not the
+# usual form.
+_DATE_OBS_WITH_ZONE = re.compile(
+    r"(?P<stamp>\d{4}-\d{2}-\d{2}[Tt][0-9:.]+)\s*"
+    r"(?:(?P<utc>[Zz])|(?P<sign>[+-])(?P<hours>\d{2})(?::?(?P<minutes>\d{2}))?)?"
+)
+
+# The largest UTC offset, in hours, a ``DATE-OBS`` suffix may carry. Real
+# time zones run from -12 to +14 hours.
+_MAXIMUM_UTC_OFFSET_HOURS = 14
+
+
 def parse_observation_time(value: Any) -> datetime:
     """Turn a ``DATE-OBS`` header value into a UTC capture time.
 
-    The value must be a full FITS date and time such as
-    ``2026-05-24T04:58:30.570``. astropy's `~astropy.time.Time` reads it,
-    which accepts the FITS forms that `datetime.fromisoformat` rejects
-    (for example a trailing ``Z`` on older Python versions). A date with
-    no time of day is refused: it would put every frame of a night at
-    midnight and flatten the light curve's time axis.
+    The value must be a full FITS date and time. These forms are accepted:
+
+    * ``2026-05-24T04:58:30.570``: no suffix. This is what INDI and Ekos
+      write, and it means UTC.
+    * ``2026-05-24T04:58:30.570Z`` or ``...+00:00``: explicit UTC.
+    * ``2026-05-24T06:58:30.570+02:00``: a UTC offset (also ``-0530`` or
+      ``+02``). The function subtracts the offset to get UTC, so this
+      example returns 04:58:30.570.
+
+    astropy's `~astropy.time.Time` reads the date and time part, which
+    accepts the FITS forms that `datetime.fromisoformat` rejects on older
+    Python versions. A date with no time of day is refused: it would put
+    every frame of a night at midnight and flatten the light curve's time
+    axis.
 
     Parameters
     ----------
@@ -101,20 +128,31 @@ def parse_observation_time(value: Any) -> datetime:
     Raises
     ------
     ObservationTimeError
-        If the value is not a string, has no time of day, or is not a
-        valid date and time.
+        If the value is not a string, has no time of day, has a UTC offset
+        outside -14 to +14 hours, or is not a valid date and time.
     """
     if not isinstance(value, str) or not value.strip():
         raise ObservationTimeError(f"DATE-OBS is not a date string (got {value!r})")
     text = value.strip()
     if "T" not in text.upper():
         raise ObservationTimeError(f"DATE-OBS {text!r} has no time of day")
+    offset = timedelta(0)
+    zone_match = _DATE_OBS_WITH_ZONE.fullmatch(text)
+    if zone_match is not None:
+        text = zone_match["stamp"]
+        if zone_match["sign"] is not None:
+            hours, minutes = int(zone_match["hours"]), int(zone_match["minutes"] or 0)
+            if hours > _MAXIMUM_UTC_OFFSET_HOURS or minutes > 59:
+                raise ObservationTimeError(f"DATE-OBS {value.strip()!r} has an impossible UTC offset")
+            offset = timedelta(hours=hours, minutes=minutes)
+            if zone_match["sign"] == "-":
+                offset = -offset
     for time_format in ("isot", "fits"):
         try:
-            return Time(text, format=time_format, scale="utc").to_datetime()
+            return Time(text, format=time_format, scale="utc").to_datetime() - offset
         except ValueError:
             continue
-    raise ObservationTimeError(f"DATE-OBS {text!r} is not a valid FITS date and time")
+    raise ObservationTimeError(f"DATE-OBS {value.strip()!r} is not a valid FITS date and time")
 
 
 def read_observation_time(header: Any) -> datetime:
@@ -209,6 +247,168 @@ def _calculate_frame_offset(
     if len(shifts_x) < 5:
         return 0.0, 0.0
     return float(np.median(shifts_x)), float(np.median(shifts_y))
+
+
+# The two ways `select_alignment_anchors` can pick the stars that measure a
+# frame's global shift. The analyzer records which one a session used.
+ANCHOR_RULE_SIGNAL_TO_NOISE = "signal-to-noise ranked"
+ANCHOR_RULE_RANK_BAND = "detections ranked 50 to 100"
+
+# How many alignment anchors to take.
+ALIGNMENT_ANCHOR_COUNT = 50
+
+# The share of the brightest unsaturated detections that is skipped. The
+# brightest stars are the ones most likely to be nearly saturated, and a
+# flattened core gives a poor centroid. A design estimate.
+ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION = 0.05
+
+# The least peak signal-to-noise (the detection's peak above the sky, divided
+# by the sky noise per pixel) an anchor may have. At 20 the centroid of a
+# star is good to a small fraction of a pixel, and a noise peak is far below
+# it. A design estimate.
+ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR = 20.0
+
+# The fewest anchors the signal-to-noise rule must find. With fewer, the
+# median shift rests on too few stars, and the older rank band is used.
+ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING = 10
+
+# Half-width, in pixels, of the box around a detection searched for a
+# saturated pixel.
+ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX = 3
+
+# The older rule's band of detections, ranked by flux, brightest first.
+ALIGNMENT_ANCHOR_FALLBACK_BAND = (50, 100)
+
+
+@dataclass(frozen=True)
+class AlignmentAnchors:
+    """The stars chosen to measure a frame's global shift.
+
+    Attributes
+    ----------
+    stars : `tuple` [`tuple` [`float`, `float`, `float`]]
+        Each anchor as ``(x, y, flux)`` in the reference frame.
+    rule : `str`
+        Which rule chose them: `ANCHOR_RULE_SIGNAL_TO_NOISE` or
+        `ANCHOR_RULE_RANK_BAND`.
+    """
+
+    stars: tuple[tuple[float, float, float], ...]
+    rule: str
+
+
+def estimate_pixel_noise(data: np.ndarray) -> float:
+    """Estimate the sky noise per pixel of a frame, ignoring gradients.
+
+    The function subtracts pixels three columns apart, so a smooth sky
+    gradient cancels. It takes the median absolute deviation (MAD, a spread
+    that ignores stars and outliers) of those differences, scales it to a
+    standard deviation, and divides by the square root of 2 because a
+    difference of two noisy pixels is that much noisier than one pixel. It
+    reads every fourth row, which is enough for a stable estimate.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The frame, shape ``(ny, nx)``.
+
+    Returns
+    -------
+    noise_adu : `float`
+        The noise per pixel, in ADU. It is 0.0 for a frame narrower than
+        four columns or one with no noise at all.
+    """
+    if data.shape[1] < 4:
+        return 0.0
+    rows = data[::4, :]
+    differences = rows[:, 3:] - rows[:, :-3]
+    return float(1.4826 * np.median(np.abs(differences - np.median(differences))) / math.sqrt(2.0))
+
+
+def select_alignment_anchors(
+    data: np.ndarray,
+    detections: Sequence[Mapping[str, Any]],
+    *,
+    saturation_threshold_adu: float,
+) -> AlignmentAnchors:
+    """Choose the stars whose shift measures a frame's drift.
+
+    The old rule took the detections ranked 50 to 100 by flux. In a sparse
+    field those do not exist or are noise peaks, and a noise peak has no
+    centroid to follow. The rule here picks real stars:
+
+    1. Drop detections with a saturated pixel next to them.
+    2. Rank the rest by flux, brightest first.
+    3. Keep the stars whose peak is at least 20 times the sky noise (see
+       `estimate_pixel_noise`).
+    4. Skip the brightest 5 percent of those, which are the most likely to
+       be nearly saturated, and take the next 50.
+    5. If fewer than 10 stars qualify, return the detections ranked 50 to
+       100 instead, as the older rule did.
+
+    The result says which rule was used.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The reference frame, shape ``(ny, nx)``, in ADU.
+    detections : `Sequence` [`Mapping`]
+        The detected stars, brightest first, each with ``xcentroid`` (or
+        ``x_centroid``), ``ycentroid`` (or ``y_centroid``), ``flux``, and
+        ``peak`` (the peak above the sky, in ADU).
+    saturation_threshold_adu : `float`
+        A pixel at or above this value counts as saturated.
+
+    Returns
+    -------
+    anchors : `AlignmentAnchors`
+        The anchors and the rule that chose them.
+    """
+    height, width = data.shape
+    noise = estimate_pixel_noise(data)
+    box = ALIGNMENT_ANCHOR_SATURATION_BOX_HALF_WIDTH_PX
+    unsaturated: list[tuple[float, float, float, float]] = []
+    for detection in detections:
+        x = detection.get("xcentroid", detection.get("x_centroid"))
+        y = detection.get("ycentroid", detection.get("y_centroid"))
+        if x is None or y is None:
+            continue
+        ix, iy = round(float(x)), round(float(y))
+        cutout = data[
+            max(0, iy - box) : min(height, iy + box + 1), max(0, ix - box) : min(width, ix + box + 1)
+        ]
+        if cutout.size and np.any(cutout >= saturation_threshold_adu):
+            continue
+        peak = detection.get("peak")
+        unsaturated.append((
+            float(x),
+            float(y),
+            float(detection.get("flux", 0.0)),
+            float(peak) if peak is not None else 0.0,
+        ))
+
+    unsaturated.sort(key=lambda row: row[2], reverse=True)
+    # The skip is a share of the stars that pass the signal-to-noise cut, not
+    # of every detection: in a sparse field most detections are noise peaks,
+    # and a share of those would skip real stars.
+    bright_enough = [
+        (x, y, flux)
+        for x, y, flux, peak in unsaturated
+        if noise > 0 and peak >= ALIGNMENT_ANCHOR_MINIMUM_PEAK_SNR * noise
+    ]
+    skipped = int(ALIGNMENT_ANCHOR_SKIPPED_BRIGHTEST_FRACTION * len(bright_enough))
+    chosen = bright_enough[skipped : skipped + ALIGNMENT_ANCHOR_COUNT]
+    if len(chosen) >= ALIGNMENT_ANCHOR_MINIMUM_QUALIFYING:
+        return AlignmentAnchors(tuple(chosen), ANCHOR_RULE_SIGNAL_TO_NOISE)
+
+    first, last = ALIGNMENT_ANCHOR_FALLBACK_BAND
+    band: list[tuple[float, float, float]] = []
+    for detection in detections[first:last]:
+        x = detection.get("xcentroid", detection.get("x_centroid"))
+        y = detection.get("ycentroid", detection.get("y_centroid"))
+        if x is not None and y is not None:
+            band.append((float(x), float(y), float(detection.get("flux", 0.0))))
+    return AlignmentAnchors(tuple(band), ANCHOR_RULE_RANK_BAND)
 
 
 def compute_frame_airmass(header: fits.Header) -> float:
@@ -386,6 +586,162 @@ def refine_star_centroid(
     if np.hypot(centre_x - x, centre_y - y) > max_shift_px:
         return StarPosition(x, y, f"centroid moved more than {max_shift_px:g} px from the shifted position")
     return StarPosition(centre_x, centre_y)
+
+
+def centroid_offsets_px(
+    positions: Mapping[str, StarPosition],
+    reference_positions: Mapping[str, tuple[float, float]],
+    shift_x: float,
+    shift_y: float,
+) -> tuple[list[float], int]:
+    """Measure how far each star's own centroid sits from the shifted position.
+
+    The frame's global shift moves every reference position by the same
+    amount. A star whose own centroid lands elsewhere has a per-star offset.
+    On a frame that only translated, the offsets are close to zero. On a
+    frame that also rotated or changed scale, the offsets grow with the
+    star's distance from the middle of the anchors.
+
+    A star whose centroid was refused sits at the shifted position by
+    construction, so its offset says nothing. It is counted instead.
+
+    Parameters
+    ----------
+    positions : `Mapping` [`str`, `StarPosition`]
+        Where each star was measured in one frame.
+    reference_positions : `Mapping` [`str`, `tuple` [`float`, `float`]]
+        Each star's ``(x, y)`` in the reference frame.
+    shift_x, shift_y : `float`
+        The frame's global shift, in pixels.
+
+    Returns
+    -------
+    offsets_px : `list` [`float`]
+        The offset of each star with a refined centroid, in pixels.
+    fallback_count : `int`
+        How many stars kept the shifted position.
+    """
+    offsets: list[float] = []
+    fallback_count = 0
+    for star_id, position in positions.items():
+        reference = reference_positions.get(star_id)
+        if reference is None:
+            continue
+        if not position.is_refined:
+            fallback_count += 1
+            continue
+        offsets.append(
+            math.hypot(position.x - (reference[0] + shift_x), position.y - (reference[1] + shift_y))
+        )
+    return offsets, fallback_count
+
+
+@dataclass(frozen=True)
+class CentroidShiftSummary:
+    """How well one session's frames lined up star by star.
+
+    Attributes
+    ----------
+    frame_count : `int`
+        Frames with at least one measured star, not counting the reference
+        frame.
+    measurement_count : `int`
+        Star measurements in those frames (one per star per frame).
+    fallback_count : `int`
+        How many of those measurements kept the shifted reference position
+        because the star's own centroid was refused.
+    median_offset_px : `float` or `None`
+        The median per-star offset, in pixels, over the measurements with a
+        refined centroid. `None` when there were none.
+    p95_offset_px : `float` or `None`
+        The 95th percentile of the same offsets, in pixels. It is large when
+        the field rotated or changed scale between frames.
+    worst_frame : `datetime.datetime` or `None`
+        The capture time of the frame with the largest per-frame 95th
+        percentile.
+    worst_frame_p95_offset_px : `float` or `None`
+        That frame's 95th percentile, in pixels.
+    anchor_rule : `str` or `None`
+        Which rule chose the alignment anchors (see
+        `select_alignment_anchors`).
+    anchor_count : `int`
+        How many anchors the session used.
+    """
+
+    frame_count: int
+    measurement_count: int
+    fallback_count: int
+    median_offset_px: float | None
+    p95_offset_px: float | None
+    worst_frame: datetime | None
+    worst_frame_p95_offset_px: float | None
+    anchor_rule: str | None = None
+    anchor_count: int = 0
+
+    @property
+    def fallback_fraction(self) -> float:
+        """Give the share of measurements that kept the shifted position.
+
+        Returns
+        -------
+        fraction : `float`
+            Between 0 and 1. It is 0.0 when nothing was measured.
+        """
+        return self.fallback_count / self.measurement_count if self.measurement_count else 0.0
+
+
+def summarize_centroid_shifts(
+    offsets_by_frame: Mapping[datetime, Sequence[float]],
+    measurement_count: int,
+    fallback_count: int,
+    *,
+    anchor_rule: str | None = None,
+    anchor_count: int = 0,
+) -> CentroidShiftSummary | None:
+    """Summarize a session's per-star centroid offsets.
+
+    Parameters
+    ----------
+    offsets_by_frame : `Mapping` [`datetime.datetime`, `Sequence` [`float`]]
+        For each frame, the per-star offsets in pixels (see
+        `centroid_offsets_px`).
+    measurement_count : `int`
+        Star measurements in all the frames, refined or not.
+    fallback_count : `int`
+        How many of them kept the shifted position.
+    anchor_rule : `str`, optional
+        The rule that chose the alignment anchors.
+    anchor_count : `int`, optional
+        The number of anchors.
+
+    Returns
+    -------
+    summary : `CentroidShiftSummary` or `None`
+        The summary, or `None` when nothing was measured (a one-frame
+        session).
+    """
+    if measurement_count <= 0:
+        return None
+    all_offsets = [offset for offsets in offsets_by_frame.values() for offset in offsets]
+    worst_frame: datetime | None = None
+    worst_p95: float | None = None
+    for timestamp, offsets in offsets_by_frame.items():
+        if not len(offsets):
+            continue
+        frame_p95 = float(np.percentile(offsets, 95))
+        if worst_p95 is None or frame_p95 > worst_p95:
+            worst_frame, worst_p95 = timestamp, frame_p95
+    return CentroidShiftSummary(
+        frame_count=len(offsets_by_frame),
+        measurement_count=measurement_count,
+        fallback_count=fallback_count,
+        median_offset_px=float(np.median(all_offsets)) if all_offsets else None,
+        p95_offset_px=float(np.percentile(all_offsets, 95)) if all_offsets else None,
+        worst_frame=worst_frame,
+        worst_frame_p95_offset_px=worst_p95,
+        anchor_rule=anchor_rule,
+        anchor_count=anchor_count,
+    )
 
 
 def aperture_flux_error_adu(

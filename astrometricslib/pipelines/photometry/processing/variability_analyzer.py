@@ -65,14 +65,18 @@ from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
     resolve_detector_noise,
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    CentroidShiftSummary,
     FrameRejection,
     ObservationTimeError,
     _measure_aperture_flux,
     _process_single_frame_worker,
     _read_exposure_seconds,
+    centroid_offsets_px,
     compute_frame_airmass,
     measure_aperture_photometry,
     read_observation_time,
+    select_alignment_anchors,
+    summarize_centroid_shifts,
 )
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     barycentric_julian_dates,
@@ -680,6 +684,21 @@ class VariabilityAnalyzer:
         # stars with at least one such frame appear. Filled during
         # `process()`; see `refine_star_centroid`.
         self.centroid_fallback_counts: dict[str, int] = {}
+        # For each frame, keyed by timestamp: how far every star with a
+        # refined centroid sat from its shifted reference position, in
+        # pixels (see `centroid_offsets_px`). A frame in which every star
+        # fell back has an empty list. Filled during `process()`;
+        # `centroid_shift_summary()` summarizes it for the
+        # `registration_drift` gate.
+        self.centroid_offsets_by_frame: dict[datetime, list[float]] = {}
+        # Star measurements made in the frames after the reference frame, one
+        # per star per frame. The denominator of the fallback fraction.
+        self.centroid_measurement_count = 0
+        # Which rule chose the stars that measure each frame's global shift
+        # (see `select_alignment_anchors`), and how many it chose. `None`
+        # and 0 before `process()` has run.
+        self.alignment_anchor_rule: str | None = None
+        self.alignment_anchor_count = 0
         self.frame_ensemble_composition: list[FrameEnsembleComposition] = []
         # How far each frame's alignment drifted from the reference
         # frame, keyed by timestamp: `(delta_x_shift, delta_y_shift)` in
@@ -832,23 +851,20 @@ class VariabilityAnalyzer:
         # SourceDetector already returns a list sorted by flux
         max_stars = 2000
 
-        # Alignment anchors (indices 50-100 to avoid saturation) always
-        # come from this blind detection pass, regardless of whether
-        # seed_stars is given -- frame-to-frame alignment doesn't care
-        # which stars are being tracked/reported, only that enough of
-        # them exist to measure a reliable shift.
-        #
-        # This used to also say the seeded population is "typically far
-        # smaller than 100 stars". That was only true because
-        # identify_session_stars capped it at 100; it now defers to
-        # Processing.Astrometry.maximum_identified_stars and a seeded
-        # population can be thousands.
-        reference_top_refs_minimal = []
-        for star_row in reference_stars_detected[50:100]:
-            x_ref = star_row.get("xcentroid", star_row.get("x_centroid"))
-            y_ref = star_row.get("ycentroid", star_row.get("y_centroid"))
-            flux_ref = star_row.get("flux", 0.0)
-            reference_top_refs_minimal.append((x_ref, y_ref, flux_ref))
+        # Alignment anchors always come from this blind detection pass,
+        # regardless of whether seed_stars is given: frame-to-frame
+        # alignment does not care which stars are being tracked or
+        # reported, only that enough real stars exist to measure a
+        # reliable shift. The anchors are unsaturated stars with a high
+        # peak signal-to-noise, not the detections ranked 50 to 100 (which
+        # are noise peaks in a sparse field); see `select_alignment_anchors`.
+        anchors = select_alignment_anchors(
+            reference_data, reference_stars_detected, saturation_threshold_adu=saturation_threshold_adu
+        )
+        reference_top_refs_minimal = list(anchors.stars)
+        self.alignment_anchor_rule = anchors.rule
+        self.alignment_anchor_count = len(anchors.stars)
+        logger.info("  Alignment anchors: %s stars (%s).", len(anchors.stars), anchors.rule)
 
         reference_stars_minimal = []
         if seed_stars is not None:
@@ -985,6 +1001,7 @@ class VariabilityAnalyzer:
 
             # 3. Aggregate Results back into the StellarObjects
             stellar_object_map = {star.id: star for star in self.stellar_objects}
+            reference_positions = {star_id: (x, y) for star_id, x, y in reference_stars_minimal}
 
             for result in results:
                 if result is None:
@@ -1003,6 +1020,11 @@ class VariabilityAnalyzer:
                     if not star_position.is_refined:
                         previous_count = self.centroid_fallback_counts.get(star_id, 0)
                         self.centroid_fallback_counts[star_id] = previous_count + 1
+                offsets, _ = centroid_offsets_px(star_positions, reference_positions, delta_x, delta_y)
+                self.centroid_offsets_by_frame[timestamp] = offsets
+                self.centroid_measurement_count += sum(
+                    1 for star_id in star_positions if star_id in reference_positions
+                )
                 self.timestamp_to_path[timestamp] = path
                 self.frame_registration_drift[timestamp] = (float(delta_x), float(delta_y))
                 self.frame_exposure_seconds[timestamp] = float(exposure_seconds)
@@ -1021,6 +1043,28 @@ class VariabilityAnalyzer:
             logger.info("Parallel processing complete.")
 
         self._record_barycentric_times(target_position_deg, observer_site)
+
+    def centroid_shift_summary(self) -> CentroidShiftSummary | None:
+        """Summarize how far star centroids sat from their shifted positions.
+
+        The result feeds the ``registration_drift`` gate. It is built from
+        the per-frame offsets that `process()` recorded.
+
+        Returns
+        -------
+        summary : `CentroidShiftSummary` or `None`
+            The median and 95th-percentile per-star offset, the fraction of
+            star measurements that fell back, the worst frame, and the
+            anchor rule. `None` when the session had no frame after the
+            reference frame.
+        """
+        return summarize_centroid_shifts(
+            self.centroid_offsets_by_frame,
+            self.centroid_measurement_count,
+            sum(self.centroid_fallback_counts.values()),
+            anchor_rule=self.alignment_anchor_rule,
+            anchor_count=self.alignment_anchor_count,
+        )
 
     def _record_barycentric_times(
         self, target_position_deg: tuple[float, float] | None, observer_site: ObservatorySite | None

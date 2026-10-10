@@ -28,6 +28,10 @@ from astrometricslib.pipelines.photometry.post_processing.variability_skill impo
 from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
     UNSTABLE_TRACKING_DRIFT_PX,
 )
+from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    ANCHOR_RULE_RANK_BAND,
+    CentroidShiftSummary,
+)
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     MINIMUM_COMPARISON_STARS,
     ComparisonSetResult,
@@ -65,6 +69,22 @@ MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
 # RR Lyrae and Miras are larger.
 MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
 
+# The largest 95th-percentile per-star centroid offset, in pixels, the
+# `registration_drift` gate accepts. The offset is the distance between a
+# star's own centroid and its reference position moved by the frame's global
+# shift. A translation alone leaves it near zero; field rotation or a scale
+# change makes it grow toward the edge of the field. The limit is two thirds
+# of `MAX_CENTROID_SHIFT_PX` (1.5 px), where a centroid is refused, so a
+# session over it is close to losing its per-star centroids. A designed
+# limit, not a measured false-alarm rate.
+MAXIMUM_STAR_OFFSET_P95_PX = 1.0
+
+# The largest share of star measurements that may keep the shifted reference
+# position because the star's own centroid was refused. Above one in five,
+# the global shift does not fit the stars well enough to trust the rest. A
+# designed limit, not a measured false-alarm rate.
+MAXIMUM_CENTROID_FALLBACK_FRACTION = 0.20
+
 # The most per-frame reasons the `capture_timestamps` gate quotes in its
 # detail. The full list stays in the run's excluded frames.
 MAXIMUM_TIMESTAMP_REASONS_SHOWN = 3
@@ -94,6 +114,7 @@ def photometry_run_gates(
     comparison_sets: Sequence[ComparisonSetResult],
     registration_drifts_px: Sequence[float | None],
     stars_with_scatter: int,
+    centroid_shift_summaries: Sequence[CentroidShiftSummary] = (),
     known_variable_scores: Sequence[float] = (),
     unlisted_scores: Sequence[float] = (),
     cutoff_cv: float | None = None,
@@ -132,6 +153,9 @@ def photometry_run_gates(
     registration_drifts_px : `Sequence` [`float` or `None`]
         Each star's largest frame-to-frame alignment offset, or `None` when
         none was recorded for it.
+    centroid_shift_summaries : `Sequence` [`CentroidShiftSummary`], optional
+        One per session: how far each star's own centroid sat from the
+        shifted reference position, and how often it fell back.
     stars_with_scatter : `int`
         Stars with at least three usable points, so with a measured scatter.
     known_variable_scores : `Sequence` [`float`], optional
@@ -278,35 +302,7 @@ def photometry_run_gates(
 
     gates.append(_comparison_ensemble_gate(comparison_sets))
 
-    drift_source = (
-        f"alignment offset of at most {UNSTABLE_TRACKING_DRIFT_PX:g} px (half of the centroid search box)"
-    )
-    recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
-    if not recorded_drifts:
-        gates.append(
-            unchecked_gate(
-                REGISTRATION_DRIFT_GATE_NAME,
-                "no star recorded its frame-to-frame alignment drift",
-                drift_source,
-            )
-        )
-    else:
-        worst = max(recorded_drifts)
-        if worst > UNSTABLE_TRACKING_DRIFT_PX:
-            gates.append(
-                failed_gate(
-                    REGISTRATION_DRIFT_GATE_NAME,
-                    f"frame alignment drifted up to {worst:.0f} px, so tracking was probably lost "
-                    "and apparent brightness changes may be alignment, not the star",
-                    worst,
-                    UNSTABLE_TRACKING_DRIFT_PX,
-                    drift_source,
-                )
-            )
-        else:
-            gates.append(
-                passed_gate(REGISTRATION_DRIFT_GATE_NAME, worst, UNSTABLE_TRACKING_DRIFT_PX, drift_source)
-            )
+    gates.append(_registration_drift_gate(registration_drifts_px, centroid_shift_summaries))
 
     population_source = (
         f"at least {MINIMUM_STARS_FOR_SCATTER_POPULATION} stars with three or more points (design estimate)"
@@ -429,6 +425,132 @@ def photometry_run_gates(
         _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)
     )
     return gates
+
+
+def _centroid_distribution_text(summaries: Sequence[CentroidShiftSummary]) -> str:
+    """Describe the per-star centroid offsets of the worst session.
+
+    Parameters
+    ----------
+    summaries : `Sequence` [`CentroidShiftSummary`]
+        One summary per session. At least one is required.
+
+    Returns
+    -------
+    text : `str`
+        The median and 95th-percentile offset, the fallback share, the worst
+        frame, and the anchor rule of the session with the largest
+        95th-percentile offset. With more than one session, the text says
+        so and names the largest fallback share of any session.
+    """
+    worst = max(
+        summaries, key=lambda summary: summary.p95_offset_px if summary.p95_offset_px is not None else -1.0
+    )
+    parts = []
+    if worst.p95_offset_px is None or worst.median_offset_px is None:
+        parts.append("no star kept its own centroid")
+    else:
+        parts.append(
+            f"per-star centroid offset from the shifted position: median {worst.median_offset_px:.2f} px, "
+            f"95th percentile {worst.p95_offset_px:.2f} px"
+        )
+    parts.append(
+        f"{100.0 * max(summary.fallback_fraction for summary in summaries):.1f}% of star measurements "
+        "kept the shifted position"
+    )
+    if worst.worst_frame is not None and worst.worst_frame_p95_offset_px is not None:
+        parts.append(
+            f"worst frame {worst.worst_frame:%Y-%m-%d %H:%M:%S} (95th percentile "
+            f"{worst.worst_frame_p95_offset_px:.2f} px)"
+        )
+    if worst.anchor_rule == ANCHOR_RULE_RANK_BAND:
+        parts.append(f"alignment used the {worst.anchor_rule} rule on {worst.anchor_count} stars")
+    scope = f" (worst of {len(summaries)} sessions)" if len(summaries) > 1 else ""
+    return "; ".join(parts) + scope
+
+
+def _registration_drift_gate(
+    registration_drifts_px: Sequence[float | None], summaries: Sequence[CentroidShiftSummary]
+) -> GateResult:
+    """Build the ``registration_drift`` gate.
+
+    The gate looks at two things. The first is the largest frame-to-frame
+    shift of the whole field, which shows lost tracking. The second is how
+    far each star's own centroid sat from the shifted reference position,
+    which shows rotation, scale change, or a poor shift. It fails when the
+    global shift exceeds `UNSTABLE_TRACKING_DRIFT_PX`, when the 95th
+    percentile of the per-star offsets exceeds `MAXIMUM_STAR_OFFSET_P95_PX`,
+    or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of the star
+    measurements fell back. It is not checked when neither was recorded.
+
+    Parameters
+    ----------
+    registration_drifts_px : `Sequence` [`float` or `None`]
+        Each star's largest frame-to-frame alignment offset, or `None`.
+    summaries : `Sequence` [`CentroidShiftSummary`]
+        One per session, possibly empty.
+
+    Returns
+    -------
+    gate : `GateResult`
+        The gate.
+    """
+    source = (
+        f"global alignment offset of at most {UNSTABLE_TRACKING_DRIFT_PX:g} px (half of the centroid search "
+        f"box), 95th-percentile per-star centroid offset of at most {MAXIMUM_STAR_OFFSET_P95_PX:g} px, "
+        f"and at most {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}% of star measurements falling back "
+        "(designed limits)"
+    )
+    recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
+    if not recorded_drifts and not summaries:
+        return unchecked_gate(
+            REGISTRATION_DRIFT_GATE_NAME, "no star recorded its frame-to-frame alignment drift", source
+        )
+
+    worst_drift = max(recorded_drifts) if recorded_drifts else None
+    p95_values = [summary.p95_offset_px for summary in summaries if summary.p95_offset_px is not None]
+    worst_p95 = max(p95_values) if p95_values else None
+    worst_fallback = max((summary.fallback_fraction for summary in summaries), default=None)
+
+    problems: list[str] = []
+    measured, limit = worst_drift, UNSTABLE_TRACKING_DRIFT_PX
+    if worst_drift is not None and worst_drift > UNSTABLE_TRACKING_DRIFT_PX:
+        problems.append(
+            f"frame alignment drifted up to {worst_drift:.0f} px, so tracking was probably lost "
+            "and apparent brightness changes may be alignment, not the star"
+        )
+    if worst_p95 is not None and worst_p95 > MAXIMUM_STAR_OFFSET_P95_PX:
+        problems.append(
+            f"the 95th percentile of the per-star centroid offsets is {worst_p95:.2f} px "
+            f"(limit {MAXIMUM_STAR_OFFSET_P95_PX:g} px), so the field rotated or changed scale "
+            "and a single shift does not line up the stars"
+        )
+        if not problems[:-1]:
+            measured, limit = worst_p95, MAXIMUM_STAR_OFFSET_P95_PX
+    if worst_fallback is not None and worst_fallback > MAXIMUM_CENTROID_FALLBACK_FRACTION:
+        problems.append(
+            f"{100.0 * worst_fallback:.1f}% of star measurements kept the shifted position because the "
+            f"star's own centroid was refused (limit {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}%)"
+        )
+        if not problems[:-1]:
+            measured, limit = worst_fallback, MAXIMUM_CENTROID_FALLBACK_FRACTION
+    if measured is None:
+        measured = worst_p95
+
+    distribution = _centroid_distribution_text(summaries) if summaries else ""
+    drift_text = f"global alignment drift up to {worst_drift:.1f} px" if worst_drift is not None else ""
+    if problems:
+        suffix = f" ({'; '.join(part for part in (drift_text, distribution) if part)})"
+        return failed_gate(
+            REGISTRATION_DRIFT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
+        )
+    return passed_gate(
+        REGISTRATION_DRIFT_GATE_NAME,
+        measured,
+        limit if worst_drift is not None else MAXIMUM_STAR_OFFSET_P95_PX,
+        source,
+        "; ".join(part for part in (drift_text, distribution) if part),
+    )
 
 
 def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) -> GateResult:

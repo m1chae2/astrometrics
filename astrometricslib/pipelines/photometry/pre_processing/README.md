@@ -7,12 +7,26 @@ This step turns a raw picture into one brightness measurement per star, and chec
 For each picture in an observing session, the code:
 
 1. Reads the picture's exposure time, airmass, and capture time from its header. Exposure time is how long the camera's shutter was open. Airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon. The capture time comes from the `DATE-OBS` card (see "Capture times" below).
-2. Finds out how far this picture has drifted compared to the first picture in the session, using a handful of bright stars as reference points. Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
+2. Finds out how far this picture has drifted compared to the first picture in the session, using up to 50 bright stars as reference points (the alignment anchors, see "Alignment anchors" below). Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
 3. For every star being tracked, starts at the star's position in the first picture plus the picture's overall drift. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the overall drift (see "Aperture placement" below).
 4. Measures the amount of light inside a small circle centered on that position, and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness in that one picture. The same step computes the brightness's 1-sigma uncertainty (see "Flux uncertainties" below).
 5. Divides that raw brightness and its uncertainty by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly. Both are in ADU per second (ADU is analog-to-digital unit, one step of the stored pixel value).
 
 Every star ends up with a brightness value, its uncertainty, a timestamp, and a flag saying whether the measurement was saturated (too bright to measure accurately) for each picture in the session. The worker also returns the exposure time it used, which the time conversion needs.
+
+## Alignment anchors
+
+The anchors are the stars whose shifts give each picture's overall drift (the median of their shifts). `select_alignment_anchors` in `frame_photometry.py` chooses them once per session, from the stars found in the first picture:
+
+1. Drop every detection with a saturated pixel within 3 pixels of its center.
+2. Rank the rest by total brightness, brightest first.
+3. Keep the detections whose peak is at least 20 times the sky noise. The sky noise per pixel comes from `estimate_pixel_noise`: the spread of the differences between pixels three columns apart, so a smooth sky gradient does not inflate it.
+4. Skip the brightest 5 percent of those, which are the most likely to be nearly saturated, and take the next 50.
+5. If fewer than 10 detections qualify, use the detections ranked 50 to 100 by brightness instead. That is the older rule. In a sparse field those ranks are mostly noise peaks, so this fallback is a last resort.
+
+`VariabilityAnalyzer.alignment_anchor_rule` and `alignment_anchor_count` record which rule a session used and how many anchors it had. The `registration_drift` gate names the older rule in its detail when a session used it. The limits (20 times the noise, 5 percent, 50 stars, 10 stars) are design estimates, not measured values.
+
+A synthetic sparse field of 12 real stars on a noisy sky has more than 50 detections, almost all noise peaks. The older rule measured a shift of (-4.7, 2.1) pixels for a true shift of (2.7, -1.3) pixels. The new rule keeps the 12 stars and measures (2.70, -1.30) pixels (`test/pre_processing/test_frame_photometry.py`).
 
 ## Aperture placement
 
@@ -26,7 +40,17 @@ The code refuses the re-centered position and keeps the shifted position from th
 - The box has no light above the sky level, or it reaches past the edge of the picture.
 - The centroid is more than 1.5 pixels from the shifted position. A move that large means the box found a neighbor or noise instead of the star.
 
-Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason` (`None` means the centroid was accepted). `VariabilityAnalyzer.centroid_fallback_counts` totals the refusals per star over the session. Nothing downstream reads these counts yet: the quality report does not use them, so a star with many refusals appears only in the analyzer's data. A star near the 1.5 pixel limit in many pictures is measured with a circle that may be off-center by up to that amount.
+Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason` (`None` means the centroid was accepted). `VariabilityAnalyzer.centroid_fallback_counts` totals the refusals per star over the session. A star near the 1.5 pixel limit in many pictures is measured with a circle that may be off-center by up to that amount.
+
+### Per-star centroid offsets
+
+The overall drift moves every star by the same amount. If the field also rotates or changes scale, each star is displaced by a different amount, and its own centroid ends up away from the shifted position. `centroid_offsets_px` measures that distance, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per picture (`centroid_offsets_by_frame`) and `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session:
+
+- **Median and 95th-percentile offset.** A pure translation gives offsets near zero (below 0.1 pixel on noisy synthetic pictures). A rotation gives offsets that grow with distance from the rotation center: a rotation of 0.05 degrees per picture moves a star 197 pixels from the center by 1.2 pixels after seven pictures. A 95th percentile well above the median points to rotation or scale change.
+- **Fallback fraction.** The share of star measurements, over all pictures, that kept the shifted position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
+- **Worst picture.** The picture with the largest 95th-percentile offset, and that value.
+
+The `registration_drift` gate reads the summary (see the photometry README). The summary is not copied into the quality metrics. It appears only in the gate's detail.
 
 The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixels (FWHM, full width at half maximum). For wider stars the box cuts off more of the star's wings and the centroid shifts toward the box center by a few hundredths of a pixel.
 
@@ -59,9 +83,15 @@ The `GAIN` card is never read as electrons per ADU. The ZWO cameras write a gain
 
 ## Capture times
 
-The capture time of each picture comes from its `DATE-OBS` card, read with astropy's `Time` class as a UTC date and time (for example `2026-05-24T04:58:30.570`). The code stores it without a time zone. This is the moment the shutter opened.
+The capture time of each picture comes from its `DATE-OBS` card, read with astropy's `Time` class as a UTC date and time. The code stores it without a time zone. This is the moment the shutter opened.
 
-A picture is rejected, and left out of every light curve, when `DATE-OBS` is missing, is not a date and time, or has a date but no time of day. The code never substitutes the current time. The rejection reason is kept in `VariabilityAnalyzer.frames_without_usable_date_obs`. The photometry runner reads that list and copies each reason into the `capture_timestamps` gate and into the list of excluded frames in the quality summary. If the first picture of a session is the one rejected, the session produces no light curves, and the session's empty-session reason says so.
+INDI and Ekos write `DATE-OBS` as an ISO 8601 date and time in UTC with no suffix, for example `2026-05-24T04:58:30.570`. The sample pictures have this form. `parse_observation_time` accepts these forms:
+
+- A date and time with no suffix, read as UTC (the INDI and Ekos form).
+- A date and time with a trailing `Z` or `+00:00`, read as UTC.
+- A date and time with a UTC offset such as `2026-05-24T06:58:30.570+02:00`, `+0200`, `+02` or `-05:30`. The code subtracts the offset and stores the UTC instant (`04:58:30.570` in the example). Offsets beyond 14 hours or with minutes above 59 are refused.
+
+A picture is rejected, and left out of every light curve, when `DATE-OBS` is missing, is not a date and time, or has a date but no time of day. A date alone is refused even with an offset, because every picture of a night would get the same midnight time. The code never substitutes the current time. The rejection reason is kept in `VariabilityAnalyzer.frames_without_usable_date_obs`. The photometry runner reads that list and copies each reason into the `capture_timestamps` gate and into the list of excluded frames in the quality summary. If the first picture of a session is the one rejected, the session produces no light curves, and the session's empty-session reason says so.
 
 `observation_times.py` converts the exposure starts of a session to mid-exposure BJD_TDB values, in days (see "Times" in the photometry README for the reasons). For each picture, it adds half the exposure time to the capture time, converts the result from UTC to TDB (a uniform time scale), and adds the light-travel time to the center of mass of the solar system for the target's direction. The light-travel time is between -499 s and +499 s. The conversion uses the observatory's position when the configuration has one, and Earth's center otherwise. It uses astropy's built-in planet positions, which need no download and are good to about 2 ms. The module's three time-basis sentences name what was done; the `capture_timestamps` gate quotes them.
 

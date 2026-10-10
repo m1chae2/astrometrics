@@ -208,6 +208,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             "unreadable_date_obs_frames": [],
             "all_frame_ensemble_composition": [],
             "all_comparison_sets": [],
+            "all_centroid_shift_summaries": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -351,6 +352,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         # One comparison-set record per session that had stars to normalize
         # (see `ComparisonSetResult`), for the `comparison_ensemble` gate.
         all_comparison_sets = []
+        # One per-star centroid offset summary per session with more than
+        # one frame (see `CentroidShiftSummary`), for the
+        # `registration_drift` gate.
+        all_centroid_shift_summaries = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
@@ -421,6 +426,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
             if analyzer.comparison_set is not None:
                 all_comparison_sets.append(analyzer.comparison_set)
+            centroid_shift_summary = analyzer.centroid_shift_summary()
+            if centroid_shift_summary is not None:
+                all_centroid_shift_summaries.append(centroid_shift_summary)
 
         # Captured before cross-session merging/re-flagging below so
         # each candidate reflects its own session's local adaptive
@@ -485,6 +493,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "unreadable_date_obs_frames": all_unreadable_date_obs_frames,
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
                 "all_comparison_sets": all_comparison_sets,
+                "all_centroid_shift_summaries": all_centroid_shift_summaries,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
@@ -612,6 +621,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
                 for photometry in star_photometry
             ],
+            centroid_shift_summaries=payload.get("all_centroid_shift_summaries", []),
             stars_with_scatter=sum(
                 1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
             ),

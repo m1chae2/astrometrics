@@ -12,7 +12,11 @@ Two groups of tests use synthetic frames whose true answer is known
   its own centroid in every frame of a drifting sequence.
 * Capture times (review item S5). A frame with a missing or unreadable
   ``DATE-OBS`` must be rejected with a reason. A readable one must come
-  back as the right UTC instant. Neither case may use the wall clock.
+  back as the right UTC instant, whether it has no suffix (INDI and Ekos),
+  a ``Z``, or a UTC offset. Neither case may use the wall clock.
+
+The alignment anchors (review item S2) are tested on a sparse field, where
+the detections ranked 50 to 100 are noise.
 """
 
 import math
@@ -23,8 +27,11 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    ANCHOR_RULE_RANK_BAND,
+    ANCHOR_RULE_SIGNAL_TO_NOISE,
     FrameRejection,
     ObservationTimeError,
     StarPosition,
@@ -35,6 +42,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     parse_observation_time,
     read_observation_time,
     refine_star_centroid,
+    select_alignment_anchors,
 )
 from astrometricslib.test.synthetic import (
     SyntheticStar,
@@ -615,3 +623,156 @@ def test_worker_stamps_a_valid_fits_date_with_that_instant(tmp_path: Path) -> No
 
     assert isinstance(result, tuple)
     assert result[0] == datetime(2026, 5, 24, 4, 58, 30, 570000)
+
+
+def test_date_obs_with_a_utc_offset_converts_to_utc() -> None:
+    """Verifies an explicit UTC offset is subtracted to give the UTC instant.
+
+    ``06:58:30.570+02:00`` is two hours ahead of UTC, so the same instant in
+    UTC is 04:58:30.570. Offsets with no colon or no minutes, and a negative
+    offset that crosses midnight, are also read.
+    """
+    expected = datetime(2026, 5, 24, 4, 58, 30, 570000)
+
+    assert parse_observation_time("2026-05-24T06:58:30.570+02:00") == expected
+    assert parse_observation_time("2026-05-24T06:58:30.570+0200") == expected
+    assert parse_observation_time("2026-05-24T06:58:30.570+02") == expected
+    assert parse_observation_time("2026-05-24T04:58:30.570+00:00") == expected
+    assert parse_observation_time("2026-05-23T23:28:30.570-05:30") == expected
+    assert parse_observation_time("2026-05-24T04:58:30.570-00:00").tzinfo is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-05-24", "2026-05-24+02:00", "2026-05-24T04:58:30+25:00", "2026-05-24T04:58:30+02:99"],
+)
+def test_date_only_and_impossible_offsets_are_still_rejected(value: str) -> None:
+    """Verifies a date with no time, or an offset no time zone has, is refused.
+
+    A UTC suffix does not make a date-only value usable, since every frame of
+    the night would still sit at midnight.
+    """
+    with pytest.raises(ObservationTimeError, match="DATE-OBS"):
+        parse_observation_time(value)
+
+
+def test_worker_stamps_a_date_with_an_offset_as_utc(tmp_path: Path) -> None:
+    """Verifies the frame worker returns the UTC instant for an offset date."""
+    path = tmp_path / "offset_date.fits"
+    make_photometry_fits(
+        path, [SyntheticStar(100.0, 100.0, 20000.0)], date_obs="2026-05-24T06:58:30.570+02:00", exptime_s=30.0
+    )
+
+    result = _worker_result_for_file(path)
+
+    assert isinstance(result, tuple)
+    assert result[0] == datetime(2026, 5, 24, 4, 58, 30, 570000)
+
+
+# --- S2: alignment anchors are real stars, not noise peaks ------------------
+
+SPARSE_FIELD_SHAPE = (600, 600)
+SPARSE_FIELD_STAR_COUNT = 12
+INJECTED_SHIFT_PX = (2.7, -1.3)
+
+
+def _sparse_field_stars(shift: tuple[float, float]) -> list[SyntheticStar]:
+    """Build a sparse field of 12 stars, moved by a shift.
+
+    Parameters
+    ----------
+    shift : `tuple` [`float`, `float`]
+        The shift in x and y, in pixels, added to every star.
+
+    Returns
+    -------
+    stars : `list` [`SyntheticStar`]
+        Twelve stars at least 80 px apart, with fluxes from 8000 to 60000 ADU.
+        The same call always returns the same field.
+    """
+    rng = np.random.default_rng(4)
+    positions: list[np.ndarray] = []
+    while len(positions) < SPARSE_FIELD_STAR_COUNT:
+        candidate = rng.uniform(60, 540, 2)
+        if all(np.hypot(*(candidate - other)) > 80 for other in positions):
+            positions.append(candidate)
+    fluxes = rng.uniform(8000, 60000, SPARSE_FIELD_STAR_COUNT)
+    return [
+        SyntheticStar(float(x) + shift[0], float(y) + shift[1], float(flux), TEST_FWHM_PX)
+        for (x, y), flux in zip(positions, fluxes, strict=True)
+    ]
+
+
+def test_sparse_field_anchors_recover_an_injected_shift_where_the_old_rule_fails() -> None:
+    """Verifies the signal-to-noise anchors measure a (2.7, -1.3) px shift.
+
+    The field has 12 real stars on a noisy sky, so the detector also reports
+    many noise peaks. The older rule took the detections ranked 50 to 100,
+    which here are noise peaks, and gave a shift that was far off. The new rule
+    keeps the 12 stars and recovers the shift to 0.05 px.
+    """
+    noise_kwargs = {"shape": SPARSE_FIELD_SHAPE, "sky_adu": 200.0, "read_noise_adu": 5.0}
+    reference = make_photometry_frame(_sparse_field_stars((0.0, 0.0)), seed=1, **noise_kwargs)
+    shifted = make_photometry_frame(_sparse_field_stars(INJECTED_SHIFT_PX), seed=2, **noise_kwargs)
+    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(reference)
+
+    anchors = select_alignment_anchors(reference, detections, saturation_threshold_adu=SATURATION_ADU)
+    old_band = [(row["x_centroid"], row["y_centroid"], row["flux"]) for row in detections[50:100]]
+    old_shift = _calculate_frame_offset(shifted, old_band)
+    new_shift = _calculate_frame_offset(shifted, list(anchors.stars))
+
+    assert len(detections) > 50, "the test needs noise peaks for the old rule to pick up"
+    assert anchors.rule == ANCHOR_RULE_SIGNAL_TO_NOISE
+    assert len(anchors.stars) == SPARSE_FIELD_STAR_COUNT
+    assert new_shift[0] == pytest.approx(INJECTED_SHIFT_PX[0], abs=0.05)
+    assert new_shift[1] == pytest.approx(INJECTED_SHIFT_PX[1], abs=0.05)
+    assert abs(old_shift[0] - INJECTED_SHIFT_PX[0]) > 0.5
+
+
+def test_anchor_rule_falls_back_to_the_rank_band_when_few_stars_qualify() -> None:
+    """Verifies fewer than 10 qualifying stars gives the older, named rule.
+
+    Only six stars are in the field, so the signal-to-noise rule cannot reach
+    10 anchors. The result then holds the detections ranked 50 to 100 and
+    records the rule that chose them.
+    """
+    stars = _sparse_field_stars((0.0, 0.0))[:6]
+    frame = make_photometry_frame(stars, shape=SPARSE_FIELD_SHAPE, sky_adu=200.0, read_noise_adu=5.0, seed=1)
+    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(frame)
+
+    anchors = select_alignment_anchors(frame, detections, saturation_threshold_adu=SATURATION_ADU)
+
+    assert anchors.rule == ANCHOR_RULE_RANK_BAND
+    assert len(anchors.stars) == len(detections[50:100])
+
+
+def test_saturated_stars_are_not_anchors() -> None:
+    """Verifies a detection with a saturated pixel beside it is left out.
+
+    Two bright stars are driven past the saturation level while ten fainter
+    ones stay below it. The anchors must be the ten fainter stars.
+    """
+    stars = _sparse_field_stars((0.0, 0.0))
+    stars = [
+        SyntheticStar(star.x, star.y, 2.0e6 if index < 2 else 20000.0, TEST_FWHM_PX)
+        for index, star in enumerate(stars)
+    ]
+    frame = make_photometry_frame(
+        stars,
+        shape=SPARSE_FIELD_SHAPE,
+        sky_adu=200.0,
+        read_noise_adu=5.0,
+        seed=1,
+        saturation_adu=SATURATION_ADU,
+    )
+    detections = SourceDetector(fwhm=4.0, threshold_sigma=3.0).detect(frame)
+
+    anchors = select_alignment_anchors(frame, detections, saturation_threshold_adu=SATURATION_ADU)
+
+    assert anchors.rule == ANCHOR_RULE_SIGNAL_TO_NOISE
+    anchor_positions = {(round(x), round(y)) for x, y, _ in anchors.stars}
+    for saturated_star in stars[:2]:
+        assert not any(
+            math.hypot(x - saturated_star.x, y - saturated_star.y) < 3 for x, y in anchor_positions
+        )
+    assert len(anchors.stars) == SPARSE_FIELD_STAR_COUNT - 2

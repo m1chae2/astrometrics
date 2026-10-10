@@ -9,11 +9,13 @@ import os
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
 from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.gate_result import GateResult, unchecked_gate
+from astrometricslib.models.target import Target
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ def _report_stage(progress_current: int, message: str) -> None:
 
 
 def stack_frames(
-    target,  # ruff: ignore[missing-type-function-argument]
+    target: Target,
     log_file: str | None = None,
     frames_to_stack: list[Any] | None = None,
     filter_type: Any | None = None,
@@ -52,6 +54,7 @@ def stack_frames(
     job_id: str | None = None,
     force: bool = False,
     preview_settings: Any | None = None,
+    drivers: Drivers | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -97,6 +100,8 @@ def stack_frames(
     preview_settings : `PreviewSettings` or `None`, optional
         Choices for this run's preview picture that replace the saved
         settings (see `stack_preview.PreviewSettings`).
+    drivers : `Drivers` or `None`, optional
+        The stacking program to use. Left out, it is Siril.
 
     Returns
     -------
@@ -376,14 +381,13 @@ def stack_frames(
 
     _report_stage(15, f"Frame checks done, {len(target_frames)} frames kept")
 
-    from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
     from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
         record_preview_as_processed_image,
         write_stack_preview,
     )
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
-    engine = SirilStackingDriver()
+    engine = (drivers or Drivers()).stacking_or_default()
     from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
 
     stack_weight = choose_stack_weight(

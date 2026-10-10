@@ -367,8 +367,8 @@ def test_plate_solve_returns_the_solved_mapping(monkeypatch: pytest.MonkeyPatch)
     class FakeIdentifier:
         """Stands in for `StarIdentifier` and records each request."""
 
-        def __init__(self, config: object) -> None:
-            """Accept the configuration the catalog passes."""
+        def __init__(self, config: object, drivers: object = None) -> None:
+            """Accept the configuration and drivers the catalog passes."""
 
         def process_image(self, path: str, attempt_plate_solving: bool) -> tuple[list, object]:
             """Record the call and return a made-up solution.

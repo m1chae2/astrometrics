@@ -9,6 +9,7 @@ import logging
 import os
 from typing import Any
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
@@ -27,7 +28,7 @@ class AstrometryPipeline:
     and identifies the objects.
     """
 
-    def __init__(self, app_config: AppConfiguration | None = None) -> None:
+    def __init__(self, app_config: AppConfiguration | None = None, *, drivers: Drivers | None = None) -> None:
         """Set up the pipeline using the program's settings.
 
         Parameters
@@ -35,6 +36,9 @@ class AstrometryPipeline:
         app_config : `AppConfiguration`, optional
             The settings to use. If left blank, it will just
             use the default system settings.
+        drivers : `Drivers`, optional
+            The plate solver and SIMBAD driver to use. Any left out is the
+            built-in one.
         """
         if app_config is None:
             from astrometricslib.foundation.config import get_configuration
@@ -42,7 +46,8 @@ class AstrometryPipeline:
             app_config = get_configuration()
 
         self.config = app_config
-        self.star_identifier = StarIdentifier(app_config)
+        self.drivers = drivers or Drivers()
+        self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
 
     def prepare_image(
         self,
@@ -499,10 +504,8 @@ class AstrometryPipeline:
             from astropy.coordinates import SkyCoord
             from astropy.wcs import FITSFixedWarning
 
-            from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
-
             warnings.simplefilter("ignore", FITSFixedWarning)
-            result = AstroquerySimbadDriver().query_object(
+            result = self.drivers.simbad_or_default().query_object(
                 object_name, votable_fields=("otype", "ra", "dec", "galdim_majaxis")
             )
             if result is not None and len(result) > 0:

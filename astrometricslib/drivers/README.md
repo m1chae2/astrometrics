@@ -7,6 +7,7 @@ This folder holds the code that talks to something outside the pipeline logic it
 - `image.py`, `fits_access.py` — `AstrometricsImage`, the main data container for a loaded astronomical image, and the lower-level functions that read pixel data and metadata out of a FITS file. `AstrometricsImage` fixes old-style header keywords (`RADECSYS`, a missing `MJD-OBS`) in memory only. It never rewrites a frame, so a frame on a backed-up network drive stays as it was downloaded. `fits_access.FITS_READ_ERRORS` names the errors that reading a damaged or missing FITS file can raise; code that reads a file catches that tuple instead of every exception.
 - `filter_detection.py` — reads an image's settings to work out what kind of picture it is (which filter, light/dark/flat/bias).
 - `interfaces/` — the abstract base classes (`*Driver`) the rest of the library uses instead of a particular program or service: `StackingDriver` (a stacking program, with the `StackSettings` it takes and the `StackRunResult` it returns), `PlateSolveDriver` (a plate solver) and `SimbadDriver` (the SIMBAD database).
+- `driver_set.py` — `Drivers`, a frozen record of the plate solver, stacking program and SIMBAD driver a caller chose, with `None` for "use the built-in one". Its `plate_solve_or_default`, `stacking_or_default` and `simbad_or_default` methods return the chosen driver or build the built-in one. This file is the only place in `pipelines/` or `api/` that names a built-in driver class (see "Injecting drivers" below).
 - `siril_stacking_driver.py` — `SirilStackingDriver`, Siril as the stacking program. It wraps `siril_interface.py` and turns Siril's files into the plain values the interface names.
 - `siril_interface.py`, `siril_output_parsing.py` — runs the external Siril program to stack images, and parses the text files Siril writes describing what it did. `siril_interface.py` also writes the Siril script that builds the master calibration frames (a master is the combination of many frames of one kind) and applies them to the lights. The rules for that script are:
     - **Bias and dark masters.** Several frames are stacked with sigma rejection (`rej 3 3`), which throws out pixel values far from the rest, such as cosmic ray hits. A lone frame has nothing to compare with, so it becomes the master unchanged.
@@ -20,5 +21,17 @@ This folder holds the code that talks to something outside the pipeline logic it
 - `local_database.py`, `catalog_store.py` — the local SQLite databases holding the target/star catalog and the cached Gaia star catalog.
 - `catalog_access.py` — reads and writes catalog data (targets, stars) to and from the local database.
 - `provenance_store.py` — repository for the IVOA provenance graph (which run, at what version, produced a result — see `astrometricslib/models/provenance.py`), stored next to the job records (`astrometricslib/foundation/jobs/`) in `astrometrics_log.db`.
+
+## Injecting drivers
+
+A caller replaces a built-in driver by passing a subclass of `PlateSolveDriver`, `StackingDriver` or `SimbadDriver` to `Astrometrics(...)` (`plate_solve_driver=`, `stacking_driver=`, `simbad_driver=`). `Astrometrics` wraps them in a `Drivers` and hands that to the sub-APIs, which pass it to the pipelines. See `api/README.md` for which calls use which driver.
+
+To add a pipeline step that needs a driver:
+
+1. Take a `drivers: Drivers | None = None` keyword.
+2. Ask `(drivers or Drivers())` for the driver, for example `.simbad_or_default()`.
+3. Do not import or call a built-in driver class in `pipelines/`. `test/test_driver_construction.py` fails if a pipeline module does.
+
+A built-in driver class is not exported from the package root. Code outside the library cannot import `astrometricslib.drivers` (ruff's `TID251` ban in `pyproject.toml`), and code inside it goes through `Drivers`.
 
 For exact behavior, read the code — the code is always the source of truth.

@@ -12,6 +12,7 @@ import math
 from collections.abc import Callable
 from typing import Any
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
@@ -470,6 +471,7 @@ def process_spectroscopy_frames_by_session(
     max_workers: int | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
     job_id: str | None = None,
+    drivers: Drivers | None = None,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
     """Process a target's spectroscopy images, grouped by observing session.
 
@@ -494,6 +496,9 @@ def process_spectroscopy_frames_by_session(
     job_id : `str`, optional
         The tracked job this run is running under, if any -- recorded
         as this run's IVOA provenance Activity when given.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver the star identification uses.
+        Any left out is the built-in one.
 
     Returns
     -------
@@ -520,7 +525,7 @@ def process_spectroscopy_frames_by_session(
 
     center_ra, center_dec = resolve_target_center_hint(target)
 
-    star_identifier = StarIdentifier()
+    star_identifier = StarIdentifier(drivers=drivers)
     session_results = []
     session_summaries = []
 

@@ -361,7 +361,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         # far off (see `resolve_solved_stack_center_hint`), so prefer the
         # centre of this target's plate-solved stack when there is one.
         hint_ra, hint_dec = resolve_solved_stack_center_hint(target, request.path)
-        astrometry = AstrometryPipeline()
+        astrometry = AstrometryPipeline(drivers=request.options.get("drivers"))
         # The target's name picks the star at the frame centre when the
         # mount's position is minutes of arc off, and keeps a planet from
         # being named after a background star.
@@ -536,7 +536,7 @@ def run_spectroscopy_analysis(
     filter_type: Any,  # unused; spectroscopy has no filter concept
     catalog_access: Any,
     path: str | None,
-    **kwargs,  # ruff: ignore[missing-type-kwargs]
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Detect stars in a spectral image and extract each one's spectrum.
 
@@ -560,6 +560,10 @@ def run_spectroscopy_analysis(
         run found.
     path : `str`
         The spectral FITS image to analyze.
+    **kwargs
+        Run options. ``drivers`` (a `Drivers`) chooses the plate solver and
+        SIMBAD driver the star identification uses; any left out is the
+        built-in one.
 
     Returns
     -------

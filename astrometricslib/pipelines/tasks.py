@@ -39,6 +39,7 @@ import threading
 import time
 from typing import Any
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import ConflictError, InvalidArgumentError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
@@ -356,6 +357,7 @@ def run_target_stages(
     stage_options: dict[str, dict[str, Any]],
     catalog_access: Any,
     register_job: bool,
+    drivers: Drivers | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
@@ -376,6 +378,10 @@ def run_target_stages(
         The star catalog the stages read and write.
     register_job : `bool`
         Whether each stage's run shows up in the job list.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver for the stages that identify
+        stars (astrometry and spectroscopy). Any left out is the built-in
+        one.
 
     Returns
     -------
@@ -388,6 +394,8 @@ def run_target_stages(
         if stage not in stages:
             continue
         options = dict(stage_options.get(stage) or {})
+        if drivers is not None and stage in ("astrometry", "spectroscopy"):
+            options["drivers"] = drivers
         if stage == "spectroscopy":
             has_spectral_input = bool(target.spectral_stacking.stacked_image) or any(
                 frame_is_spectral(frame) for frame in target.frames or []

@@ -28,6 +28,13 @@ from astrometricslib.api import AbstractCatalogAccess, CatalogAccess
 from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.interfaces import (
+    PlateSolveDriver,
+    SimbadDriver,
+    StackingDriver,
+    StackRunResult,
+    StackSettings,
+)
 from astrometricslib.drivers.provenance_store import ProvenanceStore, export_target_lineage_as_prov_xml
 from astrometricslib.foundation.astropy_setup import configure_offline_iers, warm_earth_orientation_data
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
@@ -260,28 +267,48 @@ class Astrometrics:
     catalog_access : `AbstractCatalogAccess`, optional
         The database used to save and load data. If not given, a default
         one is built from ``config``.
+    plate_solve_driver : `PlateSolveDriver`, optional
+        The plate solver. If not given, Astrometry.net is used.
+    stacking_driver : `StackingDriver`, optional
+        The stacking program. If not given, Siril is used.
+    simbad_driver : `SimbadDriver`, optional
+        The SIMBAD database client. If not given, astroquery is used.
+
+    Notes
+    -----
+    The drivers are for one process. Processing several targets at once
+    starts worker processes that cannot receive them, so that call is
+    refused when any driver was given.
     """
 
     def __init__(
         self,
         config: AppConfiguration | None = None,
         catalog_access: AbstractCatalogAccess | None = None,
+        *,
+        plate_solve_driver: PlateSolveDriver | None = None,
+        stacking_driver: StackingDriver | None = None,
+        simbad_driver: SimbadDriver | None = None,
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
+        from astrometricslib.drivers.driver_set import Drivers
 
         self.config = config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
+        drivers = Drivers(plate_solve=plate_solve_driver, stacking=stacking_driver, simbad=simbad_driver)
 
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
         # answers each question with a query for just the stars it needs.
         self.targets = TargetCatalog(self.config, self.catalog_access)
-        self.stars = StellarCatalog(self.config, self.catalog_access)
-        self.processing = ProcessingPipelines(self.config, self.catalog_access, targets=self.targets)
+        self.stars = StellarCatalog(self.config, self.catalog_access, drivers=drivers)
+        self.processing = ProcessingPipelines(
+            self.config, self.catalog_access, targets=self.targets, drivers=drivers
+        )
         self.visualization = Visualization(
             self.config, self.catalog_access, targets=self.targets, stars=self.stars
         )
@@ -351,6 +378,7 @@ __all__ = [
     "ParameterDescription",
     "PermissionDeniedError",
     "PhotometryResult",
+    "PlateSolveDriver",
     "PlateSolveFailedError",
     "PlotData",
     "PreviewRemakeResult",
@@ -366,11 +394,15 @@ __all__ = [
     "RenderedImage",
     "RestoreReport",
     "SetAsideFrame",
+    "SimbadDriver",
     "SpectralFrameCheckReport",
     "SpectroscopyResult",
     "StackQualityReport",
     "StackResult",
+    "StackRunResult",
+    "StackSettings",
     "StackSummary",
+    "StackingDriver",
     "StarQueryResult",
     "StellarCatalog",
     "StellarObject",

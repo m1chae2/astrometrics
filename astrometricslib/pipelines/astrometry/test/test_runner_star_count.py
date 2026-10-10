@@ -24,6 +24,9 @@ def test_run_sets_number_of_stars_from_stacked_image_stars(monkeypatch: pytest.M
     class FakePipeline:
         """Stand-in pipeline that returns a fixed context, reading no image."""
 
+        def __init__(self, drivers: object = None) -> None:
+            """Accept the drivers the runner passes."""
+
         def process(self, *args: Any, **kwargs: Any) -> SimpleNamespace:
             """Return the canned context.
 

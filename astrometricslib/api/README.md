@@ -15,4 +15,26 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. A method t
 - `visualization.py` — `Visualization`. `render_fits` draws a frame or stack as a PNG with a description (`kind="image"`) or as a data URL for the app's viewer (`kind="data_url"`). `plot(kind, ...)` draws one chart of a target or a star.
 - `jobs.py` — `Jobs`, a read-only view of the job history (running and finished jobs, their log lines, stored results) and of the pipeline runs that produced a target's data. It opens the logs database read-only, so it cannot change it. The MCP tool `jobs_query` calls `Jobs.query`.
 
+## Injecting drivers
+
+A driver is the code that talks to one outside program or service. The library uses three: a plate solver (Astrometry.net), a stacking program (Siril) and the SIMBAD database (through astroquery). A plate solver works out which part of the sky an image shows.
+
+`Astrometrics(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None, simbad_driver=None)` accepts a replacement for each one. A driver left out stays the built-in one. The root puts the three into one `Drivers` object (`drivers/driver_set.py`) and gives it to `StellarCatalog` and `ProcessingPipelines`. They pass it to the pipelines as a `drivers=` keyword. The method signatures on the sub-APIs do not change.
+
+A replacement subclasses `PlateSolveDriver`, `StackingDriver` or `SimbadDriver`. The root exports these base classes, and `StackSettings` and `StackRunResult`, which a stacking driver needs. A test can use this to run a stage with a fake solver and no network:
+
+```python
+astrometrics = Astrometrics(config, storage, plate_solve_driver=MySolver(), simbad_driver=MySimbad())
+astrometrics.processing.process_target("M 13", stages=["astrometry"])
+```
+
+Where the drivers reach:
+
+- `processing.stack` uses the stacking driver.
+- `processing.process_target` for one target gives the plate solver and SIMBAD driver to the astrometry and spectroscopy stages. The photometry stage still builds the built-in ones.
+- `processing.run_spectroscopy_by_session` and `stars.plate_solve` use the plate solver and SIMBAD driver.
+- `processing.process_target` for a list of targets, or for every target, runs each target in its own worker process. A worker cannot receive a driver object. The call raises `InvalidArgumentError` when any driver was given, instead of quietly using the built-in ones.
+
+`test/test_driver_construction.py` fails when a pipeline module builds a built-in driver itself, because that pipeline would ignore the driver the caller chose.
+
 For exact behavior, read the code — the code is always the source of truth.

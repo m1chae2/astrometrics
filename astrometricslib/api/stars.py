@@ -15,6 +15,7 @@ import logging
 from typing import Any, Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.catalog_queries import StarQueryResult
@@ -39,10 +40,16 @@ class StellarCatalog:
         The application settings.
     storage : `AbstractCatalogAccess`
         The database the star catalog is read from and saved to.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver that `plate_solve` uses. Any
+        left out is the built-in one.
     """
 
-    def __init__(self, config: AppConfiguration, storage: AbstractCatalogAccess) -> None:
+    def __init__(
+        self, config: AppConfiguration, storage: AbstractCatalogAccess, *, drivers: Drivers | None = None
+    ) -> None:
         self._config = config
+        self._drivers = drivers or Drivers()
         self.catalog_access = storage
 
     def get(self, object_id: str) -> StellarObject | None:
@@ -520,5 +527,7 @@ class StellarCatalog:
         """
         from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
-        _, wcs = StarIdentifier(config=self._config).process_image(image_path, attempt_plate_solving=True)
+        _, wcs = StarIdentifier(config=self._config, drivers=self._drivers).process_image(
+            image_path, attempt_plate_solving=True
+        )
         return wcs

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from astropy.time import Time
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
@@ -806,6 +807,13 @@ class ProcessingPipelines:
         target after a stack. One is built from ``storage`` when omitted.
     calibration : `CalibrationCatalog`, optional
         The calibration library to share. One is built when omitted.
+    drivers : `Drivers`, optional
+        The plate solver, stacking program and SIMBAD driver to use. Any
+        left out is the built-in one (Astrometry.net, Siril, astroquery).
+        They reach `stack`, the astrometry and spectroscopy stages of
+        `process_target` for one target, and `run_spectroscopy_by_session`.
+        `process_target` for several targets runs in worker processes, which
+        cannot receive them, so it refuses to start when any were given.
     """
 
     def __init__(
@@ -815,9 +823,11 @@ class ProcessingPipelines:
         *,
         targets: TargetCatalog | None = None,
         calibration: CalibrationCatalog | None = None,
+        drivers: Drivers | None = None,
     ) -> None:
         self._config = config
         self._storage = storage
+        self._drivers = drivers or Drivers()
         self._target_catalog = targets
         lookup = targets if targets is not None else _TargetsOnDemand(self)
         self.calibration = calibration or CalibrationCatalog(config, storage, targets=lookup)
@@ -1008,6 +1018,7 @@ class ProcessingPipelines:
             register_job=register_job,
             stacking_slot=self.acquire_stacking_slot,
             save_targets=self._targets.save,
+            drivers=self._drivers,
         )
 
     @background_job("preview", grace_period_seconds=20.0)
@@ -1163,7 +1174,9 @@ class ProcessingPipelines:
         ------
         InvalidArgumentError
             If a stage or stage option is unknown, or an argument the form
-            does not use is given.
+            does not use is given. Also if several targets are asked for
+            while `Astrometrics` was given drivers, because the worker
+            processes cannot receive them.
         """
         from astrometricslib.pipelines import tasks
 
@@ -1181,6 +1194,12 @@ class ProcessingPipelines:
             )
             if not camera_id:
                 raise InvalidArgumentError("Processing several targets needs a camera_id.")
+            if self._drivers.any_chosen:
+                raise InvalidArgumentError(
+                    "Processing several targets runs each target in its own worker process, which cannot "
+                    "receive the drivers given to Astrometrics(...). Process the targets one at a time, or "
+                    "build Astrometrics without drivers."
+                )
             from astrometricslib.pipelines.target_batch import process_targets_in_parallel
 
             if target is None:
@@ -1227,6 +1246,7 @@ class ProcessingPipelines:
             {stage: options or {} for stage, options in stage_options.items()},
             self._storage,
             register_job,
+            drivers=self._drivers,
         )
 
     def run_spectroscopy_by_session(
@@ -1278,6 +1298,7 @@ class ProcessingPipelines:
                 max_workers=max_workers,
                 on_item_complete=on_item_complete,
                 job_id=job.job_id,
+                drivers=self._drivers,
             )
 
     # -- Reading and changing a target's stacks and set-aside frames --------

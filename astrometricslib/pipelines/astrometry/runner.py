@@ -15,6 +15,7 @@ from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
+from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry.post_processing.run_gates import astrometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
@@ -213,7 +214,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         reset_plate_solve_statistics()
         reset_gaia_query_statistics()
 
-        pipeline = AstrometryPipeline()
+        pipeline = AstrometryPipeline(drivers=request.options.get("drivers"))
         context = pipeline.process(
             path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
         )
@@ -336,12 +337,12 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
 
 def run_astrometry_analysis(
-    target,  # ruff: ignore[missing-type-function-argument]
+    target: Target,
     frames: Any,  # unused; astrometry always solves `path`
     filter_type: Any,  # unused; astrometry has no filter concept
     catalog_access: Any,
     path: str | None,
-    **kwargs,  # ruff: ignore[missing-type-kwargs]
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Detect stars in one image and, if possible, solve its pointing.
 
@@ -365,6 +366,9 @@ def run_astrometry_analysis(
         the stars this run found.
     path : `str`
         The FITS image to analyze.
+    **kwargs
+        Run options. ``drivers`` (a `Drivers`) chooses the plate solver and
+        SIMBAD driver; any left out is the built-in one.
 
     Returns
     -------

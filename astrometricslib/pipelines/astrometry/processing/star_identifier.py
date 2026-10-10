@@ -27,8 +27,7 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
 from astropy.wcs import WCS, FITSFixedWarning
 
-from astrometricslib.drivers.astrometry_net_driver import AstrometryNetPlateSolveDriver
-from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
@@ -453,13 +452,16 @@ def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
-    def __init__(self, config: AppConfiguration | None = None) -> None:
+    def __init__(self, config: AppConfiguration | None = None, *, drivers: Drivers | None = None) -> None:
         """Set up the tools.
 
         Parameters
         ----------
         config : `AppConfiguration`, optional
             The system settings.
+        drivers : `Drivers`, optional
+            The plate solver and SIMBAD driver to use. Any left out is the
+            built-in one (Astrometry.net, astroquery).
         """
         if config is None:
             from astrometricslib.foundation.config import get_configuration
@@ -475,8 +477,9 @@ class StarIdentifier:
         )
         if api_key is not None and not isinstance(api_key, str) and hasattr(api_key, "_mock_methods"):
             api_key = "mock-api-key"
-        self.solver: PlateSolveDriver = AstrometryNetPlateSolveDriver(api_key=api_key)
-        self.simbad: SimbadDriver = AstroquerySimbadDriver()
+        drivers = drivers or Drivers()
+        self.solver: PlateSolveDriver = drivers.plate_solve_or_default(api_key)
+        self.simbad: SimbadDriver = drivers.simbad_or_default()
         self.stellar_objects: list[StellarObject] = []
         self.sources_detected: int = 0
         self.solve_attempted: bool = False

@@ -22,6 +22,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Literal
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError, ProcessingError
 from astrometricslib.foundation.jobs.runner import registered_job
 from astrometricslib.foundation.logging import get_log_context
@@ -166,6 +167,7 @@ def run_stack(
     register_job: bool,
     stacking_slot: Callable[[], AbstractContextManager],
     save_targets: Callable[[], None],
+    drivers: Drivers | None = None,
 ) -> StackResult:
     """Stack the chosen frames, or only report the plan.
 
@@ -193,6 +195,8 @@ def run_stack(
         Gives the context manager that holds a stacking slot.
     save_targets : `Callable`
         Saves the target catalog.
+    drivers : `Drivers`, optional
+        The stacking program to use. Left out, it is Siril.
 
     Returns
     -------
@@ -242,6 +246,7 @@ def run_stack(
             job_id=job.job_id or get_log_context().get("job_id"),
             force=force,
             preview_settings=preview_settings,
+            drivers=drivers,
         )
         # Stacking can finish without raising and still make no image, so
         # the outcome is decided here, not left to "no exception means done".

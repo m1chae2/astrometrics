@@ -625,6 +625,81 @@ class ExtinctionCorrectionRecord(BaseModel):
     reason: str | None = Field(default=None, alias="reason")
 
 
+class DifferentialRefractionRecord(BaseModel):
+    """What the refraction correction did to a spectrum's wavelengths.
+
+    Mirrors `DifferentialRefraction` in the spectroscopy pipeline. Air bends
+    blue light toward the zenith (the point straight overhead) more than red
+    light. The zero-order image is a white-light image, so each wavelength of
+    the spectrum lands slightly off the place the wavelength scale gives it.
+    The part of that shift along the dispersion changes the wavelength. The
+    part across it only widens the trail. Every number is `None` when it
+    could not be computed.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # True when the displacement was computed. False without an observatory
+    # site, a WCS or a time, and for a target below 20 degrees altitude.
+    is_computed: bool = Field(alias="isComputed")
+    # True when the wavelengths were shifted (`dar_correction_applied`).
+    is_applied: bool = Field(alias="isApplied")
+    # Why the displacement was not computed or the shift was not made.
+    reason: str | None = Field(default=None, alias="reason")
+    # The time of mid-exposure, UTC, as an ISO string.
+    mid_exposure_utc: str | None = Field(default=None, alias="midExposureUtc")
+    # The target's altitude above the horizon, in degrees.
+    altitude_degrees: float | None = Field(default=None, alias="altitudeDegrees")
+    # The position angle of the zenith as seen from the target, in degrees
+    # from north through east.
+    parallactic_angle_degrees: float | None = Field(default=None, alias="parallacticAngleDegrees")
+    # The position angle of the direction of increasing wavelength along
+    # the trail, in degrees from north through east.
+    dispersion_position_angle_degrees: float | None = Field(
+        default=None, alias="dispersionPositionAngleDegrees"
+    )
+    # The dispersion position angle minus the parallactic angle, wrapped to
+    # -180 to 180 degrees. 0 means the red end of the spectrum points at the
+    # zenith.
+    parallactic_to_dispersion_angle_degrees: float | None = Field(
+        default=None, alias="parallacticToDispersionAngleDegrees"
+    )
+    # The sky angle of one pixel along the dispersion, in arcseconds.
+    pixel_scale_arcsec: float | None = Field(default=None, alias="pixelScaleArcsec")
+    # The wavelength of the zero-order image, in Angstroms: the mean
+    # wavelength weighted by the camera's sensitivity and the star's spectrum.
+    effective_wavelength_angstrom: float | None = Field(default=None, alias="effectiveWavelengthAngstrom")
+    # The air's conditions and where they came from ("config", or the
+    # standard atmosphere scaled to the site's elevation).
+    pressure_hpa: float | None = Field(default=None, alias="pressureHpa")
+    temperature_c: float | None = Field(default=None, alias="temperatureC")
+    relative_humidity_percent: float | None = Field(default=None, alias="relativeHumidityPercent")
+    atmosphere_source: str | None = Field(default=None, alias="atmosphereSource")
+    # The displacement of the light along the dispersion, relative to the
+    # zero order, in arcseconds. Positive is toward longer wavelengths.
+    along_dispersion_arcsec_at_4200: float | None = Field(default=None, alias="alongDispersionArcsecAt4200")
+    along_dispersion_arcsec_at_8000: float | None = Field(default=None, alias="alongDispersionArcsecAt8000")
+    # The same displacement as a wavelength error before the correction (the
+    # labelled wavelength minus the true one), in Angstroms.
+    along_dispersion_angstrom_at_4200: float | None = Field(
+        default=None, alias="alongDispersionAngstromAt4200"
+    )
+    along_dispersion_angstrom_at_8000: float | None = Field(
+        default=None, alias="alongDispersionAngstromAt8000"
+    )
+    # The displacement across the dispersion, in arcseconds. It widens the
+    # trail and changes no wavelength. Positive is toward the dispersion
+    # position angle plus 90 degrees.
+    across_dispersion_arcsec_at_4200: float | None = Field(default=None, alias="acrossDispersionArcsecAt4200")
+    across_dispersion_arcsec_at_8000: float | None = Field(default=None, alias="acrossDispersionArcsecAt8000")
+    # The absolute difference between the wavelength errors at 4200 and
+    # 8000 Angstroms.
+    along_dispersion_span_angstrom: float | None = Field(default=None, alias="alongDispersionSpanAngstrom")
+    # The absolute difference between the across-dispersion displacements at
+    # 4200 and 8000 Angstroms, in pixels: how much the trail widens.
+    across_dispersion_span_px: float | None = Field(default=None, alias="acrossDispersionSpanPx")
+
+
 class SpectroscopyResult(BaseModel):
     """A star's own extracted spectrum, and what it suggests about the star.
 
@@ -800,6 +875,12 @@ class SpectroscopyResult(BaseModel):
     # before this was recorded.
     extinction_correction: ExtinctionCorrectionRecord | None = Field(
         default=None, alias="extinctionCorrection"
+    )
+    # What the atmospheric differential refraction correction did to the
+    # wavelengths (see `DifferentialRefractionRecord`). `None` for a spectrum
+    # saved before this was recorded.
+    differential_refraction: DifferentialRefractionRecord | None = Field(
+        default=None, alias="differentialRefraction"
     )
     # The id of the job (see astrometricslib.models.provenance.Activity)
     # that last wrote this spectrum, so its exact pipeline version can be

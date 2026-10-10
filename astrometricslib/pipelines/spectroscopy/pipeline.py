@@ -12,7 +12,9 @@ import numpy as np
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import ProcessingError
+from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.models.stellar_source import (
+    DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,
     SpectralExtractionDiagnostics,
     SpectroscopyResult,
@@ -37,6 +39,15 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.assess_raw_frame_qual
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     apply_extinction_correction,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
+    AtmosphericConditions,
+    load_atmospheric_conditions,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction import (
+    DifferentialRefraction,
+    correct_differential_refraction,
+    local_dispersion_angstrom_per_px,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     apply_instrument_response,
@@ -697,9 +708,21 @@ class SpectroscopyPipeline:
         The tool that reads brightness from the image.
     calibrator : `SpectrumCalibrator`
         The tool that turns pixel numbers into colors.
+    observatory_site : `ObservatorySite` or `None`
+        Where the observatory is. Without it, the refraction correction
+        is not computed.
+    atmospheric_conditions : `AtmosphericConditions` or `None`
+        The air's pressure, temperature and humidity. `None` means the
+        standard atmosphere at the site's elevation.
     """
 
-    def __init__(self, config: SpectroscopyConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: SpectroscopyConfig | None = None,
+        *,
+        observatory_site: ObservatorySite | None = None,
+        atmospheric_conditions: AtmosphericConditions | None = None,
+    ) -> None:
         """Set up the master controller.
 
         Parameters
@@ -707,12 +730,32 @@ class SpectroscopyPipeline:
         config : `SpectroscopyConfig`, optional
             The camera settings to use. If you leave this blank, it will
             load the default settings automatically.
+        observatory_site : `ObservatorySite`, optional
+            Where the observatory is, for the atmospheric refraction
+            correction. When `config` is left blank and this is too, it is
+            read from the loaded configuration. Otherwise, with no site,
+            the correction is not computed.
+        atmospheric_conditions : `AtmosphericConditions`, optional
+            The air's pressure, temperature and humidity. When left blank
+            and the configuration is loaded here, they are read from the
+            ``[Observatory.Location]`` section. Otherwise the standard
+            atmosphere at the site's elevation is used.
         """
         if config is None:
+            from astrometricslib.foundation.config import get_configuration
             from astrometricslib.utilities import ConfigLoader
 
-            config = ConfigLoader.load_spectroscopy_config()
+            app_config = get_configuration()
+            config = ConfigLoader.load_spectroscopy_config(app_config=app_config)
+            if observatory_site is None:
+                observatory_site = app_config.get_observatory_site()
+                if observatory_site is not None and atmospheric_conditions is None:
+                    atmospheric_conditions = load_atmospheric_conditions(
+                        app_config, observatory_site.elevation_m
+                    )
         self.config = config
+        self.observatory_site = observatory_site
+        self.atmospheric_conditions = atmospheric_conditions
         # What we know about this camera model (for example, the value at
         # which its pixels count as saturated), looked up once here.
         self.camera_profile = resolve_camera_profile(config.camera.name)
@@ -1142,13 +1185,32 @@ class SpectroscopyPipeline:
         know the camera's exact QE curve, we fix the data here. If we
         don't know the camera, we just skip this step.
         """
-        wavelengths_angstrom = [float(w) * 10.0 for w in result["wavelengths"]]
         intensities = result["intensities"]
+
+        # Compute the visual overlay rectangle and total rotated
+        # dispersion angle
+        rectangle, dispersion_angle = self._dispersion_overlay_geometry(
+            result["target_pos"],
+            result.get("extraction_radius", self.config.extraction_radius),
+            dispersion_angle_degrees=result["detected_angle"],
+        )
+
+        # Atmospheric differential refraction (DAR). The wavelength scale is
+        # already computed (`_process_single_star` calibrated every sample
+        # from its distance to the zero order). The air has displaced each
+        # wavelength's light along the trail, so each sample's wavelength is
+        # shifted back here, before every step below that reads a wavelength:
+        # the QE correction, the instrument response and the airmass
+        # correction. `result["wavelengths"]` keeps the unshifted scale.
+        corrected_wavelengths, differential_refraction = self._correct_differential_refraction(
+            result, image, dispersion_angle
+        )
+        wavelengths_angstrom = corrected_wavelengths.tolist()
 
         quantum_efficiency_corrected_intensities = None
         if self.quantum_efficiency_curve is not None:
             quantum_efficiency_corrected_intensities = apply_quantum_efficiency_correction(
-                wavelength_nm=np.array(result["wavelengths"]),
+                wavelength_nm=corrected_wavelengths / 10.0,
                 intensity=np.array(result["intensities"]),
                 curve=self.quantum_efficiency_curve,
             ).tolist()
@@ -1183,14 +1245,6 @@ class SpectroscopyPipeline:
                 response.reference_airmass,
             )
             logger.debug("Extinction correction: %s", extinction_record.as_dict())
-
-        # Compute the visual overlay rectangle and total rotated
-        # dispersion angle
-        rectangle, dispersion_angle = self._dispersion_overlay_geometry(
-            result["target_pos"],
-            result.get("extraction_radius", self.config.extraction_radius),
-            dispersion_angle_degrees=result["detected_angle"],
-        )
 
         # Classify and test features on the response-corrected spectrum
         # when available -- it better reflects the star's true color than
@@ -1237,6 +1291,7 @@ class SpectroscopyPipeline:
                 trail_width_px=result.get("trail_width_px"),
                 extraction_diagnostics=result.get("extraction_diagnostics"),
                 frame_check=result.get("frame_check"),
+                differential_refraction=differential_refraction,
             ),
             input_quality_checkpoint(input_quality),
             assess_processing_quality(
@@ -1301,11 +1356,78 @@ class SpectroscopyPipeline:
                 if analysis.extinction_correction is not None
                 else None
             ),
+            differential_refraction=DifferentialRefractionRecord.model_validate(
+                differential_refraction.as_dict()
+            ),
         )
 
         if isinstance(star.star_data, dict):
             star.star_data["xcentroid"] = result["target_pos"][0]
             star.star_data["ycentroid"] = result["target_pos"][1]
+
+    def _correct_differential_refraction(
+        self, result: dict[str, Any], image: AstrometricsImage, dispersion_image_angle_degrees: float
+    ) -> tuple[np.ndarray, DifferentialRefraction]:
+        """Shift one star's wavelengths for atmospheric refraction.
+
+        The correction needs the observatory site, the frame's WCS and the
+        exposure time. When any is missing, or the star is below an
+        altitude of 20 degrees, the wavelengths come back unchanged and the
+        record says why. The zero order's effective wavelength is the mean
+        wavelength of the raw counts. The counts already carry the
+        camera's sensitivity and the star's spectrum, so no second
+        weighting by the quantum efficiency curve is needed.
+
+        Parameters
+        ----------
+        result : `dict`
+            The star's extraction result from `_process_single_star`.
+        image : `AstrometricsImage`
+            The frame the spectrum was extracted from.
+        dispersion_image_angle_degrees : `float`
+            The image direction in which wavelength increases along the
+            trail, from the +x axis toward the +y axis.
+
+        Returns
+        -------
+        wavelengths_angstrom : `numpy.ndarray`
+            The corrected wavelengths, in Angstroms.
+        record : `DifferentialRefraction`
+            What was computed and whether it was applied.
+        """
+        config = self.config
+
+        def dispersion(wavelength_angstrom: np.ndarray) -> np.ndarray:
+            """Give the Angstroms per pixel at some wavelengths.
+
+            Parameters
+            ----------
+            wavelength_angstrom : `numpy.ndarray`
+                The wavelengths, in Angstroms.
+
+            Returns
+            -------
+            dispersion : `numpy.ndarray`
+                The Angstroms per pixel along the trail.
+            """
+            return local_dispersion_angstrom_per_px(
+                wavelength_angstrom,
+                config.grating_distance_mm,
+                config.grating_lines_per_mm,
+                config.camera.pixel_size_um,
+            )
+
+        return correct_differential_refraction(
+            np.asarray(result["wavelengths"], dtype=float) * 10.0,
+            np.asarray(result["intensities"], dtype=float),
+            header=getattr(image, "header", None),
+            wcs=getattr(image, "wcs", None),
+            target_pixel_xy=(float(result["target_pos"][0]), float(result["target_pos"][1])),
+            dispersion_image_angle_degrees=dispersion_image_angle_degrees,
+            site=self.observatory_site,
+            conditions=self.atmospheric_conditions,
+            dispersion_angstrom_per_px=dispersion,
+        )
 
     def _process_single_star(
         self,

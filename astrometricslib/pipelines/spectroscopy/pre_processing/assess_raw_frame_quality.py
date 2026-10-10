@@ -4,8 +4,15 @@ The checkpoint reports the raw-frame numbers the pipeline already holds for a
 star right after it extracts the star's spectrum: how much of the zero-order
 image (the star's undispersed image) was saturated, how much of the requested
 spectrum landed on the image, how wide the trail was, and how the extractor
-read the sky. It re-measures nothing. It only gathers numbers the extraction
-produced into the common `StageQualityCheckpoint` shape.
+read the sky. It re-measures none of these. It gathers the numbers the
+extraction produced into the common `StageQualityCheckpoint` shape.
+
+It also reports atmospheric differential refraction (DAR), because refraction
+is a property of the frame: how far the air shifts each wavelength of the
+spectrum along and across the trail. The refraction record comes from
+`differential_refraction`, which finds the numbers from the target's
+altitude, the sky direction of the dispersion and the air's conditions. That
+module also corrects the wavelengths.
 
 The frame-level check in `pipelines/shared/quality/spectral_frame_check.py`
 measures the whole frame (streak tilt, peak above the sky, the saturation
@@ -17,10 +24,26 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, metric
+from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric, metric
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
+    MINIMUM_ALTITUDE_DEGREES,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction import (
+    BLUE_REPORT_WAVELENGTH_ANGSTROM,
+    RED_REPORT_WAVELENGTH_ANGSTROM,
+    DifferentialRefraction,
+)
 
 STAGE = "raw_frame"
+
+# The largest spread of the wavelength error from refraction, in Angstroms,
+# between the blue and red ends of the spectrum that the pipeline accepts
+# without a flag. It is a design limit, not a measurement: half the
+# resolution element of this setup at 5000 A, which is about 40 A (35 to
+# 48 A measured on Vega; see `spectral_resolution`). A spread of 20 A moves
+# a line by half of what the instrument can tell apart.
+DAR_ALONG_DISPERSION_LIMIT_ANGSTROM = 20.0
 
 
 def _optional_float(value: object) -> float | None:
@@ -59,6 +82,75 @@ def _median_trail_width_px(trail_width_px: Sequence[float] | None) -> float | No
     return float(np.median(widths)) if widths else None
 
 
+def _refraction_metrics(refraction: DifferentialRefraction) -> tuple[list[StageQualityMetric], list[str]]:
+    """Build the refraction metrics and flags for checkpoint 0.
+
+    Parameters
+    ----------
+    refraction : `DifferentialRefraction`
+        The refraction record for this spectrum.
+
+    Returns
+    -------
+    metrics : `list` [`StageQualityMetric`]
+        The four refraction metrics. A metric has no value when the
+        refraction could not be computed.
+    flags : `list` [`str`]
+        ``dar_large`` when the along-dispersion span is over its limit.
+        ``dar_not_computed`` when there was no site, WCS, time or usable
+        altitude. ``target_altitude_low`` when the target was too low for
+        the plane-parallel model.
+    """
+    span_note = (
+        f"span of the wavelength error between {BLUE_REPORT_WAVELENGTH_ANGSTROM:.0f} and "
+        f"{RED_REPORT_WAVELENGTH_ANGSTROM:.0f} A before the correction; the limit is a design "
+        "choice (half the resolution element at 5000 A), not a measurement"
+        f"; correction applied: {'yes' if refraction.is_applied else 'no'}"
+    )
+    along = metric(
+        "dar_along_dispersion_angstrom",
+        refraction.along_dispersion_span_angstrom,
+        "angstrom",
+        limit=DAR_ALONG_DISPERSION_LIMIT_ANGSTROM,
+        higher_is_better=False,
+        note=span_note,
+    )
+    altitude = metric(
+        "target_altitude_degrees",
+        refraction.altitude_degrees,
+        "degree",
+        limit=MINIMUM_ALTITUDE_DEGREES,
+        note=(
+            f"below {MINIMUM_ALTITUDE_DEGREES:.0f} degrees the plane-parallel refraction model is "
+            "refused; the limit is a design choice, not a measurement"
+        ),
+    )
+    metrics = [
+        along,
+        metric(
+            "dar_across_dispersion_px",
+            refraction.across_dispersion_span_px,
+            "pixel",
+            note="how much refraction widens the trail between the blue and red ends; report only",
+        ),
+        altitude,
+        metric(
+            "parallactic_to_dispersion_angle_degrees",
+            refraction.parallactic_to_dispersion_angle_degrees,
+            "degree",
+            note="0 means the red end of the spectrum points at the zenith; report only",
+        ),
+    ]
+    flags = []
+    if along.passed is False:
+        flags.append("dar_large")
+    if not refraction.is_computed:
+        flags.append("dar_not_computed")
+    if altitude.passed is False:
+        flags.append("target_altitude_low")
+    return metrics, flags
+
+
 def assess_raw_frame_quality(
     *,
     zero_order_saturated_pixel_fraction: float | None,
@@ -66,6 +158,7 @@ def assess_raw_frame_quality(
     trail_width_px: Sequence[float] | None,
     extraction_diagnostics: Mapping[str, object] | None,
     frame_check: Mapping[str, object] | None = None,
+    differential_refraction: DifferentialRefraction | None = None,
 ) -> StageQualityCheckpoint:
     """Build quality checkpoint 0 for one extracted spectrum.
 
@@ -87,6 +180,9 @@ def assess_raw_frame_quality(
         its ``tilt_degrees`` and ``spectrum_peak_above_sky_adu`` become
         metrics and its ``saturation_threshold_source`` goes into the
         saturation note. Left out, those numbers are absent.
+    differential_refraction : `DifferentialRefraction`, optional
+        The refraction record for this spectrum. When given, the checkpoint
+        carries the four refraction metrics. Left out, they are absent.
 
     Returns
     -------
@@ -144,4 +240,8 @@ def assess_raw_frame_quality(
         flags.append("trail_partly_off_image")
     if contaminated_sky:
         flags.append("sky_band_contaminated")
+    if differential_refraction is not None:
+        refraction_metrics, refraction_flags = _refraction_metrics(differential_refraction)
+        metrics.extend(refraction_metrics)
+        flags.extend(refraction_flags)
     return StageQualityCheckpoint(stage=STAGE, metrics=metrics, flags=flags)

@@ -112,8 +112,9 @@ Limits come from the places that define them: `NO_GOOD_MATCH_RMS`,
 modules import these limits and define none of their own. A metric with no
 limit is reported for measurement only.
 
-**Checkpoint 0, raw frame.** The pipeline re-measures nothing here. It reuses
-what the extraction computed for this star.
+**Checkpoint 0, raw frame.** The pipeline re-measures nothing from the pixels
+here. It reuses what the extraction computed for this star, and adds the
+refraction numbers, which come from the target's position and the time.
 
 | Metric | Unit | Limit | What it tells a reader |
 |---|---|---|---|
@@ -121,6 +122,16 @@ what the extraction computed for this star.
 | `valid_fraction` | fraction | none | The share of the requested spectrum that landed on the image. Below 1, part of the trail ran off the image. |
 | `median_trail_width` | pixel | none | The median fitted width of the trail across the dispersion direction. A wide trail means a blurrier spectrum. |
 | `contaminated_sky_fraction` | fraction | none | The share of sky readings that had to drop a sky band because a neighbouring star's light fell in it. The note names the dominant sky mode. |
+| `dar_along_dispersion_angstrom` | angstrom | 20, lower is better. A design choice (half the resolution element at 5000 A), not a measurement | The spread of the wavelength error that atmospheric refraction causes between 4200 A and 8000 A, before the correction. Flag `dar_large` when over the limit. |
+| `dar_across_dispersion_px` | pixel | none | How much refraction widens the trail between 4200 A and 8000 A. |
+| `target_altitude_degrees` | degree | 20, higher is better. A design choice, not a measurement | The target's altitude at mid-exposure. Below the limit the pipeline refuses the refraction model and sets the flags `target_altitude_low` and `dar_not_computed`. |
+| `parallactic_to_dispersion_angle_degrees` | degree | none | The angle from the direction of the zenith to the direction of the dispersion on the sky. 0 means the red end of the spectrum points at the zenith. |
+
+The four refraction metrics have no value, and the checkpoint carries the flag
+`dar_not_computed`, when the pipeline has no observatory site, WCS or
+mid-exposure time. The refraction correction itself runs in pre-processing
+(see "Atmospheric differential refraction" in
+[pre-processing](pre_processing/README.md)).
 
 When the caller supplies the frame-level result of `measure_spectral_frame_file`
 under `result["frame_check"]`, the checkpoint also carries `streak_tilt`

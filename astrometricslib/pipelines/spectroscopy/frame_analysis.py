@@ -38,6 +38,9 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = No
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
     )
+    from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
+        load_atmospheric_conditions,
+    )
 
     config = get_configuration()
     astrometry = AstrometryPipeline(config)
@@ -46,7 +49,16 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = No
     from astrometricslib.utilities import ConfigLoader
 
     spec_config = ConfigLoader.load_spectroscopy_config(app_config=config)
-    spectroscopy = SpectroscopyPipeline(spec_config)
+    # The observatory site and the air's conditions let the pipeline correct
+    # the wavelengths for atmospheric differential refraction.
+    site = config.get_observatory_site()
+    spectroscopy = SpectroscopyPipeline(
+        spec_config,
+        observatory_site=site,
+        atmospheric_conditions=(
+            load_atmospheric_conditions(config, site.elevation_m) if site is not None else None
+        ),
+    )
     stellar_objects = spectroscopy.process(context, limit=limit)
 
     for obj in stellar_objects:

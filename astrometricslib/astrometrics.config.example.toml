@@ -60,6 +60,18 @@ remote_pictures_path = "/home/stellarmate/Pictures"
 # latitude = "45.0"
 # longitude = "-110.0"
 # elevation = "0"
+#
+# The spectroscopy pipeline also uses the site to correct wavelengths for
+# atmospheric refraction (air bends blue light more than red light). It
+# needs latitude and longitude. For the air at the telescope it reads three
+# optional lines, and uses the standard atmosphere at your elevation for any
+# you leave out:
+#   pressure_hpa              = air pressure in hectopascals (millibars)
+#   temperature_c             = air temperature in degrees Celsius
+#   relative_humidity_percent = 0 to 100
+# pressure_hpa = "845"
+# temperature_c = "5"
+# relative_humidity_percent = "30"
 
 ["Observatory.Optics"]
 # Every telescope or camera lens you use, by name. The name is stored as the

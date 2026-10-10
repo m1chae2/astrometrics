@@ -306,6 +306,8 @@ def analyze_spectrum(
     possible_neighbor_contamination: list[dict[str, float | None]] | None = None,
     extinction_correction: ExtinctionCorrection | None = None,
     reddening: ReddeningEstimate | None = None,
+    intensity_errors: np.ndarray | None = None,
+    response_corrected_intensity_errors: np.ndarray | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -380,6 +382,15 @@ def analyze_spectrum(
         keeps both best types. The synthetic colour is still measured on the
         observed spectrum, because the catalog colour it is checked against
         is reddened too.
+    intensity_errors : `np.ndarray`, optional
+        The 1-sigma error of each `intensity` value (see
+        `pre_processing.intensity_variance`). The feature test uses it to give
+        each feature an equivalent width and its error. It changes no
+        verdict.
+    response_corrected_intensity_errors : `np.ndarray`, optional
+        The 1-sigma error of each `response_corrected_intensity` value. The
+        classifier uses it to give each reference a reduced chi-square next to
+        its RMS. It changes no ranking, decision or threshold.
 
     Returns
     -------
@@ -477,6 +488,7 @@ def analyze_spectrum(
         reference_spectral_type=expected_reference_type,
         resolution_element_angstrom=resolution_element_angstrom,
         resolution_profile=resolution_profile,
+        errors=intensity_errors,
     )
     emission_windows, emission_names = _emission_windows(features, resolution_element_angstrom)
     # Two unrelated causes can each make part of the spectrum untrustworthy
@@ -493,6 +505,9 @@ def analyze_spectrum(
     # The spectrum the reported classification was made on: the observed one,
     # or the dereddened one when a catalog E(B-V) was supplied.
     classified_intensity = corrected_intensity
+    # The errors of `classified_intensity`, scaled with it when it is the
+    # dereddened spectrum.
+    classified_errors = response_corrected_intensity_errors
     reddening_record: ReddeningRecord | None = None
     if corrected_intensity is None:
         classification = unclassified_result(
@@ -505,17 +520,26 @@ def analyze_spectrum(
             resolution_element_angstrom=resolution_element_angstrom,
             excluded_windows_angstrom=excluded_windows,
             resolution_profile=resolution_profile,
+            intensity_errors=response_corrected_intensity_errors,
         )
         if reddening is not None:
             dereddened_intensity = _dereddened_intensity(
                 wavelength_angstrom, corrected_intensity, reddening.ebv
             )
+            # Dereddening multiplies each sample by a fixed factor, so its
+            # error scales by the same factor.
+            dereddened_errors = None
+            if response_corrected_intensity_errors is not None:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    factor = dereddened_intensity / np.asarray(corrected_intensity, dtype=float)
+                dereddened_errors = np.asarray(response_corrected_intensity_errors, dtype=float) * factor
             dereddened_classification = classify_spectral_type(
                 wavelength_angstrom,
                 dereddened_intensity,
                 resolution_element_angstrom=resolution_element_angstrom,
                 excluded_windows_angstrom=excluded_windows,
                 resolution_profile=resolution_profile,
+                intensity_errors=dereddened_errors,
             )
             observed_type = _classified_type(classification)
             dereddened_type = _classified_type(dereddened_classification)
@@ -532,6 +556,7 @@ def analyze_spectrum(
             if dereddened_type:
                 classification = dereddened_classification
                 classified_intensity = dereddened_intensity
+                classified_errors = dereddened_errors
 
     comparison: CatalogComparison | None = None
     synthetic_colour: float | None = None
@@ -548,6 +573,7 @@ def analyze_spectrum(
                 reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
                 excluded_windows_angstrom=excluded_windows,
                 resolution_profile=resolution_profile,
+                intensity_errors=classified_errors,
             )
             giant_rms = giant_result["classification_rms"]
             if giant_result["spectral_type"] != "Unknown" and isinstance(giant_rms, int | float):
@@ -610,6 +636,7 @@ def analyze_spectrum(
             reference_spectral_type=str(classification["spectral_type"]),
             resolution_element_angstrom=resolution_element_angstrom,
             resolution_profile=resolution_profile,
+            errors=intensity_errors,
         )
     return SpectrumAnalysis(
         classification,

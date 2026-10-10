@@ -503,24 +503,39 @@ def blurred_reference_spectrum(
 
 
 def _rank_by_rms(
-    rms_by_type: dict[str, float], correlation_by_type: dict[str, float]
+    rms_by_type: dict[str, float],
+    correlation_by_type: dict[str, float],
+    reduced_chi_square_by_type: dict[str, float] | None = None,
 ) -> list[dict[str, object]]:
     """Sort the compared types from the closest match to the furthest.
+
+    Parameters
+    ----------
+    rms_by_type : `dict` [`str`, `float`]
+        Each compared type's relative RMS.
+    correlation_by_type : `dict` [`str`, `float`]
+        Each compared type's Pearson correlation.
+    reduced_chi_square_by_type : `dict` [`str`, `float`], optional
+        Each compared type's reduced chi-square, for the types that have one.
 
     Returns
     -------
     ranked_types : `list` [`dict`]
         Every compared type, closest first. Each entry has
         ``"spectral_type"``, ``"rms"`` (the relative root-mean-square
-        difference; lower is closer) and ``"correlation"`` (the Pearson
-        coefficient, kept for comparison; it barely separates types). The
-        scores are RMS values, not probabilities.
+        difference; lower is closer), ``"correlation"`` (the Pearson
+        coefficient, kept for comparison; it barely separates types) and
+        ``"reduced_chi_square"`` (see `classify_spectral_type`; `None` for a
+        type without one). The order follows the RMS alone. The scores are
+        not probabilities.
     """
+    chi_square = reduced_chi_square_by_type or {}
     ranked = [
         {
             "spectral_type": spectral_type,
             "rms": float(rms),
             "correlation": float(correlation_by_type[spectral_type]),
+            "reduced_chi_square": chi_square.get(spectral_type),
         }
         for spectral_type, rms in rms_by_type.items()
     ]
@@ -548,7 +563,76 @@ def unclassified_result(reason: str) -> dict[str, object]:
         "correlation_by_type": {},
         "ranked_types": [],
         "excluded_windows_angstrom": [],
+        "reduced_chi_square": None,
+        "second_best_reduced_chi_square": None,
     }
+
+
+def _reduced_chi_square(
+    observed_wavelength: np.ndarray,
+    observed: np.ndarray,
+    observed_errors: np.ndarray,
+    template_wavelength: np.ndarray,
+    template_flux: np.ndarray,
+    scale: float,
+    low: float,
+    high: float,
+    excluded_windows: Sequence[tuple[float, float]],
+    exclude_atmospheric_bands: bool,
+) -> float | None:
+    """Score one scaled reference against the observation with the errors.
+
+    The sum runs over the observed samples (not the reference's finer
+    grid), because the sample errors are independent per sample. It uses the
+    samples the RMS comparison uses: inside the overlap, outside the
+    atmospheric bands and outside the excluded windows. The reference is
+    scaled by the scale the RMS found, so this is the chi-square of the same
+    residuals, not the smallest chi-square any scale could give.
+
+    Parameters
+    ----------
+    observed_wavelength : `numpy.ndarray`
+        The observed wavelengths, in Angstroms.
+    observed : `numpy.ndarray`
+        The observed brightness.
+    observed_errors : `numpy.ndarray`
+        The 1-sigma error of each observed brightness. NaN or zero marks a
+        sample without a usable error.
+    template_wavelength : `numpy.ndarray`
+        The reference's wavelengths, in Angstroms.
+    template_flux : `numpy.ndarray`
+        The reference's blurred brightness.
+    scale : `float`
+        The factor that brings the reference to the observation's brightness.
+    low, high : `float`
+        The comparison range, in Angstroms.
+    excluded_windows : `Sequence` [`tuple` [`float`, `float`]]
+        Windows to leave out, as (low, high) pairs.
+    exclude_atmospheric_bands : `bool`
+        Whether to leave out the atmospheric bands.
+
+    Returns
+    -------
+    reduced_chi_square : `float` or `None`
+        The chi-square divided by its degrees of freedom (the sample count
+        minus 1 for the fitted scale), or `None` when fewer than
+        `_MINIMUM_OVERLAP_POINTS` samples have a usable error.
+    """
+    keep = (
+        (observed_wavelength >= max(low, template_wavelength.min()))
+        & (observed_wavelength <= min(high, template_wavelength.max()))
+        & np.isfinite(observed_errors)
+        & (observed_errors > 0)
+    )
+    if exclude_atmospheric_bands:
+        keep &= ~atmospheric_band_mask(observed_wavelength)
+    for window_low, window_high in excluded_windows:
+        keep &= (observed_wavelength < window_low) | (observed_wavelength > window_high)
+    if keep.sum() < _MINIMUM_OVERLAP_POINTS:
+        return None
+    template_on_observed = np.interp(observed_wavelength[keep], template_wavelength, template_flux)
+    residual = (observed[keep] - scale * template_on_observed) / observed_errors[keep]
+    return float(np.sum(residual**2)) / float(keep.sum() - 1)
 
 
 def classify_spectral_type(
@@ -559,6 +643,7 @@ def classify_spectral_type(
     reference_types: Iterable[str] | None = None,
     excluded_windows_angstrom: Sequence[tuple[float, float]] | None = None,
     resolution_profile: ResolutionProfile | None = None,
+    intensity_errors: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Find the bundled reference spectrum a star's spectrum most resembles.
 
@@ -607,6 +692,11 @@ def classify_spectral_type(
         How the blur changes along this spectrum. When given, each
         reference is blurred by the resolution element at each wavelength
         instead of by `resolution_element_angstrom` everywhere.
+    intensity_errors : `np.ndarray`, optional
+        The 1-sigma error of each `intensity` value, in the same units and
+        order (see `intensity_variance`). When given, each reference also gets
+        a reduced chi-square, stored next to its RMS. The errors never change
+        the ranking, the decision or any threshold: those use the RMS alone.
 
     Returns
     -------
@@ -634,15 +724,29 @@ def classify_spectral_type(
         `NO_GOOD_MATCH_RMS`).
         ``"correlation_by_type"``: every reference's Pearson correlation.
         ``"ranked_types"``: every compared type, closest first, scored by
-        RMS (see `_rank_by_rms`).
+        RMS (see `_rank_by_rms`). Each entry also has ``"reduced_chi_square"``,
+        or `None` without `intensity_errors`.
+        ``"reduced_chi_square"`` and ``"second_best_reduced_chi_square"``: the
+        reduced chi-square of the best and of the second-best reference by
+        RMS (not the two smallest chi-squares), or `None`. A reduced
+        chi-square near 1 means the reference fits within the noise. A value
+        far above 1 means the mismatch is larger than the noise, which for a
+        bright star is the usual case: the references and the instrument
+        response are not exact.
         ``"excluded_windows_angstrom"``: the windows left out of the
         comparison, as (low, high) pairs (empty when there were none).
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
+    sample_errors = (
+        np.full(intensity.shape, np.nan)
+        if intensity_errors is None
+        else np.asarray(intensity_errors, dtype=float)
+    )
     valid = np.isfinite(wavelength_angstrom) & np.isfinite(intensity) & (intensity > 0)
     wavelength_angstrom = wavelength_angstrom[valid]
     intensity = intensity[valid]
+    sample_errors = sample_errors[valid]
 
     low, high = CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM
     in_range = (wavelength_angstrom >= low) & (wavelength_angstrom <= high)
@@ -651,6 +755,7 @@ def classify_spectral_type(
     order = np.argsort(wavelength_angstrom)
     wavelength_angstrom = wavelength_angstrom[order]
     intensity = intensity[order]
+    sample_errors = sample_errors[order]
 
     coverage = min(wavelength_angstrom.max(), high) - max(wavelength_angstrom.min(), low)
     if coverage < MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM:
@@ -664,6 +769,7 @@ def classify_spectral_type(
     ]
     rms_by_type: dict[str, float] = {}
     correlation_by_type: dict[str, float] = {}
+    reduced_chi_square_by_type: dict[str, float] = {}
     allowed_types = set(REFERENCE_SPECTRAL_TYPES if reference_types is None else reference_types)
     for spectral_type, (template_wavelength, template_flux) in _get_blurred_templates(
         resolution_element_angstrom, resolution_profile
@@ -700,6 +806,21 @@ def classify_spectral_type(
         difference = observed_on_grid - best_fit_scale * template_on_grid
         rms_by_type[spectral_type] = float(np.sqrt(np.mean(difference**2))) / observed_average
         correlation_by_type[spectral_type] = float(np.corrcoef(observed_on_grid, template_on_grid)[0, 1])
+        if intensity_errors is not None:
+            reduced_chi_square = _reduced_chi_square(
+                wavelength_angstrom,
+                intensity,
+                sample_errors,
+                template_wavelength,
+                template_flux,
+                best_fit_scale,
+                low,
+                high,
+                excluded_windows,
+                exclude_atmospheric_bands,
+            )
+            if reduced_chi_square is not None:
+                reduced_chi_square_by_type[spectral_type] = reduced_chi_square
 
     if not rms_by_type:
         return unclassified_result("no reference overlaps the spectrum enough to compare")
@@ -714,6 +835,7 @@ def classify_spectral_type(
         )
     rms_gap = rms_gap_to_second_best(rms_by_type.values())
     class_gap = rms_gap_to_next_class(rms_by_type.items())
+    ranked_types = _rank_by_rms(rms_by_type, correlation_by_type, reduced_chi_square_by_type)
     return {
         "spectral_type": best_type,
         "classification_rms": best_rms,
@@ -724,6 +846,10 @@ def classify_spectral_type(
         "match_quality": "poor" if best_rms > NO_GOOD_MATCH_RMS else "good",
         "reason": None,
         "correlation_by_type": correlation_by_type,
-        "ranked_types": _rank_by_rms(rms_by_type, correlation_by_type),
+        "ranked_types": ranked_types,
         "excluded_windows_angstrom": excluded_windows,
+        "reduced_chi_square": ranked_types[0]["reduced_chi_square"],
+        "second_best_reduced_chi_square": ranked_types[1]["reduced_chi_square"]
+        if len(ranked_types) > 1
+        else None,
     }

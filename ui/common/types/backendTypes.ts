@@ -390,8 +390,11 @@ export interface TargetStarCount {
 export interface SpectroscopyResult {
   wavelengthsAngstrom?: number[];
   intensities?: number[];
+  intensityErrors?: number[] | null;
   quantumEfficiencyCorrectedIntensities?: number[] | null;
   responseCorrectedIntensities?: number[] | null;
+  responseCorrectedIntensityErrors?: number[] | null;
+  intensityNoiseModel?: SpectralNoiseModelRecord | null;
   selfDeterminedSpectralType?: string;
   selfDeterminedSpectralTypeRms?: number | null;
   selfDeterminedSpectralTypeNote?: string;
@@ -488,6 +491,24 @@ export interface DifferentialRefractionRecord {
   acrossDispersionArcsecAt8000?: number | null;
   alongDispersionSpanAngstrom?: number | null;
   acrossDispersionSpanPx?: number | null;
+}
+
+/**
+ * The camera numbers behind a spectrum's per-sample errors.
+ *
+ * Mirrors `PixelNoiseModel` in the spectroscopy pipeline. The error of each
+ * sample comes from the photon noise of its pixels (which needs the camera's
+ * gain), the read noise, and the error of the sky level. When a number is
+ * not known for the camera, the pipeline assumes one and says so here.
+ */
+export interface SpectralNoiseModelRecord {
+  gainEPerAdu: number;
+  readNoiseE: number;
+  gainIsAssumed: boolean;
+  readNoiseIsAssumed: boolean;
+  aduPerStoredUnit?: number;
+  framesAveraged?: number;
+  framesAreAssumed?: boolean;
 }
 
 /**

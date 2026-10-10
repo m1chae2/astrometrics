@@ -154,9 +154,14 @@ peak-to-sky and saturation source.
 | `wavelength_zero_point_uncertainty_angstrom` | angstrom | none | The error of that offset. |
 | `wavelength_zero_point_line_count` | lines | none | How many of the six lines passed the significance test. |
 | `wavelength_zero_point_applied` | flag | none | 1 when the pipeline shifted the wavelengths by the offset, 0 when it only measured it. |
+| `median_snr_per_resolution_element` | per resolution element | none | The median, over 4200 to 8000 A, of the brightness summed over one resolution element divided by the error of that sum (from the per-sample errors; the element width comes from the line-spread profile). |
+| `fraction_samples_snr_below_5` | fraction | none | The share of samples in that range whose brightness is below 5 times their own error. |
+| `snr_estimate_ratio` | ratio | none | The variance-based signal-to-noise divided by `signal_to_noise`. A ratio far from 1 means one of the two is wrong. |
 
 The checkpoint 1 flags are `resolution_assumed`, `low_signal_to_noise`,
-`zero_order_saturated`, `wavelength_zero_point_unconstrained` (fewer than two
+`zero_order_saturated`, `gain_assumed` and `read_noise_assumed` (the
+per-sample errors used an assumed camera gain or read noise),
+`wavelength_zero_point_unconstrained` (fewer than two
 lines found), `wavelength_zero_point_lines_disagree` (two or more lines that
 fail the chi-square test) and `wavelength_zero_point_large` (offset over its
 limit). The pipeline applies the offset before the quantum-efficiency,
@@ -184,6 +189,9 @@ classification and colour metrics have no value, and the checkpoint carries the
 | `ebv_used` | magnitude | none (reported only) | The colour excess E(B-V) the pipeline removed from the spectrum before classifying. The note names the catalog and the conversion. No value when the star has no Gaia DR3 id or Gaia gives none. |
 | `dereddening_type_shift_steps` | subtype steps | none (reported only) | How many steps on the O-to-M ladder the best type moved because of dereddening (ten steps to a letter class). A large shift means the observed colour was mostly dust. No value without an E(B-V). |
 | `index_vs_template_type_steps` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance between the type that six line strengths point to and the template-fit type. A designed limit, the one used for two types that disagree. |
+| `median_equivalent_width_relative_error` | fraction | none | The median of the equivalent-width error over its size, for features with a detected or possible verdict. |
+| `hbeta_equivalent_width_angstrom`, `halpha_equivalent_width_angstrom` | angstrom | none | The equivalent width of each Balmer line (positive for a dip). The note holds its error. |
+| `best_template_reduced_chi_square` | reduced chi-square | none | The chi-square per degree of freedom of the best reference by RMS, using the per-sample errors. Near 1 means a fit within the noise. It decides nothing. |
 
 The processing flags are `unclassified`, `emission_line_source`,
 `second_order_risk` and `slope_and_lines_disagree`. The last one marks a

@@ -325,6 +325,92 @@ near a line can be mistaken for it, for example the CH G band at 4304 A beside
 H-gamma in G and K stars; the chi-square test catches that only when other
 lines are present to disagree with it.
 
+## Per-sample uncertainty
+
+Every sample of the spectrum carries a 1-sigma error (the size of the random
+scatter that sample would show from one exposure to the next). The pipeline
+needs it to say how much a later measurement, such as a line strength, can be
+trusted. The error comes from a model of the camera, not from the finished
+spectrum.
+
+**Where the number comes from.** The extractor adds up the pixels in a box
+across the streak and subtracts the sky level. For that sum it computes a
+variance (the square of the error), in four terms:
+
+1. **Photon noise of the box.** Light arrives in separate particles, so a
+   pixel that collected `N` electrons scatters by `sqrt(N)` electrons (Poisson
+   noise). Each pixel holds star and sky together, so the term uses the whole
+   pixel value. The camera's gain (electrons per ADU, the step of the stored
+   pixel number) converts ADU to electrons.
+2. **Read noise of the box.** Every pixel gets the camera's read noise
+   (electrons, root mean square) each time the sensor is read.
+3. **Edge weights.** A pixel at the box edge counts for the fraction of it
+   inside the box. A pixel counted for a fraction `w` adds `w` times its value
+   and so `w` squared times its variance. A box of whole pixels gives the
+   familiar `n_pix` times the read variance.
+4. **The error of the sky level.** The extractor subtracts the sky once for
+   every pixel-area of the box, so the sky level's error counts that many
+   times. Each sky band's median has a variance of about `(pi / 2) s^2 / (n +
+   1.4)` for `n` pixels with scatter `s` (`n + 0.4` when `n` is odd), and the
+   mean of the two bands has a quarter of the sum. The pixel scatter `s` is
+   measured from the band, but never taken below what the camera model predicts
+   for sky pixels. A band of ten pixels gives a noisy scatter, and the clipping
+   step that drops hot pixels reads it low.
+
+The gain and read noise come from the same resolution the photometry pipeline
+uses (`pipelines/photometry/pre_processing/detector_noise.py`): the camera
+profile first, then the `EGAIN` and `RDNOISE` header cards, then an assumption
+of 1 electron per ADU and no read noise. The result records which of the two
+was assumed (`SpectroscopyResult.intensity_noise_model`), and checkpoint 1
+carries the `gain_assumed` and `read_noise_assumed` flags. A Siril stack saved
+as fractions of full scale is converted to ADU (65535 per unit) and its
+variance is divided by the number of stacked frames (`STACKCNT`).
+
+**Carrying the error through pre-processing.** Each later step multiplies a
+sample by a factor, so each multiplies its error by the size of that factor
+(its variance by the factor squared):
+
+- The usable-sample mask drops the same samples from the errors as from the
+  brightness.
+- The quantum-efficiency correction multiplies by one over the sensitivity.
+- The instrument-response division multiplies by one over the response, and
+  gives NaN outside the response's range, like the brightness.
+- The extinction correction multiplies by its factor when it was applied.
+- The sub-pixel position of a sample blends two image columns with weights
+  `1 - u` and `u`. The two readings use different pixels, so the blend has the
+  variance `(1 - u)^2 V1 + u^2 V2`.
+
+The pipeline stores the errors as `SpectroscopyResult.intensity_errors` (same
+units and order as `intensities`) and
+`SpectroscopyResult.response_corrected_intensity_errors` (same as
+`response_corrected_intensities`). The functions are in `intensity_variance.py`.
+
+**Limits of the model.**
+
+- Neighbouring samples share an image column, so their errors are correlated.
+  The stored array holds each sample's own error and not the covariance. A
+  sum over several samples that treats them as independent understates the
+  error of the sum.
+- The model assumes bias-subtracted and dark-subtracted pixels with one gain.
+  Flat-fielding, stacking and registration change the noise a little, and the
+  model does not follow that.
+- The model takes the quantum-efficiency curve and the instrument response to
+  be exact. Their own errors are not in the stored errors.
+- The neighbour-wing correction subtracts light from the brightness, and the
+  uncertainty of that subtraction is not added to the errors.
+- The traced extraction places its box from fitted centers and widths. The
+  variance covers the pixel noise inside the box it chose. It does not cover
+  the extra scatter from the box moving between exposures. Over 200 noise
+  realizations of one small synthetic frame, the median ratio of the reported
+  error to the measured scatter is 1.00 for the flare-mask extraction (with
+  sky subtraction), 0.97 for the dispersion-line extraction, and 0.96 for the
+  traced dispersion line (60 realizations). The traced flare-mask extraction on
+  that frame scattered more than its errors (median ratio 0.73 over 200
+  realizations, and 0.2 at the 5th percentile of the samples), because its box
+  switched between the fitted width and the fixed fallback width from one
+  exposure to the next. That frame is small, and the width fit fails in about
+  40% of its steps.
+
 ## What this stage produces
 
 This stage produces a calibrated spectrum, brightness by wavelength, for
@@ -377,6 +463,28 @@ shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
   signal-to-noise metric uses the limit
   `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, below which the pipeline does not
   classify the spectrum.
+  It also carries three metrics built from the per-sample errors, none with a
+  limit:
+  - `median_snr_per_resolution_element`: the median, over 4200 to 8000 A, of
+    the brightness summed over one resolution element divided by the error of
+    that sum. The width of the element comes from the line-spread profile at
+    each wavelength (the instrument's blur, which widens toward the red).
+  - `fraction_samples_snr_below_5`: the share of samples in that range whose
+    brightness is below 5 times their own error.
+  - `snr_estimate_ratio`: the variance-based signal-to-noise divided by the
+    post-hoc `signal_to_noise` above. Both estimate the same quantity, and the
+    variance-based one cuts the spectrum into the same non-overlapping
+    resolution elements as the post-hoc one. A ratio far from 1 means one of
+    the two is wrong: the gain or read noise in the model, or scatter in the
+    spectrum that the model does not include. The post-hoc estimate is itself
+    noisy. On four synthetic frames run through the whole pipeline with the
+    true gain and read noise, the ratio was 1.0 to 1.8, and the post-hoc
+    estimate alone ranged from 29 to 69 (40 and 69 for two noise seeds of one
+    frame with the traced extraction).
+
+  No measurement says what value of these three is too low, and the limit of
+  `signal_to_noise` was set for that estimator, so the three are reported
+  only.
 
 The four refraction metrics of checkpoint 0:
 

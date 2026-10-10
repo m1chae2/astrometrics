@@ -261,3 +261,34 @@ def test_a_zero_colour_excess_leaves_the_type_unchanged(line_spread: ResolutionP
     assert analysis.reddening is not None
     assert analysis.reddening.type_shift_steps == pytest.approx(0.0)
     assert analysis.reddening.observed_best_type == analysis.reddening.dereddened_best_type == "A0V"
+
+
+def test_the_dereddened_classification_carries_a_chi_square_from_scaled_errors(
+    line_spread: ResolutionProfile,
+) -> None:
+    """Verify the reported (dereddened) type keeps its reduced chi-square.
+
+    Dereddening multiplies each sample by a fixed factor, so the sample
+    errors are scaled by the same factor before the classifier uses them.
+    With 1% errors on a noiseless reddened G0V, the dereddened fit must give
+    a finite chi-square. Without errors it would have none.
+    """
+    wavelength, flux = blurred_template("G0V", line_spread)
+    reddened = redden_spectrum(wavelength, flux, EBV)
+    errors = 0.01 * np.abs(reddened)
+
+    analysis = analyze_spectrum(
+        wavelength,
+        reddened,
+        reddened,
+        resolution_profile=line_spread,
+        reddening=ReddeningEstimate(ebv=EBV, source="test", gaia_source_id=1),
+        intensity_errors=errors,
+        response_corrected_intensity_errors=errors,
+    )
+
+    chi_square = analysis.classification.get("reduced_chi_square")
+    assert analysis.reddening is not None
+    assert analysis.reddening.dereddened_best_type
+    assert isinstance(chi_square, float)
+    assert np.isfinite(chi_square)

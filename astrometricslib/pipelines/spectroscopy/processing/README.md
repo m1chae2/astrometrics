@@ -198,6 +198,72 @@ indices. The estimate is therefore a second opinion on the type, good to a
 few subtypes. It is not a replacement for the template fit, and it cannot
 separate the hot side of A from the cool side without the continuum.
 
+## Equivalent widths and their errors
+
+The depth of a feature depends on how much the instrument blurred it. The
+equivalent width (EW) does not. It is the width, in Angstroms, of a rectangle
+from zero up to the continuum that holds the same area as the line's deficit:
+the integral of `1 - F / C` over wavelength, with `F` the spectrum and `C` the
+continuum (the brightness without the line). A dip has a positive EW, and an
+emission bump a negative one. A Gaussian dip of depth `d` and standard
+deviation `s` has an EW of `d * s * sqrt(2 * pi)`.
+
+For each named feature that the detector measures, the pipeline adds these
+keys to the feature's record, next to the depth fields (which stay as they
+were):
+
+- `equivalent_width_angstrom`
+- `equivalent_width_error_angstrom`
+- `equivalent_width_window_half_width_angstrom`, how far the integral reached
+  on each side of the feature
+
+They are `None` when the spectrum carries no errors or the window is not
+covered. The EW is measured at the center of the dip the detector chose. The
+integral runs over 1.5 times the line spread (the width of the instrument's
+blur at that wavelength) on each side. The continuum is the same quadratic the
+detector fits to the bands beside the feature. When the integration window is
+wider than the detector's inner band edge, which happens in the red where the
+blur is wider, the bands start at the window edge instead, so they never hold
+the line's own wings.
+
+The error has two independent parts, added in quadrature (as a variance sum):
+
+- the sample errors inside the window, each scaled by the width of the sample
+  and divided by the continuum;
+- the error of the continuum fit, from the covariance of the fitted
+  coefficients, which the pipeline computes from the sample errors in the
+  bands and propagates to the EW through the slope of the EW with respect to
+  each coefficient.
+
+When the band samples scatter about the fitted curve by clearly more than their
+errors say (more than 3 standard deviations above a reduced chi-square of 1),
+the continuum part is multiplied by the square root of that reduced
+chi-square. `equivalent_width.py` holds the details and its limits. The
+verdicts and p-values do not use the errors.
+
+On a synthetic Gaussian line (EW 9.6 A, blur 45 A, 200 noise realizations),
+the mean EW is within one standard error of the truth, and the mean reported
+error is 0.95 times the scatter of the 200 results (0.99 with noise only in
+the window, and 1.01 with noise only in the continuum bands). With the center
+chosen by the detector's best-dip search, a faint line's EW reads about 3% high.
+
+## Reduced chi-square next to the RMS
+
+When the spectrum carries errors, the classifier gives every reference a
+second score: the reduced chi-square. It is the sum of the squared residuals,
+each divided by its sample's error squared, over the number of samples used
+minus one (for the fitted scale). It uses the same scale and the same samples
+as the RMS (it leaves out the atmospheric bands and the excluded windows), so
+it scores the residuals the RMS scores. A value near 1 means the reference fits
+within the noise. A value far above 1 means the mismatch is larger than the
+noise, which is the usual case for a bright star, because the references and
+the instrument response are not exact.
+
+The score appears as `reduced_chi_square` in every `ranked_types` entry, and
+the classification result carries it for the best and the second-best
+reference by RMS as `reduced_chi_square` and `second_best_reduced_chi_square`.
+The ranking, the decision and every threshold still use the RMS alone.
+
 ## What this stage produces
 
 This stage produces a likely spectral type, the reddening correction behind
@@ -231,6 +297,15 @@ the second-order ratio, and changes none of them. Its metrics are:
   checkpoint raises the `slope_and_lines_disagree` flag when the distance
   passes it. On the templates, the leave-one-out distance never passes it
   (the worst miss is 19 subtypes).
+- `median_equivalent_width_relative_error`: the median of the EW error over the
+  EW's size, for features with a detected or possible verdict;
+- `hbeta_equivalent_width_angstrom` and `halpha_equivalent_width_angstrom`: the
+  EW of each line, with its error in the note;
+- `best_template_reduced_chi_square`: the reduced chi-square of the best
+  reference.
+
+The last four metrics have no limit. No measurement says what value is too
+poor, so the pipeline reports them only.
 
 The `processing_quality` run gate counts the spectra in which any of these
 metrics fails. The [pipeline README](../README.md) lists every metric with its

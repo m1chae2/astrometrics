@@ -73,6 +73,37 @@ def interpolate_quantum_efficiency(wavelength_nm: np.ndarray, curve: QuantumEffi
     return np.interp(wavelength_nm, curve.wavelength_nm, curve.quantum_efficiency_fraction)
 
 
+def quantum_efficiency_correction_factor(
+    wavelength_nm: np.ndarray,
+    curve: QuantumEfficiencyCurve,
+    minimum_quantum_efficiency_fraction: float = 0.01,
+) -> np.ndarray:
+    """Give the number the quantum-efficiency correction multiplies by.
+
+    The correction divides the brightness by the camera's sensitivity, so it
+    multiplies by one over the sensitivity. A brightness error is multiplied by
+    the same number (see `intensity_variance`).
+
+    Parameters
+    ----------
+    wavelength_nm : `np.ndarray`
+        The colors we captured.
+    curve : `QuantumEfficiencyCurve`
+        The camera's sensitivity data.
+    minimum_quantum_efficiency_fraction : `float`, optional
+        The least sensitivity used, as in the apply function above.
+
+    Returns
+    -------
+    factor : `np.ndarray`
+        One over the sensitivity, at each wavelength.
+    """
+    quantum_efficiency_fraction = np.clip(
+        interpolate_quantum_efficiency(wavelength_nm, curve), minimum_quantum_efficiency_fraction, None
+    )
+    return 1.0 / quantum_efficiency_fraction
+
+
 def apply_quantum_efficiency_correction(
     wavelength_nm: np.ndarray,
     intensity: np.ndarray,

@@ -30,7 +30,9 @@ from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.errors import InvalidArgumentError, ProcessingError
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    ResolutionProfile,
     blur_sigma_in_samples,
+    load_line_spread_profile,
 )
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -40,12 +42,23 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 # response, so the fit skips the samples around them.
 _LINES_TO_SKIP_ANGSTROM = (3970.0, 4102.0, 4340.0, 4861.0, 6563.0)
 
-# How far either side of each line the fit skips, in Angstroms. The
-# wider Balmer wings reach about 100 A at this resolution, but skipping
-# 120 A around the blue lines left the fit unconstrained below 4300 A and
-# it swung to a wrong value at the blue end. 60 A keeps the fit anchored
-# and leaves only the far wings, which the smooth polynomial ignores.
-_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
+# How far either side of each line the fit skips, as a multiple of the
+# instrument's line spread (the full width at half maximum, FWHM, of a sharp
+# line after the instrument blurs it) at that line's wavelength. A Gaussian
+# dip is down to 0.2 percent of its depth at 1.5 FWHM (3.5 sigma), so what is
+# left outside the skipped band is far below the 1 percent the response must
+# hold. The line spread is 42 A at 4200 A and 148 A at 6563 A, so the skipped
+# band is 126 A wide at H-delta and 444 A wide at H-alpha. A fixed 60 A half
+# width would leave most of the H-alpha and H-beta wings in the fit, and the
+# response would then divide Vega's line wings out of every target.
+_LINE_SKIP_HALF_WIDTH_PER_FWHM = 1.5
+
+# The least the fit skips either side of a line, in Angstroms, whatever the
+# line spread says. In the blue the line spread is only 42-45 A, but the
+# Balmer wings there reach about 100 A, so those lines keep a band of at least
+# 60 A each side. A wider band in the blue left the fit unconstrained below
+# 4300 A, and it swung to a wrong value at the blue end.
+_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 
 # The default range the response is fitted over, and so the range spectra
 # are compared with the references (a response marks everything outside
@@ -124,6 +137,11 @@ class InstrumentResponse:
         The reference spectrum the response was derived against.
     source : `str`
         A note on what was observed to derive it.
+    reference_airmass : `float` or `None`
+        The airmass of the standard star's observation. The response
+        includes the air's dimming at this airmass, so a target observed
+        at another airmass needs the correction in `atmospheric_extinction`.
+        `None` when the file that stored the response does not record it.
     """
 
     camera_name: str
@@ -132,6 +150,7 @@ class InstrumentResponse:
     maximum_wavelength_angstrom: float
     reference_type: str
     source: str
+    reference_airmass: float | None = None
 
     def value_at(self, wavelength_angstrom: np.ndarray) -> np.ndarray:
         """Give the response at some wavelengths.
@@ -179,6 +198,11 @@ def load_instrument_response(camera_name: str) -> InstrumentResponse | None:
                 maximum_wavelength_angstrom=float(stored["maximum_wavelength_angstrom"]),
                 reference_type=stored["reference_type"],
                 source=stored["source"],
+                reference_airmass=(
+                    float(stored["reference_airmass"])
+                    if stored.get("reference_airmass") is not None
+                    else None
+                ),
             )
     return None
 
@@ -213,6 +237,39 @@ def apply_instrument_response(
     return corrected
 
 
+def line_skip_half_widths_angstrom(
+    line_spread_profile: ResolutionProfile | None, fallback_line_spread_angstrom: float
+) -> np.ndarray:
+    """Give how far either side of each strong line the response fit skips.
+
+    The fit skips `_LINE_SKIP_HALF_WIDTH_PER_FWHM` times the line spread at
+    the line's wavelength, and never less than
+    `_MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM`.
+
+    Parameters
+    ----------
+    line_spread_profile : `ResolutionProfile` or `None`
+        The instrument's line spread (a FWHM, in Angstroms) at each
+        wavelength, or `None` when none is known.
+    fallback_line_spread_angstrom : `float`
+        The line spread to use at every line when there is no profile, in
+        Angstroms.
+
+    Returns
+    -------
+    half_widths_angstrom : `numpy.ndarray`
+        One half-width per entry of `_LINES_TO_SKIP_ANGSTROM`, in
+        Angstroms.
+    """
+    lines = np.array(_LINES_TO_SKIP_ANGSTROM)
+    line_spread = (
+        line_spread_profile.at(lines)
+        if line_spread_profile is not None
+        else np.full(lines.size, fallback_line_spread_angstrom)
+    )
+    return np.maximum(_LINE_SKIP_HALF_WIDTH_PER_FWHM * line_spread, _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM)
+
+
 def derive_instrument_response(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -221,6 +278,8 @@ def derive_instrument_response(
     source: str,
     wavelength_range_angstrom: tuple[float, float] = DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    line_spread_profile: ResolutionProfile | None = None,
+    reference_airmass: float | None = None,
 ) -> InstrumentResponse:
     """Fit the response from an observation of a star of known type.
 
@@ -229,6 +288,13 @@ def derive_instrument_response(
     compared. Blurring it to the wrong width would leave a mismatch around
     every line, and the fit would wrongly treat that as part of the
     instrument's response.
+
+    The fit also skips the samples around the strong hydrogen lines
+    (`_LINES_TO_SKIP_ANGSTROM`). The skipped band reaches
+    `_LINE_SKIP_HALF_WIDTH_PER_FWHM` times the instrument's line spread
+    either side of the line. The line spread comes from the same stored
+    profile the classifier uses (`load_line_spread_profile`), evaluated at
+    the line's wavelength.
 
     Parameters
     ----------
@@ -255,6 +321,15 @@ def derive_instrument_response(
         Defaults to `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the
         observation's own measured value when there is one (see
         `spectral_resolution`).
+    line_spread_profile : `ResolutionProfile`, optional
+        The instrument's line spread at each wavelength, in Angstroms. When
+        `None`, the stored profile for `camera_name` is read. When the
+        camera has none, `resolution_element_angstrom` stands in at every
+        line.
+    reference_airmass : `float`, optional
+        The airmass the standard star was observed at, stored with the
+        response so the extinction correction can use it. `None` if
+        unknown.
 
     Returns
     -------
@@ -289,8 +364,15 @@ def derive_instrument_response(
         & (wavelength_angstrom >= low)
         & (wavelength_angstrom <= high)
     )
-    for line in _LINES_TO_SKIP_ANGSTROM:
-        usable &= np.abs(wavelength_angstrom - line) > _LINE_SKIP_HALF_WIDTH_ANGSTROM
+    for line, half_width in zip(
+        _LINES_TO_SKIP_ANGSTROM,
+        line_skip_half_widths_angstrom(
+            line_spread_profile if line_spread_profile is not None else load_line_spread_profile(camera_name),
+            resolution_element_angstrom,
+        ),
+        strict=True,
+    ):
+        usable &= np.abs(wavelength_angstrom - line) > half_width
     if usable.sum() < 50:
         raise ProcessingError("Too few usable samples to fit an instrument response.")
 
@@ -304,4 +386,5 @@ def derive_instrument_response(
         maximum_wavelength_angstrom=high,
         reference_type=reference_type,
         source=source,
+        reference_airmass=reference_airmass,
     )

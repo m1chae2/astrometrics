@@ -127,17 +127,33 @@ builds this file:
    efficiency.
 2. The script divides that corrected spectrum by the bundled `a0v.txt`
    reference spectrum, after blurring the reference to the instrument's
-   resolution (30 A).
+   resolution (a single width, in Angstroms).
 3. The script fits the logarithm of that ratio with a degree-4 polynomial
-   over the range 4200-8000 A. The fit skips a 60 A window around the
-   strong Balmer and Ca H lines, so Vega's own absorption dips do not
-   become part of the recorded instrument response.
+   over the range 4200-8000 A. The fit skips a band around each strong
+   Balmer and Ca H line, so Vega's own absorption dips do not become part
+   of the recorded instrument response. Each band reaches 1.5 times the
+   instrument's line spread (a full width at half maximum, in Angstroms)
+   at that line's wavelength, and at least 60 A, to each side of the line.
+   The line spread comes from `line_spread_zwo_asi_533mm_pro.json`, the
+   file the classifier also reads. It is 148 A at H-alpha, so the band
+   there reaches 222 A to each side. At H-gamma the line spread is 44 A and
+   the 60 A minimum applies.
 
 The resulting JSON file stores the polynomial's coefficients (highest power
 first), evaluated against `(wavelength - 6000) / 2000`; the wavelength
-range over which the fit is valid; and a note identifying the observation
-used. Dividing an observed spectrum by this response removes the
-instrument's tilt.
+range over which the fit is valid; a note identifying the observation used;
+and `reference_airmass`, the airmass of that observation (unitless).
+Dividing an observed spectrum by this response removes the instrument's
+tilt, along with the air's dimming at the reference airmass.
+
+The stored file records `reference_airmass` 1.15. That value is the airmass
+that `cross_trail_blur_zwo_asi_533mm_pro.json` logs for the 40 Vega frames of
+0.25 s taken on 2026-09-25. The response's own `source` note describes the
+same set of frames. The stored coefficients came from a fit with a fixed 60 A
+band around every line, so they still carry some of Vega's line wings.
+Re-running the derivation script fits them with the wider bands. The script
+does not yet write `reference_airmass`, so add it to the JSON by hand after
+re-deriving.
 
 ### Validity
 
@@ -179,3 +195,31 @@ A setup where extending the range would help, for example one that adds a
 blocking filter to remove second-order light, can request the full range:
 
     python -m astrometricslib.scripts.derive_instrument_response --maximum-wavelength 10000
+
+## Atmospheric extinction
+
+`atmospheric_extinction_kpno.txt` lists how much the air dims starlight at
+each wavelength. The columns are `wavelength_angstrom` (Angstroms) and
+`extinction_mag_per_airmass` (magnitudes per airmass; one magnitude is a
+factor of 2.512 in brightness). The file has 78 rows from 3200 A to 8370 A.
+The extinction coefficient falls from 1.017 at 3200 A to 0.31 at 4190 A,
+0.148 at 5556 A and 0.052 at 8000 A.
+
+`atmospheric_extinction.py` interpolates this table and uses it to scale a
+spectrum from one airmass to another (see the pre-processing README).
+
+### Source
+
+Mean extinction curve for Kitt Peak National Observatory, from the file
+`noao/lib/onedstds/kpnoextinct.dat` of the IRAF distribution
+(<https://github.com/iraf-community/iraf>). The IRAF `onedstds` README
+describes it as the KPNO extinction table for ONEDSPEC. It does not give a
+journal reference for the KPNO values. The file here keeps rows up to 8370 A
+unchanged from the source; the source's last four rows (8708 to 10400 A) are
+CTIO values that the IRAF file itself marks as not measured at KPNO, and this
+file leaves them out. The download happened on 2026-10-10.
+
+Kitt Peak is a dry site at 2 km altitude. A site at lower altitude has
+somewhat larger extinction in the blue. The correction uses the difference
+between two airmasses, so the curve's shape matters more than its overall
+level.

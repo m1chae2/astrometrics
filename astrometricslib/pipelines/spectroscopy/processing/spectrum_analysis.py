@@ -16,6 +16,7 @@ import numpy as np
 
 from astrometricslib.models.spectroscopy_quality import CatalogComparison
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     ResolutionProfile,
     resolve_resolution_element_angstrom,
@@ -81,6 +82,11 @@ class SpectrumAnalysis:
         How this classification compares with the star's catalog entry
         (see `post_processing.compare_to_catalog`). `None` when nothing
         was classified, so there was nothing to compare.
+    extinction_correction : `dict` or `None`
+        Whether the airmass extinction correction was applied to
+        `response_corrected_intensity`, and the target and reference
+        airmasses (see `ExtinctionCorrection.as_dict`). `None` when the
+        caller did not try the correction.
     """
 
     classification: dict[str, object]
@@ -93,6 +99,7 @@ class SpectrumAnalysis:
     is_emission_line_source: bool = False
     response_corrected_intensity: list[float] | None = None
     catalog_comparison: CatalogComparison | None = None
+    extinction_correction: dict[str, object] | None = None
 
 
 # The `stellar_spectral_type` label given to extended objects (clusters
@@ -200,6 +207,7 @@ def analyze_spectrum(
     catalog_b_minus_v: float | None = None,
     resolution_profile: ResolutionProfile | None = None,
     possible_neighbor_contamination: list[dict[str, float | None]] | None = None,
+    extinction_correction: ExtinctionCorrection | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -260,6 +268,12 @@ def analyze_spectrum(
         comparison alongside the emission windows, not instead of them --
         the two causes are unrelated and either can apply to the same
         spectrum.
+    extinction_correction : `ExtinctionCorrection`, optional
+        The record of the airmass extinction correction the caller applied
+        to `response_corrected_intensity` (see
+        `pre_processing.atmospheric_extinction`). The analysis does not
+        apply it; it stores the record in the result so the airmasses and
+        the applied or skipped status travel with the spectrum.
 
     Returns
     -------
@@ -450,4 +464,5 @@ def analyze_spectrum(
             corrected_intensity.tolist() if corrected_intensity is not None else None
         ),
         catalog_comparison=comparison,
+        extinction_correction=extinction_correction.as_dict() if extinction_correction is not None else None,
     )

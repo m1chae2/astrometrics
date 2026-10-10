@@ -4,8 +4,11 @@ This file provides two ways to measure a spectrum:
 1. Basic: Draws a straight rectangular box over the spectrum and adds up
    all the light inside it.
 2. Advanced (Traced): Carefully follows the exact center of the spectrum as
-   it bends or widens. It adjusts the size of the box on the fly to get
-   the best possible reading while ignoring background noise.
+   it bends or widens. It sizes the box from the spectrum's width, smoothed
+   over many steps so that fit noise does not make the box jump by a whole
+   pixel from one step to the next (`traced_aperture_half_widths_px`). The
+   box can end part-way through a pixel, and each edge pixel counts for the
+   fraction of it inside the box (`box_pixel_weights`).
 
 Pipeline stage: sky background subtraction
 ------------------------------------------
@@ -22,9 +25,12 @@ does two kinds of damage to the spectrum:
 
 So, at every step along the spectrum, every extraction method in this file
 measures the sky in narrow "sky bands" just outside the box, on both sides
-of the streak, and subtracts that sky level from the box total. This stage
-runs BEFORE wavelength calibration, so the calibrator and every later stage
-(feature detection, classification) only ever see star light.
+of the streak, and subtracts that sky level from the box total. The sky
+level is the mean of the two bands' medians, or the lower-valued band's
+median alone when the bands disagree by more than noise allows
+(`measure_sky`). This stage runs BEFORE wavelength calibration, so the
+calibrator and every later stage (feature detection, classification) only
+ever see star light.
 
 In a crowded field the "sky" beside a star is mostly the light of other
 stars: their spectra overlap, and the glow around each one adds up. That
@@ -79,6 +85,7 @@ not been tested that a 2D fit would remove the gap.
 import logging
 import math
 import warnings
+from dataclasses import dataclass, field
 
 import numpy as np
 from astropy.modeling import fitting, models
@@ -125,6 +132,20 @@ _MINIMUM_CROSS_SECTION_SAMPLES = 5
 # spectrum. A value of 2.5 is wide enough to capture almost all (99%) of
 # the star's light without accidentally including too much empty black sky.
 APERTURE_SIGMA_MULTIPLIER = 2.5
+
+# How many neighbouring steps the width is smoothed over before it sets the
+# box size. The width is fitted again at every step and each fit is noisy
+# (about 0.01 px on a bright star, several times more on a faint one). A box
+# that follows each fit directly changes size from step to step, and every
+# change shows up in the spectrum as a step in brightness that the star did
+# not cause. The real width changes over hundreds of steps (Vega: 1.2 px at
+# 4200 A to 1.9 px at 5000 A, 400 or so steps), so a median over 61 steps
+# removes the noise and still follows the change. 61 steps is about a tenth
+# of a typical trail (Vega's has 563). Chosen by judgement, not tuned.
+APERTURE_SIGMA_SMOOTHING_STEPS = 61
+
+# The smallest box half-width the traced extraction will use, in pixels.
+_MINIMUM_APERTURE_HALF_WIDTH_PX = 1.0
 
 # The narrowest line width (in pixels) we'll accept as a real measurement,
 # not a math mistake. A Gaussian fit needs a handful of pixels spread
@@ -428,70 +449,379 @@ def replace_narrow_spikes(cross_section: np.ndarray) -> np.ndarray:
     return np.where(is_spike, baseline, values)
 
 
-def measure_sky_level_per_pixel(
-    cross_section: np.ndarray, aperture_center: int, aperture_half_width: int
-) -> float:
+# Each sky band is cleaned before its median is taken: pixels further than
+# this many sigma from the band's median are dropped, and the median and
+# sigma are found again, until nothing more is dropped. Three sigma drops a
+# hot pixel, a cosmic ray or the edge of a faint passing trail, and keeps
+# 99.7 percent of plain sky noise, so it leaves the median unbiased.
+SKY_CLIP_SIGMA = 3.0
+
+# The most clipping passes per band. Three or four passes settle on a typical
+# band of 10 pixels; the cap only stops a pathological band from looping.
+SKY_CLIP_MAX_PASSES = 5
+
+# How many times the noise of the difference between the two band medians
+# the bands may differ before the pipeline treats the higher one as
+# contaminated (a neighbour's trail or glow in it) and uses only the
+# lower-valued band. A false alarm costs little: the answer then falls back
+# to that band alone, which reads about half a band-median noise low.
+SKY_CONTAMINATION_SIGMA = 3.0
+
+# The noise used to judge whether the two band medians differ is the lower
+# of the two bands' pixel scatter, but never below this fraction of the
+# scatter of both bands pooled. With only 10 pixels per band, the lower of
+# two scatter estimates is often well below the true scatter, and with the
+# lower one alone about 11 percent of steps on plain sky noise were flagged
+# as contaminated; with this floor about 4 percent are, while a band half
+# filled by a neighbour's trail is still flagged in most cases (simulated
+# 2026-10-10: 10-pixel bands of normal noise, clean sky bias -0.30 ADU at 13
+# ADU of noise per pixel, against -2.6 ADU for taking the lower median).
+# Chosen by simulation, not from real frames.
+SKY_POOLED_NOISE_FLOOR = 0.75
+
+# The standard error of a median of normal data is this many times the
+# data's sigma divided by the square root of the sample count:
+# sqrt(pi / 2) = 1.2533.
+MEDIAN_STANDARD_ERROR_FACTOR = 1.2533
+
+# The labels for how a sky level was found; see `SkyMeasurement`.
+SKY_MODE_BOTH_BANDS = "both_bands"
+SKY_MODE_LOWER_BAND_CONTAMINATED = "lower_band_contaminated"
+SKY_MODE_UPPER_BAND_CONTAMINATED = "upper_band_contaminated"
+SKY_MODE_SINGLE_BAND = "single_band"
+SKY_MODE_NO_SKY = "no_sky"
+
+
+@dataclass(frozen=True)
+class SkyMeasurement:
+    """The sky level at one step along the spectrum and how it was found.
+
+    Attributes
+    ----------
+    level_per_pixel : `float`
+        The sky brightness of a single pixel, in ADU (the camera's counts).
+        `0.0` when no sky could be measured.
+    mode : `str`
+        How the level was found. `"both_bands"`: the mean of the two band
+        medians. `"lower_band_contaminated"`: the band on the low-index
+        side of the trail was the brighter of the two and differed from the
+        other by more than `SKY_CONTAMINATION_SIGMA` times the noise, so
+        only the other band was used. `"upper_band_contaminated"`: the same
+        for the band on the high-index side. `"single_band"`: only one band
+        had enough pixels on the image. `"no_sky"`: neither had.
+    """
+
+    level_per_pixel: float
+    mode: str
+
+
+@dataclass
+class ExtractionDiagnostics:
+    """What the extractor did during its latest extraction.
+
+    The extractor resets this at the start of every `extract_*` call.
+
+    Attributes
+    ----------
+    aperture_half_width_px : `list` [`float`]
+        The half-width of the reading box at each step of a traced
+        extraction, in pixels. A box reaches this far each side of its
+        centre. Empty for the untraced methods, which use the same fixed
+        radius at every step.
+    sky_mode_counts : `dict` [`str`, `int`]
+        How many sky readings used each `SkyMeasurement.mode`. Each step
+        makes one reading, and a step between two columns makes two.
+    """
+
+    aperture_half_width_px: list[float] = field(default_factory=list)
+    sky_mode_counts: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def dominant_sky_mode(self) -> str | None:
+        """Give the sky mode used by the most readings.
+
+        Returns
+        -------
+        mode : `str` or `None`
+            The most common `SkyMeasurement.mode`, or `None` when no sky
+            was read.
+        """
+        if not self.sky_mode_counts:
+            return None
+        return max(self.sky_mode_counts, key=lambda mode: self.sky_mode_counts[mode])
+
+    @property
+    def contaminated_sky_fraction(self) -> float:
+        """Give the fraction of sky readings that had to drop a band.
+
+        Returns
+        -------
+        fraction : `float`
+            The share of readings in either "contaminated" mode, 0 to 1.
+            `0.0` when no sky was read.
+        """
+        total = sum(self.sky_mode_counts.values())
+        if total == 0:
+            return 0.0
+        contaminated = self.sky_mode_counts.get(SKY_MODE_LOWER_BAND_CONTAMINATED, 0) + (
+            self.sky_mode_counts.get(SKY_MODE_UPPER_BAND_CONTAMINATED, 0)
+        )
+        return contaminated / total
+
+
+def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | None:
+    """Find a sky band's median and noise after clipping outlying pixels.
+
+    Parameters
+    ----------
+    band : `numpy.ndarray`
+        The pixels of one sky band, in ADU. Non-finite values are ignored.
+
+    Returns
+    -------
+    statistics : `tuple` [`float`, `float`, `int`] or `None`
+        The median, the standard deviation of one pixel, and the number of
+        pixels kept, or `None` when fewer than `SKY_BAND_MINIMUM_SAMPLE_COUNT`
+        finite pixels exist.
+    """
+    pixels = band.astype(float)
+    pixels = pixels[np.isfinite(pixels)]
+    if pixels.size < SKY_BAND_MINIMUM_SAMPLE_COUNT:
+        return None
+    for _ in range(SKY_CLIP_MAX_PASSES):
+        median = float(np.median(pixels))
+        # 1.4826 times the median absolute deviation is the sigma of normal
+        # data, and a bright pixel cannot inflate it the way it inflates a
+        # plain standard deviation.
+        robust_sigma = 1.4826 * float(np.median(np.abs(pixels - median)))
+        if robust_sigma <= 0.0:
+            break
+        kept = pixels[np.abs(pixels - median) <= SKY_CLIP_SIGMA * robust_sigma]
+        if kept.size == pixels.size or kept.size < SKY_BAND_MINIMUM_SAMPLE_COUNT:
+            break
+        pixels = kept
+    noise = float(np.std(pixels, ddof=1)) if pixels.size > 1 else 0.0
+    return float(np.median(pixels)), noise, int(pixels.size)
+
+
+def measure_sky(
+    cross_section: np.ndarray, aperture_center: float, aperture_half_width: float
+) -> SkyMeasurement:
     """Measure how bright the night sky is beside the spectrum.
 
     This is the measuring half of the sky background subtraction stage
     (see the module docstring). It looks at one line of pixels running
     straight across the streak, ignores the reading box and the gap next
-    to it, and measures the two sky bands beyond. Each band gets its own
-    typical value, and the LOWER of the two is used.
+    to it, and measures the two sky bands beyond.
 
-    Why the lower one: anything that is not sky (the trail of a
-    neighbouring star, or its glow) can only add light to a band. In a
-    crowded field such as a star cluster, a neighbour's spectrum often runs
-    alongside ours and fills one band. Pooling both bands would then give a
-    sky level far too high, and subtracting it would remove the star's own
-    light. The lower band is the one less likely to have a neighbour in it.
-    When the sky is smooth and both bands agree, this costs almost nothing.
+    Each band is cleaned first: a pixel far from the band's median (a hot
+    pixel, a cosmic ray, the edge of a passing trail) is dropped, and the
+    band's typical value is the median of what is left. A median is the
+    middle number once the pixels are sorted, so a few bright pixels cannot
+    pull it up.
 
-    Each band's typical value is its median, not its average. The median is
-    the middle number once the pixels are sorted, so a few unusually bright
-    pixels (a hot pixel or a cosmic ray) cannot pull it up.
+    The two band values are then combined:
+
+    * When both agree to within noise, the sky level is their mean. Each
+      median is a noisy estimate of the same sky, so their mean is the best
+      estimate. Taking the lower of the two instead is biased low by about
+      0.2 of one pixel's noise for 10-pixel bands, because the minimum of
+      two noisy numbers sits below their true value. That under-subtracts
+      the sky from every reading.
+    * When the bands differ by more than `SKY_CONTAMINATION_SIGMA` times the
+      noise of their difference, one band holds light that is not sky (the
+      trail or glow of a neighbouring star, as in a star cluster). Light
+      can only add to a band, so the band with the lower median is used
+      alone. The noise used is set by the cleaner (lower-scatter) band,
+      which has no neighbour in it.
+    * When only one band has enough pixels on the image, that band is used.
 
     Parameters
     ----------
     cross_section : `numpy.ndarray`
         One line of pixels running across the spectrum: a column of the
-        image when the spectrum runs left to right, or a row when it runs
-        top to bottom.
-    aperture_center : `int`
+        image when the spectrum runs left to right, or a row when it runs top
+        to bottom.
+    aperture_center : `float`
+        Index in `cross_section` of the middle of the reading box. A
+        fractional value is rounded to the nearest pixel to place the bands.
+    aperture_half_width : `float`
+        How many pixels the reading box reaches on each side of its middle.
+        A fractional value is rounded up, so the bands never overlap the
+        box.
+
+    Returns
+    -------
+    measurement : `SkyMeasurement`
+        The sky level per pixel, in ADU, and how it was found.
+    """
+    centre = round(aperture_center)
+    nearest_band_edge = math.ceil(aperture_half_width) + SKY_BAND_GAP_PX
+    farthest_band_edge = nearest_band_edge + SKY_BAND_WIDTH_PX
+    line_length = cross_section.size
+
+    lower_band = cross_section[max(0, centre - farthest_band_edge) : max(0, centre - nearest_band_edge)]
+    upper_band = cross_section[
+        min(line_length, centre + nearest_band_edge + 1) : min(line_length, centre + farthest_band_edge + 1)
+    ]
+
+    lower = _clipped_band_statistics(lower_band)
+    upper = _clipped_band_statistics(upper_band)
+    if lower is None and upper is None:
+        return SkyMeasurement(0.0, SKY_MODE_NO_SKY)
+    if lower is None or upper is None:
+        only = upper if lower is None else lower
+        return SkyMeasurement(only[0], SKY_MODE_SINGLE_BAND)
+
+    lower_median, lower_noise, lower_count = lower
+    upper_median, upper_noise, upper_count = upper
+    # The lower of two noisy scatter estimates reads low on average, which
+    # would flag clean sky as contaminated. Pooling both bands reads high when
+    # one band holds a neighbour. So the reference noise is the lower band
+    # scatter, but not below `SKY_POOLED_NOISE_FLOOR` of the pooled scatter.
+    pooled_noise = math.sqrt(0.5 * (lower_noise**2 + upper_noise**2))
+    reference_noise = max(min(lower_noise, upper_noise), SKY_POOLED_NOISE_FLOOR * pooled_noise)
+    difference_noise = (
+        MEDIAN_STANDARD_ERROR_FACTOR * reference_noise * math.sqrt(1.0 / lower_count + 1.0 / upper_count)
+    )
+    if abs(upper_median - lower_median) > SKY_CONTAMINATION_SIGMA * difference_noise:
+        if upper_median > lower_median:
+            return SkyMeasurement(lower_median, SKY_MODE_UPPER_BAND_CONTAMINATED)
+        return SkyMeasurement(upper_median, SKY_MODE_LOWER_BAND_CONTAMINATED)
+    return SkyMeasurement(0.5 * (lower_median + upper_median), SKY_MODE_BOTH_BANDS)
+
+
+def measure_sky_level_per_pixel(
+    cross_section: np.ndarray, aperture_center: float, aperture_half_width: float
+) -> float:
+    """Measure how bright the night sky is beside the spectrum.
+
+    This gives only the number from `measure_sky`. Use `measure_sky` when
+    the way the level was found matters.
+
+    Parameters
+    ----------
+    cross_section : `numpy.ndarray`
+        One line of pixels running across the spectrum.
+    aperture_center : `float`
         Index in `cross_section` of the middle of the reading box.
-    aperture_half_width : `int`
-        How many pixels the reading box reaches on each side of its
-        middle.
+    aperture_half_width : `float`
+        How many pixels the reading box reaches on each side of its middle.
 
     Returns
     -------
     sky_level_per_pixel : `float`
-        The typical sky brightness of a single pixel. `0.0` when neither
-        band has enough pixels on the image to measure it (subtract
+        The typical sky brightness of a single pixel, in ADU. `0.0` when
+        neither band has enough pixels on the image to measure it (subtract
         nothing).
     """
-    nearest_band_edge = aperture_half_width + SKY_BAND_GAP_PX
-    farthest_band_edge = nearest_band_edge + SKY_BAND_WIDTH_PX
-    line_length = cross_section.size
+    return measure_sky(cross_section, aperture_center, aperture_half_width).level_per_pixel
 
-    lower_band = cross_section[
-        max(0, aperture_center - farthest_band_edge) : max(0, aperture_center - nearest_band_edge)
-    ]
-    upper_band = cross_section[
-        min(line_length, aperture_center + nearest_band_edge + 1) : min(
-            line_length, aperture_center + farthest_band_edge + 1
-        )
-    ]
 
-    band_levels = []
-    for band in (lower_band, upper_band):
-        sky_pixels = band.astype(float)
-        sky_pixels = sky_pixels[np.isfinite(sky_pixels)]
-        if sky_pixels.size >= SKY_BAND_MINIMUM_SAMPLE_COUNT:
-            band_levels.append(float(np.median(sky_pixels)))
-    if not band_levels:
-        return 0.0
-    return min(band_levels)
+def smooth_aperture_sigmas(sigma_px: list[float | None] | np.ndarray) -> np.ndarray:
+    """Smooth the per-step trail width so the reading box changes slowly.
+
+    Each step's width fit is noisy. A box sized straight from it would grow
+    and shrink from step to step, and the extracted flux would jump with it.
+    This takes a running median over `APERTURE_SIGMA_SMOOTHING_STEPS` steps,
+    skipping steps whose fit failed. The median follows the slow change of
+    the real width along the trail and ignores the fit noise.
+
+    Parameters
+    ----------
+    sigma_px : `list` [`float` or `None`] or `numpy.ndarray`
+        The fitted trail width at each step, in pixels. `None`, `NaN` or a
+        value of 0 or less marks a step whose fit failed.
+
+    Returns
+    -------
+    smoothed_sigma_px : `numpy.ndarray`
+        The smoothed width at each step, in pixels. `NaN` where no fit
+        exists anywhere in the window.
+    """
+    values = np.array([np.nan if value is None else value for value in sigma_px], dtype=float)
+    values[~(values > 0)] = np.nan
+    half_window = APERTURE_SIGMA_SMOOTHING_STEPS // 2
+    smoothed = np.full(values.size, np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN windows give NaN, as wanted
+        for index in range(values.size):
+            window = values[max(0, index - half_window) : index + half_window + 1]
+            if np.isfinite(window).any():
+                smoothed[index] = np.nanmedian(window)
+    return smoothed
+
+
+def traced_aperture_half_widths_px(
+    sigma_px: list[float | None] | np.ndarray, fallback_half_width_px: float
+) -> np.ndarray:
+    """Give the reading-box half-width at every step of a traced extraction.
+
+    The half-width is `APERTURE_SIGMA_MULTIPLIER` times the smoothed trail
+    width (see `smooth_aperture_sigmas`), and at least one pixel. It can
+    be a fraction of a pixel: the reading box weights each edge pixel by the
+    fraction of it the box covers. Steps whose own fit failed use the
+    fallback, which is the fixed box the extractor reads there.
+
+    Parameters
+    ----------
+    sigma_px : `list` [`float` or `None`] or `numpy.ndarray`
+        The fitted trail width at each step, in pixels. `None`, `NaN` or a
+        value of 0 or less marks a step whose fit failed.
+    fallback_half_width_px : `float`
+        The half-width, in pixels, for a step whose fit failed.
+
+    Returns
+    -------
+    half_widths_px : `numpy.ndarray`
+        The half-width at each step, in pixels.
+    """
+    raw = np.array([np.nan if value is None else value for value in sigma_px], dtype=float)
+    smoothed = smooth_aperture_sigmas(raw)
+    half_widths = np.maximum(_MINIMUM_APERTURE_HALF_WIDTH_PX, APERTURE_SIGMA_MULTIPLIER * smoothed)
+    return np.where(np.isfinite(raw) & (raw > 0) & np.isfinite(smoothed), half_widths, fallback_half_width_px)
+
+
+def box_pixel_weights(
+    line_length: int, aperture_center: float, aperture_half_width: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Give the pixels a reading box touches and how much of each it covers.
+
+    A pixel at index `i` spans `i - 0.5` to `i + 0.5`. A box with half-width
+    `h` centred on `c` reaches `h` pixels beyond the centre pixel, so its
+    edges sit at `c - h - 0.5` and `c + h + 0.5`. Each pixel's weight is the
+    fraction of it inside the box, 0 to 1. A whole-number centre and
+    half-width give a weight of 1 to every pixel from `c - h` to `c + h`,
+    which is the box the extractor always read. A fractional half-width
+    gives the edge pixels a weight between 0 and 1, so the reading grows
+    smoothly as the box grows.
+
+    Parameters
+    ----------
+    line_length : `int`
+        The number of pixels in the line across the spectrum.
+    aperture_center : `float`
+        Where the middle of the box is, as a pixel index (may be fractional).
+    aperture_half_width : `float`
+        How far the box reaches each side of its middle, in pixels.
+
+    Returns
+    -------
+    indices : `numpy.ndarray`
+        The indices of the pixels with a weight above zero, on the image.
+    weights : `numpy.ndarray`
+        The fraction of each of those pixels the box covers.
+    """
+    low_edge = aperture_center - aperture_half_width - 0.5
+    high_edge = aperture_center + aperture_half_width + 0.5
+    first = max(0, math.floor(low_edge - 0.5))
+    last = min(line_length, math.ceil(high_edge + 0.5) + 1)
+    if first >= last:
+        return np.array([], dtype=int), np.array([], dtype=float)
+    indices = np.arange(first, last)
+    weights = np.clip(np.minimum(indices + 0.5, high_edge) - np.maximum(indices - 0.5, low_edge), 0.0, 1.0)
+    covered = weights > 0.0
+    return indices[covered], weights[covered]
 
 
 class SpectrumExtractor:
@@ -510,6 +840,10 @@ class SpectrumExtractor:
     reject_narrow_contaminants : `bool`
         Whether narrow bright spikes in the reading box (other stars'
         trails) are replaced by the smooth level before adding up.
+    last_diagnostics : `ExtractionDiagnostics`
+        What the latest `extract_*` call did: the box half-width at each
+        step and how the sky was found. Replaced at the start of every
+        `extract_*` call.
     """
 
     def __init__(
@@ -538,13 +872,14 @@ class SpectrumExtractor:
         self.radius = radius
         self.subtract_sky_background = subtract_sky_background
         self.reject_narrow_contaminants = reject_narrow_contaminants
+        self.last_diagnostics = ExtractionDiagnostics()
 
     def _sum_aperture_minus_sky(
         self,
         data: np.ndarray,
         line_index: int,
-        aperture_center: int,
-        aperture_half_width: int,
+        aperture_center: float,
+        aperture_half_width: float,
         is_horizontal: bool,
     ) -> float:
         """Add up the star's light in one reading box, without the sky.
@@ -552,6 +887,13 @@ class SpectrumExtractor:
         Every extraction method in this class reads its brightness through
         this one method, so the sky background subtraction stage cannot be
         skipped by accident in one of them.
+
+        The box can start and end part-way through a pixel. Each pixel at
+        the edge counts for the fraction of it inside the box (see
+        `box_pixel_weights`), and the sky is subtracted for the same
+        number of pixel-areas. A box that changes size in whole pixels
+        would add a step to the spectrum each time; weighting the edge
+        pixels makes the reading change smoothly with the box size.
 
         Parameters
         ----------
@@ -561,18 +903,20 @@ class SpectrumExtractor:
             Which position along the spectrum to read: the column when the
             spectrum runs left to right, or the row when it runs top to
             bottom.
-        aperture_center : `int`
-            Where the middle of the reading box is, across the spectrum.
-        aperture_half_width : `int`
-            How many pixels the box reaches on each side of its middle.
+        aperture_center : `float`
+            Where the middle of the reading box is, across the spectrum, as
+            a pixel index. A fraction places the box between pixels.
+        aperture_half_width : `float`
+            How many pixels the box reaches on each side of its middle. A
+            fraction makes the edge pixels count in part.
         is_horizontal : `bool`
             `True` when the spectrum runs left to right.
 
         Returns
         -------
         flux : `float`
-            The total light in the box minus the sky glow, or `NaN` when
-            the box is not on the image.
+            The total light in the box minus the sky glow, in ADU, or `NaN`
+            when the box is not on the image.
         """
         height, width = data.shape
         if is_horizontal:
@@ -584,32 +928,33 @@ class SpectrumExtractor:
                 return np.nan
             cross_section = data[line_index, :]
 
-        box_start = max(0, aperture_center - aperture_half_width)
-        box_end = min(cross_section.size, aperture_center + aperture_half_width + 1)
-        if box_start >= box_end:
+        box_indices, box_weights = box_pixel_weights(cross_section.size, aperture_center, aperture_half_width)
+        if box_indices.size == 0:
             return np.nan
 
-        box_pixels = cross_section[box_start:box_end]
+        box_pixels = cross_section[box_indices]
         if self.reject_narrow_contaminants:
             # Clean with a margin of real pixels beyond each box edge, so a
             # trail at the edge still has neighbours to be compared with.
-            margin_start = max(0, box_start - CONTAMINANT_BASELINE_WIDTH_PX)
-            margin_end = min(cross_section.size, box_end + CONTAMINANT_BASELINE_WIDTH_PX)
+            margin_start = max(0, int(box_indices[0]) - CONTAMINANT_BASELINE_WIDTH_PX)
+            margin_end = min(cross_section.size, int(box_indices[-1]) + 1 + CONTAMINANT_BASELINE_WIDTH_PX)
             cleaned_with_margin = replace_narrow_spikes(cross_section[margin_start:margin_end])
-            box_pixels = cleaned_with_margin[box_start - margin_start : box_end - margin_start]
-        box_total = float(np.sum(box_pixels))
+            box_pixels = cleaned_with_margin[box_indices - margin_start]
+        box_total = float(np.sum(box_weights * box_pixels))
         if not self.subtract_sky_background:
             return box_total
 
-        sky_level_per_pixel = measure_sky_level_per_pixel(cross_section, aperture_center, aperture_half_width)
-        return box_total - sky_level_per_pixel * (box_end - box_start)
+        sky = measure_sky(cross_section, aperture_center, aperture_half_width)
+        counts = self.last_diagnostics.sky_mode_counts
+        counts[sky.mode] = counts.get(sky.mode, 0) + 1
+        return box_total - sky.level_per_pixel * float(np.sum(box_weights))
 
     def _sum_aperture_at_position(
         self,
         data: np.ndarray,
         along_position: float,
-        aperture_center: int,
-        aperture_half_width: int,
+        aperture_center: float,
+        aperture_half_width: float,
         is_horizontal: bool,
     ) -> float:
         """Read the box at a position along the spectrum, whole pixel or not.
@@ -633,9 +978,9 @@ class SpectrumExtractor:
             The position along the spectrum, in pixels: the column when the
             spectrum runs left to right, or the row when it runs top to
             bottom. A whole number is the middle of that pixel.
-        aperture_center : `int`
+        aperture_center : `float`
             Where the middle of the reading box is, across the spectrum.
-        aperture_half_width : `int`
+        aperture_half_width : `float`
             How many pixels the box reaches on each side of its middle.
         is_horizontal : `bool`
             `True` when the spectrum runs left to right.
@@ -643,8 +988,8 @@ class SpectrumExtractor:
         Returns
         -------
         flux : `float`
-            The light in the box minus the sky glow, or `NaN` when the
-            position is not on the image.
+            The light in the box minus the sky glow, in ADU, or `NaN` when
+            the position is not on the image.
         """
         lower_index = math.floor(along_position)
         upper_weight = along_position - lower_index
@@ -686,6 +1031,7 @@ class SpectrumExtractor:
         profile : `np.ndarray`
             The total brightness at each step along the line.
         """
+        self.last_diagnostics = ExtractionDiagnostics()
         data = image.data
         h, w = data.shape
         x0, y0 = start_pos
@@ -729,9 +1075,10 @@ class SpectrumExtractor:
         Instead of assuming the spectrum is perfectly straight, this checks the
         true center at every step along the line. It draws a smooth curve
         through
-        those centers, and widens or narrows its reading box depending on how
-        fat the spectrum is at that spot. If it loses the trail for a moment,
-        it just guesses using a straight line until it finds it again.
+        those centers, and widens or narrows its reading box with the
+        spectrum's width, smoothed over many steps (see
+        `traced_aperture_half_widths_px`). If it loses the trail for a
+        moment, it reads a fixed-size box there until it finds it again.
 
         Parameters
         ----------
@@ -755,6 +1102,7 @@ class SpectrumExtractor:
         trail_width_px : `List[float]`
             How wide the spectrum was at each step.
         """
+        self.last_diagnostics = ExtractionDiagnostics()
         data = image.data
         height, width = data.shape
         x0, y0 = start_pos
@@ -779,6 +1127,7 @@ class SpectrumExtractor:
         fitted_sigmas = [sigma for sigma in raw_sigmas if sigma is not None]
         fallback_sigma = float(np.median(fitted_sigmas)) if fitted_sigmas else float(self.radius) / 3.0
 
+        aperture_half_widths = traced_aperture_half_widths_px(raw_sigmas, float(self.radius))
         pixels = []
         trail_width_px: list[float] = []
         for i in range(int(length)):
@@ -799,20 +1148,21 @@ class SpectrumExtractor:
                 else:
                     pixels.append(np.nan)
                 trail_width_px.append(0.0)
+                self.last_diagnostics.aperture_half_width_px.append(float(self.radius))
                 continue
 
             sigma = raw_sigmas[i] if raw_sigmas[i] is not None else fallback_sigma
-            aperture_radius = max(1, round(sigma * APERTURE_SIGMA_MULTIPLIER))
+            aperture_radius = float(aperture_half_widths[i])
             true_center_x = curr_x + perpendicular_vector[0] * smoothed_centerline[i]
             true_center_y = curr_y + perpendicular_vector[1] * smoothed_centerline[i]
-            center_int_x, center_int_y = round(true_center_x), round(true_center_y)
 
             if abs(vx) > abs(vy):
-                val = self._sum_aperture_at_position(data, curr_x, center_int_y, aperture_radius, True)
+                val = self._sum_aperture_at_position(data, curr_x, true_center_y, aperture_radius, True)
             else:
-                val = self._sum_aperture_at_position(data, curr_y, center_int_x, aperture_radius, False)
+                val = self._sum_aperture_at_position(data, curr_y, true_center_x, aperture_radius, False)
             pixels.append(val)
             trail_width_px.append(sigma)
+            self.last_diagnostics.aperture_half_width_px.append(aperture_radius)
 
         return np.array(pixels), smoothed_centerline, trail_width_px
 
@@ -864,6 +1214,7 @@ class SpectrumExtractor:
             Sub-pixel zero-order anchor Y coordinate.
 
         """
+        self.last_diagnostics = ExtractionDiagnostics()
         data = image.data
 
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
@@ -977,6 +1328,7 @@ class SpectrumExtractor:
         trail_width_px : `List[float]`
             How fat the spectrum was at each step.
         """
+        self.last_diagnostics = ExtractionDiagnostics()
         data = image.data
         anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
 
@@ -1103,11 +1455,15 @@ class SpectrumExtractor:
         profile : `numpy.ndarray`
             The summed intensity at each step.
         trail_width_px : `list` [`float`]
-            The aperture sigma used at each step (0.0 where the fit
-            failed).
+            The fitted trail sigma at each step, in pixels (0.0 where the
+            fit failed). The box half-width is not this step's value; it
+            comes from the widths smoothed over many steps (see
+            `traced_aperture_half_widths_px`) and is recorded in
+            `last_diagnostics`.
         """
         is_horizontal = orientation == "horizontal"
 
+        aperture_half_widths = traced_aperture_half_widths_px(raw_sigmas, float(radius))
         profile = []
         trail_width_px: list[float] = []
         for index, step in enumerate(steps):
@@ -1123,18 +1479,20 @@ class SpectrumExtractor:
                     val = self._sum_aperture_minus_sky(data, step, int_step_x, radius, False)
                 profile.append(val)
                 trail_width_px.append(0.0)
+                self.last_diagnostics.aperture_half_width_px.append(float(radius))
                 continue
 
             sigma = raw_sigmas[index] if raw_sigmas[index] is not None else fallback_sigma
-            aperture_radius = max(1, round(sigma * APERTURE_SIGMA_MULTIPLIER))
+            aperture_radius = float(aperture_half_widths[index])
             true_x = nominal_x + perpendicular_vector[0] * smoothed_centerline[index]
             true_y = nominal_y + perpendicular_vector[1] * smoothed_centerline[index]
 
             if is_horizontal:
-                val = self._sum_aperture_minus_sky(data, step, round(true_y), aperture_radius, True)
+                val = self._sum_aperture_minus_sky(data, step, true_y, aperture_radius, True)
             else:
-                val = self._sum_aperture_minus_sky(data, step, round(true_x), aperture_radius, False)
+                val = self._sum_aperture_minus_sky(data, step, true_x, aperture_radius, False)
             profile.append(val)
             trail_width_px.append(sigma)
+            self.last_diagnostics.aperture_half_width_px.append(aperture_radius)
 
         return np.array(profile), trail_width_px

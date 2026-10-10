@@ -10,5 +10,6 @@
   "minimum_wavelength_angstrom": 4200.0,
   "maximum_wavelength_angstrom": 8000.0,
   "reference_type": "A0V",
-  "source": "Vega spectroscopy set A: 40 frames at 0.25 s (unclipped), dark-subtracted, zero order tracked from a plate solve of the first frame; extracted with the exact-position extractor and grating distance 16.50 mm; derived 2026-09-25"
+  "source": "Vega spectroscopy set A: 40 frames at 0.25 s (unclipped), dark-subtracted, zero order tracked from a plate solve of the first frame; extracted with the exact-position extractor and grating distance 16.50 mm; derived 2026-09-25",
+  "reference_airmass": 1.15
 }

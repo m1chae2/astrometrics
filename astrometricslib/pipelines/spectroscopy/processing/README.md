@@ -2,7 +2,10 @@
 
 This stage finds things in a star's calibrated spectrum. Everything here
 takes a spectrum that pre-processing already cleaned up and works out what
-that spectrum shows about the star.
+that spectrum shows about the star. "Cleaned up" means the camera's
+sensitivity, the instrument's tilt and the difference in the air's dimming
+between this frame and the standard star's frame are already removed (see
+the [pre-processing README](../pre_processing/README.md)).
 
 ## The flow
 
@@ -31,6 +34,21 @@ that spectrum shows about the star.
    blue-versus-visual brightness ratio, its B-V colour, directly from the
    spectrum, independent of every other step in this stage. Post-processing
    later checks this measurement against the star's catalog colour.
+
+## What this stage records about its input
+
+`analyze_spectrum` stores the airmass extinction record that
+pre-processing produced in `SpectrumAnalysis.extinction_correction`. The
+record holds `is_applied` (true or false), `target_airmass` and
+`reference_airmass` (both unitless), `curve_name`, and `reason` (why the
+correction was skipped, if it was). The analysis does not apply the
+correction itself. A reviewer reads the record to see whether the
+classifier compared a spectrum that was scaled to the standard star's
+airmass or one that was not. When the correction was skipped, a tilt of
+about 0.09 magnitudes between 4200 A and 8000 A per 0.35 airmass of
+difference can remain. That is as large as the gap between neighbouring
+spectral types, so a skipped correction makes a classification less
+certain.
 
 ## What this stage produces
 

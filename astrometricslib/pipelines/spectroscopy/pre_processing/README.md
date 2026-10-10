@@ -15,8 +15,9 @@ turns out to be. The pipeline runs this stage the same way for every star.
    camera and grating to work out where each star's rainbow should fall on
    the sensor, using the physics of how a grating spreads light.
 3. **Extract each spectrum.** The pipeline measures the brightness along
-   each star's streak, following the streak's exact center and width, and
-   subtracts the sky background.
+   each star's streak. At each step along the streak it adds up the light in
+   a box across the streak, centred on the streak's fitted centre line, and
+   subtracts the sky background. See "Extraction box and sky" below.
 4. **Correct for crowding.** When two stars sit close together, a bright
    neighbour's streak can leak light into a faint star's reading. The
    pipeline measures that leakage and subtracts it back out.
@@ -33,10 +34,14 @@ turns out to be. The pipeline runs this stage the same way for every star.
    grating equation expects, so a later step can place any sample on the
    physical model without counting samples from the start.
 6. **Remove signals that are not the star.** The pipeline corrects for
-   three things that are not properties of the star itself:
+   four things that are not properties of the star itself:
    - the camera sensor's uneven sensitivity to different colours,
    - the whole instrument's own tilt (the grating, the telescope's
      coatings, and every other optic between the star and the sensor),
+   - the difference in how much the air dimmed the blue light compared with
+     the red light, between this frame and the frame of the standard star
+     that the instrument's tilt was fitted to (see "Airmass extinction"
+     below),
    - the wavelengths where Earth's own atmosphere absorbs light, which
      would otherwise look like a feature of the star.
 7. **Record what the numbers mean.** The pipeline records whether a stored
@@ -49,6 +54,91 @@ turns out to be. The pipeline runs this stage the same way for every star.
    stood out from noise. It attaches this measurement to the result so a
    reviewer can tell whether a later classification worked from strong data
    or weak data.
+
+## Extraction box and sky
+
+**The box.** The pipeline fits a Gaussian to the streak's cross-section at
+each step. The fit gives the streak's centre and its width (sigma, in
+pixels). The box reaches 2.5 sigma to each side of the centre.
+
+The fit's width is noisy from step to step. A box that followed each fit
+directly would change size by a whole pixel from one step to the next, and
+the extracted brightness would jump by about 2 percent each time. These
+jumps come from the fit noise, not from the star. The pipeline avoids this
+in two ways:
+
+- It takes the box width from the median of the fitted widths over 61
+  neighbouring steps (`APERTURE_SIGMA_SMOOTHING_STEPS`). The median follows
+  the slow change of the real width along the streak and ignores the noise
+  of single fits. Steps whose fit failed do not count in the median, and
+  read a fixed box of the configured radius instead.
+- The box can end part-way through a pixel. Each pixel at the edge counts
+  for the fraction of it that lies inside the box. The box centre also
+  keeps its fractional position, so the box does not shift by a whole pixel
+  when the streak's centre crosses a pixel boundary.
+
+`trail_width_px` still holds the fitted width of each step, unsmoothed, in
+pixels. The resolution estimate reads it. The half-width used at each step,
+in pixels, is in the extractor's `last_diagnostics.aperture_half_width_px`.
+
+**The sky.** The pipeline measures the sky in two strips, one on each side
+of the box, separated from it by a 6-pixel gap and 10 pixels wide. It does
+this at every step:
+
+1. It removes pixels more than 3 sigma from the strip's median (hot pixels,
+   cosmic rays, the edge of a passing streak), repeats until nothing more
+   drops out, and takes the median of what is left.
+2. When the two strip medians agree to within noise, the sky is their mean.
+3. When they differ by more than 3 times the noise of their difference, the
+   pipeline treats the brighter strip as contaminated (light from a
+   neighbouring star can only add to a strip) and uses the other strip
+   alone.
+4. When only one strip has enough pixels on the image, it uses that strip.
+
+Taking the lower of the two medians every time would read low by about 0.2
+of one pixel's noise, for strips of this size, because the smaller of two
+noisy numbers sits below their true value. A faint streak would then keep
+too much sky in its total.
+
+The extractor records how it found the sky in `last_diagnostics`.
+`sky_mode_counts` counts the sky readings by mode: `both_bands`,
+`lower_band_contaminated` or `upper_band_contaminated` (the strip on the
+lower or higher side of the streak was dropped), `single_band` and `no_sky`.
+`dominant_sky_mode` is the most common mode, and `contaminated_sky_fraction`
+is the share of readings that dropped a strip, from 0 to 1. A fraction well
+above a few percent means a neighbour's light lies beside the streak, and
+the star's spectrum deserves a closer look. The pipeline does not yet copy
+these diagnostics onto the star's saved result.
+
+## Airmass extinction
+
+Air dims blue light more than red light, and it dims both more at higher
+airmass (a measure of how much air the light crossed: 1.0 straight overhead,
+2.0 about 60 degrees from overhead). The instrument response already removes
+the dimming at the airmass of the standard star it was fitted to
+(`reference_airmass`, stored in the response file). A target observed at
+another airmass keeps a blue-to-red tilt from the difference. Between 4200 A
+and 8000 A the tilt is about 0.09 magnitudes for a change of 0.35 airmass.
+
+After it removes the instrument response, the pipeline multiplies the
+spectrum by `10 ** (0.4 * k * (target_airmass - reference_airmass))`. Here
+`k` is the extinction coefficient in magnitudes per airmass, read from
+`data/atmospheric_extinction_kpno.txt` at each wavelength. The target
+airmass comes from the frame header's `AIRMASS` card.
+
+The pipeline skips the correction, and records why, when the header has no
+usable airmass (missing, below 1 or above 10) or the response file records
+no reference airmass. The result of the correction is an
+`ExtinctionCorrection` record: `is_applied`, `target_airmass`,
+`reference_airmass`, `curve_name` and `reason` (set only when skipped). The
+spectrum analysis carries this record as `SpectrumAnalysis.extinction_correction`.
+The pipeline does not yet copy the record onto the star's saved result,
+because the result model has no field for it.
+
+The stored curve is the mean Kitt Peak curve, a dry site at 2 km altitude.
+A site at lower altitude has somewhat more extinction in the blue. The
+correction depends on the difference between two airmasses, so the error from
+using a different site's curve stays a small fraction of the correction.
 
 ## What this stage produces
 
@@ -83,3 +173,7 @@ tests later conclude, only on the raw data itself. It records:
 A reviewer can use this assessment to judge whether a later classification
 rests on strong data or weak data, before looking at the classification
 itself.
+
+For exact behavior, thresholds and edge cases, read the code
+(`spectrum_extractor.py`, `atmospheric_extinction.py` and
+`instrument_response.py`).

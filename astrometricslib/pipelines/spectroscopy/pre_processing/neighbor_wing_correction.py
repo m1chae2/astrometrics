@@ -44,7 +44,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_trail_deblen
     neighbor_wing_flux,
     subtract_neighbor_wings,
 )
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import APERTURE_SIGMA_MULTIPLIER
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import (
+    traced_aperture_half_widths_px,
+)
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -301,17 +303,19 @@ def box_half_widths_px(
 ) -> np.ndarray:
     """Work out half the width of the box that measured each sample.
 
-    The traced extraction reads a box of `round(2.5 x trail width)` pixels
-    either side of the trail's centre (at least 1), and falls back to the
-    configured radius where the trail was not found (a width of 0). The
-    untraced extraction always reads the configured radius. A box of `r` pixels
-    either side is `2r + 1` pixels wide, so its edges are `r + 0.5` from its
-    centre.
+    The traced extraction reads a box that reaches `h` pixels either side of
+    the trail's centre pixel, where `h` is 2.5 times the trail width smoothed
+    over many steps (at least 1; see `traced_aperture_half_widths_px`), and
+    falls back to the configured radius where the trail was not found (a
+    width of 0). The untraced extraction always reads the configured radius.
+    A box of `h` pixels either side of the centre pixel has its edges
+    `h + 0.5` from its centre.
 
     Parameters
     ----------
     trail_width_px : `list` [`float`] or `None`
-        The trail width at each sample, or `None` for an untraced extraction.
+        The fitted trail width at each sample, in pixels, or `None` for an
+        untraced extraction.
     extraction_radius : `int`
         The configured box radius, in pixels.
     sample_count : `int`
@@ -324,11 +328,7 @@ def box_half_widths_px(
     """
     if trail_width_px is None:
         return np.full(sample_count, extraction_radius + 0.5)
-    widths = np.asarray(trail_width_px, dtype=float)
-    radii = np.where(
-        widths > 0, np.maximum(1.0, np.round(widths * APERTURE_SIGMA_MULTIPLIER)), extraction_radius
-    )
-    return radii + 0.5
+    return traced_aperture_half_widths_px(trail_width_px, float(extraction_radius)) + 0.5
 
 
 def star_trace_from_result(result: dict[str, Any]) -> StarTrace | None:

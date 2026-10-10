@@ -21,6 +21,9 @@ from astrometricslib.pipelines.shared.quality.saturation import (
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
+    apply_extinction_correction,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import (
     apply_instrument_response,
     load_instrument_response,
@@ -641,6 +644,29 @@ def keep_usable_samples(
     )
 
 
+def _frame_airmass(image: Any) -> float | None:
+    """Read the airmass of a frame from its header.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The frame the spectrum was extracted from.
+
+    Returns
+    -------
+    airmass : `float` or `None`
+        The header's ``AIRMASS`` value, or `None` when the card is missing
+        or is not a number.
+    """
+    header = getattr(image, "header", None)
+    if header is None:
+        return None
+    try:
+        return float(header.get("AIRMASS"))
+    except TypeError, ValueError:
+        return None
+
+
 class SpectroscopyPipeline:
     """The master controller for processing spectra.
 
@@ -1127,6 +1153,19 @@ class SpectroscopyPipeline:
             if response is not None
             else None
         )
+        # The response includes the air's dimming at the standard star's
+        # airmass. Scale the spectrum to that airmass, using the airmass of
+        # this frame, so a target observed higher or lower does not keep a
+        # leftover blue-red tilt.
+        extinction_record = None
+        if response_corrected_intensity is not None and response is not None:
+            response_corrected_intensity, extinction_record = apply_extinction_correction(
+                np.array(wavelengths_angstrom),
+                response_corrected_intensity,
+                _frame_airmass(image),
+                response.reference_airmass,
+            )
+            logger.debug("Extinction correction: %s", extinction_record.as_dict())
 
         # Compute the visual overlay rectangle and total rotated
         # dispersion angle
@@ -1150,6 +1189,7 @@ class SpectroscopyPipeline:
             extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
             resolution_profile=self.line_spread_profile,
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
+            extinction_correction=extinction_record,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features

@@ -170,9 +170,16 @@ def test_working_frame_lays_every_dispersion_direction_down_the_rows(
 
 
 def test_box_half_widths_follow_the_traced_extraction_rule() -> None:
-    """A traced box reaches round(2.5 x width) each side, plus half a pixel."""
-    half_widths = box_half_widths_px([1.9, 0.0, 0.1], extraction_radius=8, sample_count=3)
-    assert half_widths.tolist() == [5.5, 8.5, 1.5]
+    """A traced box reaches 2.5 x the smoothed width, plus half a pixel."""
+    half_widths = box_half_widths_px([1.9, 1.9, 0.0, 1.9], extraction_radius=8, sample_count=4)
+    assert half_widths.tolist() == pytest.approx([5.25, 5.25, 8.5, 5.25])
+
+
+def test_box_half_widths_are_at_least_one_pixel_and_ignore_a_single_noisy_width() -> None:
+    """A tiny width gives a one-pixel box; one wild width moves nothing."""
+    assert box_half_widths_px([0.1] * 5, extraction_radius=8, sample_count=5).tolist() == [1.5] * 5
+    widths = [1.8] * 9 + [6.0] + [1.8] * 9
+    assert box_half_widths_px(widths, extraction_radius=8, sample_count=19) == pytest.approx([5.0] * 19)
 
 
 def test_an_untraced_extraction_uses_the_configured_radius() -> None:

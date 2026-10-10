@@ -100,6 +100,9 @@ def _select_cached_ras(
         return [(*row, None, None) for row in inside] if include_proper_motion else inside
 
     monkeypatch.setattr(catalog_store, "query_gaia_sources_in_bounds", fake_query)
+    # These tests are about the search box, so a recorded complete download
+    # is assumed. The completeness rules have their own tests.
+    monkeypatch.setattr(catalog_store, "is_gaia_region_complete", lambda *args, **keywords: True)
     monkeypatch.setattr(catalog_store, "get_catalog_cache_path", lambda config: "unused.db")
 
     result = StarIdentifier._query_gaia_region_from_cache(None, ra_center_deg, _DECLINATION_DEG, radius_deg)
@@ -130,11 +133,7 @@ def test_field_just_east_of_zero_still_selects_rows_just_west(monkeypatch: pytes
 
 
 def test_field_just_west_of_360_selects_rows_just_east_of_zero(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Check that a centre at 359.99 deg also selects rows near 0 deg.
-
-    The cache lookup returns nothing for fewer than 5 rows, so the fake
-    cache holds 5.
-    """
+    """Check that a centre at 359.99 deg also selects rows near 0 deg."""
     cached_ra_deg = [359.5, 359.6, 359.9, 0.1, 0.4]
 
     selected = _select_cached_ras(monkeypatch, cached_ra_deg, 359.99, 0.5)

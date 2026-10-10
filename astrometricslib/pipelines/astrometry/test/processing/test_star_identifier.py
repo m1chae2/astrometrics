@@ -419,6 +419,7 @@ class TestGaiaCircuitBreaker:
         import astroquery.gaia as gaia_module
 
         import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.drivers import catalog_store
         from astrometricslib.foundation.config import AppConfiguration
 
         config = AppConfiguration()
@@ -433,7 +434,6 @@ class TestGaiaCircuitBreaker:
             "CREATE TABLE IF NOT EXISTS gaia_sources "
             "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
         )
-        # The cache read requires at least 5 rows before it is trusted.
         for index in range(8):
             cursor.execute(
                 "INSERT OR REPLACE INTO gaia_sources VALUES (?, ?, ?, ?, ?)",
@@ -447,6 +447,9 @@ class TestGaiaCircuitBreaker:
             )
         connection.commit()
         connection.close()
+        # The cache is trusted only for a region recorded as completely
+        # downloaded, so record one that covers the query below.
+        catalog_store.record_gaia_region(config, VEGA_RA_DEG, VEGA_DEC_DEG, 0.1, 18.0, row_limit_hit=False)
 
         remote_query_spy = MagicMock()
         monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)

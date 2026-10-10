@@ -1259,10 +1259,13 @@ class StarIdentifier:
     ) -> int:
         """Download and save Gaia DR3 stars for a specific area of the sky.
 
-        This checks if we've already downloaded stars for this area and saved
-        them in our local database (`cached_regions`). If we haven't, it
-        downloads stars brighter than the `max_magnitude` limit and saves them
-        so we don't have to download them again later.
+        This checks if the local database already holds a complete download
+        that covers this area to this depth (see
+        `catalog_store.is_gaia_region_complete`). If not, it downloads stars
+        brighter than the `max_magnitude` limit, saves them, and records
+        the region's centre, radius and magnitude limit so a later search can
+        reuse them. The bulk query sets no row limit, so the record always
+        says the download was not cut short.
 
         Parameters
         ----------
@@ -1285,19 +1288,20 @@ class StarIdentifier:
         from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(max(0.1, radius_deg), 1.0)
-        # ruff: ignore[float-equality-comparison]
-        if ra_center == 0.0 and dec_center == 0.0:
+        if math.isclose(ra_center, 0.0, abs_tol=1e-9) and math.isclose(dec_center, 0.0, abs_tol=1e-9):
             return 0
 
         config = get_configuration()
         region_key = f"{ra_center:.3f}_{dec_center:.3f}_{radius_deg:.2f}"
 
         try:
-            if catalog_store.is_region_cached(config, region_key):
+            if catalog_store.is_gaia_region_complete(
+                config, ra_center, dec_center, radius_deg, max_magnitude
+            ):
                 logger.debug("Gaia region '%s' already cached.", region_key)
                 return 0
         except (sqlite3.Error, OSError) as e:
-            logger.warning("Error checking cached_regions: %s", e)
+            logger.warning("Error checking gaia_cache_regions: %s", e)
 
         # Use the same safety switch as the main search. We still check the
         # local database above, we just skip the internet download part if the
@@ -1323,7 +1327,14 @@ class StarIdentifier:
             f"AND CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra_center}, {dec_center}, {radius_deg}))=1"
         )
 
-        def _run_query():  # ruff: ignore[missing-return-type-private-function]
+        def _run_query() -> Table:
+            """Run the bulk seed query and wait for its table.
+
+            Returns
+            -------
+            result_table : `astropy.table.Table`
+                The rows the Gaia server returned.
+            """
             job = Gaia.launch_job_async(query, dump_to_file=False)
             return job.get_results()
 
@@ -1360,6 +1371,9 @@ class StarIdentifier:
             ]
             catalog_store.insert_gaia_sources(config, to_insert)
             catalog_store.mark_region_cached(config, region_key, ra_center, dec_center, radius_deg)
+            catalog_store.record_gaia_region(
+                config, ra_center, dec_center, radius_deg, max_magnitude, row_limit_hit=False
+            )
             logger.info(
                 "Successfully cached %s Gaia DR3 sources for field (%.4f, %.4f).",
                 len(to_insert),
@@ -1380,8 +1394,11 @@ class StarIdentifier:
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
         """Search the Gaia DR3 database for stars in a circular area.
 
-        We check our local cache first. If it's not there, we download from
-        the internet and save it for next time.
+        We check our local cache first. The cache is used only when a recorded
+        download covers this area, is at least as deep as `max_magnitude` and
+        was not cut short by the row limit. Otherwise we download from the
+        internet and save it, with a record of how it was fetched, for next
+        time.
 
         Parameters
         ----------
@@ -1433,7 +1450,9 @@ class StarIdentifier:
         logger.info("  Found %s Gaia sources in field.", len(result_table))
         result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(result_table)
 
-        StarIdentifier._cache_gaia_results(config, result_table)
+        StarIdentifier._cache_gaia_results(
+            config, result_table, region=(ra_center, dec_center, radius_deg, max_magnitude)
+        )
 
         gaia_coords = StarIdentifier._gaia_coords_from_table(result_table)
         if gaia_coords is None:
@@ -1483,13 +1502,18 @@ class StarIdentifier:
             The search centre and radius in degrees.
         max_magnitude : `float`, optional
             Cached stars fainter than this Gaia G magnitude are left out. A
-            star stored without a magnitude (stored as 0) is kept.
+            star stored without a magnitude (stored as 0) is kept. The cache
+            is also used only if a recorded download is at least this deep.
 
         Returns
         -------
         result : `tuple` or `None`
-            `(result_table, gaia_coords)` if at least 5 cached sources
-            cover the search bounding box, otherwise `None`. The table has
+            `(result_table, gaia_coords)` if a recorded download covers the
+            search circle, reaches `max_magnitude` and was not cut short, and
+            the cache holds at least one star in the search bounding box.
+            Otherwise `None`, and the caller downloads. A cache file with no
+            region records (one written before they existed) always gives
+            `None`, so its regions are downloaded again once. The table has
             ``pmra`` and ``pmdec`` columns (NaN where the cache has no
             proper motion for the star) and its ``meta["proper_motion_known"]``
             says whether any star has one.
@@ -1500,6 +1524,21 @@ class StarIdentifier:
 
         cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
+            # A star count says nothing about completeness: a region cut off
+            # by the old 10,000-row limit, or downloaded to a brighter limit,
+            # holds plenty of rows. Only a recorded download counts.
+            if not catalog_store.is_gaia_region_complete(
+                config, ra_center, dec_center, radius_deg, max_magnitude
+            ):
+                logger.debug(
+                    "No complete cached Gaia download covers (%.4f, %.4f) r=%.3f G<%.1f.",
+                    ra_center,
+                    dec_center,
+                    radius_deg,
+                    max_magnitude,
+                )
+                return None
+
             # Query existing cached sources within bounding box + radius.
             # A box that crosses RA = 0 deg splits in two, one query per side.
             min_dec = dec_center - radius_deg
@@ -1512,11 +1551,11 @@ class StarIdentifier:
                         config, min_ra, max_ra, min_dec, max_dec, include_proper_motion=True
                     )
                 )
-            # The cache keeps no record of how deep it was filled, so the same
-            # magnitude limit applies here as to a download.
+            # The recorded download may be deeper than this request, so the
+            # same magnitude limit applies here as to a download.
             cached_rows = [row for row in cached_rows if not row[3] or row[3] < max_magnitude]
 
-            if cached_rows and len(cached_rows) >= 5:
+            if cached_rows:
                 logger.info(
                     "Loaded %s Gaia DR3 sources from local SQLite cache (%s).",
                     len(cached_rows),
@@ -1635,8 +1674,28 @@ class StarIdentifier:
         return result_table
 
     @staticmethod
-    def _cache_gaia_results(config: Any, result_table: Any) -> None:
-        """Save downloaded Gaia DR3 sources to the local SQLite cache."""
+    def _cache_gaia_results(
+        config: Any,
+        result_table: Any,
+        *,
+        region: tuple[float, float, float, float] | None = None,
+    ) -> None:
+        """Save downloaded Gaia DR3 sources to the local SQLite cache.
+
+        Parameters
+        ----------
+        config : `AppConfiguration`
+            The application settings.
+        result_table : `astropy.table.Table`
+            The downloaded sources.
+        region : `tuple` of `float`, optional
+            ``(ra_center, dec_center, radius_deg, magnitude_limit)`` of the
+            download, in degrees and Gaia G magnitude. When given, the region
+            is recorded after the stars are saved, together with whether
+            ``result_table.meta["row_limit_reached"]`` says the download was
+            cut short. Without it the stars are saved but no region is
+            recorded, so they are never reused as a complete download.
+        """
         from astrometricslib.drivers import catalog_store
 
         cache_db_path = catalog_store.get_catalog_cache_path(config)
@@ -1670,6 +1729,16 @@ class StarIdentifier:
                     ))
 
                 catalog_store.insert_gaia_sources(config, to_insert)
+                if region is not None:
+                    region_ra, region_dec, region_radius, region_magnitude_limit = region
+                    catalog_store.record_gaia_region(
+                        config,
+                        region_ra,
+                        region_dec,
+                        region_radius,
+                        region_magnitude_limit,
+                        row_limit_hit=bool(result_table.meta.get("row_limit_reached")),
+                    )
                 logger.info("Cached %s Gaia DR3 sources locally in %s.", len(to_insert), cache_db_path)
         except (*DATA_ERRORS, sqlite3.Error, OSError) as cache_err:
             logger.warning("Failed to cache Gaia sources locally: %s", cache_err)

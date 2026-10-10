@@ -179,7 +179,7 @@ def test_the_frame_derived_limit_reaches_the_query(monkeypatch: pytest.MonkeyPat
 
 
 def test_cached_stars_fainter_than_the_limit_are_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The cache has no depth of its own, so the same limit applies to it."""
+    """A cached download deeper than the request is trimmed to the request."""
     from astrometricslib.drivers import catalog_store
     from astrometricslib.foundation.config import get_configuration
 
@@ -192,6 +192,8 @@ def test_cached_stars_fainter_than_the_limit_are_left_out(monkeypatch: pytest.Mo
             for index, mag in enumerate([10.0, 11.0, 12.0, 13.0, 14.0, 17.0, 19.5, 0.0])
         ],
     )
+    # The download went to G < 20, deeper than the request for G < 18.
+    catalog_store.record_gaia_region(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.6, 20.0, row_limit_hit=False)
 
     cached = StarIdentifier._query_gaia_region_from_cache(config, CENTRE_RA_DEG, CENTRE_DEC_DEG, 0.5, 18.0)
 

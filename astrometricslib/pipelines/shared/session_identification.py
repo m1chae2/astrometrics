@@ -3,6 +3,12 @@
 This tool looks at the first image in a sequence (the "reference frame"),
 maps it to the sky, and identifies all the stars. It's smart enough to
 re-use existing map data if the image already has it, saving a lot of time.
+
+When the plate solver measures its own fit, the result keeps two numbers
+from that solve: the fit residual (how far, on average, the fitted star
+positions sit from the reference stars) and the count of matched stars.
+They stay unknown (`None`) when the map came from the image file or the
+solver does not report them.
 """
 
 import configparser
@@ -18,6 +24,7 @@ from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.drivers.interfaces.plate_solve_driver import read_fit_statistics
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
@@ -139,16 +146,80 @@ def resolve_frame_wcs(
     solve_attempted : `bool`
         True if the complex math was actually run to calculate a new map.
     """
+    wcs, reused_existing_header_wcs, solve_attempted, _fit_statistics = _resolve_frame_wcs_with_fit(
+        image,
+        star_identifier,
+        allow_solve=allow_solve,
+        center_ra=center_ra,
+        center_dec=center_dec,
+        sources=sources,
+        write_back=write_back,
+        ignore_existing_wcs=ignore_existing_wcs,
+        solve_timeout=solve_timeout,
+    )
+    return wcs, reused_existing_header_wcs, solve_attempted
+
+
+def _resolve_frame_wcs_with_fit(
+    image: AstrometricsImage,
+    star_identifier: StarIdentifier,
+    allow_solve: bool = True,
+    center_ra: float | None = None,
+    center_dec: float | None = None,
+    sources: list[dict] | None = None,
+    write_back: bool = True,
+    ignore_existing_wcs: bool = False,
+    solve_timeout: int = 300,
+) -> tuple[WCS | None, bool, bool, tuple[float | None, int | None]]:
+    """Find an image's sky map (WCS) and keep the solver's fit numbers.
+
+    This does the work of `resolve_frame_wcs`. The only difference is one
+    extra return value, the fit statistics of a fresh solve.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The image to map.
+    star_identifier : `StarIdentifier`
+        The tool that does the heavy lifting to identify stars.
+    allow_solve : `bool`, optional
+        If False, just check the file and give up if the map isn't
+        already there.
+    center_ra, center_dec : `float`, optional
+        Hints about where the telescope was pointing.
+    sources : `list` [`dict`], optional
+        A list of stars already found in the image.
+    write_back : `bool`, optional
+        Whether the newly calculated map should be saved into the image file.
+    ignore_existing_wcs : `bool`, optional
+        If True, ignore any saved map and force it to calculate a new one.
+    solve_timeout : `int`, optional
+        The maximum time in seconds to let the solver run.
+
+    Returns
+    -------
+    wcs : `astropy.wcs.WCS` or `None`
+        The finished map data, or None if it failed.
+    reused_existing_header_wcs : `bool`
+        True if the saved map was used.
+    solve_attempted : `bool`
+        True if the complex math was actually run to calculate a new map.
+    fit_statistics : `tuple` [`float` or `None`, `int` or `None`]
+        The fit residual in arcseconds and the matched-star count from the
+        solve. Both are `None` when the saved map was reused, no solve ran,
+        or the solver did not report them.
+    """
+    no_fit_statistics: tuple[float | None, int | None] = (None, None)
     if not ignore_existing_wcs and image.wcs is not None and image.wcs.is_celestial:
         # NOTE: is_celestial is a *structural* check (does this WCS have
         # RA/Dec axes), not an accuracy one -- a header solution that is
         # off by tens of arcsec passes it just as readily as a good one.
         # `identify_session_stars` verifies the result against catalog
         # matches and re-solves when this turns out to be untrustworthy.
-        return image.wcs, True, False
+        return image.wcs, True, False, no_fit_statistics
 
     if not allow_solve:
-        return None, False, False
+        return None, False, False, no_fit_statistics
 
     data = image.data
     h, w = (data.shape[0], data.shape[1]) if data is not None else (1000, 1000)
@@ -169,7 +240,7 @@ def resolve_frame_wcs(
     )
     if header is None:
         logger.warning("Plate solve failed for %s; no WCS available.", image.path)
-        return None, False, True
+        return None, False, True, no_fit_statistics
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", FITSFixedWarning)
@@ -178,7 +249,7 @@ def resolve_frame_wcs(
     if write_back:
         write_wcs_to_fits_header(image.path, wcs)
 
-    return wcs, False, True
+    return wcs, False, True, read_fit_statistics(header)
 
 
 def _catalog_matched_count(stellar_objects: list[StellarObject]) -> int:
@@ -226,6 +297,14 @@ class SessionIdentificationResult:
     # trusted and was replaced by a fresh plate solve; see
     # MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS.
     header_wcs_replaced_after_verification: bool = False
+    # How well the plate solve that produced `wcs` fit its reference stars.
+    # `fit_residual_rms_arcsec` is the root mean square (RMS) distance, in
+    # arcseconds, between the matched stars' fitted positions and the
+    # reference positions. `matched_star_count` is how many stars matched.
+    # Both are None when `wcs` was reused from the image header (nobody
+    # measured it), when no solve ran, or when the solver did not report them.
+    fit_residual_rms_arcsec: float | None = None
+    matched_star_count: int | None = None
 
 
 def identify_session_stars(
@@ -259,7 +338,9 @@ def identify_session_stars(
     -------
     result : `SessionIdentificationResult`
         A bundle containing the map data, the list of identified stars,
-        and some stats about how well the process worked.
+        and some stats about how well the process worked. It includes the
+        plate solver's fit residual and matched-star count when the map
+        came from a fresh solve and the solver reported them.
     """
     data, unique_sources, sources_detected = _detect_and_limit_session_sources(
         reference_image, star_identifier, max_detections
@@ -267,7 +348,7 @@ def identify_session_stars(
 
     stellar_objects = star_identifier._build_stellar_objects_from_sources(unique_sources)
 
-    wcs, reused_existing_header_wcs, solve_attempted = resolve_frame_wcs(
+    wcs, reused_existing_header_wcs, solve_attempted, fit_statistics = _resolve_frame_wcs_with_fit(
         reference_image,
         star_identifier,
         allow_solve=True,
@@ -282,21 +363,27 @@ def identify_session_stars(
     if wcs is not None and stellar_objects:
         star_identifier.identify_stars_with_wcs(stellar_objects, wcs, width, height)
 
-    wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, header_wcs_replaced = (
-        _reverify_wcs_solution(
-            reference_image,
-            star_identifier,
-            unique_sources,
-            center_ra,
-            center_dec,
-            wcs,
-            stellar_objects,
-            reused_existing_header_wcs,
-            solve_attempted,
-            width,
-            height,
-            write_back,
-        )
+    (
+        wcs,
+        stellar_objects,
+        reused_existing_header_wcs,
+        solve_attempted,
+        header_wcs_replaced,
+        fit_statistics,
+    ) = _reverify_wcs_solution(
+        reference_image,
+        star_identifier,
+        unique_sources,
+        center_ra,
+        center_dec,
+        wcs,
+        stellar_objects,
+        reused_existing_header_wcs,
+        solve_attempted,
+        width,
+        height,
+        write_back,
+        fit_statistics,
     )
 
     simbad_matched_count = sum(1 for star in stellar_objects if star.spectral_type)
@@ -310,6 +397,8 @@ def identify_session_stars(
         simbad_matched_count=simbad_matched_count,
         sources_detected=sources_detected,
         header_wcs_replaced_after_verification=header_wcs_replaced,
+        fit_residual_rms_arcsec=fit_statistics[0],
+        matched_star_count=fit_statistics[1],
     )
 
 
@@ -375,8 +464,34 @@ def _reverify_wcs_solution(
     width: int,
     height: int,
     write_back: bool,
-) -> tuple[WCS | None, list[StellarObject], bool, bool, bool]:
+    fit_statistics: tuple[float | None, int | None],
+) -> tuple[WCS | None, list[StellarObject], bool, bool, bool, tuple[float | None, int | None]]:
     """Re-solve a reused header WCS that turns out to be untrustworthy.
+
+    Parameters
+    ----------
+    reference_image : `AstrometricsImage`
+        The frame being identified.
+    star_identifier : `StarIdentifier`
+        The tool that solves and identifies.
+    unique_sources : `list` [`dict`]
+        The detected sources.
+    center_ra, center_dec : `float` or `None`
+        Hints about where the telescope was pointing.
+    wcs : `astropy.wcs.WCS` or `None`
+        The WCS from the first pass.
+    stellar_objects : `list` [`StellarObject`]
+        The stars identified against `wcs`.
+    reused_existing_header_wcs : `bool`
+        Whether `wcs` came from the image header.
+    solve_attempted : `bool`
+        Whether a plate solve has run so far.
+    width, height : `int`
+        The image size in pixels.
+    write_back : `bool`
+        Whether a better WCS is saved into the image file.
+    fit_statistics : `tuple` [`float` or `None`, `int` or `None`]
+        The fit residual and matched-star count of the first pass's solve.
 
     Returns
     -------
@@ -393,9 +508,13 @@ def _reverify_wcs_solution(
     header_wcs_replaced : `bool`
         True if the reused header WCS was discarded in favor of a
         fresh solve.
+    fit_statistics : `tuple` [`float` or `None`, `int` or `None`]
+        The fit numbers that belong to the returned WCS: the fresh solve's
+        when it replaced the header WCS, otherwise `fit_statistics`
+        unchanged.
     """
     if not (reused_existing_header_wcs and _reused_wcs_looks_untrustworthy(stellar_objects)):
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
 
     matched_before = _catalog_matched_count(stellar_objects)
     logger.warning(
@@ -409,7 +528,7 @@ def _reverify_wcs_solution(
     # fresh solve has actually proven better. Overwriting first would
     # destroy the existing solution even when the re-solve turns out
     # worse (or fails outright).
-    fresh_wcs, _, fresh_solve_attempted = resolve_frame_wcs(
+    fresh_wcs, _, fresh_solve_attempted, fresh_fit_statistics = _resolve_frame_wcs_with_fit(
         reference_image,
         star_identifier,
         allow_solve=True,
@@ -422,7 +541,7 @@ def _reverify_wcs_solution(
     solve_attempted = solve_attempted or fresh_solve_attempted
 
     if fresh_wcs is None:
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
 
     # Identify onto *fresh* objects: the first pass already mutated
     # the originals (ids, names, coordinates), so reusing them would
@@ -438,7 +557,7 @@ def _reverify_wcs_solution(
             matched_before,
             matched_after,
         )
-        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False
+        return wcs, stellar_objects, reused_existing_header_wcs, solve_attempted, False, fit_statistics
 
     logger.info(
         "Fresh plate solve for %s improved catalog matches %s -> %s; using it instead of the header WCS.",
@@ -448,4 +567,4 @@ def _reverify_wcs_solution(
     )
     if write_back:
         write_wcs_to_fits_header(reference_image.path, fresh_wcs)
-    return fresh_wcs, fresh_objects, False, solve_attempted, True
+    return fresh_wcs, fresh_objects, False, solve_attempted, True, fresh_fit_statistics

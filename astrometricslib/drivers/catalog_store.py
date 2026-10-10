@@ -7,17 +7,25 @@ place that opens that database file directly. Everything else asks
 these functions for cached stars or tells them to save some, instead
 of running SQL itself.
 
-The database has two tables:
+The database has three tables:
 
 - ``gaia_sources``: one row per star we have downloaded, keyed by its
   Gaia source ID. Each row holds the star's position at Gaia's reference
   epoch (2016.0), its G magnitude and, when Gaia measured it, its proper
   motion (how far the star moves across the sky each year).
 - ``cached_regions``: one row per circular patch of sky we have already
-  downloaded, so we know not to download it again.
+  downloaded. It is the original record and says nothing about how deep the
+  download went or whether it was cut short, so the lookup no longer uses it.
+- ``gaia_cache_regions``: one row per downloaded patch of sky, with the
+  faintest magnitude the download asked for and whether it hit the row
+  limit. A patch counts as complete for a later request only when a row here
+  covers the request, is at least as deep, and was not cut short. A cache
+  file from before this table existed has no such rows, so none of its stars
+  count as complete.
 """
 
 import logging
+import math
 import os
 import sqlite3
 from pathlib import Path
@@ -32,9 +40,11 @@ _CATALOG_DB_FILENAME = "catalog_cache.db"
 __all__ = [
     "get_catalog_cache_path",
     "insert_gaia_sources",
+    "is_gaia_region_complete",
     "is_region_cached",
     "mark_region_cached",
     "query_gaia_sources_in_bounds",
+    "record_gaia_region",
     "summarize_catalog_coverage",
 ]
 
@@ -56,14 +66,23 @@ def get_catalog_cache_path(config: Any) -> Path:
     return config.get_library_path() / "catalogs" / _CATALOG_DB_FILENAME
 
 
+# A recorded region covers a request if the request circle lies inside it.
+# The small allowance (about 0.004 arcseconds) keeps rounding error in the
+# angle maths from rejecting a region that covers the request exactly.
+_COVERAGE_TOLERANCE_DEG = 1e-6
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    """Create the cache's two tables if they don't already exist.
+    """Create the cache's three tables if they don't already exist.
 
     Safe to call every time a connection is opened -- `CREATE TABLE IF
     NOT EXISTS` does nothing when the tables are already there. A cache
     file written before proper motions were stored has no ``pmra`` or
     ``pmdec`` column, so this adds them. The rows already in the file get
-    ``NULL`` there, which means "proper motion unknown".
+    ``NULL`` there, which means "proper motion unknown". A cache file
+    written before ``gaia_cache_regions`` existed gets that empty table
+    added. Its stars stay, but no region is recorded for them, so they are
+    never treated as a complete download.
 
     Parameters
     ----------
@@ -103,6 +122,16 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             ra REAL,
             dec REAL,
             radius REAL
+        )
+    """)
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS gaia_cache_regions (
+            region_key TEXT PRIMARY KEY,
+            ra REAL NOT NULL,
+            dec REAL NOT NULL,
+            radius REAL NOT NULL,
+            magnitude_limit REAL,
+            row_limit_hit INTEGER NOT NULL
         )
     """)
     connection.commit()
@@ -158,6 +187,129 @@ def mark_region_cached(config: Any, region_key: str, ra: float, dec: float, radi
         connection.commit()
     finally:
         connection.close()
+
+
+def record_gaia_region(
+    config: Any,
+    ra: float,
+    dec: float,
+    radius: float,
+    magnitude_limit: float,
+    row_limit_hit: bool,
+) -> None:
+    """Record how one downloaded patch of sky was fetched.
+
+    Call this after the stars of the download are saved. Recording the same
+    centre, radius and magnitude limit again replaces the earlier record.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    ra, dec : `float`
+        The centre of the patch, in degrees.
+    radius : `float`
+        The radius of the patch, in degrees.
+    magnitude_limit : `float`
+        The download asked only for stars brighter than this Gaia G
+        magnitude.
+    row_limit_hit : `bool`
+        `True` if the download returned as many rows as it was allowed. The
+        faintest stars may then be missing, so the patch is never reused as
+        complete.
+    """
+    cache_db_path = get_catalog_cache_path(config)
+    connection = connect_db(str(cache_db_path))
+    try:
+        _ensure_schema(connection)
+        region_key = f"{ra:.5f}_{dec:.5f}_{radius:.4f}_{magnitude_limit:.2f}"
+        connection.execute(
+            "INSERT OR REPLACE INTO gaia_cache_regions "
+            "(region_key, ra, dec, radius, magnitude_limit, row_limit_hit) VALUES (?, ?, ?, ?, ?, ?)",
+            (region_key, ra, dec, radius, magnitude_limit, int(bool(row_limit_hit))),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _angular_separation_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    """Measure the angle between two points on the sky.
+
+    Uses the haversine formula, which stays accurate for small angles and
+    handles Right Ascension (RA) wrapping from 360 degrees back to 0.
+
+    Parameters
+    ----------
+    ra1, dec1, ra2, dec2 : `float`
+        The two positions, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angle between the positions, in degrees.
+    """
+    phi1 = math.radians(dec1)
+    phi2 = math.radians(dec2)
+    half_delta_ra = math.radians(ra2 - ra1) / 2.0
+    half_delta_dec = (phi2 - phi1) / 2.0
+    haversine = math.sin(half_delta_dec) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(half_delta_ra) ** 2
+    return math.degrees(2.0 * math.asin(min(1.0, math.sqrt(haversine))))
+
+
+def is_gaia_region_complete(
+    config: Any,
+    ra: float,
+    dec: float,
+    radius: float,
+    magnitude_limit: float,
+) -> bool:
+    """Check whether the cache holds a complete answer for one request.
+
+    The answer is complete when one recorded download meets all three
+    conditions: its circle contains the whole requested circle, its
+    magnitude limit is at least as faint as the request's, and it did not
+    hit the row limit. Two smaller downloads that together cover the request
+    do not count. The check errs toward downloading again.
+
+    A cache file written before ``gaia_cache_regions`` existed has no
+    records, so this returns `False` for every request until the region is
+    downloaded again.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application settings.
+    ra, dec : `float`
+        The centre of the request, in degrees.
+    radius : `float`
+        The radius of the request, in degrees.
+    magnitude_limit : `float`
+        The request wants stars brighter than this Gaia G magnitude.
+
+    Returns
+    -------
+    complete : `bool`
+        `True` if the cached stars can stand in for a fresh download.
+    """
+    cache_db_path = get_catalog_cache_path(config)
+    connection = connect_db(str(cache_db_path))
+    try:
+        _ensure_schema(connection)
+        cursor = connection.execute(
+            "SELECT ra, dec, radius FROM gaia_cache_regions "
+            "WHERE row_limit_hit = 0 AND magnitude_limit IS NOT NULL AND magnitude_limit >= ?",
+            (magnitude_limit - _COVERAGE_TOLERANCE_DEG,),
+        )
+        recorded_regions = cursor.fetchall()
+    finally:
+        connection.close()
+
+    for region_ra, region_dec, region_radius in recorded_regions:
+        separation = _angular_separation_deg(ra, dec, region_ra, region_dec)
+        if separation + radius <= region_radius + _COVERAGE_TOLERANCE_DEG:
+            return True
+    return False
 
 
 def insert_gaia_sources(

@@ -175,6 +175,42 @@ class InstrumentResponse:
         return np.exp(np.polyval(self.coefficients, scaled))
 
 
+def read_instrument_response_file(path: Path) -> InstrumentResponse:
+    """Read a response from one JSON file.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        A response file, in the format `derive_instrument_response.py`
+        writes.
+
+    Returns
+    -------
+    response : `InstrumentResponse`
+        The response the file holds.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the file cannot be read as JSON or lacks a required key.
+    """
+    try:
+        stored = json.loads(path.read_text())
+        return InstrumentResponse(
+            camera_name=stored["camera_name"],
+            coefficients=tuple(stored["coefficients"]),
+            minimum_wavelength_angstrom=float(stored["minimum_wavelength_angstrom"]),
+            maximum_wavelength_angstrom=float(stored["maximum_wavelength_angstrom"]),
+            reference_type=stored["reference_type"],
+            source=stored["source"],
+            reference_airmass=(
+                float(stored["reference_airmass"]) if stored.get("reference_airmass") is not None else None
+            ),
+        )
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise InvalidArgumentError(f"{path} is not a readable instrument response file: {error}") from error
+
+
 def load_instrument_response(camera_name: str) -> InstrumentResponse | None:
     """Read the stored response for a camera, if one exists.
 
@@ -192,19 +228,7 @@ def load_instrument_response(camera_name: str) -> InstrumentResponse | None:
     for path in sorted(_DATA_DIR.glob("instrument_response_*.json")):
         stored = json.loads(path.read_text())
         if normalize_camera_name(stored["camera_name"]) == wanted:
-            return InstrumentResponse(
-                camera_name=stored["camera_name"],
-                coefficients=tuple(stored["coefficients"]),
-                minimum_wavelength_angstrom=float(stored["minimum_wavelength_angstrom"]),
-                maximum_wavelength_angstrom=float(stored["maximum_wavelength_angstrom"]),
-                reference_type=stored["reference_type"],
-                source=stored["source"],
-                reference_airmass=(
-                    float(stored["reference_airmass"])
-                    if stored.get("reference_airmass") is not None
-                    else None
-                ),
-            )
+            return read_instrument_response_file(path)
     return None
 
 

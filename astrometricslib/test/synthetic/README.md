@@ -96,8 +96,11 @@ The result has these fields:
 | `trace_sigma_px` | Standard deviation of the trail cross-profile, in pixels. |
 | `line_wavelengths_a` | Wavelength of each injected line, in angstroms. |
 | `line_columns_px` | The column where each line is centred. |
+| `trace_sigma_by_wavelength` | The `(wavelength, sigma)` entries the trail width was built from, or `None`. |
 
 `trace_center_y(x)` returns the true row of the trail centre at column `x`.
+`trace_sigma_at(wavelength_angstrom)` returns the true trail width at a
+wavelength.
 
 ### Geometry and convention
 
@@ -121,6 +124,13 @@ The generator matches `SpectrumExtractor` for horizontal dispersion.
   `fractional_depth` is the fraction of the light removed at the line centre.
   A line that falls between two columns shares its depth between them, so
   the deepest column can be slightly shallower than the requested depth.
+- By default the width is the same at every column. Pass
+  `trace_sigma_by_wavelength=((4200.0, 1.6), (8000.0, 3.0))` to make it depend
+  on wavelength. Each pair is `(wavelength_angstrom, sigma_px)`. The generator
+  interpolates between the pairs in a straight line and holds the first or
+  last width outside them. A test can use this to model a spectrum whose red
+  end is out of focus (a chromatic defocus). The zero order keeps
+  `trace_sigma_px`.
 - The zero order is a round Gaussian with the same standard deviation as the
   trail and a total flux of `zero_order_flux_adu`.
 - The gain is fixed at 1 electron per ADU. The frame clips at 65535 ADU.

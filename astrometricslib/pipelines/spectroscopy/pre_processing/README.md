@@ -204,11 +204,31 @@ shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
   `assess_input_quality.py`): it carries the five numbers of the input quality
   assessment above. Its signal-to-noise metric uses the limit
   `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, below which the pipeline does not
-  classify the spectrum.
+  classify the spectrum. The pipeline adds four line-spread metrics and the
+  `chromatic_defocus` flag from `measured_line_spread.py`, described next.
 
 Both read the saturation limit `DEFAULT_SATURATION_FLAG_THRESHOLD` from
 `pipelines/shared/quality/saturation.py`. The `spectroscopy` result stores
 them as the first two entries of `stage_quality`.
+
+## Measured line spread
+
+`measured_line_spread.py` turns a spectrum's trail width into its own
+resolution profile: the full width at half maximum (FWHM) of the blur in 400 A
+bands from 4200 to 8000 A, in pixels and in Angstroms, with each band's
+scatter. The pipeline stores it on the result as `measured_line_spread` and
+uses it for the checkpoint 1 metrics `trail_fwhm_blue_px`, `trail_fwhm_red_px`,
+`chromatic_defocus_ratio` and `measured_vs_stored_line_spread_ratio_halpha`.
+The classifier uses it only when the pipeline is built with
+`use_measured_line_spread=True`, which is off by default. The
+[pipeline README](../README.md) ("Measured line spread") gives the method, its
+assumptions and the reason the 1.3 limit is a designed value.
+
+Two other files serve the scripts: `standard_star_selection.py` picks the star
+nearest the frame centre among the detected sources (used by
+`derive_instrument_response.py` and `spectral_focus_sweep.py`), and
+`instrument_response.py` can read a response from any JSON file
+(`read_instrument_response_file`, used by `compare_instrument_responses.py`).
 
 For exact behavior, thresholds and edge cases, read the code
 (`spectrum_extractor.py`, `atmospheric_extinction.py` and

@@ -130,7 +130,8 @@ frame-level check, so a pipeline-built checkpoint 0 normally lacks tilt,
 peak-to-sky and saturation source.
 
 **Checkpoint 1, calibrated spectrum.** It carries the five numbers of
-`InputQualityAssessment`.
+`InputQualityAssessment` and four line-spread numbers (see "Measured line
+spread" below).
 
 | Metric | Unit | Limit | What it tells a reader |
 |---|---|---|---|
@@ -139,6 +140,14 @@ peak-to-sky and saturation source.
 | `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD`, lower is better | The same saturation share as checkpoint 0, kept so the assessment's numbers are all here. |
 | `valid_fraction` | fraction | none | The same coverage as checkpoint 0. |
 | `signal_to_noise` | per resolution element | `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` (1.5), higher is better | How strongly the spectrum stands out from its own scatter. Below the limit the pipeline does not classify the spectrum. |
+| `trail_fwhm_blue_px` | pixel | none | The median full width at half maximum (FWHM) of the trail across the dispersion from 4200 to 5000 A. |
+| `trail_fwhm_red_px` | pixel | none | The same width from 6200 to 7000 A. |
+| `chromatic_defocus_ratio` | ratio | 1.3, lower is better; designed, not measured | `trail_fwhm_red_px` divided by `trail_fwhm_blue_px`. Above the limit the red end is out of focus compared with the blue end. A spectrum in focus end to end gives about 0.92. |
+| `measured_vs_stored_line_spread_ratio_halpha` | ratio | none (reported only) | The spectrum's own measured FWHM at 6563 A divided by the stored line-spread profile's value there (148 A). A value far from 1 means the trail width and the stored profile disagree about the blur. |
+
+Checkpoint 1 adds the flag `chromatic_defocus` when `chromatic_defocus_ratio`
+is above its limit. The other flags of this checkpoint are `resolution_assumed`,
+`low_signal_to_noise` and `zero_order_saturated`.
 
 **Checkpoint 2, processing result.** It judges the processing results on their
 own, before the catalog comparison. For an unclassified spectrum the
@@ -177,6 +186,82 @@ carries the `unclassified` flag.
 | `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
 | `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
 | `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`. |
+
+### Measured line spread
+
+A slitless spectrum is blurred, and the blur can differ from one end of the
+spectrum to the other. The pipeline measures that blur for each spectrum from
+its own trail width, and reports it. The code is in
+`pre_processing/measured_line_spread.py`.
+
+What the pipeline does:
+
+1. It takes the width (sigma) of the trail across the dispersion at every step
+   along the spectrum. The extractor already measures it. A failed fit counts
+   as no measurement.
+2. It groups the steps into bands 400 A wide from 4200 to 8000 A. The last band
+   stops at 8000 A, so it is 200 A wide. A band needs at least 10 working fits.
+3. In each band, it takes the median sigma, multiplies it by 2.355 to get a FWHM
+   in pixels, and multiplies that by the band's median local dispersion (the
+   Angstroms one pixel covers, from the wavelength calibration) to get a FWHM
+   in Angstroms.
+4. It records the band's scatter: 1.4826 times the median absolute deviation of
+   the per-step FWHM values. A few bad fits cannot inflate it.
+
+The result is stored as `SpectroscopyResult.measured_line_spread`
+(`measuredLineSpread` in the saved JSON), a `MeasuredLineSpread` record with
+these lists, one entry per band:
+
+| Field | Unit | Meaning |
+|---|---|---|
+| `wavelength_angstrom` | A | The centre of the band. |
+| `fwhm_angstrom` | A | The blur in the band. |
+| `fwhm_px` | pixel | The same blur in pixels. |
+| `scatter_px` | pixel | The band's robust scatter. A large value means a less certain median. |
+| `sample_count` | steps | How many working fits the median uses. |
+
+The field is `None` when the trail width is missing (the fixed-box extraction
+does not fit one) or fewer than two bands have enough fits.
+
+The method assumes that a star's image is round, so the width across the
+dispersion equals the blur along it. Tracking errors, coma (a comet-shaped
+blur toward the edge of the field) and a bright neighbour all break this. The
+stored line-spread profile (`data/line_spread_*.json`) was fitted to line
+depths on other stars, so it may include scattered light that the trail width
+does not see. `measured_vs_stored_line_spread_ratio_halpha` shows how far the
+two disagree on one spectrum.
+
+Why the pipeline compares the red end with the blue end: a grating in a
+converging beam does not put the first-order spectrum in a flat plane. If the
+camera is focused on the zero order, the red end can be out of focus. That
+widens the red lines and limits how well the classifier can separate nearby
+spectral types there. The limit of 1.3 on `chromatic_defocus_ratio` is a
+designed value. A spectrum that is in focus changes width with wavelength only
+through seeing (the blur from the air), roughly as wavelength to the power
+-0.2. From 4600 A to 6600 A that gives a red-to-blue ratio of about 0.92. The
+limit sits well above that, and no real focus sweep has set it. The focus-sweep
+script (below) is the tool to check it.
+
+**The option to blur with the measured profile.** The classifier blurs its
+reference spectra to the instrument's resolution before it compares them with
+a spectrum. By default it uses the stored profile. Build the pipeline with
+`SpectroscopyPipeline(config, use_measured_line_spread=True)` to blur with this
+spectrum's own measured profile instead. The option is off by default. It
+changes only the profile that the classification and feature tests use, and
+only for a spectrum that has a measured profile. It does not change the
+instrument response, which was fitted with the stored profile, so switching it
+on makes the two blurs disagree. Do not switch it on until a real-data check
+has compared the classifications with and without it on spectra of stars of
+known type.
+
+Two scripts support this work (see the [scripts README](../../scripts/README.md)):
+
+- `scripts/spectral_focus_sweep.py` reads spectral frames of one star taken at
+  several focuser positions and reports the best focus for each wavelength band
+  and the position that suits mid-spectrum.
+- `scripts/compare_instrument_responses.py` compares two instrument-response
+  files. Use it to check that two standard stars from the same night give the
+  same response.
 
 ### Adding a metric
 

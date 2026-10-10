@@ -43,6 +43,11 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response i
     load_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_scale import counts_per_second_factor
+from astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread import (
+    line_spread_checkpoint_items,
+    measure_line_spread,
+    to_resolution_profile,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_APPLIED,
     STATUS_NOT_NEEDED,
@@ -699,7 +704,9 @@ class SpectroscopyPipeline:
         The tool that turns pixel numbers into colors.
     """
 
-    def __init__(self, config: SpectroscopyConfig | None = None) -> None:
+    def __init__(
+        self, config: SpectroscopyConfig | None = None, use_measured_line_spread: bool = False
+    ) -> None:
         """Set up the master controller.
 
         Parameters
@@ -707,7 +714,19 @@ class SpectroscopyPipeline:
         config : `SpectroscopyConfig`, optional
             The camera settings to use. If you leave this blank, it will
             load the default settings automatically.
+        use_measured_line_spread : `bool`, optional
+            Whether the classifier blurs its reference spectra with this
+            spectrum's own measured line spread (see
+            `pre_processing.measured_line_spread`) instead of the camera's
+            stored line-spread profile. Default `False`. It applies only to
+            a spectrum whose trail width gave a measured profile; any other
+            spectrum keeps the stored profile. The instrument response was
+            fitted with the stored profile and is not changed, so switching
+            this on makes the classification blur and the response
+            disagree. Do not switch it on until it has been checked on real
+            spectra (see the spectroscopy README, "Measured line spread").
         """
+        self.use_measured_line_spread = use_measured_line_spread
         if config is None:
             from astrometricslib.utilities import ConfigLoader
 
@@ -1192,6 +1211,16 @@ class SpectroscopyPipeline:
             dispersion_angle_degrees=result["detected_angle"],
         )
 
+        # How wide the blur is at each wavelength, from this spectrum's own
+        # trail width. Always measured and reported at checkpoint 1; it
+        # reaches the classifier only when `use_measured_line_spread` is on.
+        measured_line_spread = measure_line_spread(
+            wavelengths_angstrom, result.get("trail_width_px"), result.get("sample_distances_px")
+        )
+        measured_resolution_profile = (
+            to_resolution_profile(measured_line_spread) if self.use_measured_line_spread else None
+        )
+
         # Classify and test features on the response-corrected spectrum
         # when available -- it better reflects the star's true color than
         # QE-corrected or raw sensor counts.
@@ -1204,7 +1233,11 @@ class SpectroscopyPipeline:
             catalog_b_minus_v=star.b_minus_v,
             trail_width_px=result.get("trail_width_px"),
             extraction_box_width_px=float(rectangle[3]) if rectangle is not None else None,
-            resolution_profile=self.line_spread_profile,
+            resolution_profile=(
+                measured_resolution_profile
+                if measured_resolution_profile is not None
+                else self.line_spread_profile
+            ),
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             extinction_correction=extinction_record,
         )
@@ -1230,6 +1263,12 @@ class SpectroscopyPipeline:
         # this star. `frame_check` is the optional frame-level result of
         # `measure_spectral_frame_file`; the pipeline does not run it, so it
         # is normally absent.
+        calibrated_spectrum_checkpoint = input_quality_checkpoint(input_quality)
+        line_spread_metrics, line_spread_flags = line_spread_checkpoint_items(
+            wavelengths_angstrom, result.get("trail_width_px"), measured_line_spread, self.line_spread_profile
+        )
+        calibrated_spectrum_checkpoint.metrics.extend(line_spread_metrics)
+        calibrated_spectrum_checkpoint.flags.extend(line_spread_flags)
         stage_quality = [
             assess_raw_frame_quality(
                 zero_order_saturated_pixel_fraction=result.get("zero_order_saturated_pixel_fraction"),
@@ -1238,7 +1277,7 @@ class SpectroscopyPipeline:
                 extraction_diagnostics=result.get("extraction_diagnostics"),
                 frame_check=result.get("frame_check"),
             ),
-            input_quality_checkpoint(input_quality),
+            calibrated_spectrum_checkpoint,
             assess_processing_quality(
                 classification=classification,
                 features=probable_spectral_features,
@@ -1283,6 +1322,7 @@ class SpectroscopyPipeline:
             resolution_element_angstrom=(
                 analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
             ),
+            measured_line_spread=measured_line_spread,
             neighbor_wing_fraction=result.get("neighbor_wing_fraction"),
             neighbor_wing_status=result.get("neighbor_wing_status"),
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),

@@ -100,7 +100,6 @@ from astrometricslib.models.gaia_xp_comparison import (
 )
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.spectroscopy_quality import StageQualityMetric, metric
-from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_from_names
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
@@ -234,33 +233,6 @@ def xp_resolution_fwhm_angstrom(wavelength_angstrom: np.ndarray) -> np.ndarray:
     """
     nodes = np.array(XP_RESOLUTION_FWHM_NODES_ANGSTROM)
     return np.interp(wavelength_angstrom, nodes[:, 0], nodes[:, 1])
-
-
-def gaia_dr3_source_id(star: Any) -> int | None:
-    """Find the Gaia DR3 source id of a star.
-
-    The id is read from the star's stored `gaia_dr3_source_id` (set from
-    SIMBAD's list of names), or else from the star's own id or name when it is
-    a Gaia name such as ``Gaia DR3 1328045433153485824``.
-
-    Parameters
-    ----------
-    star : `StellarObject`
-        The star.
-
-    Returns
-    -------
-    source_id : `int` or `None`
-        The Gaia DR3 source id, or `None` when none is known. The brightest
-        stars have none because Gaia DR3 does not list them.
-    """
-    stored = getattr(star, "gaia_dr3_source_id", None)
-    if stored:
-        return int(stored)
-    return gaia_dr3_source_id_from_names([
-        str(getattr(star, "id", "") or ""),
-        str(getattr(star, "name", "") or ""),
-    ])
 
 
 def _not_checked(reason: str, source_id: int | None) -> GaiaXpComparison:
@@ -672,7 +644,8 @@ def compare_to_gaia_xp(
     driver : `GaiaXpDriver`
         Where the XP spectrum comes from.
     gaia_source_id : `int` or `None`
-        The star's Gaia DR3 source id (see `gaia_dr3_source_id`).
+        The star's Gaia DR3 source id (see
+        `catalog_star_identity.gaia_dr3_source_id_of`).
     wavelength_angstrom : `array-like`
         The spectrum's wavelengths, in Angstroms.
     response_corrected_intensity : `array-like` or `None`

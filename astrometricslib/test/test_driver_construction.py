@@ -22,6 +22,7 @@ PIPELINES_ROOT = pathlib.Path(__file__).resolve().parent.parent / "pipelines"
 # The built-in driver classes that only `drivers/driver_set.py` may build.
 BUILT_IN_DRIVER_CLASSES = frozenset({
     "AstrometryNetPlateSolveDriver",
+    "AstroqueryGaiaReddeningDriver",
     "AstroquerySimbadDriver",
     "SirilStackingDriver",
 })

@@ -121,6 +121,32 @@ def gaia_dr3_source_id_from_names(names: Iterable[str]) -> int | None:
     return None
 
 
+def gaia_dr3_source_id_of(star: StellarObject) -> int | None:
+    """Find a star's Gaia DR3 source number from everything it carries.
+
+    This is the one place that answers "which Gaia DR3 source is this star?"
+    for the spectroscopy steps that ask Gaia about a star (the reddening
+    lookup and the XP spectrum comparison).
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star. Its stored ``gaia_dr3_source_id`` (set from SIMBAD's list of
+        names, or from a Gaia match) is used first. Otherwise its ``id``,
+        ``name`` and ``target_ids`` are searched, in that order, for a name of
+        the form ``Gaia DR3 <digits>``.
+
+    Returns
+    -------
+    source_id : `int` or `None`
+        The source number, or `None` when none is known. The brightest stars
+        have none because Gaia DR3 does not list them.
+    """
+    if star.gaia_dr3_source_id:
+        return int(star.gaia_dr3_source_id)
+    return gaia_dr3_source_id_from_names(str(text or "") for text in (star.id, star.name, *star.target_ids))
+
+
 # Fields that identify the row itself or are recomputed fresh by every
 # pipeline run regardless of what is already on disk -- never gap-filled
 # from a duplicate, either because overwriting them from an arbitrary

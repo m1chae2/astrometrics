@@ -26,16 +26,31 @@ the [pre-processing README](../pre_processing/README.md)).
    - For a star, these are absorption dips.
    - For a glowing gas cloud (a nebula), the pipeline runs the same check
      in reverse and looks for bright emission humps instead of dips.
-4. **Classify the star.** The pipeline compares the spectrum's overall
+4. **Remove interstellar reddening, when the catalog gives it.** Dust
+   between us and a star makes the star look redder than it is. When the
+   star has a Gaia DR3 id and Gaia gives a colour excess E(B-V) for it, the
+   pipeline removes the reddening from the spectrum (see "Dereddening"
+   below). Without an E(B-V), the pipeline classifies the spectrum as
+   observed.
+5. **Classify the star.** The pipeline compares the spectrum's overall
    shape, such as how steeply its brightness changes across colours and how
    strong its hydrogen lines are, against a library of reference spectra
-   and reports the closest match as the star's likely spectral type. The
-   score for each reference is its relative RMS (see "Quality metrics from
-   the classifier" below). Lower is closer. The score is not a probability.
-5. **Measure the spectrum's own colour.** The pipeline measures the star's
+   and reports the closest match as the star's likely spectral type. When
+   step 4 ran, the pipeline classifies both the observed and the dereddened
+   spectrum and reports the dereddened result. The score for each reference
+   is its relative RMS (see "Quality metrics from the classifier" below).
+   Lower is closer. The score is not a probability.
+6. **Estimate the type from line strengths.** The pipeline measures a few
+   spectral lines against the continuum next to each one and names the
+   reference with the closest line strengths (see "Line-index cross-check"
+   below). This estimate ignores the continuum slope. It does not change
+   the type from step 5. It reports how far the two types are apart.
+7. **Measure the spectrum's own colour.** The pipeline measures the star's
    blue-versus-visual brightness ratio, its B-V colour, directly from the
-   spectrum, independent of every other step in this stage. Post-processing
-   later checks this measurement against the star's catalog colour.
+   spectrum, independent of every other step in this stage. It measures the
+   observed spectrum, because the catalog colour it is later checked
+   against is also reddened. Post-processing checks this measurement
+   against the star's catalog colour.
 
 ## What this stage records about its input
 
@@ -95,11 +110,100 @@ equally well, and interstellar reddening shifts the score by about as much
 as one rung. A small gap therefore means the data cannot choose between
 the two rungs, and the flag reports that.
 
+## Dereddening
+
+Reddening and the difference between neighbouring spectral types look alike
+at this instrument's resolution. Both tilt the spectrum, so the classifier
+cannot tell them apart from the spectrum alone (see the header of
+`spectral_classifier.py`). A catalog value of E(B-V) removes the ambiguity
+from outside the spectrum.
+
+1. **Find the Gaia id.** `catalog_star_identity.gaia_dr3_source_id_of`
+   (in `pipelines/shared/`) reads the star's stored `gaia_dr3_source_id`,
+   which the star identifier fills from SIMBAD's list of names or from a
+   Gaia match. Otherwise it looks for a `Gaia DR3 <digits>` name in the
+   star's `id`, `name` or `target_ids`. The Gaia XP comparison uses the same
+   function. A star with no Gaia id (the brightest stars are not in Gaia
+   DR3) gets no reddening lookup.
+2. **Ask the reddening driver.** `ReddeningDriver.get_reddening` returns an
+   E(B-V) and a note on where it came from. The built-in driver
+   (`drivers/astroquery_gaia_reddening_driver.py`) reads Gaia DR3
+   `ebpminrp_gspphot`, the colour excess E(BP-RP) in magnitudes, and divides
+   it by 1.339 to get E(B-V). If that value is missing, it reads
+   `ag_gspphot`, the dimming in Gaia's G band, and divides it by 2.740. Both
+   ratios come from Casagrande and VandenBerg (2018, MNRAS 479, L102) for a
+   typical star. A failed lookup is logged and the spectrum is classified as
+   observed. A caller replaces the driver with `Astrometrics(...,
+   reddening_driver=...)`.
+3. **Remove the reddening.** `interstellar_extinction.deredden_spectrum`
+   multiplies the spectrum by 10 to the power of 0.4 A(wavelength), where
+   A(wavelength) is the dimming from the Cardelli, Clayton and Mathis (1989)
+   law with R_V = 3.1 (the formula is in the module's docstring).
+4. **Classify twice.** `analyze_spectrum` classifies the observed and the
+   dereddened spectrum. The reported type, its RMS scores and the candidates
+   come from the dereddened spectrum. If the dereddened spectrum cannot be
+   classified, the observed result stays.
+
+The result keeps `SpectroscopyResult.reddening`: `ebv`, `ebv_source`,
+`gaia_source_id`, `observed_best_type`, `dereddened_best_type` and
+`type_shift_steps` (dereddened minus observed position on the O-to-M ladder,
+negative when dereddening gives a hotter type). The stored spectrum stays
+as observed.
+
+Measured on the bundled templates blurred to the stored line spread: a G0V
+template reddened with E(B-V) = 0.3 classifies as K2V (12 subtypes too late)
+without dereddening, and as G0V with the known E(B-V). With E(B-V) 0.25 for a
+star that has 0.30, the type still moves closer to G0V. The catalog value is
+itself an estimate, so a real star improves by less than a template does.
+
+## Line-index cross-check
+
+`spectral_line_indices.py` estimates the type from six line depths. Each
+depth is how far the spectrum sits below a local continuum at the line, as a
+fraction of that continuum. The local continuum is the quadratic curve the
+feature detector uses (`spectral_feature_detector.measure_local_dip_depth`),
+so a smooth tilt cancels. Measured on a G0V template, adding E(B-V) = 0.3
+moves every index by under 0.01.
+
+| Index | Core window | What it tracks |
+|---|---|---|
+| `h_beta` | 4861 A, 25 A either side or half a resolution element | Strongest at A0, weaker toward hotter and cooler stars. |
+| `h_alpha` | 6563 A, 25 A either side or half a resolution element | The same shape as H-beta. It turns negative in late K and M stars. |
+| `mg_b` | 5175 A, 20 A either side or half a resolution element | Rises through G and K stars. |
+| `na_d` | 5893 A, 20 A either side or half a resolution element | Rises through K and M stars. |
+| `tio_6200` | 6150-6250 A | Titanium oxide band in M stars. |
+| `tio_7100` | 7050-7150 A | Titanium oxide band in M stars. |
+
+The module measures the same indices on every main-sequence reference,
+blurred to the instrument's line spread. It divides each index by its spread
+(standard deviation) across the references and picks the reference nearest in
+that space. The result is `SpectroscopyResult.line_index_classification`:
+`best_type`, `distance` (unitless, root-mean-square in spread units),
+`indices`, `template_fit_type` and `steps_from_template_fit`.
+
+How accurate the estimate is, measured on the bundled templates with the
+ZWO ASI 533MM Pro line spread (34 templates):
+
+- Each template given as input, with itself among the references: 34 of 34
+  exact. This only shows that the six indices tell the templates apart.
+- Each template with itself removed from the references: 50% within two
+  subtypes, 71% within five, and the worst miss is 19 subtypes (B3 read as
+  F2). The ladder has gaps of three to five subtypes in places, so even a
+  perfect method could not reach two subtypes everywhere.
+- With 0.5% random noise on every 10 A sample: 99% within two subtypes. With
+  1% noise: 85%. With 2% noise: 72%.
+
+At this resolution a hot B star and a mid F star have nearly the same line
+indices. The estimate is therefore a second opinion on the type, good to a
+few subtypes. It is not a replacement for the template fit, and it cannot
+separate the hot side of A from the cool side without the continuum.
+
 ## What this stage produces
 
-This stage produces a likely spectral type, the features found or not found
-at each expected wavelength, a second-order-contamination risk flag, and
-the spectrum's own measured colour. It attaches all of these to the star
+This stage produces a likely spectral type, the reddening correction behind
+it (when there was one), a line-strength estimate of the type, the features
+found or not found at each expected wavelength, a second-order-contamination
+risk flag, and the spectrum's own measured colour. It attaches all of these to the star
 for post-processing to evaluate.
 
 ## Quality checkpoint 2
@@ -116,7 +220,17 @@ the second-order ratio, and changes none of them. Its metrics are:
   p-values that were not calibrated;
 - the share of samples with second-order risk and the largest blue-to-red
   ratio;
-- the number of detected emission lines.
+- the number of detected emission lines;
+- `ebv_used` (magnitudes) and `dereddening_type_shift_steps` (subtype steps),
+  which report the dereddening and have no limit, because a type shift is
+  expected when dust is present;
+- `index_vs_template_type_steps` (subtype steps), the distance between the
+  line-index type and the reported type, judged against
+  `DIFFERS_FROM_CATALOG_SUBTYPES` (20). The limit is the one the repository
+  already uses for two types that disagree. It is a designed value. The
+  checkpoint raises the `slope_and_lines_disagree` flag when the distance
+  passes it. On the templates, the leave-one-out distance never passes it
+  (the worst miss is 19 subtypes).
 
 The `processing_quality` run gate counts the spectra in which any of these
 metrics fails. The [pipeline README](../README.md) lists every metric with its

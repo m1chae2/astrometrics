@@ -13,14 +13,30 @@ The limits for the classification (`NO_GOOD_MATCH_RMS` and
 defines none of its own. Metrics without a limit (feature counts,
 second-order risk, emission lines) are reported for measurement only,
 because no validated limit exists for them yet.
+
+Two cross-checks sit beside the classification. The dereddening step removes
+the reddening a catalog E(B-V) predicts before the classifier runs, and the
+metrics `ebv_used` and `dereddening_type_shift_steps` report what it did.
+Neither has a limit, because a type shift is expected when dust is present.
+The line-index estimate is a second opinion on the type that does not depend
+on the continuum slope. `index_vs_template_type_steps` measures how far it is
+from the template-fit type. It uses `DIFFERS_FROM_CATALOG_SUBTYPES`, the
+limit this repository already uses for two types that disagree, and the
+checkpoint raises the `slope_and_lines_disagree` flag when the distance
+passes it.
 """
 
 from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric, metric
-from astrometricslib.models.stellar_source import AMBIGUOUS_RMS_GAP, NO_GOOD_MATCH_RMS
+from astrometricslib.models.stellar_source import (
+    AMBIGUOUS_RMS_GAP,
+    DIFFERS_FROM_CATALOG_SUBTYPES,
+    NO_GOOD_MATCH_RMS,
+)
 from astrometricslib.pipelines.spectroscopy.processing.emission_line_detector import (
     VERDICT_DETECTED as EMISSION_LINE_DETECTED,
 )
@@ -110,6 +126,66 @@ def _feature_metrics(features: Sequence[Mapping[str, object]]) -> list[StageQual
     ]
 
 
+def _cross_check_metrics(
+    reddening: ReddeningRecord | None, line_index_classification: LineIndexClassification | None
+) -> list[StageQualityMetric]:
+    """Build the metrics for the dereddening and line-index cross-checks.
+
+    Parameters
+    ----------
+    reddening : `ReddeningRecord`, optional
+        The dereddening applied before the classification, or `None` when no
+        E(B-V) was available.
+    line_index_classification : `LineIndexClassification`, optional
+        The line-index estimate, or `None` when it could not be made.
+
+    Returns
+    -------
+    metrics : `list` [`StageQualityMetric`]
+        ``ebv_used``, ``dereddening_type_shift_steps`` and
+        ``index_vs_template_type_steps``. A metric is `None`-valued when its
+        input is missing.
+    """
+    shift = (
+        None if reddening is None or reddening.type_shift_steps is None else abs(reddening.type_shift_steps)
+    )
+    index_steps = (
+        None if line_index_classification is None else line_index_classification.steps_from_template_fit
+    )
+    return [
+        metric(
+            "ebv_used",
+            None if reddening is None else reddening.ebv,
+            "magnitude",
+            note=(
+                f"report-only; removed from the spectrum before classifying; source: {reddening.ebv_source}"
+                if reddening is not None
+                else "report-only; no catalog E(B-V) was available, so the observed spectrum was classified"
+            ),
+        ),
+        metric(
+            "dereddening_type_shift_steps",
+            shift,
+            "subtype steps",
+            note=(
+                "report-only; steps between the best type before and after dereddening, "
+                "ten steps to a letter class"
+            ),
+        ),
+        metric(
+            "index_vs_template_type_steps",
+            index_steps,
+            "subtype steps",
+            limit=DIFFERS_FROM_CATALOG_SUBTYPES,
+            higher_is_better=False,
+            note=(
+                "limit is DIFFERS_FROM_CATALOG_SUBTYPES; steps between the type the line indices "
+                "point to and the template-fit type, ten steps to a letter class"
+            ),
+        ),
+    ]
+
+
 def assess_processing_quality(
     *,
     classification: Mapping[str, object],
@@ -118,6 +194,8 @@ def assess_processing_quality(
     emission_lines: Sequence[Mapping[str, object]],
     is_emission_line_source: bool,
     second_order_blue_to_red_ratio: Sequence[float] | np.ndarray | None,
+    reddening: ReddeningRecord | None = None,
+    line_index_classification: LineIndexClassification | None = None,
 ) -> StageQualityCheckpoint:
     """Build quality checkpoint 2 for one spectrum's processing result.
 
@@ -137,6 +215,12 @@ def assess_processing_quality(
         Whether at least two emission lines were detected.
     second_order_blue_to_red_ratio : `Sequence` [`float`], optional
         The per-sample ratio from `compute_second_order_blue_to_red_ratio`.
+    reddening : `ReddeningRecord`, optional
+        The dereddening applied before the classification (see
+        `analyze_spectrum`). Leave out when none was applied.
+    line_index_classification : `LineIndexClassification`, optional
+        The line-index estimate of the type, compared with the reported
+        template-fit type (see `classify_by_line_indices`).
 
     Returns
     -------
@@ -218,6 +302,8 @@ def assess_processing_quality(
             note="named emission lines or blends with a detected verdict",
         )
     )
+    cross_check_metrics = _cross_check_metrics(reddening, line_index_classification)
+    metrics.extend(cross_check_metrics)
 
     flags = []
     if not is_classified:
@@ -226,4 +312,9 @@ def assess_processing_quality(
         flags.append("emission_line_source")
     if risky_fraction:
         flags.append("second_order_risk")
+    if any(
+        entry.name == "index_vs_template_type_steps" and entry.passed is False
+        for entry in cross_check_metrics
+    ):
+        flags.append("slope_and_lines_disagree")
     return StageQualityCheckpoint(stage=STAGE, metrics=metrics, flags=flags)

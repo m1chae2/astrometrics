@@ -17,6 +17,7 @@ from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.gate_result import GateStatus
 from astrometricslib.models.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
     output_quality_checkpoint,
 )
@@ -31,7 +32,6 @@ from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp i
     REASON_NO_XP,
     compare_spectrum_to_xp,
     compare_to_gaia_xp,
-    gaia_dr3_source_id,
     gaia_xp_gate,
     gaia_xp_metrics,
     gaia_xp_rows,
@@ -220,12 +220,12 @@ def test_compare_to_gaia_xp_runs_the_comparison_with_the_drivers_spectrum() -> N
 
 def test_the_gaia_source_id_comes_from_the_stored_id_or_a_gaia_name() -> None:
     """The id is the stored number, else a Gaia name's number."""
-    assert gaia_dr3_source_id(StellarObject(id="HD 1", gaia_dr3_source_id=42)) == 42
-    assert gaia_dr3_source_id(StellarObject(id=f"Gaia DR3 {SOURCE_ID}")) == SOURCE_ID
-    assert gaia_dr3_source_id(StellarObject(id="HD 1", name=f"Gaia DR3 {SOURCE_ID}")) == SOURCE_ID
-    assert gaia_dr3_source_id(StellarObject(id="HD 151086")) is None
+    assert gaia_dr3_source_id_of(StellarObject(id="HD 1", gaia_dr3_source_id=42)) == 42
+    assert gaia_dr3_source_id_of(StellarObject(id=f"Gaia DR3 {SOURCE_ID}")) == SOURCE_ID
+    assert gaia_dr3_source_id_of(StellarObject(id="HD 1", name=f"Gaia DR3 {SOURCE_ID}")) == SOURCE_ID
+    assert gaia_dr3_source_id_of(StellarObject(id="HD 151086")) is None
     # A made-up name for a Gaia star with no source number is not an id.
-    assert gaia_dr3_source_id(StellarObject(id="Gaia DR3 J1234.5+12.3")) is None
+    assert gaia_dr3_source_id_of(StellarObject(id="Gaia DR3 J1234.5+12.3")) is None
 
 
 def test_the_checkpoint_metrics_carry_the_designed_limits() -> None:

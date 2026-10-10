@@ -24,6 +24,7 @@ from astrometricslib.models.stellar_source import (
     StellarObject,
 )
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     compute_stack_saturated_pixel_fraction,
@@ -35,7 +36,6 @@ from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_qualit
 )
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     compare_to_gaia_xp,
-    gaia_dr3_source_id,
     gaia_xp_precheck,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import (
@@ -97,6 +97,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
+from astrometricslib.pipelines.spectroscopy.processing.star_reddening import look_up_star_reddening
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -729,6 +730,9 @@ class SpectroscopyPipeline:
     atmospheric_conditions : `AtmosphericConditions` or `None`
         The air's pressure, temperature and humidity. `None` means the
         standard atmosphere at the site's elevation.
+    reddening_driver : `ReddeningDriver`
+        The catalog that gives a star's interstellar reddening, used to
+        remove the reddening from a spectrum before it is classified.
     """
 
     def __init__(
@@ -748,9 +752,11 @@ class SpectroscopyPipeline:
             load the default settings automatically.
         drivers : `Drivers`, optional
             The outside services to use. Only its Gaia XP driver is used here,
-            to check each spectrum against the star's Gaia XP spectrum; a
-            driver left out is the built-in one, built the first time a star
-            with a known Gaia id needs it.
+            to check each spectrum against the star's Gaia XP spectrum, and
+            its reddening source, to remove a star's catalog reddening before
+            it is classified. A Gaia XP driver left out is the built-in one,
+            built the first time a star with a known Gaia id needs it. A
+            reddening source left out is the built-in one (Gaia DR3).
         observatory_site : `ObservatorySite`, optional
             Where the observatory is, for the atmospheric refraction
             correction. When `config` is left blank and this is too, it is
@@ -777,6 +783,9 @@ class SpectroscopyPipeline:
         self.config = config
         self.observatory_site = observatory_site
         self.atmospheric_conditions = atmospheric_conditions
+        # The catalog that gives each star's reddening. Built here but asked
+        # only for a star that carries a Gaia DR3 id (see `star_reddening`).
+        self.reddening_driver = (drivers or Drivers()).reddening_or_default()
         # What we know about this camera model (for example, the value at
         # which its pixels count as saturated), looked up once here.
         self.camera_profile = resolve_camera_profile(config.camera.name)
@@ -1224,7 +1233,7 @@ class SpectroscopyPipeline:
         comparison : `GaiaXpComparison`
             The comparison, or a ``not_checked`` record that says why not.
         """
-        source_id = gaia_dr3_source_id(star)
+        source_id = gaia_dr3_source_id_of(star)
         response_corrected = analysis.response_corrected_intensity
         not_checked = gaia_xp_precheck(source_id, response_corrected)
         if not_checked is not None:
@@ -1347,6 +1356,10 @@ class SpectroscopyPipeline:
             )
             logger.debug("Extinction correction: %s", extinction_record.as_dict())
 
+        # The star's catalog reddening, when it has a Gaia DR3 id. The
+        # classification removes it from the spectrum before comparing.
+        reddening = look_up_star_reddening(star, self.reddening_driver)
+
         # Classify and test features on the response-corrected spectrum
         # when available -- it better reflects the star's true color than
         # QE-corrected or raw sensor counts.
@@ -1362,6 +1375,7 @@ class SpectroscopyPipeline:
             resolution_profile=self.line_spread_profile,
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             extinction_correction=extinction_record,
+            reddening=reddening,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
@@ -1403,6 +1417,8 @@ class SpectroscopyPipeline:
                 emission_lines=analysis.emission_lines,
                 is_emission_line_source=analysis.is_emission_line_source,
                 second_order_blue_to_red_ratio=second_order_blue_to_red_ratio,
+                reddening=analysis.reddening,
+                line_index_classification=analysis.line_index_classification,
             ),
             output_quality_checkpoint(
                 output_quality,
@@ -1451,6 +1467,8 @@ class SpectroscopyPipeline:
             output_quality=output_quality,
             stage_quality=stage_quality,
             wavelength_zero_point=zero_point,
+            reddening=analysis.reddening,
+            line_index_classification=analysis.line_index_classification,
             extraction_diagnostics=(
                 SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
                 if result.get("extraction_diagnostics") is not None

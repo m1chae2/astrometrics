@@ -116,6 +116,8 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "QuarantinePreview",
     "RPC_CODES",
     "RawFrameCheckReport",
+    "ReddeningDriver",
+    "ReddeningEstimate",
     "OverlayStar",
     "ReindexReport",
     "RenderedImage",

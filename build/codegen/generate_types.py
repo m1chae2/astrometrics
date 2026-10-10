@@ -56,6 +56,7 @@ from astrometricslib.models.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
@@ -379,6 +380,8 @@ def render_types() -> str:
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(SpectralExtractionDiagnostics, "SpectralExtractionDiagnostics"),
         generate_interface(DifferentialRefractionRecord, "DifferentialRefractionRecord"),
+        generate_interface(ReddeningRecord, "ReddeningRecord"),
+        generate_interface(LineIndexClassification, "LineIndexClassification"),
         generate_interface(GaiaXpBandResidual, "GaiaXpBandResidual"),
         generate_interface(GaiaXpComparison, "GaiaXpComparison"),
         generate_interface(GaiaXpBandSummary, "GaiaXpBandSummary"),

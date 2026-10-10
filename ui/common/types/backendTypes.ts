@@ -419,6 +419,8 @@ export interface SpectroscopyResult {
   outputQuality?: OutputQualityAssessment | null;
   stageQuality?: StageQualityCheckpoint[];
   wavelengthZeroPoint?: WavelengthZeroPointRecord | null;
+  reddening?: ReddeningRecord | null;
+  lineIndexClassification?: LineIndexClassification | null;
   extractionDiagnostics?: SpectralExtractionDiagnostics | null;
   extinctionCorrection?: ExtinctionCorrectionRecord | null;
   differentialRefraction?: DifferentialRefractionRecord | null;
@@ -486,6 +488,42 @@ export interface DifferentialRefractionRecord {
   acrossDispersionArcsecAt8000?: number | null;
   alongDispersionSpanAngstrom?: number | null;
   acrossDispersionSpanPx?: number | null;
+}
+
+/**
+ * The reddening correction applied before a spectrum was classified.
+ *
+ * Dust between us and a star dims blue light more than red light and tilts
+ * the spectrum toward the red. The colour excess E(B-V) measures how much,
+ * in magnitudes. When a catalog gives E(B-V) for a star, the pipeline
+ * removes the tilt (see `interstellar_extinction`) and classifies both the
+ * observed and the dereddened spectrum. This record keeps both results.
+ */
+export interface ReddeningRecord {
+  ebv: number;
+  ebvSource: string;
+  gaiaSourceId?: string;
+  observedBestType?: string;
+  dereddenedBestType?: string;
+  typeShiftSteps?: number | null;
+}
+
+/**
+ * A spectral type estimated from line strengths alone.
+ *
+ * Each index is the depth of one spectral line or band below the continuum
+ * next to it, as a fraction of that continuum (0.1 means 10% dimmer). The
+ * same indices are measured on every bundled reference spectrum after
+ * blurring it to the instrument's resolution. The best type is the
+ * reference whose indices are closest to the star's. It is a cross-check on
+ * the template classifier, not a replacement for it.
+ */
+export interface LineIndexClassification {
+  bestType: string;
+  distance: number;
+  indices?: Record<string, number>;
+  templateFitType?: string;
+  stepsFromTemplateFit?: number | null;
 }
 
 /**

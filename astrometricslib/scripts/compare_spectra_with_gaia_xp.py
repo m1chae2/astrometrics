@@ -41,11 +41,11 @@ from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     COMPARISON_BANDS_ANGSTROM,
     GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM,
     compare_to_gaia_xp,
-    gaia_dr3_source_id,
     gaia_xp_gate,
     summarize_gaia_xp,
 )
@@ -90,7 +90,7 @@ def compare_star(
     errors = getattr(spectroscopy, "response_corrected_intensity_errors", None)
     return compare_to_gaia_xp(
         driver,
-        gaia_dr3_source_id(star),
+        gaia_dr3_source_id_of(star),
         np.asarray(spectroscopy.wavelengths_angstrom, dtype=float),
         response_corrected,
         intensity_errors=np.asarray(errors, dtype=float) if errors else None,

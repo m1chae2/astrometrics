@@ -32,6 +32,8 @@ from astrometricslib.drivers.interfaces import (
     GaiaXpDriver,
     PlateSolveDriver,
     PlateSolveHeader,
+    ReddeningDriver,
+    ReddeningEstimate,
     SimbadDriver,
     StackingDriver,
     StackRunResult,
@@ -278,6 +280,9 @@ class Astrometrics:
     gaia_xp_driver : `GaiaXpDriver`, optional
         The source of Gaia DR3 XP spectra. If not given, astroquery is used,
         with the spectra cached in the library's data folder.
+    reddening_driver : `ReddeningDriver`, optional
+        The source of interstellar reddening values. If not given, Gaia DR3
+        is queried through astroquery.
 
     Notes
     -----
@@ -295,6 +300,7 @@ class Astrometrics:
         stacking_driver: StackingDriver | None = None,
         simbad_driver: SimbadDriver | None = None,
         gaia_xp_driver: GaiaXpDriver | None = None,
+        reddening_driver: ReddeningDriver | None = None,
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
@@ -310,6 +316,7 @@ class Astrometrics:
             stacking=stacking_driver,
             simbad=simbad_driver,
             gaia_xp=gaia_xp_driver,
+            reddening=reddening_driver,
         )
 
         # There is deliberately no in-memory copy of the star catalog here.
@@ -403,6 +410,8 @@ __all__ = [
     "QualityDiagnostics",
     "QuarantinePreview",
     "RawFrameCheckReport",
+    "ReddeningDriver",
+    "ReddeningEstimate",
     "ReindexReport",
     "RenderedImage",
     "RestoreReport",

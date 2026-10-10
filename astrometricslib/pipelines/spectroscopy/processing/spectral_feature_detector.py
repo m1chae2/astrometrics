@@ -361,6 +361,47 @@ def _measure_dip(
     return _DipMeasurement(center, depth, depth_uncertainty, depth / depth_uncertainty)
 
 
+def measure_local_dip_depth(
+    wavelength_angstrom: np.ndarray,
+    intensity: np.ndarray,
+    center: float,
+    half_window: float,
+    resolution_element_angstrom: float,
+) -> float | None:
+    """Measure how deep a spectrum dips at one wavelength.
+
+    This gives other modules the detector's own continuum rule: a quadratic
+    curve fitted to the bands on both sides of the core (see
+    `_measure_dip`). It measures at the given center only and does not
+    search around it.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        Wavelengths, sorted, in Angstroms.
+    intensity : `np.ndarray`
+        The brightness at each wavelength.
+    center : `float`
+        The wavelength to measure at, in Angstroms.
+    half_window : `float`
+        The core's half-width, in Angstroms.
+    resolution_element_angstrom : `float`
+        The width of one independent measurement, in Angstroms. It sets how
+        far the continuum bands start from the center.
+
+    Returns
+    -------
+    depth : `float` or `None`
+        How far below the local continuum the core is, as a fraction of the
+        continuum (0.05 means 5% dimmer; negative means a bump). `None`
+        when there are too few samples in the bands or the core.
+    """
+    measurement = _measure_dip(
+        wavelength_angstrom, intensity, center, half_window, resolution_element_angstrom
+    )
+    return None if measurement is None else measurement.depth
+
+
 def _candidate_dips(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,

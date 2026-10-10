@@ -379,26 +379,6 @@ export interface TargetStarCount {
 }
 
 /**
- * How clearly a spectrum's best reference type beats the next one.
- *
- * Attributes
- * ----------
- * runner_up_type : `str`
- * The second-closest reference type.
- * gap_points : `float`
- * How much worse the runner-up fits, in percentage points of the
- * root-mean-square (RMS) difference.
- * is_well_separated : `bool`
- * `True` when the gap is at least `WELL_SEPARATED_POINTS`; otherwise
- * the match is a close call.
- */
-export interface CandidateSeparation {
-  runnerUpType: string;
-  gapPoints: number;
-  isWellSeparated: boolean;
-}
-
-/**
  * A star's own extracted spectrum, and what it suggests about the star.
  *
  * Bundles spectroscopy's results the same way `PhotometryResult` bundles
@@ -412,7 +392,6 @@ export interface SpectroscopyResult {
   quantumEfficiencyCorrectedIntensities?: number[] | null;
   responseCorrectedIntensities?: number[] | null;
   selfDeterminedSpectralType?: string;
-  selfDeterminedSpectralTypeConfidence?: number | null;
   selfDeterminedSpectralTypeRms?: number | null;
   selfDeterminedSpectralTypeNote?: string;
   selfDeterminedSpectralTypeCandidates?: Record<string, any>[];
@@ -440,8 +419,14 @@ export interface SpectroscopyResult {
   generatedByJobId?: string | null;
   /** Check if even the closest reference spectrum fits badly. */
   isPoorMatch?: boolean;
-  /** How clearly the best reference type beats the runner-up. */
-  candidateSeparation?: CandidateSeparation | null;
+  /** Measure how much closer the best reference is than the runner-up. */
+  rmsGapToSecondBest?: number | null;
+  /** Check if the best reference barely beats the runner-up. */
+  isAmbiguous?: boolean | null;
+  /** Measure how much closer the best reference is than the next class. */
+  rmsGapToNextClass?: number | null;
+  /** Check if another spectral class fits almost as well as the best. */
+  isClassAmbiguous?: boolean | null;
 }
 
 /**
@@ -493,8 +478,9 @@ export interface InputQualityAssessment {
  * spectrum actually produced.
  */
 export interface OutputQualityAssessment {
-  isLowConfidence: boolean;
+  isPoorMatch: boolean;
   isAmbiguous: boolean;
+  isClassAmbiguous: boolean;
   isSubtypeFinerThanResolution?: boolean | null;
   catalogAgrees?: boolean | null;
   isTrustworthy: boolean;
@@ -609,6 +595,12 @@ export interface PhotometryResult {
   sessionSummaries?: SessionPhotometrySummary[];
   betweenSessionAmplitudeMag?: number | null;
   betweenSessionSignificance?: number | null;
+  instrumentalMag?: number | null;
+  rmsMag?: number | null;
+  excessScatter?: number | null;
+  reducedChiSquare?: number | null;
+  stetsonJ?: number | null;
+  variabilityScore?: number | null;
 }
 
 /**
@@ -1068,6 +1060,10 @@ export interface VariableCandidate {
   dec: number;
   knownVariability?: string;
   knownVariabilityNote?: string;
+  excessScatter?: number | null;
+  reducedChiSquare?: number | null;
+  stetsonJ?: number | null;
+  variabilityScore?: number | null;
   /** How confident the code is that this star is truly variable. */
   score?: number;
 }
@@ -1695,6 +1691,7 @@ export interface PhotometryPipelineQualityMetrics {
   variableCandidateCount: number;
   lightCurveScatterRmsMag?: number | null;
   crossSessionMatchCount?: number;
+  noiseModelCurve?: NoiseModelPoint[];
   sessionsMissingWcs?: string[];
   longTermVariableCandidateCount?: number;
   astrometryIdentifiedStarCount?: number;
@@ -1736,7 +1733,8 @@ export interface SpectralClassificationConcern {
   starId: string;
   reason: string;
   spectralType: string;
-  confidence?: number | null;
+  classificationRms?: number | null;
+  rmsGapToNextClass?: number | null;
 }
 
 /**
@@ -1756,7 +1754,7 @@ export interface SpectroscopyPipelineQualityMetrics {
   dispersionAngleDeg?: number | null;
   trailWidthProfileAvailable?: boolean;
   medianTrailWidthPx?: number | null;
-  lowConfidenceClassificationCount?: number;
+  poorMatchClassificationCount?: number;
   ambiguousClassificationCount?: number;
   flaggedSpectralClassifications?: SpectralClassificationConcern[];
 }
@@ -1830,7 +1828,8 @@ export enum CascadeStage {
   REJECTED_SINGLE_FRAME = "rejected_single_frame",
   REJECTED_STATIONARY_SKY = "rejected_stationary_sky",
   REJECTED_STATIONARY_PIXEL = "rejected_stationary_pixel",
-  REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE = "rejected_nonlinear_or_out_of_range_rate"
+  REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE = "rejected_nonlinear_or_out_of_range_rate",
+  REJECTED_NON_MONOTONIC = "rejected_non_monotonic"
 }
 
 /**

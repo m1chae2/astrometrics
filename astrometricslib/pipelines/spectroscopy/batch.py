@@ -605,8 +605,8 @@ def _attach_spectroscopy_quality_summary(
             frame_result.get("spectral_classification_concerns") or []
         )
 
-    low_confidence_count = sum(
-        1 for concern in all_spectral_classification_concerns if "low_confidence" in concern["reason"]
+    poor_match_count = sum(
+        1 for concern in all_spectral_classification_concerns if "poor_match" in concern["reason"]
     )
     ambiguous_count = sum(
         1 for concern in all_spectral_classification_concerns if "ambiguous" in concern["reason"]
@@ -637,7 +637,7 @@ def _attach_spectroscopy_quality_summary(
             dispersion_angle_deg=all_dispersion_angles[0] if all_dispersion_angles else None,
             trail_width_profile_available=trail_width_profile_available,
             median_trail_width_px=median_trail_width_px,
-            low_confidence_classification_count=low_confidence_count,
+            poor_match_classification_count=poor_match_count,
             ambiguous_classification_count=ambiguous_count,
             flagged_spectral_classifications=all_spectral_classification_concerns,
         ),

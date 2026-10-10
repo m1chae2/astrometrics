@@ -71,22 +71,22 @@ def test_concerns_are_built_from_the_saved_stars_not_the_raw_input(catalog_acces
     in the concerns list either, since it never gets saved at all.
     """
     unresolved = StellarObject(id="Star_2")
-    low_confidence = StellarObject(
+    poor_match = StellarObject(
         id="HD 2",
         right_ascension=30.0,
         declination=40.0,
         spectroscopy=SpectroscopyResult(
             self_determined_spectral_type="O5V",
-            self_determined_spectral_type_confidence=0.33,
+            self_determined_spectral_type_rms=0.4,
             self_determined_spectral_type_candidates=[
-                {"spectral_type": "O5V", "probability": 0.65, "correlation": 0.33},
-                {"spectral_type": "B0V", "probability": 0.34, "correlation": 0.32},
+                {"spectral_type": "O5V", "rms": 0.4, "correlation": 0.33},
+                {"spectral_type": "B0V", "rms": 0.6, "correlation": 0.32},
             ],
         ),
     )
 
     saved, _breakdown, concerns = record_and_flag_spectroscopy_stars(
-        [unresolved, low_confidence], catalog_access=catalog_access, target_id="TestTarget"
+        [unresolved, poor_match], catalog_access=catalog_access, target_id="TestTarget"
     )
 
     assert concerns == build_spectral_classification_concerns(saved)

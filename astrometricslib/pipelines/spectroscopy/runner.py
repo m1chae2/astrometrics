@@ -484,8 +484,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
         flagged_spectral_classifications = result.payload["flagged_spectral_classifications"]
-        low_confidence_count = sum(
-            1 for concern in flagged_spectral_classifications if "low_confidence" in concern["reason"]
+        poor_match_count = sum(
+            1 for concern in flagged_spectral_classifications if "poor_match" in concern["reason"]
         )
         ambiguous_count = sum(
             1 for concern in flagged_spectral_classifications if "ambiguous" in concern["reason"]
@@ -502,7 +502,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 catalog_matched_star_count=star_id_breakdown.catalog_matched,
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
-                low_confidence_classification_count=low_confidence_count,
+                poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
                 flagged_spectral_classifications=flagged_spectral_classifications,
             ),

@@ -82,7 +82,7 @@ def test_a_window_can_be_left_out_of_the_comparison() -> None:
         excluded_windows_angstrom=[(6480.0, 6650.0)],
     )
 
-    assert without_line["rms"] < with_line["rms"]
+    assert without_line["classification_rms"] < with_line["classification_rms"]
     assert without_line["spectral_type"] == "B0V"
     assert without_line["excluded_windows_angstrom"] == [(6480.0, 6650.0)]
     assert with_line["excluded_windows_angstrom"] == []
@@ -152,7 +152,7 @@ def test_the_classifier_still_treats_no_windows_as_before() -> None:
 
     assert result["spectral_type"] == "B0V"
     assert result["excluded_windows_angstrom"] == []
-    assert result["rms"] == pytest.approx(0.0, abs=0.02)
+    assert result["classification_rms"] == pytest.approx(0.0, abs=0.02)
 
 
 def _add_bump_at(spectrum: np.ndarray, centre_angstrom: float, height: float) -> np.ndarray:

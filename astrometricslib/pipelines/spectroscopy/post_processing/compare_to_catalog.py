@@ -8,28 +8,18 @@ neighbour's light, glare from a nearby bright star, or a name given to
 the wrong object).
 """
 
-import re
-
 import numpy as np
 
 from astrometricslib.models.spectroscopy_quality import CatalogComparison
+from astrometricslib.models.stellar_source import DIFFERS_FROM_CATALOG_SUBTYPES, types_differ_on_ladder
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     is_catalog_giant,
     luminosity_class,
 )
 
-_SPECTRAL_LETTER_ORDER = "OBAFGKM"
-
-# A classified type more than this many subclass steps from the catalog type
-# is flagged. A step is a tenth of a letter class, so 20 is two whole classes
-# (for example B to F). Of the 29 stars with a catalog type classified on
-# 2026-09-24, 27 were within 12 steps (F8 matched K0 was the worst), and the
-# only two beyond that were both wrong for reasons other than the templates:
-# Elnath (catalog B7III, matched M2V, 45 steps, with a blue end that looks like
-# the zero order's glare) and the star named beta1 Cyg B (catalog B9.5V,
-# matched K4V, 34.5 steps, which is really the K3II primary). A judgement call
-# from that one data set.
-CATALOG_DISAGREEMENT_SUBCLASS_STEPS = 20.0
+# The limit for "the measured type differs from the catalog type" is
+# `DIFFERS_FROM_CATALOG_SUBTYPES` in `astrometricslib.models.stellar_source`,
+# and `types_differ_on_ladder` applies it. This module defines no copy.
 
 # A catalog colour redder than this is not compared. The references stop at
 # M4V (B-V 1.64), so the map from window colour to B-V is not calibrated for
@@ -46,28 +36,6 @@ MAXIMUM_CALIBRATED_B_MINUS_V = 1.7
 # and well above the 0.09 mag median excess for F, G and early K stars, so
 # ordinary reddening does not trigger it, but the gap is thin.
 COLOUR_DISAGREEMENT_MAGNITUDES = 0.4
-
-
-def _subclass_position(spectral_type_text: str | None) -> float | None:
-    """Place a spectral type on a single scale, ten steps per letter class.
-
-    Parameters
-    ----------
-    spectral_type_text : `str`, optional
-        A spectral type such as "K3V", "B9.5V" or "A5V+M3-4V". Only the
-        first letter and subclass are read.
-
-    Returns
-    -------
-    position : `float` or `None`
-        Steps from the start of O (so B0 is 10 and M0 is 60), taking a
-        missing subclass as 5, or `None` if the text has no O to M letter.
-    """
-    match = re.match(r"\s*([OBAFGKM])\s*(\d(?:\.\d)?)?", str(spectral_type_text or ""))
-    if match is None:
-        return None
-    subclass = float(match.group(2)) if match.group(2) else 5.0
-    return _SPECTRAL_LETTER_ORDER.index(match.group(1)) * 10.0 + subclass
 
 
 def catalog_disagreement_note(catalog_spectral_type: str | None, classified_type: str | None) -> str:
@@ -87,18 +55,17 @@ def catalog_disagreement_note(catalog_spectral_type: str | None, classified_type
     Returns
     -------
     note : `str`
-        The warning, or an empty string when either type is missing or the
-        two are within `CATALOG_DISAGREEMENT_SUBCLASS_STEPS`.
+        The warning, or an empty string when the two types are within
+        `DIFFERS_FROM_CATALOG_SUBTYPES` steps, or when either type is
+        missing or not on the O-to-M ladder.
     """
-    catalog_position = _subclass_position(catalog_spectral_type)
-    classified_position = _subclass_position(classified_type)
-    if catalog_position is None or classified_position is None:
-        return ""
-    if abs(classified_position - catalog_position) <= CATALOG_DISAGREEMENT_SUBCLASS_STEPS:
+    if not types_differ_on_ladder(classified_type, catalog_spectral_type):
         return ""
     return (
         f"the spectrum matches {classified_type} but the catalog gives {catalog_spectral_type}, "
-        "more than two spectral classes apart: the spectrum may not be this star's "
+        f"more than {DIFFERS_FROM_CATALOG_SUBTYPES:.0f} subtype steps "
+        f"({DIFFERS_FROM_CATALOG_SUBTYPES / 10:g} spectral classes) apart: "
+        "the spectrum may not be this star's "
         "(a bright neighbour, glare from a very bright star, or a wrong name)"
     )
 
@@ -209,13 +176,8 @@ def compare_to_catalog(
     comparison : `CatalogComparison`
         The structured comparison; see that class for what each field means.
     """
-    catalog_position = _subclass_position(catalog_spectral_type)
-    classified_position = _subclass_position(classified_type)
-    spectral_type_agrees = (
-        None
-        if catalog_position is None or classified_position is None
-        else abs(classified_position - catalog_position) <= CATALOG_DISAGREEMENT_SUBCLASS_STEPS
-    )
+    differs = types_differ_on_ladder(classified_type, catalog_spectral_type)
+    spectral_type_agrees = None if differs is None else not differs
     is_luminosity_uncertain = bool(
         is_catalog_giant(catalog_spectral_type) and classified_type and classified_type != "Unknown"
     )

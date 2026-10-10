@@ -91,8 +91,8 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 |---|---|---|
 | `spectra_extracted` | No star produced a spectrum | Never |
 | `zero_order_saturation` | 0.1% or more of a zero-order image is saturated | No zero-order saturation was measured |
-| `spectral_classification` | A star's type is low-confidence or ambiguous | No star was given a type |
-| `catalog_agreement` | A measured type disagrees with the catalog type | No star had a catalog type to compare with |
+| `spectral_classification` | A star's best match is above `NO_GOOD_MATCH_RMS` (0.15 relative RMS) or its gap to the best reference of another spectral class is below `AMBIGUOUS_RMS_GAP` (0.02 relative RMS). Ties between neighbouring subtypes do not fail it; the detail reports "N of M classifications ambiguous at subtype level" | No star was given a type |
+| `catalog_agreement` | A measured type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` (20 subtype steps) from the catalog type | No star had a catalog type to compare with |
 | `feature_significance` | A star's feature p-values fell back to assuming Gaussian noise | No star had its features tested |
 | `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
 

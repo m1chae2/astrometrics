@@ -88,13 +88,71 @@ def test_zero_order_gate_goes_red_when_the_zero_order_is_saturated() -> None:
 
 def test_classification_gate_goes_red_for_shaky_types_and_is_unchecked_without_any() -> None:
     """A concern fails; no classified star is not checked."""
-    concern = {"star_id": "A", "reason": "low_confidence"}
+    concern = {"star_id": "A", "reason": "poor_match"}
     failed = run_gates([make_star()], concerns=[concern])[rg.CLASSIFICATION_GATE_NAME]
     assert failed.status is GateStatus.FAILED
-    assert failed.detail == "spectral classification uncertain for 1 star(s)"
+    assert failed.detail.startswith("spectral classification uncertain for 1 star(s)")
 
     unchecked = run_gates([make_star("Unknown"), make_star("")])[rg.CLASSIFICATION_GATE_NAME]
     assert unchecked.status is GateStatus.NOT_CHECKED
+
+
+def test_classification_gate_fails_for_each_reason_the_limits_define() -> None:
+    """A poor match or class tie fails the gate; a subtype-only tie does not.
+
+    The stars go through `build_spectral_classification_concerns`, so the
+    gate reads the same limits (`NO_GOOD_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`)
+    as the star's own fields. A subtype-only tie is reported in the gate's
+    detail but leaves it passed, and a clear match passes too.
+    """
+    from astrometricslib.models.stellar_source import (
+        AMBIGUOUS_RMS_GAP,
+        NO_GOOD_MATCH_RMS,
+        SpectroscopyResult,
+        StellarObject,
+    )
+    from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
+        build_spectral_classification_concerns,
+    )
+
+    def star(best: float, second: float, second_type: str = "M0V") -> StellarObject:
+        """Build a classified K5V star with the given best and second RMS.
+
+        Returns
+        -------
+        star : `StellarObject`
+            The star.
+        """
+        return StellarObject(
+            id="S",
+            spectroscopy=SpectroscopyResult(
+                self_determined_spectral_type="K5V",
+                self_determined_spectral_type_rms=best,
+                self_determined_spectral_type_candidates=[
+                    {"spectral_type": "K5V", "rms": best},
+                    {"spectral_type": second_type, "rms": second},
+                ],
+            ),
+        )
+
+    poor_star = star(NO_GOOD_MATCH_RMS + 0.05, 0.5)
+    class_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 2)
+    subtype_tie = star(0.05, 0.05 + AMBIGUOUS_RMS_GAP / 2, second_type="K7V")
+    clear = star(0.05, 0.05 + 2 * AMBIGUOUS_RMS_GAP)
+
+    for failing in (poor_star, class_tie):
+        concerns = build_spectral_classification_concerns([failing])
+        gate = run_gates([failing], concerns=concerns)[rg.CLASSIFICATION_GATE_NAME]
+        assert gate.status is GateStatus.FAILED
+    for passing in (subtype_tie, clear):
+        concerns = build_spectral_classification_concerns([passing])
+        assert concerns == []
+        gate = run_gates([passing], concerns=concerns)[rg.CLASSIFICATION_GATE_NAME]
+        assert gate.status is GateStatus.PASSED
+    subtype_gate = run_gates([subtype_tie])[rg.CLASSIFICATION_GATE_NAME]
+    assert "1 of 1 classifications ambiguous at subtype level" in subtype_gate.detail
+    clear_gate = run_gates([clear])[rg.CLASSIFICATION_GATE_NAME]
+    assert "0 of 1 classifications ambiguous at subtype level" in clear_gate.detail
 
 
 def test_catalog_gate_goes_red_on_disagreement_and_is_unchecked_without_a_catalog_type() -> None:

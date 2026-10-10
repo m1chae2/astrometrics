@@ -57,7 +57,6 @@ from astrometricslib.models.spectroscopy_quality import (
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
-    CandidateSeparation,
     FileItem,
     GroupedFrameStat,
     PeriodogramResult,
@@ -359,7 +358,6 @@ def render_types() -> str:
         generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
         generate_interface(OverlayStar, "OverlayStar"),
         generate_interface(TargetStarCount, "TargetStarCount"),
-        generate_interface(CandidateSeparation, "CandidateSeparation"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),

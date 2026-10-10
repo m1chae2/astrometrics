@@ -513,9 +513,10 @@ class TestAttachSpectroscopyQualitySummary:
                     "spectral_classification_concerns": [
                         {
                             "star_id": "HD 150579",
-                            "reason": "low_confidence",
+                            "reason": "poor_match",
                             "spectral_type": "O5V",
-                            "confidence": 0.33,
+                            "classification_rms": 0.4,
+                            "rms_gap_to_next_class": 0.2,
                         }
                     ],
                 },
@@ -528,9 +529,10 @@ class TestAttachSpectroscopyQualitySummary:
                     "spectral_classification_concerns": [
                         {
                             "star_id": "HD 150998",
-                            "reason": "ambiguous",
+                            "reason": "class_ambiguous",
                             "spectral_type": "K5V",
-                            "confidence": 0.93,
+                            "classification_rms": 0.07,
+                            "rms_gap_to_next_class": 0.001,
                         }
                     ],
                 },
@@ -542,7 +544,7 @@ class TestAttachSpectroscopyQualitySummary:
         batch._attach_spectroscopy_quality_summary(target, summary, session_results)
 
         metrics = target.quality.spectroscopy.spectroscopy_metrics
-        assert metrics.low_confidence_classification_count == 1
+        assert metrics.poor_match_classification_count == 1
         assert metrics.ambiguous_classification_count == 1
         assert {c.star_id for c in metrics.flagged_spectral_classifications} == {
             "HD 150579",

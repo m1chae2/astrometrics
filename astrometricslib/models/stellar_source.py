@@ -6,6 +6,7 @@ spectrums.
 """
 
 import math
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
@@ -36,7 +37,6 @@ from astrometricslib.models.spectroscopy_quality import (
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "AnalysisResult",
-    "CandidateSeparation",
     "FileItem",
     "GroupedFrameStat",
     "PeriodogramResult",
@@ -48,7 +48,11 @@ __all__ = [
     "TransitCandidate",
     "VariableCandidate",
     "has_catalog_magnitude",
+    "is_rms_gap_ambiguous",
     "ladder_position",
+    "rms_gap_to_next_class",
+    "rms_gap_to_second_best",
+    "types_differ_on_ladder",
 ]
 
 BRIGHTEST_CATALOG_MAGNITUDE = -2.0
@@ -68,67 +72,178 @@ MINIMUM_POINTS_FOR_TRANSIT_SEARCH = 8
 search accepts."""
 
 NO_GOOD_MATCH_RMS = 0.15
-"""A star's own spectrum is a poor match ("no good match") when its closest
-reference spectrum differs from it by more than this fraction."""
+"""Poor-match limit. Unit: relative RMS (the root-mean-square difference as a
+fraction of the spectrum's average brightness; 0.15 means a typical sample is
+15% off). A spectrum is a poor match ("no good match") when its closest
+reference differs from it by more than this. Measured on 14 stars with a
+known type or a standard: stars matched within three spectral-type steps of
+the catalog scored 0.046 to 0.105, and stars matched to the wrong type scored
+0.181 to 0.283. A low RMS means the reference is close to the spectrum, not
+that the type is right: two known-wrong matches (K2 matched as M0 at 0.086,
+and A2 matched as F2 at 0.048) score below this limit. The model field, the
+run gate and the star summary all read this one value."""
 
-WELL_SEPARATED_POINTS = 2.0
-"""The runner-up reference spectrum must be at least this many percentage
-points worse than the best for the match to count as well separated."""
+UNRELIABLE_MATCH_RMS = 0.45
+"""No-match limit. Unit: relative RMS, as for `NO_GOOD_MATCH_RMS`. When even
+the closest reference is further away than this, the classifier names no type
+at all, because the least-bad reference would only invent one. Of 55 stars
+classified on 2026-09-24, 19 scored above 0.45, and 18 of those had no catalog
+type (they were matched to the wrong part of the sky)."""
 
-DIFFERS_FROM_CATALOG_SUBTYPES = 8
-"""A measured type more than this many subtypes from the catalog type (on
-the O-to-M ladder, ten subtypes to a class) is called different."""
+AMBIGUOUS_RMS_GAP = 0.02
+"""Ambiguity limit. Unit: relative RMS (a difference between two RMS values,
+not a probability). The best match is ambiguous when the second-best
+reference is closer to the best one than this, that is, when
+`rms_gap_to_second_best` is below this value. 0.02 is the smallest RMS
+distance between two neighbouring rungs of the reference ladder (A0V and A2V
+are 0.019 apart; the median neighbouring pair is 0.043 apart and the 10th
+percentile is 0.024, at resolutions from 25 to 70 Angstroms). A gap below it
+means the spectrum cannot prefer one rung over its neighbour even by the
+margin that a perfect match to the closest-spaced rung would show. The same
+limit is applied to two gaps: `rms_gap_to_second_best` (the subtype level,
+`is_ambiguous`) and `rms_gap_to_next_class` (the best reference of another
+spectral class letter, `is_class_ambiguous`). The run gate fails only on the
+class-level one."""
+
+DIFFERS_FROM_CATALOG_SUBTYPES = 20.0
+"""Catalog-disagreement limit. Unit: subtype steps on the O-to-M ladder (ten
+steps to a letter class, so 20 is two whole classes, such as B to F). A
+measured type more than this many steps from the catalog type is called
+different. Of the 29 stars with a catalog type classified on 2026-09-24, 27
+were within 12 steps (F8 matched as K0 was the worst), and the two beyond
+that were both wrong for reasons other than the templates (34.5 and 45
+steps). A limit of 8 steps has no measurement behind it, and it would call
+the F8-as-K0 match a disagreement."""
 
 LADDER_ORDER = "OBAFGKM"
 """Spectral classes from hottest to coolest."""
 
 
-def ladder_position(spectral_type: str | None) -> int | None:
-    """Place a spectral type on the O-to-M ladder, ten subtypes to a class.
+def ladder_position(spectral_type: str | None) -> float | None:
+    """Place a spectral type on the O-to-M ladder, ten steps to a class.
 
     Parameters
     ----------
     spectral_type : `str`, optional
-        A type such as ``"A3V"``.
+        A type such as ``"A3V"``, ``"B9.5V"`` or ``"A5V+M3-4V"``. Only the
+        first letter and subtype number are read.
 
     Returns
     -------
-    position : `int` or `None`
-        For example 23 for ``"A3V"``, or `None` for a type that is not on
-        the ladder (such as a carbon star).
+    position : `float` or `None`
+        Steps from the start of O (B0 is 10 and M0 is 60), for example 23.0
+        for ``"A3V"``. A type with no subtype number counts as subtype 5,
+        the middle of its class. `None` for a type that is not on the ladder
+        (such as a carbon star).
     """
     trimmed = (spectral_type or "").strip().upper()
     if not trimmed or trimmed[0] not in LADDER_ORDER:
         return None
     digits = ""
     for character in trimmed[1:]:
-        if character.isdigit() or (character == "." and digits):
+        if character.isdigit() or (character == "." and digits and "." not in digits):
             digits += character
         else:
             break
-    return LADDER_ORDER.index(trimmed[0]) * 10 + (round(float(digits)) if digits else 0)
+    subtype = float(digits.rstrip(".")) if digits else 5.0
+    return LADDER_ORDER.index(trimmed[0]) * 10.0 + subtype
 
 
-class CandidateSeparation(BaseModel):
-    """How clearly a spectrum's best reference type beats the next one.
+def types_differ_on_ladder(own_type: str | None, catalog_type: str | None) -> bool | None:
+    """Say whether two spectral types are further apart than the limit.
 
-    Attributes
+    This is the one place that applies `DIFFERS_FROM_CATALOG_SUBTYPES`.
+
+    Parameters
     ----------
-    runner_up_type : `str`
-        The second-closest reference type.
-    gap_points : `float`
-        How much worse the runner-up fits, in percentage points of the
-        root-mean-square (RMS) difference.
-    is_well_separated : `bool`
-        `True` when the gap is at least `WELL_SEPARATED_POINTS`; otherwise
-        the match is a close call.
+    own_type : `str`, optional
+        The type measured from the spectrum.
+    catalog_type : `str`, optional
+        The type the catalog gives.
+
+    Returns
+    -------
+    differ : `bool` or `None`
+        `True` when the types are more than `DIFFERS_FROM_CATALOG_SUBTYPES`
+        steps apart. `None` when either type is missing or not on the
+        ladder, so there is nothing to compare.
     """
+    own_position, catalog_position = ladder_position(own_type), ladder_position(catalog_type)
+    if own_position is None or catalog_position is None:
+        return None
+    return abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
 
-    model_config = ConfigDict(populate_by_name=True)
 
-    runner_up_type: str = Field(alias="runnerUpType")
-    gap_points: float = Field(alias="gapPoints")
-    is_well_separated: bool = Field(alias="isWellSeparated")
+def rms_gap_to_second_best(rms_values: Iterable[float]) -> float | None:
+    """Measure how much better the best reference fits than the runner-up.
+
+    Parameters
+    ----------
+    rms_values : `Iterable` [`float`]
+        The relative RMS of each reference that was compared. Lower is a
+        closer match.
+
+    Returns
+    -------
+    gap : `float` or `None`
+        The second-smallest RMS minus the smallest, in relative RMS units.
+        This is a difference between two RMS values, not a probability. It
+        is 0.0 for a tie. `None` when fewer than two references were
+        compared.
+    """
+    ordered = sorted(float(value) for value in rms_values)
+    if len(ordered) < 2:
+        return None
+    return ordered[1] - ordered[0]
+
+
+def rms_gap_to_next_class(scores: Iterable[tuple[str, float]]) -> float | None:
+    """Measure how much better the best reference fits than the next class.
+
+    The next class is the closest reference whose spectral class letter (the
+    O, B, A, F, G, K or M at the start of its label) differs from the best
+    reference's letter.
+
+    Parameters
+    ----------
+    scores : `Iterable` [`tuple` [`str`, `float`]]
+        Each compared reference's label (such as ``"G0V"``) and its relative
+        RMS. Lower is a closer match.
+
+    Returns
+    -------
+    gap : `float` or `None`
+        The smallest RMS among references of another class, minus the best
+        reference's RMS, in relative RMS units. This is a difference between
+        two RMS values, not a probability. `None` when no reference of
+        another class was compared.
+    """
+    ordered = sorted((float(rms), label.strip().upper()[:1]) for label, rms in scores)
+    if not ordered:
+        return None
+    best_rms, best_letter = ordered[0]
+    other_rms = [rms for rms, letter in ordered[1:] if letter != best_letter]
+    return min(other_rms) - best_rms if other_rms else None
+
+
+def is_rms_gap_ambiguous(gap: float | None) -> bool | None:
+    """Say whether an RMS gap is too small to prefer the best reference.
+
+    This is the one place that applies `AMBIGUOUS_RMS_GAP`.
+
+    Parameters
+    ----------
+    gap : `float`, optional
+        The result of `rms_gap_to_second_best`, in relative RMS units.
+
+    Returns
+    -------
+    is_ambiguous : `bool` or `None`
+        `True` when the gap is below `AMBIGUOUS_RMS_GAP`. `None` when there
+        is no gap (fewer than two references), which is not the same as
+        "clearly separated".
+    """
+    return None if gap is None else gap < AMBIGUOUS_RMS_GAP
 
 
 def has_catalog_magnitude(magnitude: object) -> bool:
@@ -414,6 +529,30 @@ class PhotometryResult(BaseModel):
     # sessions have enough points.
     between_session_amplitude_mag: float | None = Field(default=None, alias="betweenSessionAmplitudeMag")
     between_session_significance: float | None = Field(default=None, alias="betweenSessionSignificance")
+    # The variability indices of the light curve (see
+    # `pipelines.photometry.processing.variability_indices`). All are `None`
+    # until the variability search has run, and when the field had too few
+    # stars to fit a noise model.
+    #
+    # The star's mean instrumental magnitude, -2.5 log10 of its mean raw flux
+    # in ADU per second, and its scatter in magnitudes (1.0857 times the
+    # sample standard deviation over the mean). The noise model of the field
+    # is fitted to these two numbers.
+    instrumental_mag: float | None = Field(default=None, alias="instrumentalMag")
+    rms_mag: float | None = Field(default=None, alias="rmsMag")
+    # Measured scatter over the scatter the field's noise model expects at
+    # this brightness. No unit; a constant star is near 1.
+    excess_scatter: float | None = Field(default=None, alias="excessScatter")
+    # Chi-square of the light curve against a constant, divided by the points
+    # minus one. No unit; a constant star with correct errors is near 1.
+    reduced_chi_square: float | None = Field(default=None, alias="reducedChiSquare")
+    # The Stetson (1996) J index: the average signed square root of the
+    # products of neighbouring residuals, in units of the errors. No unit;
+    # a constant star is near 0, a smoothly changing one is above 0.
+    stetson_j: float | None = Field(default=None, alias="stetsonJ")
+    # The smallest of the three indices divided by its threshold. Above 1
+    # exactly when the star passes all three, so it ranks candidates.
+    variability_score: float | None = Field(default=None, alias="variabilityScore")
 
 
 class StellarSessionMatch(BaseModel):
@@ -462,25 +601,20 @@ class SpectroscopyResult(BaseModel):
     # of StellarObject.spectral_type, which comes from a catalog
     # lookup. "Unknown" when no spectrum has been classified yet.
     self_determined_spectral_type: str = Field(default="", alias="selfDeterminedSpectralType")
-    # How well the winning template matched (a Pearson correlation
-    # coefficient, -1 to 1); None until self_determined_spectral_type is set.
-    self_determined_spectral_type_confidence: float | None = Field(
-        default=None, alias="selfDeterminedSpectralTypeConfidence"
-    )
     # How far the winning reference is from this spectrum: the root-mean-
     # square difference between the spectrum and the reference scaled to
-    # its brightness, as a fraction of the spectrum's average brightness.
-    # Lower is better; above about 0.15 the match is poor. `None` when no
-    # type was found.
+    # its brightness, as a fraction of the spectrum's average brightness
+    # (relative RMS). Lower is better; above `NO_GOOD_MATCH_RMS` the match
+    # is poor. This is the classification's own score, not a probability.
+    # `None` when no type was found.
     self_determined_spectral_type_rms: float | None = Field(
         default=None, alias="selfDeterminedSpectralTypeRms"
     )
     # Why no spectral type was determined (for example the trail left the
     # image), or empty when one was.
     self_determined_spectral_type_note: str = Field(default="", alias="selfDeterminedSpectralTypeNote")
-    # Every reference type compared, most probable first -- each entry has
-    # "spectral_type", "probability" (sums to 1 across the list, but is a
-    # heuristic ranking rather than a calibrated probability), and
+    # Every reference type compared, closest first -- each entry has
+    # "spectral_type", "rms" (relative RMS; lower is closer) and
     # "correlation". Lets a caller see close calls, not just the winner.
     self_determined_spectral_type_candidates: list[dict[str, Any]] = Field(
         default_factory=list, alias="selfDeterminedSpectralTypeCandidates"
@@ -603,36 +737,82 @@ class SpectroscopyResult(BaseModel):
         """Check if even the closest reference spectrum fits badly.
 
         `True` when the best reference differs from the spectrum by more
-        than `NO_GOOD_MATCH_RMS` (15%), so its type should not be claimed.
+        than `NO_GOOD_MATCH_RMS` (0.15), so its type should not be claimed.
         `False` when the fit is good or no type was matched.
         """
         rms = self.self_determined_spectral_type_rms
         return rms is not None and rms > NO_GOOD_MATCH_RMS
 
-    @computed_field(alias="candidateSeparation")
+    @computed_field(alias="rmsGapToSecondBest")
     @property
-    def candidate_separation(self) -> CandidateSeparation | None:
-        """How clearly the best reference type beats the runner-up.
+    def rms_gap_to_second_best(self) -> float | None:
+        """Measure how much closer the best reference is than the runner-up.
 
-        The candidates are ranked by their root-mean-square difference,
-        closest first. `None` when fewer than two candidates have one.
+        Compares the candidates' relative RMS values (see the module function
+        `rms_gap_to_second_best`). The gap is a difference between two RMS
+        values, not a probability.
+
+        Returns
+        -------
+        gap : `float` or `None`
+            The second-smallest RMS minus the smallest, in relative RMS
+            units. `None` when fewer than two candidates have an RMS.
         """
-        ranked = sorted(
-            (
-                c
-                for c in self.self_determined_spectral_type_candidates
-                if isinstance(c.get("rms"), int | float)
-            ),
-            key=lambda c: c["rms"],
+        return rms_gap_to_second_best(
+            float(c["rms"])
+            for c in self.self_determined_spectral_type_candidates
+            if isinstance(c.get("rms"), int | float)
         )
-        if len(ranked) < 2:
-            return None
-        gap = (float(ranked[1]["rms"]) - float(ranked[0]["rms"])) * 100.0
-        return CandidateSeparation(
-            runner_up_type=str(ranked[1].get("spectral_type", "")),
-            gap_points=gap,
-            is_well_separated=gap >= WELL_SEPARATED_POINTS,
+
+    @computed_field(alias="isAmbiguous")
+    @property
+    def is_ambiguous(self) -> bool | None:
+        """Check if the best reference barely beats the runner-up.
+
+        Returns
+        -------
+        is_ambiguous : `bool` or `None`
+            `True` when `rms_gap_to_second_best` is below `AMBIGUOUS_RMS_GAP`.
+            `None` when there is no gap to judge. The runner-up is usually a
+            neighbouring subtype of the same class, so this says the subtype
+            is uncertain, not necessarily the class.
+        """
+        return is_rms_gap_ambiguous(self.rms_gap_to_second_best)
+
+    @computed_field(alias="rmsGapToNextClass")
+    @property
+    def rms_gap_to_next_class(self) -> float | None:
+        """Measure how much closer the best reference is than the next class.
+
+        Compares the best candidate with the closest candidate whose spectral
+        class letter differs (see the module function `rms_gap_to_next_class`).
+        The gap is a difference between two RMS values, not a probability.
+
+        Returns
+        -------
+        gap : `float` or `None`
+            The RMS difference in relative RMS units. `None` when no
+            candidate of another class has an RMS.
+        """
+        return rms_gap_to_next_class(
+            (str(c.get("spectral_type", "")), float(c["rms"]))
+            for c in self.self_determined_spectral_type_candidates
+            if isinstance(c.get("rms"), int | float)
         )
+
+    @computed_field(alias="isClassAmbiguous")
+    @property
+    def is_class_ambiguous(self) -> bool | None:
+        """Check if another spectral class fits almost as well as the best.
+
+        Returns
+        -------
+        is_class_ambiguous : `bool` or `None`
+            `True` when `rms_gap_to_next_class` is below `AMBIGUOUS_RMS_GAP`,
+            so the class letter itself is uncertain. `None` when there is no
+            gap to judge.
+        """
+        return is_rms_gap_ambiguous(self.rms_gap_to_next_class)
 
 
 class StellarObject(BaseModel):
@@ -798,14 +978,11 @@ class StellarObject(BaseModel):
         """Check if the spectrum's matched type disagrees with the catalog.
 
         `True` when the two types are more than
-        `DIFFERS_FROM_CATALOG_SUBTYPES` (8) subtypes apart on the O-to-M
+        `DIFFERS_FROM_CATALOG_SUBTYPES` (20) steps apart on the O-to-M
         ladder. `None` when either type is missing or not on the ladder.
         """
         own_type = self.spectroscopy.self_determined_spectral_type if self.spectroscopy else None
-        own_position, catalog_position = ladder_position(own_type), ladder_position(self.spectral_type)
-        if own_position is None or catalog_position is None:
-            return None
-        return abs(own_position - catalog_position) > DIFFERS_FROM_CATALOG_SUBTYPES
+        return types_differ_on_ladder(own_type, self.spectral_type)
 
     @computed_field(alias="canRunPeriodSearch")
     @property
@@ -906,6 +1083,13 @@ class VariableCandidate(BaseModel):
     known_variability: str = Field(default="unknown", alias="knownVariability")
     # One sentence saying what that answer rests on, naming the catalogs.
     known_variability_note: str = Field(default="", alias="knownVariabilityNote")
+    # The indices the candidate rule used (see the same-named fields of
+    # `PhotometryResult`). `None` when the field had no noise model and the
+    # star was flagged by its CV alone.
+    excess_scatter: float | None = Field(default=None, alias="excessScatter")
+    reduced_chi_square: float | None = Field(default=None, alias="reducedChiSquare")
+    stetson_j: float | None = Field(default=None, alias="stetsonJ")
+    variability_score: float | None = Field(default=None, alias="variabilityScore")
 
     @computed_field(alias="score")
     @property

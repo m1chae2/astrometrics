@@ -89,7 +89,6 @@ def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type() -
     pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
 
     assert star.spectroscopy.self_determined_spectral_type == "G0V"
-    assert star.spectroscopy.self_determined_spectral_type_confidence > 0.9
     assert star.spectroscopy.self_determined_spectral_type_rms < 0.05
     assert star.spectroscopy.self_determined_spectral_type_candidates
     assert star.spectroscopy.self_determined_spectral_type_candidates[0]["spectral_type"] == "G0V"
@@ -113,7 +112,7 @@ def test_a_camera_with_no_instrument_response_gets_no_spectral_type() -> None:
     pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
 
     assert star.spectroscopy.self_determined_spectral_type == "Unknown"
-    assert star.spectroscopy.self_determined_spectral_type_confidence is None
+    assert star.spectroscopy.self_determined_spectral_type_rms is None
     assert "instrument response" in star.spectroscopy.self_determined_spectral_type_note
 
 
@@ -133,7 +132,7 @@ def test_apply_result_to_stellar_object_handles_unclassifiable_data() -> None:
     pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
 
     assert star.spectroscopy.self_determined_spectral_type == "Unknown"
-    assert star.spectroscopy.self_determined_spectral_type_confidence is None
+    assert star.spectroscopy.self_determined_spectral_type_rms is None
     assert star.spectroscopy.self_determined_spectral_type_candidates == []
     assert star.spectroscopy.probable_spectral_features == []
 

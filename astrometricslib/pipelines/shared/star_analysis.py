@@ -122,7 +122,6 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
     rms = spectroscopy.self_determined_spectral_type_rms
     candidates = [_plain(item) for item in (spectroscopy.self_determined_spectral_type_candidates or [])]
     ranked = sorted(candidates, key=lambda item: item.get("rms", 9.0))
-    separation = spectroscopy.candidate_separation
     differs = star.differs_from_catalog
     features = [
         {
@@ -155,14 +154,15 @@ def _spectrum_summary(star: Any) -> dict[str, Any]:
         "own_spectral_type": own_type,
         "own_type_percent_off": _round(None if rms is None else rms * 100.0, 1),
         "no_good_match": None if rms is None else spectroscopy.is_poor_match,
-        "confidence": _round(spectroscopy.self_determined_spectral_type_confidence),
         "note": spectroscopy.self_determined_spectral_type_note or None,
         "closest_reference_types": [
             {"type": item.get("spectral_type"), "percent_off": _round(item.get("rms", 0.0) * 100.0, 1)}
             for item in ranked[:TOP_CANDIDATES]
         ],
-        "runner_up_gap_points": _round(separation.gap_points, 1) if separation else None,
-        "well_separated": separation.is_well_separated if separation else None,
+        "rms_gap_to_second_best": _round(spectroscopy.rms_gap_to_second_best, 3),
+        "is_ambiguous": spectroscopy.is_ambiguous,
+        "rms_gap_to_next_class": _round(spectroscopy.rms_gap_to_next_class, 3),
+        "is_class_ambiguous": spectroscopy.is_class_ambiguous,
         "differs_from_catalog": differs,
         "emission_line_source": spectroscopy.is_emission_line_source,
         "emission_lines": lines[:MAXIMUM_ROWS_PER_LIST],

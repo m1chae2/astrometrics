@@ -55,7 +55,7 @@ def test_no_luminosity_note_without_a_matched_type() -> None:
 )
 def test_a_type_two_classes_from_the_catalog_is_flagged(catalog_type: str, classified_type: str) -> None:
     """Elnath (B7III to M2V) and beta1 Cyg (B9.5V to K4V) are caught."""
-    assert "spectral classes apart" in catalog_disagreement_note(catalog_type, classified_type)
+    assert "subtype steps" in catalog_disagreement_note(catalog_type, classified_type)
 
 
 @pytest.mark.parametrize(

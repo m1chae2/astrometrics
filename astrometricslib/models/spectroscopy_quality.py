@@ -123,14 +123,21 @@ class OutputQualityAssessment(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    # The winning type's match score was weak (see
-    # `is_classification_low_confidence`). `False` for an unclassified
-    # star -- that is a separate "nothing to compare" case, not a shaky
-    # match.
-    is_low_confidence: bool = Field(alias="isLowConfidence")
-    # The top two candidate types were too close to call apart (see
-    # `is_classification_ambiguous`).
+    # The winning type's relative RMS is above `NO_GOOD_MATCH_RMS`, so the
+    # closest reference still fits badly (see `is_classification_poor_match`).
+    # `False` for an unclassified star -- that is a separate "nothing to
+    # compare" case, not a shaky match.
+    is_poor_match: bool = Field(alias="isPoorMatch")
+    # (Subtype level.) The best and second-best reference types are less than
+    # `AMBIGUOUS_RMS_GAP` apart in relative RMS (see
+    # `is_classification_ambiguous`). `False` when fewer than two references
+    # were compared.
     is_ambiguous: bool = Field(alias="isAmbiguous")
+    # The best reference and the best reference of a different spectral
+    # class letter are less than `AMBIGUOUS_RMS_GAP` apart in relative RMS
+    # (see `is_classification_class_ambiguous`), so the class letter itself
+    # is uncertain. `False` when no other class was compared.
+    is_class_ambiguous: bool = Field(alias="isClassAmbiguous")
     # Whether the classifier's own top two candidates are closer together
     # than the instrument's resolution can actually distinguish. `None`
     # until the Angstrom-per-subtype-step conversion this needs has been

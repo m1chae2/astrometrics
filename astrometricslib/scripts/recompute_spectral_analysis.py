@@ -192,7 +192,6 @@ def recompute_star(
 
     if len(spectroscopy.wavelengths_angstrom) < _MINIMUM_SAMPLES_TO_ANALYZE:
         spectroscopy.self_determined_spectral_type = "Unknown"
-        spectroscopy.self_determined_spectral_type_confidence = None
         spectroscopy.self_determined_spectral_type_rms = None
         spectroscopy.self_determined_spectral_type_note = "too little of the spectrum was measured"
         spectroscopy.self_determined_spectral_type_candidates = []
@@ -242,8 +241,7 @@ def recompute_star(
     )
     classification = analysis.classification
     spectroscopy.self_determined_spectral_type = str(classification["spectral_type"])
-    spectroscopy.self_determined_spectral_type_confidence = classification["confidence"]
-    spectroscopy.self_determined_spectral_type_rms = classification["rms"]
+    spectroscopy.self_determined_spectral_type_rms = classification["classification_rms"]
     spectroscopy.self_determined_spectral_type_note = str(classification.get("reason") or "")
     spectroscopy.self_determined_spectral_type_candidates = classification["ranked_types"]
     spectroscopy.probable_spectral_features = analysis.features

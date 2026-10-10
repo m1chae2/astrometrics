@@ -21,6 +21,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.stellar_source import (
+    AMBIGUOUS_RMS_GAP,
+    DIFFERS_FROM_CATALOG_SUBTYPES,
+    NO_GOOD_MATCH_RMS,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     DEFAULT_SATURATION_FLAG_THRESHOLD,
     is_saturation_significant,
@@ -37,6 +42,7 @@ RESOLUTION_GATE_NAME = "resolution_measured"
 FACT_NAMES = (
     "spectra",
     "classified",
+    "subtype_ambiguous",
     "catalog_compared",
     "catalog_disagree",
     "feature_stars_tested",
@@ -74,6 +80,8 @@ def spectrum_facts(stellar_objects: Iterable[Any]) -> dict[str, int]:
         spectral_type = spectroscopy.self_determined_spectral_type
         if spectral_type and spectral_type not in _UNCLASSIFIED_TYPES:
             facts["classified"] += 1
+            if getattr(spectroscopy, "is_ambiguous", None):
+                facts["subtype_ambiguous"] += 1
         comparison = spectroscopy.catalog_comparison
         if comparison is not None and comparison.spectral_type_agrees is not None:
             facts["catalog_compared"] += 1
@@ -127,7 +135,11 @@ def spectroscopy_run_gates(
     zero_order_fractions : `Sequence` [`float`]
         The saturated share of each processed star's zero-order image.
     classification_concerns : `Sequence` [`Mapping`]
-        The stars whose spectral type is low-confidence or ambiguous.
+        The stars whose spectral type is a poor match or ambiguous at the
+        class level (the best reference of another spectral class is nearly
+        as close). A star ambiguous only between neighbouring subtypes is
+        not a concern; it is counted in ``facts["subtype_ambiguous"]`` and
+        reported in the gate's detail.
 
     Returns
     -------
@@ -169,14 +181,23 @@ def spectroscopy_run_gates(
             )
 
     classification_source = (
-        "RMS match to the template below the poor-match limit; types within the margin are ambiguous"
+        f"best reference within {NO_GOOD_MATCH_RMS} relative RMS of the spectrum, and the best "
+        f"reference of another spectral class at least {AMBIGUOUS_RMS_GAP} RMS further away "
+        "(not a probability); neighbouring subtypes closer than that are reported, not failed"
+    )
+    classified = facts.get("classified", 0)
+    subtype_note = (
+        f"; {facts.get('subtype_ambiguous', 0)} of {classified} classifications ambiguous at subtype level"
+        if classified
+        else ""
     )
     if classification_concerns:
         # A concern proves the check ran, whatever the counts say.
         gates.append(
             failed_gate(
                 CLASSIFICATION_GATE_NAME,
-                f"spectral classification uncertain for {len(classification_concerns)} star(s)",
+                f"spectral classification uncertain for {len(classification_concerns)} star(s)"
+                + subtype_note,
                 float(len(classification_concerns)),
                 0.0,
                 classification_source,
@@ -189,9 +210,20 @@ def spectroscopy_run_gates(
             )
         )
     else:
-        gates.append(passed_gate(CLASSIFICATION_GATE_NAME, 0.0, 0.0, classification_source))
+        gates.append(
+            passed_gate(
+                CLASSIFICATION_GATE_NAME,
+                0.0,
+                0.0,
+                classification_source,
+                subtype_note.removeprefix("; "),
+            )
+        )
 
-    catalog_source = "measured type within 20 subclass steps of the catalog type (set on 29 stars)"
+    catalog_source = (
+        f"measured type within {DIFFERS_FROM_CATALOG_SUBTYPES:.0f} subtype steps of the catalog type "
+        "(set on 29 stars)"
+    )
     if facts.get("catalog_compared", 0) == 0:
         gates.append(
             unchecked_gate(

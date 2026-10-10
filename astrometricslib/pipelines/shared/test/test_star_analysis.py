@@ -56,16 +56,28 @@ def make_star(own_type: str, rms: float, candidates: list[dict], catalog_type: s
     )
 
 
-def test_a_close_match_to_the_catalog_is_well_separated_and_does_not_differ() -> None:
-    """Best 5% off, runner-up 9% off: separated; A3V against A0V is close."""
+def test_a_clear_gap_to_the_runner_up_is_not_ambiguous_and_does_not_differ() -> None:
+    """Best 5% off, runner-up 9% off: a 0.04 RMS gap, not ambiguous."""
     candidates = [
-        {"spectral_type": "A3V", "rms": 0.05, "probability": 0.6, "correlation": 0.99},
-        {"spectral_type": "A5V", "rms": 0.09, "probability": 0.2, "correlation": 0.98},
+        {"spectral_type": "A3V", "rms": 0.05, "correlation": 0.99},
+        {"spectral_type": "A5V", "rms": 0.09, "correlation": 0.98},
     ]
     spectrum = summarize_star(make_star("A3V", 0.05, candidates))["spectrum"]
-    assert spectrum["well_separated"] is True
+    assert spectrum["rms_gap_to_second_best"] == pytest.approx(0.04)
+    assert spectrum["is_ambiguous"] is False
     assert spectrum["differs_from_catalog"] is False
     assert [item["type"] for item in spectrum["closest_reference_types"]] == ["A3V", "A5V"]
+
+
+def test_a_tiny_gap_to_the_runner_up_is_ambiguous_and_no_confidence_or_probability_is_reported() -> None:
+    """A 0.003 RMS gap is ambiguous; the summary has no confidence score."""
+    candidates = [
+        {"spectral_type": "A3V", "rms": 0.05, "correlation": 0.99},
+        {"spectral_type": "A5V", "rms": 0.053, "correlation": 0.98},
+    ]
+    spectrum = summarize_star(make_star("A3V", 0.05, candidates))["spectrum"]
+    assert spectrum["is_ambiguous"] is True
+    assert not [key for key in spectrum if "confidence" in key or "probability" in key]
 
 
 def test_a_far_type_is_called_different_and_a_poor_fit_is_no_good_match() -> None:

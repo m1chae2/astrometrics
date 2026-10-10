@@ -93,6 +93,9 @@ class CascadeStage(StrEnum):
     REJECTED_STATIONARY_SKY = "rejected_stationary_sky"
     REJECTED_STATIONARY_PIXEL = "rejected_stationary_pixel"
     REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE = "rejected_nonlinear_or_out_of_range_rate"
+    # The dots fit a line, but they move back and forth along it by more than
+    # the position error, the way a star with a flipping centre does.
+    REJECTED_NON_MONOTONIC = "rejected_non_monotonic"
 
 
 class EphemerisMatch(BaseModel):

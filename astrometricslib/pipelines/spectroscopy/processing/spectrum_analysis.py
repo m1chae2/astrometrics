@@ -412,8 +412,9 @@ def analyze_spectrum(
                 excluded_windows_angstrom=excluded_windows,
                 resolution_profile=resolution_profile,
             )
-            if giant_result["spectral_type"] != "Unknown":
-                closest_giant = (str(giant_result["spectral_type"]), float(giant_result["rms"]))  # type: ignore[arg-type]
+            giant_rms = giant_result["classification_rms"]
+            if giant_result["spectral_type"] != "Unknown" and isinstance(giant_rms, int | float):
+                closest_giant = (str(giant_result["spectral_type"]), float(giant_rms))
         synthetic_colour = (
             synthetic_b_minus_v(wavelength_angstrom, corrected_intensity)
             if corrected_intensity is not None

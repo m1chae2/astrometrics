@@ -14,7 +14,8 @@ module expects a spectrum that has already been corrected, compares it
 with the references blurred to the instrument's resolution, and scores
 each by how far the observation is from the reference once the reference
 has been scaled to the same overall brightness (the best-fit scale). It is
-a match score, not a probability that the star has that type.
+a match score (a relative RMS, lower is closer), not a probability that the
+star has that type.
 
 The scale is a best fit, not a divide-by-the-median. An earlier version
 divided both spectra by their own median and compared them. The median of
@@ -91,8 +92,14 @@ from pathlib import Path
 
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
-from scipy.special import softmax
 
+from astrometricslib.models.stellar_source import (
+    NO_GOOD_MATCH_RMS,
+    UNRELIABLE_MATCH_RMS,
+    is_rms_gap_ambiguous,
+    rms_gap_to_next_class,
+    rms_gap_to_second_best,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
@@ -245,54 +252,11 @@ CLASSIFICATION_WAVELENGTH_RANGE_ANGSTROM = (3000.0, 10000.0)
 # required.
 MINIMUM_CLASSIFICATION_COVERAGE_ANGSTROM = 2500.0
 
-# Softmax temperature (in root-mean-square difference units) used to turn
-# match scores into a weight for each type. It has to be about as big as
-# the gap between neighboring types, so a near neighbor keeps a visible
-# share instead of one type taking everything.
-#
-# 0.005: when the score changed from median-normalized to best-fit scale,
-# the median gap between the best and second-best type fell from 0.0110 to
-# 0.0060, and the median gap between neighbors among the top six types fell
-# from 0.0284 to 0.0135 (14 stars with a known type or a standard, the
-# instrument response applied, atmospheric bands excluded, 2026-09-19; see
-# logs/spectral_score_calibration_20260919.json). The old temperature was
-# 0.01, so it is halved to keep the same spread of weights.
-_RANKING_SOFTMAX_TEMPERATURE = 0.005
-
-# A best match with a root-mean-square difference above this is poor.
-# Provisional value. It rests on only a handful of stars and should be
-# revisited as more standards are observed.
-#
-# 0.15 sits between the two groups in the best-fit score (14 stars with a
-# known type or a standard, 2026-09-19; see
-# logs/spectral_score_calibration_20260919.json). Stars matched to within
-# three spectral-type steps of their catalog type: Alcor's second star
-# 0.049, g UMa 0.046, Vega 0.053, HD 151023 0.105. Stars matched to the
-# wrong type: BD+36 2764 0.283, HD 151086 0.218, HD 150293 0.205, BD+36 2775
-# 0.202, HD 150679 0.181. The same value fell between the two groups under
-# the old median-normalized score (0.064-0.113 against 0.196-0.375), so it
-# did not need to change.
-#
-# Two known-wrong matches score well below it and are NOT caught: HD 150998
-# (K2 matched as M0, 0.086) and the first star of the Alcor pair (A2 matched
-# as F2, 0.048, possibly saturated). A low score means the reference is close
-# to the spectrum, not that the type is right.
-POOR_MATCH_RMS_THRESHOLD = 0.15
-
-# A best match with a root-mean-square difference above this is not a match at
-# all: the spectrum is off by nearly half its own brightness from every
-# reference, so naming the least-bad one would only invent a type.
-# Provisional, and a judgement call from one data set. Of the 55 stars
-# classified in the catalog on 2026-09-24, 19 scored above 0.45 (up to 1.66).
-# 18 of those have no catalog type and are stars matched to the wrong part of
-# the sky (see `REGISTRATION_REFERENCE_FIELD_RADIUS_DEG`), so their "type" was
-# a fit to a faint, noisy spectrum. The one exception, beta Lyr B (catalog
-# B7V, matched B8V at 0.58 with a signal-to-noise of 5.9), is lost by this
-# cut. The highest scores among stars with a catalog type are V* HM Lyr (M6,
-# matched M6V at 0.39), HD 183987 (0.32) and HD 183931 (0.28), all matched
-# correctly and all kept: cool stars score high because their blue end is
-# faint and noisy, so the cut is set above them.
-UNRELIABLE_MATCH_RMS_THRESHOLD = 0.45
+# The limits that turn a match score into a verdict live in
+# `astrometricslib.models.stellar_source` (`NO_GOOD_MATCH_RMS`,
+# `UNRELIABLE_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`), so the model, the gates and
+# the star summary all read one value. This module imports them and defines
+# none of its own.
 
 _reference_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
 # Blurred references, kept for each resolution seen so far. The key is the
@@ -502,38 +466,27 @@ def _get_blurred_templates(
     return _blurred_cache[cache_key]
 
 
-def _rank_by_probability(
+def _rank_by_rms(
     rms_by_type: dict[str, float], correlation_by_type: dict[str, float]
 ) -> list[dict[str, object]]:
-    """Turn match scores into a sorted ranking with a weight for each type.
-
-    This is a heuristic ranking, not a calibrated statistical probability:
-    a softmax over the (negative) differences makes the weights
-    non-negative and sum to 1, which makes close calls between types
-    visible without claiming more rigor than shape matching supports.
+    """Sort the compared types from the closest match to the furthest.
 
     Returns
     -------
     ranked_types : `list` [`dict`]
-        Every compared type, best first. Each entry has
-        ``"spectral_type"``, ``"probability"`` (a weight; sums to 1
-        across the list), ``"rms"`` (the root-mean-square difference; lower
-        is better) and ``"correlation"`` (the Pearson coefficient, kept for
-        comparison; it barely separates types).
+        Every compared type, closest first. Each entry has
+        ``"spectral_type"``, ``"rms"`` (the relative root-mean-square
+        difference; lower is closer) and ``"correlation"`` (the Pearson
+        coefficient, kept for comparison; it barely separates types). The
+        scores are RMS values, not probabilities.
     """
-    if not rms_by_type:
-        return []
-    types = list(rms_by_type.keys())
-    differences = np.array([rms_by_type[t] for t in types])
-    probabilities = softmax(-differences / _RANKING_SOFTMAX_TEMPERATURE)
     ranked = [
         {
-            "spectral_type": t,
-            "probability": float(p),
-            "rms": float(rms_by_type[t]),
-            "correlation": float(correlation_by_type[t]),
+            "spectral_type": spectral_type,
+            "rms": float(rms),
+            "correlation": float(correlation_by_type[spectral_type]),
         }
-        for t, p in zip(types, probabilities, strict=True)
+        for spectral_type, rms in rms_by_type.items()
     ]
     ranked.sort(key=lambda entry: entry["rms"])
     return ranked
@@ -549,8 +502,11 @@ def unclassified_result(reason: str) -> dict[str, object]:
     """
     return {
         "spectral_type": "Unknown",
-        "confidence": None,
-        "rms": None,
+        "classification_rms": None,
+        "rms_gap_to_second_best": None,
+        "is_ambiguous": None,
+        "rms_gap_to_next_class": None,
+        "is_class_ambiguous": None,
         "match_quality": None,
         "reason": reason,
         "correlation_by_type": {},
@@ -622,14 +578,27 @@ def classify_spectral_type(
         ``"spectral_type"``: the best-matching reference label, or
         ``"Unknown"`` when there was not enough of the spectrum to compare
         (then ``"reason"`` says why).
-        ``"confidence"``: 1 minus the best root-mean-square difference,
-        or `None` when unknown. A match score, not a probability.
-        ``"rms"``: the best root-mean-square difference itself.
+        ``"classification_rms"``: the best reference's relative
+        root-mean-square difference, or `None` when unknown. Lower is
+        closer. It is a match score, not a probability.
+        ``"rms_gap_to_second_best"``: the second-best reference's RMS minus
+        the best one's, in the same RMS units, or `None` when fewer than two
+        references were compared. It is a difference in RMS, not a
+        probability.
+        ``"is_ambiguous"``: `True` when that gap is below
+        `AMBIGUOUS_RMS_GAP` (see `stellar_source`), `None` when there is no
+        gap. This is the subtype-level statement.
+        ``"rms_gap_to_next_class"``: the RMS of the best reference whose
+        spectral class letter differs from the best one's, minus the best
+        RMS, in the same units, or `None` when no other class was compared.
+        ``"is_class_ambiguous"``: `True` when that gap is below
+        `AMBIGUOUS_RMS_GAP`, `None` when there is no gap. This is the
+        class-level statement.
         ``"match_quality"``: ``"good"`` or ``"poor"`` (see
-        `POOR_MATCH_RMS_THRESHOLD`).
+        `NO_GOOD_MATCH_RMS`).
         ``"correlation_by_type"``: every reference's Pearson correlation.
-        ``"ranked_types"``: every compared type, best first (see
-        `_rank_by_probability`).
+        ``"ranked_types"``: every compared type, closest first, scored by
+        RMS (see `_rank_by_rms`).
         ``"excluded_windows_angstrom"``: the windows left out of the
         comparison, as (low, high) pairs (empty when there were none).
     """
@@ -701,19 +670,24 @@ def classify_spectral_type(
 
     best_type = min(rms_by_type, key=rms_by_type.get)
     best_rms = rms_by_type[best_type]
-    if best_rms > UNRELIABLE_MATCH_RMS_THRESHOLD:
+    if best_rms > UNRELIABLE_MATCH_RMS:
         return unclassified_result(
             f"no reference matches this spectrum: even the closest ({best_type}) is off by "
-            f"{best_rms:.0%} of its brightness, and more than {UNRELIABLE_MATCH_RMS_THRESHOLD:.0%} "
+            f"{best_rms:.0%} of its brightness, and more than {UNRELIABLE_MATCH_RMS:.0%} "
             "is too far to call a match"
         )
+    rms_gap = rms_gap_to_second_best(rms_by_type.values())
+    class_gap = rms_gap_to_next_class(rms_by_type.items())
     return {
         "spectral_type": best_type,
-        "confidence": max(0.0, 1.0 - best_rms),
-        "rms": best_rms,
-        "match_quality": "poor" if best_rms > POOR_MATCH_RMS_THRESHOLD else "good",
+        "classification_rms": best_rms,
+        "rms_gap_to_second_best": rms_gap,
+        "is_ambiguous": is_rms_gap_ambiguous(rms_gap),
+        "rms_gap_to_next_class": class_gap,
+        "is_class_ambiguous": is_rms_gap_ambiguous(class_gap),
+        "match_quality": "poor" if best_rms > NO_GOOD_MATCH_RMS else "good",
         "reason": None,
         "correlation_by_type": correlation_by_type,
-        "ranked_types": _rank_by_probability(rms_by_type, correlation_by_type),
+        "ranked_types": _rank_by_rms(rms_by_type, correlation_by_type),
         "excluded_windows_angstrom": excluded_windows,
     }

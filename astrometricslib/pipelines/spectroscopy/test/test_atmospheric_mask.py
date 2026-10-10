@@ -96,8 +96,8 @@ def test_a_dip_from_the_air_no_longer_counts_against_the_star() -> None:
     counted = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=False)
     ignored = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=True)
 
-    assert ignored["rms"] < 0.01
-    assert counted["rms"] > 3 * ignored["rms"]
+    assert ignored["classification_rms"] < 0.01
+    assert counted["classification_rms"] > 3 * ignored["classification_rms"]
     assert ignored["spectral_type"] == "A0V"
 
 
@@ -113,8 +113,8 @@ def test_a_dip_outside_the_bands_still_counts() -> None:
     counted = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=False)
     ignored = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=True)
 
-    assert ignored["rms"] == pytest.approx(counted["rms"], rel=0.15)
-    assert ignored["rms"] > 0.02
+    assert ignored["classification_rms"] == pytest.approx(counted["classification_rms"], rel=0.15)
+    assert ignored["classification_rms"] > 0.02
 
 
 def test_leaving_bands_out_does_not_move_the_score_of_a_dip_mid_spectrum() -> None:
@@ -132,7 +132,7 @@ def test_leaving_bands_out_does_not_move_the_score_of_a_dip_mid_spectrum() -> No
     counted = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=False)
     ignored = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=True)
 
-    assert ignored["rms"] == pytest.approx(counted["rms"], rel=0.1)
+    assert ignored["classification_rms"] == pytest.approx(counted["classification_rms"], rel=0.1)
     assert ignored["spectral_type"] == counted["spectral_type"] == "A0V"
 
 
@@ -143,7 +143,7 @@ def test_excluding_is_the_default() -> None:
     default = classify_spectral_type(wavelength, observed)
     explicit = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=True)
 
-    assert default["rms"] == pytest.approx(explicit["rms"])
+    assert default["classification_rms"] == pytest.approx(explicit["classification_rms"])
 
 
 def test_a_clean_spectrum_is_unchanged_by_the_mask() -> None:
@@ -154,5 +154,5 @@ def test_a_clean_spectrum_is_unchanged_by_the_mask() -> None:
     ignored = classify_spectral_type(wavelength, observed, exclude_atmospheric_bands=True)
 
     assert counted["spectral_type"] == ignored["spectral_type"] == "A0V"
-    assert counted["rms"] < 0.01
-    assert ignored["rms"] < 0.01
+    assert counted["classification_rms"] < 0.01
+    assert ignored["classification_rms"] < 0.01

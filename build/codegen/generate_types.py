@@ -90,6 +90,11 @@ from astrometricslib.models.target import (
     TargetQualitySummaries,
     TargetStackingResult,
 )
+from astrometricslib.models.wavelength_scale import (
+    WavelengthScaleSummary,
+    WavelengthZeroPointLine,
+    WavelengthZeroPointRecord,
+)
 from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
     IntrospectionEndpoint,
@@ -373,6 +378,9 @@ def render_types() -> str:
         generate_interface(StageQualityMetric, "StageQualityMetric"),
         generate_interface(StageQualityCheckpoint, "StageQualityCheckpoint"),
         generate_interface(StageQualityRollup, "StageQualityRollup"),
+        generate_interface(WavelengthZeroPointLine, "WavelengthZeroPointLine"),
+        generate_interface(WavelengthZeroPointRecord, "WavelengthZeroPointRecord"),
+        generate_interface(WavelengthScaleSummary, "WavelengthScaleSummary"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
         generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),

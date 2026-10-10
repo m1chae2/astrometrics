@@ -8,6 +8,9 @@ well supported, do they agree with the catalog, were the feature p-values
 calibrated against each spectrum's own noise, and was the instrument's
 resolution measured rather than assumed.
 
+The eighth check, ``wavelength_scale``, reads how much the spectra's
+wavelength zero points scatter (see `wavelength_scale`).
+
 Each check is returned as a `GateResult`. A check that could not look (no
 zero-order measurement, no catalog type to compare with) is ``not_checked``;
 it is not a pass. The failed gates' sentences are the run's flag reasons.
@@ -38,10 +41,12 @@ from astrometricslib.models.stellar_source import (
     DIFFERS_FROM_CATALOG_SUBTYPES,
     NO_GOOD_MATCH_RMS,
 )
+from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.shared.quality.saturation import (
     DEFAULT_SATURATION_FLAG_THRESHOLD,
     is_saturation_significant,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import wavelength_scale_gate
 
 SPECTRA_GATE_NAME = "spectra_extracted"
 ZERO_ORDER_GATE_NAME = "zero_order_saturation"
@@ -239,6 +244,7 @@ def spectroscopy_run_gates(
     facts: Mapping[str, int],
     zero_order_fractions: Sequence[float],
     classification_concerns: Sequence[Mapping[str, Any]],
+    wavelength_scale: WavelengthScaleSummary | None = None,
 ) -> list[GateResult]:
     """Build the gates for one spectroscopy run.
 
@@ -254,11 +260,14 @@ def spectroscopy_run_gates(
         as close). A star ambiguous only between neighbouring subtypes is
         not a concern; it is counted in ``facts["subtype_ambiguous"]`` and
         reported in the gate's detail.
+    wavelength_scale : `WavelengthScaleSummary`, optional
+        The run's wavelength-scale scatter (see `summarize_wavelength_scale`).
+        Without it the ``wavelength_scale`` gate reads ``not_checked``.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Seven gates, in a fixed order.
+        Eight gates, in a fixed order.
     """
     gates: list[GateResult] = []
     spectra = facts.get("spectra", 0)
@@ -435,4 +444,5 @@ def spectroscopy_run_gates(
                     detail,
                 )
             )
+    gates.append(wavelength_scale_gate(wavelength_scale))
     return gates

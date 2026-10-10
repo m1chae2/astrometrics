@@ -9,7 +9,8 @@ The same numbers also form quality checkpoint 1 (the calibrated spectrum),
 built by `input_quality_checkpoint` in the common `StageQualityCheckpoint`
 shape. The limit for signal-to-noise is
 `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, defined once in
-`processing.spectrum_signal`.
+`processing.spectrum_signal`. The checkpoint also carries the wavelength
+zero-point metrics from `wavelength_zero_point` when a measurement is given.
 """
 
 from astrometricslib.models.spectroscopy_quality import (
@@ -17,7 +18,9 @@ from astrometricslib.models.spectroscopy_quality import (
     StageQualityCheckpoint,
     metric,
 )
+from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
+from astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point import zero_point_metrics
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
 )
@@ -53,20 +56,27 @@ def assess_input_quality(
     )
 
 
-def input_quality_checkpoint(assessment: InputQualityAssessment) -> StageQualityCheckpoint:
+def input_quality_checkpoint(
+    assessment: InputQualityAssessment, zero_point: WavelengthZeroPointRecord | None = None
+) -> StageQualityCheckpoint:
     """Build quality checkpoint 1 from an input-quality assessment.
 
     Parameters
     ----------
     assessment : `InputQualityAssessment`
         The result of `assess_input_quality`.
+    zero_point : `WavelengthZeroPointRecord`, optional
+        The spectrum's wavelength zero-point measurement. When given, its
+        four metrics and flags are added (see `zero_point_metrics`).
 
     Returns
     -------
     checkpoint : `StageQualityCheckpoint`
         The ``pre_processing`` checkpoint. It carries the assessment's five
         numbers. Resolution has no limit: a coarse resolution limits what the
-        later stages can tell apart but is not a failure by itself.
+        later stages can tell apart but is not a failure by itself. With a
+        zero-point measurement it also carries the four
+        ``wavelength_zero_point_*`` metrics.
     """
     saturation = metric(
         "zero_order_saturated_fraction",
@@ -108,4 +118,8 @@ def input_quality_checkpoint(assessment: InputQualityAssessment) -> StageQuality
         flags.append("low_signal_to_noise")
     if saturation.passed is False:
         flags.append("zero_order_saturated")
+    if zero_point is not None:
+        zero_point_entries, zero_point_flags = zero_point_metrics(zero_point)
+        metrics.extend(zero_point_entries)
+        flags.extend(zero_point_flags)
     return StageQualityCheckpoint(stage="pre_processing", metrics=metrics, flags=flags)

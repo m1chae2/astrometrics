@@ -22,6 +22,9 @@ from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     stage_quality_rows,
     summarize_stage_quality,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
+    summarize_wavelength_scale,
+)
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -630,6 +633,7 @@ def _attach_spectroscopy_quality_summary(
     sessions = [session for session, _identify_result in session_results]
     target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
+    wavelength_scale = summarize_wavelength_scale(all_stage_quality_rows)
     target.quality.spectroscopy = SpectroscopyQualitySummary(
         target_id=target.id,
         target_session_ids=[session.id for session, _identify_result in session_results],
@@ -648,10 +652,11 @@ def _attach_spectroscopy_quality_summary(
             ambiguous_classification_count=ambiguous_count,
             flagged_spectral_classifications=all_spectral_classification_concerns,
             stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
+            wavelength_scale_summary=wavelength_scale,
         ),
     )
     for gate in spectroscopy_run_gates(
-        all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns
+        all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns, wavelength_scale
     ):
         target.quality.spectroscopy.record_gate(gate)
 

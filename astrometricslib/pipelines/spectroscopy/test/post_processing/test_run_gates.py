@@ -14,6 +14,7 @@ import pytest
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, metric
 from astrometricslib.models.target import Target
+from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.shared.star_recording import StarIdentificationBreakdown
@@ -70,24 +71,46 @@ def make_star(
 
 
 def run_gates(
-    stars: list[Any], zero_order: list[float] | None = None, concerns: list[dict] | None = None
+    stars: list[Any],
+    zero_order: list[float] | None = None,
+    concerns: list[dict] | None = None,
+    wavelength_scale: WavelengthScaleSummary | None = None,
 ) -> dict:
     """Build the gates for a set of stand-in stars.
+
+    Parameters
+    ----------
+    stars : `list`
+        The stand-in stars.
+    zero_order : `list` [`float`], optional
+        The saturated share of each star's zero-order image.
+    concerns : `list` [`dict`], optional
+        The classification concerns.
+    wavelength_scale : `WavelengthScaleSummary`, optional
+        The run's wavelength-scale summary.
 
     Returns
     -------
     gates : `dict` [`str`, `GateResult`]
         The gates keyed by name.
     """
-    gates = rg.spectroscopy_run_gates(rg.spectrum_facts(stars), zero_order or [], concerns or [])
+    gates = rg.spectroscopy_run_gates(
+        rg.spectrum_facts(stars), zero_order or [], concerns or [], wavelength_scale
+    )
     return {gate.name: gate for gate in gates}
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
-    """Good spectra give seven passes and no failure."""
-    gates = run_gates([make_star(), make_star("K0V")], zero_order=[0.0, 0.0])
+    """Good spectra give eight passes and no failure."""
+    steady_scale = WavelengthScaleSummary(
+        spectrum_count=3,
+        applied_count=3,
+        rms_before_correction_angstrom=6.0,
+        rms_after_correction_angstrom=1.5,
+    )
+    gates = run_gates([make_star(), make_star("K0V")], zero_order=[0.0, 0.0], wavelength_scale=steady_scale)
 
-    assert len(gates) == 7
+    assert len(gates) == 8
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
 
 

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.spectroscopy_quality import StageQualityRollup
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 
 class ExcludedFrame(BaseModel):
@@ -601,6 +602,14 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     # `StageQualityRollup`). `None` for a summary saved before this was
     # recorded, and for a run with no spectra.
     stage_quality_summary: list[StageQualityRollup] | None = Field(default=None, alias="stageQualitySummary")
+    # How much the spectra's wavelength zero points scatter across the run,
+    # before and after the pipeline's correction, and how the offsets relate
+    # to zero-order saturation (see `WavelengthScaleSummary`). `None` for a
+    # summary saved before this was recorded, and for a run in which no
+    # spectrum had a measured offset.
+    wavelength_scale_summary: WavelengthScaleSummary | None = Field(
+        default=None, alias="wavelengthScaleSummary"
+    )
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

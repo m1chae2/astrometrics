@@ -55,12 +55,19 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_co
     apply_quantum_efficiency_correction,
     curve_from_profile_record,
 )
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import load_line_spread_profile
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+    load_line_spread_profile,
+    resolve_resolution_element_angstrom,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point import (
+    measure_wavelength_zero_point,
+    shift_wavelengths,
+)
 from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality import (
     assess_processing_quality,
 )
@@ -1137,18 +1144,51 @@ class SpectroscopyPipeline:
     ) -> None:
         """Copy a single star's extraction result onto its `StellarObject`.
 
+        The steps run in this order, because each one reads the wavelengths
+        the one before it left:
+
+        1. Measure the wavelength zero point from known lines and, when at
+           least two lines agree, shift the wavelengths by it.
+        2. Correct for the sensor's quantum efficiency (QE).
+        3. Remove the instrument response, then rescale for the airmass.
+        4. Classify the spectrum and build the four quality checkpoints.
+
+        Steps 2 and 3 depend on wavelength, which is why step 1 is first.
+
         "Quantum Efficiency" (QE) corrects for the fact that camera
         sensors see some colors of light better than others. If we
         know the camera's exact QE curve, we fix the data here. If we
         don't know the camera, we just skip this step.
         """
-        wavelengths_angstrom = [float(w) * 10.0 for w in result["wavelengths"]]
         intensities = result["intensities"]
+
+        # The wavelength zero point comes first. The quantum-efficiency,
+        # instrument-response and extinction corrections below all depend on
+        # wavelength, so each must see the corrected one. A shift measured
+        # from known lines is removed only when at least two lines agree (see
+        # `pre_processing.wavelength_zero_point`).
+        measured_wavelengths_nm = np.array(result["wavelengths"], dtype=float)
+        measured_wavelengths_angstrom = measured_wavelengths_nm * 10.0
+        blur_angstrom, _is_blur_measured = resolve_resolution_element_angstrom(
+            measured_wavelengths_angstrom, result.get("trail_width_px")
+        )
+        zero_point = measure_wavelength_zero_point(
+            measured_wavelengths_angstrom,
+            np.array(intensities, dtype=float),
+            blur_angstrom,
+            self.line_spread_profile,
+            result.get("zero_order_saturated_pixel_fraction"),
+        )
+        corrected_wavelengths_angstrom = shift_wavelengths(measured_wavelengths_angstrom, zero_point)
+        wavelengths_angstrom = corrected_wavelengths_angstrom.tolist()
+        wavelengths_nm = (
+            corrected_wavelengths_angstrom / 10.0 if zero_point.is_applied else measured_wavelengths_nm
+        )
 
         quantum_efficiency_corrected_intensities = None
         if self.quantum_efficiency_curve is not None:
             quantum_efficiency_corrected_intensities = apply_quantum_efficiency_correction(
-                wavelength_nm=np.array(result["wavelengths"]),
+                wavelength_nm=wavelengths_nm,
                 intensity=np.array(result["intensities"]),
                 curve=self.quantum_efficiency_curve,
             ).tolist()
@@ -1238,7 +1278,7 @@ class SpectroscopyPipeline:
                 extraction_diagnostics=result.get("extraction_diagnostics"),
                 frame_check=result.get("frame_check"),
             ),
-            input_quality_checkpoint(input_quality),
+            input_quality_checkpoint(input_quality, zero_point),
             assess_processing_quality(
                 classification=classification,
                 features=probable_spectral_features,
@@ -1291,6 +1331,7 @@ class SpectroscopyPipeline:
             input_quality=input_quality,
             output_quality=output_quality,
             stage_quality=stage_quality,
+            wavelength_zero_point=zero_point,
             extraction_diagnostics=(
                 SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
                 if result.get("extraction_diagnostics") is not None

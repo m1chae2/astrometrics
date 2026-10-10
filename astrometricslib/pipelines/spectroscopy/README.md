@@ -130,7 +130,7 @@ frame-level check, so a pipeline-built checkpoint 0 normally lacks tilt,
 peak-to-sky and saturation source.
 
 **Checkpoint 1, calibrated spectrum.** It carries the five numbers of
-`InputQualityAssessment`.
+`InputQualityAssessment` and the four wavelength zero-point metrics.
 
 | Metric | Unit | Limit | What it tells a reader |
 |---|---|---|---|
@@ -139,6 +139,18 @@ peak-to-sky and saturation source.
 | `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD`, lower is better | The same saturation share as checkpoint 0, kept so the assessment's numbers are all here. |
 | `valid_fraction` | fraction | none | The same coverage as checkpoint 0. |
 | `signal_to_noise` | per resolution element | `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` (1.5), higher is better | How strongly the spectrum stands out from its own scatter. Below the limit the pipeline does not classify the spectrum. |
+| `wavelength_zero_point_offset_angstrom` | angstrom | 20, lower is better (designed) | The size of the wavelength zero-point offset measured from known lines, before correction. The limit is half a resolution element at 5000 A. It is a designed value, not a measured one. |
+| `wavelength_zero_point_uncertainty_angstrom` | angstrom | none | The error of that offset. |
+| `wavelength_zero_point_line_count` | lines | none | How many of the six lines passed the significance test. |
+| `wavelength_zero_point_applied` | flag | none | 1 when the pipeline shifted the wavelengths by the offset, 0 when it only measured it. |
+
+The checkpoint 1 flags are `resolution_assumed`, `low_signal_to_noise`,
+`zero_order_saturated`, `wavelength_zero_point_unconstrained` (fewer than two
+lines found), `wavelength_zero_point_lines_disagree` (two or more lines that
+fail the chi-square test) and `wavelength_zero_point_large` (offset over its
+limit). The pipeline applies the offset before the quantum-efficiency,
+response and extinction corrections; see "Wavelength zero point" in the
+[pre-processing README](pre_processing/README.md).
 
 **Checkpoint 2, processing result.** It judges the processing results on their
 own, before the catalog comparison. For an unclassified spectrum the
@@ -202,7 +214,8 @@ Use these rules:
    suited to each checkpoint are: atmospheric dispersion at the raw frame;
    per-pixel signal-to-noise and line width against wavelength at
    pre-processing; equivalent-width errors and reddening at processing; Gaia
-   XP residuals and wavelength zero-point scatter at post-processing.
+   XP residuals at post-processing. The scatter of the wavelength zero
+   points across a run is in the run-level summary below.
 2. Take a limit from the module that defines it. If the limit does not exist
    yet, define it once, in `models/stellar_source.py` when it is a
    classification limit, and leave `limit` out until a validated value exists.
@@ -232,6 +245,31 @@ one `StageQualityRollup` per stage, in stage order:
 The batch workers return each spectrum's checkpoints as plain dictionaries
 (`stage_quality_rows`), because a worker process cannot return whole star
 objects. The summary is `None` for a run with no spectra.
+
+`wavelength_scale_summary` on the same metrics (`WavelengthScaleSummary`,
+built by `summarize_wavelength_scale` in `post_processing/wavelength_scale.py`
+from the pre-processing checkpoints) holds the scatter of the wavelength zero
+points across the run. It counts only spectra with a measured offset:
+
+- `spectrum_count` and `applied_count`: how many spectra had an offset, and how
+  many of those had it removed.
+- `rms_before_correction_angstrom`: the root mean square (RMS) of the offsets
+  before any correction.
+- `rms_after_correction_angstrom`: the RMS of what is left. A spectrum with the
+  offset removed counts as the offset's uncertainty, because a correction
+  cannot be more exact than its measurement. A spectrum with the offset only
+  measured counts as the whole offset.
+- `offset_saturation_correlation`: the Pearson correlation between a
+  spectrum's absolute offset and its zero-order saturated fraction, with
+  `correlation_spectrum_count` spectra behind it. A value near 1 means the
+  saturated zero orders cause the offsets. It is `None` with fewer than three
+  spectra, or when either quantity does not vary. The correlation uses the
+  absolute offset because saturation can pull the centre either way.
+
+The `wavelength_scale` gate fails when `rms_after_correction_angstrom` is over
+`WAVELENGTH_SCALE_LIMIT_ANGSTROM` (11 A, one pixel of dispersion). The limit is
+a designed value, not a measured one. The gate is `not_checked` when fewer than
+three spectra have an offset.
 
 The `processing_quality` gate reads the processing checkpoint. It fails when
 more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of the classified spectra
@@ -312,6 +350,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `feature_significance` | A star's feature p-values fell back to assuming Gaussian noise | No star had its features tested |
 | `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
 | `processing_quality` | More than 50% of classified spectra fail a metric of the processing checkpoint (see "Quality checkpoints") | No classified spectrum has a processing checkpoint, including a run with no spectra |
+| `wavelength_scale` | The RMS of the per-spectrum wavelength offsets left after correction is over 11 A (one pixel of dispersion; designed, not measured) | Fewer than three spectra have a measured offset |
 
 `catalog_agreement`, `feature_significance` and `spectra_extracted` are new flags: before, a disagreement with the catalog or an uncalibrated p-value showed only on the star's own record, and a run with no spectra was not flagged at all. The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path. Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.
 

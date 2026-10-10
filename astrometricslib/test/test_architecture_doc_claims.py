@@ -1,8 +1,8 @@
-"""Purpose: Keep the architecture document's algorithm claims tied to real code.
+"""Purpose: Keep the architecture document's algorithm claims tied to code.
 
 Description: Each algorithm claim in
-``documentation/library_design/Astrometrics_Library_Architecture.md`` carries an
-HTML comment ``<!-- impl: dotted.path -->`` naming the function, class or
+``documentation/library_design/Astrometrics_Library_Architecture.md`` carries
+an HTML comment ``<!-- impl: dotted.path -->`` naming the function, class or
 constant that implements it. This test imports every named object. A claim
 whose implementation no longer exists fails the test, so a refactor cannot
 leave the document describing code that is gone. A claim with no link is a
@@ -31,12 +31,14 @@ def _resolve(dotted: str) -> object | None:
     Parameters
     ----------
     dotted : `str`
-        A path such as ``astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg``.
+        A path such as
+        ``astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg``.
 
     Returns
     -------
     target : `object` or `None`
-        The named object, or `None` when no prefix imports or an attribute is missing.
+        The named object, or `None` when no prefix imports or an attribute
+        is missing.
     """
     parts = dotted.split(".")
     for split in range(len(parts), 0, -1):
@@ -80,5 +82,5 @@ def test_the_architecture_document_keeps_its_claims_linked() -> None:
 
 @pytest.mark.parametrize("name", sorted(set(_linked_claims()))[:3])
 def test_a_sample_link_is_a_full_astrometricslib_path(name: str) -> None:
-    """Links are full dotted paths into the library, not bare function names."""
+    """Links are full dotted paths into the library, not bare names."""
     assert name.startswith("astrometricslib.")

@@ -22,12 +22,15 @@ on a poor match or a class-level ambiguity (the concerns built here).
 The same verdict also forms quality checkpoint 3 (the final result), built by
 `output_quality_checkpoint` in the common `StageQualityCheckpoint` shape. Its
 catalog limit, `DIFFERS_FROM_CATALOG_SUBTYPES`, is imported from the same
-module.
+module. The checkpoint also carries four metrics from the comparison with the
+star's Gaia DR3 XP spectrum (`compare_to_gaia_xp`), which tests the
+instrument response, the airmass correction and the wavelength scale.
 """
 
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
+from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     OutputQualityAssessment,
@@ -42,6 +45,7 @@ from astrometricslib.models.stellar_source import (
     rms_gap_to_next_class,
     rms_gap_to_second_best,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import gaia_xp_metrics
 
 if TYPE_CHECKING:
     from astrometricslib.models.stellar_source import StellarObject
@@ -222,6 +226,7 @@ def output_quality_checkpoint(
     own_spectral_type: str,
     catalog_spectral_type: str | None,
     catalog_comparison: CatalogComparison | None,
+    gaia_xp_comparison: GaiaXpComparison | None = None,
 ) -> StageQualityCheckpoint:
     """Build quality checkpoint 3 from an output-quality assessment.
 
@@ -237,14 +242,20 @@ def output_quality_checkpoint(
         the two types are.
     catalog_comparison : `CatalogComparison`, optional
         The result of `compare_to_catalog`, for the colour check.
+    gaia_xp_comparison : `GaiaXpComparison`, optional
+        The result of `compare_to_gaia_xp`. When given, its four metrics
+        are added whether or not the spectrum was classified, because the
+        check tests the instrument response and wavelength scale, not the
+        classification.
 
     Returns
     -------
     checkpoint : `StageQualityCheckpoint`
         The ``post_processing`` checkpoint. Each yes/no verdict is a metric
         with value 1.0 (yes) or 0.0 (no). For an unclassified spectrum every
-        value is `None` and the checkpoint carries the ``unclassified`` flag,
-        because there is nothing to judge.
+        classification value is `None` and the checkpoint carries the
+        ``unclassified`` flag, because there is nothing to judge. A
+        ``gaia_xp_disagrees`` flag is added when a Gaia XP metric failed.
     """
     is_classified = own_spectral_type not in ("", "Unknown")
     own_position = ladder_position(own_spectral_type) if is_classified else None
@@ -295,7 +306,11 @@ def output_quality_checkpoint(
         ),
         metric("trustworthy", verdict(assessment.is_trustworthy), "flag", limit=1.0),
     ]
+    gaia_xp_entries = gaia_xp_metrics(gaia_xp_comparison) if gaia_xp_comparison is not None else []
+    metrics.extend(gaia_xp_entries)
     flags = []
+    if any(entry.passed is False for entry in gaia_xp_entries):
+        flags.append("gaia_xp_disagrees")
     if not is_classified:
         flags.append("unclassified")
     else:

@@ -169,6 +169,7 @@ def _copy_identity(spectral_obj: StellarObject, reference_star: StellarObject) -
     spectral_obj.magnitude = reference_star.magnitude
     spectral_obj.b_minus_v = reference_star.b_minus_v
     spectral_obj.is_catalog_identified = reference_star.is_catalog_identified
+    spectral_obj.gaia_dr3_source_id = reference_star.gaia_dr3_source_id
     spectral_obj.photometry = reference_star.photometry
 
 

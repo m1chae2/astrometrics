@@ -40,6 +40,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_from_names
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
 from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
@@ -2530,12 +2531,17 @@ class StarIdentifier:
             main_id = main_id.decode("utf-8")
 
         common_name = None
+        gaia_dr3_source_id = None
         ids_col = next((c for c in ["IDS", "ids"] if c in match.colnames), None)
         if ids_col:
             all_ids = match[ids_col]
             if isinstance(all_ids, bytes):
                 all_ids = all_ids.decode("utf-8")
             id_list = [i.strip() for i in str(all_ids).split("|")]
+            # SIMBAD lists the star's Gaia DR3 name among its identifiers.
+            # Keep the number: the Gaia XP spectrum check needs it, and the
+            # star's own id is its SIMBAD main id, not this.
+            gaia_dr3_source_id = gaia_dr3_source_id_from_names(id_list)
             for ident in id_list:
                 if ident.startswith("NAME "):
                     common_name = ident.replace("NAME ", "").strip()
@@ -2556,6 +2562,7 @@ class StarIdentifier:
         blue_magnitude = _read_catalog_magnitude(match, ["B", "FLUX_B", "flux_b", "flux(B)"])
 
         stellar_object.simbad_object_types = read_simbad_object_types(match)
+        stellar_object.gaia_dr3_source_id = gaia_dr3_source_id
         stellar_object.name = common_name if common_name else str(main_id)
         stellar_object.id = str(main_id)
         stellar_object.spectral_type = str(spectral_type)
@@ -2597,6 +2604,7 @@ class StarIdentifier:
 
         stellar_object.name = source_id
         stellar_object.id = source_id
+        stellar_object.gaia_dr3_source_id = gaia_dr3_source_id_from_names([source_id])
         stellar_object.spectral_type = "Unknown"
         stellar_object.stellar_spectral_type = "Unknown"
         stellar_object.magnitude = magnitude

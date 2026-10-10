@@ -27,6 +27,11 @@ from astrometricslib.pipelines.shared.target_center_hint import (
     resolve_solved_stack_center_hint,
     resolve_solved_stack_wcs,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    gaia_xp_gate,
+    gaia_xp_rows,
+    summarize_gaia_xp,
+)
 from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     spectroscopy_run_gates,
     spectrum_facts,
@@ -421,7 +426,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
             )
 
-        spectroscopy = SpectroscopyPipeline()
+        spectroscopy = SpectroscopyPipeline(drivers=request.options.get("drivers"))
         # No fixed count here: every candidate that clears the point-source
         # detector's own 5-sigma threshold (`source_detection.py`) and the
         # spurious-trail filter gets an extraction attempt. A caller can
@@ -493,6 +498,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
             1 for concern in flagged_spectral_classifications if "ambiguous" in concern["reason"]
         )
 
+        gaia_rows = gaia_xp_rows(stellar_objects)
         summary = SpectroscopyQualitySummary(
             target_id=request.target.id,
             spectroscopy_metrics=SpectroscopyPipelineQualityMetrics(
@@ -508,12 +514,14 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 ambiguous_classification_count=ambiguous_count,
                 flagged_spectral_classifications=flagged_spectral_classifications,
                 stage_quality_summary=summarize_stage_quality(stage_quality_rows(stellar_objects)) or None,
+                gaia_xp_summary=summarize_gaia_xp(gaia_rows),
             ),
         )
         for gate in spectroscopy_run_gates(
             spectrum_facts(stellar_objects), zero_order_fractions, flagged_spectral_classifications
         ):
             summary.record_gate(gate)
+        summary.record_gate(gaia_xp_gate(gaia_rows))
 
         from astrometricslib.pipelines.shared.applied_camera_profile import record_camera_profile
 

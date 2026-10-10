@@ -17,11 +17,11 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. A method t
 
 ## Injecting drivers
 
-A driver is the code that talks to one outside program or service. The library uses three: a plate solver (Astrometry.net), a stacking program (Siril) and the SIMBAD database (through astroquery). A plate solver works out which part of the sky an image shows.
+A driver is the code that talks to one outside program or service. The library uses four: a plate solver (Astrometry.net), a stacking program (Siril), the SIMBAD database (through astroquery) and Gaia DR3's low-resolution XP spectra (through astroquery, cached on disk). A plate solver works out which part of the sky an image shows.
 
-`Astrometrics(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None, simbad_driver=None)` accepts a replacement for each one. A driver left out stays the built-in one. The root puts the three into one `Drivers` object (`drivers/driver_set.py`) and gives it to `StellarCatalog` and `ProcessingPipelines`. They pass it to the pipelines as a `drivers=` keyword. The method signatures on the sub-APIs do not change.
+`Astrometrics(config, catalog_access, *, plate_solve_driver=None, stacking_driver=None, simbad_driver=None, gaia_xp_driver=None)` accepts a replacement for each one. A driver left out stays the built-in one. The root puts the four into one `Drivers` object (`drivers/driver_set.py`) and gives it to `StellarCatalog` and `ProcessingPipelines`. They pass it to the pipelines as a `drivers=` keyword. The method signatures on the sub-APIs do not change.
 
-A replacement subclasses `PlateSolveDriver`, `StackingDriver` or `SimbadDriver`. The root exports these base classes, and `StackSettings` and `StackRunResult`, which a stacking driver needs. A test can use this to run a stage with a fake solver and no network:
+A replacement subclasses `PlateSolveDriver`, `StackingDriver`, `SimbadDriver` or `GaiaXpDriver`. The root exports these base classes, and `StackSettings` and `StackRunResult`, which a stacking driver needs. A test can use this to run a stage with a fake solver and no network:
 
 ```python
 astrometrics = Astrometrics(config, storage, plate_solve_driver=MySolver(), simbad_driver=MySimbad())

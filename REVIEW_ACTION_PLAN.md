@@ -130,6 +130,7 @@ done.
 | Golden photometry sequence | done | `test/golden/test_golden_m13.py` pins the five-frame shifts and per-star scatter |
 | Tuner follow-ups | done | `utilities/test/test_calibration_tuner_dip_detection.py` (noisy frame tunes in under 10 s) |
 | Photometry follow-ups | done | `test/pre_processing/test_centroid_shift_summary.py`; gate `registration_drift` judges per-star offsets |
+| S14 follow-ups | done | `pipelines/shared/test/test_session_fit_statistics.py`; `drivers/test/test_catalog_store_regions.py`; the residual limit is still uncalibrated on real solves |
 
 Decisions taken during the work, for the owner to confirm:
 

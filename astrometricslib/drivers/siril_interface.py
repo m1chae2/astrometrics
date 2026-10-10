@@ -196,23 +196,165 @@ _CALIBRATION_MASTER_KINDS = (
 )
 
 
+# The key in `ImageProcessing.last_run_diagnostics` that holds the blocking
+# calibration flags, one sentence each. The stacking pipeline reads it (see
+# `calibration_gates` in `pipelines/stacking/pre_processing/`
+# `assess_input_quality.py`) and fails its ``calibration_frame_count`` gate
+# when the list is not empty.
+CALIBRATION_BLOCKING_FLAGS_KEY = "calibration_blocking_flags"
+
+# What a master built from too few frames costs, for each master kind. It ends
+# the sentence that `calibration_count_flags` writes.
+_SHORT_MASTER_CONSEQUENCES = {
+    "bias": "the master bias keeps the read noise of its few frames and any cosmic ray hit in them",
+    "dark": "the master dark keeps the noise of its few frames and any cosmic ray hit in them",
+    "flat": "the master flat copies the noise of its few frames into every light frame",
+}
+
+
+def calibration_count_flags(
+    num_biases: int, num_darks: int, num_flats: int, minimum_frames: int
+) -> list[str]:
+    """Find the masters that would be built from too few frames.
+
+    A master is the combination of its source frames. The stacker averages the
+    frames and rejects outlier pixel values (such as cosmic ray hits), and both
+    steps need several frames. A master built from fewer frames than
+    `minimum_frames` is still built, because the observatory's library can
+    legitimately hold a single flat or dark. The shortfall is recorded
+    instead, as a blocking flag: the stacking pipeline reads it, fails its
+    ``calibration_frame_count`` gate and flags the stack, so the stack is not
+    mistaken for a fully calibrated one. A master with no source frames at all
+    is not built and is not flagged here.
+
+    Parameters
+    ----------
+    num_biases : `int`
+        How many bias frames are staged.
+    num_darks : `int`
+        How many dark frames are staged.
+    num_flats : `int`
+        How many flat frames are staged.
+    minimum_frames : `int`
+        The fewest frames a master should be built from
+        (`AppConfiguration.get_minimum_calibration_frames`).
+
+    Returns
+    -------
+    flags : `list` [`str`]
+        One plain sentence for each master built from fewer than
+        `minimum_frames` frames, in the order bias, dark, flat. Empty when
+        every master that is built has enough frames.
+    """
+    flags = []
+    for kind, count in (("bias", num_biases), ("dark", num_darks), ("flat", num_flats)):
+        if 0 < count < minimum_frames:
+            flags.append(
+                f"{kind} master built from {count} frame(s), fewer than the minimum of "
+                f"{minimum_frames}: {_SHORT_MASTER_CONSEQUENCES[kind]}"
+            )
+    return flags
+
+
+def build_bias_master_commands(num_biases: int) -> list[str]:
+    """Write the Siril commands that build the master bias.
+
+    One bias frame is used as it is, because Siril's ``convert`` writes no
+    sequence for a single frame and there is nothing to reject. Several are
+    stacked with sigma rejection (``rej 3 3``), without normalisation, since
+    a bias level is an absolute number. A master from fewer frames than the
+    configured minimum is reported by `calibration_count_flags`, not changed
+    here.
+
+    Parameters
+    ----------
+    num_biases : `int`
+        How many bias frames are staged. Must be at least 1.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the biases
+        folder and ending with the master saved as ``bias_stacked``.
+    """
+    if num_biases == 1:
+        return [
+            "convert bias -out=../process",
+            "cd ../process",
+            "load bias_00001.fits",
+            "save bias_stacked",
+        ]
+    return [
+        "convert bias -out=../process -fitseq",
+        "cd ../process",
+        "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    ]
+
+
+def build_dark_master_commands(num_darks: int) -> list[str]:
+    """Write the Siril commands that build the master dark.
+
+    One dark frame is used as it is, with no rejection, because Siril's
+    ``convert`` writes no sequence for a single frame and there is nothing to
+    compare it with. Several are stacked with sigma rejection (``rej 3 3``),
+    without normalisation, since dark current is an absolute signal. A master
+    from fewer frames than the configured minimum is reported by
+    `calibration_count_flags`, not changed here.
+
+    Parameters
+    ----------
+    num_darks : `int`
+        How many dark frames are staged. Must be at least 1.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the darks
+        folder and ending with the master saved as ``dark_stacked``.
+    """
+    if num_darks == 1:
+        return [
+            "convert dark -out=../process",
+            "cd ../process",
+            "load dark_00001.fits",
+            "save dark_stacked",
+        ]
+    return [
+        "convert dark -out=../process -fitseq",
+        "cd ../process",
+        "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    ]
+
+
 def build_flat_master_commands(
     num_flats: int, has_bias: bool, color_filter_array_flags: str, smoothing_sigma: float | None
 ) -> list[str]:
     """Write the Siril commands that build the master flat.
 
-    One flat is used as it is. Several are calibrated with the bias master,
-    when there is one, and stacked with rejection. A flat set too noisy to use
-    as it is gets a Gaussian blur (see `assess_staged_flats`). Siril's
-    ``gauss`` mirrors the image at its border. The master flat's own noise is
-    white, so the blur removes it and keeps the vignette and dust shadows.
+    The bias master is subtracted from the flats whenever there is one, for a
+    single flat as well as for several. A flat frame holds the bias level (the
+    constant offset the camera adds to every pixel) on top of the light that
+    reached the sensor. Dividing a light frame by a flat that still holds a
+    bias pedestal divides by a number that is too large and too flat. The
+    vignette (the dimming toward the corners) then looks shallower than it
+    is, and the lights are under-corrected. A lone flat needs this as much as
+    a set of flats does.
+
+    Several flats are converted to one sequence, calibrated with the bias and
+    stacked with rejection. Siril's ``convert`` writes no sequence for a
+    single frame, so a lone flat is calibrated with ``calibrate_single``,
+    which works on one file and writes it with the prefix ``pp_``. Without a
+    bias master, a lone flat is used as it is. A flat set too noisy to use as
+    it is gets a Gaussian blur (see `assess_staged_flats`). Siril's ``gauss``
+    mirrors the image at its border. The master flat's own noise is white, so
+    the blur removes it and keeps the vignette and dust shadows.
 
     Parameters
     ----------
     num_flats : `int`
         How many flat frames are staged.
     has_bias : `bool`
-        Whether a master bias is available to subtract from several flats.
+        Whether a master bias is available to subtract from the flats.
     color_filter_array_flags : `str`
         The colour-sensor flags for ``calibrate``, or an empty string.
     smoothing_sigma : `float` or `None`
@@ -226,13 +368,15 @@ def build_flat_master_commands(
     """
     smoothing = [f"gauss {smoothing_sigma:.4f}"] if smoothing_sigma else []
     if num_flats == 1:
-        return [
-            "convert flat -out=../process",
-            "cd ../process",
-            "load flat_00001.fits",
-            *smoothing,
-            "save flat_stacked",
-        ]
+        commands = ["convert flat -out=../process", "cd ../process"]
+        if has_bias:
+            commands += [
+                f"calibrate_single flat_00001.fits -bias=bias_stacked{color_filter_array_flags}",
+                "load pp_flat_00001.fits",
+            ]
+        else:
+            commands.append("load flat_00001.fits")
+        return [*commands, *smoothing, "save flat_stacked"]
     commands = [
         "convert flat -out=../process -fitseq",
         "cd ../process",
@@ -242,6 +386,48 @@ def build_flat_master_commands(
     if smoothing:
         commands += ["load flat_stacked", *smoothing, "save flat_stacked"]
     return commands
+
+
+def build_single_light_commands(
+    dark_flag: str, flat_flag: str, bias_flag: str, color_filter_array_flags: str, debayer_flag: str
+) -> list[str]:
+    """Write the Siril commands for a stack of exactly one light frame.
+
+    A single light has nothing to register or reject against, but it still
+    needs the same calibration as every other light: the dark removes the
+    sensor's thermal signal and bias, and the flat removes vignetting and
+    dust shadows. Siril's ``convert`` writes no sequence for one frame, so the
+    sequence command ``calibrate`` cannot be used. ``calibrate_single`` takes
+    the same options for one file and writes it with the prefix ``pp_``. When
+    no calibration master exists, there is nothing to apply and the frame is
+    saved as it is.
+
+    Parameters
+    ----------
+    dark_flag, flat_flag, bias_flag : `str`
+        The ``calibrate`` options for each master, or an empty string when it
+        is not applied (see `light_calibration_flags`).
+    color_filter_array_flags : `str`
+        The colour-sensor flags for ``calibrate``, or an empty string.
+    debayer_flag : `str`
+        ``" -debayer"`` for a colour sensor, otherwise an empty string.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the lights
+        folder and ending with the frame saved as ``result_stacked``.
+    """
+    commands = ["convert light_source -out=../process", "cd ../process"]
+    if dark_flag or flat_flag or bias_flag:
+        options = " ".join(flag for flag in (dark_flag, flat_flag, bias_flag) if flag)
+        commands += [
+            f"calibrate_single light_source_00001.fits {options}{color_filter_array_flags}{debayer_flag}",
+            "load pp_light_source_00001.fits",
+        ]
+    else:
+        commands.append("load light_source_00001.fits")
+    return [*commands, "save result_stacked"]
 
 
 def _master_recipe(kind: str) -> str:
@@ -730,6 +916,7 @@ class ImageProcessing:
         self.last_run_diagnostics: dict[str, Any] = {
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
+            CALIBRATION_BLOCKING_FLAGS_KEY: [],
         }
         _active_image_processing_instances.add(self)
 
@@ -1708,6 +1895,7 @@ class ImageProcessing:
         self.last_run_diagnostics: dict[str, Any] = {
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
+            CALIBRATION_BLOCKING_FLAGS_KEY: [],
         }
         if filter_wfwhm is None:
             filter_wfwhm = self.config.get_stack_filter_wfwhm_percentile()
@@ -1937,40 +2125,27 @@ class ImageProcessing:
                 if "flat" not in restored_master_kinds:
                     flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
 
+            # A master built from fewer frames than the minimum is still
+            # built (the library can legitimately hold one flat), but the run
+            # records a blocking flag that the stack quality summary reports.
+            # Masters restored from the cache count too: the flag describes
+            # the frames behind the master, not whether it was rebuilt now.
+            minimum_calibration_frames = self.config.get_minimum_calibration_frames()
+            count_flags = calibration_count_flags(
+                num_biases, num_darks, num_flats, minimum_calibration_frames
+            )
+            self.last_run_diagnostics[CALIBRATION_BLOCKING_FLAGS_KEY] = count_flags
+            for count_flag in count_flags:
+                job_logger.warning("Calibration frame count too low (blocking flag): %s", count_flag)
+
             # Automated Master Calibration Generation
             if num_biases > 0 and "bias" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'biases')}"]
-                if num_biases == 1:
-                    # Single bias: convert and use directly as master
-                    script += [
-                        "convert bias -out=../process",
-                        "cd ../process",
-                        "load bias_00001.fits",
-                        "save bias_stacked",
-                    ]
-                else:
-                    script += [
-                        "convert bias -out=../process -fitseq",
-                        "cd ../process",
-                        "stack bias rej 3 3 -nonorm -out=bias_stacked",
-                    ]
+                script += build_bias_master_commands(num_biases)
 
             if num_darks > 0 and "dark" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'darks')}"]
-                if num_darks == 1:
-                    # Single dark: convert and use directly as master
-                    script += [
-                        "convert dark -out=../process",
-                        "cd ../process",
-                        "load dark_00001.fits",
-                        "save dark_stacked",
-                    ]
-                else:
-                    script += [
-                        "convert dark -out=../process -fitseq",
-                        "cd ../process",
-                        "stack dark rej 3 3 -nonorm -out=dark_stacked",
-                    ]
+                script += build_dark_master_commands(num_darks)
 
             if num_flats > 0 and "flat" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'flats')}"]
@@ -1993,14 +2168,22 @@ class ImageProcessing:
                 # Siril's 'convert' does not create a .seq file for
                 # a single input frame, so sequence-based
                 # calibrate/register/stack commands can't be used
-                # here. Load and save the single converted frame
-                # directly; calibration is skipped in this case.
-                script += [
-                    "convert light_source -out=../process",
-                    "cd ../process",
-                    "load light_source_00001.fits",
-                    "save result_stacked",
-                ]
+                # here. The frame is calibrated as a single file and
+                # saved as the result: skipping the dark and flat would
+                # record an uncalibrated frame as the target's stack.
+                dark_flag, flat_flag, bias_flag = light_calibration_flags(num_darks, num_flats, num_biases)
+                self.last_run_diagnostics["calibration_applied"] = {
+                    "dark": bool(dark_flag),
+                    "flat": bool(flat_flag),
+                    "bias": bool(bias_flag),
+                }
+                script += build_single_light_commands(
+                    dark_flag,
+                    flat_flag,
+                    bias_flag,
+                    color_filter_array_flags,
+                    " -debayer" if uses_color_filter_array else "",
+                )
             else:
                 # -fitseq stores the whole sequence as one file, which is
                 # fine when Siril also does the registration -- but the

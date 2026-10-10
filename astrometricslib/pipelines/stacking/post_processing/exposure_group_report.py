@@ -21,6 +21,7 @@ import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import read_data
+from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,
@@ -28,13 +29,20 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     measure_frame_saturation,
     recommend_stack_exposure_seconds,
 )
-from astrometricslib.pipelines.stacking.processing.exposure_groups import FRAMES_SAMPLED_PER_GROUP
+from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+    FRAMES_SAMPLED_PER_GROUP,
+    GroupGainMeasurement,
+)
 
 logger = logging.getLogger(__name__)
 
 # The folder, next to a combined stack, that keeps each exposure group's own
 # stack and the manifest describing them.
 GROUPS_FOLDER_NAME = "groups"
+
+# The name of the gate that checks that each group's brightness is one scale
+# factor of the reference group's (see `exposure_group_linearity_gate`).
+EXPOSURE_GROUP_LINEARITY_GATE_NAME = "exposure_group_linearity"
 
 
 def _attribute(frame: Any, name: str) -> Any:
@@ -97,6 +105,7 @@ def build_group_summary(
     clipped_at_zero: bool = False,
     alignment_shift_pixels: list[float] | None = None,
     left_out_reason: str | None = None,
+    gain_measurement: GroupGainMeasurement | None = None,
 ) -> dict[str, Any]:
     """Build the entry describing one exposure group.
 
@@ -118,6 +127,10 @@ def build_group_summary(
         The (rows, columns) shift that lined the group up with the reference.
     left_out_reason : `str`, optional
         Why the group is not in the combined image.
+    gain_measurement : `GroupGainMeasurement`, optional
+        The brightness scale measured for the group (mid-range gain and
+        bright-end ratio). Leave it out for a group that was never compared
+        with the reference.
 
     Returns
     -------
@@ -125,6 +138,23 @@ def build_group_summary(
         The fields of `ExposureGroupSummary`.
     """
     calibration = diagnostics.get("calibration_applied") or {}
+    gain_fields: dict[str, Any] = {
+        "gain_mid_range": None,
+        "gain_bright_end_ratio": None,
+        "gain_disagreement": None,
+        "gain_nonlinear": False,
+    }
+    if gain_measurement is not None:
+        gain_fields = {
+            "gain_mid_range": float(gain_measurement.gain),
+            "gain_bright_end_ratio": None
+            if gain_measurement.bright_end_ratio is None
+            else float(gain_measurement.bright_end_ratio),
+            "gain_disagreement": None
+            if gain_measurement.disagreement is None
+            else float(gain_measurement.disagreement),
+            "gain_nonlinear": bool(gain_measurement.nonlinear),
+        }
     return {
         "exposure_seconds": float(exposure_seconds),
         "frames_submitted": len(frames),
@@ -134,8 +164,68 @@ def build_group_summary(
         "clipped_at_zero": bool(clipped_at_zero),
         "stack_path": stack_path,
         "alignment_shift_pixels": alignment_shift_pixels,
+        **gain_fields,
         "left_out_reason": left_out_reason,
     }
+
+
+def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float) -> GateResult:
+    """Judge whether each exposure group is one scale factor of the reference.
+
+    Each group is put on the reference group's brightness scale using the
+    median ratio over mid-range pixels. The same ratio over the brightest
+    pixels is a check: if the camera is linear the two agree, and if the bright
+    end of a group is compressed near full well or clipped they do not. A
+    group whose two ratios differ by more than `tolerance` is left out of the
+    combined image (see `_stack_exposure_groups`), and this gate fails with a
+    sentence that names both ratios. The sentence is the same text the stage
+    lists as the group's flag reason, so the two never disagree.
+
+    Parameters
+    ----------
+    groups : `list` [`dict`]
+        The entries from `build_group_summary`, one per exposure group.
+    tolerance : `float`
+        The allowed difference between the two ratios, as a fraction of the
+        mid-range ratio (0.05 is 5%).
+
+    Returns
+    -------
+    result : `GateResult`
+        Failed when any group is nonlinear, with the largest difference as the
+        measured value. Passed when at least one group was compared with the
+        reference and all agree. Not checked when no group was compared, for
+        example when the stack has one exposure length.
+    """
+    limit_source = "configured exposure_group_gain_tolerance (design choice, not validated)"
+    compared = [group for group in groups if group.get("gain_disagreement") is not None]
+    nonlinear = [group for group in groups if group.get("gain_nonlinear")]
+    if nonlinear:
+        worst = max(float(group["gain_disagreement"]) for group in nonlinear)
+        sentences = [
+            f"the {group['exposure_seconds']:g} s exposure group {group['left_out_reason']}"
+            for group in nonlinear
+            if group.get("left_out_reason")
+        ]
+        return failed_gate(
+            EXPOSURE_GROUP_LINEARITY_GATE_NAME,
+            "; ".join(sentences),
+            measured_value=worst,
+            limit=tolerance,
+            limit_source=limit_source,
+        )
+    if not compared:
+        return unchecked_gate(
+            EXPOSURE_GROUP_LINEARITY_GATE_NAME,
+            "no exposure group was compared with a reference group",
+            limit_source,
+        )
+    return passed_gate(
+        EXPOSURE_GROUP_LINEARITY_GATE_NAME,
+        measured_value=max(float(group["gain_disagreement"]) for group in compared),
+        limit=tolerance,
+        limit_source=limit_source,
+    )
 
 
 def recommended_exposure_for_groups(

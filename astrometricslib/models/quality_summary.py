@@ -54,6 +54,23 @@ class ExposureGroupSummary(BaseModel):
     # How far this group's stack was moved to line up with the reference
     # group, as [rows, columns] in pixels; `None` for the reference group.
     alignment_shift_pixels: list[float] | None = Field(default=None, alias="alignmentShiftPixels")
+    # How many times brighter (per second) this group reads than the reference
+    # group, measured on the reference's mid-range pixels (20th to 80th
+    # percentile of brightness). This is the scale applied to the group. It is
+    # a ratio of two counts-per-second values, so it has no unit. `None` for
+    # the reference group's own entry and when the ratio could not be measured.
+    gain_mid_range: float | None = Field(default=None, alias="gainMidRange")
+    # The same ratio measured on the brightest 1% of the shared pixels. It is
+    # never applied. It differs from `gain_mid_range` when the bright end of
+    # the group is compressed (near full well) or clipped. No unit.
+    gain_bright_end_ratio: float | None = Field(default=None, alias="gainBrightEndRatio")
+    # abs(bright end ratio - mid-range gain) / mid-range gain, as a fraction
+    # (0.05 is 5%). `None` when either ratio could not be measured.
+    gain_disagreement: float | None = Field(default=None, alias="gainDisagreement")
+    # True when `gain_disagreement` is above the configured tolerance
+    # (`exposure_group_gain_tolerance`). The group is then left out of the
+    # combined image and `left_out_reason` names both ratios.
+    gain_nonlinear: bool = Field(default=False, alias="gainNonlinear")
     # Why the group is not in the combined image, or `None` if it is.
     left_out_reason: str | None = Field(default=None, alias="leftOutReason")
 

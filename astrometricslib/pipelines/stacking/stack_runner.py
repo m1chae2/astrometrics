@@ -442,7 +442,11 @@ def _stack_exposure_groups(
     group stacks are kept in the ``groups`` folder next to the combined stack,
     lined up with the group that carries the most weight, and combined (see
     `combine_exposure_group_images`). A group that cannot be stacked or lined
-    up is left out and named in the diagnostics.
+    up is left out and named in the diagnostics. So is a group whose
+    brightness is not one scale factor of the reference group's: its
+    mid-range and bright-end brightness ratios differ by more than
+    `AppConfiguration.get_exposure_group_gain_tolerance`. Its entry in
+    ``"exposure_group_summaries"`` records both ratios and the reason.
 
     Returns
     -------
@@ -459,6 +463,7 @@ def _stack_exposure_groups(
     import numpy as np
 
     from astrometricslib.drivers.fits_access import read_data, read_header, write_image
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         build_group_summary,
         groups_directory,
@@ -470,6 +475,7 @@ def _stack_exposure_groups(
         CLIPPED_FRAME_ZERO_FRACTION,
         CLIPPING_FLOOR_SIGMAS,
         combine_exposure_group_images,
+        measure_exposure_group_gains,
         measure_group_frames,
         merge_registration_sequences,
         merge_rejection_maps,
@@ -629,6 +635,38 @@ def _stack_exposure_groups(
                 "The %g s exposure group of '%s' %s; leaving it out.", exposures[index], target_id, reason
             )
     used = [index for index in range(len(results)) if index not in left_out_reasons]
+    gain_measurements: dict[int, Any] = {}
+    if len(used) > 1:
+        # A group whose brightness is not one scale factor of the reference
+        # (its bright-end ratio disagrees with its mid-range ratio) is
+        # nonlinear or clipped at the bright end. Rescaling it would change
+        # its faint stars by the wrong amount, so it is left out and the
+        # others are combined, the same fallback as for a group that cannot
+        # be lined up.
+        reference_in_used, measurements = measure_exposure_group_gains(
+            [aligned_images[index] for index in used],
+            [exposures[index] for index in used],
+            [counts[index] for index in used],
+            frame_noises=[frame_noises[index] for index in used],
+            frame_zero_fractions=[frame_zero_fractions[index] for index in used],
+            covered_masks=[covered_masks[index] for index in used],
+            tolerance=get_configuration().get_exposure_group_gain_tolerance(),
+        )
+        for position, measurement in zip(used, measurements, strict=True):
+            gain_measurements[position] = measurement
+        for position, measurement in zip(used, measurements, strict=True):
+            if not measurement.nonlinear:
+                continue
+            reference_exposure = exposures[used[reference_in_used]]
+            reason = (
+                f"was left out: its brightness ratio to the {reference_exposure:g} s group is "
+                f"{measurement.gain:.3f} on mid-range pixels but {measurement.bright_end_ratio:.3f} on "
+                f"the brightest pixels ({measurement.disagreement:.1%} apart), so its bright end is "
+                "nonlinear or clipped and one scale factor does not describe it"
+            )
+            left_out_reasons[position] = reason
+            logger.warning("The %g s exposure group of '%s' %s.", exposures[position], target_id, reason)
+        used = [index for index in used if index not in left_out_reasons]
     combined = combine_exposure_group_images(
         [aligned_images[index] for index in used],
         [exposures[index] for index in used],
@@ -706,6 +744,7 @@ def _stack_exposure_groups(
                 if alignment is None
                 else [round(alignment.shift_rows_pixels, 3), round(alignment.shift_columns_pixels, 3)],
                 left_out_reason=left_out_reasons.get(index),
+                gain_measurement=gain_measurements.get(index),
             )
         )
         details.append({
@@ -796,6 +835,7 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
     for key in (
         "corrupt_frames_skipped",
         "calibration_mismatch_flags",
+        "calibration_blocking_flags",
         "symlinked_light_paths",
         "zero_order_stars",
     ):

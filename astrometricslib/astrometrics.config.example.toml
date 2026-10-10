@@ -271,6 +271,22 @@ siril_executable = "siril-cli"
 # --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
 # this to wfwhm to weight each frame by its measured star sharpness.
 stack_weight = ""
+# The fewest frames a master bias, master dark or master flat should be built
+# from. The stacker averages the frames and throws out odd pixel values (cosmic
+# ray hits). One frame keeps its own noise and its cosmic ray hits, and two
+# frames cannot tell a good value from a bad one; three can. A master built
+# from fewer frames is still built, but the stack is flagged with the
+# "calibration_frame_count" gate and says which master was short. The default
+# is 3.
+minimum_calibration_frames = "3"
+# Several exposure lengths in one stack are stacked one length at a time, then
+# put on one brightness scale and combined. The scale is measured on mid-range
+# pixels and checked on the brightest pixels. A camera that is linear gives the
+# same ratio both ways. This is how far the two may differ, as a fraction of
+# the mid-range ratio, before that exposure group is left out of the combined
+# image and the stack is flagged (a bright end that is compressed near full
+# well, or clipped, makes them differ). The default is 0.05, which is 5%.
+exposure_group_gain_tolerance = "0.05"
 # "true" (the default): before each stack of light frames, measure the frames
 # and move the ones with clouds or trailed stars into a folder named
 # "_excluded" beside them. Frames are moved, never deleted; the folder holds

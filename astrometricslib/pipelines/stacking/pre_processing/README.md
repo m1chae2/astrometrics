@@ -9,7 +9,8 @@ This step checks the frames and calibration data before any pixels are combined.
 3. **Background check** (`background_homogeneity.py`). Each frame's sky background is compared with the others of the same exposure length. A frame taken through cloud or twilight is set aside. The sky is measured by `shared/quality/background_measurement.py`.
 4. **Flat check** (`flat_calibration.py`). Measures how many flats there are, how bright, and how noisy the master flat would be. A noisy master gets a blur width, which Siril applies. A colour sensor's flat is measured but not blurred.
 5. **Unchanged-stack check** (`stack_inputs.py`). Builds a record of the frames, the calibration frames the library picks for them, the settings that change a stack's pixels and the stacking-code version, and compares its hash with the one saved next to the stack on disk. When they match, the stack is not rebuilt. See the stacking README for the rules and for how to force a rebuild. A test scans the stacking code for every configuration setting it reads, so a new setting has to be classified in `stack_inputs.py` (changes the stack, or does not) before the tests pass.
-6. **Input judgement** (`assess_input_quality.py`). Collects the results into a `StackingInputQuality` (`models/stacking_quality.py`).
+6. **Frame-count check** (`assess_input_quality.py`, `calibration_gates`). Reads the `calibration_blocking_flags` that the Siril driver recorded for each master bias, dark or flat built from fewer frames than `minimum_calibration_frames` (default 3). Each one becomes a flag reason, and the `calibration_frame_count` gate fails. The stack is still built.
+7. **Input judgement** (`assess_input_quality.py`). Collects the results into a `StackingInputQuality` (`models/stacking_quality.py`).
 
 ## The frame-quality check
 
@@ -32,6 +33,7 @@ The limits are in `frame_quarantine.py`, each with the measurements it was check
 - **Background split detected and detail.** Set when the frames fell into two sky-brightness groups. The detail gives each group's size and level.
 - **Flat frame count, noise fraction and smoothing width.** The flat set's size, the master flat's relative noise (0.005 is 0.5%), and the Gaussian width in pixels used to blur it, empty when none was applied.
 - **Flat calibration issues and calibration mismatch flags.** One sentence per problem.
+- **Calibration frame-count flags.** One sentence per master bias, dark or flat built from fewer frames than the minimum. They appear in the flag reasons and in the `calibration_frame_count` gate, and nothing else reads them.
 - **Flag reasons.** One sentence per problem found in any check above. They feed the summary's flag reasons.
 
 For exact behavior and thresholds, read the code.

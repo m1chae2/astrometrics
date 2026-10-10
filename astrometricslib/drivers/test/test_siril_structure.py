@@ -42,6 +42,7 @@ def test_process_target_closes_logger_handler_on_completion(
     mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
     mock_config.get_stack_filter_wfwhm_percentile.return_value = None
     mock_config.get_stack_filter_round_percentile.return_value = None
+    mock_config.get_minimum_calibration_frames.return_value = 3
     mock_config.get_stack_weight.return_value = "wfwhm"
     mock_config.get_stack_generate_rejmap.return_value = True
     mock_library = MagicMock()

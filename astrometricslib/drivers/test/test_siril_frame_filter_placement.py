@@ -112,6 +112,7 @@ def captured_siril_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Ca
         # None, so they must answer None too rather than a MagicMock.
         mock_config.get_stack_filter_wfwhm_percentile.return_value = None
         mock_config.get_stack_filter_round_percentile.return_value = None
+        mock_config.get_minimum_calibration_frames.return_value = 3
 
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")

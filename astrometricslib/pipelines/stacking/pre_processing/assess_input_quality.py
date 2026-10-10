@@ -33,10 +33,11 @@ QUARANTINE_EXCLUSION_REASON_PREFIX = "moved to _excluded"
 FLAT_LEVEL_GATE_NAME = "flat_level"
 FLAT_NOISE_GATE_NAME = "flat_noise"
 CALIBRATION_METADATA_GATE_NAME = "calibration_metadata"
+CALIBRATION_FRAME_COUNT_GATE_NAME = "calibration_frame_count"
 
 
 def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
-    """Build the gates for the flat frames and the calibration metadata.
+    """Build the gates for the flats, calibration metadata and frame counts.
 
     A stack that used no flats cannot fail the flat checks, and that is not
     the same as passing them, so those gates are ``not_checked`` with the
@@ -44,16 +45,24 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     was applied. A failed gate's sentence is the same text the input quality
     lists as a flag reason, so the two never disagree.
 
+    The ``calibration_frame_count`` gate fails when a master bias, dark or flat
+    was built from fewer frames than the configured minimum (see
+    `AppConfiguration.get_minimum_calibration_frames`). It is a blocking
+    flag: the stack is still produced, but it is flagged and its reason names
+    each short master, so nobody reads it as a fully calibrated stack.
+
     Parameters
     ----------
     diagnostics : `dict`
         What the stacking run reported. Read: ``flat_calibration``,
-        ``calibration_applied`` and ``calibration_mismatch_flags``.
+        ``calibration_applied``, ``calibration_mismatch_flags`` and
+        ``calibration_blocking_flags``.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        The ``flat_level``, ``flat_noise`` and ``calibration_metadata`` gates.
+        The ``flat_level``, ``flat_noise``, ``calibration_metadata`` and
+        ``calibration_frame_count`` gates.
     """
     gates: list[GateResult] = []
     flat = diagnostics.get("flat_calibration") or {}
@@ -139,6 +148,27 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
         )
     else:
         gates.append(passed_gate(CALIBRATION_METADATA_GATE_NAME, 0.0, 0.0))
+
+    short_masters = list(diagnostics.get("calibration_blocking_flags", []))
+    if short_masters:
+        gates.append(
+            failed_gate(
+                CALIBRATION_FRAME_COUNT_GATE_NAME,
+                "calibration frame count too low: " + "; ".join(short_masters),
+                measured_value=float(len(short_masters)),
+                limit=0.0,
+                limit_source="minimum_calibration_frames setting (default 3)",
+            )
+        )
+    elif not any(applied.values()):
+        gates.append(
+            unchecked_gate(
+                CALIBRATION_FRAME_COUNT_GATE_NAME,
+                "no calibration frame was applied, so there was no master to count",
+            )
+        )
+    else:
+        gates.append(passed_gate(CALIBRATION_FRAME_COUNT_GATE_NAME, 0.0, 0.0))
     return gates
 
 
@@ -202,6 +232,7 @@ def assess_input_quality(
     """
     flat = diagnostics.get("flat_calibration") or {}
     mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
+    short_masters = list(diagnostics.get("calibration_blocking_flags", []))
     flat_issues = list(flat.get("issues", []))
     detail = describe_background_splits(background_split)
 
@@ -218,6 +249,8 @@ def assess_input_quality(
         reasons.append(f"background split: {detail}")
     if mismatches:
         reasons.append(f"{len(mismatches)} calibration metadata mismatch(es)")
+    if short_masters:
+        reasons.append("calibration frame count too low: " + "; ".join(short_masters))
     reasons.extend(f"flat calibration: {issue}" for issue in flat_issues)
 
     return StackingInputQuality(

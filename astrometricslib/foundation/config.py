@@ -2,6 +2,7 @@
 
 import configparser
 import logging
+import math
 import os
 import threading
 import time
@@ -384,6 +385,8 @@ class AppConfiguration:
                 # default that breaks the default install is not a default.
                 "stack_weight": "",
                 "generate_rejmap": "true",
+                "exposure_group_gain_tolerance": "0.05",
+                "minimum_calibration_frames": "3",
                 "background_homogeneity_check_enabled": "true",
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
@@ -601,6 +604,61 @@ class AppConfiguration:
             The configured weight mode, or `None` if disabled.
         """
         return self.get_value("Processing.Siril", "stack_weight", fallback="") or None
+
+    def get_minimum_calibration_frames(self) -> int:
+        """Return the fewest frames a master calibration frame needs.
+
+        A master bias, dark or flat is the combination of several frames. The
+        combination averages out each frame's random noise, and the stacker
+        throws out pixel values that sit far from the rest (outliers, such as
+        cosmic ray hits). Both need several frames. With one frame, the master
+        keeps that frame's noise and its cosmic ray hits. With two, an outlier
+        cannot be told from a good value. Three is the smallest count where
+        the middle value can outvote one bad frame.
+
+        A master built from fewer frames is still built, and the stack is
+        flagged (see `calibration_count_flags` in `siril_interface.py`).
+
+        Returns
+        -------
+        minimum : `int`
+            The configured count, at least 1. An entry that is not a whole
+            number gives the default, 3.
+        """
+        raw = self.get_value("Processing.Siril", "minimum_calibration_frames", fallback="3")
+        try:
+            return max(1, int(str(raw).strip()))
+        except TypeError, ValueError:
+            return 3
+
+    def get_exposure_group_gain_tolerance(self) -> float:
+        """Return how far two brightness ratios may differ.
+
+        A group is dropped from the combined image when they differ by more
+        than this.
+
+        When a stack is made from several exposure lengths, each group is put
+        on the brightness scale of a reference group. The scale is measured
+        twice: on mid-range pixels (the value used) and on the brightest
+        pixels (a check). The two agree when the camera is linear. When the
+        bright end of a group is compressed (near full well) or clipped, they
+        differ. If the difference, as a fraction of the mid-range value, is
+        larger than this setting, the group is left out of the combined image
+        and the stack is flagged with the "exposure_group_linearity" gate.
+
+        Returns
+        -------
+        tolerance : `float`
+            The allowed fractional difference, for example 0.05 for 5%. An
+            entry that is not a number, or is not above zero, gives the
+            default, 0.05.
+        """
+        raw = self.get_value("Processing.Siril", "exposure_group_gain_tolerance", fallback="0.05")
+        try:
+            tolerance = float(raw)
+        except TypeError, ValueError:
+            return 0.05
+        return tolerance if math.isfinite(tolerance) and tolerance > 0 else 0.05
 
     def get_stack_generate_rejmap(self) -> bool:
         """Return whether Siril should generate a rejection map (-rejmap).

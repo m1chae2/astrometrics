@@ -79,8 +79,9 @@ MAXIMUM_FRAMES_AVERAGED = 32
 
 # Written into the key of the stored master flats, so that a change to how
 # the master flat is built or blurred does not reuse one built the old way.
-# Increase it whenever that changes what the master flat contains.
-FLAT_MASTER_RECIPE = "flat-recipe-3"
+# Increase it whenever that changes what the master flat contains. Version 4
+# subtracts the bias from a lone flat too.
+FLAT_MASTER_RECIPE = "flat-recipe-4"
 
 # A flat pixel at or above this fraction of full scale counts as saturated.
 _SATURATED_FRACTION_OF_FULL_SCALE = 0.98

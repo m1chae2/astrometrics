@@ -24,7 +24,9 @@ The fix here has three parts:
    exposure length can be compared, and put the groups on one brightness
    scale (Siril leaves each stack with its own) after leaving out each
    group's saturated pixels (`estimate_saturation_mask_level`,
-   `estimate_group_gains`).
+   `estimate_group_gains`). The scale is measured on mid-range pixels, and
+   a group whose bright-end ratio disagrees with it is left out (see
+   `measure_group_gains`).
 3. Combine the groups with inverse-variance weights, measured from each
    stack's own background noise (`combine_exposure_group_images`). A group
    that is quieter per second counts for more, so long exposures and
@@ -143,13 +145,38 @@ SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 # their face value puts a step in the spectrum wherever the light source
 # switches from one group to another. The gain of each group is therefore
 # measured against the group with the highest weight, as the median ratio of
-# their per-second brightness over the brightest pixels that neither group
-# saturates (the top GAIN_BRIGHTEST_FRACTION of them: high signal, so noise
-# barely biases the ratio). Fewer than GAIN_MINIMUM_PIXELS such pixels leaves
-# the gain at 1. The fraction and the pixel count are unvalidated choices:
-# 1% of a 3008 x 3008 image is about 90,000 pixels.
-GAIN_BRIGHTEST_FRACTION = 0.01
+# their per-second brightness over the pixels in the middle of the
+# reference's brightness range: the 20th to the 80th percentile of the pixels
+# that neither group saturates or masks (GAIN_MID_RANGE_PERCENTILES). Those
+# pixels sit above the sky floor and below the bright end, where a sensor
+# leaves its linear range (near full well) or a clipped group reads zero. In
+# the linear range the ratio of two exposures is the ratio of their light per
+# second, which is the gain. Fewer than GAIN_MINIMUM_PIXELS such pixels leaves
+# the gain at 1. The percentiles and the pixel count are unvalidated choices:
+# 60% of a 3008 x 3008 image is about 5 million pixels.
+GAIN_MID_RANGE_PERCENTILES = (20.0, 80.0)
 GAIN_MINIMUM_PIXELS = 200
+
+# The brightest pixels give a second, diagnostic ratio: the median ratio over
+# the top GAIN_BRIGHTEST_FRACTION of the shared pixels (1% of a 3008 x 3008
+# image is about 90,000 pixels). This was the only estimator once. The
+# brightest pixels are where nonlinearity shows first, so on a camera that is
+# not linear there this ratio drifts away from the mid-range one. On the Vega
+# session it read 0.65-0.88 between groups of one camera, which is what a
+# compressed bright end looks like and not what a gain looks like. The
+# pipeline records both ratios and compares them (see
+# DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).
+GAIN_BRIGHTEST_FRACTION = 0.01
+
+# How far the bright-end ratio may differ from the mid-range gain, as a
+# fraction of the gain, before the group is treated as nonlinear and left out
+# of the combined image. A truly linear pair of groups agrees to well under
+# 1% when the photon noise is small (the unit tests reach 0.5%). 5% allows for
+# noise in the 90,000 bright pixels and for small flat-field residuals, and is
+# far below the 35% disagreement seen in the field. It is a design choice, not
+# a validated limit; `AppConfiguration.get_exposure_group_gain_tolerance`
+# lets an observer change it.
+DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
 
 # A measured gain outside this range is not believed and the group keeps a
 # gain of 1. The gains measured on the Vega session were 0.65 to 1 (see
@@ -477,10 +504,138 @@ def saturated_pixel_mask(
     return mask
 
 
+@dataclass
+class GroupGainMeasurement:
+    """What was measured about one group's brightness scale.
+
+    Attributes
+    ----------
+    gain : `float`
+        The scale applied to the group: how many times brighter (per second)
+        it reads than the reference, measured on mid-range pixels. It is 1.0
+        for the reference group and when no believable value could be
+        measured.
+    bright_end_ratio : `float` or `None`
+        The same ratio measured on the reference's brightest pixels only. It
+        is a diagnostic and is never applied. `None` when too few bright
+        pixels are shared with the reference.
+    disagreement : `float` or `None`
+        The size of the difference between the two ratios as a fraction of
+        the gain, ``abs(bright_end_ratio - gain) / gain``. `None` when either
+        ratio could not be measured.
+    nonlinear : `bool`
+        `True` when `disagreement` is larger than the tolerance. The group's
+        brightness is then not one scale factor, and the group should not be
+        combined with the reference.
+    """
+
+    gain: float = 1.0
+    bright_end_ratio: float | None = None
+    disagreement: float | None = None
+    nonlinear: bool = False
+
+
+def _median_ratio(image: np.ndarray, reference: np.ndarray, selected: np.ndarray) -> float | None:
+    """Take the median of image / reference over the selected pixels.
+
+    Returns
+    -------
+    ratio : `float` or `None`
+        The median ratio, or `None` when fewer than `GAIN_MINIMUM_PIXELS`
+        pixels are selected or the median is not a finite number.
+    """
+    if int(np.count_nonzero(selected)) < GAIN_MINIMUM_PIXELS:
+        return None
+    ratio = float(np.median(image[selected] / reference[selected]))
+    return ratio if np.isfinite(ratio) else None
+
+
+def measure_group_gains(
+    per_second_images: list[np.ndarray],
+    usable_masks: list[np.ndarray],
+    reference_index: int,
+    tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
+) -> list[GroupGainMeasurement]:
+    """Measure each group's brightness scale and check that it is a scale.
+
+    The gain is the median of image / reference over the pixels whose
+    reference value lies between the 20th and 80th percentile
+    (`GAIN_MID_RANGE_PERCENTILES`) of the pixels that both images can be
+    trusted at. Why that range: a sensor is linear between the sky floor and
+    near full well, and in that range two exposures of one scene differ by a
+    single factor, the ratio of their light per second. That factor is the
+    true gain. Close to full well the sensor response flattens, and in a group
+    clipped at zero the faint end reads high, so at the extremes the ratio
+    measures the sensor's nonlinearity and not the gain. The brightest 1% of
+    pixels (`GAIN_BRIGHTEST_FRACTION`) lie in that nonlinear zone, so the
+    median ratio there is computed too, as a diagnostic, and never applied. A
+    group whose two ratios differ by more than `tolerance` (as a fraction of
+    the gain) is marked `nonlinear`: one scale factor does not describe it.
+
+    Parameters
+    ----------
+    per_second_images : `list` [`numpy.ndarray`]
+        Each group's image in counts per second.
+    usable_masks : `list` [`numpy.ndarray`]
+        For each group, `True` where its pixels can be trusted: not
+        saturated or masked and, for a group clipped at zero, above its
+        clipping floor.
+    reference_index : `int`
+        The group the others are compared with. Its gain is 1.
+    tolerance : `float`, optional
+        How far the bright-end ratio may differ from the gain, as a fraction
+        of the gain, before the group is marked `nonlinear`.
+
+    Returns
+    -------
+    measurements : `list` [`GroupGainMeasurement`]
+        One entry per group. A group with too few usable pixels in common
+        with the reference, or a gain outside `PLAUSIBLE_GAIN_RANGE`, keeps a
+        gain of 1 and is never marked `nonlinear`, because there is nothing
+        to compare.
+    """
+    reference = per_second_images[reference_index]
+    measurements = []
+    for index, image in enumerate(per_second_images):
+        if index == reference_index:
+            measurements.append(GroupGainMeasurement(gain=1.0, bright_end_ratio=1.0, disagreement=0.0))
+            continue
+        shared = usable_masks[index] & usable_masks[reference_index] & (reference > 0) & np.isfinite(image)
+        if int(np.count_nonzero(shared)) < GAIN_MINIMUM_PIXELS:
+            measurements.append(GroupGainMeasurement())
+            continue
+        low, high = np.percentile(reference[shared], GAIN_MID_RANGE_PERCENTILES)
+        gain = _median_ratio(image, reference, shared & (reference >= low) & (reference <= high))
+        cut = np.quantile(reference[shared], 1.0 - GAIN_BRIGHTEST_FRACTION)
+        bright_end_ratio = _median_ratio(image, reference, shared & (reference >= cut))
+        if gain is None or not PLAUSIBLE_GAIN_RANGE[0] <= gain <= PLAUSIBLE_GAIN_RANGE[1]:
+            logger.warning(
+                "Exposure group %d measured a brightness gain of %s, outside %s; using 1 instead.",
+                index,
+                "nothing" if gain is None else f"{gain:.3g}",
+                PLAUSIBLE_GAIN_RANGE,
+            )
+            measurements.append(GroupGainMeasurement(bright_end_ratio=bright_end_ratio))
+            continue
+        disagreement = None if bright_end_ratio is None else abs(bright_end_ratio - gain) / gain
+        measurements.append(
+            GroupGainMeasurement(
+                gain=gain,
+                bright_end_ratio=bright_end_ratio,
+                disagreement=disagreement,
+                nonlinear=disagreement is not None and disagreement > tolerance,
+            )
+        )
+    return measurements
+
+
 def estimate_group_gains(
     per_second_images: list[np.ndarray], usable_masks: list[np.ndarray], reference_index: int
 ) -> list[float]:
     """Measure each group's brightness scale against a reference group.
+
+    This is the gain half of `measure_group_gains`: the median ratio over the
+    mid-range pixels, with the bright-end diagnostic left out.
 
     Parameters
     ----------
@@ -497,99 +652,38 @@ def estimate_group_gains(
     gains : `list` [`float`]
         For each group, how many times brighter (per second) it reads than
         the reference. Dividing a group's image by its gain puts it on the
-        reference group's scale. A group with too few usable bright pixels
+        reference group's scale. A group with too few usable mid-range pixels
         in common with the reference keeps a gain of 1.
     """
-    reference = per_second_images[reference_index]
-    gains = []
-    for index, image in enumerate(per_second_images):
-        if index == reference_index:
-            gains.append(1.0)
-            continue
-        shared = usable_masks[index] & usable_masks[reference_index] & (reference > 0)
-        if int(np.count_nonzero(shared)) < GAIN_MINIMUM_PIXELS:
-            gains.append(1.0)
-            continue
-        cut = np.quantile(reference[shared], 1.0 - GAIN_BRIGHTEST_FRACTION)
-        bright = shared & (reference >= cut)
-        if int(np.count_nonzero(bright)) < GAIN_MINIMUM_PIXELS:
-            gains.append(1.0)
-            continue
-        gain = float(np.median(image[bright] / reference[bright]))
-        if not np.isfinite(gain) or not PLAUSIBLE_GAIN_RANGE[0] <= gain <= PLAUSIBLE_GAIN_RANGE[1]:
-            logger.warning(
-                "Exposure group %d measured a brightness gain of %.3g, outside %s; using 1 instead.",
-                index,
-                gain,
-                PLAUSIBLE_GAIN_RANGE,
-            )
-            gain = 1.0
-        gains.append(gain)
-    return gains
+    measurements = measure_group_gains(per_second_images, usable_masks, reference_index)
+    return [measurement.gain for measurement in measurements]
 
 
-def combine_exposure_group_images(
+def _prepare_group_inputs(
     images: list[np.ndarray],
     exposures_seconds: list[float],
-    frame_counts: list[int] | None = None,
-    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
-    frame_noises: list[float] | None = None,
-    frame_zero_fractions: list[float] | None = None,
-    covered_masks: list[np.ndarray] | None = None,
-) -> np.ndarray:
-    """Combine one stacked image per exposure group into a single image.
+    frame_counts: list[int] | None,
+    saturation_level: float,
+    frame_noises: list[float] | None,
+    frame_zero_fractions: list[float] | None,
+    covered_masks: list[np.ndarray] | None,
+) -> tuple[list[np.ndarray], list[float], list[np.ndarray], list[np.ndarray]]:
+    """Check the group inputs and work out what the combination needs.
 
-    Each image is first divided by its exposure length to give counts per
-    second. The images are then averaged with weights of one over the
-    square of each group's noise in counts per second. That noise is either
-    predicted from the raw frames (when `frame_noises` is given: a stack of
-    N frames of exposure t and frame noise s has a noise of s / (t sqrt(N))
-    per second, so its weight is N t^2 / s^2) or measured from the stack image
-    itself. Where a group's stack is saturated (above a ceiling measured from
-    that stack, see `estimate_saturation_mask_level`), that group is left out
-    at that pixel; if every group is saturated there, the shortest exposure is
-    used. A group whose raw frames are clipped at zero is likewise left out at
-    pixels too close to zero to be trusted (see `CLIPPING_FLOOR_SIGMAS`); if
-    that leaves no group at a pixel, the clipped group is used after all.
-    Before averaging, each group is put on the same brightness scale as
-    the group with the most weight (see `estimate_group_gains`), because
-    Siril leaves every group stack with its own overall scale.
-
-    The result is scaled back up by the average exposure length per frame,
-    so its brightness is comparable with a normal stack of the same frames.
-
-    Parameters
-    ----------
-    images : `list` [`numpy.ndarray`]
-        The stacked image of each group, all the same shape.
-    exposures_seconds : `list` [`float`]
-        The exposure length of each group, in seconds.
-    frame_counts : `list` [`int`], optional
-        How many frames each group holds, used to set the output brightness.
-        Defaults to equal counts.
-    saturation_level : `float`, optional
-        The pixel value at or above which a group counts as saturated when
-        its stack shows no measurable ceiling.
-    frame_noises : `list` [`float`], optional
-        The noise of one raw frame of each group, in counts. When given, the
-        weights come from these and `frame_counts` instead of from the stack
-        images.
-    frame_zero_fractions : `list` [`float`], optional
-        The fraction of pixels at zero in the raw frames of each group.
-        With `frame_noises`, a group above `CLIPPED_FRAME_ZERO_FRACTION` is
-        left out at pixels less than `CLIPPING_FLOOR_SIGMAS` frame noises
-        above zero, where clipping biases its average upward.
-    covered_masks : `list` [`numpy.ndarray`], optional
-        For each group, a 2-D mask of the pixels that hold real data. When the
-        group stacks have been moved to line up (see
-        `stacking/processing/group_alignment.py`), the border the move
-        filled with zeros is left out. A group is left out at pixels its
-        mask marks as empty.
+    Parameters are those of `combine_exposure_group_images`.
 
     Returns
     -------
-    combined : `numpy.ndarray`
-        The combined image, as `float32`.
+    per_second : `list` [`numpy.ndarray`]
+        Each group's image in counts per second.
+    weights : `list` [`float`]
+        Each group's inverse-variance weight.
+    usable_masks : `list` [`numpy.ndarray`]
+        `True` where a group is neither saturated nor outside its covered
+        area.
+    trusted_masks : `list` [`numpy.ndarray`]
+        `usable_masks` with a clipped-at-zero group's near-zero pixels also
+        removed.
 
     Raises
     ------
@@ -642,15 +736,163 @@ def combine_exposure_group_images(
             if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION:
                 floor = CLIPPING_FLOOR_SIGMAS * frame_noises[index] / FULL_SCALE_COUNTS
                 trusted_masks[index] = usable_masks[index] & (np.asarray(raw) >= floor)
+    return per_second, weights, usable_masks, trusted_masks
+
+
+def measure_exposure_group_gains(
+    images: list[np.ndarray],
+    exposures_seconds: list[float],
+    frame_counts: list[int] | None = None,
+    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    frame_noises: list[float] | None = None,
+    frame_zero_fractions: list[float] | None = None,
+    covered_masks: list[np.ndarray] | None = None,
+    tolerance: float = DEFAULT_GAIN_DISAGREEMENT_TOLERANCE,
+) -> tuple[int, list[GroupGainMeasurement]]:
+    """Measure the gain of every group exactly as the combination will.
+
+    This builds the same per-second images, weights and trusted-pixel masks
+    as `combine_exposure_group_images` and runs `measure_group_gains` on
+    them. A caller uses it before combining, to leave out the groups marked
+    `nonlinear`. Parameters are those of `combine_exposure_group_images`,
+    plus `tolerance`. Lists that do not line up, or an exposure or frame
+    noise that is not positive, raise `InvalidArgumentError`. A group whose
+    background noise cannot be measured raises `ProcessingError`.
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The stacked image of each group, all the same shape.
+    exposures_seconds : `list` [`float`]
+        The exposure length of each group, in seconds.
+    frame_counts : `list` [`int`], optional
+        How many frames each group holds.
+    saturation_level : `float`, optional
+        The pixel value at or above which a group counts as saturated when
+        its stack shows no measurable ceiling.
+    frame_noises : `list` [`float`], optional
+        The noise of one raw frame of each group, in counts.
+    frame_zero_fractions : `list` [`float`], optional
+        The fraction of pixels at zero in the raw frames of each group.
+    covered_masks : `list` [`numpy.ndarray`], optional
+        For each group, a 2-D mask of the pixels that hold real data.
+    tolerance : `float`, optional
+        How far the bright-end ratio may differ from the gain, as a fraction
+        of the gain, before the group is marked `nonlinear`.
+
+    Returns
+    -------
+    reference_index : `int`
+        The group the others were compared with (the one with the most
+        weight).
+    measurements : `list` [`GroupGainMeasurement`]
+        One entry per group.
+
+    """
+    per_second, weights, _, trusted_masks = _prepare_group_inputs(
+        images,
+        exposures_seconds,
+        frame_counts,
+        saturation_level,
+        frame_noises,
+        frame_zero_fractions,
+        covered_masks,
+    )
+    reference_index = int(np.argmax(weights))
+    return reference_index, measure_group_gains(per_second, trusted_masks, reference_index, tolerance)
+
+
+def combine_exposure_group_images(
+    images: list[np.ndarray],
+    exposures_seconds: list[float],
+    frame_counts: list[int] | None = None,
+    saturation_level: float = SATURATION_FRACTION_OF_FULL_SCALE,
+    frame_noises: list[float] | None = None,
+    frame_zero_fractions: list[float] | None = None,
+    covered_masks: list[np.ndarray] | None = None,
+) -> np.ndarray:
+    """Combine one stacked image per exposure group into a single image.
+
+    Each image is first divided by its exposure length to give counts per
+    second. The images are then averaged with weights of one over the
+    square of each group's noise in counts per second. That noise is either
+    predicted from the raw frames (when `frame_noises` is given: a stack of
+    N frames of exposure t and frame noise s has a noise of s / (t sqrt(N))
+    per second, so its weight is N t^2 / s^2) or measured from the stack image
+    itself. Where a group's stack is saturated (above a ceiling measured from
+    that stack, see `estimate_saturation_mask_level`), that group is left out
+    at that pixel; if every group is saturated there, the shortest exposure is
+    used. A group whose raw frames are clipped at zero is likewise left out at
+    pixels too close to zero to be trusted (see `CLIPPING_FLOOR_SIGMAS`); if
+    that leaves no group at a pixel, the clipped group is used after all.
+    Before averaging, each group is put on the same brightness scale as
+    the group with the most weight (see `measure_group_gains`, which measures
+    the scale on mid-range pixels), because Siril leaves every group stack
+    with its own overall scale. This function applies the scale to every group
+    it is given. A caller that wants to refuse groups whose brightness is not
+    one scale factor checks them first with `measure_exposure_group_gains`.
+    The input errors are the same as for that function.
+
+    The result is scaled back up by the average exposure length per frame,
+    so its brightness is comparable with a normal stack of the same frames.
+
+    Parameters
+    ----------
+    images : `list` [`numpy.ndarray`]
+        The stacked image of each group, all the same shape.
+    exposures_seconds : `list` [`float`]
+        The exposure length of each group, in seconds.
+    frame_counts : `list` [`int`], optional
+        How many frames each group holds, used to set the output brightness.
+        Defaults to equal counts.
+    saturation_level : `float`, optional
+        The pixel value at or above which a group counts as saturated when
+        its stack shows no measurable ceiling.
+    frame_noises : `list` [`float`], optional
+        The noise of one raw frame of each group, in counts. When given, the
+        weights come from these and `frame_counts` instead of from the stack
+        images.
+    frame_zero_fractions : `list` [`float`], optional
+        The fraction of pixels at zero in the raw frames of each group.
+        With `frame_noises`, a group above `CLIPPED_FRAME_ZERO_FRACTION` is
+        left out at pixels less than `CLIPPING_FLOOR_SIGMAS` frame noises
+        above zero, where clipping biases its average upward.
+    covered_masks : `list` [`numpy.ndarray`], optional
+        For each group, a 2-D mask of the pixels that hold real data. When the
+        group stacks have been moved to line up (see
+        `stacking/processing/group_alignment.py`), the border the move
+        filled with zeros is left out. A group is left out at pixels its
+        mask marks as empty.
+
+    Returns
+    -------
+    combined : `numpy.ndarray`
+        The combined image, as `float32`.
+
+    """
+    if frame_counts is None:
+        frame_counts = [1] * len(images)
+    per_second, weights, usable_masks, trusted_masks = _prepare_group_inputs(
+        images,
+        exposures_seconds,
+        frame_counts,
+        saturation_level,
+        frame_noises,
+        frame_zero_fractions,
+        covered_masks,
+    )
     # Put every group on the brightness scale of the group with the most
     # weight. The weights are left as they are: Siril's rescaling multiplies a
     # stack's signal and its noise alike, so a gain removes the same factor
     # from both and the signal-to-noise of each group is unchanged.
     reference_index = int(np.argmax(weights))
-    gains = estimate_group_gains(per_second, trusted_masks, reference_index)
+    measurements = measure_group_gains(per_second, trusted_masks, reference_index)
+    gains = [measurement.gain for measurement in measurements]
     logger.info(
-        "Exposure groups combined with brightness gains %s relative to the %g s group.",
+        "Exposure groups combined with mid-range brightness gains %s (bright-end ratios %s) "
+        "relative to the %g s group.",
         [round(gain, 3) for gain in gains],
+        [None if m.bright_end_ratio is None else round(m.bright_end_ratio, 3) for m in measurements],
         exposures_seconds[reference_index],
     )
     per_second = [image / gain for image, gain in zip(per_second, gains, strict=True)]

@@ -45,6 +45,10 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "flat_level": ALL_THREE,
         "flat_noise": ALL_THREE,
         "calibration_metadata": ALL_THREE,
+        # Not checked when no calibration master was applied.
+        "calibration_frame_count": ALL_THREE,
+        # Not checked for a single-exposure stack.
+        "exposure_group_linearity": ALL_THREE,
         "rejected_pixel_fraction": ALL_THREE,
         "stack_sharpness": ALL_THREE,
         "spectral_registration": ALL_THREE,

@@ -82,15 +82,27 @@ def test_a_colour_sensor_flat_is_measured_but_not_smoothed(tmp_path: Path) -> No
 
 
 def test_one_flat_is_loaded_blurred_and_saved() -> None:
-    """A single flat is used as it is, with the blur before the save."""
-    assert build_flat_master_commands(1, True, "", 2.5) == [
+    """A lone flat with no bias is used as it is, blurred before the save."""
+    assert build_flat_master_commands(1, False, "", 2.5) == [
         "convert flat -out=../process",
         "cd ../process",
         "load flat_00001.fits",
         "gauss 2.5000",
         "save flat_stacked",
     ]
-    assert "gauss" not in " ".join(build_flat_master_commands(1, True, "", None))
+    assert "gauss" not in " ".join(build_flat_master_commands(1, False, "", None))
+
+
+def test_one_flat_with_a_bias_is_calibrated_then_blurred_and_saved() -> None:
+    """The bias comes off the lone flat first, then the blur, then the save."""
+    assert build_flat_master_commands(1, True, "", 2.5) == [
+        "convert flat -out=../process",
+        "cd ../process",
+        "calibrate_single flat_00001.fits -bias=bias_stacked",
+        "load pp_flat_00001.fits",
+        "gauss 2.5000",
+        "save flat_stacked",
+    ]
 
 
 def test_several_flats_are_stacked_and_then_blurred() -> None:

@@ -77,3 +77,41 @@ def test_flat_issues_and_mismatches_become_reasons() -> None:
     assert quality.flat_smoothing_sigma_px == pytest.approx(2.5)
     assert "1 calibration metadata mismatch(es)" in quality.flag_reasons
     assert "flat calibration: master flat noise is 4.49% from 1 frame(s)" in quality.flag_reasons
+
+
+def test_a_short_master_becomes_a_reason_and_a_failed_gate() -> None:
+    """A master from too few frames flags the input and fails its gate."""
+    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_FRAME_COUNT_GATE_NAME,
+        calibration_gates,
+    )
+
+    short_master = "flat master built from 1 frame(s), fewer than the minimum of 3: the master flat is noisy"
+    diagnostics = {
+        "calibration_applied": {"flat": True},
+        "calibration_blocking_flags": [short_master],
+    }
+
+    quality = assess_input_quality(10, 10, [], None, diagnostics)
+    gates = {gate.name: gate for gate in calibration_gates(diagnostics)}
+
+    assert quality.is_flagged
+    assert f"calibration frame count too low: {short_master}" in quality.flag_reasons
+    assert gates[CALIBRATION_FRAME_COUNT_GATE_NAME].status is GateStatus.FAILED
+    assert gates[CALIBRATION_FRAME_COUNT_GATE_NAME].detail in quality.flag_reasons
+
+
+def test_the_frame_count_gate_passes_with_enough_frames_and_is_unchecked_without_masters() -> None:
+    """No flag passes the gate; with no calibration it is not checked."""
+    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_FRAME_COUNT_GATE_NAME,
+        calibration_gates,
+    )
+
+    applied = {gate.name: gate for gate in calibration_gates({"calibration_applied": {"dark": True}})}
+    none_applied = {gate.name: gate for gate in calibration_gates({"calibration_applied": {"dark": False}})}
+
+    assert applied[CALIBRATION_FRAME_COUNT_GATE_NAME].status is GateStatus.PASSED
+    assert none_applied[CALIBRATION_FRAME_COUNT_GATE_NAME].status is GateStatus.NOT_CHECKED

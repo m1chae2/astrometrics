@@ -1181,7 +1181,10 @@ def _finalize_stack_quality_flags(summary) -> None:  # ruff: ignore[missing-type
     output_gates = output_quality_gates(metrics, summary.quality_processing_applied)
     flag_reasons = [*summary.input_quality.flag_reasons, *summary.output_quality.flag_reasons]
     for group in metrics.exposure_groups:
-        if group.left_out_reason:
+        # A nonlinear group's reason is recorded by the
+        # `exposure_group_linearity` gate, which names both brightness
+        # ratios, so it is not listed twice.
+        if group.left_out_reason and not group.gain_nonlinear:
             flag_reasons.append(f"the {group.exposure_seconds:g} s exposure group {group.left_out_reason}")
     if not summary.quality_processing_applied:
         flag_reasons.append("single-frame stack: no rejection/registration quality processing applied")
@@ -1252,9 +1255,17 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     _finalize_stack_quality_flags(summary)
     # Recorded after the flags are rebuilt above, so a failed gate's reason is
     # not wiped by that rebuild.
+    from astrometricslib.foundation.config import get_configuration
+    from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
+        exposure_group_linearity_gate,
+    )
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
 
-    for gate_result in [*(gate_results or []), *calibration_gates(diagnostics)]:
+    linearity_gate = exposure_group_linearity_gate(
+        diagnostics.get("exposure_group_summaries", []),
+        get_configuration().get_exposure_group_gain_tolerance(),
+    )
+    for gate_result in [*(gate_results or []), *calibration_gates(diagnostics), linearity_gate]:
         summary.record_gate(gate_result)
     clipped_groups = diagnostics.get("clipped_exposure_groups", [])
     if clipped_groups:

@@ -202,6 +202,10 @@ def summarize_stack(target: Target, kind: StackKind) -> StackSummary:
                 "saturated": group.saturated,
                 "clipped_at_zero": group.clipped_at_zero,
                 "alignment_shift_pixels": group.alignment_shift_pixels,
+                "gain_mid_range": group.gain_mid_range,
+                "gain_bright_end_ratio": group.gain_bright_end_ratio,
+                "gain_disagreement": group.gain_disagreement,
+                "gain_nonlinear": group.gain_nonlinear,
                 "left_out_reason": group.left_out_reason,
             }
             for group in metrics.exposure_groups

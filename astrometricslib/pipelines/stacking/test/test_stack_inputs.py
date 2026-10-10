@@ -24,6 +24,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "get_stack_rejection_sigma_mode": "adaptive",
     "get_stack_rejection_sigma": (3.0, 3.0),
     "get_stack_generate_rejmap": True,
+    "get_exposure_group_gain_tolerance": 0.05,
     "get_stack_filter_wfwhm_percentile": None,
     "get_stack_filter_round_percentile": None,
     "get_trim_noisy_stack_edges_enabled": True,

@@ -64,8 +64,9 @@ __all__ = [
 # up to date. It is part of the fingerprint. It is a plain counter because
 # nothing can tell by itself that a code change alters a stack: a person has to
 # say so. Raised to 1 when the skip was added, together with the star-based
-# alignment of exposure groups (2026-10-03).
-STACKING_ALGORITHM_VERSION = 1
+# alignment of exposure groups (2026-10-03). Raised to 2 when a lone flat began
+# to have the bias subtracted and a lone light began to be calibrated.
+STACKING_ALGORITHM_VERSION = 2
 
 # What follows a stack's own name (without .fits) in the name of its record.
 STACK_INPUTS_SUFFIX = "_inputs.json"
@@ -84,6 +85,7 @@ SETTINGS_THAT_CHANGE_A_STACK = (
     "get_stack_rejection_sigma_mode",
     "get_stack_rejection_sigma",
     "get_stack_generate_rejmap",
+    "get_exposure_group_gain_tolerance",
     "get_stack_filter_wfwhm_percentile",
     "get_stack_filter_round_percentile",
     "get_trim_noisy_stack_edges_enabled",
@@ -98,6 +100,8 @@ SETTINGS_THAT_CHANGE_A_STACK = (
 # - Where files live, which program runs, whether the old stack is kept and
 #   whether an unchanged stack is skipped.
 # - How many jobs run at once.
+# - The fewest frames a master calibration frame should have. It only decides
+#   whether the stack is flagged, and never what the pixels hold.
 # - Which camera and optic are the preferred ones. They decide which stack the
 #   target marks as preferred, which is set again when a stack is skipped.
 # - The picture settings. They shape the preview picture and its stretched
@@ -111,6 +115,7 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_keep_previous_stack_enabled",
     "get_skip_unchanged_stacks_enabled",
     "get_max_concurrent_jobs",
+    "get_minimum_calibration_frames",
     "get_primary_camera_name",
     "get_primary_focal_length_mm",
     "get_graxpert_executable",

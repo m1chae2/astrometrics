@@ -8,6 +8,7 @@ cross-session mechanics live in `batch.py` -- this file is the thin
 """
 
 import logging
+import os
 import sqlite3
 import statistics
 from typing import Any
@@ -94,6 +95,7 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             ),
             "photometry_sessions": [],
             "all_rejected_files": [],
+            "unreadable_date_obs_frames": [],
             "all_frame_ensemble_composition": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
@@ -231,6 +233,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         per_session_results = []
         all_candidates = []
         all_rejected_files = []
+        # Frames whose DATE-OBS header was missing or unreadable, with the
+        # reason (`ExcludedFrame`). Reported through `capture_timestamps`.
+        all_unreadable_date_obs_frames = []
         all_frame_ensemble_composition = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
@@ -287,12 +292,18 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 if identify_result.header_wcs_replaced_after_verification:
                     sessions_with_replaced_header_wcs.append(session.id)
             if not analyzer.stellar_objects:
-                session_empty_reasons.append(
-                    f"session {session.id}: reference-frame star detection failed, 0 stars processed"
-                )
+                if analyzer.frames_without_usable_date_obs:
+                    session_empty_reasons.append(
+                        f"session {session.id}: reference frame has no usable DATE-OBS, 0 stars processed"
+                    )
+                else:
+                    session_empty_reasons.append(
+                        f"session {session.id}: reference-frame star detection failed, 0 stars processed"
+                    )
             per_session_results.append((analyzer, session_candidates))
             all_candidates.extend(session_candidates)
             all_rejected_files.extend(analyzer.rejected_files)
+            all_unreadable_date_obs_frames.extend(analyzer.frames_without_usable_date_obs)
             all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
 
         # Captured before cross-session merging/re-flagging below so
@@ -342,8 +353,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
             logger.warning("[%s] Period search step failed: %s", target.id, search_error)
 
-        frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
-            all_rejected_files
+        frames_processed = (
+            sum(len(session.frame_paths) for session in photometry_sessions)
+            - len(all_rejected_files)
+            - len(all_unreadable_date_obs_frames)
         )
 
         return Result(
@@ -353,6 +366,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "star_id_breakdown": star_id_breakdown,
                 "photometry_sessions": photometry_sessions,
                 "all_rejected_files": all_rejected_files,
+                "unreadable_date_obs_frames": all_unreadable_date_obs_frames,
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
@@ -376,7 +390,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         -------
         summary : `PhotometryQualitySummary`
             Flagged for a high global-outlier rejection rate, frames
-            excluded for a missing timestamp, a session with zero stars
+            excluded for a missing timestamp or an unreadable `DATE-OBS`,
+            a session with zero stars
             detected, a session that could not be plate-solved for
             cross-session matching, or (when `process_input` found
             nothing to do) the reason why -- any, all, or none of these.
@@ -396,12 +411,13 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         photometry_sessions = payload["photometry_sessions"]
         all_rejected_files = payload["all_rejected_files"]
         photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
+        unreadable_date_obs_frames = payload.get("unreadable_date_obs_frames", [])
         star_id_breakdown = payload["star_id_breakdown"]
         sessions_missing_wcs = payload["sessions_missing_wcs"]
         session_empty_reasons = payload["session_empty_reasons"]
         frames_processed = payload["frames_processed"]
 
-        rejected_paths = set(all_rejected_files)
+        rejected_paths = set(all_rejected_files) | {frame.path for frame in unreadable_date_obs_frames}
         photometry_session_breakdown = build_target_session_breakdown(photometry_sessions, rejected_paths)
 
         rejected_frames = [
@@ -413,6 +429,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 reason="no capture timestamp available; cannot be assigned to a session",
             )
             for frame in photometry_frames_without_timestamp
+        ]
+        rejected_frames += [
+            ExcludedFrame(path=frame.path, reason=frame.reason) for frame in unreadable_date_obs_frames
         ]
 
         summary = PhotometryQualitySummary(
@@ -453,10 +472,16 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             for photometry in star_photometry
             if photometry.output_quality
         ]
+        frames_without_timestamp_total = len(photometry_frames_without_timestamp) + len(
+            unreadable_date_obs_frames
+        )
         for gate in photometry_run_gates(
             frames_contributed=frames_contributed_total,
             rejected_frame_count=len(all_rejected_files),
-            frames_without_timestamp=len(photometry_frames_without_timestamp),
+            frames_without_timestamp=frames_without_timestamp_total,
+            timestamp_exclusion_reasons=[
+                f"{os.path.basename(frame.path)}: {frame.reason}" for frame in unreadable_date_obs_frames
+            ],
             session_count=len(photometry_sessions),
             session_empty_reasons=session_empty_reasons,
             sessions_missing_wcs=sessions_missing_wcs,

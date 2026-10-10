@@ -25,4 +25,17 @@ Both searches report a verdict on whether the pattern found actually stands out 
 
 ## Long-term variability
 
-When a target has more than one observing session, the code can combine brightness histories from different sessions into one longer record for the same star. It can then run the same variability check described above on that combined record, which can reveal a variable star that changes too slowly to notice within a single session.
+When a target has more than one observing session, the code combines the brightness histories of each star from the different sessions into one longer record. It then measures how much the star's brightness differs from one session to another. This can reveal a variable star that changes too slowly to notice within a single session.
+
+The measurement works on each session's median normalized flux (the star's flux divided by the comparison group's median flux in the same picture, so it has no units). The combined record keeps each session's level as measured and does not rescale one session to match another. Rescaling would remove the very change this search looks for.
+
+For each star with at least two sessions of at least three usable points each, the code:
+
+1. Takes the highest and the lowest session median.
+2. Converts their ratio to an amplitude in magnitudes: `2.5 log10(highest / lowest)`.
+3. Divides the difference of the two medians by their combined expected error. The error of one session's median is `1.2533 x scatter / sqrt(points)`, where `scatter` is the session's within-session scatter (1.4826 times the median absolute deviation of its normalized flux). The result is the significance, in multiples of that error.
+4. Flags the star when the significance is above 3 and the amplitude is at least 0.02 mag.
+
+The code stores the amplitude and the significance on the star's light curve (`betweenSessionAmplitudeMag` and `betweenSessionSignificance`). It leaves the star's coefficient of variation unchanged, so that number stays a within-session scatter.
+
+Each session picks its own comparison group, so two sessions can disagree about a star's level because the groups differ and not because the star changed. The code keeps a summary of each session on the light curve (`sessionSummaries`): the session id, the number of usable points, the star's median normalized flux and its scatter, the typical number of comparison stars per picture, and the median of the comparison group's flux. A reader can compare these across stars. A shift that every star in the field shares points to the comparison group, not to the star.

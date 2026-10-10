@@ -6,12 +6,35 @@ This step turns a raw picture into one brightness measurement per star, and chec
 
 For each picture in an observing session, the code:
 
-1. Reads the picture's exposure time and airmass from its header. Exposure time is how long the camera's shutter was open; airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon.
-2. Finds out how far this picture has drifted compared to the first picture in the session, using a handful of bright stars as reference points. Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one.
-3. For every star being tracked, measures the amount of light inside a small circle centered on the star, and subtracts the background sky brightness measured in a ring just outside that circle. This gives the star's raw brightness in that one picture.
-4. Divides that raw brightness by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly.
+1. Reads the picture's exposure time, airmass, and capture time from its header. Exposure time is how long the camera's shutter was open. Airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon. The capture time comes from the `DATE-OBS` card (see "Capture times" below).
+2. Finds out how far this picture has drifted compared to the first picture in the session, using a handful of bright stars as reference points. Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
+3. For every star being tracked, starts at the star's position in the first picture plus the picture's overall drift. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the overall drift (see "Aperture placement" below).
+4. Measures the amount of light inside a small circle centered on that position, and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness in that one picture.
+5. Divides that raw brightness by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly.
 
 Every star ends up with a brightness value, a timestamp, and a flag saying whether the measurement was saturated (too bright to measure accurately) for each picture in the session.
+
+## Aperture placement
+
+The circle (the aperture) and the background ring sit at the star's exact position, including the fractional part of a pixel. The code does not round the position to a whole pixel. A circle that is half a pixel off a star loses 1 to 2 percent of the star's light for a typical star width. That loss changes as the picture drifts, and it is the same size as the brightness changes the pipeline searches for.
+
+The re-centering box is 11 pixels wide, about 2.5 times the width of the typical star the default circle (radius 4 pixels) is sized for. The code subtracts the local sky level (the median of a 31 by 31 pixel cutout) and sets negative pixels to zero before it averages the positions. It repeats this three times, each time centering the box on the previous result.
+
+The code refuses the re-centered position and keeps the shifted position from the first picture when any of these hold:
+
+- The box contains a saturated pixel. A saturated core is flat, so its centroid is not reliable.
+- The box has no light above the sky level, or it reaches past the edge of the picture.
+- The centroid is more than 1.5 pixels from the shifted position. A move that large means the box found a neighbor or noise instead of the star.
+
+Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason` (`None` means the centroid was accepted). `VariabilityAnalyzer.centroid_fallback_counts` totals the refusals per star over the session. Nothing downstream reads these counts yet: the quality report does not use them, so a star with many refusals appears only in the analyzer's data. A star near the 1.5 pixel limit in many pictures is measured with a circle that may be off-center by up to that amount.
+
+The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixels (FWHM, full width at half maximum). For wider stars the box cuts off more of the star's wings and the centroid shifts toward the box center by a few hundredths of a pixel.
+
+## Capture times
+
+The capture time of each picture comes from its `DATE-OBS` card, read with astropy's `Time` class as a UTC date and time (for example `2026-05-24T04:58:30.570`). The code stores it without a time zone.
+
+A picture is rejected, and left out of every light curve, when `DATE-OBS` is missing, is not a date and time, or has a date but no time of day. The code never substitutes the current time. The rejection reason is kept in `VariabilityAnalyzer.frames_without_usable_date_obs`. The photometry runner reads that list and copies each reason into the `capture_timestamps` gate and into the list of excluded frames in the quality summary. If the first picture of a session is the one rejected, the session produces no light curves, and the session's empty-session reason says so.
 
 ## Judging the raw data
 

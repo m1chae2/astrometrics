@@ -968,7 +968,7 @@ def _make_matching_test_star(star_id: str, pixel_x: float, pixel_y: float) -> St
     """Build a minimal StellarObject with a pixel position and light curve.
 
     Enough for `_match_and_merge_across_sessions`/
-    `_rescale_and_merge_light_curve` to operate on without needing a
+    `_merge_light_curves` to operate on without needing a
     real VariabilityAnalyzer run.
 
     Returns
@@ -1221,20 +1221,19 @@ def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerF
     assert result_b is None  # caught, not raised -- the caller stays alive
 
 
-def test_rescale_and_merge_light_curve_removes_inter_session_step_change() -> None:
-    """Verify merging rescales each session to a shared baseline first.
+def test_merge_light_curves_keeps_inter_session_level_difference() -> None:
+    """Verify merging keeps each session's own normalized level.
 
-    Two sessions normalized against different local comparison-star
-    ensembles can carry a different absolute flux scale even for a
-    genuinely non-variable star. Naively concatenating them would
-    inject a step-change at the session boundary that reads as
-    variability; rescaling the incoming segment to the canonical
-    segment's own median removes it.
+    Each session is normalized against its own comparison stars, so its
+    level is the between-night comparison of the star. Rescaling the
+    incoming segment to the canonical segment's median would remove a real
+    brightness change between nights. The merge must concatenate both
+    segments unchanged and sort them by time.
     """
     from datetime import datetime, timedelta
 
     from astrometricslib.models.stellar_source import PhotometryResult
-    from astrometricslib.pipelines.photometry.batch import _rescale_and_merge_light_curve
+    from astrometricslib.pipelines.photometry.batch import _merge_light_curves
 
     t0 = datetime(2026, 1, 1)
     canonical = PhotometryResult(
@@ -1245,8 +1244,7 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change() -> No
         airmasses=[1.1] * 5,
         is_saturated=[False] * 5,
     )
-    # A different session, same star, but its own ensemble normalization
-    # scales it to roughly 5x the canonical segment's level.
+    # A different session, same star, at about 5x the canonical level.
     new_segment = PhotometryResult(
         timestamps=[t0 + timedelta(days=10, minutes=i) for i in range(5)],
         fluxes=[500.0] * 5,
@@ -1256,15 +1254,9 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change() -> No
         is_saturated=[False] * 5,
     )
 
-    merged = _rescale_and_merge_light_curve(canonical, new_segment)
+    merged = _merge_light_curves(canonical, new_segment)
 
     assert len(merged.timestamps) == 10
     assert merged.timestamps == sorted(merged.timestamps)
-
-    merged_flux_array = np.array(merged.fluxes_normalized)
-    merged_cv = float(np.std(merged_flux_array) / np.mean(merged_flux_array))
-    # Un-rescaled, concatenating a ~1.0-level and ~5.0-level segment
-    # would give a coefficient of variation approaching 0.5-1.0 (a huge,
-    # spurious "variability" signal); after rescaling it should read
-    # close to each segment's own genuine ~1-2% scatter.
-    assert merged_cv < 0.05
+    assert merged.fluxes_normalized == canonical.fluxes_normalized + new_segment.fluxes_normalized
+    assert merged.fluxes_detrended == canonical.fluxes_detrended + new_segment.fluxes_detrended

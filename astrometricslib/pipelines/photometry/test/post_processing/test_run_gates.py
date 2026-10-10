@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from astrometricslib.models.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality_summary import ExcludedFrame
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner
 from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
@@ -79,6 +80,46 @@ def test_timestamp_gate_goes_red_when_frames_have_no_capture_time() -> None:
 
     assert gate.status is GateStatus.FAILED
     assert gate.detail == "3 frame(s) excluded for missing capture timestamp"
+
+
+def test_timestamp_gate_detail_quotes_why_header_dates_were_unreadable() -> None:
+    """Reasons for unreadable DATE-OBS headers reach the gate's detail.
+
+    Four frames fail. The gate quotes the first three reasons and counts
+    the rest, so a long list does not flood the summary.
+    """
+    reasons = [f"f{index}.fits: DATE-OBS is missing from the FITS header" for index in range(4)]
+
+    gate = good_run(frames_without_timestamp=4, timestamp_exclusion_reasons=reasons)[
+        rg.CAPTURE_TIMESTAMP_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.detail.startswith("4 frame(s) excluded for missing capture timestamp: f0.fits")
+    assert "f2.fits: DATE-OBS is missing" in gate.detail
+    assert "f3.fits" not in gate.detail
+    assert gate.detail.endswith("; and 1 more")
+
+
+def test_validate_output_lists_frames_with_unreadable_date_obs() -> None:
+    """`validate_output` fails the gate and keeps each frame's reason."""
+    request = PipelineRequest(target=Target(id="Test Target"), catalog_access=None)
+    result = runner._empty_photometry_result("placeholder")
+    result.payload["unreadable_date_obs_frames"] = [
+        ExcludedFrame(path="/data/night/a.fits", reason="DATE-OBS is missing from the FITS header"),
+        ExcludedFrame(path="/data/night/b.fits", reason="DATE-OBS 'not a date' is not a valid FITS date"),
+    ]
+
+    summary = runner.PhotometryPipelineAdapter().validate_output(request, result)
+
+    gate = summary.gate(rg.CAPTURE_TIMESTAMP_GATE_NAME)
+    assert gate.status is GateStatus.FAILED
+    assert "2 frame(s) excluded" in gate.detail
+    assert "a.fits: DATE-OBS is missing" in gate.detail
+    assert "b.fits: DATE-OBS 'not a date'" in gate.detail
+    excluded = {frame.path: frame.reason for frame in summary.photometry_metrics.rejected_frames}
+    assert "DATE-OBS is missing" in excluded["/data/night/a.fits"]
+    assert "not a date" in excluded["/data/night/b.fits"]
 
 
 def test_session_content_gate_goes_red_for_an_empty_session() -> None:

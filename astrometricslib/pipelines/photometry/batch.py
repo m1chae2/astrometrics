@@ -8,6 +8,11 @@ than one session, matches each star's light curve across sessions by
 its sky position (`_match_and_merge_across_sessions`) so a star seen on
 two different nights ends up as one combined record instead of two
 unrelated ones.
+
+The merge keeps each session's normalized level as measured (it never
+rescales one session to another) and records a per-session summary of
+the comparison ensemble, so a later step can measure between-night
+brightness change and a reader can judge whether it is real.
 """
 
 import logging
@@ -186,49 +191,85 @@ def _stars_to_sky(stellar_objects: list[Any], wcs: Any) -> list[Any]:
     return stars_with_position
 
 
-def _positive_median_or_none(values: list[float]) -> float | None:
-    """Median of the positive values in `values`, or `None` if none exist.
+def _summarize_session_for_star(session_id: str, analyzer: Any, light_curve: Any) -> Any:
+    """Record what one session contributed to a star's light curve.
+
+    Each session normalizes against its own comparison stars, so the
+    star's level in one session is only comparable to its level in
+    another if the two comparison groups behave alike. This summary keeps
+    the numbers a reader needs to judge that: the comparison star count,
+    the typical flux of the comparison ensemble, and the star's median
+    and scatter of normalized flux.
+
+    Parameters
+    ----------
+    session_id : `str`
+        The session the light curve came from.
+    analyzer : `VariabilityAnalyzer`
+        The analyzer that normalized the session. Its
+        `frame_ensemble_composition` and `frame_reference_flux` supply the
+        comparison star count and the ensemble flux. Either may be absent
+        on a stand-in object; the matching fields are then `None`.
+    light_curve : `PhotometryResult`
+        The star's light curve from this session, before any merge.
 
     Returns
     -------
-    median : `float` or `None`
-        The median of the positive values, or `None` if none exist.
+    summary : `SessionPhotometrySummary`
+        The record for this star and session.
     """
     import numpy as np
 
-    array = np.array(values, dtype=float)
-    array = array[array > 0]
-    return float(np.median(array)) if array.size else None
+    from astrometricslib.models.stellar_source import SessionPhotometrySummary
+
+    normalized = np.array(light_curve.fluxes_normalized, dtype=float)
+    normalized = normalized[normalized > 0]
+    median_level = float(np.median(normalized)) if normalized.size else None
+    scatter = None
+    if normalized.size >= 2:
+        # 1.4826 x the median absolute deviation equals the standard
+        # deviation for normally distributed noise and ignores outliers.
+        scatter = float(1.4826 * np.median(np.abs(normalized - np.median(normalized))))
+
+    ensemble_sizes = [
+        composition.ensemble_size
+        for composition in getattr(analyzer, "frame_ensemble_composition", None) or []
+    ]
+    ensemble_fluxes = [
+        float(flux) for flux in (getattr(analyzer, "frame_reference_flux", None) or {}).values() if flux > 0
+    ]
+    return SessionPhotometrySummary(
+        session_id=session_id,
+        point_count=int(normalized.size),
+        median_normalized_flux=median_level,
+        normalized_flux_scatter=scatter,
+        comparison_star_count=int(np.median(ensemble_sizes)) if ensemble_sizes else None,
+        ensemble_median_flux=float(np.median(ensemble_fluxes)) if ensemble_fluxes else None,
+    )
 
 
-def _rescale_flux_segment(
-    values: list[float], own_median: float | None, target_median: float | None
-) -> list[float]:
-    """Rescale a flux segment so its own median matches `target_median`.
-
-    Returns
-    -------
-    rescaled : `list` [`float`]
-        `values` unchanged if either median is unavailable or non-positive;
-        otherwise each value scaled by `target_median / own_median`.
-    """
-    if not own_median or not target_median:
-        return list(values)
-    factor = target_median / own_median
-    return [float(value) * factor for value in values]
-
-
-def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
+def _merge_light_curves(canonical: Any, new: Any) -> Any:
     """Merge a star's brightness data from two different nights.
 
-    inter-session zero-point offset. The incoming (`new`) segment's
-    `fluxes_normalized`/`fluxes_detrended` are each independently
-    rescaled so their own median matches the canonical curve's existing
-    median before concatenating, then the combined curve is sorted by
-    timestamp. `magnitudes` (always empty today) is carried over
-    untouched; `periodogram`/`transit_candidate` are single computed
-    results, not per-timestamp arrays, and are dropped rather than
-    carrying a stale single-session value forward on the merged curve.
+    The two segments are concatenated and sorted by timestamp. No flux
+    value is rescaled. Each session's normalized flux is the star's flux
+    divided by that session's comparison ensemble, so the level of a
+    session is the physical comparison between nights, provided the
+    comparison stars behave alike. Rescaling the new session to the old
+    one's median would remove exactly the between-night brightness change
+    that `identify_long_term_variable_candidates` looks for.
+
+    `fluxes_detrended` is concatenated the same way. The airmass detrend
+    runs on one session at a time and keeps the session's mean level, so
+    the merged values keep each session's trend removal and each
+    session's level.
+
+    `session_summaries` from both segments are joined, in that order, so
+    a later reader can see how each session's comparison ensemble looked.
+    `magnitudes` (always empty today) is carried over untouched.
+    `periodogram`, `transit_candidate` and the between-session fields are
+    single computed results, not per-timestamp arrays, and are dropped
+    instead of carrying a stale value onto the merged curve.
 
     Returns
     -------
@@ -237,26 +278,24 @@ def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
     """
     from astrometricslib.models.stellar_source import PhotometryResult
 
-    canonical_median = _positive_median_or_none(canonical.fluxes_normalized)
-    new_median = _positive_median_or_none(new.fluxes_normalized)
-    rescaled_new_normalized = _rescale_flux_segment(new.fluxes_normalized, new_median, canonical_median)
-
-    canonical_detrended_median = _positive_median_or_none(canonical.fluxes_detrended)
-    new_detrended_median = _positive_median_or_none(new.fluxes_detrended)
-    rescaled_new_detrended = _rescale_flux_segment(
-        new.fluxes_detrended, new_detrended_median, canonical_detrended_median
-    )
-
     combined_timestamps = canonical.timestamps + new.timestamps
     combined_fluxes = canonical.fluxes + new.fluxes
-    combined_fluxes_normalized = canonical.fluxes_normalized + rescaled_new_normalized
-    combined_fluxes_detrended = canonical.fluxes_detrended + rescaled_new_detrended
+    combined_fluxes_normalized = canonical.fluxes_normalized + new.fluxes_normalized
+    combined_fluxes_detrended = canonical.fluxes_detrended + new.fluxes_detrended
     combined_airmasses = canonical.airmasses + new.airmasses
     combined_is_saturated = canonical.is_saturated + new.is_saturated
 
     sort_order = sorted(range(len(combined_timestamps)), key=lambda i: combined_timestamps[i])
 
-    def _reordered(values):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+    def _reordered(values: list[Any]) -> list[Any]:
+        """Put per-frame values in timestamp order.
+
+        Returns
+        -------
+        ordered : `list`
+            The values reordered, or a plain copy when the array is not
+            one value per frame (an empty or truncated array stays as it is).
+        """
         return [values[i] for i in sort_order] if len(values) == len(sort_order) else list(values)
 
     return PhotometryResult(
@@ -269,6 +308,7 @@ def _rescale_and_merge_light_curve(canonical: Any, new: Any) -> Any:
         magnitudes=canonical.magnitudes,
         periodogram=None,
         transit_candidate=None,
+        session_summaries=list(canonical.session_summaries) + list(new.session_summaries),
     )
 
 
@@ -347,6 +387,12 @@ def _match_and_merge_across_sessions(
             merged_stellar_objects.extend(analyzer.stellar_objects)
             continue
 
+        for star in session_stars_with_sky:
+            if star.photometry is not None:
+                star.photometry.session_summaries = [
+                    _summarize_session_for_star(session.id, analyzer, star.photometry)
+                ]
+
         stars_with_sky_ids = {id(star) for star in session_stars_with_sky}
         merged_stellar_objects.extend(
             star for star in analyzer.stellar_objects if id(star) not in stars_with_sky_ids
@@ -402,9 +448,7 @@ def _match_and_merge_across_sessions(
 
             canonical_star, _canonical_ra, _canonical_dec = canonical_registry[canonical_index]
             new_star = session_stars_with_sky[session_star_index]
-            canonical_star.photometry = _rescale_and_merge_light_curve(
-                canonical_star.photometry, new_star.photometry
-            )
+            canonical_star.photometry = _merge_light_curves(canonical_star.photometry, new_star.photometry)
             canonical_star.session_matches.append(
                 StellarSessionMatch(session_id=session.id, angular_separation_arcsec=float(separation_arcsec))
             )

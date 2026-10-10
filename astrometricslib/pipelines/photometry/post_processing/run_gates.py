@@ -53,6 +53,10 @@ MINIMUM_STARS_FOR_SCATTER_POPULATION = MINIMUM_ENSEMBLE_SIZE
 # RR Lyrae and Miras are larger.
 MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
 
+# The most per-frame reasons the `capture_timestamps` gate quotes in its
+# detail. The full list stays in the run's excluded frames.
+MAXIMUM_TIMESTAMP_REASONS_SHOWN = 3
+
 ENSEMBLE_REJECTION_GATE_NAME = "ensemble_frame_rejection"
 CAPTURE_TIMESTAMP_GATE_NAME = "capture_timestamps"
 SESSION_CONTENT_GATE_NAME = "session_content"
@@ -80,6 +84,7 @@ def photometry_run_gates(
     known_variable_cvs: Sequence[float] = (),
     unlisted_cvs: Sequence[float] = (),
     cutoff_cv: float | None = None,
+    timestamp_exclusion_reasons: Sequence[str] = (),
 ) -> list[GateResult]:
     """Build the gates for one photometry run.
 
@@ -90,7 +95,9 @@ def photometry_run_gates(
     rejected_frame_count : `int`
         Frames rejected as global ensemble outliers.
     frames_without_timestamp : `int`
-        Frames left out for having no capture time.
+        Frames left out for having no usable capture time. This counts both
+        frames the database holds no time for and frames whose ``DATE-OBS``
+        header was missing or unreadable.
     session_count : `int`
         Sessions the frames were grouped into.
     session_empty_reasons : `Sequence` [`str`]
@@ -114,6 +121,10 @@ def photometry_run_gates(
     cutoff_cv : `float` or `None`, optional
         The run's variable-star cutoff on the scatter, or `None` if it has
         none.
+    timestamp_exclusion_reasons : `Sequence` [`str`], optional
+        One sentence per frame left out because its ``DATE-OBS`` header was
+        missing or unreadable, naming the frame and the problem. The gate's
+        detail quotes the first few.
 
     Returns
     -------
@@ -162,10 +173,17 @@ def photometry_run_gates(
             )
 
     if frames_without_timestamp:
+        timestamp_detail = f"{frames_without_timestamp} frame(s) excluded for missing capture timestamp"
+        if timestamp_exclusion_reasons:
+            shown = list(timestamp_exclusion_reasons[:MAXIMUM_TIMESTAMP_REASONS_SHOWN])
+            hidden_count = len(timestamp_exclusion_reasons) - len(shown)
+            timestamp_detail += ": " + "; ".join(shown)
+            if hidden_count > 0:
+                timestamp_detail += f"; and {hidden_count} more"
         gates.append(
             failed_gate(
                 CAPTURE_TIMESTAMP_GATE_NAME,
-                f"{frames_without_timestamp} frame(s) excluded for missing capture timestamp",
+                timestamp_detail,
                 float(frames_without_timestamp),
                 0.0,
             )

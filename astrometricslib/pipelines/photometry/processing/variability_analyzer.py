@@ -21,7 +21,7 @@ from scipy.stats import median_abs_deviation
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.models.photometry_quality import InputQualityAssessment
-from astrometricslib.models.quality_summary import FrameEnsembleComposition
+from astrometricslib.models.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,
@@ -36,10 +36,13 @@ from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality im
     assess_input_quality,
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
+    FrameRejection,
+    ObservationTimeError,
     _measure_aperture_flux,
     _process_single_frame_worker,
     _read_exposure_seconds,
     compute_frame_airmass,
+    read_observation_time,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -287,40 +290,191 @@ def _flag_variable_stars_by_adaptive_cutoff(
     return variable_candidates
 
 
+# --- Long-term (between-session) change --------------------------------------
+#
+# The long-term search compares the star's median normalized flux in each
+# observing session. A median needs a few points to mean anything, and a
+# change needs two sessions to be measured at all.
+MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH = 2
+MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH = 3
+
+# How many times its expected error the difference between the brightest and
+# faintest session medians must be before the star is flagged.
+DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD = 3.0
+
+# The smallest between-session change, in magnitudes, that is flagged however
+# well it is measured. A bright star's median is so well determined that a
+# 0.5% difference between nights can be many times its error, yet the
+# comparison ensembles of two nights differ by about this much (see
+# `SessionPhotometrySummary`). 0.02 mag matches the 2% floor of the
+# within-session CV cutoff.
+MINIMUM_LONG_TERM_AMPLITUDE_MAG = 0.02
+
+# The standard error of a sample median of normally distributed values is
+# sqrt(pi / 2) = 1.2533 times the standard error of their mean.
+_MEDIAN_STANDARD_ERROR_FACTOR = 1.2533
+
+# A noiseless light curve has a zero error and so an infinite significance.
+# The value is capped so it can be stored and sent as JSON.
+_MAXIMUM_REPORTED_SIGNIFICANCE = 1.0e6
+
+
+def _between_session_change(star: StellarObject) -> tuple[float, float] | None:
+    """Measure how much a star's level changed from one session to another.
+
+    Uses the per-session summaries recorded when the sessions were merged.
+    Takes the session with the highest median normalized flux and the one
+    with the lowest. Their difference, divided by the combined expected
+    error of the two medians, is the significance. The expected error of
+    one session's median is 1.2533 x scatter / sqrt(points), where scatter
+    is the robust within-session standard deviation of the normalized flux.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        A star with a merged light curve.
+
+    Returns
+    -------
+    change : `tuple` [`float`, `float`] or `None`
+        The amplitude in magnitudes (2.5 log10 of the highest median over
+        the lowest) and the significance (difference over combined error,
+        unitless). `None` when fewer than two sessions have enough usable
+        points.
+    """
+    if star.photometry is None:
+        return None
+    usable = [
+        summary
+        for summary in star.photometry.session_summaries
+        if summary.median_normalized_flux is not None
+        and summary.median_normalized_flux > 0
+        and summary.normalized_flux_scatter is not None
+        and summary.point_count >= MINIMUM_POINTS_PER_SESSION_FOR_LONG_TERM_SEARCH
+    ]
+    if len(usable) < MINIMUM_SESSIONS_FOR_LONG_TERM_SEARCH:
+        return None
+
+    brightest = max(usable, key=lambda summary: summary.median_normalized_flux)
+    faintest = min(usable, key=lambda summary: summary.median_normalized_flux)
+    amplitude_mag = 2.5 * math.log10(brightest.median_normalized_flux / faintest.median_normalized_flux)
+
+    def _median_error(summary: Any) -> float:
+        """Estimate the error of one session's median normalized flux.
+
+        Returns
+        -------
+        error : `float`
+            Unitless, on the scale of the normalized flux.
+        """
+        scatter = summary.normalized_flux_scatter
+        return _MEDIAN_STANDARD_ERROR_FACTOR * scatter / math.sqrt(summary.point_count)
+
+    combined_error = math.hypot(_median_error(brightest), _median_error(faintest))
+    difference = brightest.median_normalized_flux - faintest.median_normalized_flux
+    if combined_error > 0:
+        significance = min(difference / combined_error, _MAXIMUM_REPORTED_SIGNIFICANCE)
+    else:
+        significance = _MAXIMUM_REPORTED_SIGNIFICANCE if difference > 0 else 0.0
+    return amplitude_mag, significance
+
+
 def identify_long_term_variable_candidates(
     stellar_objects: list[StellarObject],
-    sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD,
+    significance_threshold: float = DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD,
 ) -> list[StellarObject]:
-    """Find stars that slowly change brightness over days, weeks, or months.
+    """Find stars whose brightness differs between observing sessions.
 
-    This looks at data gathered from multiple different nights to find
-    slow-changing stars that we might miss if we only looked at one night.
+    The search needs light curves merged across sessions, with the
+    per-session summaries that the merge records. For each star it:
+
+    1. Takes each session's median normalized flux. The merge does not
+       rescale sessions, so these medians keep the between-night level.
+    2. Finds the highest and the lowest of those medians and converts the
+       ratio to an amplitude in magnitudes: ``2.5 log10(highest / lowest)``.
+    3. Divides the difference of the two medians by their combined
+       expected error. The error of one median is
+       ``1.2533 x scatter / sqrt(points)``, where ``scatter`` is the
+       session's within-session scatter (1.4826 x the median absolute
+       deviation of its normalized flux). The result is the significance,
+       in units of that error.
+    4. Flags the star when the significance exceeds `significance_threshold`
+       and the amplitude is at least 0.02 mag.
+
+    A star needs at least two sessions with at least three usable points
+    each. Other stars are never flagged, and their between-session fields
+    are cleared.
+
+    The star's `coefficient_of_variation` is not changed. It stays the
+    within-session scatter measured per session, so this search compares
+    two separate quantities and does not mix them.
+
+    The normalized levels of two sessions are only a fair comparison when
+    their comparison ensembles behave alike. The ensembles are chosen per
+    session, so a shift shared by every star in the field points to the
+    ensemble, not the star. Compare the star's amplitude with the other
+    stars' amplitudes and with the `session_summaries` ensemble fields
+    before treating a flag as a real variable.
 
     Parameters
     ----------
     stellar_objects : `list` of `StellarObject`
-        The stars to check.
-    sigma_threshold : `float`, optional
-        How strict we want to be.
+        The stars to check, with light curves merged across sessions.
+    significance_threshold : `float`, optional
+        How many times its expected error the difference between the
+        brightest and faintest session medians must be. Unitless.
 
     Returns
     -------
     variable_candidates : `list` [`StellarObject`]
-        The stars that look like long-term variables.
+        The stars that look like long-term variables. Each one carries
+        `between_session_amplitude_mag` (magnitudes) and
+        `between_session_significance` (unitless) on its photometry.
     """
-    return _flag_variable_stars_by_adaptive_cutoff(stellar_objects, sigma_threshold)
+    variable_candidates = []
+    for star in stellar_objects:
+        if star.photometry is None:
+            continue
+        change = _between_session_change(star)
+        if change is None:
+            star.photometry.between_session_amplitude_mag = None
+            star.photometry.between_session_significance = None
+            continue
+        amplitude_mag, significance = change
+        star.photometry.between_session_amplitude_mag = round(amplitude_mag, 4)
+        star.photometry.between_session_significance = round(significance, 2)
+        if significance > significance_threshold and amplitude_mag >= MINIMUM_LONG_TERM_AMPLITUDE_MAG:
+            variable_candidates.append(star)
+    return variable_candidates
 
 
 class VariabilityAnalyzer:
     """Analyzes a sequence of images to detect variable stars."""
 
-    def __init__(self, config=None) -> None:  # ruff: ignore[missing-type-function-argument]
+    def __init__(self, config: Any = None) -> None:
+        """Start an analyzer with no stars and no frames measured yet.
+
+        Parameters
+        ----------
+        config : `Any`, optional
+            Kept on the analyzer as ``self.config``. Nothing in this class
+            reads it.
+        """
         self.config = config
         self.light_curves: dict[str, PhotometryResult] = {}
         self.stellar_objects: list[StellarObject] = []
         self.frame_reference_flux = {}
         self.timestamp_to_path = {}
         self.rejected_files = []
+        # Frames left out because `DATE-OBS` is missing or unreadable, each
+        # with the reason. Filled during `process()`. The photometry runner
+        # reads it to build the `capture_timestamps` gate.
+        self.frames_without_usable_date_obs: list[ExcludedFrame] = []
+        # How many frames each star's own centroid was refused in (it kept
+        # the shifted reference position instead), keyed by star id. Only
+        # stars with at least one such frame appear. Filled during
+        # `process()`; see `refine_star_centroid`.
+        self.centroid_fallback_counts: dict[str, int] = {}
         self.frame_ensemble_composition: list[FrameEnsembleComposition] = []
         # How far each frame's alignment drifted from the reference
         # frame, keyed by timestamp: `(delta_x_shift, delta_y_shift)` in
@@ -382,11 +536,16 @@ class VariabilityAnalyzer:
                 reference_header.get("INSTRUME", reference_header.get("CAMERA"))
             )
             saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
-            reference_date = reference_header.get("DATE-OBS", datetime.now().isoformat())
             try:
-                reference_timestamp = datetime.fromisoformat(reference_date)
-            except ValueError, TypeError:
-                reference_timestamp = datetime.now()
+                reference_timestamp = read_observation_time(reference_header)
+            except ObservationTimeError as error:
+                # Without a capture time the reference frame cannot anchor
+                # the session. Record why and stop; never use the clock.
+                logger.warning("Reference frame %s rejected: %s", reference_path, error)
+                self.frames_without_usable_date_obs.append(
+                    ExcludedFrame(path=reference_path, reason=str(error))
+                )
+                return
             reference_exposure_seconds = _read_exposure_seconds(reference_header)
             # Seeded below alongside the reference frame's flux. Leaving
             # it out started every light curve with one fewer airmass
@@ -565,8 +724,15 @@ class VariabilityAnalyzer:
                 path, data = result
                 if data is None:
                     continue
+                if isinstance(data, FrameRejection):
+                    self.frames_without_usable_date_obs.append(ExcludedFrame(path=path, reason=data.reason))
+                    continue
 
-                timestamp, fluxes_dict, delta_x, delta_y, _bg, airmass = data
+                timestamp, fluxes_dict, delta_x, delta_y, _bg, airmass, star_positions = data
+                for star_id, star_position in star_positions.items():
+                    if not star_position.is_refined:
+                        previous_count = self.centroid_fallback_counts.get(star_id, 0)
+                        self.centroid_fallback_counts[star_id] = previous_count + 1
                 self.timestamp_to_path[timestamp] = path
                 self.frame_registration_drift[timestamp] = (float(delta_x), float(delta_y))
 

@@ -560,6 +560,25 @@ export interface TransitCandidate {
 }
 
 /**
+ * What one observing session contributed to a merged light curve.
+ *
+ * A star seen on several nights has one merged light curve. Each night
+ * is normalized against its own group of comparison stars, so the
+ * levels of the nights are only comparable if those groups behave
+ * alike. This record keeps what a reader needs to judge that: which
+ * session, how many comparison stars it used, how bright their
+ * typical member was, and where the star's own normalized level sat.
+ */
+export interface SessionPhotometrySummary {
+  sessionId: string;
+  pointCount?: number;
+  medianNormalizedFlux?: number | null;
+  normalizedFluxScatter?: number | null;
+  comparisonStarCount?: number | null;
+  ensembleMedianFlux?: number | null;
+}
+
+/**
  * A record of how a star's brightness changes over time: a light curve.
  */
 export interface PhotometryResult {
@@ -577,6 +596,9 @@ export interface PhotometryResult {
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
   generatedByJobId?: string | null;
+  sessionSummaries?: SessionPhotometrySummary[];
+  betweenSessionAmplitudeMag?: number | null;
+  betweenSessionSignificance?: number | null;
 }
 
 /**
@@ -1437,6 +1459,10 @@ export interface ExposureGroupSummary {
   clippedAtZero?: boolean;
   stackPath?: string | null;
   alignmentShiftPixels?: number[] | null;
+  gainMidRange?: number | null;
+  gainBrightEndRatio?: number | null;
+  gainDisagreement?: number | null;
+  gainNonlinear?: boolean;
   leftOutReason?: string | null;
 }
 

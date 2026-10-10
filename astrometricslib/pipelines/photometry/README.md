@@ -5,12 +5,12 @@ This part of the code measures how bright stars are in a series of pictures, and
 ## What the pipeline does, step by step
 
 1. **Collect the pictures.** The pipeline looks at every picture taken of a target and groups them into observing sessions. A session is one continuous night (or run) of pictures taken with the same setup. The pipeline leaves out pictures taken through a spectroscopy filter, since measuring a star's total brightness does not make sense on a dispersed spectrum image.
-2. **Measure each star's brightness, frame by frame.** For each session, the pipeline uses the first picture to find every star in the field. It then compares every later picture in that session against the first one: it re-locates each star, measures how much light it collected, and records that as one point in the star's brightness history. This step lives in `pre_processing/`.
+2. **Measure each star's brightness, frame by frame.** For each session, the pipeline uses the first picture to find every star in the field. It then compares every later picture in that session against the first one: it shifts each star by the picture's overall drift, re-centers it on its own brightness-weighted centroid, measures how much light it collected in a circle at that exact position, and records that as one point in the star's brightness history. The time of that point comes from the picture's `DATE-OBS` header. A picture with no readable `DATE-OBS` is rejected, not given the current time. This step lives in `pre_processing/`.
 3. **Compare stars against each other.** A single star's raw brightness bounces around from picture to picture for reasons that have nothing to do with the star itself: clouds, changing air quality, small changes in tracking. To remove that noise, the pipeline picks a group of steady comparison stars in the same field and uses them to correct every star's brightness, frame by frame. It then drops any frame that still looks wrong after that correction. This step lives in `processing/`.
 4. **Decide which stars are actually variable.** Once brightness is corrected, the pipeline compares how much each star's brightness varies against how much an ordinary, non-variable star in the same field varies. A star that varies much more than that baseline is flagged as a possible variable star. This also lives in `processing/`.
 5. **Look for repeating patterns.** For stars with enough data points, the pipeline also searches for a period: a repeating pattern in brightness over time, such as an eclipsing binary star or a transiting planet. This also lives in `processing/`.
 6. **Judge how much to trust the results.** Two separate quality checks run alongside the steps above. One checks how good the raw data behind a star's brightness history was (`pre_processing/`). The other checks how confident the pipeline is in a star's variability result (`post_processing/`).
-7. **Combine sessions.** When a target has more than one observing session, the pipeline matches up the same stars between sessions and combines their brightness histories into one longer record, which can reveal slower changes that a single session would miss.
+7. **Combine sessions.** When a target has more than one observing session, the pipeline matches up the same stars between sessions and combines their brightness histories into one longer record. The combined record keeps each session's brightness level as measured. It does not rescale one session to match another. The pipeline then measures how much each star's level differs between sessions (see "Change between sessions" below), which can reveal slower changes that a single session would miss.
 
 ## Where to look
 
@@ -28,7 +28,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | Gate | Fails when | Not checked when |
 |---|---|---|
 | `ensemble_frame_rejection` | Five or more frames, and a quarter of all frames, were rejected as outliers | Fewer than five frames |
-| `capture_timestamps` | A frame has no capture time | Never |
+| `capture_timestamps` | A frame has no usable capture time: none on record, or its `DATE-OBS` header is missing or unreadable (the detail lists the first three reasons) | Never |
 | `session_content` | A session produced no light curves | The run had no sessions |
 | `session_plate_solve` | A session could not be plate-solved for cross-session matching | There is only one session |
 | `photometry_work` | The run found nothing to do (the reason is given) | Never |
@@ -39,6 +39,32 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `detectable_amplitude` | The run's cutoff means a variable must change by more than about 0.3 mag peak to peak to be flagged | The run has no cutoff |
 
 `registration_drift` and `comparison_ensemble` are new flags: before, a lost-tracking night or a thin comparison ensemble only showed on each star's own record or in the log. The limits for `scatter_population` and the 7.4 multiplier in the variable-star cutoff are not yet backed by a measured false-alarm rate (Gap 2 of the audit plan).
+
+## Change between sessions
+
+Within a session, a star's normalized flux is its flux divided by the median flux of the session's comparison stars, so it has no units. The pipeline picks the comparison stars separately for each session: the brightest unsaturated stars that appear in most pictures, up to 100. Two sessions can therefore use different comparison stars, and a difference in a star's level between them can come from the comparison stars and not from the star.
+
+For that reason, the merge across sessions (`batch.py`, `_merge_light_curves`) does not rescale any flux. It joins the sessions in time order, for both `fluxesNormalized` and `fluxesDetrended`. The airmass detrend runs on one session at a time and keeps the session's mean level, so the joined detrended values keep each session's trend removal and each session's level.
+
+The merge also records one `sessionSummaries` entry per session on the light curve:
+
+| Field | Meaning |
+|---|---|
+| `sessionId` | The session the entry describes |
+| `pointCount` | Usable (positive) normalized points in the session |
+| `medianNormalizedFlux` | The star's median normalized flux in the session (no units) |
+| `normalizedFluxScatter` | 1.4826 times the median absolute deviation of the star's normalized flux in the session (no units) |
+| `comparisonStarCount` | The typical number of comparison stars per picture |
+| `ensembleMedianFlux` | The median, over pictures, of the comparison group's median flux (counts) |
+
+`identify_long_term_variable_candidates` (`processing/variability_analyzer.py`) reads these entries. For a star with at least two sessions of three or more points, it computes:
+
+- the amplitude, `2.5 log10(highest session median / lowest session median)`, in magnitudes (`betweenSessionAmplitudeMag`);
+- the significance, the difference of those two medians divided by their combined expected error (`betweenSessionSignificance`, no units). The expected error of one median is `1.2533 x normalizedFluxScatter / sqrt(pointCount)`.
+
+It flags the star when the significance is above 3 and the amplitude is at least 0.02 mag. The within-session scatter (the coefficient of variation) is not changed by this search. A flag means that the star's level differs between sessions by more than its own scatter explains. It does not rule out the comparison stars as the cause. Compare the amplitude with the amplitudes of the other stars in the field, and with the `comparisonStarCount` and `ensembleMedianFlux` of each session, before treating a flag as a variable star.
+
+No run gate checks this amplitude yet. The `detectable_amplitude` gate below describes only the within-session cutoff, so a run can pass it and still be unable to see a small change between sessions.
 
 ## Known variables
 

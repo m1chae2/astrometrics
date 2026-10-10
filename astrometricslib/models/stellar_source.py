@@ -282,6 +282,37 @@ class TransitCandidate(BaseModel):
     unconfirmed: bool = Field(default=False, alias="unconfirmed")
 
 
+class SessionPhotometrySummary(BaseModel):
+    """What one observing session contributed to a merged light curve.
+
+    A star seen on several nights has one merged light curve. Each night
+    is normalized against its own group of comparison stars, so the
+    levels of the nights are only comparable if those groups behave
+    alike. This record keeps what a reader needs to judge that: which
+    session, how many comparison stars it used, how bright their
+    typical member was, and where the star's own normalized level sat.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(alias="sessionId")
+    # How many usable (positive) normalized measurements the session gave.
+    point_count: int = Field(default=0, alias="pointCount")
+    # The middle value of the star's normalized flux in this session. A
+    # normalized flux is the star's flux divided by the comparison
+    # ensemble's median flux in the same frame, so it is unitless.
+    median_normalized_flux: float | None = Field(default=None, alias="medianNormalizedFlux")
+    # The spread of the star's normalized flux within the session, as a
+    # robust standard deviation (1.4826 x the median absolute deviation),
+    # in the same unitless scale as the normalized flux.
+    normalized_flux_scatter: float | None = Field(default=None, alias="normalizedFluxScatter")
+    # The typical number of comparison stars used per frame, and the
+    # median of the per-frame ensemble median fluxes (the divisor of the
+    # normalization), in the session's raw flux units (counts).
+    comparison_star_count: int | None = Field(default=None, alias="comparisonStarCount")
+    ensemble_median_flux: float | None = Field(default=None, alias="ensembleMedianFlux")
+
+
 class PhotometryResult(BaseModel):
     """A record of how a star's brightness changes over time: a light curve."""
 
@@ -323,6 +354,18 @@ class PhotometryResult(BaseModel):
     # be looked up. `None` for a light curve saved before this was
     # recorded, or written outside a tracked job.
     generated_by_job_id: str | None = Field(default=None, alias="generatedByJobId")
+    # One entry per observing session merged into this light curve, in the
+    # order they were merged. Empty for a light curve from a single
+    # session, or one saved before this was recorded.
+    session_summaries: list[SessionPhotometrySummary] = Field(default_factory=list, alias="sessionSummaries")
+    # The change between the sessions' median normalized levels, as the
+    # brightest session over the faintest one, in magnitudes, and how many
+    # times its expected error that difference is (see
+    # `identify_long_term_variable_candidates`). `None` until the
+    # long-term search has run on this light curve, or when fewer than two
+    # sessions have enough points.
+    between_session_amplitude_mag: float | None = Field(default=None, alias="betweenSessionAmplitudeMag")
+    between_session_significance: float | None = Field(default=None, alias="betweenSessionSignificance")
 
 
 class StellarSessionMatch(BaseModel):

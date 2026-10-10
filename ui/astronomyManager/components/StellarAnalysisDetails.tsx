@@ -7,9 +7,9 @@
 import React, { useState } from 'react';
 import '../styles/astronomyManager.css';
 import {
-    describeCandidateSeparation,
     describeEmissionLineDetail,
     describeFeatureDetail,
+    describeMatchGap,
     describeMissingPattern,
     describeTemplateMatch,
     formatFalseAlarmProbability,
@@ -123,7 +123,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
     const spectralRms = spectroscopy?.selfDeterminedSpectralTypeRms;
     const templateMatch = describeTemplateMatch(astronomyData, astronomyData?.spectralType);
     const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
-    const candidateSeparation = describeCandidateSeparation(spectroscopy?.candidateSeparation);
+    const matchGap = describeMatchGap(spectroscopy);
     const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
     // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
     const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];
@@ -195,7 +195,7 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                 <div className="stellar-analysis-details__section">
                     <div className="stellar-analysis-details__section-title">
                         Stellar Classification
-                        <InfoTip text="Compares this spectrum's shape against reference stars, O (hottest) to M (coolest). Lower percentages indicate a closer match; above 15% is considered no match. Separation indicates whether the runner-up candidate is a clearly worse fit or nearly as close." />
+                        <InfoTip text="Compares this spectrum's shape against reference stars, O (hottest) to M (coolest). Lower percentages indicate a closer match; above 15% is considered no match. Separation shows the gap in fit (RMS) between the closest reference and the runner-up, and whether the class or only the subtype is uncertain." />
                     </div>
                     <div className="stellar-analysis-details__grid">
                         <div
@@ -213,22 +213,21 @@ export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
                                     : `${measuredSpectralType}${typeof spectralRms === 'number' ? ` (${(spectralRms * 100).toFixed(0)}% off)` : ''}`}
                             </span>
                         </div>
-                        {candidateSeparation && !templateMatch?.isPoor && (
+                        {matchGap && !templateMatch?.isPoor && (
                             <div
                                 className="analysis-row"
                                 title={
-                                    candidateSeparation.label === 'well-separated'
-                                        ? 'The next-closest candidate is a clearly worse fit.'
-                                        : 'The next-closest candidate is nearly as close a fit, so this type is not firmly distinguished from it.'
+                                    matchGap.status === 'clear'
+                                        ? 'No other reference star fits nearly as well as the closest one.'
+                                        : matchGap.status === 'subtype-uncertain'
+                                          ? 'Another reference star of the same class fits almost as well, so the number after the class letter is uncertain.'
+                                          : 'A reference star of a different class fits almost as well, so the class letter itself is uncertain.'
                                 }
                             >
                                 <span className="analysis-label">Separation:</span>
-                                <span
-                                    className={`analysis-value${
-                                        candidateSeparation.label === 'marginal' ? ' analysis-value--caution' : ''
-                                    }`}
-                                >
-                                    {candidateSeparation.label === 'well-separated' ? 'Well-separated' : 'Marginal'} ({candidateSeparation.detail})
+                                <span className={`analysis-value${matchGap.status === 'clear' ? '' : ' analysis-value--caution'}`}>
+                                    {matchGap.label.charAt(0).toUpperCase() + matchGap.label.slice(1)}
+                                    {matchGap.detail ? ` (${matchGap.detail})` : ''}
                                 </span>
                             </div>
                         )}

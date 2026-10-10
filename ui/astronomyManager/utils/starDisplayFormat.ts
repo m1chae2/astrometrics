@@ -4,7 +4,7 @@
  * subtitles, coordinates, and the choice of light-curve series to plot.
  */
 
-import { CandidateSeparation, PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
+import { PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
 /** Prefix of an id given to a star found in an image but never matched to a catalog. */
@@ -306,28 +306,59 @@ export function spectralClassLetter(spectralType: string | null | undefined): st
 }
 
 /** How cleanly a spectrum's best-matching type stands out from the next-closest candidate. */
-export interface CandidateSeparationDescription {
-    /** "well-separated" when the runner-up is a clearly worse fit; "marginal" when it is nearly as close. */
-    label: 'well-separated' | 'marginal';
-    /** The runner-up type and how far behind it is, e.g. "B8V within 0.3 pts". */
-    detail: string;
+export interface MatchGapDescription {
+    /** "clear" when nothing else fits nearly as well; otherwise which part of the type is uncertain. */
+    status: 'clear' | 'subtype-uncertain' | 'class-uncertain';
+    /** Plain-words label: "clear", "same class, subtype uncertain", or "class uncertain". */
+    label: string;
+    /** The size of the gap and the type it is measured against, e.g. "gap 0.027 RMS to F8V"; null when no gap was measured. */
+    detail: string | null;
 }
 
 /**
  * Words the library's verdict on whether the best-matching spectral type is a
- * clear best or a close call against the next-closest candidate.
+ * clear best or a close call. The gap is the difference in root-mean-square
+ * (RMS) fit error between the best reference spectrum and a runner-up. It is
+ * a plain number with no unit, measured relative to the spectrum's size.
  *
- * @param separation The spectroscopy result's `candidateSeparation`.
- * @returns The separation description, or null when fewer than two candidates were compared.
+ * @param spectroscopy The star's spectroscopy result, or null when there is none.
+ * @returns The description, or null when the library gave no gap or ambiguity flag.
  */
-export function describeCandidateSeparation(
-    separation: CandidateSeparation | null | undefined
-): CandidateSeparationDescription | null {
-    if (!separation) return null;
-    return {
-        label: separation.isWellSeparated ? 'well-separated' : 'marginal',
-        detail: `${separation.runnerUpType} within ${separation.gapPoints.toFixed(1)} pts`,
-    };
+export function describeMatchGap(spectroscopy: SpectroscopyResult | null | undefined): MatchGapDescription | null {
+    if (!spectroscopy) return null;
+    const subtypeGap = spectroscopy.rmsGapToSecondBest;
+    const classGap = spectroscopy.rmsGapToNextClass;
+    const hasGap = typeof subtypeGap === 'number' || typeof classGap === 'number';
+    const hasFlag = typeof spectroscopy.isAmbiguous === 'boolean' || typeof spectroscopy.isClassAmbiguous === 'boolean';
+    if (!hasGap && !hasFlag) return null;
+
+    const candidates = (spectroscopy.selfDeterminedSpectralTypeCandidates ?? []) as { spectral_type?: string }[];
+    const bestType = candidates[0]?.spectral_type ?? spectroscopy.selfDeterminedSpectralType ?? '';
+    const bestClass = spectralClassLetter(bestType);
+    const secondType = candidates[1]?.spectral_type;
+    // The next class may sit further down the list than the runner-up when both share a class letter.
+    const nextClassType = candidates.find(
+        (candidate) => !!bestClass && !!candidate.spectral_type && spectralClassLetter(candidate.spectral_type) !== bestClass
+    )?.spectral_type;
+
+    const describeGap = (gap: number | null | undefined, type: string | undefined): string | null =>
+        typeof gap === 'number' ? `gap ${gap.toFixed(3)} RMS to ${type || 'the next type'}` : null;
+
+    if (spectroscopy.isClassAmbiguous) {
+        return {
+            status: 'class-uncertain',
+            label: 'class uncertain',
+            detail: describeGap(classGap, nextClassType ?? secondType),
+        };
+    }
+    if (spectroscopy.isAmbiguous) {
+        return {
+            status: 'subtype-uncertain',
+            label: 'same class, subtype uncertain',
+            detail: describeGap(subtypeGap, secondType),
+        };
+    }
+    return { status: 'clear', label: 'clear', detail: describeGap(subtypeGap, secondType) };
 }
 
 /** A small labelled chip in the star summary header. */

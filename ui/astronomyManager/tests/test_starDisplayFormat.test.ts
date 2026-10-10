@@ -216,16 +216,67 @@ describe('spectral type and verdict helpers', () => {
         expect(describeTemplateMatch(null, 'A2')).toBeNull();
     });
 
-    it('words the library candidate separation', async () => {
-        const { describeCandidateSeparation } = await import('../utils/starDisplayFormat');
-        expect(describeCandidateSeparation(null)).toBeNull();
-        expect(describeCandidateSeparation({ runnerUpType: 'B8V', gapPoints: 0.3, isWellSeparated: false })).toEqual({
-            label: 'marginal',
-            detail: 'B8V within 0.3 pts',
+    it('words the library match gap', async () => {
+        const { describeMatchGap } = await import('../utils/starDisplayFormat');
+        const candidates = [
+            { spectral_type: 'G2V', rms: 0.05 },
+            { spectral_type: 'F8V', rms: 0.077 },
+            { spectral_type: 'K0V', rms: 0.09 },
+        ];
+        expect(describeMatchGap(null)).toBeNull();
+        expect(describeMatchGap({})).toBeNull();
+        expect(
+            describeMatchGap({
+                selfDeterminedSpectralTypeCandidates: candidates,
+                rmsGapToSecondBest: 0.027,
+                isAmbiguous: false,
+                rmsGapToNextClass: 0.04,
+                isClassAmbiguous: false,
+            })
+        ).toEqual({ status: 'clear', label: 'clear', detail: 'gap 0.027 RMS to F8V' });
+        expect(
+            describeMatchGap({
+                selfDeterminedSpectralTypeCandidates: candidates,
+                rmsGapToSecondBest: 0.01,
+                isAmbiguous: true,
+                rmsGapToNextClass: 0.04,
+                isClassAmbiguous: false,
+            })
+        ).toEqual({ status: 'subtype-uncertain', label: 'same class, subtype uncertain', detail: 'gap 0.010 RMS to F8V' });
+    });
+
+    it('words a class-level ambiguity with the nearest other-class type', async () => {
+        const { describeMatchGap } = await import('../utils/starDisplayFormat');
+        const result = describeMatchGap({
+            selfDeterminedSpectralTypeCandidates: [
+                { spectral_type: 'G2V', rms: 0.05 },
+                { spectral_type: 'G0V', rms: 0.055 },
+                { spectral_type: 'K0V', rms: 0.06 },
+            ],
+            rmsGapToSecondBest: 0.005,
+            isAmbiguous: true,
+            rmsGapToNextClass: 0.01,
+            isClassAmbiguous: true,
         });
-        expect(describeCandidateSeparation({ runnerUpType: 'A5V', gapPoints: 4, isWellSeparated: true })?.label).toBe(
-            'well-separated'
-        );
+        expect(result).toEqual({ status: 'class-uncertain', label: 'class uncertain', detail: 'gap 0.010 RMS to K0V' });
+    });
+
+    it('never uses the words confidence or probability in the match gap wording', async () => {
+        const { describeMatchGap } = await import('../utils/starDisplayFormat');
+        const flags = [true, false];
+        for (const isAmbiguous of flags) {
+            for (const isClassAmbiguous of flags) {
+                const text = JSON.stringify(
+                    describeMatchGap({ rmsGapToSecondBest: 0.02, rmsGapToNextClass: 0.02, isAmbiguous, isClassAmbiguous })
+                );
+                expect(text).not.toMatch(/confidence|probability/i);
+            }
+        }
+    });
+
+    it('omits the detail when no gap was measured', async () => {
+        const { describeMatchGap } = await import('../utils/starDisplayFormat');
+        expect(describeMatchGap({ isAmbiguous: false, isClassAmbiguous: false })?.detail).toBeNull();
     });
 
     it('treats only detected and possible verdicts as significant', async () => {

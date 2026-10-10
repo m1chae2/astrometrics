@@ -531,7 +531,9 @@ def process_spectroscopy_frames_by_session(
         )
         session_results.append((session, identify_result))
 
-        session_wcs_header = identify_result.wcs.to_header() if identify_result.wcs is not None else None
+        session_wcs_header = (
+            identify_result.wcs.to_header(relax=True) if identify_result.wcs is not None else None
+        )
         # Only follow the target star and a few verified catalog stars.
         # Sending every detection would extract hundreds of unvetted
         # spectra from every frame.

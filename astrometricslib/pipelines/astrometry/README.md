@@ -13,7 +13,7 @@ This pipeline answers two questions about a single image: where in the sky is it
 ## Where each piece lives
 
 - `pipeline.py` runs steps 1 through 4 for a single image. It is the coordinator: it does not detect stars or query catalogs itself, but it calls the pieces that do, in the right order.
-- `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a whole observing session, writes the solved sky position back onto the target's record, and produces a summary of how well the run went.
+- `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a whole observing session, writes the solved sky position back onto the target's record, and produces a summary of how well the run went. It also saves the solved sky map (the WCS, which converts pixel positions to sky positions) into the image's FITS header, so the next program to open the file does not solve it again. The save keeps the SIP distortion terms (`A_*`, `B_*`, `AP_*`, `BP_*`), which correct lens distortion near the image edges, and keeps `-SIP` in `CTYPE1` and `CTYPE2`. It first deletes the sky-map keywords from any earlier solve, so a re-solve leaves no contradictory cards. The shared function `write_wcs_to_fits_header` in `shared/session_identification.py` does this work. `test/test_runner_wcs_write_back.py` checks that a saved map gives the same corner positions as the original to 0.01 arcsecond.
 - `pre_processing/`, `processing/`, and `post_processing/` hold the three stages described above.
 - `utilities/` holds tools that support astrometry but are not part of running the pipeline on an image — for example, downloading a region of the star catalog ahead of time so a batch of images does not overwhelm the remote database.
 

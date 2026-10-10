@@ -8,6 +8,7 @@ re-use existing map data if the image already has it, saving a lot of time.
 import configparser
 import logging
 import os
+import re
 import warnings
 from dataclasses import dataclass, field
 from typing import Any
@@ -40,21 +41,53 @@ MIN_CATALOG_MATCH_FRACTION_FOR_REUSED_WCS = 0.10
 MIN_STARS_TO_VERIFY_REUSED_WCS = 20
 
 
-def _write_wcs_to_header(path: str, wcs: WCS) -> None:
-    """Save the calculated map data back into the image file.
+# The keywords that describe where an image points on the sky, for the first
+# two axes. `write_wcs_to_fits_header` deletes these before it writes a new
+# solution. Without that step, a card from an older solve can survive and
+# contradict the new one. For example, an old `CD1_1` matrix outranks a new
+# `PC1_1` matrix when astropy reads the header, and an old `A_4_0` term
+# stays next to a new second-order SIP fit.
+_STALE_WCS_KEYWORD_PATTERN = re.compile(
+    r"^(WCSAXES|CTYPE[12]|CRVAL[12]|CRPIX[12]|CDELT[12]|CUNIT[12]|CROTA[12]"
+    r"|PC[12]_[12]|CD[12]_[12]|PV[12]_\d+|PS[12]_\d+"
+    r"|LONPOLE|LATPOLE|RADESYS|RADECSYS|EQUINOX"
+    r"|(A|B|AP|BP)_ORDER|(A|B|AP|BP)_\d+_\d+|(A|B)_DMAX)$"
+)
 
-    This means the next time this image is loaded, time won't be wasted
-    re-calculating everything.
+
+def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
+    """Save a solved sky map (WCS) into a FITS file's header.
+
+    The next program that opens the file (this library, Siril, a FITS
+    viewer) then gets the solved pointing without solving again.
+
+    The function first deletes the old sky-map keywords, so an earlier
+    solve cannot leave cards that contradict the new one. It then writes
+    the new keywords with ``to_header(relax=True)``. Without ``relax=True``,
+    astropy leaves out the SIP distortion terms (``A_*``, ``B_*``,
+    ``AP_*``, ``BP_*``) and removes ``-SIP`` from ``CTYPE``. A reader of the
+    file would then lose the lens distortion near the image edges.
+
+    The function logs a warning and returns if the file cannot be updated.
+
+    Parameters
+    ----------
+    path : `str`
+        The FITS file to update. A missing or empty path does nothing.
+    wcs : `astropy.wcs.WCS`
+        The solved sky map to store.
     """
     if not path or not os.path.exists(path):
         return
     try:
-        with fits.open(path, mode="update") as hdul:
-            wcs_header = wcs.to_header()
-            for card in wcs_header.cards:
+        with fits.open(path, mode="update", memmap=False) as hdul:
+            header = hdul[0].header
+            for keyword in [key for key in header if _STALE_WCS_KEYWORD_PATTERN.match(key)]:
+                del header[keyword]
+            for card in wcs.to_header(relax=True).cards:
                 if not card.keyword:
                     continue
-                hdul[0].header[card.keyword] = (card.value, card.comment)
+                header[card.keyword] = (card.value, card.comment)
             hdul.flush()
         logger.info("Updated FITS file %s header with solved WCS keywords.", path)
     except FITS_READ_ERRORS as wcs_error:
@@ -143,7 +176,7 @@ def resolve_frame_wcs(
         wcs = WCS(header, naxis=2)
 
     if write_back:
-        _write_wcs_to_header(image.path, wcs)
+        write_wcs_to_fits_header(image.path, wcs)
 
     return wcs, False, True
 
@@ -414,5 +447,5 @@ def _reverify_wcs_solution(
         matched_after,
     )
     if write_back:
-        _write_wcs_to_header(reference_image.path, fresh_wcs)
+        write_wcs_to_fits_header(reference_image.path, fresh_wcs)
     return fresh_wcs, fresh_objects, False, solve_attempted, True

@@ -6,7 +6,6 @@ saves the identified stars into the shared star catalog.
 """
 
 import logging
-import os
 from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
@@ -23,6 +22,7 @@ from astrometricslib.pipelines.pipeline_base import (
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
     merge_astrometry_stellar_object,
@@ -89,23 +89,21 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
 
     So the next tool that opens this file (Siril, another astrometry
     run, a human in a FITS viewer) sees the solved pointing without
-    having to solve it again.
-    """
-    if context.wcs is None or not path or not os.path.exists(path):
-        return
-    try:
-        from astropy.io import fits
+    having to solve it again. The write keeps the SIP distortion terms
+    and replaces any sky-map keywords from an earlier solve. See
+    `write_wcs_to_fits_header` for how.
 
-        with fits.open(path, mode="update") as hdul:
-            wcs_header = context.wcs.to_header()
-            for card in wcs_header.cards:
-                if not card.keyword:
-                    continue
-                hdul[0].header[card.keyword] = (card.value, card.comment)
-            hdul.flush()
-        logger.info("Updated FITS file %s header with solved WCS keywords.", path)
-    except FITS_READ_ERRORS as wcs_error:
-        logger.warning("Failed to update FITS file header with WCS: %s", wcs_error)
+    Parameters
+    ----------
+    path : `str` or `None`
+        The FITS file to update. `None` or a missing file does nothing.
+    context : `Any`
+        The finished pipeline context. Its `wcs` attribute is the solved
+        sky map, or `None` when the image was not solved.
+    """
+    if context.wcs is None or not path:
+        return
+    write_wcs_to_fits_header(path, context.wcs)
 
 
 def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:

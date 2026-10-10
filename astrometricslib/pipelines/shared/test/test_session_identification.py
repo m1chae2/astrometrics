@@ -85,7 +85,7 @@ class TestResolveFrameWcs:
         constructed_wcs = _make_celestial_wcs()
         monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=constructed_wcs))
         write_back_spy = MagicMock()
-        monkeypatch.setattr(session_identification, "_write_wcs_to_header", write_back_spy)
+        monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", write_back_spy)
 
         wcs, reused, solve_attempted = resolve_frame_wcs(image, identifier)
 
@@ -103,7 +103,7 @@ class TestResolveFrameWcs:
 
         monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=_make_celestial_wcs()))
         write_back_spy = MagicMock()
-        monkeypatch.setattr(session_identification, "_write_wcs_to_header", write_back_spy)
+        monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", write_back_spy)
 
         resolve_frame_wcs(image, identifier, write_back=False)
 
@@ -293,7 +293,7 @@ class TestReusedHeaderWcsVerification:
         identifier.solver.solve = MagicMock(return_value=MagicMock())
         monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=fresh_wcs))
         write_back_spy = MagicMock()
-        monkeypatch.setattr(session_identification, "_write_wcs_to_header", write_back_spy)
+        monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", write_back_spy)
 
         # First pass (header WCS) matches 1/40 = 2.5%; the re-solve matches 25.
         marks = iter([self._identify_marking(1), self._identify_marking(25)])
@@ -326,7 +326,7 @@ class TestReusedHeaderWcsVerification:
         identifier.solver.solve = MagicMock(return_value=MagicMock())
         monkeypatch.setattr(session_identification, "WCS", MagicMock(return_value=_make_celestial_wcs()))
         write_back_spy = MagicMock()
-        monkeypatch.setattr(session_identification, "_write_wcs_to_header", write_back_spy)
+        monkeypatch.setattr(session_identification, "write_wcs_to_fits_header", write_back_spy)
 
         marks = iter([self._identify_marking(2), self._identify_marking(1)])
         monkeypatch.setattr(

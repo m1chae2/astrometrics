@@ -47,7 +47,6 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "drivers/siril_interface.py",
     "pipelines/astrometry/utilities/catalog_seeding.py",
     "pipelines/astrometry/pre_processing/fwhm.py",
-    "pipelines/astrometry/runner.py",
     "pipelines/shared/session_identification.py",
     "pipelines/asteroid_detection/pipeline.py",
     "pipelines/photometry/pre_processing/frame_photometry.py",
@@ -56,6 +55,9 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "pipelines/shared/quality/background_measurement.py",
     "pipelines/shared/quality/quality_metrics.py",
     "scripts/backfill_focal_length.py",
+    # Reads pixels on its own on purpose: it re-measures saved numbers by
+    # a path independent of the pipeline's FITS access.
+    "scripts/recompute_headline_numbers.py",
     "scripts/spectral_registration_quality_analysis.py",
     "visualization/helpers.py",
 })

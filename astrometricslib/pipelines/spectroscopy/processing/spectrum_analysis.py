@@ -87,6 +87,11 @@ class SpectrumAnalysis:
         `response_corrected_intensity`, and the target and reference
         airmasses (see `ExtinctionCorrection.as_dict`). `None` when the
         caller did not try the correction.
+    synthetic_b_minus_v : `float` or `None`
+        The B-V colour measured from the spectrum itself (see
+        `synthetic_colour`), in magnitudes. `None` when the spectrum was not
+        classified, so the colour was not tried, or when it could not be
+        measured.
     """
 
     classification: dict[str, object]
@@ -100,6 +105,7 @@ class SpectrumAnalysis:
     response_corrected_intensity: list[float] | None = None
     catalog_comparison: CatalogComparison | None = None
     extinction_correction: dict[str, object] | None = None
+    synthetic_b_minus_v: float | None = None
 
 
 # The `stellar_spectral_type` label given to extended objects (clusters
@@ -398,6 +404,7 @@ def analyze_spectrum(
         )
 
     comparison: CatalogComparison | None = None
+    synthetic_colour: float | None = None
     if classification["spectral_type"] != "Unknown" and not classification["reason"]:
         # For a star the catalog calls a giant, also find the closest giant
         # reference, so the note can say what the spectrum looks like once
@@ -466,4 +473,5 @@ def analyze_spectrum(
         ),
         catalog_comparison=comparison,
         extinction_correction=extinction_correction.as_dict() if extinction_correction is not None else None,
+        synthetic_b_minus_v=synthetic_colour,
     )

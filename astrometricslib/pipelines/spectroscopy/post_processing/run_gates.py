@@ -15,12 +15,24 @@ it is not a pass. The failed gates' sentences are the run's flag reasons.
 The run is summarised first as a few plain counts (`spectrum_facts`), so the
 single-image runner and the parallel batch workers, which cannot pass whole
 star objects between processes, build the same gates from the same numbers.
+
+The module also rolls up the four per-spectrum quality checkpoints
+(`StageQualityCheckpoint`) into one `StageQualityRollup` per stage for the run
+summary. The workers pass each spectrum's checkpoints between processes as
+plain dictionaries (`stage_quality_rows`), and `summarize_stage_quality` reads
+them back.
 """
 
+import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.spectroscopy_quality import (
+    STAGE_ORDER,
+    StageQualityCheckpoint,
+    StageQualityRollup,
+)
 from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     DIFFERS_FROM_CATALOG_SUBTYPES,
@@ -37,6 +49,14 @@ CLASSIFICATION_GATE_NAME = "spectral_classification"
 CATALOG_GATE_NAME = "catalog_agreement"
 FEATURE_GATE_NAME = "feature_significance"
 RESOLUTION_GATE_NAME = "resolution_measured"
+PROCESSING_QUALITY_GATE_NAME = "processing_quality"
+
+# The largest share of classified spectra allowed to fail a processing-
+# checkpoint metric before the `processing_quality` gate fails. A designed
+# value, not a measured one: half the classified spectra failing means the
+# processing stage is not working for most of the run. It has not been checked
+# against real runs.
+PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION = 0.5
 
 # The counts `spectrum_facts` returns, so a caller can start from all zeros.
 FACT_NAMES = (
@@ -48,6 +68,8 @@ FACT_NAMES = (
     "feature_stars_tested",
     "feature_stars_uncalibrated",
     "resolution_measured",
+    "processing_checked",
+    "processing_failed",
 )
 
 # A spectral type that was never guessed.
@@ -98,7 +120,99 @@ def spectrum_facts(stellar_objects: Iterable[Any]) -> dict[str, int]:
                 facts["feature_stars_uncalibrated"] += 1
         if spectroscopy.resolution_element_angstrom is not None:
             facts["resolution_measured"] += 1
+        if spectral_type and spectral_type not in _UNCLASSIFIED_TYPES:
+            processing = next(
+                (
+                    checkpoint
+                    for checkpoint in getattr(spectroscopy, "stage_quality", None) or []
+                    if checkpoint.stage == "processing"
+                ),
+                None,
+            )
+            if processing is not None:
+                facts["processing_checked"] += 1
+                if processing.has_failed_metric:
+                    facts["processing_failed"] += 1
     return facts
+
+
+def stage_quality_rows(stellar_objects: Iterable[Any]) -> list[list[dict[str, Any]]]:
+    """Collect each spectrum's quality checkpoints as plain dictionaries.
+
+    A batch worker returns these to the parent process, which cannot receive
+    whole star objects.
+
+    Parameters
+    ----------
+    stellar_objects : `Iterable`
+        Stars carrying a ``spectroscopy`` result (or `None`).
+
+    Returns
+    -------
+    rows : `list` [`list` [`dict`]]
+        One list per spectrum that has checkpoints, each holding that
+        spectrum's checkpoints in stage order.
+    """
+    rows = []
+    for star in stellar_objects:
+        spectroscopy = getattr(star, "spectroscopy", None)
+        checkpoints = getattr(spectroscopy, "stage_quality", None) if spectroscopy is not None else None
+        if checkpoints:
+            rows.append([checkpoint.model_dump() for checkpoint in checkpoints])
+    return rows
+
+
+def summarize_stage_quality(
+    rows: Iterable[Iterable[StageQualityCheckpoint | Mapping[str, Any]]],
+) -> list[StageQualityRollup]:
+    """Roll the per-spectrum checkpoints up into one record per stage.
+
+    Parameters
+    ----------
+    rows : `Iterable` [`Iterable`]
+        One entry per spectrum, each holding that spectrum's checkpoints,
+        either as `StageQualityCheckpoint` objects or as the dictionaries
+        from `stage_quality_rows`.
+
+    Returns
+    -------
+    rollups : `list` [`StageQualityRollup`]
+        One record for each stage that at least one spectrum has, in stage
+        order. Each holds the number of spectra, how many have a failed
+        metric, and the median of every metric that at least one spectrum
+        measured. A spectrum counts once per stage, even if it fails several
+        metrics there. Empty when no spectrum has a checkpoint.
+    """
+    spectra_by_stage: dict[str, list[StageQualityCheckpoint]] = {stage: [] for stage in STAGE_ORDER}
+    for row in rows:
+        for entry in row:
+            checkpoint = (
+                entry
+                if isinstance(entry, StageQualityCheckpoint)
+                else StageQualityCheckpoint.model_validate(entry)
+            )
+            spectra_by_stage[checkpoint.stage].append(checkpoint)
+    rollups = []
+    for stage in STAGE_ORDER:
+        checkpoints = spectra_by_stage[stage]
+        if not checkpoints:
+            continue
+        values_by_metric: dict[str, list[float]] = {}
+        for checkpoint in checkpoints:
+            for entry in checkpoint.metrics:
+                if entry.value is not None:
+                    values_by_metric.setdefault(entry.name, []).append(entry.value)
+        rollups.append(
+            StageQualityRollup(
+                stage=stage,
+                spectrum_count=len(checkpoints),
+                failed_spectrum_count=sum(1 for checkpoint in checkpoints if checkpoint.has_failed_metric),
+                metric_medians={
+                    name: float(statistics.median(values)) for name, values in values_by_metric.items()
+                },
+            )
+        )
+    return rollups
 
 
 def merge_spectrum_facts(parts: Iterable[Mapping[str, int] | None]) -> dict[str, int]:
@@ -144,7 +258,7 @@ def spectroscopy_run_gates(
     Returns
     -------
     gates : `list` [`GateResult`]
-        Six gates, in a fixed order.
+        Seven gates, in a fixed order.
     """
     gates: list[GateResult] = []
     spectra = facts.get("spectra", 0)
@@ -283,4 +397,42 @@ def spectroscopy_run_gates(
                 f"resolution measured for {measured} of {spectra} spectrum(s)",
             )
         )
+
+    processing_source = (
+        f"at most {PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION:.0%} of classified spectra fail a "
+        "processing-checkpoint metric (designed share, not validated)"
+    )
+    processing_checked = facts.get("processing_checked", 0)
+    processing_failed = facts.get("processing_failed", 0)
+    if processing_checked == 0:
+        gates.append(
+            unchecked_gate(
+                PROCESSING_QUALITY_GATE_NAME,
+                "no classified spectrum had a processing checkpoint to judge",
+                processing_source,
+            )
+        )
+    else:
+        failed_fraction = processing_failed / processing_checked
+        detail = f"{processing_failed} of {processing_checked} classified spectra failed a processing metric"
+        if failed_fraction > PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION:
+            gates.append(
+                failed_gate(
+                    PROCESSING_QUALITY_GATE_NAME,
+                    detail,
+                    failed_fraction,
+                    PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION,
+                    processing_source,
+                )
+            )
+        else:
+            gates.append(
+                passed_gate(
+                    PROCESSING_QUALITY_GATE_NAME,
+                    failed_fraction,
+                    PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION,
+                    processing_source,
+                    detail,
+                )
+            )
     return gates

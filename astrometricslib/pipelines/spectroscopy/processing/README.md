@@ -102,4 +102,24 @@ at each expected wavelength, a second-order-contamination risk flag, and
 the spectrum's own measured colour. It attaches all of these to the star
 for post-processing to evaluate.
 
+## Quality checkpoint 2
+
+`assess_processing_quality.py` judges this stage's results on their own and
+returns a `StageQualityCheckpoint` for the `processing` stage. It reads the
+classification, the feature tests, the synthetic colour, the emission lines and
+the second-order ratio, and changes none of them. Its metrics are:
+
+- the classification RMS and the RMS gaps to the second-best and the next
+  class, judged against `NO_GOOD_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`;
+- whether the pipeline measured a synthetic colour, and the colour itself;
+- the number of significant features, their best p-value and the number of
+  p-values that were not calibrated;
+- the share of samples with second-order risk and the largest blue-to-red
+  ratio;
+- the number of detected emission lines.
+
+The `processing_quality` run gate counts the spectra in which any of these
+metrics fails. The [pipeline README](../README.md) lists every metric with its
+unit and limit.
+
 For exact behavior, read the code.

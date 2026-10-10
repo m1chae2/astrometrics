@@ -21,9 +21,12 @@ from astropy.wcs import WCS
 from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.models.gate_result import GateStatus
+from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, metric
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
+from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import PROCESSING_QUALITY_GATE_NAME
 from astrometricslib.utilities import parallel_batch
 
 
@@ -431,6 +434,66 @@ class TestAttachSpectroscopyQualitySummary:
         assert breakdown[0].frames_contributed == 2
         assert breakdown[0].frames_clipped == 0
         assert target.quality.spectroscopy.upstream_quality_summary_reference == "raw_frames"
+
+    def test_merges_the_stage_quality_rows_of_every_frame(self) -> None:
+        """Checkpoints from every frame roll up into one summary and gate."""
+        target = Target(id="StageQualityBatchTarget")
+
+        def row(rms: float) -> list[dict]:
+            """Build one spectrum's checkpoint as a worker returns it.
+
+            Returns
+            -------
+            row : `list` [`dict`]
+                The spectrum's checkpoints as plain dictionaries.
+            """
+            return [
+                StageQualityCheckpoint(
+                    stage="processing", metrics=[metric("classification_rms", rms, "", 0.15, False)]
+                ).model_dump()
+            ]
+
+        results = {
+            "a.fits": {
+                "status": "success",
+                "stars_processed": 2,
+                "zero_order_saturation_fractions": [0.0],
+                "spectrum_facts": {
+                    "spectra": 2,
+                    "classified": 2,
+                    "processing_checked": 2,
+                    "processing_failed": 1,
+                },
+                "stage_quality": [row(0.05), row(0.30)],
+            },
+            "b.fits": {
+                "status": "success",
+                "stars_processed": 1,
+                "zero_order_saturation_fractions": [0.0],
+                "spectrum_facts": {
+                    "spectra": 1,
+                    "classified": 1,
+                    "processing_checked": 1,
+                    "processing_failed": 1,
+                },
+                "stage_quality": [row(0.40)],
+            },
+        }
+        summary = parallel_batch.BatchRunSummary(succeeded=list(results), failed=[], results=results)
+        session = _make_session("Target:2026-01-01:0.0:0", list(results))
+
+        batch._attach_spectroscopy_quality_summary(target, summary, [(session, SimpleNamespace())])
+
+        recorded = target.quality.spectroscopy
+        rollups = recorded.spectroscopy_metrics.stage_quality_summary
+        assert rollups is not None
+        assert rollups[0].stage == "processing"
+        assert rollups[0].spectrum_count == 3
+        assert rollups[0].failed_spectrum_count == 2
+        assert rollups[0].metric_medians["classification_rms"] == pytest.approx(0.30)
+        gate = recorded.gate(PROCESSING_QUALITY_GATE_NAME)
+        assert gate.status is GateStatus.FAILED
+        assert recorded.flagged is True
 
     def test_records_the_camera_profile_of_the_frames_that_were_processed(self) -> None:
         """The summary names the camera of the session's frames."""

@@ -91,6 +91,7 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "catalog_agreement": ALL_THREE,
         "feature_significance": ALL_THREE,
         "resolution_measured": frozenset({PASSED, NOT_CHECKED}),
+        "processing_quality": ALL_THREE,
     },
     "asteroid_detection": {
         # Too few frames means "could not look", never a failure.

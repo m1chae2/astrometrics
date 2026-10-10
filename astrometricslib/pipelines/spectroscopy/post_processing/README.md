@@ -101,4 +101,17 @@ The colour limits in `compare_to_catalog.py`
 (`COLOUR_DISAGREEMENT_MAGNITUDES` and `MAXIMUM_CALIBRATED_B_MINUS_V`) are
 used only there and stay in that file.
 
+## Quality checkpoint 3
+
+`output_quality_checkpoint` in `assess_output_quality.py` turns the output
+quality assessment into the final `StageQualityCheckpoint` (stage
+`post_processing`). It carries the poor-match, subtype-ambiguity, class-
+ambiguity, catalog-agreement, colour-agreement and trustworthy verdicts as 1 or
+0 values, plus the distance in subtype steps between the measured and the
+catalog type, judged against `DIFFERS_FROM_CATALOG_SUBTYPES`. For an
+unclassified spectrum every value is empty. `run_gates.py` also rolls the four
+checkpoints of all spectra up into the run summary's `stage_quality_summary`
+and builds the `processing_quality` gate. The [pipeline README](../README.md)
+describes both.
+
 For exact behavior, read the code.

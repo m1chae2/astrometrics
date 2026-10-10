@@ -7,9 +7,181 @@ what it looks like next to the star's catalog entry, and how much the
 resulting classification should be trusted. These are attached directly
 to `SpectroscopyResult` on `StellarObject`, one set per star, so a reader
 can judge a single result without re-deriving any of this themselves.
+
+The module also holds the common record for the pipeline's quality
+checkpoints (`StageQualityCheckpoint`). The pipeline measures quality at four
+points: the raw frame, the calibrated spectrum, the processing result and the
+final result. Every checkpoint is a list of `StageQualityMetric` records, so
+all four read the same way. `metric` builds one record and decides whether it
+passed, which makes adding a metric to a checkpoint a one-line call.
 """
 
+import math
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+# The four places the spectroscopy pipeline measures its own quality, in the
+# order a spectrum passes through them: the raw frame (checkpoint 0), the
+# calibrated spectrum after pre-processing (1), the result of core processing
+# (2) and the final result after post-processing (3).
+StageName = Literal["raw_frame", "pre_processing", "processing", "post_processing"]
+STAGE_ORDER: tuple[StageName, ...] = ("raw_frame", "pre_processing", "processing", "post_processing")
+
+
+class StageQualityMetric(BaseModel):
+    """One measured number at a quality checkpoint, with its limit and verdict.
+
+    Every checkpoint reports its numbers in this one shape. A reader can
+    compare a metric with its limit without knowing which stage made it. Build
+    one with `metric`, which fills in `passed`.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # A short snake_case name that is unique within its checkpoint, for
+    # example "zero_order_saturated_fraction".
+    name: str = Field(alias="name")
+    # The measured value. `None` when it could not be measured for this
+    # spectrum. A yes/no check is stored as 1.0 (yes) or 0.0 (no).
+    value: float | None = Field(default=None, alias="value")
+    # What `value` is measured in, for example "fraction", "angstrom" or
+    # "relative RMS". Empty for a plain count.
+    unit: str = Field(default="", alias="unit")
+    # The value the metric is judged against. `None` for a metric that is
+    # reported but has no limit yet.
+    limit: float | None = Field(default=None, alias="limit")
+    # `True` when the value is on the good side of the limit, `False` when it
+    # is on the bad side. `None` when there is no limit or no value to judge.
+    passed: bool | None = Field(default=None, alias="passed")
+    # One sentence of context, such as where the limit came from. Empty when
+    # there is nothing to add.
+    note: str = Field(default="", alias="note")
+
+
+class StageQualityCheckpoint(BaseModel):
+    """All the quality numbers measured at one point of the pipeline.
+
+    A spectrum passes four checkpoints, in order: ``raw_frame``,
+    ``pre_processing``, ``processing`` and ``post_processing``. The
+    checkpoints let a reader see where in the pipeline quality was lost.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    stage: StageName = Field(alias="stage")
+    metrics: list[StageQualityMetric] = Field(default_factory=list, alias="metrics")
+    # Short snake_case labels for conditions worth a reader's attention at
+    # this checkpoint, for example "zero_order_saturated". Empty when none
+    # applies.
+    flags: list[str] = Field(default_factory=list, alias="flags")
+
+    @property
+    def has_failed_metric(self) -> bool:
+        """Say whether any metric at this checkpoint failed its limit.
+
+        Returns
+        -------
+        has_failed_metric : `bool`
+            `True` when at least one metric has ``passed`` equal to `False`.
+            A metric with no limit or no value never counts.
+        """
+        return any(entry.passed is False for entry in self.metrics)
+
+
+class StageQualityRollup(BaseModel):
+    """How one checkpoint went across all the spectra of a run.
+
+    Built from every spectrum's `StageQualityCheckpoint` for the same stage.
+    It tells a reader how many spectra had a problem at this stage and what a
+    typical spectrum measured.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    stage: StageName = Field(alias="stage")
+    # How many spectra have a checkpoint for this stage.
+    spectrum_count: int = Field(default=0, alias="spectrumCount")
+    # How many of those spectra have at least one failed metric.
+    failed_spectrum_count: int = Field(default=0, alias="failedSpectrumCount")
+    # The median of each numeric metric across the spectra, keyed by metric
+    # name. A metric no spectrum could measure is left out.
+    metric_medians: dict[str, float] = Field(default_factory=dict, alias="metricMedians")
+
+
+def metric(
+    name: str,
+    value: float | None,
+    unit: str,
+    limit: float | None = None,
+    higher_is_better: bool = True,
+    note: str = "",
+    *,
+    limit_is_a_pass: bool = True,
+) -> StageQualityMetric:
+    """Build one checkpoint metric and decide whether it passed.
+
+    This is the one call that adds a number to a checkpoint. It casts the
+    value and limit to plain `float` (so a NumPy value never reaches the
+    model), turns a NaN or infinite value into `None`, and sets ``passed``.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric's name, unique within its checkpoint.
+    value : `float` or `None`
+        The measured value, or `None` when it could not be measured.
+    unit : `str`
+        What the value is measured in.
+    limit : `float`, optional
+        The value to judge against. Leave out for a metric that has no limit.
+    higher_is_better : `bool`, optional
+        `True` when a value above the limit is good (a signal-to-noise
+        ratio), `False` when a value below it is good (a saturated fraction).
+    note : `str`, optional
+        One sentence of context, such as where the limit came from.
+    limit_is_a_pass : `bool`, optional
+        Whether a value exactly equal to the limit passes. `True` by default.
+        Pass `False` for a limit that is a trigger, for example a saturated
+        fraction that is flagged once it reaches the limit.
+
+    Returns
+    -------
+    metric : `StageQualityMetric`
+        The record. ``passed`` is `None` when there is no limit or no value.
+    """
+    clean_value = _plain_float(value)
+    clean_limit = _plain_float(limit)
+    passed: bool | None = None
+    if clean_value is not None and clean_limit is not None:
+        if clean_value == clean_limit:
+            passed = limit_is_a_pass
+        elif higher_is_better:
+            passed = clean_value > clean_limit
+        else:
+            passed = clean_value < clean_limit
+    return StageQualityMetric(
+        name=name, value=clean_value, unit=unit, limit=clean_limit, passed=passed, note=note
+    )
+
+
+def _plain_float(number: float | None) -> float | None:
+    """Turn a number into a plain `float`, or `None` if it is unusable.
+
+    Parameters
+    ----------
+    number : `float` or `None`
+        A Python or NumPy number, or `None`.
+
+    Returns
+    -------
+    plain : `float` or `None`
+        The number as a Python `float`. `None` for `None`, NaN and infinity.
+    """
+    if number is None:
+        return None
+    converted = float(number)
+    return converted if math.isfinite(converted) else None
 
 
 class CatalogComparison(BaseModel):

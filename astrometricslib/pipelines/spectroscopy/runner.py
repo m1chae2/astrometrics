@@ -30,6 +30,8 @@ from astrometricslib.pipelines.shared.target_center_hint import (
 from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     spectroscopy_run_gates,
     spectrum_facts,
+    stage_quality_rows,
+    summarize_stage_quality,
 )
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
@@ -505,6 +507,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
                 flagged_spectral_classifications=flagged_spectral_classifications,
+                stage_quality_summary=summarize_stage_quality(stage_quality_rows(stellar_objects)) or None,
             ),
         )
         for gate in spectroscopy_run_gates(

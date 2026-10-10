@@ -18,15 +18,27 @@ subtype of the same class. The class level compares the best reference with
 the best reference of a different spectral class letter. A star's trust
 verdict uses both. The run-level `spectral_classification` gate fails only
 on a poor match or a class-level ambiguity (the concerns built here).
+
+The same verdict also forms quality checkpoint 3 (the final result), built by
+`output_quality_checkpoint` in the common `StageQualityCheckpoint` shape. Its
+catalog limit, `DIFFERS_FROM_CATALOG_SUBTYPES`, is imported from the same
+module.
 """
 
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from astrometricslib.models.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
+from astrometricslib.models.spectroscopy_quality import (
+    CatalogComparison,
+    OutputQualityAssessment,
+    StageQualityCheckpoint,
+    metric,
+)
 from astrometricslib.models.stellar_source import (
+    DIFFERS_FROM_CATALOG_SUBTYPES,
     NO_GOOD_MATCH_RMS,
     is_rms_gap_ambiguous,
+    ladder_position,
     rms_gap_to_next_class,
     rms_gap_to_second_best,
 )
@@ -186,3 +198,117 @@ def assess_output_quality(
         catalog_agrees=catalog_agrees,
         is_trustworthy=not (is_poor_match or is_ambiguous or catalog_agrees is False),
     )
+
+
+def _flag_value(flag: bool | None) -> float | None:
+    """Turn a yes/no result into 1.0, 0.0 or `None` for a checkpoint metric.
+
+    Parameters
+    ----------
+    flag : `bool` or `None`
+        A yes/no result, or `None` when it was not judged.
+
+    Returns
+    -------
+    value : `float` or `None`
+        1.0 for `True`, 0.0 for `False`, `None` for `None`.
+    """
+    return None if flag is None else float(flag)
+
+
+def output_quality_checkpoint(
+    assessment: OutputQualityAssessment,
+    *,
+    own_spectral_type: str,
+    catalog_spectral_type: str | None,
+    catalog_comparison: CatalogComparison | None,
+) -> StageQualityCheckpoint:
+    """Build quality checkpoint 3 from an output-quality assessment.
+
+    Parameters
+    ----------
+    assessment : `OutputQualityAssessment`
+        The result of `assess_output_quality`.
+    own_spectral_type : `str`
+        The type the pipeline measured, or ``"Unknown"`` / an empty string
+        when none was.
+    catalog_spectral_type : `str`, optional
+        The star's catalog type, used to count how many subtype steps apart
+        the two types are.
+    catalog_comparison : `CatalogComparison`, optional
+        The result of `compare_to_catalog`, for the colour check.
+
+    Returns
+    -------
+    checkpoint : `StageQualityCheckpoint`
+        The ``post_processing`` checkpoint. Each yes/no verdict is a metric
+        with value 1.0 (yes) or 0.0 (no). For an unclassified spectrum every
+        value is `None` and the checkpoint carries the ``unclassified`` flag,
+        because there is nothing to judge.
+    """
+    is_classified = own_spectral_type not in ("", "Unknown")
+    own_position = ladder_position(own_spectral_type) if is_classified else None
+    catalog_position = ladder_position(catalog_spectral_type)
+    steps_apart = (
+        abs(own_position - catalog_position)
+        if own_position is not None and catalog_position is not None
+        else None
+    )
+
+    def verdict(value: bool | None) -> float | None:
+        """Give a verdict's metric value, `None` if unclassified.
+
+        Returns
+        -------
+        value : `float` or `None`
+            1.0, 0.0 or `None`.
+        """
+        return _flag_value(value) if is_classified else None
+
+    metrics = [
+        metric(
+            "catalog_type_steps_apart",
+            steps_apart,
+            "subtype steps",
+            limit=DIFFERS_FROM_CATALOG_SUBTYPES,
+            higher_is_better=False,
+            note="ten steps make one spectral class, so B0 is 10 and A5 is 25",
+        ),
+        metric("poor_match", verdict(assessment.is_poor_match), "flag", limit=0.0, higher_is_better=False),
+        metric(
+            "subtype_ambiguous", verdict(assessment.is_ambiguous), "flag", limit=0.0, higher_is_better=False
+        ),
+        metric(
+            "class_ambiguous",
+            verdict(assessment.is_class_ambiguous),
+            "flag",
+            limit=0.0,
+            higher_is_better=False,
+        ),
+        metric("catalog_agrees", verdict(assessment.catalog_agrees), "flag", limit=1.0),
+        metric(
+            "colour_agrees",
+            verdict(catalog_comparison.colour_agrees if catalog_comparison is not None else None),
+            "flag",
+            limit=1.0,
+            note="1 when the spectrum's own B-V colour is close to the catalog colour",
+        ),
+        metric("trustworthy", verdict(assessment.is_trustworthy), "flag", limit=1.0),
+    ]
+    flags = []
+    if not is_classified:
+        flags.append("unclassified")
+    else:
+        if assessment.is_poor_match:
+            flags.append("poor_match")
+        if assessment.is_ambiguous:
+            flags.append("subtype_ambiguous")
+        if assessment.is_class_ambiguous:
+            flags.append("class_ambiguous")
+        if assessment.catalog_agrees is False:
+            flags.append("catalog_disagrees")
+        if catalog_comparison is not None and catalog_comparison.colour_agrees is False:
+            flags.append("colour_disagrees")
+        if not assessment.is_trustworthy:
+            flags.append("not_trustworthy")
+    return StageQualityCheckpoint(stage="post_processing", metrics=metrics, flags=flags)

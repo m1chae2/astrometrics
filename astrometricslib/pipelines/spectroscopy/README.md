@@ -19,7 +19,9 @@ themselves for exact methods and thresholds.
 Each star's spectrum moves through all three stages in order. The pipeline
 stores the result of each stage on the star, so a reviewer can see the
 final classification along with the input quality and output trust score
-behind it.
+behind it. A quality checkpoint sits before the first stage and after each
+stage, so a reviewer can also see where quality was lost (see "Quality
+checkpoints" below).
 
 ## How this runs in practice
 
@@ -48,6 +50,197 @@ session does not lose the frames already processed.
   `frame_analysis.py`) drive a star or a session through the three stages
   above. They implement the "how this runs in practice" section, not a
   fourth stage.
+
+## Quality checkpoints
+
+The pipeline measures a spectrum's quality at four checkpoints: one on the
+raw frame and one after each of the three stages. Every checkpoint reports
+its numbers in the same shape, so a reader can compare them and see at which
+point quality was lost.
+
+```text
+checkpoint 0 (raw frame) -> pre-processing -> checkpoint 1 (calibrated spectrum)
+  -> processing -> checkpoint 2 (processing result)
+  -> post-processing -> checkpoint 3 (final result)
+```
+
+### The record
+
+A checkpoint is a `StageQualityCheckpoint` (in `models/spectroscopy_quality.py`).
+It holds the stage name (`raw_frame`, `pre_processing`, `processing` or
+`post_processing`), a list of `StageQualityMetric` records, and a list of
+`flags`. A flag is a short label for a condition worth a reader's attention,
+such as `zero_order_saturated`.
+
+Each `StageQualityMetric` has these fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | A short snake_case name, unique within its checkpoint. |
+| `value` | The measured number, or `None` when the pipeline could not measure it. A yes/no check is stored as 1.0 (yes) or 0.0 (no). |
+| `unit` | What `value` is measured in, such as `fraction`, `angstrom` or `relative RMS`. |
+| `limit` | The number the value is judged against, or `None` when the metric has no limit. |
+| `passed` | `True` when the value is on the good side of the limit, `False` when it is on the bad side, `None` when there is no limit or no value. A value exactly at the limit passes, except where a metric sets `limit_is_a_pass=False`. |
+| `note` | One sentence of context, such as where the limit comes from. |
+
+The pipeline stores the four checkpoints on each star as
+`SpectroscopyResult.stage_quality` (`stageQuality` in the saved JSON), in stage
+order. The older `input_quality` and `output_quality` records stay as they
+are. The user interface reads them, and checkpoints 1 and 3 repeat their
+numbers.
+
+### The four checkpoints
+
+| Checkpoint | Stage name | Built by | Built from |
+|---|---|---|---|
+| 0 | `raw_frame` | `assess_raw_frame_quality` in `pre_processing/assess_raw_frame_quality.py` | The numbers the extraction already measured for the star |
+| 1 | `pre_processing` | `input_quality_checkpoint` in `pre_processing/assess_input_quality.py` | The `InputQualityAssessment` |
+| 2 | `processing` | `assess_processing_quality` in `processing/assess_processing_quality.py` | The classification, features, colour, emission lines and second-order ratio |
+| 3 | `post_processing` | `output_quality_checkpoint` in `post_processing/assess_output_quality.py` | The `OutputQualityAssessment` and the catalog comparison |
+
+`_apply_result_to_stellar_object` in `pipeline.py` calls the four builders and
+stores the list. Each builder only gathers numbers that earlier code already
+produced. None of them changes a spectrum or a classification.
+
+### Metrics each checkpoint carries today
+
+Limits come from the places that define them: `NO_GOOD_MATCH_RMS`,
+`AMBIGUOUS_RMS_GAP` and `DIFFERS_FROM_CATALOG_SUBTYPES` in
+`models/stellar_source.py`, `DEFAULT_SATURATION_FLAG_THRESHOLD` in
+`pipelines/shared/quality/saturation.py`, and
+`MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` in `processing/spectrum_signal.py`. The new
+modules import these limits and define none of their own. A metric with no
+limit is reported for measurement only.
+
+**Checkpoint 0, raw frame.** The pipeline re-measures nothing here. It reuses
+what the extraction computed for this star.
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.001), lower is better; a value at the limit fails | The share of the zero-order image (the star's undispersed image) at the camera's saturation level. A high value means the star's brightest part is unreliable. |
+| `valid_fraction` | fraction | none | The share of the requested spectrum that landed on the image. Below 1, part of the trail ran off the image. |
+| `median_trail_width` | pixel | none | The median fitted width of the trail across the dispersion direction. A wide trail means a blurrier spectrum. |
+| `contaminated_sky_fraction` | fraction | none | The share of sky readings that had to drop a sky band because a neighbouring star's light fell in it. The note names the dominant sky mode. |
+
+When the caller supplies the frame-level result of `measure_spectral_frame_file`
+under `result["frame_check"]`, the checkpoint also carries `streak_tilt`
+(degree) and `peak_above_sky` (ADU), and the saturation note names the
+saturation level's source. The spectroscopy pipeline does not run that
+frame-level check, so a pipeline-built checkpoint 0 normally lacks tilt,
+peak-to-sky and saturation source.
+
+**Checkpoint 1, calibrated spectrum.** It carries the five numbers of
+`InputQualityAssessment`.
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `resolution_element` | angstrom | none | How much the instrument blurred the spectrum. A smaller value separates nearby spectral types better. |
+| `resolution_measured` | flag | none | 1 when the blur came from the spectrum's own trail width, 0 when a fixed fallback was used. |
+| `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD`, lower is better | The same saturation share as checkpoint 0, kept so the assessment's numbers are all here. |
+| `valid_fraction` | fraction | none | The same coverage as checkpoint 0. |
+| `signal_to_noise` | per resolution element | `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` (1.5), higher is better | How strongly the spectrum stands out from its own scatter. Below the limit the pipeline does not classify the spectrum. |
+
+**Checkpoint 2, processing result.** It judges the processing results on their
+own, before the catalog comparison. For an unclassified spectrum the
+classification and colour metrics have no value, and the checkpoint carries the
+`unclassified` flag.
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `classification_rms` | relative RMS | `NO_GOOD_MATCH_RMS` (0.15), lower is better | How far the best reference spectrum is from this spectrum. |
+| `rms_gap_to_second_best` | relative RMS | none (reported only) | How much closer the best reference is than the runner-up. Below `AMBIGUOUS_RMS_GAP` (0.02) the subtype is uncertain, which is common at this resolution, so it fails nothing. |
+| `rms_gap_to_next_class` | relative RMS | `AMBIGUOUS_RMS_GAP`, higher is better | The same gap to the best reference of another class letter. A small gap means the class is uncertain. |
+| `synthetic_colour_measured` | flag | 1, higher is better | 1 when the pipeline measured a B-V colour from the spectrum. |
+| `synthetic_b_minus_v` | magnitude | none | The B-V colour measured from the spectrum. |
+| `significant_feature_count` | features | none | How many named features have a detected or possible verdict. |
+| `best_feature_p_value` | probability | none | The smallest feature p-value (the chance that noise like this spectrum's gives a feature this strong). Lower is stronger. |
+| `uncalibrated_feature_count` | features | 0, lower is better | How many p-values assumed Gaussian noise because too few control windows were available. |
+| `second_order_risky_fraction` | fraction | none | The share of samples where second-order light could add a tenth of the signal. |
+| `second_order_max_blue_to_red_ratio` | ratio | none | The largest ratio of the brightness at half a wavelength to the brightness at that wavelength. |
+| `emission_lines_detected` | lines | none | How many named emission lines or blends have a detected verdict. The `emission_line_source` flag marks two or more. |
+
+The processing flags are `unclassified`, `emission_line_source` and
+`second_order_risk`. The two second-order metrics have no limit because their
+2 percent and 10 percent figures are not validated.
+
+**Checkpoint 3, final result.** It carries the verdicts of
+`OutputQualityAssessment` and the catalog distance. Each verdict is 1 (yes) or
+0 (no). For an unclassified spectrum every value is `None` and the checkpoint
+carries the `unclassified` flag.
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `catalog_type_steps_apart` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance on the O-to-M ladder between the measured and the catalog type (B0 is 10, A5 is 25). |
+| `poor_match` | flag | 0, lower is better | 1 when `classification_rms` is above `NO_GOOD_MATCH_RMS`. |
+| `subtype_ambiguous` | flag | 0, lower is better | 1 when the gap to the second best is below `AMBIGUOUS_RMS_GAP`. Common, because neighbouring subtypes often fit about equally well. |
+| `class_ambiguous` | flag | 0, lower is better | 1 when the gap to the next class is below `AMBIGUOUS_RMS_GAP`. |
+| `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
+| `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
+| `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`. |
+
+### Adding a metric
+
+Adding a metric to a checkpoint takes one `metric(...)` call in that
+checkpoint's builder. `metric` is in `models/spectroscopy_quality.py`:
+
+```python
+metric(name, value, unit, limit=None, higher_is_better=True, note="", *, limit_is_a_pass=True)
+```
+
+`metric` casts the value and limit to plain `float`, turns NaN and infinity
+into `None`, and sets `passed` from the limit and the direction. For example,
+a per-pixel signal-to-noise floor at the pre-processing checkpoint is one line
+in the list that `input_quality_checkpoint` builds:
+
+```python
+metric("minimum_pixel_signal_to_noise", value, "per pixel", limit=3.0, note="source of the limit")
+```
+
+Use these rules:
+
+1. Add the metric in the builder of the checkpoint that owns the stage. Metrics
+   suited to each checkpoint are: atmospheric dispersion at the raw frame;
+   per-pixel signal-to-noise and line width against wavelength at
+   pre-processing; equivalent-width errors and reddening at processing; Gaia
+   XP residuals and wavelength zero-point scatter at post-processing.
+2. Take a limit from the module that defines it. If the limit does not exist
+   yet, define it once, in `models/stellar_source.py` when it is a
+   classification limit, and leave `limit` out until a validated value exists.
+3. Keep the name unique within the checkpoint. The run summary keys its medians
+   by name.
+4. Pass `higher_is_better=False` for a quantity where smaller is better.
+   Pass `limit_is_a_pass=False` when reaching the limit already counts as a
+   failure.
+
+A new metric needs no change to the models, the run summary or the generated
+TypeScript types. The roll-up and the generated types read the list as it is.
+
+### The run-level summary
+
+Both `runner.py` (one image) and `batch.py` (a session) roll the per-spectrum
+checkpoints up into `stage_quality_summary` on the summary's
+`spectroscopy_metrics` (`SpectroscopyPipelineQualityMetrics`).
+`summarize_stage_quality` in `post_processing/run_gates.py` builds it. It holds
+one `StageQualityRollup` per stage, in stage order:
+
+- `spectrum_count`: how many spectra have a checkpoint for the stage.
+- `failed_spectrum_count`: how many of them have at least one metric with
+  `passed` equal to `False`. A spectrum counts once per stage.
+- `metric_medians`: the median of each metric across the spectra that measured
+  it. A metric that no spectrum measured is left out.
+
+The batch workers return each spectrum's checkpoints as plain dictionaries
+(`stage_quality_rows`), because a worker process cannot return whole star
+objects. The summary is `None` for a run with no spectra.
+
+The `processing_quality` gate reads the processing checkpoint. It fails when
+more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of the classified spectra
+fail a processing-checkpoint metric. That limit is 0.5 (50 percent). The share
+is a designed value, not a measured one, and no real run has validated it. The
+gate is `not_checked` when no classified spectrum has a processing checkpoint,
+which includes a run with no spectra. A tie between neighbouring subtypes does not
+count: like the `spectral_classification` gate, this gate fails on ambiguity
+between spectral classes only.
 
 ## Calibration tuning
 
@@ -118,6 +311,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `catalog_agreement` | A measured type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` (20 subtype steps) from the catalog type | No star had a catalog type to compare with |
 | `feature_significance` | A star's feature p-values fell back to assuming Gaussian noise | No star had its features tested |
 | `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
+| `processing_quality` | More than 50% of classified spectra fail a metric of the processing checkpoint (see "Quality checkpoints") | No classified spectrum has a processing checkpoint, including a run with no spectra |
 
 `catalog_agreement`, `feature_significance` and `spectra_extracted` are new flags: before, a disagreement with the catalog or an uncalibrated p-value showed only on the star's own record, and a run with no spectra was not flagged at all. The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path. Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.
 

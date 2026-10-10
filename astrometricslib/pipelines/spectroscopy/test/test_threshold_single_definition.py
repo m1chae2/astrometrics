@@ -30,7 +30,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing import (
     compare_to_catalog,
     run_gates,
 )
-from astrometricslib.pipelines.spectroscopy.processing import spectral_classifier
+from astrometricslib.pipelines.spectroscopy.processing import assess_processing_quality, spectral_classifier
 
 # Each shared limit, its value, and the unit its docstring must state.
 SHARED_LIMITS: dict[str, tuple[float, str]] = {
@@ -48,6 +48,7 @@ MODULES_THAT_MUST_NOT_DEFINE_LIMITS = (
     spectral_classifier,
     compare_to_catalog,
     assess_output_quality,
+    assess_processing_quality,
     run_gates,
 )
 

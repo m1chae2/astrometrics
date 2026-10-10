@@ -30,6 +30,7 @@ from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
     OutputQualityAssessment,
+    StageQualityCheckpoint,
 )
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
@@ -781,6 +782,12 @@ class SpectroscopyResult(BaseModel):
     # (see `post_processing.assess_output_quality`). `None` for a spectrum
     # saved before this was recorded, or one that was never classified.
     output_quality: OutputQualityAssessment | None = Field(default=None, alias="outputQuality")
+    # The four quality checkpoints this spectrum passed, in stage order: raw
+    # frame, pre-processing, processing and post-processing (see
+    # `StageQualityCheckpoint`). Each lists its measured numbers against their
+    # limits in one common shape. Empty for a spectrum saved before this was
+    # recorded.
+    stage_quality: list[StageQualityCheckpoint] = Field(default_factory=list, alias="stageQuality")
     # How the extractor read the sky and how wide its reading box was (see
     # `SpectralExtractionDiagnostics`). `None` for a spectrum saved before
     # this was recorded.

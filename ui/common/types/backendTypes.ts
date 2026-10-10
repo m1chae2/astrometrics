@@ -416,6 +416,7 @@ export interface SpectroscopyResult {
   catalogComparison?: CatalogComparison | null;
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
+  stageQuality?: StageQualityCheckpoint[];
   extractionDiagnostics?: SpectralExtractionDiagnostics | null;
   extinctionCorrection?: ExtinctionCorrectionRecord | null;
   generatedByJobId?: string | null;
@@ -519,6 +520,49 @@ export interface OutputQualityAssessment {
   isSubtypeFinerThanResolution?: boolean | null;
   catalogAgrees?: boolean | null;
   isTrustworthy: boolean;
+}
+
+/**
+ * One measured number at a quality checkpoint, with its limit and verdict.
+ *
+ * Every checkpoint reports its numbers in this one shape. A reader can
+ * compare a metric with its limit without knowing which stage made it. Build
+ * one with `metric`, which fills in `passed`.
+ */
+export interface StageQualityMetric {
+  name: string;
+  value?: number | null;
+  unit?: string;
+  limit?: number | null;
+  passed?: boolean | null;
+  note?: string;
+}
+
+/**
+ * All the quality numbers measured at one point of the pipeline.
+ *
+ * A spectrum passes four checkpoints, in order: ``raw_frame``,
+ * ``pre_processing``, ``processing`` and ``post_processing``. The
+ * checkpoints let a reader see where in the pipeline quality was lost.
+ */
+export interface StageQualityCheckpoint {
+  stage: any;
+  metrics?: StageQualityMetric[];
+  flags?: string[];
+}
+
+/**
+ * How one checkpoint went across all the spectra of a run.
+ *
+ * Built from every spectrum's `StageQualityCheckpoint` for the same stage.
+ * It tells a reader how many spectra had a problem at this stage and what a
+ * typical spectrum measured.
+ */
+export interface StageQualityRollup {
+  stage: any;
+  spectrumCount?: number;
+  failedSpectrumCount?: number;
+  metricMedians?: Record<string, number>;
 }
 
 /**
@@ -1807,6 +1851,7 @@ export interface SpectroscopyPipelineQualityMetrics {
   poorMatchClassificationCount?: number;
   ambiguousClassificationCount?: number;
   flaggedSpectralClassifications?: SpectralClassificationConcern[];
+  stageQualitySummary?: StageQualityRollup[] | null;
 }
 
 /**

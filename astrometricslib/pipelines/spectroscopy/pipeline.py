@@ -24,8 +24,17 @@ from astrometricslib.pipelines.shared.quality.saturation import (
     compute_stack_saturated_pixel_fraction,
     is_normalised_stack_scale,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import assess_output_quality
-from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import assess_input_quality
+from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
+    assess_output_quality,
+    output_quality_checkpoint,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import (
+    assess_input_quality,
+    input_quality_checkpoint,
+)
+from astrometricslib.pipelines.spectroscopy.pre_processing.assess_raw_frame_quality import (
+    assess_raw_frame_quality,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import (
     apply_extinction_correction,
 )
@@ -52,6 +61,9 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrume
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality import (
+    assess_processing_quality,
+)
 from astrometricslib.pipelines.spectroscopy.processing.second_order_risk import (
     compute_second_order_blue_to_red_ratio,
 )
@@ -1209,6 +1221,39 @@ class SpectroscopyPipeline:
         output_quality = assess_output_quality(
             classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
         )
+        second_order_blue_to_red_ratio = compute_second_order_blue_to_red_ratio(
+            np.array(wavelengths_angstrom), np.array(intensities)
+        ).tolist()
+
+        # The four quality checkpoints, in the order a spectrum passes them.
+        # Checkpoint 0 reuses the numbers the extraction already measured for
+        # this star. `frame_check` is the optional frame-level result of
+        # `measure_spectral_frame_file`; the pipeline does not run it, so it
+        # is normally absent.
+        stage_quality = [
+            assess_raw_frame_quality(
+                zero_order_saturated_pixel_fraction=result.get("zero_order_saturated_pixel_fraction"),
+                valid_fraction=result.get("valid_fraction"),
+                trail_width_px=result.get("trail_width_px"),
+                extraction_diagnostics=result.get("extraction_diagnostics"),
+                frame_check=result.get("frame_check"),
+            ),
+            input_quality_checkpoint(input_quality),
+            assess_processing_quality(
+                classification=classification,
+                features=probable_spectral_features,
+                synthetic_b_minus_v=analysis.synthetic_b_minus_v,
+                emission_lines=analysis.emission_lines,
+                is_emission_line_source=analysis.is_emission_line_source,
+                second_order_blue_to_red_ratio=second_order_blue_to_red_ratio,
+            ),
+            output_quality_checkpoint(
+                output_quality,
+                own_spectral_type=str(classification["spectral_type"]),
+                catalog_spectral_type=star.spectral_type,
+                catalog_comparison=analysis.catalog_comparison,
+            ),
+        ]
 
         star.spectroscopy = SpectroscopyResult(
             wavelengths_angstrom=wavelengths_angstrom,
@@ -1234,9 +1279,7 @@ class SpectroscopyPipeline:
             dispersion_angle=dispersion_angle,
             trail_centerline_px=result.get("trail_centerline_px"),
             trail_width_px=result.get("trail_width_px"),
-            second_order_blue_to_red_ratio=compute_second_order_blue_to_red_ratio(
-                np.array(wavelengths_angstrom), np.array(intensities)
-            ).tolist(),
+            second_order_blue_to_red_ratio=second_order_blue_to_red_ratio,
             resolution_element_angstrom=(
                 analysis.resolution_element_angstrom if analysis.is_resolution_measured else None
             ),
@@ -1247,6 +1290,7 @@ class SpectroscopyPipeline:
             catalog_comparison=analysis.catalog_comparison,
             input_quality=input_quality,
             output_quality=output_quality,
+            stage_quality=stage_quality,
             extraction_diagnostics=(
                 SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
                 if result.get("extraction_diagnostics") is not None

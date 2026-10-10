@@ -189,6 +189,27 @@ A reviewer can use this assessment to judge whether a later classification
 rests on strong data or weak data, before looking at the classification
 itself.
 
+## Quality checkpoints 0 and 1
+
+This stage builds two checkpoints in the common `StageQualityCheckpoint`
+shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
+
+- **Checkpoint 0, raw frame** (`assess_raw_frame_quality.py`): the pipeline
+  builds it right after it extracts a star. It reuses the zero-order
+  saturated fraction, the valid fraction, the median trail width and the sky
+  contamination from the extraction, and re-measures nothing. It adds the
+  frame's streak tilt and peak above the sky only when the caller supplies the
+  frame-level check result.
+- **Checkpoint 1, calibrated spectrum** (`input_quality_checkpoint` in
+  `assess_input_quality.py`): it carries the five numbers of the input quality
+  assessment above. Its signal-to-noise metric uses the limit
+  `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, below which the pipeline does not
+  classify the spectrum.
+
+Both read the saturation limit `DEFAULT_SATURATION_FLAG_THRESHOLD` from
+`pipelines/shared/quality/saturation.py`. The `spectroscopy` result stores
+them as the first two entries of `stage_quality`.
+
 For exact behavior, thresholds and edge cases, read the code
 (`spectrum_extractor.py`, `atmospheric_extinction.py` and
 `instrument_response.py`).

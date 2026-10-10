@@ -54,6 +54,9 @@ from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
     OutputQualityAssessment,
+    StageQualityCheckpoint,
+    StageQualityMetric,
+    StageQualityRollup,
 )
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
@@ -367,6 +370,9 @@ def render_types() -> str:
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),
         generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
+        generate_interface(StageQualityMetric, "StageQualityMetric"),
+        generate_interface(StageQualityCheckpoint, "StageQualityCheckpoint"),
+        generate_interface(StageQualityRollup, "StageQualityRollup"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
         generate_interface(TransitCandidate, "TransitCandidate"),
         generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),

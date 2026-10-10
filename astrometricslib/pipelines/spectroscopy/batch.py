@@ -19,6 +19,8 @@ from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     merge_spectrum_facts,
     spectroscopy_run_gates,
     spectrum_facts,
+    stage_quality_rows,
+    summarize_stage_quality,
 )
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
@@ -292,6 +294,7 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
     fallback_stars = analysis_outcome.get("stellar_objects") or []
     result["stars_processed"] = len(fallback_stars)
     result["spectrum_facts"] = spectrum_facts(fallback_stars)
+    result["stage_quality"] = stage_quality_rows(fallback_stars)
     result["status"] = "success"
     return result
 
@@ -367,6 +370,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         "zero_order_saturation_fractions": [],
         "spectral_classification_concerns": [],
         "spectrum_facts": {},
+        "stage_quality": [],
     }
     try:
         from astrometricslib import Astrometrics
@@ -418,6 +422,7 @@ def _process_single_spectroscopy_frame_worker_v2(
 
         result["stars_processed"] = len(stellar_objects)
         result["spectrum_facts"] = spectrum_facts(stellar_objects)
+        result["stage_quality"] = stage_quality_rows(stellar_objects)
         result["dispersion_angles"] = [
             obj.spectroscopy.dispersion_angle
             for obj in stellar_objects
@@ -588,6 +593,7 @@ def _attach_spectroscopy_quality_summary(
     all_trail_widths = []
     all_zero_order_fractions = []
     all_spectral_classification_concerns = []
+    all_stage_quality_rows: list[list[dict]] = []
     all_spectrum_facts = merge_spectrum_facts(
         frame_result.get("spectrum_facts") for frame_result in summary.results.values()
     )
@@ -604,6 +610,7 @@ def _attach_spectroscopy_quality_summary(
         all_spectral_classification_concerns.extend(
             frame_result.get("spectral_classification_concerns") or []
         )
+        all_stage_quality_rows.extend(frame_result.get("stage_quality") or [])
 
     poor_match_count = sum(
         1 for concern in all_spectral_classification_concerns if "poor_match" in concern["reason"]
@@ -640,6 +647,7 @@ def _attach_spectroscopy_quality_summary(
             poor_match_classification_count=poor_match_count,
             ambiguous_classification_count=ambiguous_count,
             flagged_spectral_classifications=all_spectral_classification_concerns,
+            stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
         ),
     )
     for gate in spectroscopy_run_gates(

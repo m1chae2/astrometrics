@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.models.gate_result import GateResult, GateStatus
+from astrometricslib.models.spectroscopy_quality import StageQualityRollup
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 
 
@@ -536,7 +537,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.4.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.5.0"
 
 
 class SpectralClassificationConcern(BaseModel):
@@ -594,6 +595,12 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     flagged_spectral_classifications: list[SpectralClassificationConcern] = Field(
         default_factory=list, alias="flaggedSpectralClassifications"
     )
+    # How each quality checkpoint went across the run's spectra, in stage
+    # order: for each of the four stages, how many spectra were checked, how
+    # many had a failed metric, and the median of each numeric metric (see
+    # `StageQualityRollup`). `None` for a summary saved before this was
+    # recorded, and for a run with no spectra.
+    stage_quality_summary: list[StageQualityRollup] | None = Field(default=None, alias="stageQualitySummary")
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

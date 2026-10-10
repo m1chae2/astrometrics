@@ -1514,7 +1514,10 @@ class SpectroscopyPipeline:
         # `anchor + flare_offset_pixels`, so the first sample is not exactly
         # `flare_offset_pixels` from the anchor. Take each sample's real
         # distance from the anchor along the dispersion direction, and
-        # calibrate from that distance.
+        # calibrate from that distance. The anchor is the extractor's
+        # centroid of the zero order with the spectrum trail removed. A
+        # centroid that kept the trail would sit about 0.06 to 0.09 pixel
+        # toward it, and every recorded distance would be short by that much.
         anchor_along_axis = anchor_x if self.config.dispersion_orientation == "horizontal" else anchor_y
         first_step = round(anchor_along_axis + flare_offset_pixels)
         axis_offsets = first_step + np.arange(len(spectrum_1d), dtype=float) - anchor_along_axis

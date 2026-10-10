@@ -102,9 +102,9 @@ without leading samples dropped. The same file checks that a noisy frame
 (3000 ADU continuum, Poisson noise) gives at most 12 candidates including the
 three true lines and finishes the search in under 10 seconds, and that the
 refined positions bring the fitted distance within 0.02 percent of the truth
-on the plain extraction path. The flare-mask path keeps a constant offset of
-about 0.08 pixel from its zero-order anchor, which leaves it within 0.03
-percent. For exact behavior, read the code.
+on both extraction paths, with zero-order positions that fall between pixels.
+It also checks that each flare-mask sample distance lands within 0.01 pixel of
+the true distance from the zero order. For exact behavior, read the code.
 
 ## The gate record
 

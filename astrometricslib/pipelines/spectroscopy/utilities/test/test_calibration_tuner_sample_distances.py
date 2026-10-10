@@ -62,6 +62,16 @@ ZERO_ORDER_XY = (60.0, 128.0)
 # Accuracy the tuner must reach.
 POSITION_TOLERANCE_PX = 0.5
 DISTANCE_TOLERANCE_FRACTION = 0.01
+# Accuracy after the parabolic refinement of the dip centres, on both paths.
+REFINED_DISTANCE_TOLERANCE_FRACTION = 2e-4
+REFINED_POSITION_TOLERANCE_PX = 0.05
+# How far a recorded sample distance may sit from the truth on a noise-free
+# frame, in pixels.
+SAMPLE_DISTANCE_TOLERANCE_PX = 0.01
+# Fractional parts of the zero order's x position. The zero order sits
+# between pixels in real frames, and a centroid that rounds or is pulled by
+# the trail shows up as an error that changes with this fraction.
+ZERO_ORDER_X_VALUES = (60.0, 60.25, 60.5, 60.75)
 
 
 class ArrayImage(AstrometricsImage):
@@ -114,7 +124,12 @@ def _true_line_offsets_px() -> np.ndarray:
     )
 
 
-def _build_frame(angle_deg: float, add_noise: bool = False, seed: int = 0) -> SyntheticSpectralFrame:
+def _build_frame(
+    angle_deg: float,
+    add_noise: bool = False,
+    seed: int = 0,
+    zero_order_xy: tuple[float, float] = ZERO_ORDER_XY,
+) -> SyntheticSpectralFrame:
     """Draw a spectral frame with the Balmer lines in place.
 
     The generator spaces lines with a straight-line wavelength model, so
@@ -136,6 +151,8 @@ def _build_frame(angle_deg: float, add_noise: bool = False, seed: int = 0) -> Sy
         column). The default is a noise-free frame.
     seed : `int`, optional
         Seed for the noise.
+    zero_order_xy : `tuple` [`float`, `float`], optional
+        The zero order's true position. The default is a whole-pixel x.
 
     Returns
     -------
@@ -145,7 +162,7 @@ def _build_frame(angle_deg: float, add_noise: bool = False, seed: int = 0) -> Sy
     column_offsets_px = _true_line_offsets_px() * np.cos(np.radians(angle_deg))
     dispersion_a_per_px = 10.0
     return make_spectral_frame(
-        zero_order_xy=ZERO_ORDER_XY,
+        zero_order_xy=zero_order_xy,
         angle_deg=angle_deg,
         dispersion_a_per_px=dispersion_a_per_px,
         trail_length_px=900,
@@ -420,24 +437,16 @@ def test_noisy_adu_frame_gives_few_candidates_and_finishes_quickly(seed: int) ->
     assert fitted_distance_mm == pytest.approx(TRUE_GRATING_DISTANCE_MM, rel=2e-3)
 
 
-@pytest.mark.parametrize(
-    ("use_flare_mask", "distance_tolerance_fraction", "position_tolerance_px"),
-    [(False, 2e-4, 0.05), (True, 3e-4, 0.1)],
-    ids=["dispersion-line", "flare-mask"],
-)
+@pytest.mark.parametrize("use_flare_mask", [False, True], ids=["dispersion-line", "flare-mask"])
 @pytest.mark.parametrize("angle_deg", [0.0, 3.0], ids=["level", "tilted"])
-def test_refined_dip_centres_improve_the_fitted_distance(
-    angle_deg: float, use_flare_mask: bool, distance_tolerance_fraction: float, position_tolerance_px: float
-) -> None:
+def test_refined_dip_centres_improve_the_fitted_distance(angle_deg: float, use_flare_mask: bool) -> None:
     """Sub-sample dip centres bring the fit within 0.02 percent of the truth.
 
     Whole-sample dip positions are up to half a pixel off, which left a
     0.08 percent error in the fitted grating distance. With the parabolic
-    refinement the plain extraction is within 0.02 percent and its dips
-    within 0.05 pixel of the true lines. The flare-mask extraction keeps a
-    constant offset of about 0.08 pixel from its anchor (the same for every
-    line and tilt), so its limits are a little wider. In every case the
-    refined fit must be closer to the truth than the whole-sample fit.
+    refinement both extraction paths must land within 0.02 percent and
+    their dips within 0.05 pixel of the true lines. The refined fit must
+    also be closer to the truth than the whole-sample fit.
 
     Parameters
     ----------
@@ -445,10 +454,6 @@ def test_refined_dip_centres_improve_the_fitted_distance(
         The trail tilt, in degrees.
     use_flare_mask : `bool`
         Whether the pipeline uses the flare-mask extraction path.
-    distance_tolerance_fraction : `float`
-        The largest allowed relative error of the refined distance.
-    position_tolerance_px : `float`
-        The largest allowed error of a refined dip position, in pixels.
     """
     frame = _build_frame(angle_deg)
     pipeline = _build_pipeline(START_PX_WITH_DROPS, angle_deg, use_flare_mask)
@@ -468,13 +473,13 @@ def test_refined_dip_centres_improve_the_fitted_distance(
 
     whole_sample_error = abs(whole_sample_distance_mm / TRUE_GRATING_DISTANCE_MM - 1.0)
     refined_error = abs(refined_distance_mm / TRUE_GRATING_DISTANCE_MM - 1.0)
-    assert refined_error < distance_tolerance_fraction
+    assert refined_error < REFINED_DISTANCE_TOLERANCE_FRACTION
     assert refined_error < whole_sample_error
     refined_offsets_px = SpectroscopyCalibrationTuner._positions_to_distances_px(
         refined_combo, sample_distances_px
     )
     np.testing.assert_allclose(
-        refined_offsets_px, _true_line_offsets_px(), atol=position_tolerance_px, rtol=0.0
+        refined_offsets_px, _true_line_offsets_px(), atol=REFINED_POSITION_TOLERANCE_PX, rtol=0.0
     )
 
     summary = SpectroscopyCalibrationTuner._build_calibration_summary(
@@ -492,3 +497,74 @@ def test_refined_dip_centres_improve_the_fitted_distance(
     )
     for line, offset_px in zip(summary["detailed_calibration"], refined_offsets_px, strict=True):
         assert line["pixel_offset"] == pytest.approx(offset_px)
+
+
+@pytest.mark.parametrize("use_flare_mask", [False, True], ids=["dispersion-line", "flare-mask"])
+@pytest.mark.parametrize("angle_deg", [0.0, 3.0], ids=["level", "tilted"])
+@pytest.mark.parametrize("zero_order_x", ZERO_ORDER_X_VALUES)
+def test_refined_dip_positions_hold_for_a_zero_order_between_pixels(
+    zero_order_x: float, angle_deg: float, use_flare_mask: bool
+) -> None:
+    """Both paths place the dips on the true lines for any zero-order fraction.
+
+    The zero order is moved by a fraction of a pixel in x (and by 0.4 pixel
+    in y). The refined dip distances must stay within 0.02 pixel of the
+    true line distances on both extraction paths, and the fitted grating
+    distance must stay within 0.02 percent of the truth.
+
+    Parameters
+    ----------
+    zero_order_x : `float`
+        The zero order's true x position, in pixels.
+    angle_deg : `float`
+        The trail tilt, in degrees.
+    use_flare_mask : `bool`
+        Whether the pipeline uses the flare-mask extraction path.
+    """
+    frame = _build_frame(angle_deg, zero_order_xy=(zero_order_x, 128.4))
+    pipeline = _build_pipeline(START_PX_WITH_DROPS, angle_deg, use_flare_mask)
+    _, smoothed, sample_distances_px = SpectroscopyCalibrationTuner._extract_smoothed_spectrum(
+        pipeline, ArrayImage(frame.image), frame.zero_order_xy
+    )
+    dips = SpectroscopyCalibrationTuner._detect_absorption_dips(smoothed)
+    assert len(dips) == 3
+    centers = SpectroscopyCalibrationTuner._refine_dip_centers(smoothed, dips)
+
+    _, distance_mm, combo = SpectroscopyCalibrationTuner._fit_grating_distance(
+        centers, sample_distances_px, pipeline, TARGET_WAVELENGTHS_NM
+    )
+    offsets_px = SpectroscopyCalibrationTuner._positions_to_distances_px(combo, sample_distances_px)
+
+    np.testing.assert_allclose(offsets_px, _true_line_offsets_px(), atol=0.02, rtol=0.0)
+    assert distance_mm == pytest.approx(TRUE_GRATING_DISTANCE_MM, rel=REFINED_DISTANCE_TOLERANCE_FRACTION)
+
+
+@pytest.mark.parametrize("angle_deg", [0.0, 3.0], ids=["level", "tilted"])
+@pytest.mark.parametrize("zero_order_x", ZERO_ORDER_X_VALUES)
+def test_flare_mask_sample_distances_match_the_true_zero_order(zero_order_x: float, angle_deg: float) -> None:
+    """The flare-mask distances measure from the true zero order.
+
+    Every sample sits on a whole column, so its true distance from the zero
+    order is `(column - zero_order_x) / cos(tilt)`. Converting each
+    recorded distance back to a column (`distance * cos(tilt) + zero_order_x`)
+    must land within 0.01 pixel of a whole number. A zero-order anchor that
+    the spectrum trail pulled 0.08 pixel toward itself would fail this for
+    every sample, and so would an anchor rounded to a whole pixel.
+
+    Parameters
+    ----------
+    zero_order_x : `float`
+        The zero order's true x position, in pixels.
+    angle_deg : `float`
+        The trail tilt, in degrees.
+    """
+    frame = _build_frame(angle_deg, zero_order_xy=(zero_order_x, 128.4))
+    pipeline = _build_pipeline(START_PX_WITHOUT_DROPS, angle_deg, use_flare_mask=True)
+
+    result = pipeline._process_single_star(
+        ArrayImage(frame.image), frame.zero_order_xy, auto_detect_angle=False
+    )
+
+    distances = np.asarray(result["sample_distances_px"])
+    columns = distances * np.cos(np.radians(angle_deg)) + zero_order_x
+    np.testing.assert_allclose(columns, np.round(columns), atol=SAMPLE_DISTANCE_TOLERANCE_PX, rtol=0.0)

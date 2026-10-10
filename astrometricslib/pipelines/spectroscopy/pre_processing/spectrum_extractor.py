@@ -851,6 +851,32 @@ def box_pixel_weights(
     return indices[covered], weights[covered]
 
 
+def _window_weights(line_length: int, centre: float, half_width: float) -> np.ndarray:
+    """Give every pixel of a line its share inside a window.
+
+    A pixel at index `i` spans `i - 0.5` to `i + 0.5`. The window spans
+    `centre - half_width` to `centre + half_width`.
+
+    Parameters
+    ----------
+    line_length : `int`
+        The number of pixels in the line.
+    centre : `float`
+        The middle of the window, as a pixel index (may be fractional).
+    half_width : `float`
+        How far the window reaches each side of its middle, in pixels.
+
+    Returns
+    -------
+    weights : `numpy.ndarray`
+        The fraction of each pixel inside the window, 0 to 1.
+    """
+    indices = np.arange(line_length)
+    low_edge = centre - half_width
+    high_edge = centre + half_width
+    return np.clip(np.minimum(indices + 0.5, high_edge) - np.maximum(indices - 0.5, low_edge), 0.0, 1.0)
+
+
 class SpectrumExtractor:
     """Reads the brightness of a spectrum from an image.
 
@@ -1245,7 +1271,10 @@ class SpectrumExtractor:
         data = image.data
 
         # 1. Centroid Anchor (21x21 subgrid around rough start position)
-        anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
+        trail_side = 1 if flare_offset_pixels + max_offset_pixels >= 0 else -1
+        anchor_x, anchor_y = self._compute_centroid_reference_point(
+            data, start_pos, orientation, angle_degrees, trail_side
+        )
 
         # 2. Bounding Box & Profile Extraction with Dynamic Tilt Tracking
         profile = []
@@ -1277,9 +1306,38 @@ class SpectrumExtractor:
         return np.array(profile), anchor_x, anchor_y
 
     def _compute_centroid_reference_point(
-        self, data: np.ndarray, start_pos: tuple[float, float]
+        self,
+        data: np.ndarray,
+        start_pos: tuple[float, float],
+        orientation: str | None = None,
+        angle_degrees: float = 0.0,
+        trail_side: int = 1,
     ) -> tuple[float, float]:
         """Find the sub-pixel centroid of a star in a 21x21 pixel box.
+
+        The centroid is the brightness-weighted average position. The
+        spectrum trail that leaves the star puts light on one side of it,
+        and that light drags a plain centroid toward the trail: about 0.06
+        pixel for a trail of 3000 ADU per column beside a 2 million ADU
+        star. When the caller gives the dispersion orientation, this method
+        removes the trail first (see `_subtract_trail_from_box`).
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        start_pos : `tuple` [`float`, `float`]
+            Rough star position `(x, y)`.
+        orientation : `str`, optional
+            `"horizontal"` or `"vertical"`, the direction the trail runs.
+            `None` skips the trail removal and gives the plain centroid.
+        angle_degrees : `float`, optional
+            The tilt of the trail, in the same convention as
+            `extract_with_flare_mask` (the trail centre moves by
+            `-tan(angle)` across for each step along).
+        trail_side : `int`, optional
+            `1` when the trail leaves toward larger pixel indices along the
+            dispersion axis, `-1` when it leaves toward smaller ones.
 
         Returns
         -------
@@ -1296,15 +1354,164 @@ class SpectrumExtractor:
 
         subgrid = data[y_start:y_end, x_start:x_end]
         total_mass = np.sum(subgrid)
+        if total_mass <= 0:
+            return x0, y0
 
-        if total_mass > 0:
-            y_indices, x_indices = np.indices(subgrid.shape)
-            anchor_x = x_start + np.sum(subgrid * x_indices) / total_mass
-            anchor_y = y_start + np.sum(subgrid * y_indices) / total_mass
-        else:
-            anchor_x, anchor_y = x0, y0
+        y_indices, x_indices = np.indices(subgrid.shape)
+        anchor_x = np.sum(subgrid * x_indices) / total_mass
+        anchor_y = np.sum(subgrid * y_indices) / total_mass
 
-        return anchor_x, anchor_y
+        if orientation is not None:
+            # Clean the box around the latest centre, then measure again.
+            # The cleaning needs the centre and the centre needs the
+            # cleaning, so a few rounds settle both.
+            is_vertical = orientation == "vertical"
+            slope = -np.tan(np.radians(angle_degrees))
+            for _ in range(4):
+                if is_vertical:
+                    cleaned = self._subtract_trail_from_box(subgrid.T, slope, trail_side, anchor_y).T
+                else:
+                    cleaned = self._subtract_trail_from_box(subgrid, slope, trail_side, anchor_x)
+                if np.sum(cleaned) <= 0:
+                    break
+                anchor_x, anchor_y = self._recentre_centroid_window(cleaned, anchor_x, anchor_y)
+        return x_start + anchor_x, y_start + anchor_y
+
+    @staticmethod
+    def _recentre_centroid_window(
+        box: np.ndarray, centre_x: float, centre_y: float, half_width: float = 8.0, iterations: int = 100
+    ) -> tuple[float, float]:
+        """Refine a centroid with a window that stays centred on the star.
+
+        The box around the star is centred on a whole pixel, so a star
+        between pixels has more of one side of its faint wings inside the
+        box than the other. That pulls the centroid by up to 0.03 pixel.
+        This method averages inside a smaller window instead, and moves the
+        window to the latest centroid each time. A pixel at the window edge
+        counts for the fraction of it inside the window (see
+        `box_pixel_weights`).
+
+        Parameters
+        ----------
+        box : `numpy.ndarray`
+            The pixels around the star, with the trail and background
+            already removed.
+        centre_x, centre_y : `float`
+            The first centroid, in the box's own pixel indices.
+        half_width : `float`, optional
+            How far the window reaches each side of its middle, in pixels.
+            It must be smaller than half the box, so the window stays
+            inside the box.
+        iterations : `int`, optional
+            The most times to recentre the window. The loop stops early
+            once the centre moves by less than 0.0001 pixel. Each step
+            closes only a small part of the gap, so it needs many steps.
+
+        Returns
+        -------
+        centre_x, centre_y : `float`
+            The refined centroid, in the box's own pixel indices.
+        """
+        n_rows, n_cols = box.shape
+        for _ in range(iterations):
+            weights_x = _window_weights(n_cols, centre_x, half_width)
+            weights_y = _window_weights(n_rows, centre_y, half_width)
+            weighted = box * np.outer(weights_y, weights_x)
+            mass = np.sum(weighted)
+            if mass <= 0:
+                break
+            new_x = float(np.sum(weighted.sum(axis=0) * np.arange(n_cols)) / mass)
+            new_y = float(np.sum(weighted.sum(axis=1) * np.arange(n_rows)) / mass)
+            moved = max(abs(new_x - centre_x), abs(new_y - centre_y))
+            centre_x, centre_y = new_x, new_y
+            if moved < 1e-4:
+                break
+        return centre_x, centre_y
+
+    @staticmethod
+    def _subtract_trail_from_box(box: np.ndarray, slope: float, trail_side: int, centre: float) -> np.ndarray:
+        """Remove the trail and the background from a box around a star.
+
+        The method reads two cross-sections (one value per row, from the
+        average of three nearby lines) at equal distances either side of the
+        star's centre, near the box edge. The one away from the trail shows
+        the sky and a faint wing of the star. The one on the trail side
+        shows those two plus the trail. Equal distances from the centre
+        give the star's wing the same size at both, so their difference is
+        the trail's cross-section alone.
+
+        Every line loses the away-side cross-section, which is the same
+        background for each line. That leaves the star balanced around its
+        centre. Every line on the trail side of the centre also loses the
+        trail's cross-section, slid along the tilted trail to that line. The
+        centroid then has no pull toward the trail.
+
+        Parameters
+        ----------
+        box : `numpy.ndarray`
+            The pixels around the star, with the dispersion axis along the
+            columns.
+        slope : `float`
+            How many rows the trail centre moves for each column along.
+        trail_side : `int`
+            `1` when the trail leaves toward larger column numbers, `-1`
+            when toward smaller ones.
+        centre : `float`
+            The star's centre along the dispersion axis, in the box's own
+            column numbers.
+
+        Returns
+        -------
+        cleaned : `numpy.ndarray`
+            The box with the trail and background subtracted.
+        """
+        n_rows, n_cols = box.shape
+        if n_cols < 8:
+            return box
+        rows = np.arange(n_rows, dtype=float)
+        distances = (8.0, 8.5, 9.0)
+        reference = float(np.clip(centre + trail_side * 8.5, 0.0, n_cols - 1.0))
+
+        def read_line(position: float) -> np.ndarray:
+            """Read one cross-section at a fractional column position.
+
+            Parameters
+            ----------
+            position : `float`
+                The column position, clamped to the box.
+
+            Returns
+            -------
+            section : `numpy.ndarray`
+                The interpolated value of each row.
+            """
+            left = min(int(np.floor(position)), n_cols - 2)
+            share = position - left
+            return (1.0 - share) * box[:, left] + share * box[:, left + 1]
+
+        trail_section = np.zeros(n_rows)
+        background = np.zeros(n_rows)
+        for distance in distances:
+            trail_position = float(np.clip(centre + trail_side * distance, 0.0, n_cols - 1.0))
+            background_position = float(np.clip(centre - trail_side * distance, 0.0, n_cols - 1.0))
+            # Slide the trail's line onto the reference column along the trail.
+            trail_section += np.interp(
+                rows + slope * (trail_position - reference),
+                rows,
+                read_line(trail_position),
+                left=0.0,
+                right=0.0,
+            )
+            background += read_line(background_position)
+        background /= len(distances)
+        trail_section = trail_section / len(distances) - background
+
+        cleaned = box.astype(float) - background[:, np.newaxis]
+        for column in np.arange(n_cols)[(np.arange(n_cols) - centre) * trail_side > 0]:
+            cleaned[:, column] -= np.interp(
+                rows - slope * (column - reference), rows, trail_section, left=0.0, right=0.0
+            )
+        return cleaned
 
     def extract_with_flare_mask_traced(
         self,
@@ -1357,7 +1564,10 @@ class SpectrumExtractor:
         """
         self.last_diagnostics = ExtractionDiagnostics()
         data = image.data
-        anchor_x, anchor_y = self._compute_centroid_reference_point(data, start_pos)
+        trail_side = 1 if flare_offset_pixels + max_offset_pixels >= 0 else -1
+        anchor_x, anchor_y = self._compute_centroid_reference_point(
+            data, start_pos, orientation, angle_degrees, trail_side
+        )
 
         steps, nominal_centers, perpendicular_vector = self._nominal_trace_centers(
             anchor_x, anchor_y, flare_offset_pixels, max_offset_pixels, orientation, angle_degrees

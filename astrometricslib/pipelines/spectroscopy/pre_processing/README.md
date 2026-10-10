@@ -29,8 +29,12 @@ turns out to be. The pipeline runs this stage the same way for every star.
    the distance from the zero-order star (the undispersed image of the
    star), in pixels, measured along the streak. A tilted streak is longer
    than the number of columns it covers, so the flare-mask extraction
-   divides its column offset by the cosine of the tilt. Both extraction
-   paths use this same definition. The distance is the one position the
+   divides its column offset by the cosine of the tilt. The flare-mask
+   extraction measures that offset from its zero-order anchor, the centroid
+   (brightness-weighted average position) of the zero order. Light from the
+   spectrum trail would pull a plain centroid about 0.08 pixel toward the
+   trail, so the extractor subtracts the trail and the background from the
+   box first. Both extraction paths use this same definition. The distance is the one position the
    grating equation expects, so a later step can place any sample on the
    physical model without counting samples from the start.
 6. **Remove signals that are not the star.** The pipeline corrects for

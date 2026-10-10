@@ -27,7 +27,10 @@ from astrometricslib.models.moving_object_config import (
     MovingObjectConfig,
     MovingObjectConfigLoader,
 )
-from astrometricslib.pipelines.asteroid_detection.detection import MovingObjectDetector
+from astrometricslib.pipelines.asteroid_detection.detection import (
+    MovingObjectDetector,
+    wrapped_ra_difference_deg,
+)
 from astrometricslib.pipelines.asteroid_detection.ephemeris import EphemerisCrossMatcher
 from astrometricslib.pipelines.asteroid_detection.frame_wcs_composer import (
     estimate_frame_wcs_from_mount_pointing,
@@ -85,6 +88,34 @@ _POINTING_CORRECTION_VOTE_BIN_ARCSEC = 5.0
 _POINTING_CORRECTION_MIN_VOTES = 5
 
 
+def _reference_centre_ra_deg(reference_ra_deg: np.ndarray) -> float:
+    """Find one central Right Ascension (RA) for a set of reference stars.
+
+    RA wraps from 360 deg back to 0 deg, so a plain average of
+    359.98 deg and 0.02 deg gives 180 deg, which is the wrong side of
+    the sky. This function averages the RA values as points on a circle
+    instead, so a field that straddles RA = 0 h gets a centre inside
+    the field. The tree builder and the offset estimator both call it on
+    the same reference array, so they always agree on the centre.
+
+    Parameters
+    ----------
+    reference_ra_deg : `numpy.ndarray`
+        The reference stars' RA values, in degrees.
+
+    Returns
+    -------
+    centre_ra_deg : `float`
+        The circular mean RA, in degrees in [0, 360). It is `0.0` for an
+        empty array.
+    """
+    if reference_ra_deg.size == 0:
+        return 0.0
+    ra_radians = np.radians(reference_ra_deg)
+    centre_radians = math.atan2(float(np.mean(np.sin(ra_radians))), float(np.mean(np.cos(ra_radians))))
+    return math.degrees(centre_radians) % 360.0
+
+
 def _estimate_bulk_pointing_correction_deg(
     detection_positions_deg: list[tuple[float, float]],
     reference_tree: cKDTree,
@@ -135,8 +166,11 @@ def _estimate_bulk_pointing_correction_deg(
         return 0.0, 0.0
 
     detection_array = np.array(detection_positions_deg)
+    # Measure every RA from one centre, wrapped, so a field across
+    # RA = 0 h lands in one connected patch of the tree's flat space.
+    centre_ra_deg = _reference_centre_ra_deg(reference_ra_deg)
     query_points = np.column_stack((
-        detection_array[:, 0] * reference_cos_declination * 3600.0,
+        wrapped_ra_difference_deg(detection_array[:, 0], centre_ra_deg) * reference_cos_declination * 3600.0,
         detection_array[:, 1] * 3600.0,
     ))
     candidate_reference_indices_per_detection = reference_tree.query_ball_point(
@@ -150,7 +184,9 @@ def _estimate_bulk_pointing_correction_deg(
             continue
         candidate_reference_indices = np.asarray(candidate_reference_indices)
         ra_offset_arcsec_per_pair.append(
-            (reference_ra_deg[candidate_reference_indices] - detection_array[detection_index, 0])
+            wrapped_ra_difference_deg(
+                reference_ra_deg[candidate_reference_indices], detection_array[detection_index, 0]
+            )
             * reference_cos_declination
             * 3600.0
         )
@@ -207,8 +243,9 @@ def _build_reference_star_tree(
     -------
     tree : `scipy.spatial.cKDTree` or `None`
         Index over the reference stars' flattened arcsecond positions
-        (RA scaled by `cos_declination` so an arcsecond means the same
-        thing on both axes), or `None` if there were none.
+        (RA measured as a wrapped offset from the stars' circular-mean
+        RA, then scaled by `cos_declination` so an arcsecond means the
+        same thing on both axes), or `None` if there were none.
     reference_ra_deg, reference_dec_deg : `numpy.ndarray`
         The reference stars' true sky positions, indexed the same way
         as `tree`.
@@ -223,8 +260,9 @@ def _build_reference_star_tree(
     reference_ra_deg = np.array([ra for ra, _ in reference_positions_deg])
     reference_dec_deg = np.array([dec for _, dec in reference_positions_deg])
     cos_declination = math.cos(math.radians(float(np.mean(reference_dec_deg))))
+    centre_ra_deg = _reference_centre_ra_deg(reference_ra_deg)
     flattened_points = np.column_stack((
-        reference_ra_deg * cos_declination * 3600.0,
+        wrapped_ra_difference_deg(reference_ra_deg, centre_ra_deg) * cos_declination * 3600.0,
         reference_dec_deg * 3600.0,
     ))
     return cKDTree(flattened_points), reference_ra_deg, reference_dec_deg, cos_declination

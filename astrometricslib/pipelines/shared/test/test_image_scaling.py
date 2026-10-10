@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.pipelines.shared.image_scaling import (
+    PREVIEW_SAMPLE_SEED,
     ImageScaler,
     _autostretch_parameters,
     _midtones_transfer_function,
@@ -22,6 +23,7 @@ from astrometricslib.pipelines.shared.image_scaling import (
     _solve_midtones_balance,
     measure_sky,
     midtones_balance_for,
+    percentile_sample,
     white_fraction_after_autostretch,
 )
 
@@ -278,3 +280,39 @@ def test_the_viewer_pictures_carry_the_stretch(tmp_path: Path) -> None:
     )
     manual = image_conversions.render_viewable_image(path, 200, True, 100.0, 50.0, None)
     assert manual.stretch_parameters is None
+
+
+def test_percentile_sample_is_identical_between_calls() -> None:
+    """Two calls with the default seed pick exactly the same pixels."""
+    image = np.arange(400 * 400, dtype=np.float64).reshape(400, 400)
+
+    assert np.array_equal(percentile_sample(image), percentile_sample(image))
+
+
+def test_percentile_sample_is_a_random_looking_subset() -> None:
+    """The sample is spread over the whole image, not the first N pixels."""
+    image = np.arange(400 * 400, dtype=np.float64).reshape(400, 400)
+
+    sample = percentile_sample(image)
+
+    assert sample.size == 10000
+    assert not np.array_equal(sample, image.flat[:10000])
+    assert sample.max() > image.size * 0.9
+    assert sample.min() < image.size * 0.1
+    assert percentile_sample(image, seed=PREVIEW_SAMPLE_SEED + 1).tolist() != sample.tolist()
+
+
+def test_percentile_stretch_of_a_large_image_is_repeatable() -> None:
+    """Two plain percentile stretches of one large image give identical output.
+
+    An image of exact zeros plus a few bright pixels has no measurable
+    sky, so the scaler falls back to the sampled percentile stretch.
+    """
+    image = np.zeros((400, 400))
+    image.flat[::97] = np.linspace(1.0, 1000.0, image.flat[::97].size)
+
+    first = ImageScaler.scale_to_uint8(image)
+    second = ImageScaler.scale_to_uint8(image)
+
+    assert np.array_equal(first[0], second[0])
+    assert first[1:] == second[1:]

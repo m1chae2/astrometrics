@@ -31,6 +31,12 @@ _BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS = 512 * 512
 # ::4]) was tried first and rejected -- it aliased with real spatial
 # structure in the frame and came out 77% off on std.
 _BACKGROUND_STATS_SAMPLE_FRACTION = 1.0 / 16.0
+# Seed for the random subsample above. The sample feeds the detection
+# threshold, so an unseeded sample would nudge the threshold a little on
+# every run, and a faint star near the cutoff could appear in one run and
+# vanish in the next. A fixed seed makes two runs on the same frame give
+# the same star list. The value itself is arbitrary.
+BACKGROUND_SAMPLE_SEED = 20261010
 
 # Background2D box size, in pixels, as a fraction of the image's
 # shorter axis. Verified against a NGC 6992 (Veil Nebula) frame: a
@@ -59,6 +65,31 @@ _STAR_RADIUS_PEAK_FRACTION = 0.1
 # within half of this are counted, so a neighbouring star is not mistaken
 # for part of this one.
 _STAR_RADIUS_WINDOW_HALF_WIDTH_PX = 30
+
+
+def background_sample_indices(pixel_count: int, seed: int = BACKGROUND_SAMPLE_SEED) -> np.ndarray:
+    """Pick the random pixels used to estimate the global background.
+
+    The same `seed` always gives the same pixels, so repeated detection
+    runs on one frame use the same background estimate. The pixels are
+    spread over the whole image, not taken from its first rows.
+
+    Parameters
+    ----------
+    pixel_count : `int`
+        The number of pixels in the (flattened) image.
+    seed : `int`, optional
+        Seed for the random generator. Defaults to
+        `BACKGROUND_SAMPLE_SEED`.
+
+    Returns
+    -------
+    indices : `numpy.ndarray`
+        Distinct positions in the flattened image, one per sampled pixel.
+        The sample holds `_BACKGROUND_STATS_SAMPLE_FRACTION` of the pixels.
+    """
+    sample_size = int(pixel_count * _BACKGROUND_STATS_SAMPLE_FRACTION)
+    return np.random.default_rng(seed).choice(pixel_count, size=sample_size, replace=False)
 
 
 def measure_star_radius_px(data: np.ndarray, x_centroid: float, y_centroid: float) -> float | None:
@@ -179,9 +210,7 @@ class SourceDetector:
             # images (see _BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS).
             stats_data, stats_mask = data, mask
             if data.size >= _BACKGROUND_STATS_SUBSAMPLE_MIN_PIXELS:
-                rng = np.random.default_rng()
-                sample_size = int(data.size * _BACKGROUND_STATS_SAMPLE_FRACTION)
-                sample_indices = rng.choice(data.size, size=sample_size, replace=False)
+                sample_indices = background_sample_indices(data.size)
                 stats_data = data.ravel()[sample_indices]
                 stats_mask = mask.ravel()[sample_indices] if mask is not None else None
             mean, median, std = sigma_clipped_stats(stats_data, sigma=3.0, mask=stats_mask)

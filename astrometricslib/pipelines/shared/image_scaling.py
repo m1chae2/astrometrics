@@ -33,6 +33,14 @@ AUTOSTRETCH_SHADOWS_CLIP_SIGMA = _AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 # visibility.
 _AUTOSTRETCH_TARGET_BACKGROUND = 0.25
 
+# How many pixels the plain percentile stretch samples from a large image,
+# and the seed that picks them. The sample sets the black and white points,
+# so an unseeded sample would shift the preview slightly on every run. A
+# fixed seed makes two renders of the same image identical. The seed value
+# is arbitrary.
+_PERCENTILE_SAMPLE_COUNT = 10000
+PREVIEW_SAMPLE_SEED = 20261010
+
 # MAD -> standard deviation for normally-distributed data (1 / Phi^-1(3/4)).
 # A fixed astronomical/statistical constant, not a tuned parameter.
 _MAD_TO_SIGMA = 1.4826
@@ -383,6 +391,30 @@ def _scale_to_uint8_in_blocks(
     return img8
 
 
+def percentile_sample(arr: np.ndarray, seed: int = PREVIEW_SAMPLE_SEED) -> np.ndarray:
+    """Pick the random pixels the percentile stretch measures.
+
+    The same `seed` always gives the same pixels, so a preview does not
+    change between runs. The pixels are spread over the whole image, not
+    taken from its first rows.
+
+    Parameters
+    ----------
+    arr : `numpy.ndarray`
+        The image data, any shape.
+    seed : `int`, optional
+        Seed for the random generator. Defaults to `PREVIEW_SAMPLE_SEED`.
+
+    Returns
+    -------
+    sample : `numpy.ndarray`
+        `_PERCENTILE_SAMPLE_COUNT` pixel values. A pixel can be picked
+        more than once.
+    """
+    chosen = np.random.default_rng(seed).integers(0, arr.size, _PERCENTILE_SAMPLE_COUNT)
+    return arr.flat[chosen]
+
+
 def _display_array(data: np.ndarray) -> np.ndarray:
     """Turn image data into the 2-D or colour-last array that is drawn.
 
@@ -501,7 +533,7 @@ class ImageScaler:
                 try:
                     # Sampling for large arrays to improve performance
                     if arr.size > 100000:
-                        sample = arr.flat[np.random.randint(0, arr.size, 10000)]
+                        sample = percentile_sample(arr)
                         calc_vmin, calc_vmax = np.percentile(sample, percentiles)
                     else:
                         calc_vmin, calc_vmax = np.percentile(arr, percentiles)

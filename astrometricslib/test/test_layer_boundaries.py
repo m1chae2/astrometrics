@@ -28,6 +28,11 @@ A second ratchet in this file keeps the wall clock out of the pipelines
 (`datetime.now()` and `datetime.utcnow()` under `pipelines/`). A pipeline
 that reads the clock instead of a frame's own capture time fabricates
 timestamps. See `KNOWN_WALL_CLOCK_SITES`.
+
+A third ratchet keeps unseeded randomness out of the pipelines (review item
+S20). A random generator with no seed gives a different answer on every run,
+so a detection threshold or a preview could change between two runs on the
+same frame. See `KNOWN_UNSEEDED_RANDOM_SITES`.
 """
 
 import ast
@@ -228,3 +233,173 @@ def test_the_wall_clock_list_has_no_stale_entries() -> None:
         f"KNOWN_WALL_CLOCK_SITES lists file(s) with no datetime.now()/utcnow() "
         f"call left: {sorted(stale_entries)}. Remove them from the list."
     )
+
+
+# Files under `pipelines/` that use unseeded randomness on purpose. Each
+# entry needs a reason. It is empty: the two sites found by review item S20
+# (the source detector's background subsample and the preview scaler's
+# percentile sample) now take fixed seeds.
+KNOWN_UNSEEDED_RANDOM_SITES: frozenset[str] = frozenset()
+
+# The `numpy.random` module-level functions that draw from numpy's hidden
+# global generator. They cannot be given a seed per call.
+_LEGACY_NUMPY_RANDOM_FUNCTIONS = frozenset({
+    "rand",
+    "randn",
+    "randint",
+    "random",
+    "random_sample",
+    "ranf",
+    "sample",
+    "normal",
+    "standard_normal",
+    "uniform",
+    "choice",
+    "shuffle",
+    "permutation",
+    "poisson",
+    "seed",
+    "bytes",
+    "RandomState",
+})
+
+# The `random` standard-library functions that draw from its hidden global
+# generator.
+_LEGACY_STDLIB_RANDOM_FUNCTIONS = frozenset({
+    "random",
+    "randint",
+    "randrange",
+    "uniform",
+    "choice",
+    "choices",
+    "shuffle",
+    "sample",
+    "gauss",
+    "normalvariate",
+    "seed",
+})
+
+
+def _is_unseeded_random_call(node: ast.AST) -> bool:
+    """Decide whether a syntax-tree node draws unseeded randomness.
+
+    Three forms count: ``default_rng()`` (or ``default_rng(None)``) with no
+    seed, a ``numpy.random`` legacy function such as ``np.random.randint``,
+    and a ``random`` standard-library function such as ``random.random``.
+
+    Parameters
+    ----------
+    node : `ast.AST`
+        Any node from a parsed module.
+
+    Returns
+    -------
+    is_unseeded : `bool`
+        `True` if the node is one of those calls.
+    """
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute | ast.Name)):
+        return False
+    function = node.func
+    function_name = function.attr if isinstance(function, ast.Attribute) else function.id
+
+    if function_name == "default_rng":
+        seed_is_missing = not node.args and not node.keywords
+        seed_is_none = (
+            len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and node.args[0].value is None
+        )
+        return seed_is_missing or seed_is_none
+
+    if not isinstance(function, ast.Attribute):
+        return False
+    owner = function.value
+    # `np.random.<name>` or `numpy.random.<name>`
+    if (
+        isinstance(owner, ast.Attribute)
+        and owner.attr == "random"
+        and isinstance(owner.value, ast.Name)
+        and owner.value.id in {"np", "numpy"}
+    ):
+        return function_name in _LEGACY_NUMPY_RANDOM_FUNCTIONS
+    # `random.<name>` from the standard library
+    if isinstance(owner, ast.Name) and owner.id == "random":
+        return function_name in _LEGACY_STDLIB_RANDOM_FUNCTIONS
+    return False
+
+
+def _find_unseeded_random_sites() -> set[str]:
+    """List every pipeline file that draws unseeded randomness.
+
+    Test modules are skipped.
+
+    Returns
+    -------
+    files_with_random : `set` [`str`]
+        Paths, relative to `astrometricslib/`, of every non-test file under
+        `pipelines/` with at least one unseeded random call.
+    """
+    files_with_random: set[str] = set()
+
+    for module_path in sorted((ASTROMETRICSLIB_ROOT / "pipelines").rglob("*.py")):
+        if _is_test_module(module_path):
+            continue
+
+        tree = ast.parse(module_path.read_text(), filename=str(module_path))
+        if any(_is_unseeded_random_call(node) for node in ast.walk(tree)):
+            files_with_random.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+
+    return files_with_random
+
+
+def test_pipelines_do_not_use_unseeded_randomness() -> None:
+    """Verify no pipeline file draws random numbers without a seed.
+
+    A bare ``default_rng()``, a ``numpy.random`` legacy function, or a
+    ``random`` standard-library function gives different numbers on every
+    run. Build a generator with ``np.random.default_rng(seed)`` and a named
+    seed constant instead. A file that truly needs unseeded randomness goes
+    on `KNOWN_UNSEEDED_RANDOM_SITES` with a reason.
+    """
+    new_sites = _find_unseeded_random_sites() - KNOWN_UNSEEDED_RANDOM_SITES
+
+    assert not new_sites, (
+        f"Unseeded randomness found in pipeline file(s): {sorted(new_sites)}. "
+        f"Pass a fixed seed to np.random.default_rng, or if the file truly "
+        f"needs a different answer each run, add it to "
+        f"KNOWN_UNSEEDED_RANDOM_SITES with a reason."
+    )
+
+
+def test_the_unseeded_random_list_has_no_stale_entries() -> None:
+    """Verify every allowlisted unseeded-random file still uses it.
+
+    A stale entry would leave a file free to add unseeded randomness later
+    with nothing to flag it.
+    """
+    stale_entries = KNOWN_UNSEEDED_RANDOM_SITES - _find_unseeded_random_sites()
+
+    assert not stale_entries, (
+        f"KNOWN_UNSEEDED_RANDOM_SITES lists file(s) with no unseeded random "
+        f"call left: {sorted(stale_entries)}. Remove them from the list."
+    )
+
+
+def test_the_unseeded_random_scan_recognizes_each_banned_form() -> None:
+    """Verify the scan flags the banned calls and accepts seeded ones."""
+    banned = [
+        "np.random.default_rng()",
+        "default_rng(None)",
+        "np.random.randint(0, 5)",
+        "numpy.random.normal(0, 1)",
+    ]
+    banned += ["random.random()", "np.random.RandomState(1)"]
+    allowed = [
+        "np.random.default_rng(0)",
+        "np.random.default_rng(seed=3)",
+        "rng.integers(0, 5)",
+        "np.random.Generator",
+    ]
+
+    for source in banned:
+        assert _is_unseeded_random_call(ast.parse(source).body[0].value), source
+    for source in allowed:
+        assert not _is_unseeded_random_call(ast.parse(source).body[0].value), source

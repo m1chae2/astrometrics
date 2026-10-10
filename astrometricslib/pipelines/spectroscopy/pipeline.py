@@ -10,9 +10,12 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
+from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import (
     DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,
@@ -29,6 +32,11 @@ from astrometricslib.pipelines.shared.quality.saturation import (
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (
     assess_output_quality,
     output_quality_checkpoint,
+)
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    compare_to_gaia_xp,
+    gaia_dr3_source_id,
+    gaia_xp_precheck,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.assess_input_quality import (
     assess_input_quality,
@@ -719,6 +727,7 @@ class SpectroscopyPipeline:
     def __init__(
         self,
         config: SpectroscopyConfig | None = None,
+        drivers: Drivers | None = None,
         *,
         observatory_site: ObservatorySite | None = None,
         atmospheric_conditions: AtmosphericConditions | None = None,
@@ -730,6 +739,11 @@ class SpectroscopyPipeline:
         config : `SpectroscopyConfig`, optional
             The camera settings to use. If you leave this blank, it will
             load the default settings automatically.
+        drivers : `Drivers`, optional
+            The outside services to use. Only its Gaia XP driver is used here,
+            to check each spectrum against the star's Gaia XP spectrum; a
+            driver left out is the built-in one, built the first time a star
+            with a known Gaia id needs it.
         observatory_site : `ObservatorySite`, optional
             Where the observatory is, for the atmospheric refraction
             correction. When `config` is left blank and this is too, it is
@@ -783,6 +797,8 @@ class SpectroscopyPipeline:
             reject_narrow_contaminants=config.reject_narrow_contaminants,
         )
         self.calibrator = SpectrumCalibrator(self.instrument)
+        self._drivers = drivers or Drivers()
+        self._gaia_xp_driver: GaiaXpDriver | None = None
         # Keeps track of how many stars were too bright (saturated) in the
         # center. We save this list so other parts of the program can check
         # the overall image quality later.
@@ -1175,6 +1191,49 @@ class SpectroscopyPipeline:
                 result["intensities"] = outcome.corrected_flux.tolist()
                 result["neighbor_wing_fraction"] = outcome.wing_fraction.tolist()
 
+    def _gaia_xp_comparison(
+        self,
+        star: StellarObject,
+        wavelengths_angstrom: list[float],
+        analysis: Any,
+    ) -> GaiaXpComparison:
+        """Check one star's response-corrected spectrum against Gaia XP.
+
+        The Gaia XP driver is built, and the network used, only for a star
+        that has a Gaia DR3 id and a response-corrected spectrum.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star, for its Gaia id.
+        wavelengths_angstrom : `list` [`float`]
+            The spectrum's wavelengths, in Angstroms.
+        analysis : `SpectrumAnalysis`
+            The result of `analyze_spectrum`, for the response-corrected
+            spectrum, its errors when it has them, and the resolution.
+
+        Returns
+        -------
+        comparison : `GaiaXpComparison`
+            The comparison, or a ``not_checked`` record that says why not.
+        """
+        source_id = gaia_dr3_source_id(star)
+        response_corrected = analysis.response_corrected_intensity
+        not_checked = gaia_xp_precheck(source_id, response_corrected)
+        if not_checked is not None:
+            return not_checked
+        if self._gaia_xp_driver is None:
+            self._gaia_xp_driver = self._drivers.gaia_xp_or_default()
+        return compare_to_gaia_xp(
+            self._gaia_xp_driver,
+            source_id,
+            wavelengths_angstrom,
+            response_corrected,
+            intensity_errors=getattr(analysis, "response_corrected_intensity_errors", None),
+            line_spread=self.line_spread_profile,
+            fallback_resolution_angstrom=analysis.resolution_element_angstrom,
+        )
+
     def _apply_result_to_stellar_object(
         self, star: StellarObject, result: dict[str, Any], image: AstrometricsImage
     ) -> None:
@@ -1275,6 +1334,7 @@ class SpectroscopyPipeline:
         output_quality = assess_output_quality(
             classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
         )
+        gaia_xp_comparison = self._gaia_xp_comparison(star, wavelengths_angstrom, analysis)
         second_order_blue_to_red_ratio = compute_second_order_blue_to_red_ratio(
             np.array(wavelengths_angstrom), np.array(intensities)
         ).tolist()
@@ -1307,6 +1367,7 @@ class SpectroscopyPipeline:
                 own_spectral_type=str(classification["spectral_type"]),
                 catalog_spectral_type=star.spectral_type,
                 catalog_comparison=analysis.catalog_comparison,
+                gaia_xp_comparison=gaia_xp_comparison,
             ),
         ]
 
@@ -1343,6 +1404,7 @@ class SpectroscopyPipeline:
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             counts_per_second_factor=counts_per_second_factor(getattr(image, "header", None)),
             catalog_comparison=analysis.catalog_comparison,
+            gaia_xp_comparison=gaia_xp_comparison,
             input_quality=input_quality,
             output_quality=output_quality,
             stage_quality=stage_quality,

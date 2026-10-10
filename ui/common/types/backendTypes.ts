@@ -303,6 +303,7 @@ export interface Spectrum {
   isCatalogIdentified?: boolean;
   simbadObjectTypes?: string;
   gaiaVariableFlag?: string;
+  gaiaDr3SourceId?: number | null;
   vsxVariabilityType?: string;
   catalogMatchQuality?: CatalogMatchQuality | null;
   /** How much this star's brightness jumps around, on a display scale. */
@@ -420,6 +421,7 @@ export interface SpectroscopyResult {
   extractionDiagnostics?: SpectralExtractionDiagnostics | null;
   extinctionCorrection?: ExtinctionCorrectionRecord | null;
   differentialRefraction?: DifferentialRefractionRecord | null;
+  gaiaXpComparison?: GaiaXpComparison | null;
   generatedByJobId?: string | null;
   /** Check if even the closest reference spectrum fits badly. */
   isPoorMatch?: boolean;
@@ -483,6 +485,74 @@ export interface DifferentialRefractionRecord {
   acrossDispersionArcsecAt8000?: number | null;
   alongDispersionSpanAngstrom?: number | null;
   acrossDispersionSpanPx?: number | null;
+}
+
+/**
+ * How one wavelength band of a spectrum compares with the XP spectrum.
+ *
+ * Both spectra are scaled to match at 5400-5600 Angstroms first, so the
+ * numbers show the change of shape across the spectrum, not its brightness.
+ */
+export interface GaiaXpBandResidual {
+  startAngstrom: number;
+  endAngstrom: number;
+  medianRatio?: number | null;
+  rmsFraction?: number | null;
+  sampleCount?: number;
+}
+
+/**
+ * The result of checking one spectrum against its Gaia XP spectrum.
+ *
+ * ``status`` is ``"compared"`` when the check ran, and ``"not_checked"``
+ * when it could not (no Gaia id, no XP spectrum, no response-corrected
+ * spectrum). A not-checked record keeps its reason and has no numbers.
+ */
+export interface GaiaXpComparison {
+  status: any;
+  notCheckedReason?: string;
+  gaiaSourceId?: number | null;
+  sampleCount?: number;
+  residualRmsFraction?: number | null;
+  slopePercentPer1000Angstrom?: number | null;
+  slopeErrorPercentPer1000Angstrom?: number | null;
+  wavelengthShiftAngstrom?: number | null;
+  wavelengthShiftCorrelation?: number | null;
+  bands?: GaiaXpBandResidual[];
+  normalizationWindowAngstrom?: number[];
+  observedNormalization?: number | null;
+  xpNormalization?: number | null;
+  xpWasBlurred?: boolean;
+  observedWasBlurred?: boolean;
+  usedObservedErrors?: boolean;
+}
+
+/**
+ * The run's comparison with XP in one wavelength band, over all stars.
+ *
+ * The median ratio of observed to XP is the measured residual instrument
+ * response in this band: dividing the response-corrected spectra by it would
+ * make them agree with Gaia.
+ */
+export interface GaiaXpBandSummary {
+  startAngstrom: number;
+  endAngstrom: number;
+  medianRatio?: number | null;
+  scatter?: number | null;
+  starCount?: number;
+}
+
+/**
+ * How a run's spectra compare with Gaia XP, summed over its stars.
+ *
+ * Each star counts once, however many spectra (frames) it has: its numbers
+ * are the median over its own spectra.
+ */
+export interface GaiaXpRunSummary {
+  comparedStarCount?: number;
+  bands?: GaiaXpBandSummary[];
+  medianSlopePercentPer1000Angstrom?: number | null;
+  medianAbsoluteSlopePercentPer1000Angstrom?: number | null;
 }
 
 /**
@@ -1889,6 +1959,7 @@ export interface SpectroscopyPipelineQualityMetrics {
   ambiguousClassificationCount?: number;
   flaggedSpectralClassifications?: SpectralClassificationConcern[];
   stageQualitySummary?: StageQualityRollup[] | null;
+  gaiaXpSummary?: GaiaXpRunSummary | null;
 }
 
 /**

@@ -29,6 +29,14 @@ itself. This stage only evaluates it.
    trustworthy or not-trustworthy verdict per star, so a reviewer can read
    the bottom line without re-deriving it from the individual checks.
 
+4. **Compare with Gaia XP.** Independent of the catalog, the pipeline compares
+   the calibrated spectrum with the star's Gaia DR3 XP spectrum, a low-resolution
+   spectrum from a different instrument. The comparison measures the tilt, the
+   residual and the wavelength shift of the calibration. The code is in
+   `compare_to_gaia_xp.py`. See "Check against Gaia XP" in the pipeline README
+   for the method and the limits. A star with no known Gaia id is recorded as
+   not checked, with the reason.
+
 ## What this stage produces
 
 This stage produces a record of how the star's spectrum compares with its

@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.gate_result import GateResult
 from astrometricslib.models.known_variability import (
     KnownVariability,
@@ -882,6 +883,11 @@ class SpectroscopyResult(BaseModel):
     differential_refraction: DifferentialRefractionRecord | None = Field(
         default=None, alias="differentialRefraction"
     )
+    # How this spectrum compares with the star's Gaia DR3 XP spectrum, an
+    # outside reference of similar resolution (see
+    # `post_processing.compare_to_gaia_xp`). Holds the reason when the check
+    # could not run. `None` for a spectrum saved before this was recorded.
+    gaia_xp_comparison: GaiaXpComparison | None = Field(default=None, alias="gaiaXpComparison")
     # The id of the job (see astrometricslib.models.provenance.Activity)
     # that last wrote this spectrum, so its exact pipeline version can be
     # looked up. `None` for a spectrum saved before this was recorded, or
@@ -1047,6 +1053,12 @@ class StellarObject(BaseModel):
     # has no entry (the brightest stars are not in Gaia DR3). Empty when Gaia
     # was never asked. See `known_variability`.
     gaia_variable_flag: str = Field(default="", alias="gaiaVariableFlag")
+    # The star's Gaia DR3 source id (the long number in "Gaia DR3 132..."),
+    # read from SIMBAD's list of names for the star, or from the star's own
+    # Gaia name. `None` when Gaia has no entry (the brightest stars are not in
+    # Gaia DR3) or the star was saved before this was recorded. The XP
+    # spectrum check needs it (see `post_processing.compare_to_gaia_xp`).
+    gaia_dr3_source_id: int | None = Field(default=None, alias="gaiaDr3SourceId")
     # The AAVSO Variable Star Index type of this star ("EA/SD", "DCEP", or
     # "CST" for a star checked and found constant), "NOT_IN_VSX", or
     # "LISTED_WITHOUT_TYPE". Empty when VSX was never asked.

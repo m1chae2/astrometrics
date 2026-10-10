@@ -18,6 +18,7 @@ share.
 """
 
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.models.stellar_source import StellarObject
@@ -90,6 +91,34 @@ def choose_survivor_id(ids: list[str]) -> str:
         first id alphabetically.
     """
     return min(sorted(ids), key=name_preference_rank)
+
+
+# A Gaia DR3 name with a source number, such as "Gaia DR3 1328045433153485824".
+# A made-up name for a Gaia star with no number ("Gaia DR3 J1234.5+12.3")
+# does not match, because it is not digits only.
+_GAIA_DR3_NAME_PATTERN = re.compile(r"^\s*Gaia DR3\s+(\d+)\s*$")
+
+
+def gaia_dr3_source_id_from_names(names: Iterable[str]) -> int | None:
+    """Find a star's Gaia DR3 source number among its names.
+
+    Parameters
+    ----------
+    names : `Iterable` [`str`]
+        Names of one star, for example the ``|``-separated parts of SIMBAD's
+        list of identifiers, or the star's own id and name.
+
+    Returns
+    -------
+    source_id : `int` or `None`
+        The number of the first name of the form ``Gaia DR3 <digits>``, or
+        `None` when no name has that form.
+    """
+    for name in names:
+        match = _GAIA_DR3_NAME_PATTERN.match(name)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 # Fields that identify the row itself or are recomputed fresh by every

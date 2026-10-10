@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from astrometricslib.models.gaia_xp_comparison import GaiaXpRunSummary
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.spectroscopy_quality import StageQualityRollup
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
@@ -601,6 +602,12 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     # `StageQualityRollup`). `None` for a summary saved before this was
     # recorded, and for a run with no spectra.
     stage_quality_summary: list[StageQualityRollup] | None = Field(default=None, alias="stageQualitySummary")
+    # How the run's spectra compare with their Gaia DR3 XP spectra: in each of
+    # four bands, the median ratio observed / XP over the compared stars (the
+    # measured residual instrument response) and its scatter, and the median
+    # tilt (see `GaiaXpRunSummary`). `None` for a summary saved before this was
+    # recorded, and for a run in which no star was compared.
+    gaia_xp_summary: GaiaXpRunSummary | None = Field(default=None, alias="gaiaXpSummary")
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

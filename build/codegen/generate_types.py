@@ -23,6 +23,12 @@ from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
 from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.gaia_xp_comparison import (
+    GaiaXpBandResidual,
+    GaiaXpBandSummary,
+    GaiaXpComparison,
+    GaiaXpRunSummary,
+)
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -368,6 +374,10 @@ def render_types() -> str:
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(SpectralExtractionDiagnostics, "SpectralExtractionDiagnostics"),
         generate_interface(DifferentialRefractionRecord, "DifferentialRefractionRecord"),
+        generate_interface(GaiaXpBandResidual, "GaiaXpBandResidual"),
+        generate_interface(GaiaXpComparison, "GaiaXpComparison"),
+        generate_interface(GaiaXpBandSummary, "GaiaXpBandSummary"),
+        generate_interface(GaiaXpRunSummary, "GaiaXpRunSummary"),
         generate_interface(ExtinctionCorrectionRecord, "ExtinctionCorrectionRecord"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),

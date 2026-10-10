@@ -188,6 +188,83 @@ carries the `unclassified` flag.
 | `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
 | `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
 | `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`. |
+| `gaia_xp_residual_rms_fraction` | fraction | 0.05, lower is better (designed) | The RMS of (observed / Gaia XP - 1) over 4200-8000 Å. See "Check against Gaia XP". Empty when the spectrum was not compared. |
+| `gaia_xp_slope_percent_per_1000_angstrom` | percent per 1000 Å | 3, lower is better (designed) | The absolute tilt of observed / Gaia XP. A tilt points at the instrument response or the airmass correction. |
+| `gaia_xp_wavelength_shift_angstrom` | Å | 11, lower is better (designed) | The absolute shift of the spectrum's features against Gaia XP's. 11 Å is one pixel of dispersion. A shift points at the wavelength scale. |
+| `gaia_xp_available` | flag | none (reported only) | 1 when the spectrum was compared with Gaia XP, 0 when not. The note gives the reason. |
+
+The Gaia XP metrics are filled for classified and unclassified spectra alike,
+because they test the calibration, not the classification. When a Gaia XP metric
+fails, the checkpoint carries the `gaia_xp_disagrees` flag.
+
+### Check against Gaia XP
+
+The Gaia satellite measured a low-resolution spectrum, the XP spectrum, for about
+220 million stars. Its resolving power (wavelength divided by the smallest
+resolvable wavelength difference) is about 30 to 100, close to the Star
+Analyser's. It comes from a different instrument above the atmosphere. The
+pipeline compares each calibrated spectrum with the XP spectrum of the same star.
+The comparison tests the instrument response, the airmass correction and the
+wavelength scale together. The code is in
+`post_processing/compare_to_gaia_xp.py`.
+
+1. **Find the Gaia DR3 source id.** The pipeline reads `StellarObject.gaia_dr3_source_id`.
+   The star identifier fills it from the `Gaia DR3 <number>` name in SIMBAD's list
+   of identifiers, or from a star that was named from Gaia. If the star has none
+   (the brightest stars are not in Gaia DR3), the comparison is `not_checked`
+   with that reason.
+2. **Fetch the XP spectrum** through the `GaiaXpDriver` (`drivers/gaia_xp_driver.py`).
+   The driver caches each spectrum on disk. A source with no XP spectrum, or a
+   failed download, gives `not_checked` and never stops the pipeline.
+3. **Put both on the same quantity.** The response-corrected spectrum is the
+   counts divided by the response, which is Vega observed over the Pickles A0V
+   template. Pickles fluxes are energy per unit wavelength, so the corrected
+   spectrum is a relative F-lambda above the atmosphere. Gaia's sampled flux is
+   also F-lambda, in W m⁻² nm⁻¹. The two differ by one constant, which the
+   normalization removes. A difference between Vega and the A0V template stays
+   inside every corrected spectrum, so it appears as an offset common to all stars.
+4. **Match the resolutions.** XP's blur is a Gaussian of 95 Å full width at half
+   maximum (FWHM) at 4340 Å, 130 Å at 4861 Å, 70 Å at 6563 Å and 185 Å at 8800 Å,
+   with straight lines between. A fit of the Pickles A0V template to the XP
+   spectra of 12 A0V stars (G 6.0 to 6.6) gave these medians on 2026-10-10. The
+   spread between stars was 20 to 40 percent. The instrument's stored line
+   spread is sharper than XP's below about 5000 Å and broader above it. Where
+   the instrument is broader, the pipeline blurs XP to it. Where XP is broader,
+   the pipeline blurs the observed spectrum to XP. The blur width is the
+   quadrature difference, `sqrt(broad² - narrow²)`.
+5. **Compare.** The pipeline keeps 4200 to 8000 Å outside the atmospheric bands,
+   divides each spectrum by its median over 5400 to 5600 Å, and computes
+   - the RMS of observed / XP - 1;
+   - the slope of a straight line fitted to observed / XP, in percent of the flux
+     at 5500 Å per 1000 Å. The fit weights samples by XP's errors, the spectrum's
+     own errors when `response_corrected_intensity_errors` exists, and a 1 percent
+     floor;
+   - the median ratio and the RMS in four bands: 4200-5000, 5000-6000, 6000-7000
+     and 7000-8000 Å;
+   - the wavelength shift that best correlates the two spectra's logarithmic
+     derivatives (d ln F / dλ). The sign is positive when the observed features sit
+     at longer wavelengths than XP's. The search covers ±60 Å. A correlation below
+     0.3 gives no shift.
+
+The result is stored on `SpectroscopyResult.gaia_xp_comparison`
+(`GaiaXpComparison`, in `models/gaia_xp_comparison.py`), together with the
+normalization levels and whether either spectrum was blurred.
+
+All three limits are designed, not measured: 0.05 is above XP's own 1 to 2
+percent calibration error, 3 percent per 1000 Å is an 11 percent change across the
+compared range, and 11 Å is one pixel. Synthetic tests recover a 5 percent per
+1000 Å tilt to within 0.2 and a 20 Å shift to within 1 Å. Against real data, a
+shift measured between a real XP spectrum and a template of a different star ranged
+from -23 to +36 Å over 12 A0V stars (median +11 Å). That number measures
+differences between stars, not the instrument. The shift's noise floor for a real
+spectrum of the same star is not known yet.
+`scripts/compare_spectra_with_gaia_xp.py` measures it on a processed target.
+
+At the run level, the summary's `gaiaXpSummary` (`GaiaXpRunSummary`) gives, for
+each of the four bands, the median over the compared stars of observed / XP and
+its scatter (1.4826 times the median absolute deviation). A star with several
+spectra counts once. That median ratio is the measured residual instrument
+response: dividing the corrected spectra by it makes them agree with Gaia.
 
 ### Adding a metric
 
@@ -323,6 +400,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 | `feature_significance` | A star's feature p-values fell back to assuming Gaussian noise | No star had its features tested |
 | `resolution_measured` | Never | The resolution was assumed from the instrument design for every spectrum |
 | `processing_quality` | More than 50% of classified spectra fail a metric of the processing checkpoint (see "Quality checkpoints") | No classified spectrum has a processing checkpoint, including a run with no spectra |
+| `gaia_xp_agreement` | The median absolute slope of observed / Gaia XP over the compared stars is above 3 percent per 1000 Å (designed limit) | Fewer than three stars were compared with Gaia XP |
 
 `catalog_agreement`, `feature_significance` and `spectra_extracted` are new flags: before, a disagreement with the catalog or an uncalibrated p-value showed only on the star's own record, and a run with no spectra was not flagged at all. The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path. Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.
 

@@ -29,6 +29,7 @@ from astrometricslib.drivers.calibration_library import DEFAULT_DARK_TEMPERATURE
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces import (
+    GaiaXpDriver,
     PlateSolveDriver,
     PlateSolveHeader,
     SimbadDriver,
@@ -274,6 +275,9 @@ class Astrometrics:
         The stacking program. If not given, Siril is used.
     simbad_driver : `SimbadDriver`, optional
         The SIMBAD database client. If not given, astroquery is used.
+    gaia_xp_driver : `GaiaXpDriver`, optional
+        The source of Gaia DR3 XP spectra. If not given, astroquery is used,
+        with the spectra cached in the library's data folder.
 
     Notes
     -----
@@ -290,6 +294,7 @@ class Astrometrics:
         plate_solve_driver: PlateSolveDriver | None = None,
         stacking_driver: StackingDriver | None = None,
         simbad_driver: SimbadDriver | None = None,
+        gaia_xp_driver: GaiaXpDriver | None = None,
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
@@ -300,7 +305,12 @@ class Astrometrics:
 
         self.config = config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
-        drivers = Drivers(plate_solve=plate_solve_driver, stacking=stacking_driver, simbad=simbad_driver)
+        drivers = Drivers(
+            plate_solve=plate_solve_driver,
+            stacking=stacking_driver,
+            simbad=simbad_driver,
+            gaia_xp=gaia_xp_driver,
+        )
 
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
@@ -363,6 +373,7 @@ __all__ = [
     "FitsHeaderEntry",
     "FrameRecord",
     "FrameSelection",
+    "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
     "HardwareError",

@@ -568,6 +568,9 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     # type; it must not erase one an earlier run found.
     if updated_stellar_object.simbad_object_types:
         existing_stellar_object.simbad_object_types = updated_stellar_object.simbad_object_types
+    # Likewise for the Gaia DR3 source number: keep one an earlier run found.
+    if updated_stellar_object.gaia_dr3_source_id is not None:
+        existing_stellar_object.gaia_dr3_source_id = updated_stellar_object.gaia_dr3_source_id
     return existing_stellar_object
 
 

@@ -86,6 +86,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "FitsHeaderEntry",
     "FrameRecord",
     "FrameSelection",
+    "GaiaXpDriver",
     "GenerationDescription",
     "GroupedFrameStat",
     "HardwareError",

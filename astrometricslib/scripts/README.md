@@ -38,6 +38,7 @@ A script here may import astrometricslib's internal modules. It never imports an
 - `rejection_small_n_check.py` — simulates pure noise at 5, 8, 15 and 40 frames per pixel and reports how many good samples each rejection rule throws out and how often it catches an injected outlier. Needs no library data.
 - `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating.
 - `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames. It applies the same airmass extinction correction as the pipeline, using the airmass stored with each spectrum.
+- `compare_spectra_with_gaia_xp.py` — read-only. For every star of a processed target, compares its stored response-corrected spectrum with the star's Gaia DR3 XP spectrum and prints one line per star (tilt, RMS residual, wavelength shift, median ratio observed / XP in four bands), then the run summary: the median ratio and scatter per band, which is the residual instrument response, and the `gaia_xp_agreement` gate verdict. XP spectra are downloaded once and cached in the library's `catalogs/gaia_xp` folder.
 - `derive_instrument_response.py` — derives a camera's instrument response curve from a known star's master stack and stores it, with the standard star's airmass (`reference_airmass`), as a JSON file.
 - `benchmark_siril_concurrency.py` — measures how many Siril stacking runs a given machine should be allowed to run at once.
 

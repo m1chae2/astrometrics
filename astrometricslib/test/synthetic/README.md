@@ -139,6 +139,19 @@ the real relation must compute its own line columns from the instrument
 parameters and not use `line_columns_px`. The straight-line model is a good
 approximation only near the zero order.
 
+## Gaia XP spectra: `gaia_xp_spectra.py`
+
+These helpers test the comparison of a calibrated spectrum with the star's Gaia
+DR3 XP spectrum. They build both spectra from one Pickles template, so the true
+tilt and shift between them are known. They are not re-exported by the package;
+import them from the module.
+
+| Name | What it produces |
+| --- | --- |
+| `make_xp_spectrum(spectral_type, relative_error)` | The template blurred to Gaia's resolution, sampled every 20 Å from 3360 to 10200 Å, as `(wavelength_angstrom, flux, flux_error)`. |
+| `make_calibrated_spectrum(spectral_type, tilt_percent_per_1000_angstrom, shift_angstrom, noise_fraction, seed)` | The template blurred to the instrument's line spread, sampled every 11.2 Å, with a straight tilt that is 1 at 5500 Å, a redward shift, and optional noise. NaN outside 4200-8000 Å. |
+| `FakeGaiaXpDriver(spectra)` | A `GaiaXpDriver` that serves the given spectra by source id and records the ids asked for. |
+
 ## Variability field: `variability_field.py`
 
 `make_variability_field(...)` returns a `SyntheticVariabilityField`: the raw

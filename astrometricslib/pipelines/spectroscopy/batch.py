@@ -15,6 +15,11 @@ from typing import Any
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    gaia_xp_gate,
+    gaia_xp_rows,
+    summarize_gaia_xp,
+)
 from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     merge_spectrum_facts,
     spectroscopy_run_gates,
@@ -295,6 +300,7 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
     result["stars_processed"] = len(fallback_stars)
     result["spectrum_facts"] = spectrum_facts(fallback_stars)
     result["stage_quality"] = stage_quality_rows(fallback_stars)
+    result["gaia_xp"] = gaia_xp_rows(fallback_stars)
     result["status"] = "success"
     return result
 
@@ -371,6 +377,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         "spectral_classification_concerns": [],
         "spectrum_facts": {},
         "stage_quality": [],
+        "gaia_xp": [],
     }
     try:
         from astrometricslib import Astrometrics
@@ -423,6 +430,7 @@ def _process_single_spectroscopy_frame_worker_v2(
         result["stars_processed"] = len(stellar_objects)
         result["spectrum_facts"] = spectrum_facts(stellar_objects)
         result["stage_quality"] = stage_quality_rows(stellar_objects)
+        result["gaia_xp"] = gaia_xp_rows(stellar_objects)
         result["dispersion_angles"] = [
             obj.spectroscopy.dispersion_angle
             for obj in stellar_objects
@@ -594,6 +602,7 @@ def _attach_spectroscopy_quality_summary(
     all_zero_order_fractions = []
     all_spectral_classification_concerns = []
     all_stage_quality_rows: list[list[dict]] = []
+    all_gaia_xp_rows: list[dict] = []
     all_spectrum_facts = merge_spectrum_facts(
         frame_result.get("spectrum_facts") for frame_result in summary.results.values()
     )
@@ -611,6 +620,7 @@ def _attach_spectroscopy_quality_summary(
             frame_result.get("spectral_classification_concerns") or []
         )
         all_stage_quality_rows.extend(frame_result.get("stage_quality") or [])
+        all_gaia_xp_rows.extend(frame_result.get("gaia_xp") or [])
 
     poor_match_count = sum(
         1 for concern in all_spectral_classification_concerns if "poor_match" in concern["reason"]
@@ -648,12 +658,14 @@ def _attach_spectroscopy_quality_summary(
             ambiguous_classification_count=ambiguous_count,
             flagged_spectral_classifications=all_spectral_classification_concerns,
             stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
+            gaia_xp_summary=summarize_gaia_xp(all_gaia_xp_rows),
         ),
     )
     for gate in spectroscopy_run_gates(
         all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns
     ):
         target.quality.spectroscopy.record_gate(gate)
+    target.quality.spectroscopy.record_gate(gaia_xp_gate(all_gaia_xp_rows))
 
     from astrometricslib.pipelines.shared.applied_camera_profile import (
         camera_name_for_paths,

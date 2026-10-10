@@ -125,6 +125,11 @@ done.
 | S16 | done | `pipelines/spectroscopy/test/test_threshold_single_definition.py`; `models/test/test_spectral_match_fields.py`; gate `spectral_classification` fails on class-level ambiguity |
 | S17 | done | `pipelines/asteroid_detection/test/test_session_chaining.py`, `test_residual_criterion.py`, `test_mpc_report.py`; gate `track_residuals` |
 | S18 | done | `pipelines/photometry/test/test_variability_injection.py` (synthetic AUC 0.94); gate `variability_discrimination` fails below 0.7 |
+| S19 | open | the recompute script still re-reads stored arrays; an independent re-measurement is not yet written |
+| S21 | done | `astrometricslib/test/test_architecture_doc_claims.py` imports every `impl` link in the architecture document |
+| Golden photometry sequence | done | `test/golden/test_golden_m13.py` pins the five-frame shifts and per-star scatter |
+| Tuner follow-ups | done | `utilities/test/test_calibration_tuner_dip_detection.py` (noisy frame tunes in under 10 s) |
+| Photometry follow-ups | done | `test/pre_processing/test_centroid_shift_summary.py`; gate `registration_drift` judges per-star offsets |
 
 Decisions taken during the work, for the owner to confirm:
 
@@ -145,6 +150,9 @@ Found while doing tier 1, now tracked as follow-ups:
   drift by about half. Fixed with S2.
 - `find_zero_order_position` returns `None` on every M 13 spectroscopy frame, because the target
   is an extended cluster. The spectral frame check therefore cannot run on cluster targets.
+- M 13 frame 020 carries a faint satellite or plane trail (4 px wide, about 50 ADU over a 320
+  ADU sky) that lifts noise peaks over the detection cut-off. No raw-frame flag catches it; a
+  high-count rule or a line detector is needed.
 - The tuner's dip detector uses an absolute prominence in the spectrum's own units and can find
   hundreds of dips on a noisy ADU-scale spectrum, after which the three-line search does not
   finish.

@@ -63,13 +63,18 @@ class SyntheticSpectralFrame:
         Dispersion in angstroms per pixel of column offset.
     trace_sigma_px : `float`
         Standard deviation of the trail cross-profile, in pixels, measured
-        along a column.
+        along a column. When the frame was made with
+        ``trace_sigma_by_wavelength`` this is only the zero order's width;
+        use `trace_sigma_at` for the trail's.
     line_wavelengths_a : `tuple` [`float`, ...]
         Wavelength of each injected line, in angstroms, in the order the
         lines were given.
     line_columns_px : `tuple` [`float`, ...]
         Column at which each line is centred: ``x0 + wavelength /
         dispersion_a_per_px``. Same order as ``line_wavelengths_a``.
+    trace_sigma_by_wavelength : `tuple` or `None`
+        The ``(wavelength_angstrom, sigma_px)`` entries the trail width was
+        built from, or `None` when the width is the same at every column.
     """
 
     image: np.ndarray
@@ -79,6 +84,27 @@ class SyntheticSpectralFrame:
     trace_sigma_px: float
     line_wavelengths_a: tuple[float, ...]
     line_columns_px: tuple[float, ...]
+    trace_sigma_by_wavelength: tuple[tuple[float, float], ...] | None = None
+
+    def trace_sigma_at(self, wavelength_angstrom: np.ndarray | float) -> np.ndarray | float:
+        """Return the true cross-profile width of the trail at a wavelength.
+
+        Parameters
+        ----------
+        wavelength_angstrom : `numpy.ndarray` or `float`
+            Wavelength or wavelengths, in angstroms.
+
+        Returns
+        -------
+        sigma_px : `numpy.ndarray` or `float`
+            The trail's standard deviation across the dispersion, in pixels.
+            It is ``trace_sigma_px`` when the frame has no
+            wavelength-dependent width.
+        """
+        if self.trace_sigma_by_wavelength is None:
+            return self.trace_sigma_px
+        nodes = np.array(sorted(self.trace_sigma_by_wavelength), dtype=np.float64)
+        return np.interp(wavelength_angstrom, nodes[:, 0], nodes[:, 1])
 
     def trace_center_y(self, x: np.ndarray | float) -> np.ndarray | float:
         """Return the true row of the trail centre at column ``x``.
@@ -132,6 +158,7 @@ def make_spectral_frame(
     dispersion_a_per_px: float = 11.0,
     trail_length_px: int = 700,
     trace_sigma_px: float = 2.5,
+    trace_sigma_by_wavelength: tuple[tuple[float, float], ...] | None = None,
     continuum_adu: float = 3000.0,
     lines: tuple[tuple[float, float], ...] = ((4861.0, 0.5), (6563.0, 0.6)),
     zero_order_flux_adu: float = 2e6,
@@ -151,8 +178,10 @@ def make_spectral_frame(
        total trail flux in that column to ``continuum_adu * (1 - sum of
        line dips)``. There is no trail at or left of the zero order.
     3. Spread that flux across rows with a Gaussian cross-profile
-       (standard deviation ``trace_sigma_px``, integrated over each row)
-       centred on ``y = y0 - tan(angle_deg) * (x - x0)``.
+       (standard deviation ``trace_sigma_px``, or the width that
+       ``trace_sigma_by_wavelength`` gives at that column's wavelength,
+       integrated over each row) centred on
+       ``y = y0 - tan(angle_deg) * (x - x0)``.
     4. Add the flat sky level.
     5. Unless ``add_noise`` is `False`, apply Poisson noise (gain fixed
        at 1 electron per ADU), then Gaussian read noise.
@@ -176,6 +205,15 @@ def make_spectral_frame(
         Length of the trail in columns (default 700).
     trace_sigma_px : `float`, optional
         Standard deviation of the cross-profile in pixels (default 2.5).
+    trace_sigma_by_wavelength : `tuple`, optional
+        Makes the cross-profile width depend on wavelength, as it does in a
+        spectrum whose red end is out of focus. Each entry is
+        ``(wavelength_angstrom, sigma_px)``. The width at a column is the
+        straight-line interpolation between the entries, held at the first
+        or last entry outside them. The wavelength of a column follows the
+        generator's straight-line model. The zero order keeps
+        ``trace_sigma_px``. Default `None`: every column uses
+        ``trace_sigma_px``, as before.
     continuum_adu : `float`, optional
         Total trail flux in one column, in ADU, outside any line (default
         3000.0). It is the sum over the rows of that column.
@@ -224,7 +262,12 @@ def make_spectral_frame(
     column_flux = np.where(on_trail, continuum_adu * np.clip(transmission, 0.0, None), 0.0)
 
     centre_y = y0 - np.tan(np.radians(angle_deg)) * column_offset
-    row_fractions = pixel_fractions(centre_y, trace_sigma_px, ny)
+    if trace_sigma_by_wavelength is None:
+        column_sigma: np.ndarray | float = trace_sigma_px
+    else:
+        nodes = np.array(sorted(trace_sigma_by_wavelength), dtype=np.float64)
+        column_sigma = np.interp(column_offset * dispersion_a_per_px, nodes[:, 0], nodes[:, 1])
+    row_fractions = pixel_fractions(centre_y, column_sigma, ny)
     image = row_fractions * column_flux[np.newaxis, :]
 
     zero_columns = pixel_fractions(x0, trace_sigma_px, nx)[:, 0]
@@ -246,4 +289,9 @@ def make_spectral_frame(
         trace_sigma_px=float(trace_sigma_px),
         line_wavelengths_a=tuple(float(w) for w, _ in lines),
         line_columns_px=line_columns,
+        trace_sigma_by_wavelength=(
+            None
+            if trace_sigma_by_wavelength is None
+            else tuple((float(w), float(sigma)) for w, sigma in trace_sigma_by_wavelength)
+        ),
     )

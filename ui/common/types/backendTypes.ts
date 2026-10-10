@@ -412,6 +412,7 @@ export interface SpectroscopyResult {
   trailWidthPx?: number[] | null;
   secondOrderBlueToRedRatio?: number[] | null;
   resolutionElementAngstrom?: number | null;
+  measuredLineSpread?: MeasuredLineSpread | null;
   extractionRadius?: number | null;
   neighborWingFraction?: number[] | null;
   neighborWingStatus?: string | null;
@@ -491,6 +492,21 @@ export interface DifferentialRefractionRecord {
   acrossDispersionArcsecAt8000?: number | null;
   alongDispersionSpanAngstrom?: number | null;
   acrossDispersionSpanPx?: number | null;
+}
+
+/**
+ * The blur of one spectrum, measured in wavelength bands.
+ *
+ * Every list has one entry per band, in order of increasing wavelength.
+ * A band that had too few working trail-width fits is left out of all the
+ * lists, so the lists always have the same length.
+ */
+export interface MeasuredLineSpread {
+  wavelengthAngstrom?: number[];
+  fwhmAngstrom?: number[];
+  fwhmPx?: number[];
+  scatterPx?: number[];
+  sampleCount?: number[];
 }
 
 /**

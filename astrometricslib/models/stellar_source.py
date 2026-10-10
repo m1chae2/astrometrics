@@ -21,6 +21,7 @@ from astrometricslib.models.known_variability import (
     combine_known_variability,
     is_confirmed_constant,
 )
+from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.photometry_quality import (
     InputQualityAssessment as PhotometryInputQuality,
 )
@@ -887,6 +888,12 @@ class SpectroscopyResult(BaseModel):
     # when the trail width was not available, in which case they used the
     # fixed fallback resolution instead.
     resolution_element_angstrom: float | None = Field(default=None, alias="resolutionElementAngstrom")
+    # This spectrum's own blur against wavelength, in 400 A bands over
+    # 4200-8000 A, measured from the trail width (see
+    # `pre_processing.measured_line_spread`). `None` when the trail width
+    # was not available (fixed-box extraction) or too few bands had enough
+    # working fits, and for a spectrum saved before this was recorded.
+    measured_line_spread: MeasuredLineSpread | None = Field(default=None, alias="measuredLineSpread")
     # How many pixels out from the star's center to gather light from
     # when measuring its spectrum.
     extraction_radius: int | None = Field(default=None, alias="extractionRadius")

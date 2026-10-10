@@ -14,7 +14,7 @@ from scipy.special import erf
 FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
 
-def pixel_fractions(centres: np.ndarray | float, sigma_px: float, n_pixels: int) -> np.ndarray:
+def pixel_fractions(centres: np.ndarray | float, sigma_px: np.ndarray | float, n_pixels: int) -> np.ndarray:
     """Return the fraction of a 1-D Gaussian that lands in each pixel.
 
     Pixel ``i`` covers the interval from ``i - 0.5`` to ``i + 0.5``, so the
@@ -27,8 +27,10 @@ def pixel_fractions(centres: np.ndarray | float, sigma_px: float, n_pixels: int)
     centres : `numpy.ndarray` or `float`
         Centre of the Gaussian, in pixel coordinates. A scalar gives one
         curve. An array of shape ``(m,)`` gives ``m`` curves.
-    sigma_px : `float`
-        Standard deviation of the Gaussian, in pixels. Must be positive.
+    sigma_px : `numpy.ndarray` or `float`
+        Standard deviation of the Gaussian, in pixels. Must be positive. A
+        scalar gives every curve the same width. An array of shape ``(m,)``
+        gives each of the ``m`` curves its own width.
     n_pixels : `int`
         Number of pixels along the axis.
 

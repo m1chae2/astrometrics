@@ -131,6 +131,13 @@ done.
 | Tuner follow-ups | done | `utilities/test/test_calibration_tuner_dip_detection.py` (noisy frame tunes in under 10 s) |
 | Photometry follow-ups | done | `test/pre_processing/test_centroid_shift_summary.py`; gate `registration_drift` judges per-star offsets |
 | S14 follow-ups | done | `pipelines/shared/test/test_session_fit_statistics.py`; `drivers/test/test_catalog_store_regions.py`; the residual limit is still uncalibrated on real solves |
+| Spectroscopy checkpoints | done | four `StageQualityCheckpoint`s per spectrum (raw frame, calibrated spectrum, processing, output); `pipelines/spectroscopy/test/test_stage_quality.py`; gate `processing_quality` |
+| Atmospheric refraction | done | `test/pre_processing/test_atmospheric_refraction.py` (Ciddor 1996 index to 1e-8), `test_differential_refraction.py`; checkpoint 0 metrics `dar_*`, `target_altitude_degrees` |
+| Wavelength zero point | done | `test/pre_processing/test_wavelength_zero_point.py` (25 Å error recovered within 2 Å; measured after refraction); checkpoint 1 metrics; gate `wavelength_scale` |
+| Per-sample errors and equivalent widths | done | `test/pre_processing/test_intensity_variance.py` (reported error / scatter 0.96 to 1.01 over 200 realizations), `test/processing/test_equivalent_width.py` (z-score sd 1.06); checkpoint 1 and 2 metrics, all report-only |
+| Dereddening and line indices | done | `test/processing/test_dereddened_classification.py` (reddened G0V reads K2V, dereddened G0V); line-index type is a rough second opinion (50% within 2 subtypes, leave-one-out) |
+| Gaia XP comparison | done | `test/post_processing/test_compare_to_gaia_xp.py` (5%/1000 Å tilt recovered to 0.1); checkpoint 3 metrics; gate `gaia_xp_agreement` |
+| Measured line spread | done | `test/pre_processing/test_measured_line_spread.py` (injected sigma within 5%); checkpoint 1 `chromatic_defocus_ratio`; `scripts/spectral_focus_sweep.py`, `scripts/compare_instrument_responses.py` |
 
 Decisions taken during the work, for the owner to confirm:
 
@@ -147,6 +154,19 @@ Decisions taken during the work, for the owner to confirm:
   is not in the repository).
 - Variability thresholds (chi-square and Stetson J at the field's 99th percentile, excess
   scatter 1.5, AUC floor 0.7) are design choices measured only on synthetic fields.
+- Spectroscopy limits that are designed, not measured on real spectra: the refraction span
+  (20 Å) and minimum altitude (20°), the zero-point offset (20 Å) and the `wavelength_scale`
+  gate (11 Å), the Gaia XP tilt (3 %/1000 Å), RMS (5 %) and shift (11 Å), and the chromatic
+  defocus ratio (1.3). The zero-point line threshold (6 sigma) is measured on synthetic noise.
+  Real XP spectra of different A0V stars already differ by up to 36 Å in shift from one
+  template, so the 11 Å XP shift limit may sit at the method's floor; run
+  `scripts/compare_spectra_with_gaia_xp.py` on a real night to set it.
+- The Gaia BP-RP to E(B-V) factor (1.339) and the A(G) to E(B-V) factor (2.740) were taken from
+  Casagrande and VandenBerg (2018) from memory and need checking against the paper.
+- The stored instrument response was fitted before the refraction correction existed;
+  re-derive it once a Vega stack and an observatory site are available.
+- `SpectroscopyPipeline(use_measured_line_spread=True)` stays off until the focus sweep has
+  been run on a real bright star; M 13 (a cluster) cannot settle chromatic defocus.
 
 Found while doing tier 1, now tracked as follow-ups:
 

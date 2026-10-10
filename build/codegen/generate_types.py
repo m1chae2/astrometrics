@@ -30,6 +30,7 @@ from astrometricslib.models.gaia_xp_comparison import (
     GaiaXpRunSummary,
 )
 from astrometricslib.models.gate_result import GateResult, GateStatus
+from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -381,6 +382,7 @@ def render_types() -> str:
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(SpectralExtractionDiagnostics, "SpectralExtractionDiagnostics"),
         generate_interface(DifferentialRefractionRecord, "DifferentialRefractionRecord"),
+        generate_interface(MeasuredLineSpread, "MeasuredLineSpread"),
         generate_interface(SpectralNoiseModelRecord, "SpectralNoiseModelRecord"),
         generate_interface(ReddeningRecord, "ReddeningRecord"),
         generate_interface(LineIndexClassification, "LineIndexClassification"),

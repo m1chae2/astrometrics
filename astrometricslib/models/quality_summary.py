@@ -539,7 +539,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.5.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.6.0"
 
 
 class SpectralClassificationConcern(BaseModel):

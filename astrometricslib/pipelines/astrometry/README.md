@@ -21,6 +21,30 @@ This pipeline answers two questions about a single image: where in the sky is it
 
 The star identifier reads cached Gaia stars from a box around the field, and Right Ascension (RA, the east-west sky coordinate) wraps from 360 deg back to 0 deg. When the box crosses that line, `_catalog_ra_ranges` in `processing/star_identifier.py` splits it into two RA ranges, one on each side, and the identifier runs one query per range. A field at RA = 0.01 deg therefore selects stars at 359.6 deg as well as at 0.4 deg. The shared helper `wrapped_ra_difference_deg` in `pipelines/shared/angles.py` handles the same wrap for code that compares two RA values.
 
+## Two residual numbers: the plate-solve fit and the catalog match separation
+
+The summary records two different measures of how well the solved sky map fits the stars. They are separate fields because they measure different things.
+
+- **Plate-solve fit residual** (`plate_solve_fit_residual_rms_arcsec`, arcseconds). The plate solver (solve-field) matches stars in the image to stars in its own reference catalog. For each matched star it reports where the fitted sky map puts the star and where the reference star sits. The residual is the root mean square (RMS: square each distance, average, take the root) of those distances. The driver reads it from solve-field's `.corr` table (see `drivers/README.md`). A small value means the fit is good. `plate_solve_matched_star_count` is the number of stars in that table. Both are `None` when the solver gave no table, as with the online service.
+- **Catalog match separation** (`catalog_match_separation_rms_arcsec`, arcseconds). The identifier measures the distance from each detected star to the nearest SIMBAD or Gaia star and takes the RMS. It counts only stars within the 10 arcsecond match radius, so the number cannot exceed that radius. Wrong matches and SIMBAD's uneven position precision make it larger. It is a rough check, not a measure of the fit. The older field `astrometric_residual_rms_arcsec` holds the same value and stays for summaries saved earlier.
+
+The `astrometric_residual` gate judges the plate-solve fit residual when the solver reported one. It falls back to the catalog match separation when the solver reported none. The gate's `detail` names the number it used. The limit (half a star's width) was set on catalog match separations, and a fit residual is normally smaller, so the limit is lenient for fit residuals. Nobody has re-measured it on fit residuals yet.
+
+## Gaia positions, proper motion and search depth
+
+Gaia DR3 gives each star's position for the year 2016.0, plus its proper motion (how far it moves across the sky each year, in milliarcseconds per year). A star that moves 1 arcsecond per year sits 10 arcseconds from its Gaia position ten years later, which is the full match radius. The identifier therefore moves each Gaia position to the image's `DATE-OBS` before matching, using `SkyCoord.apply_space_motion`. The local Gaia cache stores `pmra` and `pmdec` for this.
+
+The identifier leaves positions at epoch 2016.0 and records a flag in the summary's `astrometry_flags` when it cannot move them:
+
+- `gaia_proper_motion_unknown`: the Gaia rows carry no proper motion. A cache file written before proper motions were stored gets the columns added, and its old rows read as unknown until a new download replaces them.
+- `gaia_epoch_unknown`: the image has no readable `DATE-OBS`.
+
+The Gaia search asks only for stars brighter than a G magnitude limit and returns the brightest first. The limit is the faintest detected star's magnitude plus one, kept between 14 and 20. The identifier estimates that magnitude from the detected stars that SIMBAD identified: each gives a zero point (catalog V magnitude plus 2.5 times log10 of the measured flux), and the median zero point converts the faintest detection's flux to a magnitude. With fewer than five such stars, the limit is G < 18. The search returns at most 50,000 rows. When the result hits that limit, the identifier records the flag `gaia_row_limit_reached`, because faint stars in the field may be missing. The cache keeps no record of how deep it was filled, so the same magnitude limit also filters cached rows, and a cache that holds only part of a dense field is still used as long as it holds five stars.
+
+## Pixel scale hint
+
+The identifier gives the plate solver a pixel scale range so the solver does not search every scale. The scale is `206.265 * pixel size / focal length` in arcseconds per pixel, with the pixel size in micrometers and the focal length in millimeters. The pixel size is the header's `XPIXSZ`, which already includes binning: INDI/Ekos (libindi), NINA and Siril write the camera's pixel size times the binning factor there. The identifier therefore does not multiply `XPIXSZ` by `XBINNING`. When the header has no `XPIXSZ` but has `PIXSIZE1` (the camera's own, unbinned pixel size), the identifier uses `PIXSIZE1` times `XBINNING` (1 if absent). When the header has neither but has `PIXSCAL` (a scale in arcseconds per pixel), the identifier uses that value as the scale and applies no binning to it. When the X and Y cards differ (`XPIXSZ` and `YPIXSZ`, or `XBINNING` and `YBINNING` for the `PIXSIZE1` rule), the identifier uses their mean and records the flag `scale_hint_binning_mismatch`.
+
 ## A note on scope
 
 This pipeline identifies stars and solves the sky position of an image. It does not measure star brightness (that is photometry) or star spectra (that is spectroscopy) — those pipelines depend on astrometry's output but live elsewhere.
@@ -36,10 +60,10 @@ The summary keeps one record per check in `gates`. Each gate is `passed`, `faile
 | `plate_solve` | The image was not solved to sky coordinates | Never |
 | `source_detection` | No star was detected | Never |
 | `catalog_matches` | Fewer than 20 stars were matched to a catalog, too few for the fit to be reliable | The image was not solved |
-| `astrometric_residual` | The plate solution misses its stars by more than half a star's width (residual in arcseconds against the plate scale times the star width) | The residual, the plate scale or the star width was not measured |
+| `astrometric_residual` | The plate solution misses its stars by more than half a star's width (residual in arcseconds against the plate scale times the star width). The residual is the solver's fit residual, or the catalog match separation when the solver gave none; the detail says which | Neither residual, the plate scale or the star width was measured |
 | `catalog_lookup` | Lookups were made and the catalog circuit breaker tripped, or half or more of them failed | No lookup was attempted, including when the breaker was already open from earlier failures in the same process |
 
-`source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. The two limits are design estimates, tied to the equipment: the residual is judged against the star width in pixels times the plate scale, both recorded with each run. On the library (2026-10-09) the 8 saved solves with a plate scale had residuals of 0.14 to 0.44 of a star's width, so the half-width limit catches a failed solve and does not rank good ones; and the four solves with fewer than 20 matched stars (4, 6, 11 and 19) are among the five with the largest residuals (5.8 to 9.0 arcsec).
+`source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. The two limits are design estimates, tied to the equipment: the residual is judged against the star width in pixels times the plate scale, both recorded with each run. On the library (2026-10-09) the 8 saved solves with a plate scale had catalog match separations of 0.14 to 0.44 of a star's width, so the half-width limit catches a failed solve and does not rank good ones; and the four solves with fewer than 20 matched stars (4, 6, 11 and 19) are among the five with the largest residuals (5.8 to 9.0 arcsec).
 
 ## SIMBAD object types
 

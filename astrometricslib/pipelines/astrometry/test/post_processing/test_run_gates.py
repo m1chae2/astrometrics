@@ -153,3 +153,66 @@ def test_the_matches_gate_is_not_checked_when_the_image_was_not_solved() -> None
     gate = gates_for(plate_solve_succeeded=False, catalog_matched_star_count=0)[rg.MATCHED_STARS_GATE_NAME]
 
     assert gate.status is GateStatus.NOT_CHECKED
+
+
+def test_the_residual_gate_judges_the_plate_solve_fit_when_the_solver_gave_one() -> None:
+    """A good fit passes even when the catalog separation alone would fail."""
+    gate = gates_for(
+        plate_solve_fit_residual_rms_arcsec=0.5,
+        plate_solve_matched_star_count=42,
+        catalog_match_separation_rms_arcsec=8.0,
+        astrometric_residual_rms_arcsec=8.0,
+    )[rg.RESIDUAL_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(0.5 / (1.9 * 3.0))
+    assert "plate-solve fit residual" in gate.detail
+    assert "42 matched stars" in gate.detail
+    assert "catalog match separation" not in gate.detail
+
+
+def test_the_residual_gate_fails_a_bad_fit_even_when_the_catalog_separation_is_small() -> None:
+    """A fit that misses by 5 arcsec fails, whatever the catalog proxy says."""
+    gate = gates_for(
+        plate_solve_fit_residual_rms_arcsec=5.0,
+        catalog_match_separation_rms_arcsec=1.0,
+        astrometric_residual_rms_arcsec=1.0,
+    )[rg.RESIDUAL_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.measured_value == pytest.approx(5.0 / (1.9 * 3.0))
+    assert "plate-solve fit residual" in gate.detail
+
+
+def test_the_residual_gate_falls_back_to_the_catalog_separation_and_says_so() -> None:
+    """With no fit residual, the catalog proxy is judged and named."""
+    passed = gates_for(catalog_match_separation_rms_arcsec=1.0)[rg.RESIDUAL_GATE_NAME]
+    failed = gates_for(catalog_match_separation_rms_arcsec=5.0)[rg.RESIDUAL_GATE_NAME]
+
+    assert passed.status is GateStatus.PASSED
+    assert "catalog match separation" in passed.detail
+    assert "reported no fit residual" in passed.detail
+    assert failed.status is GateStatus.FAILED
+    assert "catalog match separation" in failed.detail
+    assert "reported no fit residual" in failed.detail
+
+
+def test_the_residual_gate_reads_the_older_field_when_the_new_proxy_is_absent() -> None:
+    """A summary saved before the rename still gives the gate its proxy."""
+    gate = gates_for(catalog_match_separation_rms_arcsec=None, astrometric_residual_rms_arcsec=5.0)[
+        rg.RESIDUAL_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.FAILED
+    assert "catalog match separation" in gate.detail
+
+
+def test_the_residual_gate_is_not_checked_with_neither_a_fit_nor_a_catalog_separation() -> None:
+    """No fit residual and no catalog match leave nothing to judge."""
+    gate = gates_for(
+        plate_solve_fit_residual_rms_arcsec=None,
+        catalog_match_separation_rms_arcsec=None,
+        astrometric_residual_rms_arcsec=None,
+    )[rg.RESIDUAL_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED

@@ -34,9 +34,27 @@ class MovingObjectConfig(BaseModel):
     rate_max_arcsec_per_hour : `float`
         The fastest an object can move. Anything faster is probably a
         satellite, by default 300.0.
-    rate_linearity_r_squared_min : `float`
-        How perfectly straight the object's path must be (1.0 is
-        perfectly straight), by default 0.98.
+    chain_match_radius_max_arcsec : `float`
+        The farthest, in arcseconds, a dot may sit from the last dot of a
+        track and still be added to it. The search radius grows with the
+        time between pictures, and this stops it at a few arcminutes, by
+        default 300.0.
+    residual_rms_max_multiple : `float`
+        A track counts as a straight line when the root-mean-square (RMS)
+        distance of its dots from the fitted line, on each sky axis, is
+        below this many times the error of one position, by default 2.0.
+    min_displacement_error_multiple : `float`
+        A track must move, along the fitted line, at least this many times
+        the error of one position between its first and last picture. This
+        keeps a star that merely jitters by its position error from passing
+        as a slow mover, by default 3.0.
+    astrometric_error_default_arcsec : `float`
+        The error of one position, in arcseconds, to assume for a picture
+        whose own error could not be measured, by default 10.0.
+    centroid_error_px : `float`
+        The error, in pixels, of finding the centre of a faint dot. It is
+        added in quadrature (square root of the sum of squares) to the
+        measured pointing scatter, by default 0.5.
     ephemeris_cross_match_radius_arcsec : `float`
         How close the object must be to a known asteroid's predicted
         position to count as a match, by default 10.0.
@@ -56,7 +74,11 @@ class MovingObjectConfig(BaseModel):
     sky_match_tolerance_arcsec: float = Field(default=3.0, alias="skyMatchToleranceArcsec")
     rate_min_arcsec_per_hour: float = Field(default=1.0, alias="rateMinArcsecPerHour")
     rate_max_arcsec_per_hour: float = Field(default=300.0, alias="rateMaxArcsecPerHour")
-    rate_linearity_r_squared_min: float = Field(default=0.98, alias="rateLinearityRSquaredMin")
+    chain_match_radius_max_arcsec: float = Field(default=300.0, alias="chainMatchRadiusMaxArcsec")
+    residual_rms_max_multiple: float = Field(default=2.0, alias="residualRmsMaxMultiple")
+    min_displacement_error_multiple: float = Field(default=3.0, alias="minDisplacementErrorMultiple")
+    astrometric_error_default_arcsec: float = Field(default=10.0, alias="astrometricErrorDefaultArcsec")
+    centroid_error_px: float = Field(default=0.5, alias="centroidErrorPx")
     ephemeris_cross_match_radius_arcsec: float = Field(default=10.0, alias="ephemerisCrossMatchRadiusArcsec")
     mpc_observatory_code: str = Field(default="500", alias="mpcObservatoryCode")
 
@@ -113,9 +135,19 @@ class MovingObjectConfigLoader:
             rate_max_arcsec_per_hour=float(
                 _get_val("rate_max_arcsec_per_hour", defaults.rate_max_arcsec_per_hour)
             ),
-            rate_linearity_r_squared_min=float(
-                _get_val("rate_linearity_r_squared_min", defaults.rate_linearity_r_squared_min)
+            chain_match_radius_max_arcsec=float(
+                _get_val("chain_match_radius_max_arcsec", defaults.chain_match_radius_max_arcsec)
             ),
+            residual_rms_max_multiple=float(
+                _get_val("residual_rms_max_multiple", defaults.residual_rms_max_multiple)
+            ),
+            min_displacement_error_multiple=float(
+                _get_val("min_displacement_error_multiple", defaults.min_displacement_error_multiple)
+            ),
+            astrometric_error_default_arcsec=float(
+                _get_val("astrometric_error_default_arcsec", defaults.astrometric_error_default_arcsec)
+            ),
+            centroid_error_px=float(_get_val("centroid_error_px", defaults.centroid_error_px)),
             ephemeris_cross_match_radius_arcsec=float(
                 _get_val("ephemeris_cross_match_radius_arcsec", defaults.ephemeris_cross_match_radius_arcsec)
             ),

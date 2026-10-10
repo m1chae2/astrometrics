@@ -142,6 +142,12 @@ class AstrometryPipeline:
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
             astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),
+            catalog_match_separation_rms_arcsec=(
+                self.star_identifier.get_catalog_match_separation_rms_arcsec()
+            ),
+            plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
+            plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
+            astrometry_flags=list(self.star_identifier.astrometry_flags),
         )
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:

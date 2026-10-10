@@ -5,6 +5,12 @@ Astrometry finds the stars in an image, works out where the image points
 Three checks say whether the run can be trusted: were any stars found, did the
 plate solve succeed, and did the catalog lookups work.
 
+The residual check judges the plate solver's own fit residual (how far the
+fitted position of each star it matched sits from the reference star). When the
+solver reported none, as the online solver does, the check falls back to the
+catalog match separation (the distance from each detected star to the nearest
+SIMBAD or Gaia star). The gate's detail says which number it used.
+
 Each check is returned as a `GateResult`. The plate-solve gate is built by the
 runner as before; the other two are built here. A catalog lookup that was
 never attempted is ``not_checked``; it is not a pass.
@@ -25,7 +31,11 @@ CATALOG_LOOKUP_GATE_NAME = "catalog_lookup"
 # A design estimate. On the 8 saved solves whose stacked image carries a
 # solved plate scale (2026-10-09) the residual was 0.14 to 0.44 of the width
 # (median 0.25), so none fires; it is there to catch a failed solve, not to
-# rank good ones.
+# rank good ones. Those 8 numbers are catalog match separations (see
+# `AstrometryPipelineQualityMetrics.catalog_match_separation_rms_arcsec`), not
+# plate-solver fit residuals. A fit residual is expected to be the smaller of
+# the two, so this limit is the more lenient one for it. It has not been
+# re-measured on fit residuals.
 MAXIMUM_RESIDUAL_FRACTION_OF_FWHM = 0.5
 
 # The fewest catalog-matched stars for the residual to mean anything. The
@@ -39,6 +49,34 @@ MINIMUM_MATCHED_STARS = 20
 # trusted. A design estimate: the first failures usually come from one slow
 # or unreachable service, and half failing means most stars went unnamed.
 MAXIMUM_FAILED_LOOKUP_FRACTION = 0.5
+
+
+def _residual_and_basis(metrics: AstrometryPipelineQualityMetrics) -> tuple[float | None, str]:
+    """Pick the residual the gate judges and say where it came from.
+
+    Parameters
+    ----------
+    metrics : `AstrometryPipelineQualityMetrics`
+        What the run measured.
+
+    Returns
+    -------
+    residual : `float` or `None`
+        The plate solver's fit residual in arcseconds when it reported one.
+        Otherwise the catalog match separation RMS, or `None` when neither
+        was measured.
+    basis : `str`
+        A short phrase naming the number used, for the gate's detail.
+    """
+    fit_residual = metrics.plate_solve_fit_residual_rms_arcsec
+    if fit_residual is not None:
+        matched = metrics.plate_solve_matched_star_count
+        stars = f" over {matched} matched stars" if matched is not None else ""
+        return fit_residual, f"plate-solve fit residual RMS{stars}"
+    separation = metrics.catalog_match_separation_rms_arcsec
+    if separation is None:
+        separation = metrics.astrometric_residual_rms_arcsec
+    return separation, "catalog match separation RMS, because the plate solver reported no fit residual"
 
 
 def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[GateResult]:
@@ -80,7 +118,7 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
         )
 
     residual_source = f"at most {MAXIMUM_RESIDUAL_FRACTION_OF_FWHM:g} of a star's width (design estimate)"
-    residual = metrics.astrometric_residual_rms_arcsec
+    residual, basis = _residual_and_basis(metrics)
     scale = metrics.plate_scale_arcsec_per_pixel
     fwhm = metrics.star_fwhm_px
     if residual is None or not scale or not fwhm:
@@ -98,7 +136,7 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
             gates.append(
                 failed_gate(
                     RESIDUAL_GATE_NAME,
-                    f"the plate solution misses its stars by {residual:.1f} arcsec, "
+                    f"the plate solution misses its stars by {residual:.1f} arcsec ({basis}), "
                     f"{fraction:.0%} of a star's width, so it may be wrong",
                     fraction,
                     MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,
@@ -107,7 +145,13 @@ def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[Gate
             )
         else:
             gates.append(
-                passed_gate(RESIDUAL_GATE_NAME, fraction, MAXIMUM_RESIDUAL_FRACTION_OF_FWHM, residual_source)
+                passed_gate(
+                    RESIDUAL_GATE_NAME,
+                    fraction,
+                    MAXIMUM_RESIDUAL_FRACTION_OF_FWHM,
+                    residual_source,
+                    f"{residual:.2f} arcsec ({basis})",
+                )
             )
 
     if metrics.sources_detected <= 0:

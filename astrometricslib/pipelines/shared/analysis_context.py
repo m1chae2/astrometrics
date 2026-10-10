@@ -4,7 +4,7 @@ It holds the image itself, any objects (like stars) found in it, and the
 mapping that connects image pixels to real sky coordinates (WCS).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from astropy.wcs import WCS
 
@@ -43,3 +43,7 @@ class AnalysisContext:
     sources_detected: int = 0
     solve_attempted: bool = False
     astrometric_residual_rms_arcsec: float | None = None
+    catalog_match_separation_rms_arcsec: float | None = None
+    plate_solve_fit_residual_rms_arcsec: float | None = None
+    plate_solve_matched_star_count: int | None = None
+    astrometry_flags: list[str] = field(default_factory=list)

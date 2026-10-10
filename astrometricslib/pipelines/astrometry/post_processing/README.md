@@ -12,7 +12,7 @@ Post-processing does not do any new matching or lookup work. It takes the outcom
 
 Post-processing produces one quality record per identified star, made up of the three facts listed above: which catalog matched it, how far off the match was, and whether it was picked out of a crowded group. Together, these describe how much to trust that one star's identity.
 
-These per-star records also feed a session-level number: the pipeline calculates the observing session's overall position accuracy by averaging the match distances across every identified star. A smaller average means the whole session's coordinates line up more closely with the star catalogs, not just one star's. This session-level number, along with how many stars were matched through each catalog, becomes part of the astrometry pipeline's quality summary for that session.
+These per-star records also feed a session-level number: the pipeline calculates the catalog match separation by taking the root mean square (RMS) of the match distances across every identified star. A smaller value means the detected positions line up more closely with the star catalogs. This number is a rough check. It counts only stars within the 10 arcsecond match radius, and wrong matches raise it. It is not the plate-solve fit residual, which the plate solver reports separately and the `astrometric_residual` gate prefers (see `run_gates.py` and the pipeline README). The catalog match separation, along with how many stars were matched through each catalog, becomes part of the astrometry pipeline's quality summary for that session.
 
 ## Why this step exists
 

@@ -30,6 +30,7 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces import (
     PlateSolveDriver,
+    PlateSolveHeader,
     SimbadDriver,
     StackingDriver,
     StackRunResult,
@@ -380,6 +381,7 @@ __all__ = [
     "PhotometryResult",
     "PlateSolveDriver",
     "PlateSolveFailedError",
+    "PlateSolveHeader",
     "PlotData",
     "PreviewRemakeResult",
     "ProcessTargetResult",

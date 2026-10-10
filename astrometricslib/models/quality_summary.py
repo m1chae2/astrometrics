@@ -349,8 +349,10 @@ class StackQualitySummary(PipelineQualitySummaryBase):
 # ---------------------------------------------------------------------------
 
 # Bumped whenever AstrometryPipelineQualityMetrics's shape changes
-# meaningfully.
-ASTROMETRY_PIPELINE_VERSION = "1.3.0"
+# meaningfully. 1.4.0: the residual gate judges the plate solver's own fit
+# when it reports one, Gaia positions carry proper motion to the observation
+# epoch, and the scale hint uses binning.
+ASTROMETRY_PIPELINE_VERSION = "1.4.0"
 
 
 class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
@@ -368,10 +370,39 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     # SIMBAD and Gaia are online databases of stars and their real
     # positions, used to double-check what's in the picture.
     simbad_matched_count: int = Field(alias="simbadMatchedCount")
-    # How far off, on average, the calculated coordinates were from the
-    # true star positions, in arcseconds ("RMS" is a standard way to
-    # average errors so they don't cancel out). Lower is better.
+    # The root mean square (RMS) of the distance, in arcseconds, between each
+    # detected star and the nearest SIMBAD or Gaia star within the match
+    # radius. This is the catalog match separation, not the plate-solve fit
+    # residual: it ignores any star farther than the radius and includes
+    # wrong matches. The field keeps its older name for saved summaries and
+    # always holds the same value as `catalog_match_separation_rms_arcsec`.
     astrometric_residual_rms_arcsec: float | None = Field(default=None, alias="astrometricResidualRmsArcsec")
+    # The same catalog match separation RMS, under a name that says what it
+    # is. The residual gate uses it only when the plate solver gave no fit
+    # residual of its own. `None` when no star was matched to a catalog.
+    catalog_match_separation_rms_arcsec: float | None = Field(
+        default=None, alias="catalogMatchSeparationRmsArcsec"
+    )
+    # The plate solver's own fit residual, in arcseconds: the RMS distance
+    # between each matched field star's fitted position and its reference
+    # star's position. This is the number the residual gate judges. `None`
+    # when the solver reported none (an online solve, or a missing match
+    # table).
+    plate_solve_fit_residual_rms_arcsec: float | None = Field(
+        default=None, alias="plateSolveFitResidualRmsArcsec"
+    )
+    # How many stars the plate solver matched to its reference stars when it
+    # fitted the solution. `None` when the solver reported none.
+    plate_solve_matched_star_count: int | None = Field(default=None, alias="plateSolveMatchedStarCount")
+    # Short stable keys for conditions that limit how far the results can be
+    # trusted: ``gaia_row_limit_reached`` (the Gaia search returned as many
+    # rows as it may, so faint stars may be missing),
+    # ``gaia_proper_motion_unknown`` (cached Gaia rows had no proper motion,
+    # so positions stay at epoch 2016.0), ``gaia_epoch_unknown`` (the frame has
+    # no observation date, so positions stay at epoch 2016.0) and
+    # ``scale_hint_binning_mismatch`` (the header's X and Y pixel sizes, or X
+    # and Y binning, differ). They do not flag the run.
+    astrometry_flags: list[str] = Field(default_factory=list, alias="astrometryFlags")
 
     # The size of one pixel on the sky, in arcseconds, from the solved
     # coordinates, and the width (FWHM) of the stars in the image, in pixels.

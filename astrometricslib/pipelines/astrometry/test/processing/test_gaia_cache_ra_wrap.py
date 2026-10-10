@@ -71,8 +71,14 @@ def _select_cached_ras(
     rows = _fake_cache_rows(cached_ra_values_deg)
 
     def fake_query(
-        config: Any, min_ra: float, max_ra: float, min_dec: float, max_dec: float
-    ) -> list[tuple[str, float, float, float, str]]:
+        config: Any,
+        min_ra: float,
+        max_ra: float,
+        min_dec: float,
+        max_dec: float,
+        *,
+        include_proper_motion: bool = False,
+    ) -> list[tuple]:
         """Return the fake rows inside the box, like the SQL query does.
 
         Parameters
@@ -81,13 +87,17 @@ def _select_cached_ras(
             Unused; present to match the real function.
         min_ra, max_ra, min_dec, max_dec : `float`
             The edges of the box, in degrees.
+        include_proper_motion : `bool`, optional
+            Add two unknown proper-motion values to each row, as the real
+            function does.
 
         Returns
         -------
         rows : `list` [`tuple`]
             The fake rows inside the box.
         """
-        return [row for row in rows if min_ra <= row[1] <= max_ra and min_dec <= row[2] <= max_dec]
+        inside = [row for row in rows if min_ra <= row[1] <= max_ra and min_dec <= row[2] <= max_dec]
+        return [(*row, None, None) for row in inside] if include_proper_motion else inside
 
     monkeypatch.setattr(catalog_store, "query_gaia_sources_in_bounds", fake_query)
     monkeypatch.setattr(catalog_store, "get_catalog_cache_path", lambda config: "unused.db")

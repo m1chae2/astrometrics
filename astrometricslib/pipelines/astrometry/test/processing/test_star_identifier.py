@@ -251,16 +251,15 @@ def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
 
 
 def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _query_gaia_region pins Gaia DR3's table explicitly.
+    """Verify _query_gaia_region pins Gaia DR3's table and limits the search.
 
-    astroquery's `Gaia.cone_search_async` defaults to whichever table
-    the ESA archive server reports as current when `table_name` isn't
-    given -- not something pinned in our own code. Every other Gaia
-    access in this file hardcodes gaiadr3.gaia_source (the bulk-seed
-    ADQL query, the local cache schema, every "Gaia DR3 ..." id
-    string), so the cone-search fallback must match it explicitly, or
-    a future server-side default change could silently start mixing
-    Gaia releases between the two query paths.
+    astroquery's cone search defaults to whichever table the ESA archive
+    server reports as current, which is not something this code pins. Every
+    other Gaia access in this file hardcodes gaiadr3.gaia_source (the
+    bulk-seed ADQL query, the local cache schema, every "Gaia DR3 ..." id
+    string), so the search names the table in its own ADQL query. The query
+    also carries the magnitude limit and the row limit, and asks for proper
+    motions.
     """
     import astroquery.gaia as gaia_module
 
@@ -271,21 +270,50 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pyte
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
 
-    captured_kwargs = {}
+    captured_queries: list[str] = []
 
     class _FakeJob:
+        """A finished job whose result table is empty."""
+
         def get_results(self) -> Table:
+            """Return an empty result table.
+
+            Returns
+            -------
+            table : `astropy.table.Table`
+                A table with no rows.
+            """
             return Table({"ra": [], "dec": []})
 
-    def _fake_cone_search_async(coordinate, *, radius=None, table_name=None, **_kw):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument, missing-type-kwargs]
-        captured_kwargs["table_name"] = table_name
+    def _fake_launch_job_async(query: str, **_keywords: object) -> _FakeJob:
+        """Record the ADQL text and return a finished empty job.
+
+        Parameters
+        ----------
+        query : `str`
+            The ADQL query text.
+        **_keywords
+            Ignored job options.
+
+        Returns
+        -------
+        job : `_FakeJob`
+            A job that returns an empty table.
+        """
+        captured_queries.append(query)
         return _FakeJob()
 
-    monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", _fake_cone_search_async)
+    monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", _fake_launch_job_async)
 
     StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
 
-    assert captured_kwargs["table_name"] == "gaiadr3.gaia_source"
+    assert len(captured_queries) == 1
+    query = captured_queries[0]
+    assert "FROM gaiadr3.gaia_source" in query
+    assert f"phot_g_mean_mag < {star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT}" in query
+    assert f"TOP {star_identifier_module.GAIA_ROW_LIMIT}" in query
+    assert "pmra" in query
+    assert "pmdec" in query
 
 
 class TestGaiaCircuitBreaker:
@@ -339,8 +367,8 @@ class TestGaiaCircuitBreaker:
         config.update_config({"Image Library": {"path": str(tmp_path)}})
         monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
 
-        cone_search_spy = MagicMock()
-        monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", cone_search_spy)
+        remote_query_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
 
         for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
             star_identifier_module._record_gaia_failure("test")
@@ -349,7 +377,7 @@ class TestGaiaCircuitBreaker:
 
         assert table is None
         assert coords is None
-        cone_search_spy.assert_not_called()
+        remote_query_spy.assert_not_called()
 
     def test_open_breaker_skips_the_cache_seed_download(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -420,8 +448,8 @@ class TestGaiaCircuitBreaker:
         connection.commit()
         connection.close()
 
-        cone_search_spy = MagicMock()
-        monkeypatch.setattr(gaia_module.Gaia, "cone_search_async", cone_search_spy)
+        remote_query_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
 
         for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
             star_identifier_module._record_gaia_failure("test")
@@ -431,7 +459,7 @@ class TestGaiaCircuitBreaker:
         assert table is not None, "cached Gaia rows must still be served with the breaker open"
         assert len(table) == 8
         assert coords is not None
-        cone_search_spy.assert_not_called()
+        remote_query_spy.assert_not_called()
 
 
 def _apply_simbad_match_for_v_column(v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]

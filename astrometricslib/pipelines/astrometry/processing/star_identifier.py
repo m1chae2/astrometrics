@@ -25,12 +25,14 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
+from astropy.time import Time
 from astropy.wcs import WCS, FITSFixedWarning
+from erfa import ErfaWarning
 
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
+from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, read_fit_statistics
 from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import ExternalServiceError
@@ -104,11 +106,6 @@ _COLOR_DETECTION_BIN_FACTOR = 2
 # driver, rather than here: they describe how to talk to astroquery, not
 # how this pipeline identifies a star.
 
-# Gaia TAP service queries also aren't safe to run at the same time
-# from multiple threads, since every query shares one connection
-# object; force them to run one at a time with a dedicated lock.
-GAIA_LOCK = threading.Lock()
-
 # --- Gaia Connection Safety Switch ------------------------------------------
 #
 # This acts like a circuit breaker to protect the program if the Gaia database
@@ -142,6 +139,47 @@ CATALOG_MATCH_RADIUS_ARCSEC = 10.0
 # after the companion because it happened to be nearer by a fraction of a
 # pixel. A judgement call, checked on that one pair.
 UNRESOLVED_COMPANION_RADIUS_ARCSEC = 3.0
+
+# --- Gaia Search Depth and Epoch --------------------------------------------
+#
+# The Gaia cone search asks for stars brighter than a magnitude limit and
+# returns at most `GAIA_ROW_LIMIT` of them, brightest first. Without a limit
+# the search ranked stars by distance from the field centre and stopped at
+# 10,000 rows, so a dense field lost its edge stars and those stars went
+# unmatched.
+#
+# The limit comes from the frame when it can: the faintest detected star's
+# estimated G magnitude plus `GAIA_MAGNITUDE_LIMIT_MARGIN`. The estimate fits
+# a zero point to the detected stars that SIMBAD matched (their catalog V
+# magnitude against their measured flux). V and G differ by a few tenths of a
+# magnitude for most stars and by more than one for the reddest, so the
+# margin and the clamps below are design estimates, not measurements.
+# Without enough SIMBAD-matched stars to fit, the limit is
+# `GAIA_DEFAULT_MAGNITUDE_LIMIT`, which is also the depth the bulk cache
+# seed uses.
+GAIA_DEFAULT_MAGNITUDE_LIMIT = 18.0
+GAIA_MAGNITUDE_LIMIT_MARGIN = 1.0
+GAIA_MINIMUM_MAGNITUDE_LIMIT = 14.0
+GAIA_MAXIMUM_MAGNITUDE_LIMIT = 20.0
+MINIMUM_STARS_FOR_DEPTH_ESTIMATE = 5
+
+# The most rows one Gaia cone search may return. The old limit was 10,000.
+# A one-degree-radius field at G < 18 near the galactic plane holds tens of
+# thousands of stars, so the limit is raised to 50,000. A result with exactly
+# this many rows is treated as cut short and recorded in a flag.
+GAIA_ROW_LIMIT = 50_000
+
+# Gaia DR3 positions are for this epoch (the year 2016.0, in Julian years).
+# A star's position at the time of the image is its Gaia position moved along
+# its proper motion for the years in between.
+GAIA_DR3_REFERENCE_EPOCH = "J2016.0"
+
+# Flags recorded on the quality summary (`astrometry_flags` of the
+# astrometry metrics). Each is a stable key; tests and readers match on it.
+FLAG_GAIA_ROW_LIMIT_REACHED = "gaia_row_limit_reached"
+FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
+FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
+FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
@@ -352,6 +390,29 @@ def _brightest_pixel(data: Any) -> float | None:
     return peak if math.isfinite(peak) else None
 
 
+def _optional_float(value: Any) -> float | None:
+    """Turn a catalog table value into a float, or `None` if it has no value.
+
+    Parameters
+    ----------
+    value : `Any`
+        A table cell: a number, `None`, or an astropy masked value.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The value, or `None` when it is missing, masked, not a number, or
+        not finite.
+    """
+    if value is None or (hasattr(value, "mask") and bool(np.all(value.mask))):
+        return None
+    try:
+        number = float(value)
+    except TypeError, ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _read_catalog_magnitude(match: Any, column_names: list[str]) -> float | None:
     """Read a star's brightness from a catalog row, if the catalog has one.
 
@@ -490,6 +551,122 @@ def _catalog_ra_ranges(ra_center: float, dec_center: float, radius_deg: float) -
     return [(low_deg, high_deg)]
 
 
+def propagate_gaia_positions(
+    ra_deg: Any,
+    dec_deg: Any,
+    pmra_mas_per_year: Any,
+    pmdec_mas_per_year: Any,
+    observation_time: Time,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Move Gaia DR3 star positions from epoch 2016.0 to the observation time.
+
+    A star's position changes over the years because the star moves across the
+    sky (its proper motion). Gaia reports each position for the year 2016.0.
+    A fast star such as Barnard's Star has moved by several arcseconds by the
+    time of an image taken years later, which is enough to miss a match.
+
+    Parameters
+    ----------
+    ra_deg, dec_deg : array-like
+        The Gaia positions at epoch 2016.0, in degrees.
+    pmra_mas_per_year, pmdec_mas_per_year : array-like
+        The proper motion in milliarcseconds per year. ``pmra`` is Gaia's
+        ``pmra`` column, which already includes the cosine of the
+        declination. A value that is not finite (Gaia has no motion for the
+        star) leaves that star where it is.
+    observation_time : `astropy.time.Time`
+        When the image was taken.
+
+    Returns
+    -------
+    ra_deg, dec_deg : `numpy.ndarray`
+        The positions at `observation_time`, in degrees.
+    """
+    ra = np.atleast_1d(np.asarray(ra_deg, dtype=float))
+    dec = np.atleast_1d(np.asarray(dec_deg, dtype=float))
+    pm_ra = np.nan_to_num(np.atleast_1d(np.asarray(pmra_mas_per_year, dtype=float)), nan=0.0)
+    pm_dec = np.nan_to_num(np.atleast_1d(np.asarray(pmdec_mas_per_year, dtype=float)), nan=0.0)
+    catalog_coords = SkyCoord(
+        ra=ra * u.deg,
+        dec=dec * u.deg,
+        pm_ra_cosdec=pm_ra * u.mas / u.yr,
+        pm_dec=pm_dec * u.mas / u.yr,
+        obstime=Time(GAIA_DR3_REFERENCE_EPOCH),
+    )
+    with warnings.catch_warnings():
+        # Gaia gives no distance here. astropy then assumes one and says so.
+        # The shift over a few years does not depend on it.
+        warnings.simplefilter("ignore", ErfaWarning)
+        moved = catalog_coords.apply_space_motion(new_obstime=observation_time)
+    return np.asarray(moved.ra.deg, dtype=float), np.asarray(moved.dec.deg, dtype=float)
+
+
+def read_observation_time(header: Any) -> Time | None:
+    """Read when an image was taken from its ``DATE-OBS`` header card.
+
+    Parameters
+    ----------
+    header : `astropy.io.fits.Header` or `None`
+        The image header.
+
+    Returns
+    -------
+    observation_time : `astropy.time.Time` or `None`
+        The time in UTC, or `None` if the header is missing, has no
+        ``DATE-OBS``, or the value cannot be read as a date.
+    """
+    if header is None:
+        return None
+    value = header.get("DATE-OBS")
+    if not value:
+        return None
+    try:
+        return Time(str(value), scale="utc")
+    except ValueError:
+        logger.warning("Could not read DATE-OBS %r as a date.", value)
+        return None
+
+
+def estimate_gaia_magnitude_limit(stellar_objects: list[StellarObject]) -> float | None:
+    """Work out how faint a Gaia search needs to go for one frame.
+
+    The detected stars that SIMBAD identified have both a measured flux and a
+    catalog V magnitude. Magnitude is ``zero_point - 2.5 * log10(flux)``, so
+    each such star gives a zero point, and the median is the frame's. The
+    faintest detected star's magnitude follows from its flux. The limit is
+    that magnitude plus `GAIA_MAGNITUDE_LIMIT_MARGIN`, kept between
+    `GAIA_MINIMUM_MAGNITUDE_LIMIT` and `GAIA_MAXIMUM_MAGNITUDE_LIMIT`.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        Every detected star of the frame, after the SIMBAD pass.
+
+    Returns
+    -------
+    magnitude_limit : `float` or `None`
+        The limit, or `None` when fewer than
+        `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` stars have both a positive flux
+        and a catalog magnitude. The caller then uses
+        `GAIA_DEFAULT_MAGNITUDE_LIMIT`.
+    """
+    fluxes: list[float] = []
+    zero_points: list[float] = []
+    for star in stellar_objects:
+        flux = _optional_float(star.flux)
+        if flux is None or flux <= 0:
+            continue
+        fluxes.append(flux)
+        magnitude = _optional_float(star.magnitude)
+        if star.is_catalog_identified and magnitude is not None:
+            zero_points.append(magnitude + 2.5 * math.log10(flux))
+    if len(zero_points) < MINIMUM_STARS_FOR_DEPTH_ESTIMATE:
+        return None
+    faintest_magnitude = float(np.median(zero_points)) - 2.5 * math.log10(min(fluxes))
+    limit = faintest_magnitude + GAIA_MAGNITUDE_LIMIT_MARGIN
+    return float(min(max(limit, GAIA_MINIMUM_MAGNITUDE_LIMIT), GAIA_MAXIMUM_MAGNITUDE_LIMIT))
+
+
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
@@ -531,6 +708,27 @@ class StarIdentifier:
         # database says it should be (measured in arcseconds). We use this
         # to figure out how accurate our image alignment is.
         self.catalog_match_separations_arcsec: list[float] = []
+        # The plate solver's own fit residual (RMS, arcseconds) and matched
+        # star count for the last solve. `None` when the solver gave none.
+        self.plate_solve_fit_residual_rms_arcsec: float | None = None
+        self.plate_solve_matched_star_count: int | None = None
+        # When the last image was taken (from DATE-OBS), or `None`. Gaia
+        # positions are moved to this time.
+        self.observation_time: Time | None = None
+        # Stable keys for conditions that limit the last run's results; see
+        # the ``FLAG_*`` constants.
+        self.astrometry_flags: list[str] = []
+
+    def _add_flag(self, flag: str) -> None:
+        """Record a limiting condition once for the current image.
+
+        Parameters
+        ----------
+        flag : `str`
+            One of the ``FLAG_*`` constants.
+        """
+        if flag not in self.astrometry_flags:
+            self.astrometry_flags.append(flag)
 
     @staticmethod
     def _build_stellar_objects_from_sources(sources: list[dict]) -> list[StellarObject]:
@@ -574,22 +772,37 @@ class StarIdentifier:
             stellar_objects.append(obj)
         return stellar_objects
 
-    def get_astrometric_residual_rms_arcsec(self) -> float | None:
-        """Check how accurate our map is.
+    def get_catalog_match_separation_rms_arcsec(self) -> float | None:
+        """Measure how far detected stars sit from their catalog matches.
 
-        This measures the average distance between where our map says a
-        star should be, and where the official database says it actually is.
-        A small number (less than 1) is good.
+        This is the root mean square (RMS) of the distance from each detected
+        star to its nearest SIMBAD or Gaia star. It is not the plate-solve fit
+        residual. Only stars within `CATALOG_MATCH_RADIUS_ARCSEC` of a catalog
+        star count, so the number cannot exceed that radius. A wrong match,
+        and SIMBAD's uneven position precision, make it larger.
 
         Returns
         -------
-        residual_rms_arcsec : `float` or `None`
-            The average error distance, or None if we didn't match any stars.
+        separation_rms_arcsec : `float` or `None`
+            The RMS separation in arcseconds, or `None` if no star was
+            matched.
         """
         separations = self.catalog_match_separations_arcsec
         if not separations:
             return None
         return round(math.sqrt(sum(value**2 for value in separations) / len(separations)), 4)
+
+    def get_astrometric_residual_rms_arcsec(self) -> float | None:
+        """Return the catalog match separation RMS under its older name.
+
+        Returns
+        -------
+        separation_rms_arcsec : `float` or `None`
+            The same value as `get_catalog_match_separation_rms_arcsec`. It is
+            the catalog proxy, not the plate-solve fit residual (see
+            `plate_solve_fit_residual_rms_arcsec` for that).
+        """
+        return self.get_catalog_match_separation_rms_arcsec()
 
     def detect_stars(self, data: np.ndarray, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
         """Find all the dots of light in the image and remove duplicates.
@@ -636,11 +849,90 @@ class StarIdentifier:
         unique_sources = self.detector.deduplicate(sources)
         return sources, unique_sources
 
+    def _read_axis_mean(self, header: Any, x_keyword: str, y_keyword: str) -> float | None:
+        """Read a per-axis header value, averaging the X and Y cards.
+
+        If both cards hold usable values and they differ, the mean is used
+        and the run is flagged, because the scale hint then fits neither
+        axis exactly.
+
+        Parameters
+        ----------
+        header : `astropy.io.fits.Header`
+            The image header.
+        x_keyword, y_keyword : `str`
+            The cards for the X and Y axes, such as ``XPIXSZ`` and ``YPIXSZ``.
+
+        Returns
+        -------
+        value : `float` or `None`
+            The common value when the axes agree, their mean when they
+            differ, the one usable value when only one card is usable, or
+            `None` when neither is a positive, finite number.
+        """
+        values: list[float] = []
+        for keyword in (x_keyword, y_keyword):
+            try:
+                value = float(header.get(keyword))
+            except TypeError, ValueError:
+                continue
+            if math.isfinite(value) and value > 0:
+                values.append(value)
+        if not values:
+            return None
+        if len(values) == 2 and not math.isclose(values[0], values[1]):
+            logger.warning(
+                "%s (%s) and %s (%s) differ; using their mean for the scale hint.",
+                x_keyword,
+                values[0],
+                y_keyword,
+                values[1],
+            )
+            self._add_flag(FLAG_SCALE_HINT_BINNING_MISMATCH)
+        return sum(values) / len(values)
+
+    def _read_binned_pixel_size(self, header: Any) -> float | None:
+        """Read the size of one image pixel, in micrometers, from the header.
+
+        Capture programs that write through INDI/Ekos (libindi), NINA and
+        Siril store ``XPIXSZ`` and ``YPIXSZ`` as the binned pixel size (the
+        camera's pixel size times the binning factor), so those cards are
+        used as they are. Only when they are absent does the function use
+        ``PIXSIZE1`` and ``PIXSIZE2``, which hold the camera's own
+        (unbinned) pixel size, and multiply by the binning factor from
+        ``XBINNING`` and ``YBINNING`` (1 when absent).
+
+        Parameters
+        ----------
+        header : `astropy.io.fits.Header`
+            The image header.
+
+        Returns
+        -------
+        pixel_size : `float` or `None`
+            The binned pixel size in micrometers, or `None` if the header
+            names none.
+        """
+        binned_size = self._read_axis_mean(header, "XPIXSZ", "YPIXSZ")
+        if binned_size is not None:
+            return binned_size
+        unbinned_size = self._read_axis_mean(header, "PIXSIZE1", "PIXSIZE2")
+        if unbinned_size is None:
+            return None
+        binning = self._read_axis_mean(header, "XBINNING", "YBINNING")
+        return unbinned_size * (1.0 if binning is None else binning)
+
     def _calculate_scale_hints(self, image_data_or_path: Any) -> tuple[float | None, float | None]:
         """Guess how zoomed in the image is based on the telescope settings.
 
         This helps the math solver run much faster because it doesn't have
-        to guess the zoom level.
+        to guess the zoom level. The guess is the pixel scale in arcseconds
+        per pixel: ``206.265 * pixel size (micrometers) / focal length
+        (millimeters)``. The pixel size is the header's ``XPIXSZ``, which
+        already includes binning. Without ``XPIXSZ`` it is ``PIXSIZE1``
+        times ``XBINNING`` (see `_read_binned_pixel_size`). When the header
+        has neither but has ``PIXSCAL`` (the scale in arcseconds per
+        pixel), that value is the scale and binning is not applied to it.
 
         Returns
         -------
@@ -650,11 +942,21 @@ class StarIdentifier:
         """
         focal_len = None
         pixel_size = None
+        header_scale = None
 
         if isinstance(image_data_or_path, AstrometricsImage):
             hdr = image_data_or_path.header
             focal_len = hdr.get("FOCALLEN")
-            pixel_size = hdr.get("XPIXSZ") or hdr.get("PIXSCAL")
+            pixel_size = self._read_binned_pixel_size(hdr)
+            if pixel_size is None:
+                header_scale = hdr.get("PIXSCAL")
+
+        try:
+            if header_scale and float(header_scale) > 0:
+                logger.info("Using the header's pixel scale: %.3f arcsec/pixel", float(header_scale))
+                return float(header_scale) * 0.95, float(header_scale) * 1.05
+        except TypeError, ValueError:
+            logger.warning("Could not read PIXSCAL from the image header.")
 
         if not focal_len or focal_len <= 0:
             try:
@@ -714,16 +1016,20 @@ class StarIdentifier:
             If plate solving is attempted and the field cannot be solved.
         """
         # 1. Load Image
+        header = None
         if isinstance(image_data_or_path, str):
             img = AstrometricsImage(image_data_or_path)
             data = img.data
             path = image_data_or_path
+            header = img.header
         elif isinstance(image_data_or_path, AstrometricsImage):
             data = image_data_or_path.data
             path = image_data_or_path.path
+            header = image_data_or_path.header
         else:
             data = image_data_or_path
             path = None
+        self.observation_time = read_observation_time(header)
 
         is_color_frame = data is not None and data.ndim == 3
         if is_color_frame:
@@ -736,6 +1042,9 @@ class StarIdentifier:
         logger.debug("Detected %s sources, %s unique.", len(sources), len(unique_sources))
         self.sources_detected = len(unique_sources)
         self.catalog_match_separations_arcsec = []
+        self.plate_solve_fit_residual_rms_arcsec = None
+        self.plate_solve_matched_star_count = None
+        self.astrometry_flags = []
 
         # We limit how many stars we send to the plate solver because it
         # only needs the brightest ones to figure out where the image is
@@ -790,7 +1099,7 @@ class StarIdentifier:
                 # plate solve driver will relax it by another 20%.
                 scale_lower, scale_upper = self._calculate_scale_hints(image_data_or_path)
 
-                header = self.solver.solve(
+                solved_header = self.solver.solve(
                     image_path=path,
                     sources=solver_sources,
                     image_width=w,
@@ -804,11 +1113,18 @@ class StarIdentifier:
                     solve_timeout=300,
                 )
 
-                if header:
+                if solved_header:
                     logger.info("Field solved! Querying SIMBAD...")
+                    # The solver's own fit statistics, when it gave any. They
+                    # are the residual the quality gate judges; the catalog
+                    # match separation stays a separate, weaker number.
+                    (
+                        self.plate_solve_fit_residual_rms_arcsec,
+                        self.plate_solve_matched_star_count,
+                    ) = read_fit_statistics(solved_header)
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", FITSFixedWarning)
-                        wcs = WCS(header, naxis=2)
+                        wcs = WCS(solved_header, naxis=2)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
                     logger.error("Could not solve field.")
@@ -939,7 +1255,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float = 0.5,
-        max_magnitude: float = 18.0,
+        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
     ) -> int:
         """Download and save Gaia DR3 stars for a specific area of the sky.
 
@@ -1001,7 +1317,7 @@ class StarIdentifier:
             radius_deg,
         )
         query = (
-            "SELECT source_id, ra, dec, phot_g_mean_mag, designation "
+            "SELECT source_id, ra, dec, phot_g_mean_mag, designation, pmra, pmdec "
             "FROM gaiadr3.gaia_source "
             f"WHERE phot_g_mean_mag < {max_magnitude} "
             f"AND CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra_center}, {dec_center}, {radius_deg}))=1"
@@ -1037,6 +1353,8 @@ class StarIdentifier:
                     float(row["dec"]),
                     float(row["phot_g_mean_mag"]) if row["phot_g_mean_mag"] is not None else 0.0,
                     str(row["designation"]) if row["designation"] else f"Gaia DR3 {row['source_id']}",
+                    _optional_float(row["pmra"]) if "pmra" in result_table.colnames else None,
+                    _optional_float(row["pmdec"]) if "pmdec" in result_table.colnames else None,
                 )
                 for row in result_table
             ]
@@ -1058,6 +1376,7 @@ class StarIdentifier:
         ra_center: float,
         dec_center: float,
         radius_deg: float,
+        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
     ) -> tuple[Any, SkyCoord] | tuple[None, None]:
         """Search the Gaia DR3 database for stars in a circular area.
 
@@ -1070,19 +1389,27 @@ class StarIdentifier:
             The center of the image area in degrees.
         radius_deg : `float`
             How wide of an area to search.
+        max_magnitude : `float`, optional
+            Only stars brighter than this Gaia G magnitude are returned,
+            whether they come from the cache or the download.
 
         Returns
         -------
         result_table, gaia_coords : `astropy.table.Table`, `SkyCoord`
             The list of stars and their coordinates, or None if the search
-            failed.
+            failed. The table's ``meta`` dictionary can hold two keys:
+            ``row_limit_reached`` (the download returned `GAIA_ROW_LIMIT`
+            rows, so it may be cut short) and ``proper_motion_known``
+            (whether any row has a proper motion).
         """
         from astrometricslib.foundation.config import get_configuration
 
         radius_deg = min(radius_deg, 1.0)
         config = get_configuration()
 
-        cached = StarIdentifier._query_gaia_region_from_cache(config, ra_center, dec_center, radius_deg)
+        cached = StarIdentifier._query_gaia_region_from_cache(
+            config, ra_center, dec_center, radius_deg, max_magnitude
+        )
         if cached is not None:
             return cached
 
@@ -1097,13 +1424,14 @@ class StarIdentifier:
             )
             return None, None
 
-        result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg)
+        result_table = StarIdentifier._download_gaia_region(ra_center, dec_center, radius_deg, max_magnitude)
 
         if result_table is None or len(result_table) == 0:
             logger.info("No Gaia results for this region.")
             return None, None
 
         logger.info("  Found %s Gaia sources in field.", len(result_table))
+        result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(result_table)
 
         StarIdentifier._cache_gaia_results(config, result_table)
 
@@ -1114,16 +1442,57 @@ class StarIdentifier:
         return result_table, gaia_coords
 
     @staticmethod
+    def _table_has_proper_motion(result_table: Any) -> bool:
+        """Check whether any star of a Gaia table has a proper motion.
+
+        Parameters
+        ----------
+        result_table : `astropy.table.Table`
+            A Gaia result or cache table.
+
+        Returns
+        -------
+        known : `bool`
+            True if the table has ``pmra`` and ``pmdec`` columns and at least
+            one row has a finite value in both. Some Gaia stars have none
+            (their solution has no motion), so a few missing values are normal.
+            A table where every value is missing came from a cache written
+            before proper motions were stored.
+        """
+        if "pmra" not in result_table.colnames or "pmdec" not in result_table.colnames:
+            return False
+        pm_ra = np.ma.filled(np.ma.asarray(result_table["pmra"], dtype=float), np.nan)
+        pm_dec = np.ma.filled(np.ma.asarray(result_table["pmdec"], dtype=float), np.nan)
+        return bool(np.any(np.isfinite(pm_ra) & np.isfinite(pm_dec)))
+
+    @staticmethod
     def _query_gaia_region_from_cache(
-        config: Any, ra_center: float, dec_center: float, radius_deg: float
+        config: Any,
+        ra_center: float,
+        dec_center: float,
+        radius_deg: float,
+        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
     ) -> tuple[Any, SkyCoord] | None:
         """Look for cached Gaia DR3 sources covering this region.
+
+        Parameters
+        ----------
+        config : `AppConfiguration`
+            The application settings.
+        ra_center, dec_center, radius_deg : `float`
+            The search centre and radius in degrees.
+        max_magnitude : `float`, optional
+            Cached stars fainter than this Gaia G magnitude are left out. A
+            star stored without a magnitude (stored as 0) is kept.
 
         Returns
         -------
         result : `tuple` or `None`
             `(result_table, gaia_coords)` if at least 5 cached sources
-            cover the search bounding box, otherwise `None`.
+            cover the search bounding box, otherwise `None`. The table has
+            ``pmra`` and ``pmdec`` columns (NaN where the cache has no
+            proper motion for the star) and its ``meta["proper_motion_known"]``
+            says whether any star has one.
         """
         from astropy.table import Table
 
@@ -1139,8 +1508,13 @@ class StarIdentifier:
             cached_rows = []
             for min_ra, max_ra in _catalog_ra_ranges(ra_center, dec_center, radius_deg):
                 cached_rows.extend(
-                    catalog_store.query_gaia_sources_in_bounds(config, min_ra, max_ra, min_dec, max_dec)
+                    catalog_store.query_gaia_sources_in_bounds(
+                        config, min_ra, max_ra, min_dec, max_dec, include_proper_motion=True
+                    )
                 )
+            # The cache keeps no record of how deep it was filled, so the same
+            # magnitude limit applies here as to a download.
+            cached_rows = [row for row in cached_rows if not row[3] or row[3] < max_magnitude]
 
             if cached_rows and len(cached_rows) >= 5:
                 logger.info(
@@ -1153,10 +1527,15 @@ class StarIdentifier:
                 decs = [r[2] for r in cached_rows]
                 mags = [r[3] for r in cached_rows]
                 desigs = [r[4] for r in cached_rows]
+                pm_ras = [np.nan if r[5] is None else r[5] for r in cached_rows]
+                pm_decs = [np.nan if r[6] is None else r[6] for r in cached_rows]
 
                 result_table = Table(
-                    [source_ids, ras, decs, mags, desigs],
-                    names=["source_id", "ra", "dec", "phot_g_mean_mag", "DESIGNATION"],
+                    [source_ids, ras, decs, mags, desigs, pm_ras, pm_decs],
+                    names=["source_id", "ra", "dec", "phot_g_mean_mag", "DESIGNATION", "pmra", "pmdec"],
+                )
+                result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(
+                    result_table
                 )
                 gaia_coords = SkyCoord(ra=np.array(ras) * u.deg, dec=np.array(decs) * u.deg)
                 return result_table, gaia_coords
@@ -1166,62 +1545,76 @@ class StarIdentifier:
         return None
 
     @staticmethod
-    def _download_gaia_region(ra_center: float, dec_center: float, radius_deg: float) -> Any | None:
+    def _download_gaia_region(
+        ra_center: float,
+        dec_center: float,
+        radius_deg: float,
+        max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
+        row_limit: int = GAIA_ROW_LIMIT,
+    ) -> Any | None:
         """Download Gaia DR3 sources for a region from the remote TAP server.
+
+        The query asks for stars brighter than `max_magnitude` inside the
+        circle and returns the brightest first, so if the result is cut at
+        `row_limit` rows, the faintest stars are the ones lost. Each row has
+        the position (epoch 2016.0), the G magnitude, the designation and the
+        proper motion.
+
+        Parameters
+        ----------
+        ra_center, dec_center, radius_deg : `float`
+            The search circle in degrees.
+        max_magnitude : `float`, optional
+            Only stars brighter than this Gaia G magnitude are returned.
+        row_limit : `int`, optional
+            The most rows to return.
 
         Returns
         -------
         result_table : `astropy.table.Table` or `None`
             The downloaded sources, or `None` if the query timed out
-            or failed.
+            or failed. When the table holds exactly `row_limit` rows,
+            ``result_table.meta["row_limit_reached"]`` is True.
         """
         from astroquery.gaia import Gaia
 
         # If cache miss, auto-download from remote TAP server
         logger.info(
-            "Querying Gaia DR3 bulk region at %.4f, %.4f with %.3f degree radius...",
+            "Querying Gaia DR3 bulk region at %.4f, %.4f with %.3f degree radius (G < %.1f)...",
             ra_center,
             dec_center,
             radius_deg,
+            max_magnitude,
         )
+        # The table is pinned explicitly (gaiadr3.gaia_source) rather than
+        # left to astroquery's default, the ESA archive server's own current
+        # release. It must always match the release hardcoded in the bulk-seed
+        # ADQL query, the local SQLite cache schema, and every "Gaia DR3 ..."
+        # id string this file generates. Bump deliberately, together with
+        # those, when moving to a newer Gaia release.
+        query = (
+            f"SELECT TOP {int(row_limit)} source_id, ra, dec, phot_g_mean_mag, designation, pmra, pmdec "
+            "FROM gaiadr3.gaia_source "
+            f"WHERE phot_g_mean_mag < {max_magnitude} "
+            "AND CONTAINS(POINT('ICRS', ra, dec), "
+            f"CIRCLE('ICRS', {ra_center}, {dec_center}, {radius_deg}))=1 "
+            "ORDER BY phot_g_mean_mag ASC"
+        )
+
         # Gaia's TAP client (unlike Simbad) exposes no configurable
         # timeout, so a stalled connection blocks indefinitely -- wrap the
         # call in a hard deadline via a worker thread rather than let a
-        # bad connection hang the whole analysis run.
-
+        # bad connection hang the whole analysis run. The thread is
+        # abandoned, not killed, if it exceeds the deadline.
         def _run_gaia_query():  # ruff: ignore[missing-return-type-private-function]
-            # GAIA_LOCK protects only the shared Gaia.ROW_LIMIT mutation,
-            # not the network call itself: this query already runs inside
-            # a worker thread that gets abandoned (not killed -- Python
-            # threads can't be) if it exceeds the timeout below. Holding
-            # the lock for the whole call would mean an abandoned thread
-            # keeps it locked forever, permanently deadlocking every
-            # subsequent Gaia query (including from other jobs) on this
-            # same lock -- exactly the "jobs stuck" failure mode this is
-            # guarding against.
-            with GAIA_LOCK:
-                Gaia.ROW_LIMIT = 10000
-            coord = SkyCoord(ra=ra_center * u.deg, dec=dec_center * u.deg)
-            job = Gaia.cone_search_async(
-                coord,
-                radius=u.Quantity(radius_deg, u.deg),
-                # Pinned explicitly rather than left to astroquery's
-                # default (the ESA archive server's own current-release
-                # table, resolved at call time) -- this must always
-                # match the release hardcoded in the bulk-seed ADQL
-                # query, the local SQLite cache schema, and every
-                # "Gaia DR3 ..." id string this file generates. Bump
-                # deliberately, together with those, when moving to a
-                # newer Gaia release.
-                table_name="gaiadr3.gaia_source",
-            )
+            job = Gaia.launch_job_async(query, dump_to_file=False)
             return job.get_results()
 
         try:
-            result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=30)
+            result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=60)
         except ExternalServiceError:
-            logger.exception("Gaia query timed out after 30s.")
-            _record_gaia_failure("cone search timed out after 30s")
+            logger.exception("Gaia query timed out after 60s.")
+            _record_gaia_failure("cone search timed out after 60s")
             return None
         except ONLINE_QUERY_ERRORS as e:
             logger.exception("Gaia query failed")
@@ -1231,6 +1624,14 @@ class StarIdentifier:
         # The service answered. An empty region is a legitimate answer, so
         # this counts as success and clears any accumulated failures.
         _record_gaia_success()
+        if result_table is not None and len(result_table) >= row_limit:
+            logger.warning(
+                "The Gaia search returned its limit of %s rows (G < %.1f), so faint stars in the "
+                "field may be missing.",
+                row_limit,
+                max_magnitude,
+            )
+            result_table.meta["row_limit_reached"] = True
         return result_table
 
     @staticmethod
@@ -1244,6 +1645,8 @@ class StarIdentifier:
             dec_col = next((c for c in ["dec", "DEC", "dec_epoch2000"] if c in result_table.colnames), None)
             id_col = next((c for c in ["source_id", "SOURCE_ID"] if c in result_table.colnames), None)
             mag_col = next((c for c in ["phot_g_mean_mag", "g_mag"] if c in result_table.colnames), None)
+            pm_ra_col = "pmra" if "pmra" in result_table.colnames else None
+            pm_dec_col = "pmdec" if "pmdec" in result_table.colnames else None
             desig_col = next((c for c in ["DESIGNATION", "designation"] if c in result_table.colnames), None)
 
             if ra_col and dec_col:
@@ -1256,7 +1659,15 @@ class StarIdentifier:
                     des = (
                         str(row[desig_col]) if desig_col and row[desig_col] is not None else f"Gaia DR3 {sid}"
                     )
-                    to_insert.append((sid, r_val, d_val, m_val, des))
+                    to_insert.append((
+                        sid,
+                        r_val,
+                        d_val,
+                        m_val,
+                        des,
+                        _optional_float(row[pm_ra_col]) if pm_ra_col else None,
+                        _optional_float(row[pm_dec_col]) if pm_dec_col else None,
+                    ))
 
                 catalog_store.insert_gaia_sources(config, to_insert)
                 logger.info("Cached %s Gaia DR3 sources locally in %s.", len(to_insert), cache_db_path)
@@ -1354,7 +1765,15 @@ class StarIdentifier:
             return stellar_objects
 
         still_unmatched = self._match_stars_against_gaia(
-            unmatched_after_simbad, sky_positions, ra_center, dec_center, wcs, width, height, query_radius_deg
+            unmatched_after_simbad,
+            sky_positions,
+            ra_center,
+            dec_center,
+            wcs,
+            width,
+            height,
+            query_radius_deg,
+            magnitude_limit=estimate_gaia_magnitude_limit(stellar_objects),
         )
 
         self._assign_field_ids(still_unmatched, sky_positions)
@@ -1517,8 +1936,31 @@ class StarIdentifier:
         width: int,
         height: int,
         query_radius_deg: float | None,
+        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
         """Match stars SIMBAD couldn't identify against a bulk Gaia query.
+
+        Gaia positions are moved from epoch 2016.0 to the time of the image
+        before matching (see `_move_gaia_coords_to_observation_epoch`).
+
+        Parameters
+        ----------
+        unmatched_after_simbad : `list` [`StellarObject`]
+            The stars SIMBAD could not identify.
+        sky_positions : `dict`
+            Maps `id(stellar_object)` to its `(ra, dec)` in degrees.
+        ra_center, dec_center : `float`
+            The search centre in degrees.
+        wcs : `astropy.wcs.WCS`
+            The solved sky map, used to size the search when no radius
+            is given.
+        width, height : `int`
+            The image size in pixels.
+        query_radius_deg : `float` or `None`
+            The search radius in degrees, or `None` to derive it from the WCS.
+        magnitude_limit : `float`, optional
+            Only Gaia stars brighter than this G magnitude are searched.
+            `GAIA_DEFAULT_MAGNITUDE_LIMIT` when left out.
 
         Returns
         -------
@@ -1543,7 +1985,16 @@ class StarIdentifier:
             except DATA_ERRORS as exc:
                 logger.debug("Could not derive search radius from WCS pixel scale: %s", exc)
 
-        gaia_table, gaia_coords = self._query_gaia_region(ra_center, dec_center, radius_deg)
+        gaia_table, gaia_coords = self._query_gaia_region(
+            ra_center,
+            dec_center,
+            radius_deg,
+            GAIA_DEFAULT_MAGNITUDE_LIMIT if magnitude_limit is None else magnitude_limit,
+        )
+        if gaia_table is not None and gaia_coords is not None:
+            if gaia_table.meta.get("row_limit_reached"):
+                self._add_flag(FLAG_GAIA_ROW_LIMIT_REACHED)
+            gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []
         if gaia_table is not None and gaia_coords is not None:
@@ -1588,6 +2039,53 @@ class StarIdentifier:
         )
 
         return still_unmatched
+
+    def _move_gaia_coords_to_observation_epoch(self, gaia_table: Any, gaia_coords: SkyCoord) -> SkyCoord:
+        """Move Gaia star positions from epoch 2016.0 to the image's time.
+
+        A star with a proper motion of 1 arcsecond per year sits 10
+        arcseconds from its Gaia position ten years later. The match radius
+        is also 10 arcseconds, so a fast star would otherwise go unmatched
+        or be matched to a neighbour. The positions stay at epoch 2016.0,
+        and a flag says so, when the table has no proper motions (an older
+        cache) or the image has no ``DATE-OBS``.
+
+        Parameters
+        ----------
+        gaia_table : `astropy.table.Table`
+            The Gaia stars, with ``pmra`` and ``pmdec`` columns if known.
+        gaia_coords : `astropy.coordinates.SkyCoord`
+            The positions at epoch 2016.0, lined up with `gaia_table`.
+
+        Returns
+        -------
+        coords : `astropy.coordinates.SkyCoord`
+            The positions at the observation time, or `gaia_coords`
+            unchanged when they cannot be moved.
+        """
+        if not self._table_has_proper_motion(gaia_table):
+            logger.warning(
+                "The Gaia stars carry no proper motion (an older cache?), so their positions stay at "
+                "epoch 2016.0."
+            )
+            self._add_flag(FLAG_GAIA_PROPER_MOTION_UNKNOWN)
+            return gaia_coords
+        if self.observation_time is None:
+            logger.warning("The image has no usable DATE-OBS, so Gaia positions stay at epoch 2016.0.")
+            self._add_flag(FLAG_GAIA_EPOCH_UNKNOWN)
+            return gaia_coords
+        try:
+            ra_deg, dec_deg = propagate_gaia_positions(
+                gaia_coords.ra.deg,
+                gaia_coords.dec.deg,
+                np.ma.filled(np.ma.asarray(gaia_table["pmra"], dtype=float), np.nan),
+                np.ma.filled(np.ma.asarray(gaia_table["pmdec"], dtype=float), np.nan),
+                self.observation_time,
+            )
+        except DATA_ERRORS:
+            logger.exception("Could not move Gaia positions to the observation epoch.")
+            return gaia_coords
+        return SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg)
 
     def _assign_field_ids(
         self,

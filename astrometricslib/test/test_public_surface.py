@@ -102,6 +102,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "PermissionDeniedError",
     "PhotometryResult",
     "PlateSolveDriver",
+    "PlateSolveHeader",
     "PlateSolveFailedError",
     "PlotData",
     "PreviewRemakeResult",

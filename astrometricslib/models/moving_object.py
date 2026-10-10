@@ -33,6 +33,17 @@ class FrameDetection(BaseModel):
     # haze, moonlight) from one picture to the next, so what's left is
     # mostly just this object's own brightness changing.
     picture_brightness_level: float | None = Field(default=None, alias="pictureBrightnessLevel")
+    # How far, in arcseconds, this picture's star positions scatter around
+    # the reference stars after the pointing correction. It is the typical
+    # error of one position in this picture. `None` if it could not be
+    # measured (too few matched stars), in which case the straight-line
+    # test falls back on an assumed value from the settings.
+    astrometric_error_arcsec: float | None = Field(default=None, alias="astrometricErrorArcsec")
+    # How long the shutter was open for this picture, in seconds (the
+    # `EXPTIME` header). `timestamp` is the moment the exposure started, so
+    # the middle of the exposure is `timestamp + exposure_seconds / 2`.
+    # `None` if the header had no usable value.
+    exposure_seconds: float | None = Field(default=None, alias="exposureSeconds")
 
 
 class MovingObjectTrack(BaseModel):
@@ -46,7 +57,23 @@ class MovingObjectTrack(BaseModel):
     # How well a straight line fits the object's positions over time,
     # from 0 (no fit at all) to 1 (a perfect straight line). A real
     # asteroid should fit close to 1.
+    # This is reported for information only. Any chain with a large
+    # displacement scores close to 1, so it no longer decides anything.
     linear_fit_r_squared: float = Field(alias="linearFitRSquared")
+    # How far the positions miss the fitted line, as a root-mean-square
+    # (RMS) in arcseconds, for each sky axis. These decide the straight-line
+    # test. `None` on records saved before this check existed.
+    residual_rms_right_ascension_arcsec: float | None = Field(
+        default=None, alias="residualRmsRightAscensionArcsec"
+    )
+    residual_rms_declination_arcsec: float | None = Field(default=None, alias="residualRmsDeclinationArcsec")
+    # The error of one position that the residuals were judged against, and
+    # the largest RMS the chain was allowed. `astrometric_error_assumed` is
+    # true when at least one picture had no measured error and the assumed
+    # value from the settings was used for it.
+    astrometric_error_arcsec: float | None = Field(default=None, alias="astrometricErrorArcsec")
+    residual_limit_arcsec: float | None = Field(default=None, alias="residualLimitArcsec")
+    astrometric_error_assumed: bool | None = Field(default=None, alias="astrometricErrorAssumed")
     fit_start_timestamp: float = Field(alias="fitStartTimestamp")
     fit_end_timestamp: float = Field(alias="fitEndTimestamp")
 
@@ -82,6 +109,17 @@ class EphemerisMatch(BaseModel):
     # known asteroid's predicted position. A smaller number is a
     # closer, more confident match.
     angular_separation_arcsec: float = Field(alias="angularSeparationArcsec")
+    # The same separation measured at the first and at the last detection of
+    # the chain, each against the known asteroid's position at that
+    # detection's own time. Both must be inside the match radius.
+    # `angular_separation_arcsec` is the larger of the two. `None` on records
+    # saved before the database was asked once per end of the chain.
+    first_detection_separation_arcsec: float | None = Field(
+        default=None, alias="firstDetectionSeparationArcsec"
+    )
+    last_detection_separation_arcsec: float | None = Field(
+        default=None, alias="lastDetectionSeparationArcsec"
+    )
 
 
 class AsteroidDetectionCandidate(BaseModel):

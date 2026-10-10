@@ -98,6 +98,9 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "pointing_metadata": ALL_THREE,
         "ephemeris_cross_match": ALL_THREE,
         "unmatched_movers": ALL_THREE,
+        # Not checked when no chain reached the straight-line test; failed
+        # when the verdict used an assumed rather than a measured error.
+        "track_residuals": ALL_THREE,
     },
 }
 

@@ -5,6 +5,15 @@ Description: `AstrometryNetPlateSolveDriver` implements the
 with Astrometry.net, which maps the stars in an image to sky coordinates.
 It tries the program installed on this computer first, and if that
 fails, it asks the online service.
+
+The local program also writes a ``.corr`` file next to the solved image. Each
+row of that table is one field star that the solver matched to a reference
+star, with the field star's fitted sky position and the reference star's sky
+position. The driver reads the table and attaches two numbers to the header it
+returns (see `PlateSolveHeader`): the fit residual, which is the root mean
+square (RMS) of the distance between those two positions, and the count of
+matched stars. The online service returns no such table, so an online solve
+carries no statistics.
 """
 
 import http.client
@@ -18,12 +27,16 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
+from astropy.table import Table
 from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
+from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +107,62 @@ ONLINE_SOLVE_RETRY_BACKOFF_SECONDS = 2.0
 # only succeeded after dropped connections. Reset by
 # `reset_plate_solve_statistics` at the start of a run.
 _plate_solve_attempts = 0
+
+
+# The columns of solve-field's ``.corr`` table that the fit statistics use: the
+# field star's fitted sky position and the reference star's sky position, both
+# in degrees.
+_CORR_FIELD_COLUMNS = ("field_ra", "field_dec")
+_CORR_INDEX_COLUMNS = ("index_ra", "index_dec")
+
+
+def read_corr_fit_statistics(corr_path: str) -> tuple[float | None, int | None]:
+    """Measure how well solve-field's fit matched its stars.
+
+    solve-field writes one ``.corr`` row per field star it matched to a
+    reference ("index") star. The row holds the field star's sky position from
+    the solved World Coordinate System (WCS) and the reference star's sky
+    position. The distance between the two is that star's fit residual.
+
+    Parameters
+    ----------
+    corr_path : `str`
+        The ``.corr`` file solve-field wrote.
+
+    Returns
+    -------
+    fit_residual_rms_arcsec : `float` or `None`
+        The RMS of the per-star distances in arcseconds, or `None` when the
+        file is missing, cannot be read, lacks the position columns, or has
+        no usable rows.
+    matched_star_count : `int` or `None`
+        The number of matched stars. `None` when the file is missing, cannot
+        be read, or lacks the position columns. 0 when the table has no
+        usable rows.
+    """
+    if not os.path.exists(corr_path):
+        return None, None
+    try:
+        with fits.open(corr_path, memmap=False) as hdul:
+            table = Table(hdul[1].data)
+    except (*FITS_READ_ERRORS, IndexError, TypeError) as corr_error:
+        logger.warning("Could not read the solve-field match table %s: %s", corr_path, corr_error)
+        return None, None
+
+    needed = (*_CORR_FIELD_COLUMNS, *_CORR_INDEX_COLUMNS)
+    if any(column not in table.colnames for column in needed):
+        logger.warning("The solve-field match table %s lacks the position columns.", corr_path)
+        return None, None
+
+    positions = np.column_stack([np.asarray(table[column], dtype=float) for column in needed])
+    positions = positions[np.all(np.isfinite(positions), axis=1)]
+    if len(positions) == 0:
+        return None, 0
+    field_stars = SkyCoord(positions[:, 0] * u.deg, positions[:, 1] * u.deg)
+    index_stars = SkyCoord(positions[:, 2] * u.deg, positions[:, 3] * u.deg)
+    separations_arcsec = field_stars.separation(index_stars).arcsec
+    rms_arcsec = np.sqrt(np.mean(separations_arcsec**2))
+    return float(rms_arcsec.item()), len(positions)
 
 
 def get_plate_solve_attempt_count() -> int:
@@ -438,7 +507,10 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         Returns
         -------
         header : `astropy.io.fits.Header` or `None`
-            The map metadata if it worked, or None.
+            The map metadata if it worked, or None. It is a
+            `PlateSolveHeader` that holds the fit residual and matched-star
+            count read from the ``.corr`` file (both `None` if that file
+            is absent or unreadable).
         """
         logger.info("Executing: %s", " ".join(command))
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
@@ -451,7 +523,21 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         if not os.path.exists(solved_path):
             return None
         with fits.open(solved_path, memmap=False) as hdul:
-            return hdul[0].header.copy()
+            solved_header = hdul[0].header.copy()
+        residual_rms_arcsec, matched_star_count = read_corr_fit_statistics(
+            os.path.join(working_directory, "input_image.corr")
+        )
+        if residual_rms_arcsec is not None:
+            logger.info(
+                "solve-field matched %s stars with a fit residual of %.3f arcsec RMS.",
+                matched_star_count,
+                residual_rms_arcsec,
+            )
+        return PlateSolveHeader.from_header(
+            solved_header,
+            fit_residual_rms_arcsec=residual_rms_arcsec,
+            matched_star_count=matched_star_count,
+        )
 
     def _solve_online_sources(
         self,

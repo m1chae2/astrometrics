@@ -85,6 +85,11 @@ def _build_camera_profile(section_name: str, section: dict) -> CameraProfile:
         )
     if "quantum_efficiency" in section:
         kwargs["quantum_efficiency"] = _build_quantum_efficiency(section["quantum_efficiency"])
+    # Detector noise terms for the photometric error budget. Both are optional;
+    # without them the pipeline assumes unit gain, no read noise, and says so.
+    for field_name in ("gain_e_per_adu", "read_noise_e"):
+        if field_name in section:
+            kwargs[field_name] = _build_provenanced_value(section[field_name])
     return CameraProfile(**kwargs)
 
 

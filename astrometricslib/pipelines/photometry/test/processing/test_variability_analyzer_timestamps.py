@@ -114,7 +114,7 @@ def test_a_bad_reference_frame_stops_the_session_and_says_why(tmp_path: Path) ->
 
 
 def _fake_worker(
-    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float],
+    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float, object],
 ) -> tuple[str, tuple]:
     """Stand in for the frame worker; refuse the first star's centroid.
 
@@ -125,15 +125,15 @@ def _fake_worker(
         flux 1 and sits at its reference position. The first star carries a
         fallback reason, the others do not.
     """
-    path, reference_stars, _, _ = args
+    path, reference_stars, _, _, _ = args
     minute = int(Path(path).stem.removeprefix("f"))
-    fluxes = {star_id: (1.0, False) for star_id, _, _ in reference_stars}
+    fluxes = {star_id: (1.0, False, 0.1) for star_id, _, _ in reference_stars}
     positions = {
         star_id: StarPosition(x, y, "saturated pixel in the centroid box" if index == 0 else None)
         for index, (star_id, x, y) in enumerate(reference_stars)
     }
     timestamp = datetime(2026, 5, 24, 5, minute, 0)
-    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions)
+    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions, 30.0)
 
 
 def test_stars_whose_centroid_is_refused_are_counted_per_star(

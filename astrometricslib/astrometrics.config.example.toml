@@ -171,6 +171,11 @@ dispersion_offset_x = "0.0"
 clip_ceiling_adu = { value = 65532.0, kind = "measured", source = "Maximum of saturated raw frames in this library. The sensor is 14-bit, stored as 16-bit in steps of 4, so a clipped frame reaches 65532." }
 saturation_threshold_adu = { value = 65000.0, kind = "assumed", source = "Long-standing pipeline default for raw frames: just under the 16-bit maximum of 65535. Never measured per camera." }
 photometric_linearity_limit_adu = { value = 60000.0, kind = "measured", source = "Antonov 2026: the response turns non-linear above about 60,000 ADU at Gain 0 / Offset 10, before hard clipping." }
+# Optional. Detector noise terms, used for the photometric error budget (the
+# CCD equation). Without them the pipeline assumes 1 e-/ADU and no read noise
+# and marks the errors as a guide. Values below are the ZWO datasheet at Gain 0.
+gain_e_per_adu = { value = 3.6, kind = "datasheet", source = "ZWO ASI533MM Pro gain chart at Gain 0." }
+read_noise_e = { value = 3.8, kind = "datasheet", source = "ZWO ASI533MM Pro read-noise chart at Gain 0." }
 quantum_efficiency = { wavelength_nm = [400.0, 420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 550.0, 600.0, 650.0, 700.0, 750.0, 800.0, 850.0, 900.0, 950.0, 1000.0], quantum_efficiency_fraction = [0.7, 0.82, 0.88, 0.91, 0.92, 0.9, 0.89, 0.88, 0.78, 0.62, 0.48, 0.36, 0.27, 0.19, 0.13, 0.08, 0.06], kind = "datasheet", source = "Read off the sensitivity graph published by ZWO." }
 # Optional. The wavelength, in nm, that calibration treats as the start of
 # the spectrum. Leave it out to use the default of 380.

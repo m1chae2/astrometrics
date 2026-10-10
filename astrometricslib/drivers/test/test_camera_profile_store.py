@@ -108,6 +108,23 @@ def test_the_shipped_config_loads_and_has_one_generic_fallback() -> None:
     }
 
 
+def test_the_shipped_asi533_profile_carries_its_detector_noise_terms() -> None:
+    """Gain and read noise load from the camera section as provenanced values.
+
+    The photometric error budget needs both. Without them the pipeline
+    assumes unit gain and no read noise, so the shipped example must set
+    them for the camera the sample frames came from.
+    """
+    profiles = {profile.camera_name: profile for profile in load_camera_profiles(_shipped_config())}
+    asi533 = profiles["ZWO ASI533MM Pro"]
+    assert asi533.gain_e_per_adu is not None
+    assert asi533.read_noise_e is not None
+    assert asi533.gain_e_per_adu.value == pytest.approx(3.6)
+    assert asi533.read_noise_e.value == pytest.approx(3.8)
+    assert asi533.gain_e_per_adu.provenance.kind.value == "datasheet"
+    assert profiles["Nikon D5300"].gain_e_per_adu is None
+
+
 @pytest.mark.parametrize(
     ("spelling", "expected_camera"),
     [

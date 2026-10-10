@@ -31,6 +31,16 @@ is one measurement, which is the plain shuffle; for red noise the blocks keep
 the correlation inside them, so the false-alarm probability is honest about
 it. The verdicts are a guard against reading noise as a finding, not a proof
 that a pattern is real.
+
+Both searches accept the 1-sigma uncertainty of each measurement
+(``flux_errors``). The fit then weights each measurement by one over the square
+of its uncertainty, so a noisy measurement counts for less. When the
+uncertainties are missing or unusable (not one per measurement, or any
+that is not a finite number above zero), the Lomb-Scargle search weights all
+points equally, and the box search uses one scatter estimated from the
+differences between neighboring measurements. In the noise-only versions each
+measurement is shuffled together with its own uncertainty, so a shuffled light
+curve has the same set of weights as the real one.
 """
 
 import math
@@ -395,8 +405,60 @@ def verdict_from_false_alarm(
     return _verdict_from(false_alarm, cycles, events, dip_points)
 
 
+def _usable_flux_errors(flux_errors: np.ndarray | None, size: int) -> np.ndarray | None:
+    """Check that per-measurement uncertainties can be used as weights.
+
+    Parameters
+    ----------
+    flux_errors : `numpy.ndarray` or `None`
+        The 1-sigma uncertainty of each measurement, or `None`.
+    size : `int`
+        The number of measurements.
+
+    Returns
+    -------
+    errors : `numpy.ndarray` or `None`
+        The uncertainties as floats, or `None` when they were not given, are
+        not one per measurement, or include a value that is not a finite
+        number above zero.
+    """
+    if flux_errors is None:
+        return None
+    errors = np.asarray(flux_errors, dtype=float)
+    if errors.shape != (size,) or not np.all(np.isfinite(errors)) or np.any(errors <= 0):
+        return None
+    return errors
+
+
+def _null_order(count: int, random_generator: np.random.Generator, block_length: int) -> np.ndarray:
+    """Make one random re-ordering of the measurements, moving blocks.
+
+    The same ordering is applied to the brightness and to its uncertainty,
+    so each measurement keeps its own uncertainty.
+
+    Parameters
+    ----------
+    count : `int`
+        The number of measurements.
+    random_generator : `numpy.random.Generator`
+        The source of randomness.
+    block_length : `int`
+        How many consecutive measurements move together.
+
+    Returns
+    -------
+    order : `numpy.ndarray`
+        Indices into the measurements, in the new order.
+    """
+    return null_flux(np.arange(count), random_generator, block_length)
+
+
 def lomb_scargle_search(
-    time_days: np.ndarray, flux: np.ndarray, shuffle_count: int | None = None, block_length: int | None = None
+    time_days: np.ndarray,
+    flux: np.ndarray,
+    shuffle_count: int | None = None,
+    block_length: int | None = None,
+    flux_errors: np.ndarray | None = None,
 ) -> PeriodogramResult:
     """Search a light curve for a smooth repeating cycle.
 
@@ -412,6 +474,11 @@ def lomb_scargle_search(
     block_length : `int`, optional
         How many consecutive measurements move together in the noise-only
         versions. By default chosen from the light curve's own correlation.
+    flux_errors : `np.ndarray`, optional
+        The 1-sigma uncertainty of each brightness value, in the same units
+        as `flux`. When given and usable (see the module notes), the
+        periodogram weights the points by it. By default all points count
+        equally.
 
     Returns
     -------
@@ -427,7 +494,8 @@ def lomb_scargle_search(
 
     minimum_frequency = 1.0 / grid.maximum_period_days
     maximum_frequency = 1.0 / grid.minimum_period_days
-    model = LombScargle(time_days, flux)
+    errors = _usable_flux_errors(flux_errors, flux.size)
+    model = LombScargle(time_days, flux, errors)
     frequency = _cap_grid_size(
         model.autofrequency(
             minimum_frequency=minimum_frequency, maximum_frequency=maximum_frequency, samples_per_peak=10
@@ -456,7 +524,8 @@ def lomb_scargle_search(
     block = block_length or correlation_block_length(flux)
     at_least_as_strong = 0
     for _ in range(shuffles):
-        shuffled_power = LombScargle(time_days, null_flux(flux, random_generator, block)).power(
+        order = _null_order(flux.size, random_generator, block)
+        shuffled_power = LombScargle(time_days, flux[order], None if errors is None else errors[order]).power(
             frequency, assume_regular_frequency=True
         )
         at_least_as_strong += int(np.max(shuffled_power) >= best_power)
@@ -496,7 +565,11 @@ def _robust_point_scatter(flux: np.ndarray) -> float:
 
 
 def box_search(
-    time_days: np.ndarray, flux: np.ndarray, shuffle_count: int | None = None, block_length: int | None = None
+    time_days: np.ndarray,
+    flux: np.ndarray,
+    shuffle_count: int | None = None,
+    block_length: int | None = None,
+    flux_errors: np.ndarray | None = None,
 ) -> TransitCandidate:
     """Search a light curve for a repeating flat-bottomed dip.
 
@@ -513,6 +586,13 @@ def box_search(
     block_length : `int`, optional
         How many consecutive measurements move together in the noise-only
         versions. By default chosen from the light curve's own correlation.
+    flux_errors : `np.ndarray`, optional
+        The 1-sigma uncertainty of each brightness value, in the same units
+        as `flux`. It is divided by the median of `flux`, like the
+        brightness. When given and usable (see the module notes), it is the
+        weight of each point. By default one scatter, estimated from the
+        differences between neighboring measurements, is used for all
+        points.
 
     Returns
     -------
@@ -536,8 +616,12 @@ def box_search(
     if minimum_period >= grid.maximum_period_days:
         return TransitCandidate(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
 
-    point_scatter = _robust_point_scatter(normalized)
-    model = BoxLeastSquares(time_days, normalized, dy=np.full_like(normalized, point_scatter))
+    errors = _usable_flux_errors(flux_errors, flux.size)
+    if errors is not None:
+        point_errors = errors / np.median(flux)
+    else:
+        point_errors = np.full_like(normalized, _robust_point_scatter(normalized))
+    model = BoxLeastSquares(time_days, normalized, dy=point_errors)
     try:
         # BoxLeastSquares.autoperiod's own resolution heuristic scales
         # with the transit duration and observing baseline, and unlike
@@ -575,11 +659,8 @@ def box_search(
     block = block_length or correlation_block_length(normalized)
     at_least_as_strong = 0
     for _ in range(shuffles):
-        shuffled = BoxLeastSquares(
-            time_days,
-            null_flux(normalized, random_generator, block),
-            dy=np.full_like(normalized, point_scatter),
-        )
+        order = _null_order(normalized.size, random_generator, block)
+        shuffled = BoxLeastSquares(time_days, normalized[order], dy=point_errors[order])
         at_least_as_strong += int(
             np.max(shuffled.power(periods, durations, objective="snr").power) >= best_power
         )

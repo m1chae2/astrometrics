@@ -589,6 +589,13 @@ export interface PhotometryResult {
   airmasses?: number[];
   magnitudes?: number[];
   isSaturated?: boolean[];
+  fluxErrors?: number[];
+  fluxesNormalizedErrors?: number[];
+  fluxesDetrendedErrors?: number[];
+  errorsAssumeUnitGain?: boolean | null;
+  errorsAssumeZeroReadNoise?: boolean | null;
+  timeBjdTdb?: number[];
+  timeBasis?: string | null;
   periodogram?: PeriodogramResult | null;
   transitCandidate?: TransitCandidate | null;
   meanFlux?: number | null;

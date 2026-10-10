@@ -9,7 +9,7 @@ methods because `_process_single_frame_worker` is dispatched to a
 `ProcessPoolExecutor` and needs to be picklable/forkable independent of
 any analyzer instance.
 
-Two rules keep the measured light curves honest:
+Three rules keep the measured light curves honest:
 
 * Aperture centers are never rounded to whole pixels. Each star is placed
   at its global-shifted reference position, then re-centered on its own
@@ -18,9 +18,14 @@ Two rules keep the measured light curves honest:
   position and the frame result records why.
 * A frame whose ``DATE-OBS`` is missing or unreadable is rejected with a
   reason (see `read_observation_time`). It never gets the wall-clock time.
+* Every flux comes with its 1-sigma uncertainty, from the CCD equation (see
+  `aperture_flux_error_adu`). The uncertainty uses the camera's gain and
+  read noise (see `detector_noise`). The flux values themselves do not
+  depend on it.
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -32,6 +37,7 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from photutils.centroids import centroid_com
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
     is_saturation_significant,
@@ -382,7 +388,96 @@ def refine_star_centroid(
     return StarPosition(centre_x, centre_y)
 
 
-def _measure_aperture_flux(
+def aperture_flux_error_adu(
+    net_flux_adu: float,
+    sky_adu_per_pixel: float,
+    aperture_pixels: float,
+    sky_pixels: float,
+    noise: DetectorNoise,
+    dark_current_e_per_pixel: float = 0.0,
+) -> float:
+    """Find the 1-sigma uncertainty of a sky-subtracted aperture sum.
+
+    This is the CCD equation (the noise budget of a sensor). It works in
+    electrons, because the random scatter of a count is set by the number of
+    electrons collected:
+
+    ``variance_e = F_e + n_pix * (S_e + RN**2 + D_e)
+    + (n_pix**2 / n_sky) * (S_e + RN**2)``
+
+    where ``F_e`` is the star's net counts in electrons (its own shot
+    noise), ``S_e`` the sky level per pixel in electrons, ``RN`` the read
+    noise in electrons, ``D_e`` the dark current per pixel in electrons
+    (heat-made electrons collected during the exposure), ``n_pix`` the
+    number of pixels in the aperture and ``n_sky`` the number of pixels in
+    the sky ring. The first term is the star's own noise. The second is the
+    noise of the sky, read-out and dark counts inside the aperture. The third
+    is the noise in the sky level itself, which the sky ring measures from
+    finitely many pixels. The result is converted back to ADU by dividing by
+    the gain.
+
+    The sky level is in the same units as the data. The equation assumes the
+    data have had their bias level (the fixed offset the camera adds) and
+    dark signal subtracted, as calibrated frames do. On a frame with a bias
+    offset still in it, the sky term is overestimated.
+
+    Parameters
+    ----------
+    net_flux_adu : `float`
+        The sky-subtracted sum of the aperture, in ADU. A negative value is
+        treated as zero.
+    sky_adu_per_pixel : `float`
+        The sky level in the ring, in ADU per pixel. A negative value is
+        treated as zero.
+    aperture_pixels : `float`
+        The area of the aperture, in pixels.
+    sky_pixels : `float`
+        The number of pixels in the sky ring. With zero, the sky level is
+        treated as known exactly and the third term is left out.
+    noise : `DetectorNoise`
+        The gain (electrons per ADU) and read noise (electrons).
+    dark_current_e_per_pixel : `float`, optional
+        Dark current collected per pixel during the exposure, in electrons.
+        Zero when unknown.
+
+    Returns
+    -------
+    error_adu : `float`
+        The 1-sigma uncertainty of `net_flux_adu`, in ADU. It is not divided
+        by the exposure time.
+    """
+    gain = noise.gain_e_per_adu
+    source_e = max(net_flux_adu, 0.0) * gain
+    sky_e = max(sky_adu_per_pixel, 0.0) * gain
+    background_per_pixel_e = sky_e + noise.read_noise_e**2
+    variance_e = source_e + aperture_pixels * (background_per_pixel_e + dark_current_e_per_pixel)
+    if sky_pixels > 0:
+        variance_e += (aperture_pixels**2 / sky_pixels) * background_per_pixel_e
+    return math.sqrt(variance_e) / gain
+
+
+@dataclass(frozen=True)
+class ApertureMeasurement:
+    """One aperture measurement of one star in one frame.
+
+    Attributes
+    ----------
+    net_flux_adu : `float`
+        The sky-subtracted sum of the aperture, in ADU. It is never
+        negative and is not divided by the exposure time.
+    flux_error_adu : `float`
+        The 1-sigma uncertainty of `net_flux_adu`, in ADU. It is 0.0 when
+        the star was too close to the frame edge to measure.
+    is_saturated : `bool`
+        Whether the aperture holds a significant number of saturated pixels.
+    """
+
+    net_flux_adu: float
+    flux_error_adu: float
+    is_saturated: bool
+
+
+def measure_aperture_photometry(
     data: np.ndarray,
     x: float,
     y: float,
@@ -393,8 +488,10 @@ def _measure_aperture_flux(
     fallback_background: float | None = None,
     *,
     saturation_threshold_adu: float,
-) -> tuple[float, bool]:
-    """Measure the brightness of a star inside a small circle.
+    noise: DetectorNoise | None = None,
+    dark_current_e_per_pixel: float = 0.0,
+) -> ApertureMeasurement:
+    """Measure the brightness of a star inside a small circle, with its error.
 
     We add up all the light inside the circle, then subtract the background
     glow to get the star's true brightness. This is the one place that
@@ -409,13 +506,39 @@ def _measure_aperture_flux(
     with the fractional part kept. Callers that want the circle on the
     star's own center pass the position from `refine_star_centroid`.
 
+    The uncertainty comes from `aperture_flux_error_adu`. It uses the
+    aperture's true area, the number of pixels in the sky ring, and the
+    median sky level. It does not change the flux.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The frame, shape ``(ny, nx)``, in ADU.
+    x, y : `float`
+        The aperture center, in pixels.
+    radius : `float`, optional
+        The aperture radius, in pixels.
+    annulus_inner, annulus_outer : `float`, optional
+        The inner and outer radius of the sky ring, in pixels.
+    cutout_radius : `int`, optional
+        The star must be at least this far from the frame edge, in pixels.
+    fallback_background : `float`, optional
+        The sky level, in ADU per pixel, to use if the ring holds no pixels.
+    saturation_threshold_adu : `float`
+        A pixel at or above this value counts as saturated.
+    noise : `DetectorNoise`, optional
+        The gain and read noise. By default 1 electron per ADU and no read
+        noise.
+    dark_current_e_per_pixel : `float`, optional
+        Dark current per pixel over the exposure, in electrons.
+
     Returns
     -------
-    result : `tuple[float, bool]`
-        The total brightness, and a True/False flag if the star was
-        too bright (saturated).
+    measurement : `ApertureMeasurement`
+        The flux, its uncertainty and the saturation flag.
     """
     height, width = data.shape
+    noise = noise if noise is not None else DetectorNoise()
     # The whole-pixel position is used only for the bounds check and the
     # fallback cutout below. The apertures sit at the exact (x, y): a star
     # half a pixel off the aperture center loses 1 to 2 percent of its
@@ -429,7 +552,7 @@ def _measure_aperture_flux(
         or y_int - cutout_radius < 0
         or y_int + cutout_radius >= height
     ):
-        return 0.0, False
+        return ApertureMeasurement(0.0, 0.0, False)
 
     aperture = CircularAperture((x, y), r=radius)
     annulus = CircularAnnulus((x, y), r_in=annulus_inner, r_out=annulus_outer)
@@ -453,8 +576,10 @@ def _measure_aperture_flux(
     # method is used, so the plain unweighted mask is enough here.
     annulus_values = annulus.to_mask(method="center").get_values(data)
 
+    sky_pixel_count = 0
     if annulus_values is not None and annulus_values.size > 0:
         background_level = np.median(annulus_values)
+        sky_pixel_count = int(annulus_values.size)
     elif fallback_background is not None:
         background_level = fallback_background
     else:
@@ -464,11 +589,56 @@ def _measure_aperture_flux(
         ]
         background_level = np.median(local_cutout)
 
-    net_flux = star_flux_sum - aperture.area * background_level
+    net_flux = max(0.0, float(star_flux_sum - aperture.area * background_level))
     saturated_fraction = compute_saturated_pixel_fraction(star_raw_values, saturation_threshold_adu)
     is_saturated = is_saturation_significant(saturated_fraction)
+    flux_error = aperture_flux_error_adu(
+        net_flux,
+        float(background_level),
+        float(aperture.area),
+        float(sky_pixel_count),
+        noise,
+        dark_current_e_per_pixel,
+    )
 
-    return max(0.0, float(net_flux)), is_saturated
+    return ApertureMeasurement(net_flux, flux_error, is_saturated)
+
+
+def _measure_aperture_flux(
+    data: np.ndarray,
+    x: float,
+    y: float,
+    radius: float = 4.0,
+    annulus_inner: float = 7.0,
+    annulus_outer: float = 12.0,
+    cutout_radius: int = 15,
+    fallback_background: float | None = None,
+    *,
+    saturation_threshold_adu: float,
+) -> tuple[float, bool]:
+    """Measure the brightness of a star inside a small circle.
+
+    The flux and saturation part of `measure_aperture_photometry`, for
+    callers that do not need the uncertainty. The arguments are the same.
+
+    Returns
+    -------
+    result : `tuple[float, bool]`
+        The total brightness, and a True/False flag if the star was
+        too bright (saturated).
+    """
+    measurement = measure_aperture_photometry(
+        data,
+        x,
+        y,
+        radius,
+        annulus_inner,
+        annulus_outer,
+        cutout_radius,
+        fallback_background,
+        saturation_threshold_adu=saturation_threshold_adu,
+    )
+    return measurement.net_flux_adu, measurement.is_saturated
 
 
 @dataclass(frozen=True)
@@ -486,7 +656,7 @@ class FrameRejection:
 
 
 def _process_single_frame_worker(
-    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float],
+    args: tuple[str, list[tuple[str, float, float]], list[tuple[str, float, float]], float, DetectorNoise],
 ) -> tuple[str, tuple[Any, ...] | FrameRejection | None]:
     """Analyze a single picture.
 
@@ -503,14 +673,16 @@ def _process_single_frame_worker(
     3. For each star, start at its reference position plus that shift,
        then re-center it on its own centroid (see `refine_star_centroid`).
        If the centroid is refused, keep the shifted position.
-    4. Measure each star's flux in an aperture centered on that position.
+    4. Measure each star's flux in an aperture centered on that position,
+       and its 1-sigma uncertainty from the CCD equation.
 
     Parameters
     ----------
     args : `tuple`
         The picture's path, the reference stars as (id, x, y), the
-        brightest reference stars used to line the picture up, and the
-        camera's saturation threshold in ADU.
+        brightest reference stars used to line the picture up, the
+        camera's saturation threshold in ADU, and the camera's
+        `DetectorNoise` (gain and read noise).
 
     Returns
     -------
@@ -518,14 +690,17 @@ def _process_single_frame_worker(
         The picture's path and one of:
 
         * A tuple ``(timestamp, fluxes, shift_x, shift_y, background,
-          airmass, positions)``. ``fluxes`` maps each star id to
-          ``(flux in ADU per second, is_saturated)``. ``positions`` maps
-          each star id to its `StarPosition`, which says where the
-          aperture sat and whether the centroid was refused.
+          airmass, positions, exposure_seconds)``. ``timestamp`` is the
+          exposure start in UTC. ``fluxes`` maps each star id to
+          ``(flux in ADU per second, is_saturated, flux error in ADU per
+          second)``. ``positions`` maps each star id to its
+          `StarPosition`, which says where the aperture sat and whether
+          the centroid was refused. ``exposure_seconds`` is the exposure
+          time used to turn ADU into ADU per second.
         * A `FrameRejection` when the picture has no usable ``DATE-OBS``.
         * `None` when the picture could not be read or measured.
     """
-    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu = args
+    path, reference_stars_list, reference_top_refs_minimal, saturation_threshold_adu, noise = args
 
     try:
         # 1. Load Header & Data
@@ -564,16 +739,22 @@ def _process_single_frame_worker(
             )
             positions_dict[reference_id] = position
             # Saturation is judged from raw ADU pixel values (against the
-            # camera's saturation threshold) inside _measure_aperture_flux,
-            # so it happens before the ADU/second conversion below.
-            net_flux, is_saturated = _measure_aperture_flux(
+            # camera's saturation threshold) inside
+            # measure_aperture_photometry, so it happens before the
+            # ADU/second conversion below.
+            measurement = measure_aperture_photometry(
                 data,
                 position.x,
                 position.y,
                 fallback_background=global_background,
                 saturation_threshold_adu=saturation_threshold_adu,
+                noise=noise,
             )
-            fluxes_dict[reference_id] = (net_flux / exposure_seconds, is_saturated)
+            fluxes_dict[reference_id] = (
+                measurement.net_flux_adu / exposure_seconds,
+                measurement.is_saturated,
+                measurement.flux_error_adu / exposure_seconds,
+            )
 
         return path, (
             timestamp,
@@ -583,6 +764,7 @@ def _process_single_frame_worker(
             global_background,
             airmass,
             positions_dict,
+            exposure_seconds,
         )
 
     except Exception:

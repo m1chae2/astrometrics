@@ -23,6 +23,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
+from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     FrameRejection,
     ObservationTimeError,
@@ -115,9 +116,15 @@ def _measure_sequence(
         header.header["DATE-OBS"] = f"2026-05-24T04:{index:02d}:30.570"
         header.header["EXPTIME"] = 1.0
         header.writeto(path)
-        _, result = _process_single_frame_worker((str(path), reference, alignment, SATURATION_ADU))
+        _, result = _process_single_frame_worker((
+            str(path),
+            reference,
+            alignment,
+            SATURATION_ADU,
+            DetectorNoise(),
+        ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, star_fluxes, _, _, _, _, star_positions = result
+        _, star_fluxes, _, _, _, _, star_positions, _ = result
         fluxes[index] = [star_fluxes[f"star{i}"][0] for i in range(len(stars))]
         positions.append([star_positions[f"star{i}"] for i in range(len(stars))])
     return fluxes, positions
@@ -496,10 +503,16 @@ def test_noisy_global_shift_is_not_pulled_toward_zero(tmp_path: Path) -> None:
     reference = [(f"star{i}", star.x, star.y) for i, star in enumerate(stars)]
     alignment = [(star.x, star.y, 0.0) for star in stars]
 
-    _, result = _process_single_frame_worker((str(path), reference, alignment, SATURATION_ADU))
+    _, result = _process_single_frame_worker((
+        str(path),
+        reference,
+        alignment,
+        SATURATION_ADU,
+        DetectorNoise(),
+    ))
 
     assert isinstance(result, tuple)
-    _, _, shift_x, shift_y, _, _, _ = result
+    _, _, shift_x, shift_y, _, _, _, _ = result
     assert shift_x == pytest.approx(2.7, abs=0.15)
     assert shift_y == pytest.approx(-1.8, abs=0.15)
 
@@ -556,7 +569,7 @@ def _worker_result_for_file(path: Path) -> object:
         What the worker returned for the file, without the path.
     """
     reference = [("star0", 100.0, 100.0)]
-    _, result = _process_single_frame_worker((str(path), reference, [], SATURATION_ADU))
+    _, result = _process_single_frame_worker((str(path), reference, [], SATURATION_ADU, DetectorNoise()))
     return result
 
 

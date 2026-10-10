@@ -153,6 +153,18 @@ class CameraProfile(BaseModel):
     quantum_efficiency : `QuantumEfficiencyRecord` or `None`
         The sensitivity curve, or `None` when none is known. Without
         one, spectra from this camera are not corrected for sensitivity.
+    gain_e_per_adu : `ProvenancedValue` or `None`
+        The conversion gain, in electrons per ADU: how many electrons the
+        sensor collected for each step of the stored number. Photometry
+        needs it to turn counts into a noise estimate. Gain depends on the
+        camera's gain setting, so this is the value at the setting the
+        frames were taken with. `None` when it has not been measured; the
+        photometry then assumes 1 electron per ADU and says so.
+    read_noise_e : `ProvenancedValue` or `None`
+        The read noise, in electrons (RMS, root mean square): the random
+        error added to every pixel each time the sensor is read out. Like
+        the gain, it depends on the camera's gain setting. `None` when it
+        has not been measured; the photometry then assumes zero.
     notes : `str`
         Anything a reader should know that does not fit a field, such as
         a known open question about one of the numbers.
@@ -169,6 +181,8 @@ class CameraProfile(BaseModel):
     saturation_threshold_adu: ProvenancedValue
     photometric_linearity_limit_adu: ProvenancedValue | None = None
     quantum_efficiency: QuantumEfficiencyRecord | None = None
+    gain_e_per_adu: ProvenancedValue | None = None
+    read_noise_e: ProvenancedValue | None = None
     notes: str = ""
 
     @property

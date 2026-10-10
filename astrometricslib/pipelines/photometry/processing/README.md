@@ -10,6 +10,12 @@ A star's raw brightness changes a little from picture to picture even when the s
 2. For each picture, finds the typical brightness of that comparison group and uses it to correct every star's measurement in that picture. It drops entirely any picture whose comparison group looks like a clear outlier compared to every other picture, since that likely reflects a passing cloud or a similar problem rather than real star behavior.
 3. Removes the effect of airmass on each star's corrected brightness, since stars appear dimmer near the horizon for reasons that have nothing to do with their own variability.
 
+Each correction also carries the measurement uncertainty forward, so `fluxesNormalizedErrors` and `fluxesDetrendedErrors` stay the same length as the values they describe (neither has a unit):
+
+- Normalizing divides a flux `F` by the comparison group's level `N` (their median flux in that picture). The error of the ratio is `sqrt((sigma_F / N)^2 + (F sigma_N / N^2)^2)`. Here `sigma_F` is the star's flux error, and `sigma_N` is the comparison stars' flux errors added in quadrature and divided by their number, `sqrt(sum(sigma_i^2)) / n`. That is the error of the mean of the group. The level is a median, whose error is up to 25 percent larger for equally noisy stars, so `sigma_N` is slightly small. A picture whose comparison stars lack errors gets no normalized errors, and the star gets none for the whole session.
+- Detrending divides by a fitted airmass trend and rescales to the trend's mean. The code multiplies the error by the same factor. It treats the fitted trend as exact.
+- A frame dropped by the outlier steps takes its error and its BJD_TDB time with it, so every per-frame list keeps one entry per remaining frame.
+
 ## Deciding which stars are variable
 
 Once the code corrects every star's brightness, it measures how much each star's brightness bounces around relative to its average, a standard way of comparing "noisiness" between stars of different brightness. It then compares each star's own noisiness against the typical noisiness of the whole field. The code flags a star that is noisier than the field by a wide enough margin as a possible variable star. This comparison is relative to the field's own conditions on the night, rather than to one fixed number, so noisier nights need a correspondingly bigger difference before the code flags a star.
@@ -22,6 +28,10 @@ For a star with enough brightness measurements, the code also searches for a per
 - A brief, box-shaped dip in brightness that repeats on a regular schedule, which can indicate a transiting planet or an eclipsing binary star.
 
 Both searches report a verdict on whether the pattern found actually stands out from noise, since chance alone can always produce some repeating pattern in any data set.
+
+The searches weight each point by its uncertainty when the star has them (`dy` in astropy's `LombScargle` and `BoxLeastSquares`). They use the star's detrended errors with the detrended brightness, or the normalized errors with the normalized brightness. If any error is missing, zero or not a number, or the list has the wrong length, the searches ignore all of them: the cycle search then weights every point equally, and the dip search uses one scatter estimated from the differences between neighboring points. The noise-only versions that set the false-alarm probability shuffle each brightness value together with its own error, so a shuffled light curve has the same weights as the real one.
+
+The time axis is days since the first point, taken from the star's BJD_TDB times (`timeBjdTdb`, mid-exposure) when it has one per timestamp, and from the UTC capture times otherwise. The held-out and alias checks in `period_checks.py` use that axis and the brightness only, not the errors.
 
 ## Long-term variability
 

@@ -24,6 +24,9 @@ from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
+    TIME_BASIS_BJD_TDB_GEOCENTRIC,
+)
 from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -41,6 +44,42 @@ logger = logging.getLogger(__name__)
 MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH = 10
 
 
+def _field_position_deg(target: Target | None, identify_result: Any | None) -> tuple[float, float] | None:
+    """Pick the sky position for a session's barycentric time correction.
+
+    The barycentric correction depends on the direction of the object. The
+    whole session uses one position, in this order:
+
+    1. The target's own right ascension and declination, when it has them.
+    2. The reference point (CRVAL) of the reference frame's plate solution,
+       which lies near the middle of the frame.
+
+    Parameters
+    ----------
+    target : `Target` or `None`
+        The target being analyzed.
+    identify_result : `IdentifyStarsResult` or `None`
+        The star lookup for the session's reference frame, which carries its
+        plate solution (`wcs`).
+
+    Returns
+    -------
+    position : `tuple` [`float`, `float`] or `None`
+        Right ascension and declination in degrees (ICRS), or `None` when
+        neither source gives a position.
+    """
+    if target is not None:
+        center_ra, center_dec = resolve_target_center_hint(target)
+        if center_ra is not None and center_dec is not None:
+            return float(center_ra), float(center_dec)
+    wcs = getattr(identify_result, "wcs", None)
+    if wcs is not None and getattr(wcs, "has_celestial", False):
+        reference_ra, reference_dec = (float(value) for value in wcs.celestial.wcs.crval)
+        if math.isfinite(reference_ra) and math.isfinite(reference_dec):
+            return reference_ra, reference_dec
+    return None
+
+
 def _run_variability_analysis_for_session(
     session: Any,
     max_workers: int | None,
@@ -55,6 +94,12 @@ def _run_variability_analysis_for_session(
     figure out the sky coordinates (plate solve) of the reference image.
     It then looks up the stars in SIMBAD/Gaia databases before tracking
     their brightness. This known identity stays with the star.
+
+    The session's light curves also get mid-exposure BJD_TDB times. The
+    sky position comes from `_field_position_deg` and the observatory from
+    the configuration (`get_observatory_site`); without a site the times
+    are taken from Earth's center, and without a position they are left
+    out.
 
     Returns
     -------
@@ -92,8 +137,17 @@ def _run_variability_analysis_for_session(
         )
         seed_stars = identify_result.stellar_objects
 
+    from astrometricslib.foundation.config import get_configuration
+
     analyzer = VariabilityAnalyzer()
-    analyzer.process(session.frame_paths, max_workers=max_workers, id_prefix=id_prefix, seed_stars=seed_stars)
+    analyzer.process(
+        session.frame_paths,
+        max_workers=max_workers,
+        id_prefix=id_prefix,
+        seed_stars=seed_stars,
+        target_position_deg=_field_position_deg(target, identify_result),
+        observer_site=get_configuration().get_observatory_site(),
+    )
     analyzer.normalize_light_curves()
     analyzer.detrend_light_curves_airmass()
     candidates = analyzer.identify_variable_stars()
@@ -266,6 +320,14 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
 
     `session_summaries` from both segments are joined, in that order, so
     a later reader can see how each session's comparison ensemble looked.
+    The per-measurement uncertainties (`flux_errors`,
+    `fluxes_normalized_errors`, `fluxes_detrended_errors`) and the
+    mid-exposure `time_bjd_tdb` times are joined and sorted the same way. A
+    merged array is kept only when it has one value per point of the array it
+    belongs to, so it is dropped when only one of the two segments has it. The
+    flags saying the errors assumed unit gain or zero read noise are `True`
+    when either segment's errors assumed it. The merged `time_basis` is the
+    shared one, or the less exact geocentric one when the segments differ.
     `magnitudes` (always empty today) is carried over untouched.
     `periodogram`, `transit_candidate` and the between-session fields are
     single computed results, not per-timestamp arrays, and are dropped
@@ -284,6 +346,10 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
     combined_fluxes_detrended = canonical.fluxes_detrended + new.fluxes_detrended
     combined_airmasses = canonical.airmasses + new.airmasses
     combined_is_saturated = canonical.is_saturated + new.is_saturated
+    combined_flux_errors = canonical.flux_errors + new.flux_errors
+    combined_normalized_errors = canonical.fluxes_normalized_errors + new.fluxes_normalized_errors
+    combined_detrended_errors = canonical.fluxes_detrended_errors + new.fluxes_detrended_errors
+    combined_bjd_times = canonical.time_bjd_tdb + new.time_bjd_tdb
 
     sort_order = sorted(range(len(combined_timestamps)), key=lambda i: combined_timestamps[i])
 
@@ -298,6 +364,40 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         """
         return [values[i] for i in sort_order] if len(values) == len(sort_order) else list(values)
 
+    def _reordered_if_complete(values: list[Any], companion: list[Any]) -> list[Any]:
+        """Put an uncertainty or time array in order, or drop it if incomplete.
+
+        Parameters
+        ----------
+        values : `list`
+            The joined array.
+        companion : `list`
+            The joined array it belongs to, which has one entry per point.
+
+        Returns
+        -------
+        ordered : `list`
+            The values in timestamp order, or an empty list when `values`
+            does not have one entry per point of `companion`.
+        """
+        if not values or len(values) != len(companion) or len(companion) != len(sort_order):
+            return []
+        return [values[i] for i in sort_order]
+
+    merged_flux_errors = _reordered_if_complete(combined_flux_errors, combined_fluxes)
+    merged_normalized_errors = _reordered_if_complete(combined_normalized_errors, combined_fluxes_normalized)
+    merged_detrended_errors = _reordered_if_complete(combined_detrended_errors, combined_fluxes_detrended)
+    merged_bjd_times = _reordered_if_complete(combined_bjd_times, combined_timestamps)
+    segments_with_errors = [light_curve for light_curve in (canonical, new) if light_curve.flux_errors]
+    errors_kept = bool(merged_flux_errors or merged_normalized_errors or merged_detrended_errors)
+    shared_bases = {light_curve.time_basis for light_curve in (canonical, new) if light_curve.time_basis}
+    if not merged_bjd_times or not shared_bases:
+        merged_basis = None
+    elif len(shared_bases) == 1 and canonical.time_basis and new.time_basis:
+        merged_basis = canonical.time_basis
+    else:
+        merged_basis = TIME_BASIS_BJD_TDB_GEOCENTRIC
+
     return PhotometryResult(
         timestamps=_reordered(combined_timestamps),
         fluxes=_reordered(combined_fluxes),
@@ -305,6 +405,21 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         fluxes_detrended=_reordered(combined_fluxes_detrended),
         airmasses=_reordered(combined_airmasses),
         is_saturated=_reordered(combined_is_saturated),
+        flux_errors=merged_flux_errors,
+        fluxes_normalized_errors=merged_normalized_errors,
+        fluxes_detrended_errors=merged_detrended_errors,
+        errors_assume_unit_gain=(
+            any(light_curve.errors_assume_unit_gain for light_curve in segments_with_errors)
+            if errors_kept
+            else None
+        ),
+        errors_assume_zero_read_noise=(
+            any(light_curve.errors_assume_zero_read_noise for light_curve in segments_with_errors)
+            if errors_kept
+            else None
+        ),
+        time_bjd_tdb=merged_bjd_times,
+        time_basis=merged_basis,
         magnitudes=canonical.magnitudes,
         periodogram=None,
         transit_candidate=None,

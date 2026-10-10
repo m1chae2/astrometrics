@@ -328,6 +328,40 @@ class PhotometryResult(BaseModel):
     airmasses: list[float] = Field(default_factory=list, alias="airmasses")
     magnitudes: list[float] = Field(default_factory=list, alias="magnitudes")
     is_saturated: list[bool] = Field(default_factory=list, alias="isSaturated")
+    # The 1-sigma uncertainty of each entry of `fluxes`, in ADU per second
+    # (the same units), from the CCD equation (see
+    # `pre_processing.frame_photometry.aperture_flux_error_adu`). Empty, or
+    # one entry per timestamp. Empty for a light curve saved before
+    # uncertainties were recorded.
+    flux_errors: list[float] = Field(default_factory=list, alias="fluxErrors")
+    # The 1-sigma uncertainty of each entry of `fluxes_normalized`, with no
+    # unit (the normalized flux is a ratio). It adds the uncertainty of the
+    # comparison-star ensemble to the star's own. Empty, or one entry per
+    # normalized flux.
+    fluxes_normalized_errors: list[float] = Field(default_factory=list, alias="fluxesNormalizedErrors")
+    # The 1-sigma uncertainty of each entry of `fluxes_detrended`, with no
+    # unit. The airmass trend is treated as exact, so this is the normalized
+    # uncertainty scaled by the same factor as the flux. Empty, or one entry
+    # per detrended flux.
+    fluxes_detrended_errors: list[float] = Field(default_factory=list, alias="fluxesDetrendedErrors")
+    # `True` when the gain of the camera was unknown and the errors above
+    # assume 1 electron per ADU, so their size is only a guide. `False` when
+    # the gain came from the camera profile or the FITS header. `None` when
+    # no errors were recorded.
+    errors_assume_unit_gain: bool | None = Field(default=None, alias="errorsAssumeUnitGain")
+    # `True` when the read noise of the camera was unknown and the errors
+    # above assume none. `None` when no errors were recorded.
+    errors_assume_zero_read_noise: bool | None = Field(default=None, alias="errorsAssumeZeroReadNoise")
+    # The mid-exposure time of each entry of `timestamps`, as a Barycentric
+    # Julian Date in Barycentric Dynamical Time (BJD_TDB), in days.
+    # `timestamps` stays the exposure start in UTC. Empty, or one entry per
+    # timestamp. Empty for a light curve saved before this was recorded, or
+    # when the target's position was unknown.
+    time_bjd_tdb: list[float] = Field(default_factory=list, alias="timeBjdTdb")
+    # How `time_bjd_tdb` was found: with the observatory's position or from
+    # Earth's center (see `pre_processing.observation_times`). `None` when
+    # `time_bjd_tdb` is empty.
+    time_basis: str | None = Field(default=None, alias="timeBasis")
     periodogram: PeriodogramResult | None = Field(default=None, alias="periodogram")
     transit_candidate: TransitCandidate | None = Field(default=None, alias="transitCandidate")
     mean_flux: float | None = Field(default=None, alias="meanFlux")

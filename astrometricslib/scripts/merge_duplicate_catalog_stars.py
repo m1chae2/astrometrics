@@ -67,6 +67,10 @@ _PER_MEASUREMENT_FIELDS = (
     "airmasses",
     "magnitudes",
     "is_saturated",
+    "flux_errors",
+    "fluxes_normalized_errors",
+    "fluxes_detrended_errors",
+    "time_bjd_tdb",
 )
 
 _POSITION_ONLY_PREFIX = "FIELD_J"

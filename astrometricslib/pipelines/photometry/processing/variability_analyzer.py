@@ -1,6 +1,31 @@
 """Differential photometry and ensemble normalization for variability.
 
 Used for detecting variable stars in image sequences.
+
+Every light curve carries its measurement uncertainties next to its values:
+
+* ``flux_errors`` (ADU per second) go with ``fluxes``. They come from the
+  CCD equation in `frame_photometry.aperture_flux_error_adu`.
+* ``fluxes_normalized_errors`` go with ``fluxes_normalized``. Normalizing
+  divides a star's flux ``F`` by the frame's comparison-ensemble level ``N``
+  (the median flux of the comparison stars measured in that frame). The error
+  of the ratio adds the star's own error ``sigma_F`` and the ensemble's error
+  ``sigma_N`` in quadrature: ``sigma = sqrt((sigma_F / N)**2 +
+  (F * sigma_N / N**2)**2)``. The ensemble error is the comparison stars'
+  errors added in quadrature and divided by their count,
+  ``sqrt(sum(sigma_i**2)) / n``. This is the error of the mean of the
+  comparison fluxes. The ensemble level is a median, whose error is up to
+  25 percent larger for equally noisy stars, so the normalized errors are
+  slightly small.
+* ``fluxes_detrended_errors`` go with ``fluxes_detrended``. Detrending
+  divides by an airmass trend and rescales to the trend's mean, so the error
+  is scaled by the same factor as the value. The fitted trend is treated as
+  exact.
+
+Each frame's time is recorded twice: ``timestamps`` keeps the exposure start
+in UTC, and ``time_bjd_tdb`` holds the mid-exposure BJD_TDB in days (see
+`observation_times`). The period searches use ``time_bjd_tdb`` when a star
+has it.
 """
 
 import logging
@@ -20,6 +45,7 @@ from scipy.stats import median_abs_deviation
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.foundation.observatory_site import ObservatorySite
 from astrometricslib.models.photometry_quality import InputQualityAssessment
 from astrometricslib.models.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
@@ -35,6 +61,10 @@ from astrometricslib.pipelines.photometry.post_processing.assess_output_quality 
 from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
     assess_input_quality,
 )
+from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
+    DetectorNoise,
+    resolve_detector_noise,
+)
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     FrameRejection,
     ObservationTimeError,
@@ -42,7 +72,12 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     _process_single_frame_worker,
     _read_exposure_seconds,
     compute_frame_airmass,
+    measure_aperture_photometry,
     read_observation_time,
+)
+from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
+    barycentric_julian_dates,
+    time_basis_for,
 )
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -190,6 +225,47 @@ def median_light_curve_scatter_mag(stellar_objects: list[StellarObject]) -> floa
         scatters.append(2.5 * math.log10(1.0 + fractional_scatter))
 
     return round(statistics.median(scatters), 4) if scatters else None
+
+
+# Converts a fractional flux error to magnitudes: 2.5 / ln(10) = 1.0857.
+MAGNITUDES_PER_FRACTIONAL_FLUX_ERROR = 2.5 / math.log(10.0)
+
+
+def median_flux_error_mag(stellar_objects: list[StellarObject]) -> float | None:
+    """Find the typical per-point measurement error of a run, in magnitudes.
+
+    For every point of every light curve that has normalized errors, the
+    error in magnitudes is ``1.0857 * sigma / flux`` (a small fractional error
+    changes the magnitude by 2.5 / ln(10) times that fraction). The result
+    is the median of all those points. It is the noise the measurement
+    process says each point has, not the scatter actually seen in the light
+    curve (see `median_light_curve_scatter_mag`).
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        Stars carrying light curves.
+
+    Returns
+    -------
+    error_mag : `float` or `None`
+        The median error in magnitudes, or `None` when no star has
+        normalized errors.
+    """
+    errors_mag: list[float] = []
+    for star in stellar_objects:
+        light_curve = getattr(star, "photometry", None)
+        if light_curve is None:
+            continue
+        fluxes, errors = light_curve.fluxes_normalized, light_curve.fluxes_normalized_errors
+        if not errors or len(errors) != len(fluxes):
+            continue
+        errors_mag.extend(
+            MAGNITUDES_PER_FRACTIONAL_FLUX_ERROR * error / flux
+            for flux, error in zip(fluxes, errors, strict=True)
+            if flux > 0
+        )
+    return float(np.median(errors_mag)) if errors_mag else None
 
 
 @dataclass(frozen=True)
@@ -448,6 +524,50 @@ def identify_long_term_variable_candidates(
     return variable_candidates
 
 
+def _normalized_flux_error(flux: float, flux_error: float, level: float, level_error: float) -> float:
+    """Find the uncertainty of a flux divided by the ensemble level.
+
+    For the ratio ``flux / level`` with independent errors, the variances
+    add: ``(flux_error / level)**2 + (flux * level_error / level**2)**2``.
+
+    Parameters
+    ----------
+    flux, flux_error : `float`
+        The star's flux and its 1-sigma uncertainty, in ADU per second.
+    level, level_error : `float`
+        The ensemble level and its 1-sigma uncertainty, in ADU per second.
+        The level must be above zero.
+
+    Returns
+    -------
+    error : `float`
+        The 1-sigma uncertainty of the normalized flux. It has no unit.
+    """
+    return math.hypot(flux_error / level, flux * level_error / level**2)
+
+
+def _keep_where(values: list[Any], keep: Any) -> list[Any]:
+    """Keep the entries of a per-frame list that a mask marks as valid.
+
+    Parameters
+    ----------
+    values : `list`
+        One value per frame, or empty.
+    keep : `numpy.ndarray`
+        A boolean mask with one entry per frame.
+
+    Returns
+    -------
+    kept : `list`
+        The values where the mask is `True`. A list that is empty, or not
+        as long as the mask, is returned unchanged, because pairing its
+        entries with the mask by position would be a guess.
+    """
+    if not values or len(values) != len(keep):
+        return values
+    return [value for value, valid in zip(values, keep, strict=True) if valid]
+
+
 class VariabilityAnalyzer:
     """Analyzes a sequence of images to detect variable stars."""
 
@@ -485,6 +605,22 @@ class VariabilityAnalyzer:
         # The number of frames in this session, set at the top of
         # `process()`. `input_quality.coverage_fraction`'s denominator.
         self.total_frames = 0
+        # The gain and read noise the flux errors were computed with. Set
+        # during `process()`.
+        self.detector_noise = DetectorNoise()
+        # The exposure time of each frame, in seconds, keyed by the frame's
+        # UTC exposure start. Filled during `process()`.
+        self.frame_exposure_seconds: dict[datetime, float] = {}
+        # The uncertainty of each frame's comparison-ensemble level, keyed
+        # by timestamp, in the same units as `frame_reference_flux` (ADU per
+        # second). Filled by `normalize_light_curves()`. A frame is absent
+        # when its comparison stars carry no errors.
+        self.frame_reference_flux_error: dict[datetime, float] = {}
+        # The comparison stars' flux errors, per timestamp, in the order
+        # `_collect_ensemble_frame_fluxes` listed their fluxes. It is
+        # replaced on every call, so after the ensemble is settled it
+        # describes the ensemble that was used.
+        self._frame_ensemble_flux_errors: dict[datetime, list[float]] = {}
 
     def load_target_images(self, target_id: str) -> list[str]:
         """Not used anymore, kept only so older code doesn't break.
@@ -502,6 +638,8 @@ class VariabilityAnalyzer:
         max_workers: int | None = None,
         id_prefix: str = "",
         seed_stars: list[StellarObject] | None = None,
+        target_position_deg: tuple[float, float] | None = None,
+        observer_site: ObservatorySite | None = None,
     ) -> None:
         """Measure the brightness of all stars across a sequence of images.
 
@@ -516,6 +654,15 @@ class VariabilityAnalyzer:
         seed_stars : `list` [`StellarObject`], optional
             A list of specific stars to track instead of finding them
             ourselves.
+        target_position_deg : `tuple` [`float`, `float`], optional
+            The right ascension and declination of the field, in degrees
+            (ICRS). With it, every light curve also gets mid-exposure
+            BJD_TDB times (``time_bjd_tdb``). Without it, only the UTC
+            exposure starts are recorded.
+        observer_site : `ObservatorySite`, optional
+            The observatory, for the BJD_TDB conversion. Without it, the
+            observer is taken at Earth's center and the light curves say so
+            in ``time_basis``.
         """
         if not image_paths:
             return
@@ -536,6 +683,10 @@ class VariabilityAnalyzer:
                 reference_header.get("INSTRUME", reference_header.get("CAMERA"))
             )
             saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
+            # The gain and read noise behind the flux errors. Every later
+            # frame is assumed to come from the same camera at the same
+            # settings, like the saturation threshold above.
+            self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
             try:
                 reference_timestamp = read_observation_time(reference_header)
             except ObservationTimeError as error:
@@ -547,6 +698,7 @@ class VariabilityAnalyzer:
                 )
                 return
             reference_exposure_seconds = _read_exposure_seconds(reference_header)
+            self.frame_exposure_seconds[reference_timestamp] = reference_exposure_seconds
             # Seeded below alongside the reference frame's flux. Leaving
             # it out started every light curve with one fewer airmass
             # than flux, and since the per-frame worker appends to both
@@ -635,10 +787,14 @@ class VariabilityAnalyzer:
                 # Divided by exposure time (ADU/second, not raw ADU
                 # counts) for the same reason as the per-frame worker
                 # below -- see _read_exposure_seconds.
-                flux, is_saturated = self._measure_flux_numpy(
-                    reference_data, x_ref, y_ref, saturation_threshold_adu=saturation_threshold_adu
+                reference_measurement = measure_aperture_photometry(
+                    reference_data,
+                    x_ref,
+                    y_ref,
+                    saturation_threshold_adu=saturation_threshold_adu,
+                    noise=self.detector_noise,
                 )
-                flux = flux / reference_exposure_seconds
+                flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 if flux <= 0:
                     seed_stars_without_signal += 1
                     continue
@@ -646,7 +802,10 @@ class VariabilityAnalyzer:
                 seed_star.photometry = PhotometryResult(
                     timestamps=[reference_timestamp],
                     fluxes=[flux],
-                    is_saturated=[is_saturated],
+                    flux_errors=[reference_measurement.flux_error_adu / reference_exposure_seconds],
+                    errors_assume_unit_gain=self.detector_noise.gain_is_assumed,
+                    errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
+                    is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(seed_star)
@@ -669,15 +828,22 @@ class VariabilityAnalyzer:
                 # for consistency. Divided by exposure time (ADU/second)
                 # for the same reason as the per-frame worker -- see
                 # _read_exposure_seconds.
-                flux, is_saturated = self._measure_flux_numpy(
-                    reference_data, x_ref, y_ref, saturation_threshold_adu=saturation_threshold_adu
+                reference_measurement = measure_aperture_photometry(
+                    reference_data,
+                    x_ref,
+                    y_ref,
+                    saturation_threshold_adu=saturation_threshold_adu,
+                    noise=self.detector_noise,
                 )
-                flux = flux / reference_exposure_seconds
+                flux = reference_measurement.net_flux_adu / reference_exposure_seconds
                 new_star.flux = flux
                 new_star.photometry = PhotometryResult(
                     timestamps=[reference_timestamp],
                     fluxes=[flux],
-                    is_saturated=[is_saturated],
+                    flux_errors=[reference_measurement.flux_error_adu / reference_exposure_seconds],
+                    errors_assume_unit_gain=self.detector_noise.gain_is_assumed,
+                    errors_assume_zero_read_noise=self.detector_noise.read_noise_is_assumed,
+                    is_saturated=[reference_measurement.is_saturated],
                     airmasses=[reference_airmass],
                 )
                 self.stellar_objects.append(new_star)
@@ -695,7 +861,13 @@ class VariabilityAnalyzer:
                 max_workers,
             )
             worker_arguments = [
-                (path, reference_stars_minimal, reference_top_refs_minimal, saturation_threshold_adu)
+                (
+                    path,
+                    reference_stars_minimal,
+                    reference_top_refs_minimal,
+                    saturation_threshold_adu,
+                    self.detector_noise,
+                )
                 for path in image_paths[1:]
             ]
 
@@ -728,25 +900,75 @@ class VariabilityAnalyzer:
                     self.frames_without_usable_date_obs.append(ExcludedFrame(path=path, reason=data.reason))
                     continue
 
-                timestamp, fluxes_dict, delta_x, delta_y, _bg, airmass, star_positions = data
+                timestamp, fluxes_dict, delta_x, delta_y, _bg, airmass, star_positions, exposure_seconds = (
+                    data
+                )
                 for star_id, star_position in star_positions.items():
                     if not star_position.is_refined:
                         previous_count = self.centroid_fallback_counts.get(star_id, 0)
                         self.centroid_fallback_counts[star_id] = previous_count + 1
                 self.timestamp_to_path[timestamp] = path
                 self.frame_registration_drift[timestamp] = (float(delta_x), float(delta_y))
+                self.frame_exposure_seconds[timestamp] = float(exposure_seconds)
 
                 # Update each StellarObject's light curve with the new
                 # data point
-                for star_id, (flux, is_saturated) in fluxes_dict.items():
+                for star_id, (flux, is_saturated, flux_error) in fluxes_dict.items():
                     if star_id in stellar_object_map:
                         star = stellar_object_map[star_id]
                         star.photometry.timestamps.append(timestamp)
                         star.photometry.fluxes.append(float(flux))
+                        star.photometry.flux_errors.append(float(flux_error))
                         star.photometry.is_saturated.append(is_saturated)
                         star.photometry.airmasses.append(float(airmass))
 
             logger.info("Parallel processing complete.")
+
+        self._record_barycentric_times(target_position_deg, observer_site)
+
+    def _record_barycentric_times(
+        self, target_position_deg: tuple[float, float] | None, observer_site: ObservatorySite | None
+    ) -> None:
+        """Give every light curve its mid-exposure BJD_TDB times.
+
+        The conversion runs once for all frames of the session, then each
+        star takes the value for each of its timestamps. Nothing is
+        recorded without a target position, because the barycentric
+        correction depends on the direction of the target.
+
+        Parameters
+        ----------
+        target_position_deg : `tuple` [`float`, `float`] or `None`
+            Right ascension and declination of the field, in degrees.
+        observer_site : `ObservatorySite` or `None`
+            The observatory, or `None` to take the observer at Earth's
+            center.
+        """
+        if target_position_deg is None:
+            return
+        frame_starts = sorted(self.frame_exposure_seconds)
+        if not frame_starts:
+            return
+        try:
+            bjd_values = barycentric_julian_dates(
+                frame_starts,
+                [self.frame_exposure_seconds[start] for start in frame_starts],
+                target_position_deg[0],
+                target_position_deg[1],
+                observer_site,
+            )
+        except (ValueError, OverflowError) as time_error:
+            # An out-of-range position or date. The UTC times stay usable.
+            logger.warning("BJD_TDB times could not be computed: %s", time_error)
+            return
+        bjd_by_start = dict(zip(frame_starts, (float(value) for value in bjd_values), strict=True))
+        basis = time_basis_for(observer_site)
+        for star in self.stellar_objects:
+            light_curve = star.photometry
+            if light_curve is None or not all(stamp in bjd_by_start for stamp in light_curve.timestamps):
+                continue
+            light_curve.time_bjd_tdb = [bjd_by_start[stamp] for stamp in light_curve.timestamps]
+            light_curve.time_basis = basis
 
     def _measure_flux_numpy(
         self, data: np.ndarray, x: float, y: float, radius: float = 4.0, *, saturation_threshold_adu: float
@@ -805,7 +1027,36 @@ class VariabilityAnalyzer:
             for timestamp, fluxes in frame_flux_data.items()
         ]
         self._reject_outlier_frames(frame_flux_data)
+        self.frame_reference_flux_error = self._ensemble_level_errors()
         self._apply_frame_normalization()
+
+    def _ensemble_level_errors(self) -> dict[datetime, float]:
+        """Find the uncertainty of each frame's comparison-ensemble level.
+
+        For a frame, the comparison stars' flux errors are added in
+        quadrature and divided by the number of stars:
+        ``sqrt(sum(sigma_i**2)) / n``. This is the error of the mean of
+        their fluxes. The level that normalizes the frame is their median,
+        whose error is up to 25 percent larger for equally noisy stars, so
+        this value is slightly small. The result has the units of
+        `frame_reference_flux` (ADU per second).
+
+        Returns
+        -------
+        errors : `dict` [`datetime.datetime`, `float`]
+            The error for each frame that has a normalization factor and
+            whose comparison stars all carry a usable error. Other frames
+            are absent.
+        """
+        errors: dict[datetime, float] = {}
+        for timestamp in self.frame_reference_flux:
+            member_errors = self._frame_ensemble_flux_errors.get(timestamp)
+            if not member_errors or any(
+                error is None or not math.isfinite(error) or error <= 0 for error in member_errors
+            ):
+                continue
+            errors[timestamp] = math.sqrt(sum(error**2 for error in member_errors)) / len(member_errors)
+        return errors
 
     def _score_reference_star_candidates(self) -> list[tuple]:
         """Score every star as a potential ensemble reference.
@@ -951,6 +1202,10 @@ class VariabilityAnalyzer:
         it isn't saturated, so ensemble composition (and size) is
         tracked per frame rather than assumed constant across the run.
 
+        The comparison stars' flux errors are kept alongside, in the same
+        order, in ``self._frame_ensemble_flux_errors`` (see
+        `_ensemble_level_errors`).
+
         Returns
         -------
         flux_data : `dict`
@@ -962,20 +1217,33 @@ class VariabilityAnalyzer:
         """
         flux_data: dict = {}
         excluded: dict = {}
+        flux_error_data: dict = {}
         for star in self.stellar_objects:
             if star.id not in candidate_ids:
                 continue
-            for timestamp, flux, is_saturated in zip(
-                star.photometry.timestamps,
-                star.photometry.fluxes,
-                star.photometry.is_saturated,
-                strict=False,
+            light_curve = star.photometry
+            errors_line_up = bool(light_curve.flux_errors) and len(light_curve.flux_errors) == len(
+                light_curve.timestamps
+            )
+            for index, (timestamp, flux, is_saturated) in enumerate(
+                zip(
+                    light_curve.timestamps,
+                    light_curve.fluxes,
+                    light_curve.is_saturated,
+                    strict=False,
+                )
             ):
                 if is_saturated:
                     excluded.setdefault(timestamp, []).append(star.id)
                     continue
                 if flux > 0:
                     flux_data.setdefault(timestamp, []).append(flux)
+                    # A comparison star with no usable error makes the
+                    # frame's ensemble error unknown (marked by `None`).
+                    flux_error_data.setdefault(timestamp, []).append(
+                        light_curve.flux_errors[index] if errors_line_up else None
+                    )
+        self._frame_ensemble_flux_errors = flux_error_data
         return flux_data, excluded
 
     def _build_frame_flux_ensemble(
@@ -1143,6 +1411,7 @@ class VariabilityAnalyzer:
             )
             for star in self.stellar_objects:
                 star.photometry.fluxes_normalized = list(star.photometry.fluxes)
+                star.photometry.fluxes_normalized_errors = list(star.photometry.flux_errors)
                 star.photometry.input_quality = self._build_input_quality_for_star(star)
             return False
 
@@ -1175,6 +1444,17 @@ class VariabilityAnalyzer:
             airmasses = star.photometry.airmasses or []
             saturation_flags_aligned = len(saturation_flags) == len(star.photometry.timestamps)
             airmasses_aligned = len(airmasses) == len(star.photometry.timestamps)
+            # The error and BJD_TDB arrays follow the same rule, with one
+            # difference: an empty array stays empty without counting as
+            # misaligned, because light curves without them are normal.
+            new_flux_errors = []
+            new_normalized_errors = []
+            new_bjd_times = []
+            flux_errors = star.photometry.flux_errors or []
+            bjd_times = star.photometry.time_bjd_tdb or []
+            flux_errors_aligned = bool(flux_errors) and len(flux_errors) == len(star.photometry.timestamps)
+            bjd_times_aligned = bool(bjd_times) and len(bjd_times) == len(star.photometry.timestamps)
+            normalized_errors_complete = flux_errors_aligned
 
             for index, (timestamp, flux) in enumerate(
                 zip(star.photometry.timestamps, star.photometry.fluxes, strict=False)
@@ -1189,12 +1469,32 @@ class VariabilityAnalyzer:
                             new_is_saturated.append(saturation_flags[index])
                         if airmasses_aligned:
                             new_airmasses.append(airmasses[index])
+                        if flux_errors_aligned:
+                            new_flux_errors.append(flux_errors[index])
+                            ensemble_error = self.frame_reference_flux_error.get(timestamp)
+                            if ensemble_error is None:
+                                normalized_errors_complete = False
+                            else:
+                                new_normalized_errors.append(
+                                    _normalized_flux_error(
+                                        flux, flux_errors[index], norm_factor, ensemble_error
+                                    )
+                                )
+                        if bjd_times_aligned:
+                            new_bjd_times.append(bjd_times[index])
 
             # Update the original light curve data to exclude rejected frames
             star.photometry.timestamps = new_timestamps
             star.photometry.fluxes = new_fluxes
             star.photometry.is_saturated = new_is_saturated if saturation_flags_aligned else []
             star.photometry.airmasses = new_airmasses if airmasses_aligned else []
+            star.photometry.flux_errors = new_flux_errors if flux_errors_aligned else []
+            star.photometry.fluxes_normalized_errors = (
+                new_normalized_errors if normalized_errors_complete else []
+            )
+            star.photometry.time_bjd_tdb = new_bjd_times if bjd_times_aligned else []
+            if not bjd_times_aligned:
+                star.photometry.time_basis = None
             self._reject_outlier_measurements_for_star(star)
             star.photometry.input_quality = self._build_input_quality_for_star(star)
 
@@ -1272,6 +1572,16 @@ class VariabilityAnalyzer:
                         for i, a in enumerate(star.photometry.airmasses)
                         if i < len(valid_mask) and valid_mask[i]
                     ]
+                    # The error and BJD_TDB arrays are cut only when they
+                    # line up with the flux array. A misaligned or empty
+                    # array is left as it is rather than mispaired.
+                    star.photometry.flux_errors = _keep_where(star.photometry.flux_errors, valid_mask)
+                    star.photometry.fluxes_normalized_errors = _keep_where(
+                        star.photometry.fluxes_normalized_errors, valid_mask
+                    )
+                    star.photometry.time_bjd_tdb = _keep_where(star.photometry.time_bjd_tdb, valid_mask)
+                    if not star.photometry.time_bjd_tdb:
+                        star.photometry.time_basis = None
 
     def identify_variable_stars(
         self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
@@ -1296,6 +1606,11 @@ class VariabilityAnalyzer:
                 continue
 
             fluxes_norm = np.array(star.photometry.fluxes_normalized)
+            normalized_errors = star.photometry.fluxes_normalized_errors
+            normalized_errors = (
+                np.array(normalized_errors) if len(normalized_errors) == len(fluxes_norm) else None
+            )
+            star.photometry.fluxes_detrended_errors = []
             airmasses = (
                 np.array(star.photometry.airmasses)
                 if star.photometry.airmasses and len(star.photometry.airmasses) == len(fluxes_norm)
@@ -1310,13 +1625,25 @@ class VariabilityAnalyzer:
                     if mean_trend > 0:
                         fluxes_detrended = (fluxes_norm / trend) * mean_trend
                         star.photometry.fluxes_detrended = [float(f) for f in fluxes_detrended]
+                        if normalized_errors is not None and np.all(trend > 0):
+                            # The same factor that scales the value scales
+                            # its error. The fitted trend is taken as exact.
+                            star.photometry.fluxes_detrended_errors = [
+                                float(e) for e in normalized_errors * mean_trend / trend
+                            ]
                     else:
                         star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
+                        if normalized_errors is not None:
+                            star.photometry.fluxes_detrended_errors = [float(e) for e in normalized_errors]
                 except DATA_ERRORS:
                     # A fit that fails leaves the light curve as it was.
                     star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
+                    if normalized_errors is not None:
+                        star.photometry.fluxes_detrended_errors = [float(e) for e in normalized_errors]
             else:
                 star.photometry.fluxes_detrended = [float(f) for f in fluxes_norm]
+                if normalized_errors is not None:
+                    star.photometry.fluxes_detrended_errors = [float(e) for e in normalized_errors]
 
     def run_bls_transit_search(self, star: StellarObject, shuffle_count: int | None = None) -> Any | None:
         """Look for a repeating, box-shaped dip in brightness.
@@ -1350,7 +1677,9 @@ class VariabilityAnalyzer:
         time_days, fluxes = self._light_curve_arrays(star)
         if fluxes.size < MINIMUM_POINTS_FOR_TRANSIT_SEARCH or np.mean(fluxes) <= 0:
             return None
-        candidate = box_search(time_days, fluxes, shuffle_count=shuffle_count)
+        candidate = box_search(
+            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
+        )
         star.photometry.transit_candidate = candidate
         return candidate
 
@@ -1385,7 +1714,9 @@ class VariabilityAnalyzer:
         time_days, fluxes = self._light_curve_arrays(star)
         if fluxes.size < MINIMUM_POINTS_FOR_PERIOD_SEARCH:
             return None
-        result = lomb_scargle_search(time_days, fluxes, shuffle_count=shuffle_count)
+        result = lomb_scargle_search(
+            time_days, fluxes, shuffle_count=shuffle_count, flux_errors=self.light_curve_errors(star)
+        )
         star.photometry.periodogram = result
         return result
 
@@ -1401,6 +1732,8 @@ class VariabilityAnalyzer:
         time_days, fluxes : `tuple` [`np.ndarray`, `np.ndarray`]
             Days since the first measurement, and the detrended brightness
             (or the normalized brightness when no detrended one exists).
+            The days come from the mid-exposure BJD_TDB times when the star
+            has them, and from the exposure start times otherwise.
         """
         return VariabilityAnalyzer._light_curve_arrays(star)
 
@@ -1413,6 +1746,8 @@ class VariabilityAnalyzer:
         time_days, fluxes : `tuple` [`np.ndarray`, `np.ndarray`]
             Days since the first measurement, and the detrended brightness
             (or the normalized brightness when no detrended one exists).
+            The days come from ``time_bjd_tdb`` when it has one finite value
+            for every timestamp, and from ``timestamps`` otherwise.
         """
         photometry = star.photometry
         raw_fluxes = (
@@ -1420,8 +1755,49 @@ class VariabilityAnalyzer:
         )
         fluxes = np.array(raw_fluxes, dtype=float)
         count = min(len(photometry.timestamps), fluxes.size)
-        time_days = np.array([
-            (stamp - photometry.timestamps[0]).total_seconds() / 86400.0
-            for stamp in photometry.timestamps[:count]
-        ])
+        bjd_times = np.array(photometry.time_bjd_tdb, dtype=float)
+        if (
+            bjd_times.size == len(photometry.timestamps)
+            and bjd_times.size > 0
+            and np.all(np.isfinite(bjd_times))
+        ):
+            time_days = bjd_times[:count] - bjd_times[0]
+        else:
+            time_days = np.array([
+                (stamp - photometry.timestamps[0]).total_seconds() / 86400.0
+                for stamp in photometry.timestamps[:count]
+            ])
         return time_days, fluxes[:count]
+
+    @staticmethod
+    def light_curve_errors(star: StellarObject) -> np.ndarray | None:
+        """Give the uncertainties that go with `light_curve_arrays`.
+
+        Parameters
+        ----------
+        star : `StellarObject`
+            The star whose light curve is searched.
+
+        Returns
+        -------
+        errors : `numpy.ndarray` or `None`
+            The 1-sigma uncertainty of each brightness value (no unit; the
+            detrended errors when the detrended brightness is used, the
+            normalized errors otherwise), trimmed to the same length as the
+            arrays from `light_curve_arrays`. `None` when the star has no
+            errors, when they are not one per brightness value, or when
+            any is not a finite number above zero. The searches then fall
+            back to a single scatter estimated from the light curve.
+        """
+        photometry = star.photometry
+        if photometry.fluxes_detrended:
+            values, errors = photometry.fluxes_detrended, photometry.fluxes_detrended_errors
+        else:
+            values, errors = photometry.fluxes_normalized, photometry.fluxes_normalized_errors
+        if not errors or len(errors) != len(values):
+            return None
+        error_array = np.array(errors, dtype=float)
+        if not np.all(np.isfinite(error_array)) or np.any(error_array <= 0):
+            return None
+        count = min(len(photometry.timestamps), error_array.size)
+        return error_array[:count]

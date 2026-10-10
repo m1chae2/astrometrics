@@ -3,9 +3,10 @@
 A photometry run produces light curves for many stars from one or more
 sessions of frames. Whether the run as a whole can be trusted depends on a
 few checks: were many frames thrown out as outliers, did every frame have a
-capture time, could every session be used, did the comparison stars hold up
-in every frame, did the telescope keep tracking, and are there enough stars
-to say what "normal" scatter looks like.
+capture time (and which time scale do the times use), could every session be
+used, did the comparison stars hold up in every frame, did the telescope keep
+tracking, are there enough stars to say what "normal" scatter looks like, and
+how large does the measurement say the error of each point is.
 
 Each check is returned as a `GateResult`. A check that could not look (for
 example, no star recorded its alignment drift) is ``not_checked``; it is not
@@ -67,6 +68,7 @@ REGISTRATION_DRIFT_GATE_NAME = "registration_drift"
 SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
 DETECTABLE_AMPLITUDE_GATE_NAME = "detectable_amplitude"
+FLUX_UNCERTAINTY_GATE_NAME = "flux_uncertainty"
 
 
 def photometry_run_gates(
@@ -85,6 +87,10 @@ def photometry_run_gates(
     unlisted_cvs: Sequence[float] = (),
     cutoff_cv: float | None = None,
     timestamp_exclusion_reasons: Sequence[str] = (),
+    time_basis: str | None = None,
+    median_flux_error_mag: float | None = None,
+    errors_assume_unit_gain: bool = False,
+    errors_assume_zero_read_noise: bool = False,
 ) -> list[GateResult]:
     """Build the gates for one photometry run.
 
@@ -125,11 +131,26 @@ def photometry_run_gates(
         One sentence per frame left out because its ``DATE-OBS`` header was
         missing or unreadable, naming the frame and the problem. The gate's
         detail quotes the first few.
+    time_basis : `str` or `None`, optional
+        The time scale of the run's light curves, for example ``"BJD_TDB,
+        mid-exposure"`` (see `observation_times`). The `capture_timestamps`
+        gate quotes it in its detail, whether it passes or fails. `None`
+        leaves it out.
+    median_flux_error_mag : `float` or `None`, optional
+        The median per-point error of the run's normalized light curves, in
+        magnitudes (see `median_flux_error_mag`), or `None` when no light
+        curve has errors.
+    errors_assume_unit_gain : `bool`, optional
+        Whether those errors assumed 1 electron per ADU because the camera's
+        gain was unknown.
+    errors_assume_zero_read_noise : `bool`, optional
+        Whether those errors assumed no read noise because the camera's read
+        noise was unknown.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Ten gates, in a fixed order.
+        Eleven gates, in a fixed order.
     """
     gates: list[GateResult] = []
 
@@ -180,6 +201,8 @@ def photometry_run_gates(
             timestamp_detail += ": " + "; ".join(shown)
             if hidden_count > 0:
                 timestamp_detail += f"; and {hidden_count} more"
+        if time_basis:
+            timestamp_detail += f". Times of the other frames: {time_basis}"
         gates.append(
             failed_gate(
                 CAPTURE_TIMESTAMP_GATE_NAME,
@@ -189,7 +212,11 @@ def photometry_run_gates(
             )
         )
     else:
-        gates.append(passed_gate(CAPTURE_TIMESTAMP_GATE_NAME, 0.0, 0.0))
+        gates.append(
+            passed_gate(
+                CAPTURE_TIMESTAMP_GATE_NAME, 0.0, 0.0, detail=f"times: {time_basis}" if time_basis else ""
+            )
+        )
 
     if session_empty_reasons:
         gates.append(failed_gate(SESSION_CONTENT_GATE_NAME, "; ".join(session_empty_reasons)))
@@ -370,4 +397,52 @@ def photometry_run_gates(
                     amplitude_source,
                 )
             )
+
+    gates.append(
+        _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)
+    )
     return gates
+
+
+def _flux_uncertainty_gate(
+    median_error_mag: float | None, assumes_unit_gain: bool, assumes_zero_read_noise: bool
+) -> GateResult:
+    """Report the size of the per-point errors and what they assumed.
+
+    The gate cannot fail: the errors are the measurement's own estimate, and
+    this repository holds no limit for what a good error is. It answers
+    whether the estimate can be trusted. With a known gain it passes and
+    reports the median error. With an assumed gain the error scale is only a
+    guide, so the gate reads "not checked" and still quotes the median in
+    its detail.
+
+    Parameters
+    ----------
+    median_error_mag : `float` or `None`
+        The median per-point error of the run's light curves, in magnitudes.
+    assumes_unit_gain : `bool`
+        Whether the errors assumed 1 electron per ADU.
+    assumes_zero_read_noise : `bool`
+        Whether the errors assumed no read noise.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` without errors or with an assumed gain, otherwise
+        ``passed`` with the median error as its measured value.
+    """
+    source = "median of 1.0857 x sigma / flux over all points; no limit applies"
+    if median_error_mag is None:
+        return unchecked_gate(FLUX_UNCERTAINTY_GATE_NAME, "no light curve carries measurement errors", source)
+    if assumes_unit_gain:
+        return unchecked_gate(
+            FLUX_UNCERTAINTY_GATE_NAME,
+            f"errors assume unit gain (1 e-/ADU) because the camera's gain is not known, so the median "
+            f"error of {median_error_mag:.4f} mag is only a guide; add gain_e_per_adu to the camera "
+            "profile to make it a measurement",
+            source,
+        )
+    detail = f"median per-point error {median_error_mag:.4f} mag"
+    if assumes_zero_read_noise:
+        detail += "; read noise assumed to be zero, so faint stars' errors are slightly small"
+    return passed_gate(FLUX_UNCERTAINTY_GATE_NAME, median_error_mag, None, source, detail)

@@ -14,7 +14,7 @@ import statistics
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.stellar_source import StellarObject, VariableCandidate
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,
@@ -26,6 +26,11 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
     split_scatter_by_catalog_status,
 )
 from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
+from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
+    TIME_BASIS_BJD_TDB,
+    TIME_BASIS_BJD_TDB_GEOCENTRIC,
+    TIME_BASIS_UTC_START,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -62,6 +67,36 @@ def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCand
         )
         for star in stars
     ]
+
+
+def _run_time_basis(star_photometry: list[PhotometryResult]) -> str | None:
+    """Name the time scale of a run's light curves, for the timestamp gate.
+
+    The run's basis is the least exact one any light curve has. A star with
+    no BJD_TDB times counts as the UTC-start basis, so one such star is
+    enough to make the whole run read UTC start. Stars with no light-curve
+    points are ignored.
+
+    Parameters
+    ----------
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    basis : `str` or `None`
+        One of the `observation_times` time-basis sentences, or `None` when
+        no star has any point.
+    """
+    bases = {
+        (photometry.time_basis if photometry.time_bjd_tdb and photometry.time_basis else TIME_BASIS_UTC_START)
+        for photometry in star_photometry
+        if photometry.timestamps
+    }
+    for basis in (TIME_BASIS_UTC_START, TIME_BASIS_BJD_TDB_GEOCENTRIC, TIME_BASIS_BJD_TDB):
+        if basis in bases:
+            return basis
+    return next(iter(bases), None)
 
 
 def _empty_photometry_result(no_work_reason: str) -> Result:
@@ -402,6 +437,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             PhotometryQualitySummary,
         )
         from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
+            median_flux_error_mag,
             median_light_curve_scatter_mag,
         )
         from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
@@ -499,6 +535,12 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             known_variable_cvs=known_variable_cvs,
             unlisted_cvs=unlisted_cvs,
             cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
+            time_basis=_run_time_basis(star_photometry),
+            median_flux_error_mag=median_flux_error_mag(result.stellar_objects),
+            errors_assume_unit_gain=any(photometry.errors_assume_unit_gain for photometry in star_photometry),
+            errors_assume_zero_read_noise=any(
+                photometry.errors_assume_zero_read_noise for photometry in star_photometry
+            ),
         ):
             summary.record_gate(gate)
 

@@ -5,15 +5,22 @@ read "not checked" when it could not look. The last test runs the real
 `validate_output`, which no earlier test covered.
 """
 
+from datetime import datetime
 from typing import Any
 
 import pytest
 
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.quality_summary import ExcludedFrame
+from astrometricslib.models.stellar_source import PhotometryResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner
 from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
+    TIME_BASIS_BJD_TDB,
+    TIME_BASIS_BJD_TDB_GEOCENTRIC,
+    TIME_BASIS_UTC_START,
+)
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
 
 
@@ -45,16 +52,18 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "known_variable_cvs": [0.3 + 0.01 * index for index in range(20)],
         "unlisted_cvs": [0.05 + 0.001 * index for index in range(60)],
         "cutoff_cv": 0.04,
+        "median_flux_error_mag": 0.02,
+        "errors_assume_unit_gain": False,
     }
     inputs.update(changes)
     return {gate.name: gate for gate in rg.photometry_run_gates(**inputs)}
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
-    """Nothing wrong gives ten passes and no failure."""
+    """Nothing wrong gives eleven passes and no failure."""
     gates = good_run()
 
-    assert len(gates) == 10
+    assert len(gates) == 11
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
 
 
@@ -242,3 +251,87 @@ def test_the_amplitude_gate_passes_for_a_sensitive_run_and_skips_a_run_with_no_c
     """A 4% cutoff sees about 0.12 mag; no cutoff is not checked."""
     assert good_run()[rg.DETECTABLE_AMPLITUDE_GATE_NAME].status is GateStatus.PASSED
     assert good_run(cutoff_cv=None)[rg.DETECTABLE_AMPLITUDE_GATE_NAME].status is GateStatus.NOT_CHECKED
+
+
+def test_the_timestamp_gate_names_the_time_scale_when_it_passes() -> None:
+    """A passing gate says which time scale the light curves use."""
+    gate = good_run(time_basis="BJD_TDB, mid-exposure")[rg.CAPTURE_TIMESTAMP_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.detail == "times: BJD_TDB, mid-exposure"
+
+
+def test_the_timestamp_gate_keeps_its_detail_and_adds_the_time_scale_when_it_fails() -> None:
+    """The failed detail keeps its first sentence; the time scale follows."""
+    gate = good_run(frames_without_timestamp=3, time_basis=TIME_BASIS_UTC_START)[
+        rg.CAPTURE_TIMESTAMP_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.detail.startswith("3 frame(s) excluded for missing capture timestamp")
+    assert gate.detail.endswith(f"Times of the other frames: {TIME_BASIS_UTC_START}")
+
+
+def test_the_flux_uncertainty_gate_reports_the_median_error_when_the_gain_is_known() -> None:
+    """With a known gain the gate passes and quotes the median error in mag."""
+    gate = good_run(median_flux_error_mag=0.0123)[rg.FLUX_UNCERTAINTY_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(0.0123)
+    assert "0.0123 mag" in gate.detail
+
+
+def test_the_flux_uncertainty_gate_says_when_read_noise_was_assumed_zero() -> None:
+    """A known gain with an unknown read noise still passes, with a caveat."""
+    gate = good_run(errors_assume_zero_read_noise=True)[rg.FLUX_UNCERTAINTY_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert "read noise assumed to be zero" in gate.detail
+
+
+def test_the_flux_uncertainty_gate_is_not_checked_when_unit_gain_was_assumed() -> None:
+    """Errors that assume 1 e-/ADU are a guide, so the gate cannot pass them.
+
+    The sentence still quotes the median error so a reader can see its size.
+    """
+    gate = good_run(errors_assume_unit_gain=True, median_flux_error_mag=0.0456)[rg.FLUX_UNCERTAINTY_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED
+    assert "errors assume unit gain" in gate.detail
+    assert "0.0456 mag" in gate.detail
+
+
+def test_the_flux_uncertainty_gate_is_not_checked_without_any_errors() -> None:
+    """A run whose light curves carry no errors has nothing to report."""
+    gate = good_run(median_flux_error_mag=None)[rg.FLUX_UNCERTAINTY_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED
+    assert "no light curve carries measurement errors" in gate.detail
+
+
+def _light_curve(time_basis: str | None, has_bjd: bool) -> PhotometryResult:
+    """Build a two-point light curve with or without BJD_TDB times.
+
+    Returns
+    -------
+    light_curve : `PhotometryResult`
+        A light curve whose time basis is `time_basis`.
+    """
+    stamps = [datetime(2026, 5, 24, 4, 0, 0), datetime(2026, 5, 24, 4, 1, 0)]
+    return PhotometryResult(
+        timestamps=stamps,
+        time_bjd_tdb=[2461184.67, 2461184.68] if has_bjd else [],
+        time_basis=time_basis,
+    )
+
+
+def test_the_run_time_basis_is_the_least_exact_one_any_light_curve_has() -> None:
+    """One light curve without BJD_TDB times makes the run read UTC start."""
+    full = _light_curve(TIME_BASIS_BJD_TDB, True)
+    geocentric = _light_curve(TIME_BASIS_BJD_TDB_GEOCENTRIC, True)
+    bare = _light_curve(None, False)
+
+    assert runner._run_time_basis([full, full]) == TIME_BASIS_BJD_TDB
+    assert runner._run_time_basis([full, geocentric]) == TIME_BASIS_BJD_TDB_GEOCENTRIC
+    assert runner._run_time_basis([full, geocentric, bare]) == TIME_BASIS_UTC_START
+    assert runner._run_time_basis([]) is None

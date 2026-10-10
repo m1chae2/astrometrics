@@ -76,6 +76,9 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "scatter_population": frozenset({PASSED, NOT_CHECKED}),
         "variability_discrimination": ALL_THREE,
         "detectable_amplitude": ALL_THREE,
+        # An unknown gain only makes the error scale a guide, so the gate reads
+        # "not checked" then. There is no limit to fail.
+        "flux_uncertainty": frozenset({PASSED, NOT_CHECKED}),
         # Checks made on a period result (not the run's summary): the hold-out
         # and the alias test.
         "holdout_nights": ALL_THREE,

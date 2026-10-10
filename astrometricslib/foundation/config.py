@@ -15,6 +15,7 @@ import tomlkit
 from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
+from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
 from astrometricslib.foundation.paths import resolve_mounted_path
 
 _instance = None
@@ -1017,6 +1018,21 @@ class AppConfiguration:
             The optics and setups. Both are empty when the config has none.
         """
         return load_observatory_setups(self)
+
+    def get_observatory_site(self) -> ObservatorySite | None:
+        """Return the observatory's position on Earth, if the config gives one.
+
+        Read from ``latitude``, ``longitude`` and ``elevation`` in the
+        ``[Observatory.Location]`` section (see
+        `astrometricslib.foundation.observatory_site`).
+
+        Returns
+        -------
+        site : `ObservatorySite` or `None`
+            The site, or `None` when the section has no usable latitude and
+            longitude. No default site is substituted.
+        """
+        return load_observatory_site(self)
 
     def get_camera_default_iso(self, camera_name: str | None) -> str | None:
         """Return the ISO or gain to assume for a camera whose header has none.

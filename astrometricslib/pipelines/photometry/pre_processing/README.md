@@ -9,10 +9,10 @@ For each picture in an observing session, the code:
 1. Reads the picture's exposure time, airmass, and capture time from its header. Exposure time is how long the camera's shutter was open. Airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon. The capture time comes from the `DATE-OBS` card (see "Capture times" below).
 2. Finds out how far this picture has drifted compared to the first picture in the session, using a handful of bright stars as reference points. Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
 3. For every star being tracked, starts at the star's position in the first picture plus the picture's overall drift. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the overall drift (see "Aperture placement" below).
-4. Measures the amount of light inside a small circle centered on that position, and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness in that one picture.
-5. Divides that raw brightness by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly.
+4. Measures the amount of light inside a small circle centered on that position, and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness in that one picture. The same step computes the brightness's 1-sigma uncertainty (see "Flux uncertainties" below).
+5. Divides that raw brightness and its uncertainty by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly. Both are in ADU per second (ADU is analog-to-digital unit, one step of the stored pixel value).
 
-Every star ends up with a brightness value, a timestamp, and a flag saying whether the measurement was saturated (too bright to measure accurately) for each picture in the session.
+Every star ends up with a brightness value, its uncertainty, a timestamp, and a flag saying whether the measurement was saturated (too bright to measure accurately) for each picture in the session. The worker also returns the exposure time it used, which the time conversion needs.
 
 ## Aperture placement
 
@@ -30,11 +30,40 @@ Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason
 
 The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixels (FWHM, full width at half maximum). For wider stars the box cuts off more of the star's wings and the centroid shifts toward the box center by a few hundredths of a pixel.
 
+## Flux uncertainties
+
+`frame_photometry.py` computes the 1-sigma uncertainty of each flux with the CCD equation (the noise budget of a camera sensor), in `aperture_flux_error_adu`. The equation works in electrons, because the random scatter of a count follows the number of electrons collected:
+
+`variance = F + n_pix (S + RN^2 + D) + (n_pix^2 / n_sky) (S + RN^2)`
+
+| Symbol | Meaning | Unit |
+|---|---|---|
+| `F` | The star's net counts (sky-subtracted aperture sum) times the gain | electrons |
+| `S` | The sky level per pixel (median of the ring) times the gain | electrons per pixel |
+| `RN` | Read noise | electrons per pixel |
+| `D` | Dark current collected during the exposure | electrons per pixel |
+| `n_pix` | Area of the circle, as the exact area, not a pixel count | pixels |
+| `n_sky` | Number of pixels in the sky ring | pixels |
+
+The first term is the star's own shot noise (the random scatter of a count). The second is the noise of the sky, read-out and dark counts under the circle. The third is the noise in the sky level itself, which the ring measures from a limited number of pixels. The code takes the square root, divides by the gain to get ADU, and divides by the exposure time to get ADU per second. The dark current is zero, because no source records it. The equation assumes the picture has had its bias level removed; a picture with the bias still in it has an overestimated sky term. A star too near the frame edge to measure has a flux of 0 and an error of 0.
+
+The error does not change the flux. `measure_aperture_photometry` returns both, and `_measure_aperture_flux` keeps returning only the flux and the saturation flag.
+
+`detector_noise.py` picks the gain (electrons per ADU) and read noise (electrons):
+
+1. The camera's profile: `gain_e_per_adu` and `read_noise_e` in `models/camera_profile.py`. Each carries its source (datasheet, measured or assumed). The values depend on the camera's gain setting, so they are exact only for pictures taken at the setting they were measured at.
+2. The picture's `EGAIN` card (electrons per ADU) and `RDNOISE` card (electrons).
+3. An assumption: 1 electron per ADU and no read noise.
+
+The `GAIN` card is never read as electrons per ADU. The ZWO cameras write a gain setting there (the sample pictures say `GAIN = 0.0`). `DetectorNoise.gain_is_assumed` and `read_noise_is_assumed` record which numbers were assumed. They reach the light curve as `errorsAssumeUnitGain` and `errorsAssumeZeroReadNoise` and the `flux_uncertainty` gate. With an assumed gain the errors have the right dependence on brightness, but the wrong size by a factor near the square root of the true gain.
+
 ## Capture times
 
-The capture time of each picture comes from its `DATE-OBS` card, read with astropy's `Time` class as a UTC date and time (for example `2026-05-24T04:58:30.570`). The code stores it without a time zone.
+The capture time of each picture comes from its `DATE-OBS` card, read with astropy's `Time` class as a UTC date and time (for example `2026-05-24T04:58:30.570`). The code stores it without a time zone. This is the moment the shutter opened.
 
 A picture is rejected, and left out of every light curve, when `DATE-OBS` is missing, is not a date and time, or has a date but no time of day. The code never substitutes the current time. The rejection reason is kept in `VariabilityAnalyzer.frames_without_usable_date_obs`. The photometry runner reads that list and copies each reason into the `capture_timestamps` gate and into the list of excluded frames in the quality summary. If the first picture of a session is the one rejected, the session produces no light curves, and the session's empty-session reason says so.
+
+`observation_times.py` converts the exposure starts of a session to mid-exposure BJD_TDB values, in days (see "Times" in the photometry README for the reasons). For each picture, it adds half the exposure time to the capture time, converts the result from UTC to TDB (a uniform time scale), and adds the light-travel time to the center of mass of the solar system for the target's direction. The light-travel time is between -499 s and +499 s. The conversion uses the observatory's position when the configuration has one, and Earth's center otherwise. It uses astropy's built-in planet positions, which need no download and are good to about 2 ms. The module's three time-basis sentences name what was done; the `capture_timestamps` gate quotes them.
 
 ## Judging the raw data
 

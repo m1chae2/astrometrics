@@ -66,7 +66,9 @@ __all__ = [
 # say so. Raised to 1 when the skip was added, together with the star-based
 # alignment of exposure groups (2026-10-03). Raised to 2 when a lone flat began
 # to have the bias subtracted and a lone light began to be calibrated.
-STACKING_ALGORITHM_VERSION = 2
+# Raised to 3 when adaptive rejection began to use a floor and a looser low
+# bound, which changes the rejection limits of every small stack.
+STACKING_ALGORITHM_VERSION = 3
 
 # What follows a stack's own name (without .fits) in the name of its record.
 STACK_INPUTS_SUFFIX = "_inputs.json"
@@ -84,6 +86,8 @@ SETTINGS_THAT_CHANGE_A_STACK = (
     "get_stack_weight",
     "get_stack_rejection_sigma_mode",
     "get_stack_rejection_sigma",
+    "get_stack_rejection_sigma_floor",
+    "get_stack_rejection_low_extra_sigma",
     "get_stack_generate_rejmap",
     "get_exposure_group_gain_tolerance",
     "get_stack_filter_wfwhm_percentile",

@@ -276,6 +276,20 @@ siril_executable = "siril-cli"
 # --siril-source=flatpak (see build/linux/install_ubuntu_deps.sh), set
 # this to wfwhm to weight each frame by its measured star sharpness.
 stack_weight = ""
+# Pixel rejection while stacking. The stacker throws out values that sit far
+# from the middle value of the same pixel in the other frames. The limits scale
+# with the number of frames (Chauvenet's criterion), which gives 1.64 standard
+# deviations for 5 frames and 2.5 for 40. With few frames the spread is a rough
+# estimate, and a limit that tight throws out good values (in a simulation of
+# pure noise, 7.4% of the samples of 5-frame pixels). "stack_rejection_sigma_floor"
+# is the smallest high limit, in standard deviations. The default is 2.5.
+# "stack_rejection_low_extra_sigma" is how much looser the low limit is than the
+# high limit. Satellite trails, cosmic ray hits and hot pixels are brighter than
+# the true value, so the high limit has to catch them; values far below are rare.
+# The default is 0.5, so a 5-frame stack rejects at 3.0 below and 2.5 above. Use 0
+# for equal limits. Changing either value rebuilds the stacks.
+stack_rejection_sigma_floor = "2.5"
+stack_rejection_low_extra_sigma = "0.5"
 # The fewest frames a master bias, master dark or master flat should be built
 # from. The stacker averages the frames and throws out odd pixel values (cosmic
 # ray hits). One frame keeps its own noise and its cosmic ray hits, and two

@@ -13,6 +13,8 @@ The refinement keeps the plain shift when it cannot trust the fit: fewer than 30
 
 Alignment accuracy matters most here. On the groups measured, these steps place frames within 0.05 pixels, while Siril's registration of the same groups was 0.06 to 3 pixels off. For that reason these steps stay in Python.
 
+Pixel rejection when Siril combines the frames is set before this step runs. The limits come from `rejection_bounds` in `utilities/rejection_thresholds.py`, and the stacking README ("Pixel rejection limits") describes them and the measurements behind them.
+
 ## The brightness scale between exposure groups
 
 Siril leaves each group stack with its own overall brightness. Before the groups are averaged, `exposure_groups.py` divides each group's counts-per-second image by a gain (a single number) so that all groups read the same.

@@ -379,6 +379,8 @@ class AppConfiguration:
                 "rejection_sigma_mode": "adaptive",
                 "rejection_sigma_low": "3.0",
                 "rejection_sigma_high": "3.0",
+                "stack_rejection_sigma_floor": "2.5",
+                "stack_rejection_low_extra_sigma": "0.5",
                 "filter_wfwhm_percentile": "",
                 "filter_round_percentile": "",
                 # Blank, matching the config template: -weight= needs
@@ -541,13 +543,16 @@ class AppConfiguration:
         """Return the configured stack-time pixel rejection sigma mode.
 
         Either "adaptive" (Chauvenet's criterion, scaled to frame count)
-        or "fixed". Adaptive is the default: rejection_threshold_analysis.py
-        sweeps against M 81, M 13, and NGC 2403 found stacked-image FWHM
-        indistinguishable between sigma=2.5 and sigma=3.0, so the lower,
-        frame-count-derived Chauvenet sigma (see
-        utilities/rejection_thresholds.py) costs no measurable
-        sharpness while rejecting a more statistically-justified fraction of
-        pixels.
+        or "fixed". Adaptive is the default. rejection_threshold_analysis.py
+        sweeps against M 81, M 13, and NGC 2403 (40 or more frames each)
+        measured no difference in stacked-image FWHM between sigma=2.5 and
+        sigma=3.0, so a lower, frame-count-derived Chauvenet sigma (see
+        utilities/rejection_thresholds.py) costs no measurable sharpness
+        at those frame counts. Those sweeps did not include stacks of 5 to 15
+        frames. For those, the floor and the looser low bound
+        (get_stack_rejection_sigma_floor() and
+        get_stack_rejection_low_extra_sigma()) rest on the simulation in
+        scripts/rejection_small_n_check.py, not on a sharpness measurement.
         "fixed" falls back to get_stack_rejection_sigma()'s configured
         constant for callers that want the old fixed-sigma behavior.
 
@@ -559,7 +564,7 @@ class AppConfiguration:
         val = self.get_value("Processing.Siril", "rejection_sigma_mode", fallback="adaptive")
         return str(val).lower()
 
-    def get_stack_rejection_sigma(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_stack_rejection_sigma(self) -> tuple[float, float]:
         """Return the configured (sigma_low, sigma_high) rejection pair.
 
         This fixed pair is only used when get_stack_rejection_sigma_mode()
@@ -575,6 +580,54 @@ class AppConfiguration:
         low = self.get_value("Processing.Siril", "rejection_sigma_low", fallback="3.0")
         high = self.get_value("Processing.Siril", "rejection_sigma_high", fallback="3.0")
         return (float(low), float(high))
+
+    def get_stack_rejection_sigma_floor(self) -> float:
+        """Return the smallest high rejection limit adaptive mode may use.
+
+        Adaptive mode (Chauvenet's criterion) gives 1.64 standard deviations
+        for 5 frames and 1.86 for 8. The stacker estimates the spread of each
+        pixel from those few values, and the estimate is noisy, so limits that
+        tight throw out good values. In a simulation of pure noise
+        (scripts/rejection_small_n_check.py), 7.4% of the samples of 5-frame
+        pixels were rejected at 1.64 and 3.0% at 2.5. The floor stops the
+        limit from dropping below this value. For 40 frames the Chauvenet
+        limit is already 2.5, so the floor changes nothing there.
+
+        Returns
+        -------
+        floor : `float`
+            The configured floor, in standard deviations. An entry that is not
+            a number above zero gives the default, 2.5.
+        """
+        raw = self.get_value("Processing.Siril", "stack_rejection_sigma_floor", fallback="2.5")
+        try:
+            floor = float(str(raw).strip())
+        except TypeError, ValueError:
+            return 2.5
+        return floor if math.isfinite(floor) and floor > 0 else 2.5
+
+    def get_stack_rejection_low_extra_sigma(self) -> float:
+        """Return how much looser the low rejection limit is than the high one.
+
+        Adaptive mode sets the low limit to the high limit plus this amount.
+        Satellite trails, cosmic ray hits and hot pixels are brighter than the
+        true value, so they fall above the middle value and the high limit
+        has to catch them. Values far below the middle value are rare, so a
+        looser low limit removes fewer good values at no cost to that
+        cleanup. Use 0 for equal limits.
+
+        Returns
+        -------
+        extra : `float`
+            The configured amount, in standard deviations, at least 0. An
+            entry that is not a number gives the default, 0.5.
+        """
+        raw = self.get_value("Processing.Siril", "stack_rejection_low_extra_sigma", fallback="0.5")
+        try:
+            extra = float(str(raw).strip())
+        except TypeError, ValueError:
+            return 0.5
+        return max(0.0, extra) if math.isfinite(extra) else 0.5
 
     def get_stack_filter_wfwhm_percentile(self) -> str | None:
         """Return the configured -filter-wfwhm value, or None if disabled.

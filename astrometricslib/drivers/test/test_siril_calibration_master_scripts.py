@@ -321,13 +321,24 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
     monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
     monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
 
-    def run(num_biases: int, num_darks: int, num_flats: int, num_lights: int) -> tuple[list[str], dict]:
+    def run(
+        num_biases: int,
+        num_darks: int,
+        num_flats: int,
+        num_lights: int,
+        rejection_mode: str = "fixed",
+        rejection_sigma: tuple[float, float] | None = None,
+    ) -> tuple[list[str], dict]:
         """Stage the frames, run `process_target`, and return what it built.
 
         Parameters
         ----------
         num_biases, num_darks, num_flats, num_lights : `int`
             How many frames of each kind to stage.
+        rejection_mode : `str`, optional
+            The configured rejection mode, ``"fixed"`` or ``"adaptive"``.
+        rejection_sigma : `tuple` [`float`, `float`], optional
+            An explicit (low, high) pair passed to `process_target`.
 
         Returns
         -------
@@ -342,8 +353,10 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
         mock_config.get_logs_path.return_value = str(tmp_path)
         mock_config.get_frames_path.return_value = str(tmp_path / "frames")
         mock_config.get_stacks_path.return_value = str(tmp_path / "frames")
-        mock_config.get_stack_rejection_sigma_mode.return_value = "fixed"
+        mock_config.get_stack_rejection_sigma_mode.return_value = rejection_mode
         mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
+        mock_config.get_stack_rejection_sigma_floor.return_value = 2.5
+        mock_config.get_stack_rejection_low_extra_sigma.return_value = 0.5
         mock_config.get_stack_weight.return_value = None
         mock_config.get_stack_generate_rejmap.return_value = False
         mock_config.get_auto_open_siril_gui.return_value = False
@@ -354,7 +367,10 @@ def run_with_staged_frames(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> C
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         driver.process_target(
-            id="MasterScripts", image_files=[{"path": "a.fits", "camera": "Cam"}], is_spectral=False
+            id="MasterScripts",
+            image_files=[{"path": "a.fits", "camera": "Cam"}],
+            is_spectral=False,
+            rejection_sigma=rejection_sigma,
         )
         logging.getLogger("siril_MasterScripts").handlers.clear()
         return list(sent_commands), driver.last_run_diagnostics
@@ -417,3 +433,124 @@ def test_a_run_with_one_light_and_no_masters_records_no_calibration(
 
     assert not any(line.startswith("calibrate") for line in script)
     assert diagnostics["calibration_applied"] == {"dark": False, "flat": False, "bias": False}
+
+
+# ------------------------------------------------------- rejection limits
+
+
+def _rejection_line(script: list[str]) -> str:
+    """Return the `stack` command that combines the lights.
+
+    Parameters
+    ----------
+    script : `list` [`str`]
+        The Siril commands `process_target` would have sent.
+
+    Returns
+    -------
+    line : `str`
+        The stack command that writes ``result_stacked``, with its ``rej``
+        limits.
+    """
+    return next(line for line in script if line.startswith("stack ") and "-out=result_stacked" in line)
+
+
+def test_a_five_frame_adaptive_stack_rejects_at_the_floor_with_a_looser_low_bound(
+    run_with_staged_frames: Callable[..., Any],
+) -> None:
+    """Five lights give `rej 3.0000 2.5000` and record the floor."""
+    script, diagnostics = run_with_staged_frames(
+        num_biases=3, num_darks=3, num_flats=3, num_lights=5, rejection_mode="adaptive"
+    )
+
+    assert " rej 3.0000 2.5000 " in _rejection_line(script)
+    assert diagnostics["rejection_sigma_low"] == pytest.approx(3.0)
+    assert diagnostics["rejection_sigma_high"] == pytest.approx(2.5)
+    assert diagnostics["rejection_sigma_mode"] == "adaptive"
+    assert diagnostics["rejection_sigma_floor"] == pytest.approx(2.5)
+    assert diagnostics["rejection_sigma_low_extra"] == pytest.approx(0.5)
+    assert diagnostics["rejection_sigma_floor_applied"] is True
+
+
+def test_a_large_adaptive_stack_keeps_its_own_limit_above_the_floor(
+    run_with_staged_frames: Callable[..., Any],
+) -> None:
+    """Seventy lights keep the Chauvenet limit 2.6901 on the high side."""
+    script, diagnostics = run_with_staged_frames(
+        num_biases=3, num_darks=3, num_flats=3, num_lights=70, rejection_mode="adaptive"
+    )
+
+    assert " rej 3.1901 2.6901 " in _rejection_line(script)
+    assert diagnostics["rejection_sigma_floor_applied"] is False
+
+
+def test_an_explicit_rejection_override_is_passed_through_unchanged(
+    run_with_staged_frames: Callable[..., Any],
+) -> None:
+    """A caller's (low, high) pair skips the floor and the extra."""
+    script, diagnostics = run_with_staged_frames(
+        num_biases=3,
+        num_darks=3,
+        num_flats=3,
+        num_lights=5,
+        rejection_mode="adaptive",
+        rejection_sigma=(2.0, 2.2),
+    )
+
+    assert " rej 2.0000 2.2000 " in _rejection_line(script)
+    assert diagnostics["rejection_sigma_mode"] == "override"
+    assert diagnostics["rejection_sigma_floor"] is None
+    assert diagnostics["rejection_sigma_floor_applied"] is False
+
+
+def test_fixed_mode_uses_the_configured_pair_without_a_floor(
+    run_with_staged_frames: Callable[..., Any],
+) -> None:
+    """Fixed mode sends the configured pair as it is."""
+    script, diagnostics = run_with_staged_frames(
+        num_biases=3, num_darks=3, num_flats=3, num_lights=5, rejection_mode="fixed"
+    )
+
+    assert " rej 3.0000 3.0000 " in _rejection_line(script)
+    assert diagnostics["rejection_sigma_floor_applied"] is False
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [
+        ("2.5", 2.5),
+        ("3", 3.0),
+        (" 2.0 ", 2.0),
+        ("0", 2.5),
+        ("-1", 2.5),
+        ("nan", 2.5),
+        ("tight", 2.5),
+        (None, 2.5),
+    ],
+)
+def test_the_floor_comes_from_the_configuration(configured: str | None, expected: float) -> None:
+    """The floor is a number above zero; a bad entry gives 2.5."""
+    configuration = SimpleNamespace(get_value=lambda section, key, fallback=None: configured)
+
+    assert AppConfiguration.get_stack_rejection_sigma_floor(configuration) == expected  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("0.5", 0.5), ("0", 0.0), ("1", 1.0), ("-2", 0.0), ("inf", 0.5), ("wide", 0.5), (None, 0.5)],
+)
+def test_the_low_extra_comes_from_the_configuration(configured: str | None, expected: float) -> None:
+    """The extra is a number of at least 0; a bad entry gives 0.5."""
+    configuration = SimpleNamespace(get_value=lambda section, key, fallback=None: configured)
+
+    assert AppConfiguration.get_stack_rejection_low_extra_sigma(configuration) == expected  # type: ignore[arg-type]
+
+
+def test_the_floor_and_extra_default_when_the_entries_are_absent() -> None:
+    """With no entry at all, the fallbacks in the getters are 2.5 and 0.5."""
+    configuration = SimpleNamespace(get_value=lambda section, key, fallback=None: fallback)
+
+    floor = AppConfiguration.get_stack_rejection_sigma_floor(configuration)  # type: ignore[arg-type]
+    extra = AppConfiguration.get_stack_rejection_low_extra_sigma(configuration)  # type: ignore[arg-type]
+    assert floor == pytest.approx(2.5)
+    assert extra == pytest.approx(0.5)

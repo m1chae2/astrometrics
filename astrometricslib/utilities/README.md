@@ -9,7 +9,7 @@ This folder holds small, generic helpers that several parts of the library use a
 - `observing_night.py` — names the observing night a moment belongs to: the local date on which the night began, found by subtracting 12 hours from the moment. A night that crosses midnight keeps one name, so records written before and after midnight group together. The SQL queries of wayfindinglib's `ControlRecordStore` use the same rule.
 - `iso_text.py` — helpers for parsing and formatting the ISO and gain text stored on a frame.
 - `concurrency.py`, `parallel_batch.py` — generic worker-count reconciliation and a parallel batch-processing engine, used by any pipeline stage that fans work out across several processes.
-- `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count, and for keeping a sharpness filter from discarding too many frames.
+- `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count (`rejection_bounds` adds a floor and a looser low limit for small stacks), and for keeping a sharpness filter from discarding too many frames.
 - `spectroscopy_models.py` — pydantic models for spectroscopy camera and session configuration.
 
 For exact behavior, read the code — the code is always the source of truth.

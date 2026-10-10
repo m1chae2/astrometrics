@@ -35,6 +35,7 @@ A script here may import astrometricslib's internal modules. It never imports an
 - `validate_spectral_and_period_analysis.py` — checks that the spectral and period-search analyses actually tell a real signal from noise.
 - `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with our own group alignment and group combining on the group stacks a target already has, to show whether a replacement would lose quality (it changes nothing in the library).
 - `rejection_threshold_analysis.py` — an empirical grid search over stacking's sigma/filter-percentile rejection thresholds.
+- `rejection_small_n_check.py` — simulates pure noise at 5, 8, 15 and 40 frames per pixel and reports how many good samples each rejection rule throws out and how often it catches an injected outlier. Needs no library data.
 - `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating.
 - `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames.
 - `derive_instrument_response.py` — derives a camera's instrument response curve from a known star's master stack.

@@ -6,7 +6,7 @@ and checking the quality of the final stacked images.
 
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity
 from astrometricslib.drivers.driver_set import Drivers
@@ -17,6 +17,9 @@ from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.gate_result import GateResult, unchecked_gate
 from astrometricslib.models.target import Target
 from astrometricslib.utilities.exceptions import DATA_ERRORS
+
+if TYPE_CHECKING:
+    from astrometricslib.models.quality_summary import StackQualitySummary
 
 logger = logging.getLogger(__name__)
 
@@ -823,14 +826,14 @@ def _camera_names_match(first: str, second: str) -> bool:
     return camera_identity(first) == camera_identity(second)
 
 
-def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-function]
-    target,  # ruff: ignore[missing-type-function-argument]
+def _base_stack_quality_summary(
+    target: Target,
     is_spectral: bool,
     frames_submitted: int,
     target_frames: list[Any],
     excluded_frames: list[Any],
     diagnostics: dict,
-):
+) -> StackQualitySummary:
     """Build the `StackQualitySummary` shell before any measured metrics.
 
     Returns
@@ -863,6 +866,9 @@ def _base_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fun
             "rejection_sigma_low": diagnostics.get("rejection_sigma_low", 0.0),
             "rejection_sigma_high": diagnostics.get("rejection_sigma_high", 0.0),
             "rejection_sigma_mode": diagnostics.get("rejection_sigma_mode", "unknown"),
+            "rejection_sigma_floor": diagnostics.get("rejection_sigma_floor"),
+            "rejection_sigma_low_extra": diagnostics.get("rejection_sigma_low_extra"),
+            "rejection_sigma_floor_applied": diagnostics.get("rejection_sigma_floor_applied", False),
             "filter_wfwhm_requested": diagnostics.get("filter_wfwhm_requested"),
             "filter_wfwhm_effective": diagnostics.get("filter_wfwhm_effective"),
             "filter_wfwhm_loosened": diagnostics.get("filter_wfwhm_loosened", False),

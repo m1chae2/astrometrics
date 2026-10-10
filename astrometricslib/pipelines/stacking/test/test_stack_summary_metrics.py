@@ -10,6 +10,7 @@ combined image is named in the flags.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,6 +22,7 @@ from astrometricslib.models.quality_summary import (
 )
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import assess_input_quality
 from astrometricslib.pipelines.stacking.stage import (
+    _base_stack_quality_summary,
     _finalize_stack_quality_flags,
     _measure_calibration_health,
     _record_exposure_groups,
@@ -231,3 +233,32 @@ def test_a_colour_stack_with_one_dead_channel_is_flagged(tmp_path: Path) -> None
     assert summary.stacking_metrics.zero_pixel_fraction == pytest.approx(0.9, abs=0.03)
     assert summary.stacking_metrics.zero_fraction_flagged
     assert any("exactly zero" in reason for reason in summary.flag_reasons)
+
+
+def test_the_summary_records_the_rejection_limits_and_whether_the_floor_applied() -> None:
+    """The resolved parameters carry the low and high limits and the floor."""
+    diagnostics = {
+        "rejection_sigma_low": 3.0,
+        "rejection_sigma_high": 2.5,
+        "rejection_sigma_mode": "adaptive",
+        "rejection_sigma_floor": 2.5,
+        "rejection_sigma_low_extra": 0.5,
+        "rejection_sigma_floor_applied": True,
+    }
+
+    summary = _base_stack_quality_summary(
+        SimpleNamespace(id="M 13"),
+        False,
+        5,
+        [],
+        [],
+        diagnostics,  # type: ignore[arg-type]
+    )
+
+    parameters = summary.resolved_parameters
+    assert parameters["rejection_sigma_low"] == pytest.approx(3.0)
+    assert parameters["rejection_sigma_high"] == pytest.approx(2.5)
+    assert parameters["rejection_sigma_mode"] == "adaptive"
+    assert parameters["rejection_sigma_floor"] == pytest.approx(2.5)
+    assert parameters["rejection_sigma_low_extra"] == pytest.approx(0.5)
+    assert parameters["rejection_sigma_floor_applied"] is True

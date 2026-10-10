@@ -2017,8 +2017,15 @@ class ImageProcessing:
             # (the default) derives sigma from num_lights via
             # Chauvenet's criterion rather than using one fixed
             # constant for every stack -- see
-            # utilities/rejection_thresholds.py for why. "fixed"
-            # mode uses the configured constant unconditionally.
+            # utilities/rejection_thresholds.py for why. Adaptive mode
+            # keeps the high bound at or above a configured floor and sets
+            # the low bound a configured amount above the high bound, so a
+            # stack of 5 frames does not throw out about 7% of its good
+            # samples. "fixed" mode uses the configured constant
+            # unconditionally.
+            rejection_sigma_floor: float | None = None
+            rejection_sigma_low_extra: float | None = None
+            rejection_sigma_floor_applied = False
             if rejection_sigma is not None:
                 rejection_sigma_low, rejection_sigma_high = rejection_sigma
                 rejection_sigma_mode_used = "override"
@@ -2026,10 +2033,16 @@ class ImageProcessing:
                 rejection_sigma_low, rejection_sigma_high = self.config.get_stack_rejection_sigma()
                 rejection_sigma_mode_used = "fixed"
             else:
-                from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
+                from astrometricslib.utilities.rejection_thresholds import rejection_bounds
 
-                adaptive_sigma = chauvenet_sigma(max(num_lights, 1))
-                rejection_sigma_low = rejection_sigma_high = adaptive_sigma
+                rejection_sigma_floor = self.config.get_stack_rejection_sigma_floor()
+                rejection_sigma_low_extra = self.config.get_stack_rejection_low_extra_sigma()
+                adaptive_bounds = rejection_bounds(
+                    max(num_lights, 1), floor=rejection_sigma_floor, low_extra=rejection_sigma_low_extra
+                )
+                rejection_sigma_low = adaptive_bounds.low
+                rejection_sigma_high = adaptive_bounds.high
+                rejection_sigma_floor_applied = adaptive_bounds.floor_applied
                 rejection_sigma_mode_used = "adaptive"
 
             # Applies the minimum-surviving-frames floor to a
@@ -2060,6 +2073,9 @@ class ImageProcessing:
                 "rejection_sigma_low": rejection_sigma_low,
                 "rejection_sigma_high": rejection_sigma_high,
                 "rejection_sigma_mode": rejection_sigma_mode_used,
+                "rejection_sigma_floor": rejection_sigma_floor,
+                "rejection_sigma_low_extra": rejection_sigma_low_extra,
+                "rejection_sigma_floor_applied": rejection_sigma_floor_applied,
                 "filter_wfwhm_requested": requested_filter_wfwhm,
                 "filter_wfwhm_effective": filter_wfwhm,
                 "filter_wfwhm_loosened": filter_wfwhm_loosened,

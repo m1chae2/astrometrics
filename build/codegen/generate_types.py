@@ -61,6 +61,7 @@ from astrometricslib.models.spectroscopy_quality import (
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
+    DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,
     FileItem,
     GroupedFrameStat,
@@ -366,6 +367,7 @@ def render_types() -> str:
         generate_interface(TargetStarCount, "TargetStarCount"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
         generate_interface(SpectralExtractionDiagnostics, "SpectralExtractionDiagnostics"),
+        generate_interface(DifferentialRefractionRecord, "DifferentialRefractionRecord"),
         generate_interface(ExtinctionCorrectionRecord, "ExtinctionCorrectionRecord"),
         generate_interface(CatalogComparison, "CatalogComparison"),
         generate_interface(InputQualityAssessment, "InputQualityAssessment"),

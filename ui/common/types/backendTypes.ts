@@ -419,6 +419,7 @@ export interface SpectroscopyResult {
   stageQuality?: StageQualityCheckpoint[];
   extractionDiagnostics?: SpectralExtractionDiagnostics | null;
   extinctionCorrection?: ExtinctionCorrectionRecord | null;
+  differentialRefraction?: DifferentialRefractionRecord | null;
   generatedByJobId?: string | null;
   /** Check if even the closest reference spectrum fits badly. */
   isPoorMatch?: boolean;
@@ -446,6 +447,42 @@ export interface SpectralExtractionDiagnostics {
   contaminatedSkyFraction?: number;
   apertureHalfWidthMedianPx?: number | null;
   apertureHalfWidthSpreadPx?: number | null;
+}
+
+/**
+ * What the refraction correction did to a spectrum's wavelengths.
+ *
+ * Mirrors `DifferentialRefraction` in the spectroscopy pipeline. Air bends
+ * blue light toward the zenith (the point straight overhead) more than red
+ * light. The zero-order image is a white-light image, so each wavelength of
+ * the spectrum lands slightly off the place the wavelength scale gives it.
+ * The part of that shift along the dispersion changes the wavelength. The
+ * part across it only widens the trail. Every number is `None` when it
+ * could not be computed.
+ */
+export interface DifferentialRefractionRecord {
+  isComputed: boolean;
+  isApplied: boolean;
+  reason?: string | null;
+  midExposureUtc?: string | null;
+  altitudeDegrees?: number | null;
+  parallacticAngleDegrees?: number | null;
+  dispersionPositionAngleDegrees?: number | null;
+  parallacticToDispersionAngleDegrees?: number | null;
+  pixelScaleArcsec?: number | null;
+  effectiveWavelengthAngstrom?: number | null;
+  pressureHpa?: number | null;
+  temperatureC?: number | null;
+  relativeHumidityPercent?: number | null;
+  atmosphereSource?: string | null;
+  alongDispersionArcsecAt4200?: number | null;
+  alongDispersionArcsecAt8000?: number | null;
+  alongDispersionAngstromAt4200?: number | null;
+  alongDispersionAngstromAt8000?: number | null;
+  acrossDispersionArcsecAt4200?: number | null;
+  acrossDispersionArcsecAt8000?: number | null;
+  alongDispersionSpanAngstrom?: number | null;
+  acrossDispersionSpanPx?: number | null;
 }
 
 /**

@@ -443,7 +443,7 @@ class AstrometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever PhotometryPipelineQualityMetrics's shape changes
 # meaningfully.
-PHOTOMETRY_PIPELINE_VERSION = "1.2.0"
+PHOTOMETRY_PIPELINE_VERSION = "1.3.0"
 
 
 class FrameEnsembleComposition(BaseModel):
@@ -459,6 +459,25 @@ class FrameEnsembleComposition(BaseModel):
     frame_path: str = Field(alias="framePath")
     ensemble_size: int = Field(alias="ensembleSize")
     excluded_comparison_star_ids: list[str] = Field(default_factory=list, alias="excludedComparisonStarIds")
+
+
+class NoiseModelPoint(BaseModel):
+    """One point of a photometry run's noise-model curve.
+
+    The curve says how much scatter a constant star of each brightness shows
+    in the run's field. A plot of these points, with the stars' own
+    `instrumentalMag` and `rmsMag`, shows which stars sit above the curve.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # The median instrumental magnitude (-2.5 log10 of the flux in ADU per
+    # second) of the stars in this bin of the fit.
+    instrumental_mag: float = Field(alias="instrumentalMag")
+    # The median scatter of those stars, in magnitudes.
+    rms_mag: float = Field(alias="rmsMag")
+    # How many stars were in the bin.
+    star_count: int = Field(alias="starCount")
 
 
 class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
@@ -483,6 +502,11 @@ class PhotometryPipelineQualityMetrics(StarIdentificationMetrics):
     # actually changing.
     light_curve_scatter_rms_mag: float | None = Field(default=None, alias="lightCurveScatterRmsMag")
     cross_session_match_count: int = Field(default=0, alias="crossSessionMatchCount")
+    # The field's noise-model curve, brightest bin first: how much scatter a
+    # constant star of each brightness shows (see
+    # `pipelines.photometry.processing.variability_indices`). Empty when the
+    # field had too few stars to fit one.
+    noise_model_curve: list[NoiseModelPoint] = Field(default_factory=list, alias="noiseModelCurve")
     # "WCS" (World Coordinate System) is the map, stored in a picture's
     # file, from its pixels to real sky coordinates. These three lists
     # track sessions where that map was missing, already correct and
@@ -512,7 +536,7 @@ class PhotometryQualitySummary(PipelineQualitySummaryBase):
 
 # Bumped whenever SpectroscopyPipelineQualityMetrics's shape changes
 # meaningfully.
-SPECTROSCOPY_PIPELINE_VERSION = "1.3.0"
+SPECTROSCOPY_PIPELINE_VERSION = "1.4.0"
 
 
 class SpectralClassificationConcern(BaseModel):
@@ -527,12 +551,18 @@ class SpectralClassificationConcern(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     star_id: str = Field(alias="starId")
-    # "low_confidence", "ambiguous", or both joined by a comma -- see
-    # spectral_classifier.is_classification_low_confidence and
-    # .is_classification_ambiguous for what each means.
+    # "poor_match", "class_ambiguous", or both joined by a comma -- see
+    # assess_output_quality.is_classification_poor_match and
+    # .is_classification_class_ambiguous for what each means. A star that is
+    # ambiguous only between neighbouring subtypes is not listed.
     reason: str = Field(alias="reason")
     spectral_type: str = Field(alias="spectralType")
-    confidence: float | None = Field(default=None, alias="confidence")
+    # The best reference's relative RMS (lower is closer). Not a probability.
+    classification_rms: float | None = Field(default=None, alias="classificationRms")
+    # The RMS of the best reference of a different spectral class letter
+    # minus the best RMS, in relative RMS units; `None` when no other class
+    # was compared. Not a probability.
+    rms_gap_to_next_class: float | None = Field(default=None, alias="rmsGapToNextClass")
 
 
 class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
@@ -556,9 +586,10 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     dispersion_angle_deg: float | None = Field(default=None, alias="dispersionAngleDeg")
     trail_width_profile_available: bool = Field(default=False, alias="trailWidthProfileAvailable")
     median_trail_width_px: float | None = Field(default=None, alias="medianTrailWidthPx")
-    # How many classified stars had a winning correlation too weak to
-    # trust, or a top-two-type near-tie -- see SpectralClassificationConcern.
-    low_confidence_classification_count: int = Field(default=0, alias="lowConfidenceClassificationCount")
+    # How many classified stars had a best match above `NO_GOOD_MATCH_RMS`, or
+    # a gap to the best reference of another spectral class below
+    # `AMBIGUOUS_RMS_GAP` -- see SpectralClassificationConcern.
+    poor_match_classification_count: int = Field(default=0, alias="poorMatchClassificationCount")
     ambiguous_classification_count: int = Field(default=0, alias="ambiguousClassificationCount")
     flagged_spectral_classifications: list[SpectralClassificationConcern] = Field(
         default_factory=list, alias="flaggedSpectralClassifications"

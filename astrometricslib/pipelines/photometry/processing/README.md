@@ -56,7 +56,43 @@ Designed, not measured on real fields: the 2 and 30 percent band edges, the 5-st
 
 ## Deciding which stars are variable
 
-Once the code corrects every star's brightness, it measures how much each star's brightness bounces around relative to its average, a standard way of comparing "noisiness" between stars of different brightness. It then compares each star's own noisiness against the typical noisiness of the whole field. The code flags a star that is noisier than the field by a wide enough margin as a possible variable star. This comparison is relative to the field's own conditions on the night, rather than to one fixed number, so noisier nights need a correspondingly bigger difference before the code flags a star.
+A star's raw scatter grows as it gets fainter, because its measurements are noisier. A rule that flags the stars with the most scatter therefore fills with faint stars. The code asks a different question: does this star scatter more than a constant star of the same brightness scatters in this field? The code lives in `variability_indices.py`. It works in four steps.
+
+1. **Fit a noise model of the field.** For each star with at least five usable points, the code takes the star's mean instrumental magnitude (`-2.5 log10` of its mean raw flux in ADU per second) and its scatter in magnitudes (`1.0857 x std / mean` of the detrended flux, using the sample standard deviation). It sorts the stars by magnitude and cuts them into bins of equal star count: at least 10 stars per bin and at most 10 bins. The median scatter of each bin gives one point of a curve. A running maximum makes the curve rise or stay level with magnitude. Between bin centers the curve is straight in magnitude against the logarithm of the scatter. Brighter than the first bin it stays level. Fainter than the last bin it continues with the slope of the last two bins and never falls. The expected scatter of a star is the curve at the star's magnitude, but never below the star's own median propagated error. The model needs at least 20 stars. A field with fewer stars has no model, and the code flags stars by the CV cutoff described at the end of this section. The runner records the fitted curve (bin magnitude, scatter and star count) on the run as `noiseModelCurve`, so a plot can show it next to each star's `instrumentalMag` and `rmsMag`.
+2. **Compute three indices per star.** They use the detrended flux and the detrended errors (or the normalized ones when the star has no detrended values).
+   - **Excess scatter** (`excessScatter`, no unit). The star's measured scatter divided by its expected scatter. A constant star is near 1. A value of 3 means three times the scatter of a constant star of the same brightness.
+   - **Reduced chi-square** (`reducedChiSquare`, no unit). `sum(((x_i - m) / s_i)^2) / (n - 1)`, where `m` is the error-weighted mean of the values and `s_i` is the error of point `i`. A constant star whose errors are right is near 1. The errors `s_i` are the propagated errors, raised to the noise-model level when that level is higher (every error of the star is multiplied by the ratio of the model's scatter to the star's median propagated error). The propagated errors leave out centroid jitter and flat-field errors, so unscaled they give a constant bright star a chi-square far above 1. A star with no errors gets a constant error equal to the model's scatter.
+   - **Stetson J** (`stetsonJ`, no unit). Stetson (1996, PASP 108, 851). Each point gets the normalized residual `d_i = sqrt(n / (n - 1)) (x_i - m) / s_i`. For each pair of consecutive points the code forms `P = d_i d_(i+1)`. J is the mean over the `n - 1` pairs of `sign(P) sqrt(|P|)`. Every pair has weight 1; Stetson's weights for unevenly spaced times are not used. White noise gives products of random sign, so J stays near 0. A smooth change gives mostly positive products, so J is positive. One bad point gives two products of opposite sign, so it adds little.
+   - The **coefficient of variation** (`coefficientOfVariation`, standard deviation over mean) stays on every light curve. It sets each star's `outputQuality` margin and the fallback cutoff. It is not used to choose candidates when a noise model exists.
+3. **Calibrate the thresholds from the field.** The chi-square threshold is the field's median of `log10(chi-square)` plus 2.326 robust standard deviations (1.4826 times the median absolute deviation), turned back into a chi-square. The J threshold is the field's median J plus 2.326 robust standard deviations. 2.326 is the one-sided 99th percentile of a normal distribution. The median and the median absolute deviation barely move for the few variable stars in a field. The chi-square threshold rises when every chi-square in the field is high together, as when the camera gain is assumed. The excess-scatter threshold is fixed at 1.5.
+4. **Select.** A star is a candidate when its chi-square, its excess scatter and its Stetson J all exceed their thresholds. Each star gets `variabilityScore`, the smaller of `chi-square / threshold` and `excess scatter / 1.5`, capped at 1 when J does not exceed its threshold. The score is above 1 exactly for the candidates, and it ranks the stars. The `variability_discrimination` gate takes the AUC of this score.
+
+The thresholds are designed values: the 1.5, the 2.326 (the 99th percentile), the bin sizes and the 20-star minimum. The synthetic fields below check that they work. No real field has validated them.
+
+### What the indices recover: measured on synthetic data
+
+The numbers below come from `make_variability_field` (see `test/synthetic/README.md`), not from the sky. Each field holds 400 constant stars spread evenly over 6 magnitudes of brightness (scatter from 0.0035 mag at the bright end, set by an unrecorded systematic term of 0.3 percent, to 0.06 mag at the faint end, set by photon and background noise) and 48 frames. Five percent of the stars (20) carry a sinusoid (two thirds) or an eclipsing dip (one third) with an amplitude drawn log-uniformly from 0.01 to 0.3 mag, independent of brightness. Every field runs through the real comparison-star normalization, the detrending and `identify_variable_stars`. The AUC (the chance that a random injected variable gets a higher value than a random constant star; 0.5 is chance) is the mean over 24 fields, with the standard deviation between fields.
+
+| Index | AUC (mean, sd) |
+|---|---|
+| Coefficient of variation | 0.835, 0.039 |
+| Reduced chi-square against the propagated errors | 0.809, 0.066 |
+| Reduced chi-square against the scaled errors | 0.940, 0.044 |
+| Stetson J (scaled errors) | 0.879, 0.042 |
+| Excess scatter | 0.942, 0.042 |
+| Smallest ratio of the three indices to their thresholds | 0.880, 0.043 |
+| Chosen score (chi-square and excess scatter, J as a veto) | 0.940, 0.044 |
+
+Reading the table:
+
+- Dividing by the noise model matters more than the choice of index. Chi-square against the propagated errors alone ranks below the CV, because the propagated errors are too small for the bright stars. Against the scaled errors it ranks with excess scatter.
+- Stetson J ranks lower than chi-square here, since it uses only the sign pattern of neighbouring points. Taking the smallest of the three ratios lets J pull the ranking down to 0.880, so the score uses J only as a veto. This gives the same AUC as chi-square with excess scatter (0.940) and keeps J's protection against isolated bad points: in 8 fields where 5 percent of the points scatter five times more than the others, the rule with J flagged none of 3,040 constant stars, and the rule without J flagged 24 (0.8 percent).
+- At the thresholds above, the rule flagged none of the 9,120 constant stars in the 24 fields, and 64 percent of the injected variables: 90 percent of those with an amplitude of 0.1 to 0.3 mag, 63 percent of those from 0.03 to 0.1 mag, and 40 percent of those from 0.01 to 0.03 mag; 76 percent of the sinusoids and 38 percent of the eclipsing dips. A narrow eclipse puts few points in the dip, so it is the hardest shape.
+- The injected systematic term and the outlier share are the generator's choices. A real field has other error sources, so these AUCs describe the method on a field whose noise is understood, not its performance on the sky.
+
+To reproduce the table, run `.venv/bin/python -m astrometricslib.pipelines.photometry.test.test_variability_injection`.
+
+When the field has fewer than 20 stars with a usable light curve, the code has no noise model. It then flags the stars whose CV exceeds the field's CV cutoff, `max(0.02, median + 7.4 x MAD)` of the field's CVs, and leaves the new indices empty. The `scatter_population` gate says so.
 
 ## Looking for repeating patterns
 

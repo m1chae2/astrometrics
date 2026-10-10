@@ -635,6 +635,17 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     ):
         updated_photometry.mean_flux = existing_photometry.mean_flux
         updated_photometry.coefficient_of_variation = existing_photometry.coefficient_of_variation
+        # The variability indices go with the CV: they describe the same
+        # earlier light curve.
+        for index_name in (
+            "instrumental_mag",
+            "rms_mag",
+            "excess_scatter",
+            "reduced_chi_square",
+            "stetson_j",
+            "variability_score",
+        ):
+            setattr(updated_photometry, index_name, getattr(existing_photometry, index_name))
     existing_stellar_object.photometry = updated_photometry
     # Cross-session matching (see _match_and_merge_across_sessions)
     # recomputes both fresh each run, so a full replace keeps a repeat

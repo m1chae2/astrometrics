@@ -1,4 +1,4 @@
-"""Tests for the check that a run's scatter statistic can see variables.
+"""Tests for the check that a run's variability score can see variables.
 
 The arithmetic is checked on known answers, and the decision is checked on
 simulated fields: one where catalogued variables really do vary more (it must
@@ -45,6 +45,27 @@ def test_identical_groups_do_not_pass() -> None:
     assert not skill.discrimination(values[:20], values[20:]).sees_known_variables
 
 
+def test_the_design_floor_binds_for_every_allowed_group_size() -> None:
+    """The chance level is at most 0.676, so the 0.7 floor decides."""
+    smallest = skill.discrimination([0.9] * 10, [0.1] * 30)
+    large = skill.discrimination(list(np.linspace(0.0, 1.0, 400)), list(np.linspace(0.0, 1.0, 1200)))
+
+    assert smallest.required_auc < skill.MINIMUM_DISCRIMINATION_AUC
+    assert large.required_auc < skill.MINIMUM_DISCRIMINATION_AUC
+    assert smallest.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC
+    assert large.needed_auc == skill.MINIMUM_DISCRIMINATION_AUC
+    assert smallest.sees_known_variables
+    assert not large.sees_known_variables  # AUC 0.5: no skill
+
+
+def test_the_noise_based_amplitude_follows_the_excess_threshold() -> None:
+    """A 0.02 mag scatter and a threshold of 1.5 follow the formula."""
+    expected = 2.0 * 2.0**0.5 * 0.02 * 1.25**0.5
+
+    assert skill.minimum_detectable_amplitude_from_noise_mag(0.02) == pytest.approx(expected)
+    assert skill.minimum_detectable_amplitude_from_noise_mag(0.02, 1.0) == pytest.approx(0.0)
+
+
 def test_the_decision_is_neither_blind_nor_trigger_happy() -> None:
     """Simulate many fields: skill is found, and noise passes about 5%."""
     generator = np.random.default_rng(12)
@@ -61,4 +82,6 @@ def test_the_decision_is_neither_blind_nor_trigger_happy() -> None:
         ).sees_known_variables
 
     assert real_passes / fields > 0.9
-    assert noise_passes / fields == pytest.approx(0.05, abs=0.03)
+    # The 0.7 floor (MINIMUM_DISCRIMINATION_AUC) sits above the chance
+    # level for these group sizes, so equal groups pass less than 5%.
+    assert noise_passes / fields <= 0.05

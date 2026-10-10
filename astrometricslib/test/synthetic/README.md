@@ -136,6 +136,39 @@ the real relation must compute its own line columns from the instrument
 parameters and not use `line_columns_px`. The straight-line model is a good
 approximation only near the zero order.
 
+## Variability field: `variability_field.py`
+
+`make_variability_field(...)` returns a `SyntheticVariabilityField`: the raw
+light curves of a field of stars, with the answer for each. It does not
+render pixels. A test can pass its stars to `VariabilityAnalyzer` (normalize,
+detrend, flag) and compare the result with the truth.
+
+| Field | Meaning |
+| --- | --- |
+| `stars` | `StellarObject` list with raw light curves: `fluxes` (ADU per second), `flux_errors`, `airmasses`, `timestamps`. |
+| `true_magnitudes` | The true instrumental magnitude, `-2.5 log10(flux)`, of each star. |
+| `is_variable` | `True` for each star with an injected signal. |
+| `injected` | One `InjectedVariable` per signal: kind, amplitude in magnitudes, period in frames. |
+
+- **Brightness.** The true magnitudes are evenly spaced over
+  `magnitude_span` (default 6) magnitudes.
+- **Noise per point.** Photon noise plus a fixed background variance, as the
+  CCD equation gives it. That value is written to `flux_errors`. A
+  systematic term (`systematic_fraction`, default 0.3 percent of the flux)
+  is added to the flux and not to `flux_errors`, so bright stars scatter
+  above their stated errors. `outlier_fraction` makes a share of points
+  scatter `outlier_scale` times more.
+- **Common to all stars.** Extinction that rises with airmass, and a
+  transparency change in each frame. Normalization removes both.
+- **Variables.** `variable_fraction` (default 5 percent) of the stars get a
+  sinusoid (two thirds) or an eclipsing dip (one third). Amplitudes are
+  log-uniform over `amplitude_range_mag` (default 0.01 to 0.3 mag) and do
+  not depend on brightness. A sinusoid's amplitude is its semi-amplitude.
+  An eclipse's amplitude is its depth. Periods are log-uniform from 4
+  frames to the length of the run.
+- **Seed.** One `numpy.random.default_rng(seed)` drives every draw, so the
+  same arguments give the same field.
+
 ## Extending the generators
 
 - Add new frame types as a new module here and export the names in
@@ -147,6 +180,8 @@ approximation only near the zero order.
 
 ## Tests
 
+The variability field is tested through the photometry pipeline's own
+tests (`pipelines/photometry/test/test_variability_injection.py`).
 `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid
 shifts, the drift rule, line depth and column, the extractor's tilt sign,
 and seed repeatability. Run it with:

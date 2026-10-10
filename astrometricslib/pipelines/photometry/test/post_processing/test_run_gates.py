@@ -8,6 +8,7 @@ read "not checked" when it could not look. The last test runs the real
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import pytest
 
 from astrometricslib.models.gate_result import GateResult, GateStatus
@@ -16,12 +17,19 @@ from astrometricslib.models.stellar_source import PhotometryResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner
 from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
+    MINIMUM_DISCRIMINATION_AUC,
+    discrimination,
+)
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     TIME_BASIS_BJD_TDB,
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
     TIME_BASIS_UTC_START,
 )
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import ComparisonSetResult
+from astrometricslib.pipelines.photometry.processing.variability_indices import (
+    MINIMUM_STARS_FOR_NOISE_MODEL,
+)
 from astrometricslib.pipelines.pipeline_base import PipelineRequest
 
 
@@ -79,9 +87,9 @@ def good_run(**changes: Any) -> dict[str, GateResult]:
         "comparison_sets": [comparison_set(12), comparison_set(15)],
         "registration_drifts_px": [3.0, 5.0, None],
         "stars_with_scatter": 80,
-        # Catalogued variables clearly scatter more than the others here.
-        "known_variable_cvs": [0.3 + 0.01 * index for index in range(20)],
-        "unlisted_cvs": [0.05 + 0.001 * index for index in range(60)],
+        # Catalogued variables clearly score higher than the others here.
+        "known_variable_scores": [3.0 + 0.01 * index for index in range(20)],
+        "unlisted_scores": [0.05 + 0.001 * index for index in range(60)],
         "cutoff_cv": 0.04,
         "median_flux_error_mag": 0.02,
         "errors_assume_unit_gain": False,
@@ -266,15 +274,39 @@ def test_the_real_validate_output_records_the_gates_for_a_run_with_no_work() -> 
         assert summary.gate(name).status is GateStatus.NOT_CHECKED
 
 
-def test_the_discrimination_gate_goes_red_when_scatter_cannot_see_known_variables() -> None:
-    """Known variables no noisier than the rest give a failed gate."""
+def test_the_discrimination_gate_goes_red_when_the_score_cannot_see_known_variables() -> None:
+    """Known variables that score like the rest give a failed gate."""
     same = [0.05 + 0.001 * index for index in range(60)]
-    gate = good_run(known_variable_cvs=same[:20], unlisted_cvs=same[20:])[
+    gate = good_run(known_variable_scores=same[:20], unlisted_scores=same[20:])[
         rg.VARIABILITY_DISCRIMINATION_GATE_NAME
     ]
 
     assert gate.status is GateStatus.FAILED
     assert "does not pick out the 20 stars the catalogs list as variable" in gate.detail
+
+
+def test_the_discrimination_gate_goes_red_below_the_auc_floor_even_when_it_beats_chance() -> None:
+    """An AUC near 0.64 beats chance but misses the 0.7 floor.
+
+    The groups hold 200 and 600 stars.
+
+    The floor is a design choice (`MINIMUM_DISCRIMINATION_AUC`). The gate
+    reports the larger of the floor and the chance level as its threshold.
+    """
+    generator = np.random.default_rng(3)
+    known = list(generator.normal(0.5, 1.0, 200))
+    unlisted = list(generator.normal(0.0, 1.0, 600))
+    skill = discrimination(known, unlisted)
+    assert skill is not None
+    assert skill.required_auc < skill.auc < MINIMUM_DISCRIMINATION_AUC
+
+    gate = good_run(known_variable_scores=known, unlisted_scores=unlisted)[
+        rg.VARIABILITY_DISCRIMINATION_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.limit == pytest.approx(MINIMUM_DISCRIMINATION_AUC)
+    assert "needs 0.70" in gate.detail
 
 
 def test_the_discrimination_gate_passes_when_known_variables_stand_out() -> None:
@@ -287,9 +319,9 @@ def test_the_discrimination_gate_passes_when_known_variables_stand_out() -> None
 
 def test_the_discrimination_gate_is_not_checked_without_enough_catalogued_stars() -> None:
     """Too few known variables or unlisted stars cannot show skill."""
-    few_known = good_run(known_variable_cvs=[0.4] * 5)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
-    few_unlisted = good_run(unlisted_cvs=[0.05] * 10)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
-    nothing = good_run(known_variable_cvs=[], unlisted_cvs=[])[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+    few_known = good_run(known_variable_scores=[0.4] * 5)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+    few_unlisted = good_run(unlisted_scores=[0.05] * 10)[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
+    nothing = good_run(known_variable_scores=[], unlisted_scores=[])[rg.VARIABILITY_DISCRIMINATION_GATE_NAME]
 
     assert few_known.status is GateStatus.NOT_CHECKED
     assert few_unlisted.status is GateStatus.NOT_CHECKED
@@ -393,3 +425,29 @@ def test_the_run_time_basis_is_the_least_exact_one_any_light_curve_has() -> None
     assert runner._run_time_basis([full, geocentric]) == TIME_BASIS_BJD_TDB_GEOCENTRIC
     assert runner._run_time_basis([full, geocentric, bare]) == TIME_BASIS_UTC_START
     assert runner._run_time_basis([]) is None
+
+
+def test_the_scatter_population_gate_reads_the_noise_model_star_count() -> None:
+    """Enough stars for a noise model pass; fewer are not checked."""
+    enough = good_run(noise_model_stars=MINIMUM_STARS_FOR_NOISE_MODEL)[rg.SCATTER_POPULATION_GATE_NAME]
+    too_few = good_run(noise_model_stars=MINIMUM_STARS_FOR_NOISE_MODEL - 1)[rg.SCATTER_POPULATION_GATE_NAME]
+
+    assert enough.status is GateStatus.PASSED
+    assert "noise model fitted from" in enough.detail
+    assert too_few.status is GateStatus.NOT_CHECKED
+    assert "candidates were picked by the CV cutoff alone" in too_few.detail
+
+
+def test_the_amplitude_gate_reads_the_noise_floor_when_the_run_has_a_noise_model() -> None:
+    """A typical scatter of 0.1 mag needs 0.32 mag peak to peak: red.
+
+    The same gate passes for a typical scatter of 0.02 mag (about 0.06 mag),
+    and the noise floor takes precedence over the CV cutoff.
+    """
+    noisy = good_run(noise_floor_mag=0.1, cutoff_cv=0.001)[rg.DETECTABLE_AMPLITUDE_GATE_NAME]
+    quiet = good_run(noise_floor_mag=0.02, cutoff_cv=0.3)[rg.DETECTABLE_AMPLITUDE_GATE_NAME]
+
+    assert noisy.status is GateStatus.FAILED
+    assert noisy.measured_value == pytest.approx(0.1 * 2.0 * 2**0.5 * (1.5**2 - 1.0) ** 0.5)
+    assert "from the noise model" in noisy.limit_source
+    assert quiet.status is GateStatus.PASSED

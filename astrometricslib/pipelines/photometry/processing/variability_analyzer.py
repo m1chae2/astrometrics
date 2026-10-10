@@ -88,6 +88,12 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     select_comparison_set,
     set_result,
 )
+from astrometricslib.pipelines.photometry.processing.variability_indices import (
+    FieldAssessment,
+    NoiseModel,
+    VariabilityThresholds,
+    assess_variability,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -156,8 +162,11 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     return cv_list
 
 
-# The multiplier in the variable-star cutoff, median + 7.4 x MAD of the
-# field's scatter. It was chosen to flag "roughly the top 3%" of stars, and
+# The multiplier in the CV cutoff, median + 7.4 x MAD of the field's
+# scatter. The cutoff now picks candidates only in a field too small for a
+# noise model (see `variability_indices`); it still sets each star's
+# `output_quality` and the `detectable_amplitude` gate's fallback. It was
+# chosen to flag "roughly the top 3%" of stars, and
 # set slightly low on purpose so a new supernova is not missed. Measured on
 # the library on 2026-10-09 (`scripts/measure_variability_cutoff.py`): it
 # flags 5.2% of stars, 3.8% of the stars the catalogs list as variable and
@@ -305,28 +314,42 @@ def _adaptive_cv_cutoff(cv_list: list[float], sigma_threshold: float) -> Adaptiv
 adaptive_cv_cutoff = _adaptive_cv_cutoff
 
 
-def _flag_variable_stars_by_adaptive_cutoff(
+def flag_variable_stars(
     stellar_objects: list[StellarObject], sigma_threshold: float
-) -> list[StellarObject]:
-    """Find the stars that change brightness more than the noise limit.
+) -> tuple[list[StellarObject], FieldAssessment]:
+    """Find the stars that change brightness more than their noise explains.
+
+    The steps are:
+
+    1. Compute each star's CV, and the field's CV cutoff (median plus
+       ``sigma_threshold`` MADs, with a floor of 0.02). Each star's
+       `output_quality` is built from its CV against that cutoff.
+    2. Fit the field's noise model and compute the three variability
+       indices of each star (see `variability_indices`). A star is a
+       candidate when its reduced chi-square, Stetson J and excess scatter
+       all pass their thresholds.
+    3. When the field has too few stars for a noise model, flag the stars
+       whose CV exceeds the cutoff instead.
 
     Parameters
     ----------
     stellar_objects : `list` of `StellarObject`
         The stars to check.
     sigma_threshold : `float`
-        How strict we want to be.
+        The multiplier of the MAD in the CV cutoff. Used for the CV cutoff
+        only; the thresholds of the indices are calibrated in
+        `variability_indices.calibrate_thresholds`.
 
     Returns
     -------
-    variable_candidates : `list` [`StellarObject`]
-        The stars that passed the test and look like real variable stars.
+    result : `tuple` [`list` [`StellarObject`], `FieldAssessment`]
+        The candidate stars, and the noise model and thresholds that picked
+        them (both `None` when the CV cutoff was used).
     """
-    variable_candidates = []
     cv_list = _compute_star_coefficients_of_variation(stellar_objects)
 
     if not cv_list:
-        return variable_candidates
+        return [], FieldAssessment(None, None, [])
 
     cutoff_stats = _adaptive_cv_cutoff(cv_list, sigma_threshold)
 
@@ -334,22 +357,50 @@ def _flag_variable_stars_by_adaptive_cutoff(
         cv = getattr(star.photometry, "coefficient_of_variation", None)
         if cv is None:
             continue
-
+        # The margin stays a statement about the CV against its cutoff. It is
+        # not the margin of the candidate rule below.
         star.photometry.output_quality = assess_output_quality(
             coefficient_of_variation=cv,
             adaptive_cutoff=cutoff_stats.cutoff,
             mad_cv=cutoff_stats.mad_cv,
         )
 
-        # Flag star if scatter exceeds the population's own adaptive
-        # cutoff. (adaptive_cutoff already has its own 0.02 floor, so no
-        # separate flat threshold is applied here -- a flat 0.10 `or`
-        # clause would cap the effective cutoff at 10% and defeat the
-        # point of raising it in noisy fields/sessions.)
-        if cv > cutoff_stats.cutoff:
-            variable_candidates.append(star)
+    assessment = assess_variability(stellar_objects)
+    if assessment.noise_model is not None:
+        return assessment.candidates, assessment
 
-    return variable_candidates
+    # Too few stars for a noise model: flag by the CV cutoff. (The cutoff
+    # already has its own 0.02 floor, so no separate flat threshold is
+    # applied here; a flat 0.10 would cap the cutoff at 10% and defeat the
+    # point of raising it in noisy fields.)
+    variable_candidates = [
+        star
+        for star in stellar_objects
+        if star.photometry.coefficient_of_variation is not None
+        and star.photometry.coefficient_of_variation > cutoff_stats.cutoff
+    ]
+    return variable_candidates, assessment
+
+
+def _flag_variable_stars_by_adaptive_cutoff(
+    stellar_objects: list[StellarObject], sigma_threshold: float
+) -> list[StellarObject]:
+    """Find the stars that change brightness more than their noise explains.
+
+    Parameters
+    ----------
+    stellar_objects : `list` of `StellarObject`
+        The stars to check.
+    sigma_threshold : `float`
+        The multiplier of the MAD in the CV cutoff (see
+        `flag_variable_stars`).
+
+    Returns
+    -------
+    variable_candidates : `list` [`StellarObject`]
+        The stars that passed the test and look like real variable stars.
+    """
+    return flag_variable_stars(stellar_objects, sigma_threshold)[0]
 
 
 # --- Long-term (between-session) change --------------------------------------
@@ -661,6 +712,11 @@ class VariabilityAnalyzer:
         # The airmass slope the optional correction removed, as a fractional
         # change of flux per unit of airmass. `None` when it was not applied.
         self.ensemble_airmass_slope: float | None = None
+        # The noise model and the thresholds of the last
+        # `identify_variable_stars()`. `None` before it runs, and when the
+        # field was too small for a noise model.
+        self.noise_model: NoiseModel | None = None
+        self.variability_thresholds: VariabilityThresholds | None = None
 
     def load_target_images(self, target_id: str) -> list[str]:
         """Not used anymore, kept only so older code doesn't break.
@@ -1477,14 +1533,27 @@ class VariabilityAnalyzer:
     def identify_variable_stars(
         self, sigma_threshold: float = DEFAULT_VARIABILITY_SIGMA_THRESHOLD
     ) -> list[StellarObject]:
-        """Find the stars that change brightness more than the noise limit.
+        """Find the stars that vary more than their noise explains.
+
+        Sets the variability indices on each star's light curve and keeps the
+        field's noise model and thresholds in `noise_model` and
+        `variability_thresholds` (see `flag_variable_stars`).
+
+        Parameters
+        ----------
+        sigma_threshold : `float`, optional
+            The multiplier of the MAD in the CV cutoff, used when the field
+            has too few stars for a noise model.
 
         Returns
         -------
         variable_candidates : `list[StellarObject]`
             The stars that look like real variable stars.
         """
-        return _flag_variable_stars_by_adaptive_cutoff(self.stellar_objects, sigma_threshold)
+        candidates, assessment = flag_variable_stars(self.stellar_objects, sigma_threshold)
+        self.noise_model = assessment.noise_model
+        self.variability_thresholds = assessment.thresholds
+        return candidates
 
     def detrend_light_curves_airmass(self) -> None:
         """Fill the detrended light curves without fitting any star's own flux.

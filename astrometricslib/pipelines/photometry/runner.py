@@ -14,6 +14,7 @@ import statistics
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.models.quality_summary import NoiseModelPoint
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
@@ -23,7 +24,7 @@ from astrometricslib.pipelines.photometry.batch import (
 )
 from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
     label_known_variability,
-    split_scatter_by_catalog_status,
+    split_scores_by_catalog_status,
 )
 from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
@@ -31,6 +32,7 @@ from astrometricslib.pipelines.photometry.pre_processing.observation_times impor
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
     TIME_BASIS_UTC_START,
 )
+from astrometricslib.pipelines.photometry.processing.variability_indices import NoiseModel, fit_noise_model
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -62,11 +64,84 @@ def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCand
             id=star.id,
             meanFlux=star.photometry.mean_flux,
             coefficientOfVariation=star.photometry.coefficient_of_variation,
+            excessScatter=star.photometry.excess_scatter,
+            reducedChiSquare=star.photometry.reduced_chi_square,
+            stetsonJ=star.photometry.stetson_j,
+            variabilityScore=star.photometry.variability_score,
             ra=float(star.right_ascension) if star.right_ascension else 0.0,
             dec=float(star.declination) if star.declination else 0.0,
         )
         for star in stars
     ]
+
+
+def _noise_model_inputs(star_photometry: list[PhotometryResult]) -> tuple[list[float], list[float]]:
+    """Collect the brightness and scatter that the noise model is fitted to.
+
+    Each session stores them on its stars when it flags variables, so the run's
+    curve is fitted from those stored values, not from the merged light
+    curves.
+
+    Parameters
+    ----------
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    inputs : `tuple` [`list` [`float`], `list` [`float`]]
+        The instrumental magnitudes and the scatters, in magnitudes, of the
+        stars that have both.
+    """
+    pairs = [
+        (photometry.instrumental_mag, photometry.rms_mag)
+        for photometry in star_photometry
+        if photometry.instrumental_mag is not None and photometry.rms_mag
+    ]
+    return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+
+
+def _noise_curve_points(model: NoiseModel | None) -> list[NoiseModelPoint]:
+    """Turn a noise model into the small list recorded on the run.
+
+    Parameters
+    ----------
+    model : `NoiseModel` or `None`
+        The run's noise model.
+
+    Returns
+    -------
+    points : `list` [`NoiseModelPoint`]
+        One point per bin, brightest first. Empty without a model.
+    """
+    if model is None:
+        return []
+    return [
+        NoiseModelPoint(instrumentalMag=magnitude, rmsMag=rms, starCount=count)
+        for magnitude, rms, count in zip(model.magnitudes, model.rms_mag, model.star_counts, strict=True)
+    ]
+
+
+def _typical_noise_mag(model: NoiseModel | None, star_photometry: list[PhotometryResult]) -> float | None:
+    """Give the scatter the noise model expects of a typical star.
+
+    Parameters
+    ----------
+    model : `NoiseModel` or `None`
+        The run's noise model.
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    rms_mag : `float` or `None`
+        The model's scatter at the median instrumental magnitude of the
+        stars, in magnitudes. `None` without a model.
+    """
+    magnitudes = _noise_model_inputs(star_photometry)[0]
+    if model is None or not magnitudes:
+        return None
+    return model.expected_rms_mag(float(statistics.median(magnitudes)))
 
 
 def _run_time_basis(star_photometry: list[PhotometryResult]) -> str | None:
@@ -477,6 +552,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             ExcludedFrame(path=frame.path, reason=frame.reason) for frame in unreadable_date_obs_frames
         ]
 
+        star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
+        noise_model = fit_noise_model(*_noise_model_inputs(star_photometry))
         summary = PhotometryQualitySummary(
             target_id=target.id,
             target_session_ids=[session.id for session in photometry_sessions],
@@ -498,6 +575,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
                 light_curve_scatter_rms_mag=median_light_curve_scatter_mag(result.stellar_objects),
+                noise_model_curve=_noise_curve_points(noise_model),
             ),
         )
         # The rejected frames are recorded in the metrics either way;
@@ -506,10 +584,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_contributed_total = sum(
             contribution.frames_contributed for contribution in photometry_session_breakdown
         )
-        star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
-        known_variable_cvs, unlisted_cvs = split_scatter_by_catalog_status(
+        known_variable_scores, unlisted_scores = split_scores_by_catalog_status(
             result.stellar_objects, request.catalog_access
         )
+
         cutoffs = [
             photometry.output_quality.adaptive_cutoff
             for photometry in star_photometry
@@ -537,9 +615,11 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             stars_with_scatter=sum(
                 1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
             ),
-            known_variable_cvs=known_variable_cvs,
-            unlisted_cvs=unlisted_cvs,
+            known_variable_scores=known_variable_scores,
+            unlisted_scores=unlisted_scores,
             cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
+            noise_model_stars=len(_noise_model_inputs(star_photometry)[0]),
+            noise_floor_mag=_typical_noise_mag(noise_model, star_photometry),
             time_basis=_run_time_basis(star_photometry),
             median_flux_error_mag=median_flux_error_mag(result.stellar_objects),
             errors_assume_unit_gain=any(photometry.errors_assume_unit_gain for photometry in star_photometry),

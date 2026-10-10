@@ -19,16 +19,24 @@ from astrometricslib.test.synthetic.spectral_frame import (
     SyntheticSpectralFrame,
     make_spectral_frame,
 )
+from astrometricslib.test.synthetic.variability_field import (
+    InjectedVariable,
+    SyntheticVariabilityField,
+    make_variability_field,
+)
 
 __all__ = [
     "LINE_FWHM_PX",
+    "InjectedVariable",
     "SyntheticSpectralFrame",
     "SyntheticStar",
+    "SyntheticVariabilityField",
     "drifted_stars",
     "make_drifted_sequence",
     "make_photometry_fits",
     "make_photometry_frame",
     "make_spectral_frame",
+    "make_variability_field",
     "render_stars",
     "star_flux_multipliers",
 ]

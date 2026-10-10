@@ -81,10 +81,10 @@ def is_listed_as_variable(star: StellarObject) -> bool:
     return star.known_variability in (KnownVariability.KNOWN_VARIABLE, KnownVariability.SUSPECTED_VARIABLE)
 
 
-def split_scatter_by_catalog_status(
+def split_scores_by_catalog_status(
     stars: Iterable[StellarObject], catalog_access: Any, chunk_size: int = 2000
 ) -> tuple[list[float], list[float]]:
-    """Split the scatter of a run's stars by what the catalogs say about them.
+    """Split the variability scores of a run's stars by what the catalogs say.
 
     Parameters
     ----------
@@ -98,22 +98,22 @@ def split_scatter_by_catalog_status(
 
     Returns
     -------
-    cvs : `tuple` [`list` [`float`], `list` [`float`]]
-        Two lists: the scatter (coefficient of variation) of the stars a
-        catalog lists as variable, and of the stars that were asked and are
-        not listed. Stars
-        with no saved row, no scatter, or no catalog answer are in neither.
+    scores : `tuple` [`list` [`float`], `list` [`float`]]
+        Two lists: the variability score (see `variability_indices`) of the
+        stars a catalog lists as variable, and of the stars that were asked
+        and are not listed. Stars with no saved row, no score (a field too
+        small for a noise model), or no catalog answer are in neither.
     """
-    scatter = {
-        star.id: star.photometry.coefficient_of_variation
+    scores = {
+        star.id: star.photometry.variability_score
         for star in stars
-        if star.photometry is not None and star.photometry.coefficient_of_variation is not None
+        if star.photometry is not None and star.photometry.variability_score is not None
     }
-    if catalog_access is None or not scatter:
+    if catalog_access is None or not scores:
         return [], []
     known: list[float] = []
     unlisted: list[float] = []
-    identifiers = list(scatter)
+    identifiers = list(scores)
     try:
         for start in range(0, len(identifiers), chunk_size):
             for saved in catalog_access.get_by_ids(
@@ -121,12 +121,12 @@ def split_scatter_by_catalog_status(
             ):
                 status = saved.known_variability
                 if status is KnownVariability.KNOWN_VARIABLE:
-                    known.append(scatter[saved.id])
+                    known.append(scores[saved.id])
                 elif status is KnownVariability.NOT_LISTED:
-                    unlisted.append(scatter[saved.id])
+                    unlisted.append(scores[saved.id])
     except (AstrometricsError, *DATA_ERRORS):
         logger.warning(
-            "Could not look up the saved catalog rows to check the variability statistic.", exc_info=True
+            "Could not look up the saved catalog rows to check the variability score.", exc_info=True
         )
         return [], []
     return known, unlisted

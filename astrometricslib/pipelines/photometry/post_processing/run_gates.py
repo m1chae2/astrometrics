@@ -18,9 +18,11 @@ from collections.abc import Sequence
 
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
+    MINIMUM_DISCRIMINATION_AUC,
     MINIMUM_KNOWN_VARIABLES,
     MINIMUM_UNLISTED_STARS,
     discrimination,
+    minimum_detectable_amplitude_from_noise_mag,
     minimum_detectable_amplitude_mag,
 )
 from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality import (
@@ -29,6 +31,9 @@ from astrometricslib.pipelines.photometry.pre_processing.assess_input_quality im
 from astrometricslib.pipelines.photometry.processing.comparison_ensemble import (
     MINIMUM_COMPARISON_STARS,
     ComparisonSetResult,
+)
+from astrometricslib.pipelines.photometry.processing.variability_indices import (
+    MINIMUM_STARS_FOR_NOISE_MODEL,
 )
 
 # The percentage of rejected frames needed to trigger a quality warning flag.
@@ -44,15 +49,17 @@ MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
 MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
 
 # The fewest stars with a usable light curve (three or more points) needed
-# to say what the field's normal scatter is. The variable-star cutoff is the
-# median plus a multiple of the median absolute deviation (MAD) of every
-# star's scatter; with only a handful of stars those two numbers describe
-# the handful, not the field. A design estimate, not validated on real
-# fields.
+# to say what the field's normal scatter is. The CV cutoff is the median
+# plus a multiple of the median absolute deviation (MAD) of every star's
+# scatter; with only a handful of stars those two numbers describe the
+# handful, not the field. A design estimate, not validated on real fields.
+# The noise model that replaces the CV cutoff needs more stars
+# (`MINIMUM_STARS_FOR_NOISE_MODEL`).
 MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
 
-# The largest peak-to-peak amplitude, in magnitudes, a run's cutoff may demand
-# of a sinusoidal variable before the run is called blind to most variables.
+# The largest peak-to-peak amplitude, in magnitudes, a run's noise level (or,
+# without a noise model, its CV cutoff) may demand of a sinusoidal variable
+# before the run is called blind to most variables.
 # A design estimate, not validated: pulsating, rotating and young-star
 # variables are mostly below about 0.3 mag, while eclipsing binaries, Cepheids,
 # RR Lyrae and Miras are larger.
@@ -87,9 +94,11 @@ def photometry_run_gates(
     comparison_sets: Sequence[ComparisonSetResult],
     registration_drifts_px: Sequence[float | None],
     stars_with_scatter: int,
-    known_variable_cvs: Sequence[float] = (),
-    unlisted_cvs: Sequence[float] = (),
+    known_variable_scores: Sequence[float] = (),
+    unlisted_scores: Sequence[float] = (),
     cutoff_cv: float | None = None,
+    noise_model_stars: int | None = None,
+    noise_floor_mag: float | None = None,
     timestamp_exclusion_reasons: Sequence[str] = (),
     time_basis: str | None = None,
     median_flux_error_mag: float | None = None,
@@ -125,14 +134,24 @@ def photometry_run_gates(
         none was recorded for it.
     stars_with_scatter : `int`
         Stars with at least three usable points, so with a measured scatter.
-    known_variable_cvs : `Sequence` [`float`], optional
-        The scatter (CV) of each star with a light curve that a catalog lists
-        as variable.
-    unlisted_cvs : `Sequence` [`float`], optional
-        The scatter of each star with a light curve that no catalog lists.
+    known_variable_scores : `Sequence` [`float`], optional
+        The variability score (see `variability_indices`) of each star with a
+        light curve that a catalog lists as variable.
+    unlisted_scores : `Sequence` [`float`], optional
+        The variability score of each star with a light curve that no catalog
+        lists.
     cutoff_cv : `float` or `None`, optional
-        The run's variable-star cutoff on the scatter, or `None` if it has
-        none.
+        The run's variable-star cutoff on the CV, or `None` if it has none.
+        The `detectable_amplitude` gate uses it only when `noise_floor_mag`
+        is `None`.
+    noise_model_stars : `int` or `None`, optional
+        How many stars the run's noise model was fitted from (stars with a
+        stored brightness and scatter). The `scatter_population` gate reads
+        it. `None` leaves the gate on the count of stars with a CV.
+    noise_floor_mag : `float` or `None`, optional
+        The scatter the run's noise model expects of a star of typical
+        brightness, in magnitudes. The `detectable_amplitude` gate uses it
+        when it is given.
     timestamp_exclusion_reasons : `Sequence` [`str`], optional
         One sentence per frame left out because its ``DATE-OBS`` header was
         missing or unreadable, naming the frame and the problem. The gate's
@@ -292,6 +311,10 @@ def photometry_run_gates(
     population_source = (
         f"at least {MINIMUM_STARS_FOR_SCATTER_POPULATION} stars with three or more points (design estimate)"
     )
+    model_source = (
+        f"at least {MINIMUM_STARS_FOR_NOISE_MODEL} stars with five or more points and a raw flux to fit the "
+        "noise model (design estimate)"
+    )
     if stars_with_scatter < MINIMUM_STARS_FOR_SCATTER_POPULATION:
         gates.append(
             unchecked_gate(
@@ -301,7 +324,7 @@ def photometry_run_gates(
                 population_source,
             )
         )
-    else:
+    elif noise_model_stars is None:
         gates.append(
             passed_gate(
                 SCATTER_POPULATION_GATE_NAME,
@@ -310,68 +333,97 @@ def photometry_run_gates(
                 population_source,
             )
         )
+    elif noise_model_stars < MINIMUM_STARS_FOR_NOISE_MODEL:
+        gates.append(
+            unchecked_gate(
+                SCATTER_POPULATION_GATE_NAME,
+                f"only {noise_model_stars} star(s) can be used to fit the noise model, too few to say how "
+                "much scatter a constant star of each brightness shows, so candidates were picked by the "
+                "CV cutoff alone",
+                model_source,
+            )
+        )
+    else:
+        gates.append(
+            passed_gate(
+                SCATTER_POPULATION_GATE_NAME,
+                float(noise_model_stars),
+                float(MINIMUM_STARS_FOR_NOISE_MODEL),
+                model_source,
+                f"noise model fitted from {noise_model_stars} stars",
+            )
+        )
 
     skill_source = (
         f"at least {MINIMUM_KNOWN_VARIABLES} catalogued variables and "
-        f"{MINIMUM_UNLISTED_STARS} unlisted stars; AUC above chance at the 5% level"
+        f"{MINIMUM_UNLISTED_STARS} unlisted stars; AUC above chance at the 5% level and at least "
+        f"{MINIMUM_DISCRIMINATION_AUC:g} (design choice)"
     )
-    skill = discrimination(known_variable_cvs, unlisted_cvs)
+    skill = discrimination(known_variable_scores, unlisted_scores)
     if skill is None:
         gates.append(
             unchecked_gate(
                 VARIABILITY_DISCRIMINATION_GATE_NAME,
-                f"the field has {len(known_variable_cvs)} star(s) the catalogs list as variable and "
-                f"{len(unlisted_cvs)} they do not, too few to check that the scatter "
-                "statistic can see variables",
+                f"the field has {len(known_variable_scores)} star(s) the catalogs list as variable and "
+                f"{len(unlisted_scores)} they do not, too few to check that the variability "
+                "score can see variables",
                 skill_source,
             )
         )
     elif skill.sees_known_variables:
         gates.append(
-            passed_gate(VARIABILITY_DISCRIMINATION_GATE_NAME, skill.auc, skill.required_auc, skill_source)
+            passed_gate(VARIABILITY_DISCRIMINATION_GATE_NAME, skill.auc, skill.needed_auc, skill_source)
         )
     else:
         gates.append(
             failed_gate(
                 VARIABILITY_DISCRIMINATION_GATE_NAME,
-                f"the scatter statistic does not pick out the {skill.known_variables} stars "
+                f"the variability score does not pick out the {skill.known_variables} stars "
                 f"the catalogs list as variable (AUC {skill.auc:.2f}, needs "
-                f"{skill.required_auc:.2f}), so variable candidates from this run are not reliable",
+                f"{skill.needed_auc:.2f}), so variable candidates from this run are not reliable",
                 skill.auc,
-                skill.required_auc,
+                skill.needed_auc,
                 skill_source,
             )
         )
 
     amplitude_source = f"at most {MAXIMUM_DETECTABLE_AMPLITUDE_MAG:g} mag peak to peak (design estimate)"
-    if cutoff_cv is None:
+    if noise_floor_mag is not None:
+        amplitude = minimum_detectable_amplitude_from_noise_mag(noise_floor_mag)
+        amplitude_source += "; from the noise model"
+    elif cutoff_cv is not None:
+        amplitude = minimum_detectable_amplitude_mag(cutoff_cv)
+        amplitude_source += "; from the CV cutoff"
+    else:
+        amplitude = None
+    if amplitude is None:
         gates.append(
             unchecked_gate(
-                DETECTABLE_AMPLITUDE_GATE_NAME, "the run has no variable-star cutoff", amplitude_source
+                DETECTABLE_AMPLITUDE_GATE_NAME,
+                "the run has no noise model and no variable-star cutoff",
+                amplitude_source,
+            )
+        )
+    elif amplitude > MAXIMUM_DETECTABLE_AMPLITUDE_MAG:
+        gates.append(
+            failed_gate(
+                DETECTABLE_AMPLITUDE_GATE_NAME,
+                f"a variable would have to change by about {amplitude:.2f} mag peak to peak "
+                "to clear this run's noise level, so smaller variables cannot be flagged",
+                amplitude,
+                MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                amplitude_source,
             )
         )
     else:
-        amplitude = minimum_detectable_amplitude_mag(cutoff_cv)
-        if amplitude > MAXIMUM_DETECTABLE_AMPLITUDE_MAG:
-            gates.append(
-                failed_gate(
-                    DETECTABLE_AMPLITUDE_GATE_NAME,
-                    f"a variable would have to change by about {amplitude:.2f} mag peak to peak "
-                    "to clear this run's cutoff, so smaller variables cannot be flagged",
-                    amplitude,
-                    MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
-                    amplitude_source,
-                )
+        gates.append(
+            passed_gate(
+                DETECTABLE_AMPLITUDE_GATE_NAME,
+                amplitude,
+                MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
+                amplitude_source,
             )
-        else:
-            gates.append(
-                passed_gate(
-                    DETECTABLE_AMPLITUDE_GATE_NAME,
-                    amplitude,
-                    MAXIMUM_DETECTABLE_AMPLITUDE_MAG,
-                    amplitude_source,
-                )
-            )
+        )
 
     gates.append(
         _flux_uncertainty_gate(median_flux_error_mag, errors_assume_unit_gain, errors_assume_zero_read_noise)

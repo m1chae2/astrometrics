@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import (
@@ -71,6 +72,7 @@ from astrometricslib.pipelines.spectroscopy.processing.spectrum_analysis import 
     EXTENDED_TARGET_SPECTRAL_TYPE,
     analyze_spectrum,
 )
+from astrometricslib.pipelines.spectroscopy.processing.star_reddening import look_up_star_reddening
 from astrometricslib.utilities import SpectroscopyConfig
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
@@ -697,9 +699,12 @@ class SpectroscopyPipeline:
         The tool that reads brightness from the image.
     calibrator : `SpectrumCalibrator`
         The tool that turns pixel numbers into colors.
+    reddening_driver : `ReddeningDriver`
+        The catalog that gives a star's interstellar reddening, used to
+        remove the reddening from a spectrum before it is classified.
     """
 
-    def __init__(self, config: SpectroscopyConfig | None = None) -> None:
+    def __init__(self, config: SpectroscopyConfig | None = None, drivers: Drivers | None = None) -> None:
         """Set up the master controller.
 
         Parameters
@@ -707,12 +712,18 @@ class SpectroscopyPipeline:
         config : `SpectroscopyConfig`, optional
             The camera settings to use. If you leave this blank, it will
             load the default settings automatically.
+        drivers : `Drivers`, optional
+            The drivers a caller chose. Only the reddening source is used
+            here. Any left out is the built-in one (Gaia DR3).
         """
         if config is None:
             from astrometricslib.utilities import ConfigLoader
 
             config = ConfigLoader.load_spectroscopy_config()
         self.config = config
+        # The catalog that gives each star's reddening. Built here but asked
+        # only for a star that carries a Gaia DR3 id (see `star_reddening`).
+        self.reddening_driver = (drivers or Drivers()).reddening_or_default()
         # What we know about this camera model (for example, the value at
         # which its pixels count as saturated), looked up once here.
         self.camera_profile = resolve_camera_profile(config.camera.name)
@@ -1192,6 +1203,10 @@ class SpectroscopyPipeline:
             dispersion_angle_degrees=result["detected_angle"],
         )
 
+        # The star's catalog reddening, when it has a Gaia DR3 id. The
+        # classification removes it from the spectrum before comparing.
+        reddening = look_up_star_reddening(star, self.reddening_driver)
+
         # Classify and test features on the response-corrected spectrum
         # when available -- it better reflects the star's true color than
         # QE-corrected or raw sensor counts.
@@ -1207,6 +1222,7 @@ class SpectroscopyPipeline:
             resolution_profile=self.line_spread_profile,
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             extinction_correction=extinction_record,
+            reddening=reddening,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
@@ -1246,6 +1262,8 @@ class SpectroscopyPipeline:
                 emission_lines=analysis.emission_lines,
                 is_emission_line_source=analysis.is_emission_line_source,
                 second_order_blue_to_red_ratio=second_order_blue_to_red_ratio,
+                reddening=analysis.reddening,
+                line_index_classification=analysis.line_index_classification,
             ),
             output_quality_checkpoint(
                 output_quality,
@@ -1291,6 +1309,8 @@ class SpectroscopyPipeline:
             input_quality=input_quality,
             output_quality=output_quality,
             stage_quality=stage_quality,
+            reddening=analysis.reddening,
+            line_index_classification=analysis.line_index_classification,
             extraction_diagnostics=(
                 SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
                 if result.get("extraction_diagnostics") is not None

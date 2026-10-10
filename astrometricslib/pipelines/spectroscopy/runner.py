@@ -421,7 +421,7 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 astrometry, context, target, request.path, reference_stellar_objects, hint_ra, hint_dec
             )
 
-        spectroscopy = SpectroscopyPipeline()
+        spectroscopy = SpectroscopyPipeline(drivers=request.options.get("drivers"))
         # No fixed count here: every candidate that clears the point-source
         # detector's own 5-sigma threshold (`source_detection.py`) and the
         # spurious-trail filter gets an extraction attempt. A caller can

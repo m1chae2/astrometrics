@@ -63,7 +63,11 @@ contain counts against the star, or is absorbed by a wrong type:
   two neighboring spectral types are the same size and shape of effect, so
   nothing this module can fit or threshold tells them apart. Treat a
   self-determined O/B/A type as reading about one subtype cool of the truth,
-  rather than expecting it to be corrected.
+  rather than expecting it to be corrected here. The correction comes from
+  outside the spectrum instead: when a catalog gives the star's E(B-V), the
+  pipeline removes the reddening before it calls this module (see
+  `spectrum_analysis.analyze_spectrum` and `interstellar_extinction`), and a
+  star with no catalog E(B-V) still reads cool.
 * Airmass. The spectrum is not corrected for how much air the light crossed.
   On the 2026-09-25 spectra the airmass ran from 1.01 to 1.46 (Mirfak),
   which is too small a range, and the wrong direction, to explain the
@@ -464,6 +468,38 @@ def _get_blurred_templates(
             for spectral_type, (wavelength, flux) in _get_reference_templates().items()
         }
     return _blurred_cache[cache_key]
+
+
+def blurred_reference_spectrum(
+    spectral_type: str,
+    resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
+    resolution_profile: ResolutionProfile | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Give one bundled reference spectrum, blurred to the resolution.
+
+    This lets other modules measure the references exactly as the classifier
+    compares them.
+
+    Parameters
+    ----------
+    spectral_type : `str`
+        A label from `REFERENCE_SPECTRAL_TYPES` or
+        `GIANT_REFERENCE_SPECTRAL_TYPES`.
+    resolution_element_angstrom : `float`, optional
+        The resolution element to blur to, in Angstroms.
+    resolution_profile : `ResolutionProfile`, optional
+        How the resolution element changes with wavelength. When given, it
+        is used instead of the single width.
+
+    Returns
+    -------
+    wavelength_angstrom, flux : `tuple` [`np.ndarray`, `np.ndarray`]
+        The reference's wavelength grid and its blurred flux.
+    """
+    wavelength, flux = _get_reference_templates()[spectral_type]
+    if resolution_profile is not None:
+        return wavelength, blur_to_resolution_profile(wavelength, flux, resolution_profile)
+    return _get_blurred_templates(resolution_element_angstrom)[spectral_type]
 
 
 def _rank_by_rms(

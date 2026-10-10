@@ -31,6 +31,8 @@ from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces import (
     PlateSolveDriver,
     PlateSolveHeader,
+    ReddeningDriver,
+    ReddeningEstimate,
     SimbadDriver,
     StackingDriver,
     StackRunResult,
@@ -274,6 +276,9 @@ class Astrometrics:
         The stacking program. If not given, Siril is used.
     simbad_driver : `SimbadDriver`, optional
         The SIMBAD database client. If not given, astroquery is used.
+    reddening_driver : `ReddeningDriver`, optional
+        The source of interstellar reddening values. If not given, Gaia DR3
+        is queried through astroquery.
 
     Notes
     -----
@@ -290,6 +295,7 @@ class Astrometrics:
         plate_solve_driver: PlateSolveDriver | None = None,
         stacking_driver: StackingDriver | None = None,
         simbad_driver: SimbadDriver | None = None,
+        reddening_driver: ReddeningDriver | None = None,
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
@@ -300,7 +306,12 @@ class Astrometrics:
 
         self.config = config or get_configuration()
         self.catalog_access = catalog_access or CatalogAccess(self.config)
-        drivers = Drivers(plate_solve=plate_solve_driver, stacking=stacking_driver, simbad=simbad_driver)
+        drivers = Drivers(
+            plate_solve=plate_solve_driver,
+            stacking=stacking_driver,
+            simbad=simbad_driver,
+            reddening=reddening_driver,
+        )
 
         # There is deliberately no in-memory copy of the star catalog here.
         # The database is the one copy, reached through `self.stars`, which
@@ -392,6 +403,8 @@ __all__ = [
     "QualityDiagnostics",
     "QuarantinePreview",
     "RawFrameCheckReport",
+    "ReddeningDriver",
+    "ReddeningEstimate",
     "ReindexReport",
     "RenderedImage",
     "RestoreReport",

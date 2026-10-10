@@ -26,6 +26,7 @@ from astrometricslib.models.photometry_quality import (
 from astrometricslib.models.photometry_quality import (
     OutputQualityAssessment as PhotometryOutputQuality,
 )
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
@@ -53,6 +54,7 @@ __all__ = [
     "has_catalog_magnitude",
     "is_rms_gap_ambiguous",
     "ladder_position",
+    "ladder_steps_between",
     "rms_gap_to_next_class",
     "rms_gap_to_second_best",
     "types_differ_on_ladder",
@@ -150,6 +152,27 @@ def ladder_position(spectral_type: str | None) -> float | None:
             break
     subtype = float(digits.rstrip(".")) if digits else 5.0
     return LADDER_ORDER.index(trimmed[0]) * 10.0 + subtype
+
+
+def ladder_steps_between(first_type: str | None, second_type: str | None) -> float | None:
+    """Measure how far apart two spectral types are on the O-to-M ladder.
+
+    Parameters
+    ----------
+    first_type, second_type : `str`, optional
+        Spectral types such as ``"A3V"`` or ``"K5"`` (see `ladder_position`).
+
+    Returns
+    -------
+    steps : `float` or `None`
+        The signed distance, second position minus first position, in
+        subtype steps (ten per letter class). Negative means the second type
+        is hotter. `None` when either type is missing or not on the ladder.
+    """
+    first_position, second_position = ladder_position(first_type), ladder_position(second_type)
+    if first_position is None or second_position is None:
+        return None
+    return second_position - first_position
 
 
 def types_differ_on_ladder(own_type: str | None, catalog_type: str | None) -> bool | None:
@@ -788,6 +811,18 @@ class SpectroscopyResult(BaseModel):
     # limits in one common shape. Empty for a spectrum saved before this was
     # recorded.
     stage_quality: list[StageQualityCheckpoint] = Field(default_factory=list, alias="stageQuality")
+    # The reddening correction applied before the classification: the catalog
+    # E(B-V) used, its source, and the best type with and without dereddening
+    # (see `ReddeningRecord`). `None` when the star had no catalog E(B-V), and
+    # for a spectrum saved before this was recorded.
+    reddening: ReddeningRecord | None = Field(default=None, alias="reddening")
+    # The type that the strengths of a few spectral lines point to, and how far
+    # it is from the template-fit type above (see `LineIndexClassification`).
+    # A cross-check that ignores the continuum slope. `None` when it could not
+    # be made, and for a spectrum saved before this was recorded.
+    line_index_classification: LineIndexClassification | None = Field(
+        default=None, alias="lineIndexClassification"
+    )
     # How the extractor read the sky and how wide its reading box was (see
     # `SpectralExtractionDiagnostics`). `None` for a spectrum saved before
     # this was recorded.

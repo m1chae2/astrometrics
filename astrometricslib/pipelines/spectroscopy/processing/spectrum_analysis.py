@@ -14,7 +14,10 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from astrometricslib.drivers.interfaces.reddening_driver import ReddeningEstimate
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.spectroscopy_quality import CatalogComparison
+from astrometricslib.models.stellar_source import ladder_steps_between
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
@@ -25,6 +28,11 @@ from astrometricslib.pipelines.spectroscopy.processing.emission_line_detector im
     detect_emission_lines,
     is_emission_line_source,
     line_half_width_angstrom,
+)
+from astrometricslib.pipelines.spectroscopy.processing.interstellar_extinction import (
+    CCM89_MAXIMUM_WAVELENGTH_ANGSTROM,
+    CCM89_MINIMUM_WAVELENGTH_ANGSTROM,
+    deredden_spectrum,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     GIANT_REFERENCE_SPECTRAL_TYPES,
@@ -38,6 +46,9 @@ from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector
     VERDICT_DETECTED,
     VERDICT_POSSIBLE,
     detect_named_features,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices import (
+    classify_by_line_indices,
 )
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
@@ -92,6 +103,15 @@ class SpectrumAnalysis:
         `synthetic_colour`), in magnitudes. `None` when the spectrum was not
         classified, so the colour was not tried, or when it could not be
         measured.
+    reddening : `ReddeningRecord` or `None`
+        The dereddening that went into `classification`: the E(B-V) used,
+        its source, and the best type with and without dereddening. `None`
+        when no E(B-V) was supplied or the spectrum was not classified.
+    line_index_classification : `LineIndexClassification` or `None`
+        The type that the strengths of a few lines point to, and how far it
+        is from the type in `classification` (see `spectral_line_indices`).
+        `None` when the spectrum was not classified or too few line indices
+        could be measured.
     """
 
     classification: dict[str, object]
@@ -106,6 +126,8 @@ class SpectrumAnalysis:
     catalog_comparison: CatalogComparison | None = None
     extinction_correction: dict[str, object] | None = None
     synthetic_b_minus_v: float | None = None
+    reddening: ReddeningRecord | None = None
+    line_index_classification: LineIndexClassification | None = None
 
 
 # The `stellar_spectral_type` label given to extended objects (clusters
@@ -202,6 +224,75 @@ def _neighbor_contamination_windows(
     return windows
 
 
+def _dereddened_intensity(wavelength_angstrom: np.ndarray, intensity: np.ndarray, ebv: float) -> np.ndarray:
+    """Remove interstellar reddening from a spectrum.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        The spectrum's wavelengths, in Angstroms.
+    intensity : `np.ndarray`
+        The response-corrected brightness.
+    ebv : `float`
+        The colour excess E(B-V), in magnitudes.
+
+    Returns
+    -------
+    dereddened : `np.ndarray`
+        `intensity` with the Cardelli, Clayton and Mathis reddening removed
+        (see `interstellar_extinction`). A sample outside the wavelengths
+        that law covers is NaN, which the classifier skips.
+    """
+    covered = (wavelength_angstrom >= CCM89_MINIMUM_WAVELENGTH_ANGSTROM) & (
+        wavelength_angstrom <= CCM89_MAXIMUM_WAVELENGTH_ANGSTROM
+    )
+    dereddened = np.full(intensity.shape, np.nan)
+    dereddened[covered] = deredden_spectrum(wavelength_angstrom[covered], intensity[covered], ebv)
+    return dereddened
+
+
+def _classified_type(classification: dict[str, object]) -> str:
+    """Read the best type out of a classification result.
+
+    Parameters
+    ----------
+    classification : `dict`
+        The result of `classify_spectral_type`.
+
+    Returns
+    -------
+    spectral_type : `str`
+        The best type, or an empty string for an "Unknown" result.
+    """
+    spectral_type = str(classification["spectral_type"])
+    return "" if spectral_type == "Unknown" else spectral_type
+
+
+def _dereddening_note(record: ReddeningRecord) -> str:
+    """Write the phrase that records a dereddening in the note.
+
+    Parameters
+    ----------
+    record : `ReddeningRecord`
+        The dereddening.
+
+    Returns
+    -------
+    note : `str`
+        One phrase naming the E(B-V), its source and the two best types.
+    """
+    if not record.observed_best_type:
+        outcome = (
+            "the observed spectrum had no match, and the dereddened best type is "
+            f"{record.dereddened_best_type}"
+        )
+    elif record.dereddened_best_type == record.observed_best_type:
+        outcome = f"the best type stayed {record.observed_best_type}"
+    else:
+        outcome = f"the best type moved from {record.observed_best_type} to {record.dereddened_best_type}"
+    return f"dereddened with E(B-V) = {record.ebv:.2f} ({record.ebv_source}); {outcome}"
+
+
 def analyze_spectrum(
     wavelength_angstrom: np.ndarray,
     intensity: np.ndarray,
@@ -214,6 +305,7 @@ def analyze_spectrum(
     resolution_profile: ResolutionProfile | None = None,
     possible_neighbor_contamination: list[dict[str, float | None]] | None = None,
     extinction_correction: ExtinctionCorrection | None = None,
+    reddening: ReddeningEstimate | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -280,6 +372,14 @@ def analyze_spectrum(
         `pre_processing.atmospheric_extinction`). The analysis does not
         apply it; it stores the record in the result so the airmasses and
         the applied or skipped status travel with the spectrum.
+    reddening : `ReddeningEstimate`, optional
+        The star's catalog colour excess E(B-V). When given, the
+        classification runs on the observed spectrum and on the spectrum with
+        the reddening removed (see `interstellar_extinction`). The reported
+        classification is the dereddened one, and `SpectrumAnalysis.reddening`
+        keeps both best types. The synthetic colour is still measured on the
+        observed spectrum, because the catalog colour it is checked against
+        is reddened too.
 
     Returns
     -------
@@ -390,6 +490,10 @@ def analyze_spectrum(
         if response_corrected_intensity is None
         else np.asarray(response_corrected_intensity, dtype=float)
     )
+    # The spectrum the reported classification was made on: the observed one,
+    # or the dereddened one when a catalog E(B-V) was supplied.
+    classified_intensity = corrected_intensity
+    reddening_record: ReddeningRecord | None = None
     if corrected_intensity is None:
         classification = unclassified_result(
             "no instrument response is available for this camera, so the spectrum cannot be compared"
@@ -402,6 +506,32 @@ def analyze_spectrum(
             excluded_windows_angstrom=excluded_windows,
             resolution_profile=resolution_profile,
         )
+        if reddening is not None:
+            dereddened_intensity = _dereddened_intensity(
+                wavelength_angstrom, corrected_intensity, reddening.ebv
+            )
+            dereddened_classification = classify_spectral_type(
+                wavelength_angstrom,
+                dereddened_intensity,
+                resolution_element_angstrom=resolution_element_angstrom,
+                excluded_windows_angstrom=excluded_windows,
+                resolution_profile=resolution_profile,
+            )
+            observed_type = _classified_type(classification)
+            dereddened_type = _classified_type(dereddened_classification)
+            reddening_record = ReddeningRecord(
+                ebv=reddening.ebv,
+                ebv_source=reddening.source,
+                gaia_source_id="" if reddening.gaia_source_id is None else str(reddening.gaia_source_id),
+                observed_best_type=observed_type,
+                dereddened_best_type=dereddened_type,
+                type_shift_steps=ladder_steps_between(observed_type, dereddened_type),
+            )
+            # The reported type uses the dereddened spectrum whenever it
+            # could be classified. If it could not, the observed result stays.
+            if dereddened_type:
+                classification = dereddened_classification
+                classified_intensity = dereddened_intensity
 
     comparison: CatalogComparison | None = None
     synthetic_colour: float | None = None
@@ -410,10 +540,10 @@ def analyze_spectrum(
         # reference, so the note can say what the spectrum looks like once
         # the (unreliable) luminosity class is set aside.
         closest_giant = None
-        if corrected_intensity is not None and is_catalog_giant(catalog_spectral_type):
+        if classified_intensity is not None and is_catalog_giant(catalog_spectral_type):
             giant_result = classify_spectral_type(
                 wavelength_angstrom,
-                corrected_intensity,
+                classified_intensity,
                 resolution_element_angstrom=resolution_element_angstrom,
                 reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
                 excluded_windows_angstrom=excluded_windows,
@@ -439,9 +569,31 @@ def analyze_spectrum(
             if emission_names
             else ""
         )
-        classification["reason"] = (
-            "; ".join(note for note in (emission_note, comparison.joined_note()) if note) or None
+        dereddening_note = (
+            _dereddening_note(reddening_record)
+            if reddening_record is not None and reddening_record.dereddened_best_type
+            else ""
         )
+        classification["reason"] = (
+            "; ".join(note for note in (emission_note, dereddening_note, comparison.joined_note()) if note)
+            or None
+        )
+
+    # The line-strength estimate is a cross-check beside the template fit. It
+    # reads the same spectrum the reported type was fitted to, leaves out the
+    # same emission and neighbour windows, and is compared with that type.
+    line_index_classification = (
+        classify_by_line_indices(
+            wavelength_angstrom,
+            classified_intensity,
+            resolution_element_angstrom=resolution_element_angstrom,
+            resolution_profile=resolution_profile,
+            excluded_windows_angstrom=excluded_windows,
+            template_fit_type=str(classification["spectral_type"]),
+        )
+        if classified_intensity is not None and classification["spectral_type"] != "Unknown"
+        else None
+    )
 
     # The catalog type says what kind of star this is without using the
     # spectrum being tested. A spectrum match is only a fallback, and only
@@ -474,4 +626,6 @@ def analyze_spectrum(
         catalog_comparison=comparison,
         extinction_correction=extinction_correction.as_dict() if extinction_correction is not None else None,
         synthetic_b_minus_v=synthetic_colour,
+        reddening=reddening_record,
+        line_index_classification=line_index_classification,
     )

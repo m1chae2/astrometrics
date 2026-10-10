@@ -158,10 +158,16 @@ classification and colour metrics have no value, and the checkpoint carries the
 | `second_order_risky_fraction` | fraction | none | The share of samples where second-order light could add a tenth of the signal. |
 | `second_order_max_blue_to_red_ratio` | ratio | none | The largest ratio of the brightness at half a wavelength to the brightness at that wavelength. |
 | `emission_lines_detected` | lines | none | How many named emission lines or blends have a detected verdict. The `emission_line_source` flag marks two or more. |
+| `ebv_used` | magnitude | none (reported only) | The colour excess E(B-V) the pipeline removed from the spectrum before classifying. The note names the catalog and the conversion. No value when the star has no Gaia DR3 id or Gaia gives none. |
+| `dereddening_type_shift_steps` | subtype steps | none (reported only) | How many steps on the O-to-M ladder the best type moved because of dereddening (ten steps to a letter class). A large shift means the observed colour was mostly dust. No value without an E(B-V). |
+| `index_vs_template_type_steps` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance between the type that six line strengths point to and the template-fit type. A designed limit, the one used for two types that disagree. |
 
-The processing flags are `unclassified`, `emission_line_source` and
-`second_order_risk`. The two second-order metrics have no limit because their
-2 percent and 10 percent figures are not validated.
+The processing flags are `unclassified`, `emission_line_source`,
+`second_order_risk` and `slope_and_lines_disagree`. The last one marks a
+spectrum whose `index_vs_template_type_steps` is above its limit: the
+continuum slope and the line strengths point to different types. The two
+second-order metrics have no limit because their 2 percent and 10 percent
+figures are not validated.
 
 **Checkpoint 3, final result.** It carries the verdicts of
 `OutputQualityAssessment` and the catalog distance. Each verdict is 1 (yes) or

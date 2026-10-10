@@ -1,11 +1,12 @@
 """Purpose: Carry the drivers a caller chose down to the code that uses them.
 
-Description: The library talks to three outside programs or services: a plate
-solver, a stacking program and the SIMBAD database. Each has an abstract base
-class in `drivers/interfaces/`. `Drivers` holds the instance a caller wants
-for each one. A field left as `None` means "use the built-in driver"
-(Astrometry.net, Siril and astroquery), and the `*_or_default` methods build
-that built-in driver on demand.
+Description: The library talks to four outside programs or services: a plate
+solver, a stacking program, the SIMBAD database and a catalog of interstellar
+reddening values. Each has an abstract
+base class in `drivers/interfaces/`. `Drivers` holds the instance a caller
+wants for each one. A field left as `None` means "use the built-in driver"
+(Astrometry.net, Siril, astroquery, and Gaia through astroquery), and the
+`*_or_default` methods build that built-in driver on demand.
 
 `Astrometrics(...)` builds one `Drivers` and passes it to the sub-APIs, which
 pass it on to the pipelines. This file is the only place in `pipelines/` or
@@ -17,6 +18,7 @@ astrometry.net. A test in `test/test_layer_boundaries.py` keeps it that way.
 from dataclasses import dataclass
 
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver
+from astrometricslib.drivers.interfaces.reddening_driver import ReddeningDriver
 from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
 from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver
 
@@ -35,11 +37,15 @@ class Drivers:
         The stacking program. `None` means Siril.
     simbad : `SimbadDriver` or `None`
         The SIMBAD database. `None` means astroquery.
+    reddening : `ReddeningDriver` or `None`
+        The source of interstellar reddening values. `None` means Gaia DR3
+        through astroquery.
     """
 
     plate_solve: PlateSolveDriver | None = None
     stacking: StackingDriver | None = None
     simbad: SimbadDriver | None = None
+    reddening: ReddeningDriver | None = None
 
     @property
     def any_chosen(self) -> bool:
@@ -50,7 +56,8 @@ class Drivers:
         any_chosen : `bool`
             `True` if any field is not `None`.
         """
-        return any(driver is not None for driver in (self.plate_solve, self.stacking, self.simbad))
+        chosen = (self.plate_solve, self.stacking, self.simbad, self.reddening)
+        return any(driver is not None for driver in chosen)
 
     def plate_solve_or_default(self, api_key: str | None = None) -> PlateSolveDriver:
         """Give the chosen plate solver, or build the built-in one.
@@ -98,3 +105,17 @@ class Drivers:
         from astrometricslib.drivers.astroquery_simbad_driver import AstroquerySimbadDriver
 
         return AstroquerySimbadDriver()
+
+    def reddening_or_default(self) -> ReddeningDriver:
+        """Give the chosen reddening source, or build the built-in one.
+
+        Returns
+        -------
+        reddening : `ReddeningDriver`
+            The chosen driver, or a new `AstroqueryGaiaReddeningDriver`.
+        """
+        if self.reddening is not None:
+            return self.reddening
+        from astrometricslib.drivers.astroquery_gaia_reddening_driver import AstroqueryGaiaReddeningDriver
+
+        return AstroqueryGaiaReddeningDriver()

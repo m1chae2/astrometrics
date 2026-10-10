@@ -47,6 +47,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response i
     derive_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+    load_line_spread_profile,
     resolve_resolution_element_angstrom,
 )
 
@@ -304,6 +305,10 @@ def run_derivation(argv: list[str] | None = None) -> int:
         f"Resolution element {resolution_element_angstrom:.1f} A "
         f"({'measured from the trail width' if is_resolution_measured else 'fallback, no trail width'})."
     )
+    has_line_spread_profile = load_line_spread_profile(pipeline.config.camera.name) is not None
+    blur_basis = "line-spread profile" if has_line_spread_profile else "trail width"
+    if has_line_spread_profile:
+        print("The reference is blurred with the camera's line-spread profile; the single width is not used.")
     reference_airmass = (
         arguments.reference_airmass
         if arguments.reference_airmass is not None
@@ -332,7 +337,7 @@ def run_derivation(argv: list[str] | None = None) -> int:
         pipeline.config.camera.name,
         source=(
             f"{arguments.target} master spectral stack {Path(stacked_path).name}, star at pixel "
-            f"({star_x:.0f}, {star_y:.0f}), "
+            f"({star_x:.0f}, {star_y:.0f}), reference blurred with the {blur_basis}, "
             f"derived {datetime.now(UTC).date().isoformat()}"
         ),
         wavelength_range_angstrom=fit_range_angstrom,

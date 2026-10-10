@@ -127,7 +127,9 @@ builds this file:
    efficiency.
 2. The script divides that corrected spectrum by the bundled `a0v.txt`
    reference spectrum, after blurring the reference to the instrument's
-   resolution (a single width, in Angstroms).
+   resolution. The blur follows `line_spread_zwo_asi_533mm_pro.json`, which
+   grows from 42 A at 4200 A to 148 A at H-alpha. A single width measured
+   from the trail is used only for a camera with no line-spread file.
 3. The script fits the logarithm of that ratio with a degree-4 polynomial
    over the range 4200-8000 A. The fit skips a band around each strong
    Balmer and Ca H line, so Vega's own absorption dips do not become part
@@ -149,9 +151,15 @@ tilt, along with the air's dimming at the reference airmass.
 The stored file records `reference_airmass` 1.15. That value is the airmass
 that `cross_trail_blur_zwo_asi_533mm_pro.json` logs for the 40 Vega frames of
 0.25 s taken on 2026-09-25. The response's own `source` note describes the
-same set of frames. The stored coefficients came from a fit with a fixed 60 A
-band around every line, so they still carry some of Vega's line wings.
-Re-running the derivation script fits them with the wider bands. The script
+same set of frames. The stored coefficients came from a fit that blurred the
+reference to one width and skipped a fixed 60 A band around every line, so
+they carry some of Vega's line wings. A synthetic Vega observed through the
+stored line spread measures the size of that error: blurring to one 45 A
+width leaves the fitted response up to 0.5 percent wrong (0.3 percent
+red-to-blue tilt), and one 119 A width up to 2.6 percent wrong, while the
+wavelength-dependent blur recovers it exactly; `test/test_response_template_blur.py`
+holds the fit to that. Re-running the
+derivation script on Vega's stack replaces the coefficients. The script
 writes `reference_airmass` into the JSON. It reads the value from the
 stack's `AIRMASS` header card, or from the `--reference-airmass` option when
 the stack has no such card. With neither, it stores `null`, and the pipeline

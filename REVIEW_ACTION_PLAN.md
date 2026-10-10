@@ -140,8 +140,11 @@ Decisions taken during the work, for the owner to confirm:
   count goes in its detail. Set the constant to about 0.0025 to recover the old behaviour.
 - Airmass extinction uses the mean Kitt Peak curve (2 km, dry site). Only the curve's shape
   enters a difference correction, but a wetter or lower site has more blue extinction.
-- The stored instrument response still carries coefficients fitted with the old 60 Å Balmer
-  mask; re-derive it on the Vega stack with `scripts/derive_instrument_response.py`.
+- The stored instrument response still carries coefficients fitted with one blur width and the
+  old 60 Å Balmer mask. Simulation puts its error at up to 0.5 percent (0.3 percent red-to-blue
+  tilt) if the original width was about 45 Å. The fit now blurs with the measured line-spread
+  profile; re-derive on the Vega stack with `scripts/derive_instrument_response.py` (the stack
+  is not in the repository).
 - Variability thresholds (chi-square and Stetson J at the field's 99th percentile, excess
   scatter 1.5, AUC floor 0.7) are design choices measured only on synthetic fields.
 

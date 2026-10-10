@@ -2,11 +2,11 @@
 
 Description: The instrument response is fitted by comparing an observation
 of a reference star (Vega) with a bundled reference spectrum. Near the
-Balmer lines the two disagree, because the instrument blurs the observed
-lines to 100-150 Angstroms and the bundled spectrum is blurred only to one
-fixed width. The fit must skip a band around each line wide enough to cover
-that mismatch, or the line wings end up in the response and get divided out
-of every target. These tests build a synthetic reference with a flat
+Balmer lines the two can disagree when the reference is blurred differently
+from the observation, which the instrument blurs to 100-150 Angstroms there.
+The fit skips a band around each line wide enough to cover any remaining
+mismatch, so the line wings do not end up in the response and get divided
+out of every target. These tests build a synthetic reference with a flat
 continuum and Balmer dips, observe it through the stored line-spread profile,
 and check that the fitted response is flat.
 """

@@ -32,6 +32,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     ResolutionProfile,
     blur_sigma_in_samples,
+    blur_to_resolution_profile,
     load_line_spread_profile,
 )
 
@@ -287,7 +288,14 @@ def derive_instrument_response(
     so it is blurred to the instrument's resolution before the two are
     compared. Blurring it to the wrong width would leave a mismatch around
     every line, and the fit would wrongly treat that as part of the
-    instrument's response.
+    instrument's response. The line spread of a slitless grism spectrum
+    grows with wavelength (about 42 A at 4200 A to 148 A at 6563 A for the
+    ASI533 setup), so the reference is blurred with the camera's stored
+    line-spread profile when one exists, the same profile the classifier
+    uses. A single width is used only when the camera has no profile. On a
+    synthetic Vega observed through the stored profile, a single 45 A width
+    left a fitted response up to 0.5 percent wrong and a single 119 A width
+    up to 2.6 percent wrong, while the profile blur recovered it exactly.
 
     The fit also skips the samples around the strong hydrogen lines
     (`_LINES_TO_SKIP_ANGSTROM`). The skipped band reaches
@@ -317,15 +325,16 @@ def derive_instrument_response(
         end where second-order light and low sensitivity spoil the spectrum;
         see `DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM`.
     resolution_element_angstrom : `float`, optional
-        How much the instrument blurs this observation, in Angstroms.
-        Defaults to `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the
-        observation's own measured value when there is one (see
-        `spectral_resolution`).
+        How much the instrument blurs this observation, in Angstroms, used
+        only when no line-spread profile is known. Defaults to
+        `FALLBACK_RESOLUTION_ELEMENT_ANGSTROM`; pass the observation's own
+        measured value when there is one (see `spectral_resolution`).
     line_spread_profile : `ResolutionProfile`, optional
-        The instrument's line spread at each wavelength, in Angstroms. When
-        `None`, the stored profile for `camera_name` is read. When the
-        camera has none, `resolution_element_angstrom` stands in at every
-        line.
+        The instrument's line spread at each wavelength, in Angstroms. It
+        sets both the reference's blur and the band skipped around each
+        hydrogen line. When `None`, the stored profile for `camera_name` is
+        read. When the camera has none, `resolution_element_angstrom`
+        stands in for both.
     reference_airmass : `float`, optional
         The airmass the standard star was observed at, stored with the
         response so the extinction correction can use it. `None` if
@@ -349,10 +358,18 @@ def derive_instrument_response(
     if reference_type not in templates:
         raise InvalidArgumentError(f"No bundled reference spectrum for {reference_type!r}.")
     template_wavelength, template_flux = templates[reference_type]
-    smoothed_template = gaussian_filter1d(
-        template_flux,
-        blur_sigma_in_samples(resolution_element_angstrom, float(np.median(np.diff(template_wavelength)))),
+    profile = (
+        line_spread_profile if line_spread_profile is not None else load_line_spread_profile(camera_name)
     )
+    if profile is not None:
+        smoothed_template = blur_to_resolution_profile(template_wavelength, template_flux, profile)
+    else:
+        smoothed_template = gaussian_filter1d(
+            template_flux,
+            blur_sigma_in_samples(
+                resolution_element_angstrom, float(np.median(np.diff(template_wavelength)))
+            ),
+        )
 
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -366,10 +383,7 @@ def derive_instrument_response(
     )
     for line, half_width in zip(
         _LINES_TO_SKIP_ANGSTROM,
-        line_skip_half_widths_angstrom(
-            line_spread_profile if line_spread_profile is not None else load_line_spread_profile(camera_name),
-            resolution_element_angstrom,
-        ),
+        line_skip_half_widths_angstrom(profile, resolution_element_angstrom),
         strict=True,
     ):
         usable &= np.abs(wavelength_angstrom - line) > half_width

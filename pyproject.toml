@@ -129,7 +129,8 @@ pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
     "anyio: mark test to run with anyio",
-    "trio: mark test as trio-only (skip if trio not installed)"
+    "trio: mark test as trio-only (skip if trio not installed)",
+    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)"
 ]
 log_cli = true
 log_cli_level = "INFO"

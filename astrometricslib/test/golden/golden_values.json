@@ -1,0 +1,922 @@
+{
+  "_comment": "Golden values measured on the real M 13 sample frames (Git LFS). Each pin has a value, a tolerance, a tolerance_type ('absolute' or 'relative') and a 'why' naming the change that last set it. Do not edit by hand: run 'pytest astrometricslib/test/golden --update-golden --golden-why \"<the change>\"' and review the diff. See README.md.",
+  "raw_frame_quality": {
+    "M_13_Light_Luminance_019": {
+      "star_count": {
+        "value": 602,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "fwhm_px": {
+        "value": 3.71045967,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "roundness": {
+        "value": 0.970975937,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "longest_trail_px": {
+        "value": 77,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_median_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 43,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flag_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_level_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_noise_adu": {
+        "value": 21.0665458,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_fraction": {
+        "value": 4.75239786e-06,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    },
+    "M_13_Light_Luminance_020": {
+      "star_count": {
+        "value": 934,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "fwhm_px": {
+        "value": 3.73167003,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "roundness": {
+        "value": 0.909658737,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "longest_trail_px": {
+        "value": 77,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_median_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 44,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flag_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_y_px": {
+        "value": -0.0775094626,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_x_px": {
+        "value": -0.600332581,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_matched_stars": {
+        "value": 148,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_level_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_noise_adu": {
+        "value": 21.069831,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_fraction": {
+        "value": 4.86291874e-06,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    },
+    "M_13_Light_Luminance_021": {
+      "star_count": {
+        "value": 624,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "fwhm_px": {
+        "value": 3.65164523,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "roundness": {
+        "value": 0.976100017,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "longest_trail_px": {
+        "value": 78,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_median_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 46,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flag_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_y_px": {
+        "value": 0.165652337,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_x_px": {
+        "value": -0.425910026,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_matched_stars": {
+        "value": 147,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_level_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_noise_adu": {
+        "value": 21.0383502,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_fraction": {
+        "value": 5.0839605e-06,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    },
+    "M_13_Light_Luminance_022": {
+      "star_count": {
+        "value": 612,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "fwhm_px": {
+        "value": 3.59080034,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "roundness": {
+        "value": 0.948256461,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "longest_trail_px": {
+        "value": 78,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_median_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 46,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flag_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_y_px": {
+        "value": 0.0542497072,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_x_px": {
+        "value": -0.265926455,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_matched_stars": {
+        "value": 147,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_level_adu": {
+        "value": 320.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_noise_adu": {
+        "value": 21.0311922,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_fraction": {
+        "value": 5.0839605e-06,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    },
+    "M_13_Light_Luminance_023": {
+      "star_count": {
+        "value": 635,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "fwhm_px": {
+        "value": 3.52056518,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "roundness": {
+        "value": 0.972590043,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "longest_trail_px": {
+        "value": 78,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_median_adu": {
+        "value": 316.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 45,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flag_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_y_px": {
+        "value": 0.0691051206,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_x_px": {
+        "value": 1.26455971,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "shift_matched_stars": {
+        "value": 148,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_level_adu": {
+        "value": 316.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "background_noise_adu": {
+        "value": 20.9450643,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_fraction": {
+        "value": 4.97343962e-06,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    },
+    "batch": {
+      "median_star_count": {
+        "value": 624,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "median_fwhm_px": {
+        "value": 3.65164523,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "flagged_frame_count": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    }
+  },
+  "source_detection": {
+    "_comment": "Source detection on one frame. The detector draws a random subsample for its background only when the 2-D background map fails; on these 3008 x 3008 frames the map works, so the numbers are repeatable (checked twice on 2026-10-10).",
+    "M_13_Light_Luminance_020": {
+      "source_count": {
+        "value": 1649,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_01_x": {
+        "value": 1140.79926,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_01_y": {
+        "value": 1083.20327,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_01_flux": {
+        "value": 1084897.93,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_02_x": {
+        "value": 2020.32144,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_02_y": {
+        "value": 1439.77343,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_02_flux": {
+        "value": 1047906.94,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_03_x": {
+        "value": 163.506556,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_03_y": {
+        "value": 54.9592337,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_03_flux": {
+        "value": 798848.224,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_04_x": {
+        "value": 88.3006126,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_04_y": {
+        "value": 780.433234,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_04_flux": {
+        "value": 694867.336,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_05_x": {
+        "value": 2358.60427,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_05_y": {
+        "value": 2400.47937,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_05_flux": {
+        "value": 654545.392,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_06_x": {
+        "value": 2172.47823,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_06_y": {
+        "value": 1146.99624,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_06_flux": {
+        "value": 568332.664,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_07_x": {
+        "value": 2429.50429,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_07_y": {
+        "value": 836.993238,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_07_flux": {
+        "value": 541183.714,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_08_x": {
+        "value": 1317.5955,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_08_y": {
+        "value": 2664.30171,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_08_flux": {
+        "value": 488557.348,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_09_x": {
+        "value": 703.203042,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_09_y": {
+        "value": 179.012373,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_09_flux": {
+        "value": 424235.97,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_10_x": {
+        "value": 747.098703,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_10_y": {
+        "value": 1760.85424,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "source_10_flux": {
+        "value": 399056.401,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    }
+  },
+  "fwhm_top5": {
+    "M_13_Light_Luminance_020": {
+      "median_fwhm_px": {
+        "value": 2.5162452,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    }
+  },
+  "spectral_frame": {
+    "M_13_Light_Spectroscopy_024": {
+      "zero_order_found": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "sky_adu": {
+        "value": 264.0,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "zero_order_peak_adu": {
+        "value": 1560.0,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "spectrum_peak_above_sky_adu": {
+        "value": 336.8,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "zero_order_peak_to_sky_ratio": {
+        "value": 5.90909091,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "spectrum_width_px": {
+        "value": 42.63,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "streak_bands_found": {
+        "value": 41,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "saturated_pixels": {
+        "value": 5,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "tilt_degrees": {
+        "value": 3.05935087,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "trail_contrast": {
+        "value": 21.8980512,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    }
+  },
+  "photometry_pre_S2": {
+    "_comment": "Aperture photometry with every aperture centred on a whole pixel, which is what the pipeline did before item S2 (sub-pixel apertures) in REVIEW_ACTION_PLAN.md. S2 now centres apertures on the exact position, so this block is reproduced by rounding the position before the call. The fluxes are EXPECTED TO MOVE if the aperture sum or the background ring changes, and the block can be dropped once nobody needs the old numbers.",
+    "M_13_Light_Luminance_020": {
+      "star_01_flux_adu_per_s": {
+        "value": 45718.9048,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_01_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_02_flux_adu_per_s": {
+        "value": 53436.7862,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_02_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_03_flux_adu_per_s": {
+        "value": 29840.8684,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_03_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_04_flux_adu_per_s": {
+        "value": 25680.7374,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_04_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_05_flux_adu_per_s": {
+        "value": 24430.1909,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_05_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_06_flux_adu_per_s": {
+        "value": 20653.9441,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_06_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_07_flux_adu_per_s": {
+        "value": 19988.2957,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_07_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_08_flux_adu_per_s": {
+        "value": 17916.8009,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_08_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_09_flux_adu_per_s": {
+        "value": 15237.6741,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_09_saturated": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_10_flux_adu_per_s": {
+        "value": 14386.7696,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "star_10_saturated": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 before tier 1 fixes"
+      }
+    }
+  },
+  "photometry_sub_pixel": {
+    "_comment": "Aperture photometry with every aperture centred on the exact detected position (item S2). The difference from photometry_pre_S2 is the effect of S2 on these ten stars.",
+    "M_13_Light_Luminance_020": {
+      "star_01_flux_adu_per_s": {
+        "value": 45737.2561,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_01_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_02_flux_adu_per_s": {
+        "value": 53919.2714,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_02_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_03_flux_adu_per_s": {
+        "value": 29864.8686,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_03_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_04_flux_adu_per_s": {
+        "value": 25882.9291,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_04_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_05_flux_adu_per_s": {
+        "value": 24549.9563,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_05_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_06_flux_adu_per_s": {
+        "value": 20695.3491,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_06_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_07_flux_adu_per_s": {
+        "value": 20086.4546,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_07_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_08_flux_adu_per_s": {
+        "value": 17957.4905,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_08_saturated": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_09_flux_adu_per_s": {
+        "value": 15257.7586,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_09_saturated": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_10_flux_adu_per_s": {
+        "value": 14396.287,
+        "tolerance": 0.01,
+        "tolerance_type": "relative",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      },
+      "star_10_saturated": {
+        "value": 0,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
+      }
+    }
+  }
+}

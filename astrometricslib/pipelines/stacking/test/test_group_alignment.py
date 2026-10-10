@@ -8,7 +8,9 @@ a fraction of a pixel, that two unrelated fields are refused instead of being
 in are reported. Further tests check the star-based refinement: that a known
 rotation and scale between two stacks are recovered, that stars land closer
 together than a shift alone puts them, and that a fit that is not believable is
-refused so the plain shift is kept.
+refused so the plain shift is kept. Last, tests of the extended-target search,
+which finds a broad glow (a globular cluster) that the point-source search
+rejects, and refuses a frame with two equally bright glows.
 """
 
 import numpy as np
@@ -24,7 +26,9 @@ from astrometricslib.pipelines.stacking.processing.group_alignment import (
     apply_alignment,
     apply_shift,
     detect_star_centroids,
+    find_extended_zero_order_position,
     find_zero_order_position,
+    locate_zero_order,
     measure_alignment,
     refine_alignment_with_stars,
 )
@@ -539,3 +543,104 @@ def test_apply_alignment_without_rotation_is_the_plain_shift() -> None:
 
     assert np.array_equal(result, plain)
     assert np.array_equal(covered, plain_covered)
+
+
+CLUSTER_ROW, CLUSTER_COLUMN = 505.0, 492.0
+
+
+def make_cluster_field(
+    amplitude: float = 300.0, extra_glows: tuple[tuple[float, float, float], ...] = ()
+) -> np.ndarray:
+    """Build a noisy sky with a broad glow and bright stars scattered on it.
+
+    The glow stands in for a globular cluster. It is a Gaussian 30 px wide at
+    (505, 492). Six stars of height 400 sit within 80 px of its centre, so the
+    point-source search sees several rival spots.
+
+    Parameters
+    ----------
+    amplitude : `float`, optional
+        The height of the main glow above the sky of 100.
+    extra_glows : `tuple` [`tuple` [`float`, `float`, `float`], ...], optional
+        More glows of the same width, each as (row, column, height).
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        A 1000 x 1000 float32 image.
+    """
+    y, x = np.mgrid[0:1000, 0:1000].astype(np.float32)
+    image = 100.0 + np.random.default_rng(3).normal(0, 5, (1000, 1000)).astype(np.float32)
+    glows = [(CLUSTER_ROW, CLUSTER_COLUMN, amplitude), *extra_glows]
+    for row, column, height in glows:
+        image += height * np.exp(-((y - row) ** 2 + (x - column) ** 2) / (2 * 30.0**2))
+    stars = [(-70, 20), (60, -50), (10, 75), (-30, -60), (45, 40), (-55, 60)]
+    for row_offset, column_offset in stars:
+        distance = (y - CLUSTER_ROW - row_offset) ** 2 + (x - CLUSTER_COLUMN - column_offset) ** 2
+        image += 400.0 * np.exp(-distance / (2 * 2.5**2))
+    return image
+
+
+def test_a_cluster_with_rival_bright_spots_defeats_the_point_source_search() -> None:
+    """The point-source search gives up on a glow with bright stars on it."""
+    assert find_zero_order_position(make_cluster_field()) is None
+
+
+def test_the_extended_search_finds_the_middle_of_a_cluster() -> None:
+    """The glow's centre is found to within a few pixels."""
+    position = find_extended_zero_order_position(make_cluster_field())
+
+    assert position is not None
+    assert position[0] == pytest.approx(CLUSTER_ROW, abs=3.0)
+    assert position[1] == pytest.approx(CLUSTER_COLUMN, abs=3.0)
+
+
+def test_locating_a_cluster_says_the_position_is_from_the_extended_search() -> None:
+    """`locate_zero_order` flags a position that came from the glow search."""
+    found = locate_zero_order(make_cluster_field())
+
+    assert found is not None
+    assert found.is_extended_target
+    assert found.row_column == (found.row, found.column)
+
+
+def test_locating_a_star_gives_the_point_source_answer_unflagged() -> None:
+    """A clear star is found by the point-source search, exactly as before."""
+    image = make_spectrum_stack(500.4, 507.6, 0.5, 0.2)
+
+    found = locate_zero_order(image)
+
+    assert found is not None
+    assert not found.is_extended_target
+    assert found.row_column == find_zero_order_position(image)
+
+
+def test_two_equally_bright_glows_are_ambiguous_for_the_extended_search() -> None:
+    """A second glow of the same height 200 px away leaves no clear target."""
+    image = make_cluster_field(extra_glows=((CLUSTER_ROW, CLUSTER_COLUMN + 200.0, 300.0),))
+
+    assert locate_zero_order(image) is None
+
+
+def test_a_glow_beyond_the_rival_window_is_ignored() -> None:
+    """A brighter glow 450 px from the centre is outside the rival window."""
+    image = make_cluster_field(extra_glows=((505.0, 942.0, 600.0),))
+
+    found = locate_zero_order(image)
+
+    assert found is not None
+    assert found.column == pytest.approx(CLUSTER_COLUMN, abs=3.0)
+
+
+def test_a_blank_image_and_a_smooth_gradient_have_no_extended_target() -> None:
+    """Neither a flat image nor a tilted plane has a peak in the window."""
+    rows, columns = np.mgrid[0:1000, 0:1000]
+    gradient = (0.2 * columns + 0.1 * rows).astype(np.float32)
+
+    assert find_extended_zero_order_position(np.zeros((1000, 1000), np.float32)) is None
+    assert find_extended_zero_order_position(gradient) is None
+
+
+def test_an_image_smaller_than_one_block_has_no_extended_target() -> None:
+    """A 3 x 3 image is too small to average in blocks."""
+    assert find_extended_zero_order_position(np.ones((3, 3), np.float32)) is None

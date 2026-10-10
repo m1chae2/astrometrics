@@ -101,10 +101,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "flag_count": {
-        "value": 0,
+        "value": 2,
         "tolerance": 0.0,
         "tolerance_type": "absolute",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
       },
       "shift_y_px": {
         "value": -0.0775094626,
@@ -397,10 +397,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "flagged_frame_count": {
-        "value": 0,
+        "value": 1,
         "tolerance": 0.0,
         "tolerance_type": "absolute",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
       }
     }
   },
@@ -608,10 +608,10 @@
   "spectral_frame": {
     "M_13_Light_Spectroscopy_024": {
       "zero_order_found": {
-        "value": 0,
+        "value": 1,
         "tolerance": 0.0,
         "tolerance_type": "absolute",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
       },
       "sky_adu": {
         "value": 264.0,
@@ -666,6 +666,24 @@
         "tolerance": 0.01,
         "tolerance_type": "relative",
         "why": "baseline 2026-10-10 before tier 1 fixes"
+      },
+      "zero_order_extended": {
+        "value": 1,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
+      },
+      "zero_order_row": {
+        "value": 1492.03965,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
+      },
+      "zero_order_column": {
+        "value": 1488.13221,
+        "tolerance": 0.5,
+        "tolerance_type": "absolute",
+        "why": "raw-frame trail and high-count flags on frame 020; extended-target zero-order finder on the cluster"
       }
     }
   },

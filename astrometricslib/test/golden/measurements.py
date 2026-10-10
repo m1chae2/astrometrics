@@ -41,7 +41,7 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
 from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
 from astrometricslib.pipelines.shared.quality.spectral_frame_check import analyze_spectral_frame
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
+from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 SAMPLE_FOLDER = (
@@ -128,12 +128,13 @@ settings file of the machine that runs the test."""
 _TOLERANCE_RULES: tuple[tuple[str, str, float], ...] = (
     (r"cv_percent$", "relative", 0.05),
     (
-        r"(count|saturated_pixels|longest_trail_px|matched_stars|bands_found|_saturated|zero_order_found)$",
+        r"(count|saturated_pixels|longest_trail_px|matched_stars|bands_found|_saturated|zero_order_found|zero_order_extended)$",
         "absolute",
         0.0,
     ),
     (r"(sky_median_adu|background_level_adu|sky_adu|global_background_adu)$", "absolute", 0.5),
     (r"(shift_[yx]_px|source_\d+_[xy]|tilt_degrees)$", "absolute", 0.05),
+    (r"zero_order_(row|column)$", "absolute", 0.5),
     (r"(fwhm|flux|roundness|noise|fraction|width_px|contrast|peak|ratio)", "relative", 0.01),
 )
 """Rules that give each pinned number its tolerance, first match wins.
@@ -364,7 +365,9 @@ def measure_spectral_frame(data: np.ndarray, path: Path) -> dict[str, float]:
     """Measure one spectroscopy frame at the cluster core.
 
     The library's zero-order finder is run on the frame and its answer is
-    pinned (it finds nothing in a crowded cluster). The rest is measured at
+    pinned. The point-source search finds nothing in a crowded cluster, so
+    the extended-target search answers, within a few pixels of the cluster
+    core. The rest is measured at
     `CLUSTER_CORE_ROW_COLUMN` with the instrument settings of
     `SPECTRAL_CONFIG_VALUES`.
 
@@ -378,10 +381,12 @@ def measure_spectral_frame(data: np.ndarray, path: Path) -> dict[str, float]:
     Returns
     -------
     values : `dict` [`str`, `float`]
-        ``zero_order_found`` (1 if the finder found a star, else 0), the sky
-        level, the zero-order and spectrum peaks, the peak-to-sky ratio, the
-        cross-streak FWHM, the number of bands that held the streak, the
-        saturated pixel count, the streak tilt and its contrast.
+        ``zero_order_found`` (1 if the finder found a target, else 0),
+        ``zero_order_extended`` (1 if the extended-target search found it),
+        the found ``zero_order_row`` and ``zero_order_column`` in pixels,
+        the sky level, the zero-order and spectrum peaks, the peak-to-sky
+        ratio, the cross-streak FWHM, the number of bands that held the
+        streak, the saturated pixel count, the streak tilt and its contrast.
     """
     settings = SPECTRAL_CONFIG_VALUES
     camera = CameraConfig(
@@ -403,7 +408,7 @@ def measure_spectral_frame(data: np.ndarray, path: Path) -> dict[str, float]:
     )
     pipeline = SpectroscopyPipeline(config=config)
     row, column = CLUSTER_CORE_ROW_COLUMN
-    found = find_zero_order_position(data)
+    found = locate_zero_order(data)
     frame = analyze_spectral_frame(
         data,
         (row, column),
@@ -416,6 +421,9 @@ def measure_spectral_frame(data: np.ndarray, path: Path) -> dict[str, float]:
     tilt, contrast = pipeline.measure_dispersion_trail(AstrometricsImage(str(path)), (column, row))
     return {
         "zero_order_found": 0 if found is None else 1,
+        "zero_order_extended": 0 if found is None else int(found.is_extended_target),
+        "zero_order_row": float("nan") if found is None else float(found.row),
+        "zero_order_column": float("nan") if found is None else float(found.column),
         "sky_adu": frame["sky_adu"],
         "zero_order_peak_adu": frame["zero_order_peak_adu"],
         "spectrum_peak_above_sky_adu": frame["spectrum_peak_above_sky_adu"],

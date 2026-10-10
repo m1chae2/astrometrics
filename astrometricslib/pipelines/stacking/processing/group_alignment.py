@@ -123,6 +123,51 @@ ZERO_ORDER_CENTROID_FRACTION_OF_PEAK = 0.5
 ZERO_ORDER_RIVAL_SEPARATION_PIXELS = 40
 ZERO_ORDER_MAX_RIVAL_FRACTION = 0.5
 
+# Extended targets (a globular cluster, a galaxy, a nebula). The point-source
+# search above fails on them: the target is a broad glow, not one spot, so the
+# smoothed image has several bright spots of similar height. On the six M 13
+# spectroscopy frames (five single frames and the stack) the brightest spot
+# within the search window sits at about row 1491, column 1476, 845 ADU
+# (frame 024), and a spot 67 px away at row 1486, column 1543 reaches 536 ADU.
+# That is 0.63 of the brightest (0.47 once the sky is removed), above the 0.5
+# limit, so it is the rival test, not the peak test, that rejects the cluster.
+# The extended path instead averages the frame in blocks of
+# EXTENDED_TARGET_BLOCK_PIXELS (cheap, and it suppresses noise), then smooths
+# with a Gaussian of EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS, a width comparable
+# to the target. At that scale the cluster is one smooth hill.
+EXTENDED_TARGET_BLOCK_PIXELS = 4
+EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS = 25.0
+
+# Two smoothed peaks count as independent when no brighter pixel lies within
+# this many smoothing sigmas of either one (two sigmas is 50 px at the width
+# above). Peaks closer than that are shoulders of one hill, not rivals.
+EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS = 2.0
+
+# The brightest smoothed peak must lie inside the same central search window as
+# the point-source search (ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS). Rivals are
+# looked for twice as far out, so a target near the edge of the window is not
+# accepted just because its competitor lies a little beyond it. Rivals
+# farther than 300 px are ignored: on M 13 other smoothed peaks of similar
+# height lie 380 px (row 1502, column 1122) and 520 px away, so a wider
+# rival window would reject every M 13 frame.
+EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS = 2 * ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS
+
+# The peak is accepted only when the tallest independent rival is at most this
+# fraction of it, both measured above the frame's sky level (the median of the
+# block-averaged image). On the six M 13 frames the rival reached 0.078 to
+# 0.088 of the peak at sigmas of 20 to 30 px (no rival at all in the 300 px
+# window is also possible and passes). One third is about four times the worst
+# measured value and well below the 1.0 of two equal targets, which the
+# synthetic two-blob test rejects. Only M 13 has been measured.
+EXTENDED_TARGET_MAX_RIVAL_FRACTION = 1.0 / 3.0
+
+# The centre is the brightness-weighted centre of the smoothed pixels, within
+# the independent-peak distance of the peak, that are at least this fraction of
+# the peak (above sky). The block grid steps 4 px, so the peak pixel alone
+# jumps between neighbouring blocks: on frame 024 it moved by 4 px between
+# sigmas of 20 and 25 px, while the weighted centre moved by 0.2 px.
+EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK = 0.5
+
 # Refining the offset with the stars themselves (imaging stacks only).
 #
 # A shift cannot describe two stacks of different nights. On M 57 (2026-10-03)
@@ -355,6 +400,152 @@ def find_zero_order_position(plane: np.ndarray) -> tuple[float, float] | None:
         float((weights * window_rows).sum() / total),
         float((weights * window_columns).sum() / total),
     )
+
+
+@dataclass(frozen=True)
+class ZeroOrderPosition:
+    """Where the zero-order target is and which search found it.
+
+    Attributes
+    ----------
+    row : `float`
+        The target's row (the y position), in pixels.
+    column : `float`
+        The target's column (the x position), in pixels.
+    is_extended_target : `bool`
+        `True` when the point-source search found no single clear spot and
+        the broad-glow search (see `find_extended_zero_order_position`)
+        supplied the position. Such a position marks the middle of a glow
+        tens of pixels wide, so it is good to a few pixels, not a fraction
+        of a pixel. `False` for a point-source position.
+    """
+
+    row: float
+    column: float
+    is_extended_target: bool = False
+
+    @property
+    def row_column(self) -> tuple[float, float]:
+        """Give the position as a (row, column) pair.
+
+        Returns
+        -------
+        position : `tuple` [`float`, `float`]
+            The row and the column.
+        """
+        return (self.row, self.column)
+
+
+def find_extended_zero_order_position(plane: np.ndarray) -> tuple[float, float] | None:
+    """Find the centre of an extended target, such as a globular cluster.
+
+    The steps are:
+
+    1. Average the image in blocks of `EXTENDED_TARGET_BLOCK_PIXELS`.
+    2. Subtract the median of the blocks (the sky) and smooth with a Gaussian
+       of `EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS`.
+    3. List the local maxima: smoothed pixels no lower than any pixel within
+       `EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS` smoothing widths.
+    4. Take the brightest local maximum inside the central search window
+       (`ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS`).
+    5. Find the brightest other local maximum inside the wider rival window
+       (`EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS`).
+    6. Refuse the peak when the rival is brighter than
+       `EXTENDED_TARGET_MAX_RIVAL_FRACTION` of it.
+    7. Return the brightness-weighted centre of the pixels around the peak
+       that are at least `EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK` of it.
+
+    A smooth sky gradient has no local maximum inside the window, so it gives
+    `None`, as does a blank image or a frame with two equally bright targets.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        A 2-D image. The target is expected near its centre.
+
+    Returns
+    -------
+    position : `tuple` [`float`, `float`] or `None`
+        The target's (row, column), or `None` when the window has no peak or
+        a rival is too bright for the peak to be trusted.
+    """
+    block = EXTENDED_TARGET_BLOCK_PIXELS
+    image = np.nan_to_num(np.asarray(plane, dtype=np.float32))
+    block_rows, block_columns = image.shape[0] // block, image.shape[1] // block
+    if block_rows < 1 or block_columns < 1:
+        return None
+    blocks = (
+        image[: block_rows * block, : block_columns * block]
+        .reshape(block_rows, block, block_columns, block)
+        .mean(axis=(1, 3))
+    )
+    smooth = gaussian_filter(blocks, EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS / block) - float(
+        np.median(blocks)
+    )
+    reach_blocks = round(
+        EXTENDED_TARGET_INDEPENDENT_PEAK_SIGMAS * EXTENDED_TARGET_SMOOTHING_SIGMA_PIXELS / block
+    )
+    is_peak = (maximum_filter(smooth, size=2 * reach_blocks + 1) == smooth) & (smooth > 0)
+    peak_rows, peak_columns = np.nonzero(is_peak)
+    heights = smooth[peak_rows, peak_columns]
+    # Block (i, j) covers pixels block * i to block * i + block - 1.
+    rows_px = peak_rows * block + (block - 1) / 2.0
+    columns_px = peak_columns * block + (block - 1) / 2.0
+    away_rows = np.abs(rows_px - (image.shape[0] - 1) / 2.0)
+    away_columns = np.abs(columns_px - (image.shape[1] - 1) / 2.0)
+    in_search_window = (away_rows <= ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS) & (
+        away_columns <= ZERO_ORDER_SEARCH_HALF_WIDTH_PIXELS
+    )
+    if not in_search_window.any():
+        return None
+    best = int(np.nonzero(in_search_window)[0][np.argmax(heights[in_search_window])])
+    in_rival_window = (
+        (away_rows <= EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS)
+        & (away_columns <= EXTENDED_TARGET_RIVAL_HALF_WIDTH_PIXELS)
+        & (np.arange(heights.size) != best)
+    )
+    rival = float(heights[in_rival_window].max(initial=0.0))
+    if rival > EXTENDED_TARGET_MAX_RIVAL_FRACTION * heights[best]:
+        return None
+    row_slice = slice(max(peak_rows[best] - reach_blocks, 0), peak_rows[best] + reach_blocks + 1)
+    column_slice = slice(max(peak_columns[best] - reach_blocks, 0), peak_columns[best] + reach_blocks + 1)
+    window = smooth[row_slice, column_slice]
+    weights = np.where(window >= EXTENDED_TARGET_CENTROID_FRACTION_OF_PEAK * heights[best], window, 0.0)
+    window_rows, window_columns = np.mgrid[row_slice, column_slice]
+    total = float(weights.sum())
+    return (
+        float((weights * window_rows).sum() / total) * block + (block - 1) / 2.0,
+        float((weights * window_columns).sum() / total) * block + (block - 1) / 2.0,
+    )
+
+
+def locate_zero_order(plane: np.ndarray) -> ZeroOrderPosition | None:
+    """Find the zero-order target, trying a point source first.
+
+    This first runs `find_zero_order_position`, whose behaviour is unchanged.
+    When that finds no single clear spot, it runs
+    `find_extended_zero_order_position`. The result says which search
+    supplied the position, so a caller can treat a few-pixel position
+    differently from a sub-pixel one.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        A 2-D image (already cropped to where the target can be).
+
+    Returns
+    -------
+    position : `ZeroOrderPosition` or `None`
+        The position and whether it came from the extended-target search, or
+        `None` when neither search finds a clear target.
+    """
+    point = find_zero_order_position(plane)
+    if point is not None:
+        return ZeroOrderPosition(point[0], point[1], is_extended_target=False)
+    extended = find_extended_zero_order_position(plane)
+    if extended is None:
+        return None
+    return ZeroOrderPosition(extended[0], extended[1], is_extended_target=True)
 
 
 def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT) -> np.ndarray:

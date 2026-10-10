@@ -12,7 +12,14 @@ the brightness it can also predict the peak at another exposure length.
 The measuring is split in two. `analyze_spectral_frame` works on a loaded
 array and is plain arithmetic, so it can be tested on made-up streaks.
 `measure_spectral_frame_file` reads a file, finds the zero order and the
-tilt with the same code the stacking stage uses, and calls it.
+tilt with the same code the stacking stage uses, and calls it. A caller who
+already knows where the zero order is can pass that position and skip the
+search. The search also handles extended targets such as globular clusters,
+and the result says which kind of search found the position.
+
+The saturation level comes from the camera's profile (a 14-bit camera clips
+near 16383 ADU, far below a 16-bit camera's 65535 ADU), and the result
+records where the level came from.
 """
 
 from typing import Any
@@ -23,8 +30,8 @@ from scipy import ndimage
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
 
 SATURATION_ADU = 65000
-"""Pixels at or above this value count as saturated (16-bit frames). The
-same level the raw frame check uses."""
+"""Pixels at or above this value count as saturated when no camera profile
+gives a level (16-bit frames). The same level the raw frame check uses."""
 
 ZERO_ORDER_PEAK_HALF_WINDOW_PX = 6
 """Half-size of the box around the zero order in which its peak is read."""
@@ -54,6 +61,50 @@ ZERO_ORDER_SATURATION_RADIUS_PX = 12
 _MAD_TO_SIGMA = 1.4826
 """A robust standard deviation is 1.4826 times the median absolute deviation
 for Gaussian noise."""
+
+
+def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
+    """Find the level at which this camera's pixels count as saturated.
+
+    The level is the camera profile's saturation threshold. A profile can
+    list a threshold above the value a clipped pixel actually reaches (its
+    clip ceiling), which would make saturation impossible to detect. In that
+    case the clip ceiling is used instead, and the source text says so. The
+    default `SATURATION_ADU` is used only when no profile can be read.
+
+    Parameters
+    ----------
+    camera_name : `str` or `None`
+        The camera that took the frame.
+
+    Returns
+    -------
+    threshold_adu : `float`
+        Pixels at or above this value count as saturated.
+    source : `str`
+        A sentence saying where the level came from.
+    """
+    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+
+    try:
+        profile = resolve_camera_profile(camera_name)
+    except AstrometricsError as error:
+        return float(
+            SATURATION_ADU
+        ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
+    threshold = float(profile.saturation_threshold_adu.value)
+    if profile.is_generic_fallback:
+        return (
+            threshold,
+            f"generic fallback camera profile, {threshold:g} ADU (camera {camera_name!r} is not listed)",
+        )
+    ceiling = float(profile.clip_ceiling_adu.value)
+    if not profile.saturation_threshold_can_be_reached:
+        return ceiling, (
+            f"{profile.camera_name} profile clip ceiling, {ceiling:g} ADU "
+            f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
+        )
+    return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"
 
 
 def _fwhm_across(profile: np.ndarray, centre: int) -> float | None:
@@ -98,6 +149,8 @@ def analyze_spectral_frame(
     length_px: float,
     exposure_seconds: float,
     predict_exposure_seconds: float | None = None,
+    saturation_threshold_adu: float = SATURATION_ADU,
+    saturation_source: str = f"default {SATURATION_ADU:g} ADU (no camera profile given)",
 ) -> dict[str, Any]:
     """Measure the zero order, the streak and the saturation of one frame.
 
@@ -120,13 +173,20 @@ def analyze_spectral_frame(
         The frame's exposure, used to predict brightness at another one.
     predict_exposure_seconds : `float`, optional
         If given, also predict the peaks at this exposure.
+    saturation_threshold_adu : `float`, optional
+        Pixels at or above this value count as saturated. See
+        `resolve_saturation_threshold`. Defaults to `SATURATION_ADU`.
+    saturation_source : `str`, optional
+        Where that level came from, copied into the result.
 
     Returns
     -------
     measurements : `dict` [`str`, `Any`]
         Sky level, zero-order peak, spectrum peak and width, the saturated
         pixel count, and the saturated patches with their distance along
-        the streak. Distances are positive toward the spectrum.
+        the streak. Distances are positive toward the spectrum. The
+        saturation level used and its source are in
+        ``saturation_threshold_adu`` and ``saturation_threshold_source``.
     """
     image = np.asarray(data, dtype=np.float64)
     along_image = image if vertical else image.T
@@ -137,7 +197,7 @@ def analyze_spectral_frame(
     sky = float(np.median(image))
     sigma = _MAD_TO_SIGMA * float(np.median(np.abs(image - sky)))
 
-    saturated = image >= SATURATION_ADU
+    saturated = image >= saturation_threshold_adu
     labels, count = ndimage.label(saturated)
     blobs = []
     zero_order_saturated = False
@@ -194,6 +254,8 @@ def analyze_spectral_frame(
 
     result: dict[str, Any] = {
         "sky_adu": sky,
+        "saturation_threshold_adu": float(saturation_threshold_adu),
+        "saturation_threshold_source": saturation_source,
         "zero_order_peak_adu": zero_order_peak,
         "zero_order_saturated": zero_order_saturated,
         "saturated_pixels": int(saturated.sum()),
@@ -210,9 +272,9 @@ def analyze_spectral_frame(
         result["predicted"] = {
             "exposure_seconds": predict_exposure_seconds,
             "zero_order_peak_adu": round(zero_order_predicted),
-            "zero_order_peak_is_lower_bound": zero_order_peak >= SATURATION_ADU,
+            "zero_order_peak_is_lower_bound": zero_order_peak >= saturation_threshold_adu,
             "spectrum_peak_adu": round(spectrum_predicted),
-            "spectrum_would_saturate": spectrum_predicted >= SATURATION_ADU,
+            "spectrum_would_saturate": spectrum_predicted >= saturation_threshold_adu,
         }
     return result
 
@@ -249,12 +311,17 @@ def measure_spectral_frame_file(
     exposure_seconds: float,
     geometry: dict[str, Any],
     predict_exposure_seconds: float | None = None,
+    zero_order_row_column: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """Read one raw spectrum frame and measure it.
 
     The zero-order star and the streak's tilt are found with the same code
-    the stacking stage uses (`find_zero_order_position` and
-    `measure_trail_angle_degrees`), so the numbers agree with it.
+    the stacking stage uses (`locate_zero_order`, which tries
+    `find_zero_order_position` first, and `measure_trail_angle_degrees`), so
+    the numbers agree with it. A target that is a broad glow rather than a
+    point, such as a globular cluster, is found by the extended-target
+    search, and ``zero_order_source`` says so. The saturation level comes
+    from the camera's profile (see `resolve_saturation_threshold`).
 
     Parameters
     ----------
@@ -268,38 +335,54 @@ def measure_spectral_frame_file(
         From `load_dispersion_geometry`.
     predict_exposure_seconds : `float`, optional
         An exposure to predict the peaks at.
+    zero_order_row_column : `tuple` [`float`, `float`], optional
+        The zero order's (row, column), when the caller already knows it.
+        The search is then skipped, which is the way to measure a frame whose
+        target the search cannot find.
 
     Returns
     -------
     measurements : `dict` [`str`, `Any`]
         See `analyze_spectral_frame`, plus ``zero_order_xy``,
-        ``tilt_degrees`` and ``trail_contrast``.
+        ``zero_order_source`` (``"given"``, ``"point source"`` or
+        ``"extended target"``), ``tilt_degrees`` and ``trail_contrast``.
 
     Raises
     ------
     ProcessingError
-        No single clear zero-order star is near the centre of the frame.
+        No clear zero-order target is near the centre of the frame, and no
+        position was given.
     """
     from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
-    from astrometricslib.pipelines.stacking.processing.group_alignment import find_zero_order_position
+    from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
     from astrometricslib.pipelines.stacking.processing.group_derotation import measure_trail_angle_degrees
 
     data = np.asarray(collapse_to_2d(np.asarray(read_data(path), dtype=np.float64)))
-    position = find_zero_order_position(data)
-    if position is None:
-        raise ProcessingError(
-            "No single clear zero-order star near the centre of the frame.", details={"path": path}
-        )
+    if zero_order_row_column is not None:
+        position = (float(zero_order_row_column[0]), float(zero_order_row_column[1]))
+        zero_order_source = "given"
+    else:
+        found = locate_zero_order(data)
+        if found is None:
+            raise ProcessingError(
+                "No single clear zero-order star near the centre of the frame.", details={"path": path}
+            )
+        position = found.row_column
+        zero_order_source = "extended target" if found.is_extended_target else "point source"
+    threshold_adu, threshold_source = resolve_saturation_threshold(camera_name)
     measured = analyze_spectral_frame(
         data,
         position,
         exposure_seconds=exposure_seconds,
         predict_exposure_seconds=predict_exposure_seconds,
+        saturation_threshold_adu=threshold_adu,
+        saturation_source=threshold_source,
         **geometry,
     )
     tilt, contrast = measure_trail_angle_degrees(path, (position[1], position[0]), camera_name)
     return {
         "zero_order_xy": [round(position[1], 1), round(position[0], 1)],
+        "zero_order_source": zero_order_source,
         "tilt_degrees": round(tilt, 3) if contrast > 0 else None,
         "trail_contrast": round(contrast, 1),
         **measured,
@@ -388,6 +471,7 @@ def check_spectral_frames(
     exposure_seconds: float | None,
     predict_exposure_seconds: float | None,
     limit: int,
+    zero_order_row_column: tuple[float, float] | None = None,
 ) -> Any:
     """Measure a target's raw spectrum frames and summarize where they clip.
 
@@ -407,6 +491,10 @@ def check_spectral_frames(
         An exposure to predict the peaks at, in seconds.
     limit : `int`
         How many frames to measure.
+    zero_order_row_column : `tuple` [`float`, `float`], optional
+        The zero order's (row, column), when the caller knows it. It is used
+        for every frame, so it suits frames of one target taken without
+        moving the mount, and it skips the search.
 
     Returns
     -------
@@ -458,6 +546,7 @@ def check_spectral_frames(
                     row["exposure_seconds"],
                     geometry_by_camera[frame.camera],
                     predict_exposure_seconds,
+                    zero_order_row_column,
                 )
             )
         except (OSError, ValueError, AstrometricsError) as error:
@@ -469,5 +558,8 @@ def check_spectral_frames(
         frames_measured=len(rows),
         summary=summarize_spectral_frames(rows, MINIMUM_TRAIL_CONTRAST_SIGMA),
         frames=rows,
-        note="Nothing was saved. Peaks above 65,000 ADU are lower bounds; predictions scale linearly.",
+        note=(
+            "Nothing was saved. Peaks at or above the saturation level are lower bounds; "
+            "each row gives its level and where it came from. Predictions scale linearly."
+        ),
     )

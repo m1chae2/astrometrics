@@ -15,6 +15,23 @@ Alignment accuracy matters most here. On the groups measured, these steps place 
 
 Pixel rejection when Siril combines the frames is set before this step runs. The limits come from `rejection_bounds` in `utilities/rejection_thresholds.py`, and the stacking README ("Pixel rejection limits") describes them and the measurements behind them.
 
+## Finding the zero-order target
+
+The zero order is the undispersed image of the target in a slitless spectrum frame. Three functions in `group_alignment.py` find it. Each returns a position as (row, column), in pixels, or `None` when it finds no clear target.
+
+1. `find_zero_order_position` looks for a point source. It smooths the image by 2 pixels and takes the brightest spot within 150 pixels of the image centre. It accepts the spot only when no spot more than 40 pixels away is brighter than half of it. The position is good to a fraction of a pixel. The stack aligner and the trail-tilt measurement use this function, and its behaviour does not change.
+2. `find_extended_zero_order_position` looks for a broad glow, such as a globular cluster, which has no single bright spot. It follows these steps:
+   - It averages the image in 4 by 4 pixel blocks and subtracts the sky (the median of the blocks).
+   - It smooths with a Gaussian of 25 pixels.
+   - It takes the brightest local maximum within 150 pixels of the image centre. A local maximum is a pixel no lower than any pixel within 50 pixels of it.
+   - It compares that peak with the next brightest local maximum within 300 pixels of the centre, and accepts the peak only when the rival is at most one third of its height.
+   - It returns the brightness-weighted centre of the smoothed pixels that are at least half the peak height.
+3. `locate_zero_order` runs function 1 and, if that returns `None`, function 2. It returns a `ZeroOrderPosition` with the row, the column and `is_extended_target`. `is_extended_target` is `True` when function 2 supplied the position. An extended-target position marks the middle of a glow tens of pixels wide, so it is good to a few pixels and no better. Callers that need sub-pixel accuracy, such as alignment on the star, should keep using function 1.
+
+**Quality values.** The rival fraction (rival height divided by peak height, both above the sky, no units) decides the second search. Near 0 means one clear glow. Near 1 means two similar glows, and the search returns `None`. On the six M 13 spectroscopy frames (five single frames and the stack), function 1 returned `None` because its rival spot reached 0.61 to 0.64 of the peak, against a limit of 0.5. Function 2 found the cluster on all six, with a rival fraction of 0.08 and positions within about 1 pixel of each other. They sat 3 to 4 pixels from the fixed cluster-core point (row 1493, column 1485) used by the golden tests, mostly along the columns. The limit of one third, the 25 pixel smoothing and the 300 pixel rival window were chosen from those frames alone. Other targets are not measured. Other peaks of similar height lie 380 pixels and farther from the centre on the M 13 frames, so a target more than about 150 pixels off the frame centre is not reliably found.
+
+`measure_spectral_frame_file` (in `pipelines/shared/quality/spectral_frame_check.py`) uses `locate_zero_order` and reports the result as `zero_order_source`: `point source` or `extended target`. A caller who knows where the target is can pass the position and skip the search, and the source is then `given`. For exact thresholds and edge cases, read the code.
+
 ## The brightness scale between exposure groups
 
 Siril leaves each group stack with its own overall brightness. Before the groups are averaged, `exposure_groups.py` divides each group's counts-per-second image by a gain (a single number) so that all groups read the same.

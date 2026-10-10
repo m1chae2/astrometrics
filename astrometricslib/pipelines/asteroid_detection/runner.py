@@ -136,7 +136,10 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             MovingObjectConfigLoader.load_moving_object_config()
         )
         for gate in asteroid_run_gates(
-            metrics, moving_object_config.min_frames_for_persistence, candidates_awaiting_recovery
+            metrics,
+            moving_object_config.min_frames_for_persistence,
+            candidates_awaiting_recovery,
+            moving_object_config.residual_rms_max_multiple,
         ):
             summary.record_gate(gate)
 

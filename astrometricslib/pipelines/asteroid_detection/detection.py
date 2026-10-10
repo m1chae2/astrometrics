@@ -7,6 +7,17 @@ through a series of tests to find the real asteroids:
 3. Is it moving in a straight line at a reasonable speed? (Linearity/Rate)
 
 This helps us ignore random noise (like cosmic rays) and broken camera pixels.
+
+Dots are only linked within one observing session (one observing night, as
+named by `observing_night_id`). Pictures from different nights are never
+chained together: with gaps of days, a search radius large enough to follow
+an asteroid would also link two unrelated stars. Joining a mover seen on
+different nights is a separate step that this module does not do.
+
+A straight-line track is judged by how far its dots miss the fitted line, in
+arcseconds, compared with the position error of one picture. R-squared is
+still reported, but it does not decide anything: it is close to 1 for any
+chain with a large displacement, however badly the dots scatter.
 """
 
 import logging
@@ -15,6 +26,7 @@ import statistics
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -26,6 +38,7 @@ from astrometricslib.models.moving_object import (
 )
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.pipelines.shared.angles import wrapped_ra_difference_deg
+from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +49,34 @@ _SECONDS_PER_HOUR = 3600.0
 # We use this to safely handle those cases.
 _LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON = 1e-12
 
-# A chain's match radius grows with the time since its last match
-# (rate_max_arcsec_per_hour * elapsed_hours), which would otherwise grow
-# without bound for a chain that hasn't matched in a long time (this
-# detector is run across a target's whole multi-night history). Capping it
-# at 1 degree -- matching the field-of-view query cap used elsewhere in this
-# subsystem (asteroid_detection/pipeline.py's _FIELD_QUERY_RADIUS_CAP_DEG)
-# -- keeps a stale chain from ever claiming a detection an entire field away.
-_MAX_CHAIN_MATCH_RADIUS_ARCSEC = 3600.0
+
+@dataclass
+class ResidualCriterionSummary:
+    """Counts of how the straight-line (residual) test went in one run.
+
+    Attributes
+    ----------
+    chains_tested : `int`
+        Chains that reached the straight-line test.
+    chains_rejected : `int`
+        Chains whose dots missed the fitted line by more than the allowed
+        multiple of the position error.
+    chains_non_monotonic : `int`
+        Chains that passed the other straight-line conditions but moved back
+        along their fitted direction by more than the position error.
+    assumed_error_detections : `int`
+        Dots, in the tested chains, whose picture had no measured position
+        error, so the assumed value from the settings was used.
+    worst_accepted_ratio : `float` or `None`
+        The largest ratio of RMS residual to position error among the
+        chains that were accepted, or `None` if none were.
+    """
+
+    chains_tested: int = 0
+    chains_rejected: int = 0
+    chains_non_monotonic: int = 0
+    assumed_error_detections: int = 0
+    worst_accepted_ratio: float | None = None
 
 
 def _circular_mean_degrees(values_deg: Iterable[float]) -> float:
@@ -113,7 +146,7 @@ def _tangent_plane_offset_arcsec(
 
 def _fit_linear_rate_arcsec_per_hour(
     timestamps: np.ndarray, tangent_plane_offsets_arcsec: np.ndarray
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Calculate how fast an object moves in a straight line, on one axis.
 
     Parameters
@@ -129,10 +162,17 @@ def _fit_linear_rate_arcsec_per_hour(
         How fast the object is moving along this axis.
     r_squared : `float`
         How perfectly straight the movement is (1.0 is a perfect straight
-        line).
+        line). It is near 1 for any chain with a large displacement, so it
+        is a diagnostic only.
+    residual_rms_arcsec : `float`
+        The root-mean-square (RMS) distance, in arcseconds, between the
+        positions and the fitted line. It is the square root of the mean of
+        the squared misses.
     """
-    rate_arcsec_per_second, intercept = np.polyfit(timestamps, tangent_plane_offsets_arcsec, 1)
-    fitted_values = rate_arcsec_per_second * timestamps + intercept
+    # Time is measured from its mean so the fit works with small numbers.
+    centred_timestamps = timestamps - np.mean(timestamps)
+    rate_arcsec_per_second, intercept = np.polyfit(centred_timestamps, tangent_plane_offsets_arcsec, 1)
+    fitted_values = rate_arcsec_per_second * centred_timestamps + intercept
 
     mean_offset_arcsec = np.mean(tangent_plane_offsets_arcsec)
     total_sum_of_squares = float(np.sum((tangent_plane_offsets_arcsec - mean_offset_arcsec) ** 2))
@@ -143,7 +183,63 @@ def _fit_linear_rate_arcsec_per_hour(
     else:
         r_squared = 1.0 - (residual_sum_of_squares / total_sum_of_squares)
 
-    return rate_arcsec_per_second * _SECONDS_PER_HOUR, r_squared
+    residual_rms_arcsec = math.sqrt(residual_sum_of_squares / len(tangent_plane_offsets_arcsec))
+    return float(rate_arcsec_per_second) * _SECONDS_PER_HOUR, r_squared, residual_rms_arcsec
+
+
+def _reverses_direction(
+    timestamps: np.ndarray,
+    right_ascension_offsets_arcsec: np.ndarray,
+    declination_offsets_arcsec: np.ndarray,
+    right_ascension_rate: float,
+    declination_rate: float,
+    errors_arcsec: np.ndarray,
+) -> bool:
+    """Say whether a chain moves back along its own fitted direction.
+
+    Each dot is projected onto the direction of the fitted motion (the unit
+    vector along the two fitted rates). A real mover only ever goes forward
+    along that direction, so its projections, taken in time order, never
+    decrease. A star whose measured centre flips between two points
+    alternates instead. A step back counts only when it is larger than the
+    combined position error of the two dots compared (the square root of the
+    sum of their squared errors), so noise on a slow mover does not trip it.
+    Every earlier dot is compared with every later one, not only neighbours,
+    so a slow drift of small steps cannot hide a larger reversal.
+
+    Parameters
+    ----------
+    timestamps : `numpy.ndarray`
+        The times of the dots.
+    right_ascension_offsets_arcsec : `numpy.ndarray`
+        Tangent-plane RA positions of the dots, in arcseconds.
+    declination_offsets_arcsec : `numpy.ndarray`
+        Tangent-plane Dec positions of the dots, in arcseconds.
+    right_ascension_rate, declination_rate : `float`
+        The fitted rates on the two axes. Only their ratio is used.
+    errors_arcsec : `numpy.ndarray`
+        The position error of each dot, in arcseconds.
+
+    Returns
+    -------
+    reverses : `bool`
+        True if any earlier dot lies ahead of a later dot, along the fitted
+        direction, by more than their combined position error.
+    """
+    total_rate = math.hypot(right_ascension_rate, declination_rate)
+    if total_rate < _LINEAR_FIT_TOTAL_SUM_OF_SQUARES_EPSILON:
+        return False
+    order = np.argsort(timestamps, kind="stable")
+    projections = (
+        right_ascension_offsets_arcsec[order] * right_ascension_rate
+        + declination_offsets_arcsec[order] * declination_rate
+    ) / total_rate
+    sorted_errors = errors_arcsec[order]
+    # step_back[i, j] is how far dot i sits ahead of the later dot j.
+    step_back = projections[:, None] - projections[None, :]
+    tolerance = np.hypot(sorted_errors[:, None], sorted_errors[None, :])
+    later_than = np.triu(np.ones_like(step_back, dtype=bool), k=1)
+    return bool(np.any(later_than & (step_back > tolerance)))
 
 
 class MovingObjectDetector:
@@ -161,11 +257,17 @@ class MovingObjectDetector:
 
     def __init__(self, config: MovingObjectConfig) -> None:
         self.config = config
+        # How the straight-line test went in the most recent run.
+        self.last_residual_summary = ResidualCriterionSummary()
 
     def detect_candidates(
         self, target_id: str, frame_detections: list[FrameDetection]
     ) -> list[AsteroidDetectionCandidate]:
         """Connect the dots between frames and run all the tests.
+
+        The dots are first split by observing night, and each night is
+        chained on its own. A mover seen on two nights comes out as two
+        separate candidates.
 
         Parameters
         ----------
@@ -181,14 +283,20 @@ class MovingObjectDetector:
             failed a test (like it didn't move fast enough), we still include
             it in this list with a note explaining why it failed.
         """
-        # Step 2: Chain detections that appear consistently across
-        # multiple frames (Recording test)
-        chains = self._chain_detections_by_persistence(frame_detections)
+        self.last_residual_summary = ResidualCriterionSummary()
+        detections_by_night: dict[str, list[FrameDetection]] = defaultdict(list)
+        for detection in frame_detections:
+            detections_by_night[observing_night_id(detection.timestamp)].append(detection)
+
         candidates = []
-        for chain in chains:
-            # Steps 3-4: Run reference-frame (stationary test) and
-            # rate/linearity checks
-            candidates.append(self._evaluate_chain(target_id, chain))
+        # Night names are ISO dates, so sorting them puts the nights in order.
+        for night in sorted(detections_by_night):
+            # Step 2: Chain detections that appear consistently across
+            # multiple frames of this night (Recording test)
+            for chain in self._chain_detections_by_persistence(detections_by_night[night]):
+                # Steps 3-4: Run reference-frame (stationary test) and
+                # rate/linearity checks
+                candidates.append(self._evaluate_chain(target_id, chain))
         return candidates
 
     def _evaluate_chain(self, target_id: str, chain: list[FrameDetection]) -> AsteroidDetectionCandidate:
@@ -241,12 +349,14 @@ class MovingObjectDetector:
         """Try to connect dots picture to picture by finding the closest match.
 
         It looks for a dot in the next picture that is close to where we'd
-        expect it to be based on how much time has passed.
+        expect it to be based on how much time has passed. The search
+        radius grows with that time but never beyond
+        `MovingObjectConfig.chain_match_radius_max_arcsec`.
 
         Parameters
         ----------
         frame_detections : `list` [`FrameDetection`]
-            All the dots found in all the pictures.
+            The dots found in the pictures of one observing session.
 
         Returns
         -------
@@ -287,11 +397,12 @@ class MovingObjectDetector:
                 last_detection = chain[-1]
                 elapsed_seconds = abs(unmatched_detections[0].timestamp - last_detection.timestamp)
                 elapsed_hours = elapsed_seconds / _SECONDS_PER_HOUR
-                # Capped so a chain that hasn't matched in a long time can't
-                # accumulate a match radius larger than the field of view.
+                # Capped at a few arcminutes so that a gap of hours inside
+                # one night cannot grow the radius to a whole field of view,
+                # where two unrelated stars would look like a mover.
                 match_radius_arcsec = min(
                     self.config.rate_max_arcsec_per_hour * elapsed_hours,
-                    _MAX_CHAIN_MATCH_RADIUS_ARCSEC,
+                    self.config.chain_match_radius_max_arcsec,
                 )
 
                 cos_dec = math.cos(math.radians(last_detection.declination_deg))
@@ -406,7 +517,23 @@ class MovingObjectDetector:
     ) -> tuple[MovingObjectTrack | None, CascadeStage]:
         """Check if the object moves in a straight line at a reasonable speed.
 
-        Asteroids don't usually zig-zag or move incredibly fast.
+        A straight line is fitted to the sky positions on each axis. The
+        chain passes when all of these hold:
+
+        * The total rate is inside the allowed range.
+        * On each axis, the RMS distance of the dots from the line is at
+          most `residual_rms_max_multiple` times the position error of one
+          picture. The error comes from each dot's
+          `astrometric_error_arcsec`, or the assumed value in the settings
+          when that is missing.
+        * The fitted line moves the object at least
+          `min_displacement_error_multiple` times that error between the
+          first and the last picture. Without this, a star that only
+          jitters by its position error would pass.
+        * The dots never move back along the fitted direction by more than
+          the position error (see `_reverses_direction`). A chain that
+          meets every other condition but fails this one is rejected as
+          `REJECTED_NON_MONOTONIC`.
 
         Parameters
         ----------
@@ -431,31 +558,24 @@ class MovingObjectDetector:
 
         # Project spherical RA/Dec onto a flat Cartesian plane (arcsec)
         # relative to the mean position
-        right_ascension_offsets_arcsec = np.array([
+        offsets = [
             _tangent_plane_offset_arcsec(
                 detection.right_ascension_deg,
                 detection.declination_deg,
                 mean_right_ascension_deg,
                 mean_declination_deg,
-            )[0]
+            )
             for detection in chain
-        ])
-        declination_offsets_arcsec = np.array([
-            _tangent_plane_offset_arcsec(
-                detection.right_ascension_deg,
-                detection.declination_deg,
-                mean_right_ascension_deg,
-                mean_declination_deg,
-            )[1]
-            for detection in chain
-        ])
+        ]
+        right_ascension_offsets_arcsec = np.array([offset[0] for offset in offsets])
+        declination_offsets_arcsec = np.array([offset[1] for offset in offsets])
 
         # Fit a straight line to the projected motion in both RA and
         # Dec axes against time
-        right_ascension_rate, right_ascension_r_squared = _fit_linear_rate_arcsec_per_hour(
-            timestamps, right_ascension_offsets_arcsec
+        right_ascension_rate, right_ascension_r_squared, right_ascension_rms_arcsec = (
+            _fit_linear_rate_arcsec_per_hour(timestamps, right_ascension_offsets_arcsec)
         )
-        declination_rate, declination_r_squared = _fit_linear_rate_arcsec_per_hour(
+        declination_rate, declination_r_squared, declination_rms_arcsec = _fit_linear_rate_arcsec_per_hour(
             timestamps, declination_offsets_arcsec
         )
         linear_fit_r_squared = min(right_ascension_r_squared, declination_r_squared)
@@ -467,17 +587,63 @@ class MovingObjectDetector:
             <= self.config.rate_max_arcsec_per_hour
         )
 
+        # The error of one position, combined over the dots of this chain as
+        # the square root of the mean of the squares.
+        assumed_error_detections = sum(1 for d in chain if d.astrometric_error_arcsec is None)
+        errors_arcsec = np.array([
+            d.astrometric_error_arcsec
+            if d.astrometric_error_arcsec is not None
+            else self.config.astrometric_error_default_arcsec
+            for d in chain
+        ])
+        astrometric_error_arcsec = float(np.sqrt(np.mean(errors_arcsec**2)))
+        residual_limit_arcsec = self.config.residual_rms_max_multiple * astrometric_error_arcsec
+        worst_rms_arcsec = max(right_ascension_rms_arcsec, declination_rms_arcsec)
+        residual_ok = worst_rms_arcsec <= residual_limit_arcsec
+
+        displacement_arcsec = total_rate_arcsec_per_hour * float(np.ptp(timestamps)) / _SECONDS_PER_HOUR
+        moves_enough = (
+            displacement_arcsec >= self.config.min_displacement_error_multiple * astrometric_error_arcsec
+        )
+
+        summary = self.last_residual_summary
+        summary.chains_tested += 1
+        summary.assumed_error_detections += assumed_error_detections
+        if not residual_ok:
+            summary.chains_rejected += 1
+
         # Reject the object if it's moving way too fast or too slow (like a
-        # satellite instead of an asteroid), or if it's zig-zagging randomly
-        # instead of moving in a straight line.
-        if linear_fit_r_squared < self.config.rate_linearity_r_squared_min or not rate_in_range:
+        # satellite instead of an asteroid), if its dots miss a straight
+        # line by more than the position error allows, or if it hardly
+        # moves compared with that error.
+        if not (rate_in_range and residual_ok and moves_enough):
             return None, CascadeStage.REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE
+        if _reverses_direction(
+            timestamps,
+            right_ascension_offsets_arcsec,
+            declination_offsets_arcsec,
+            right_ascension_rate,
+            declination_rate,
+            errors_arcsec,
+        ):
+            summary.chains_non_monotonic += 1
+            return None, CascadeStage.REJECTED_NON_MONOTONIC
+
+        if astrometric_error_arcsec > 0.0:
+            ratio = worst_rms_arcsec / astrometric_error_arcsec
+            if summary.worst_accepted_ratio is None or ratio > summary.worst_accepted_ratio:
+                summary.worst_accepted_ratio = ratio
 
         track = MovingObjectTrack(
             right_ascension_rate_arcsec_per_hour=right_ascension_rate,
             declination_rate_arcsec_per_hour=declination_rate,
             total_rate_arcsec_per_hour=total_rate_arcsec_per_hour,
             linear_fit_r_squared=linear_fit_r_squared,
+            residual_rms_right_ascension_arcsec=right_ascension_rms_arcsec,
+            residual_rms_declination_arcsec=declination_rms_arcsec,
+            astrometric_error_arcsec=astrometric_error_arcsec,
+            residual_limit_arcsec=residual_limit_arcsec,
+            astrometric_error_assumed=assumed_error_detections > 0,
             fit_start_timestamp=float(np.min(timestamps)),
             fit_end_timestamp=float(np.max(timestamps)),
         )

@@ -29,6 +29,11 @@ HEALTHY_METRICS = {
     "candidates_ephemeris_matched": 2,
     "ephemeris_queries_attempted": 1,
     "ephemeris_queries_failed": 0,
+    "residual_chains_tested": 3,
+    "residual_chains_rejected": 1,
+    "residual_chains_non_monotonic": 2,
+    "residual_assumed_error_detections": 0,
+    "residual_worst_accepted_ratio": 1.4,
 }
 
 
@@ -45,10 +50,10 @@ def gates_for(awaiting: int = 0, minimum_frames: int = 3, **changes: int) -> dic
 
 
 def test_a_healthy_run_passes_every_gate() -> None:
-    """Enough frames, known movers all matched: four passes."""
+    """Enough frames, movers matched, residuals measured: five passes."""
     gates = gates_for()
 
-    assert len(gates) == 4
+    assert len(gates) == 5
     assert {gate.status for gate in gates.values()} == {GateStatus.PASSED}
 
 
@@ -138,12 +143,14 @@ def test_the_pipeline_counts_a_failed_query_and_an_empty_field_differently(
     (tmp_path / "empty").mkdir()
     (tmp_path / "down").mkdir()
     _target, empty_field, _ = run_pipeline(tmp_path / "empty", mocker, return_value=None)
-    assert empty_field.last_run_metrics["ephemeris_queries_attempted"] == 1
+    # One question at the first detection and one at the last.
+    assert empty_field.last_run_metrics["ephemeris_queries_attempted"] == 2
     assert empty_field.last_run_metrics["ephemeris_queries_failed"] == 0
 
     _target, unreachable, _ = run_pipeline(
         tmp_path / "down", mocker, side_effect=RuntimeError("service error")
     )
+    # The first question failed, so the second was never sent.
     assert unreachable.last_run_metrics["ephemeris_queries_attempted"] == 1
     assert unreachable.last_run_metrics["ephemeris_queries_failed"] == 1
 
@@ -172,3 +179,35 @@ def test_the_real_validate_output_tells_an_empty_field_from_an_offline_database(
     assert summary.gate(rg.EPHEMERIS_GATE_NAME).status is expected_ephemeris
     assert any(expected_flagged_text in reason for reason in summary.flag_reasons)
     assert summary.flagged is True
+
+
+def test_residual_gate_is_not_checked_when_no_chain_reached_the_straight_line_test() -> None:
+    """With nothing judged, the gate says so instead of passing."""
+    gate = gates_for(residual_chains_tested=0)[rg.RESIDUAL_CRITERION_GATE_NAME]
+
+    assert gate.status is GateStatus.NOT_CHECKED
+    assert "no residual was judged" in gate.detail
+
+
+def test_residual_gate_goes_red_when_the_position_error_was_only_assumed() -> None:
+    """A verdict that rests on an unmeasured error fails the gate."""
+    gate = gates_for(residual_assumed_error_detections=4)[rg.RESIDUAL_CRITERION_GATE_NAME]
+
+    assert gate.status is GateStatus.FAILED
+    assert gate.measured_value == pytest.approx(4.0)
+    assert "assumed error" in gate.detail
+
+
+def test_residual_gate_passes_with_the_worst_accepted_ratio_and_the_limit() -> None:
+    """A measured error passes, and the gate quotes the ratio and the limit."""
+    gates = {
+        gate.name: gate
+        for gate in rg.asteroid_run_gates(HEALTHY_METRICS, 3, 0, residual_rms_max_multiple=2.5)
+    }
+    gate = gates[rg.RESIDUAL_CRITERION_GATE_NAME]
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(1.4)
+    assert gate.limit == pytest.approx(2.5)
+    assert "1 rejected" in gate.detail
+    assert "2 rejected for moving back" in gate.detail

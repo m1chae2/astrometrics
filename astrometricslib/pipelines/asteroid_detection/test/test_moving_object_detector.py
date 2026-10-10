@@ -59,10 +59,11 @@ def test_fit_linear_rate_arcsec_per_hour_recovers_known_rate() -> None:
     known_rate_arcsec_per_hour = 20.0
     offsets_arcsec = known_rate_arcsec_per_hour * (timestamps / 3600.0)
 
-    rate, r_squared = _fit_linear_rate_arcsec_per_hour(timestamps, offsets_arcsec)
+    rate, r_squared, residual_rms_arcsec = _fit_linear_rate_arcsec_per_hour(timestamps, offsets_arcsec)
 
     assert rate == pytest.approx(known_rate_arcsec_per_hour)
     assert r_squared == pytest.approx(1.0)
+    assert residual_rms_arcsec == pytest.approx(0.0, abs=1e-6)
 
 
 def test_detect_candidates_rejects_single_frame_apparition_as_cosmic_ray() -> None:
@@ -165,8 +166,12 @@ def test_detect_candidates_links_a_track_near_the_celestial_pole() -> None:
 
 
 def test_detect_candidates_confirms_a_clean_linear_track() -> None:
-    """Test that a perfectly normal moving asteroid passes all the tests."""
-    detector = MovingObjectDetector(MovingObjectConfig())
+    """Test that a perfectly normal moving asteroid passes all the tests.
+
+    The test states a position error of 2 arcsec, so that 11 arcsec of motion
+    in half an hour is a clear move compared with it.
+    """
+    detector = MovingObjectDetector(MovingObjectConfig(astrometric_error_default_arcsec=2.0))
     reference_right_ascension_deg = 150.0
     reference_declination_deg = 0.0
     right_ascension_rate_arcsec_per_hour = 20.0

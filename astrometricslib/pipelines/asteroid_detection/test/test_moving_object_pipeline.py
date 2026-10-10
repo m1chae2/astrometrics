@@ -138,17 +138,32 @@ def test_process_confirms_a_moving_source_with_no_ephemeris_match(
 
 
 def test_process_matches_a_moving_source_against_a_known_body(tmp_path: Path, mocker: MockerFixture) -> None:
-    """Test that we match a moving object to an asteroid in the database."""
-    field_table = QTable({
-        "Number": [-1],
-        "Name": ["2003 XY99"],
-        "RA": [150.002] * u.deg,
-        "DEC": [-0.003] * u.deg,
-        "V": [15.0],
-        "RA_rate": [-54.0] * (u.arcsec / u.hour),
-        "DEC_rate": [32.0] * (u.arcsec / u.hour),
-    })
-    mocker.patch("astroquery.imcce.Skybot.cone_search", return_value=field_table)
+    """Test that we match a moving object to an asteroid in the database.
+
+    The fake service moves the known asteroid along with the dot, the way
+    the real one gives a different position for each moment asked about.
+    """
+
+    def moving_asteroid(coordinate: object, radius: object, epoch: object, **keywords: object) -> QTable:
+        """Place a known asteroid on the dot's path at the asked moment.
+
+        Returns
+        -------
+        table : `astropy.table.QTable`
+            One asteroid, 2 arcsec off the dot's true position.
+        """
+        hours = float(epoch.unix) / 3600.0
+        return QTable({
+            "Number": [-1],
+            "Name": ["2003 XY99"],
+            "RA": [150.006 - 54.0 * hours / 3600.0 + 2.0 / 3600.0] * u.deg,
+            "DEC": [-0.006 + 32.4 * hours / 3600.0] * u.deg,
+            "V": [15.0],
+            "RA_rate": [-54.0] * (u.arcsec / u.hour),
+            "DEC_rate": [32.0] * (u.arcsec / u.hour),
+        })
+
+    mocker.patch("astroquery.imcce.Skybot.cone_search", side_effect=moving_asteroid)
 
     target = _build_moving_target(tmp_path)
     pipeline = AsteroidDetectionPipeline(MovingObjectConfig())
@@ -159,7 +174,10 @@ def test_process_matches_a_moving_source_against_a_known_body(tmp_path: Path, mo
     assert candidates[0].cascade_stage == CascadeStage.EPHEMERIS_MATCHED
     assert candidates[0].ephemeris_match is not None
     assert candidates[0].ephemeris_match.designation == "2003 XY99"
+    assert candidates[0].ephemeris_match.first_detection_separation_arcsec is not None
+    assert candidates[0].ephemeris_match.last_detection_separation_arcsec is not None
     assert pipeline.last_run_metrics["candidates_ephemeris_matched"] == 1
+    assert pipeline.last_run_metrics["ephemeris_queries_attempted"] == 2
 
 
 def test_process_excludes_frames_missing_pointing_metadata(tmp_path: Path, mocker: MockerFixture) -> None:

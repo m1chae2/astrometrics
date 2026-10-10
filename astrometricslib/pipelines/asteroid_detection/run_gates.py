@@ -5,7 +5,8 @@ straight line across them, then asks a database of known asteroids (SkyBoT)
 whether each mover is already known. A run that finds nothing says very
 little unless the search could actually have found something, so the checks
 here ask: were enough frames searched, did every frame have pointing data,
-could the known-asteroid database be asked, and did any mover stay unknown.
+could the known-asteroid database be asked, did any mover stay unknown, and
+were the straight-line tracks judged against a measured position error.
 
 Each check is returned as a `GateResult`. A check that could not look (too
 few frames to form a track, no candidate to look up) is ``not_checked``; it
@@ -20,16 +21,20 @@ SEARCH_FRAMES_GATE_NAME = "search_frames"
 POINTING_METADATA_GATE_NAME = "pointing_metadata"
 EPHEMERIS_GATE_NAME = "ephemeris_cross_match"
 UNMATCHED_MOVERS_GATE_NAME = "unmatched_movers"
+RESIDUAL_CRITERION_GATE_NAME = "track_residuals"
 
 
 def asteroid_run_gates(
-    metrics: Mapping[str, int], minimum_frames_for_a_track: int, candidates_awaiting_recovery: int
+    metrics: Mapping[str, float],
+    minimum_frames_for_a_track: int,
+    candidates_awaiting_recovery: int,
+    residual_rms_max_multiple: float = 2.0,
 ) -> list[GateResult]:
     """Build the gates for one asteroid-detection run.
 
     Parameters
     ----------
-    metrics : `Mapping` [`str`, `int`]
+    metrics : `Mapping` [`str`, `float`]
         The pipeline's counts for the run (its ``last_run_metrics``).
     minimum_frames_for_a_track : `int`
         The fewest frames a moving object must appear in to count (the
@@ -37,11 +42,15 @@ def asteroid_run_gates(
     candidates_awaiting_recovery : `int`
         Movers confirmed as moving in a straight line but not matched to a
         known asteroid.
+    residual_rms_max_multiple : `float`, optional
+        How many times the position error a track's RMS residual may be
+        (the ``residual_rms_max_multiple`` setting). Quoted as the limit of
+        the ``track_residuals`` gate.
 
     Returns
     -------
     gates : `list` [`GateResult`]
-        Four gates, in a fixed order.
+        Five gates, in a fixed order.
     """
     gates: list[GateResult] = []
     searched = int(metrics.get("frames_with_wcs_estimate", 0))
@@ -82,7 +91,7 @@ def asteroid_run_gates(
     attempted = int(metrics.get("ephemeris_queries_attempted", 0))
     failed = int(metrics.get("ephemeris_queries_failed", 0))
     matched = int(metrics.get("candidates_ephemeris_matched", 0))
-    ephemeris_source = "one SkyBoT cone search of the field"
+    ephemeris_source = "SkyBoT cone searches at the first and last detection of each mover"
     if confirmed == 0:
         gates.append(
             unchecked_gate(EPHEMERIS_GATE_NAME, "no mover reached the known-asteroid check", ephemeris_source)
@@ -128,4 +137,60 @@ def asteroid_run_gates(
         )
     else:
         gates.append(passed_gate(UNMATCHED_MOVERS_GATE_NAME, 0.0, 0.0))
+
+    gates.append(_residual_gate(metrics, residual_rms_max_multiple))
     return gates
+
+
+def _residual_gate(metrics: Mapping[str, float], residual_rms_max_multiple: float) -> GateResult:
+    """Build the gate for the straight-line (residual) test.
+
+    The test accepts a track when its dots miss the fitted line by no more
+    than a multiple of the position error of one picture. That error is
+    measured per picture from the reference stars. When it could not be
+    measured, an assumed value is used instead, and the verdict then rests
+    on a number nobody measured.
+
+    Parameters
+    ----------
+    metrics : `Mapping` [`str`, `float`]
+        The pipeline's counts for the run.
+    residual_rms_max_multiple : `float`
+        The allowed multiple, quoted as the gate's limit.
+
+    Returns
+    -------
+    gate : `GateResult`
+        ``not_checked`` when no chain reached the test; ``failed`` when any
+        tested chain used an assumed position error; otherwise ``passed``,
+        with the largest accepted ratio as the measured value. The detail
+        line also counts the chains rejected for reversing direction.
+    """
+    tested = int(metrics.get("residual_chains_tested", 0))
+    rejected = int(metrics.get("residual_chains_rejected", 0))
+    reversing = int(metrics.get("residual_chains_non_monotonic", 0))
+    assumed = int(metrics.get("residual_assumed_error_detections", 0))
+    limit_source = "the residual_rms_max_multiple setting, times the position error of one picture"
+    if tested == 0:
+        return unchecked_gate(
+            RESIDUAL_CRITERION_GATE_NAME,
+            "no chain reached the straight-line test, so no residual was judged",
+            limit_source,
+        )
+    if assumed > 0:
+        return failed_gate(
+            RESIDUAL_CRITERION_GATE_NAME,
+            f"{assumed} detection(s) in the tested chains had no measured position error, "
+            "so the assumed error from the settings was used for them",
+            float(assumed),
+            0.0,
+            limit_source,
+        )
+    return passed_gate(
+        RESIDUAL_CRITERION_GATE_NAME,
+        float(metrics.get("residual_worst_accepted_ratio", 0.0)),
+        residual_rms_max_multiple,
+        limit_source,
+        f"{tested} chain(s) tested, {rejected} rejected for missing a straight line by more than the limit, "
+        f"{reversing} rejected for moving back along their direction by more than the position error",
+    )

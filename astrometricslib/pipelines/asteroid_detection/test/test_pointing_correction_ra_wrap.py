@@ -85,7 +85,7 @@ def test_pointing_correction_recovers_known_offset_across_ra_zero(
         assert any(ra > 359.0 for ra, _ in detections)
 
     tree, reference_ra, reference_dec, reference_cos_dec = _build_reference_star_tree(reference_positions)
-    ra_offset_deg, dec_offset_deg = _estimate_bulk_pointing_correction_deg(
+    ra_offset_deg, dec_offset_deg, _position_error = _estimate_bulk_pointing_correction_deg(
         detections, tree, reference_ra, reference_dec, reference_cos_dec
     )
 

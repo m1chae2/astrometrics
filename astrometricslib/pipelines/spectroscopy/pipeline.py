@@ -1243,7 +1243,10 @@ class SpectroscopyPipeline:
         result : `dict`
             A dictionary containing the color data (wavelengths and
             intensities)
-            and other math details about the extraction.
+            and other math details about the extraction. The key
+            `sample_distances_px` holds the distance of each kept sample
+            from the zero order, in pixels, measured along the dispersion
+            direction. It has one value per wavelength.
 
         Raises
         ------
@@ -1278,11 +1281,11 @@ class SpectroscopyPipeline:
         is_traced = self.config.extraction_method == "traced"
 
         if use_flare_mask:
-            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
+            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px, sample_distances_px = (
                 self._extract_via_flare_mask(image, pos, detected_angle, is_traced, extractor, radius)
             )
         else:
-            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px = (
+            wavelengths, intensities, target_pos, trail_centerline_px, trail_width_px, sample_distances_px = (
                 self._extract_via_dispersion_line(image, pos, is_traced, extractor)
             )
 
@@ -1298,10 +1301,11 @@ class SpectroscopyPipeline:
                 "The instrument model asked for a spectrum of zero length; check the camera config."
             )
         requested_wavelength_range_nm = [float(np.nanmin(wavelengths)), float(np.nanmax(wavelengths))]
-        # The geometry the plain dispersion-line extraction used, kept so the
-        # neighbour-wing stage can place every sample on the image again. The
-        # flare-mask extraction reads a different path and records none.
-        sample_distances_px = self.instrument.zero_order_offset_px + np.arange(wavelengths.size, dtype=float)
+        # `sample_distances_px` holds the distance of every sample from the
+        # zero order, measured along the dispersion direction. The sample
+        # arrays and the trail arrays are trimmed below with the same mask, so
+        # a distance stays attached to its own sample.
+        sample_distances_px = np.asarray(sample_distances_px, dtype=float)
         usable = keep_usable_samples(
             wavelengths,
             intensities,
@@ -1334,6 +1338,13 @@ class SpectroscopyPipeline:
             "trail_width_px": trail_width_px,
             "valid_fraction": valid_fraction,
             "requested_wavelength_range_nm": requested_wavelength_range_nm,
+            # Both extraction paths record this, so the calibration tuner can
+            # place each sample on the physical model after leading samples
+            # were dropped.
+            "sample_distances_px": sample_distances_px.tolist(),
+            # The neighbour-wing stage needs the plain dispersion-line
+            # geometry to place every sample on the image again. The
+            # flare-mask extraction reads a different path and records none.
             **(
                 {}
                 if use_flare_mask
@@ -1356,7 +1367,7 @@ class SpectroscopyPipeline:
         is_traced: bool,
         extractor: SpectrumExtractor,
         extraction_radius: int,
-    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
+    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None, np.ndarray]:
         """Extract a spectrum using the flare-masking method.
 
         Parameters
@@ -1384,6 +1395,13 @@ class SpectroscopyPipeline:
         trail_centerline_px, trail_width_px : `list` or `None`
             The traced extraction's per-column centerline and width, or
             both `None` when using the untraced extraction method.
+        sample_distances_px : `numpy.ndarray`
+            The distance of each sample from the zero order, in pixels,
+            measured along the dispersion direction. The extractor steps one
+            pixel along the dispersion axis per sample, and a tilted trail
+            is longer than that by a factor of 1 / cos(tilt). The distance
+            of a sample is therefore its offset from the anchor along the
+            axis, divided by the cosine of the detected tilt.
         """
         flare_offset_pixels = (
             self.config.dispersion_start_px if self.config.dispersion_start_px is not None else 120.0
@@ -1434,11 +1452,25 @@ class SpectroscopyPipeline:
                 angle_degrees=flare_mask_angle,
             )
 
-        # Calibrate wavelengths relative to the zero-order anchor
-        # starting from flare_offset_pixels
-        wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, flare_offset_pixels)
+        # The extractor starts at the whole pixel nearest to
+        # `anchor + flare_offset_pixels`, so the first sample is not exactly
+        # `flare_offset_pixels` from the anchor. Take each sample's real
+        # distance from the anchor along the dispersion direction, and
+        # calibrate from that distance.
+        anchor_along_axis = anchor_x if self.config.dispersion_orientation == "horizontal" else anchor_y
+        first_step = round(anchor_along_axis + flare_offset_pixels)
+        axis_offsets = first_step + np.arange(len(spectrum_1d), dtype=float) - anchor_along_axis
+        sample_distances_px = axis_offsets / np.cos(np.radians(detected_angle))
+        wavelengths, intensities = self.calibrator.calibrate_at_distances(spectrum_1d, sample_distances_px)
 
-        return wavelengths, intensities, (anchor_x, anchor_y), trail_centerline_px, trail_width_px
+        return (
+            wavelengths,
+            intensities,
+            (anchor_x, anchor_y),
+            trail_centerline_px,
+            trail_width_px,
+            sample_distances_px,
+        )
 
     def _extract_via_dispersion_line(
         self,
@@ -1446,7 +1478,7 @@ class SpectroscopyPipeline:
         pos: tuple[float, float],
         is_traced: bool,
         extractor: SpectrumExtractor,
-    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None]:
+    ) -> tuple[np.ndarray, np.ndarray, tuple[float, float], list | None, list | None, np.ndarray]:
         """Extract a spectrum along the instrument's default dispersion line.
 
         Parameters
@@ -1469,6 +1501,11 @@ class SpectroscopyPipeline:
         trail_centerline_px, trail_width_px : `list` or `None`
             The traced extraction's per-column centerline and width, or
             both `None` when using the untraced extraction method.
+        sample_distances_px : `numpy.ndarray`
+            The distance of each sample from the zero order, in pixels,
+            measured along the dispersion direction. The extractor steps one
+            pixel along the dispersion vector per sample, so this is
+            `offset_px + i` for sample `i`.
         """
         # Default line extraction workflow
         vector = self.instrument.get_dispersion_vector()
@@ -1498,8 +1535,9 @@ class SpectroscopyPipeline:
 
         # We start from offset_px relative to zero order
         wavelengths, intensities = self.calibrator.calibrate(spectrum_1d, offset_px)
+        sample_distances_px = offset_px + np.arange(len(spectrum_1d), dtype=float)
 
-        return wavelengths, intensities, pos, trail_centerline_px, trail_width_px
+        return wavelengths, intensities, pos, trail_centerline_px, trail_width_px, sample_distances_px
 
     def _measure_zero_order_saturation(
         self, image: AstrometricsImage, target_pos: tuple[float, float]

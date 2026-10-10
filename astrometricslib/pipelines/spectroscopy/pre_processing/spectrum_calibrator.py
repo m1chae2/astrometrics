@@ -55,12 +55,34 @@ class SpectrumCalibrator:
         intensities : `np.ndarray`
             The original brightness values, untouched.
         """
-        wavelengths = []
-        for i in range(len(pixels)):
-            # Calculate wavelength for each pixel
-            wl = self.instrument.wavelength_at_pixel_offset(offset_px + i)
-            wavelengths.append(wl)
+        return self.calibrate_at_distances(pixels, offset_px + np.arange(len(pixels), dtype=float))
 
+    def calibrate_at_distances(
+        self, pixels: np.ndarray, distances_px: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Figure out what color each sample represents, given its distance.
+
+        Use this when the samples are not exactly one pixel apart, for
+        example when the first sample sits a fraction of a pixel past the
+        requested start.
+
+        Parameters
+        ----------
+        pixels : `np.ndarray`
+            The brightness value of each sample.
+        distances_px : `np.ndarray`
+            The distance of each sample from the main star, in pixels,
+            measured along the dispersion direction. It has one value per
+            sample.
+
+        Returns
+        -------
+        wavelengths : `np.ndarray`
+            The calculated color (in nm) for each sample.
+        intensities : `np.ndarray`
+            The original brightness values, untouched.
+        """
+        wavelengths = [self.instrument.wavelength_at_pixel_offset(float(d)) for d in distances_px]
         return np.array(wavelengths), pixels
 
     def apply_smoothing(self, intensities: np.ndarray, window: int = 5) -> np.ndarray:

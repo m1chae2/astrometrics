@@ -49,6 +49,40 @@ session does not lose the frames already processed.
   above. They implement the "how this runs in practice" section, not a
   fourth stage.
 
+## Calibration tuning
+
+`utilities/calibration_tuner.py` fits the one unknown in the instrument
+model, the distance from the grating to the sensor. It reads a frame of a
+star with known absorption lines (Vega, for example) and works in these
+steps:
+
+1. Extract the star's spectrum with the normal pipeline and smooth it.
+2. Find the dark valleys (absorption lines) in the smoothed spectrum.
+3. Look up where each valley sits. The tuner reads the position from
+   `sample_distances_px`, the distance from the zero-order star, in pixels,
+   that the pipeline recorded for each kept sample. It does not count
+   samples from a fixed start, because the pipeline drops leading samples
+   that are off the image or shorter than the camera's shortest wavelength.
+   Counting from a fixed start would shift every valley by the number of
+   dropped samples and bias the fitted distance.
+4. Try every group of three valleys against the Balmer lines H-delta,
+   H-gamma and H-beta (hydrogen lines at 410.17, 434.05 and 486.13 nm). For
+   each group, solve for the grating distance that makes the grating
+   equation, `wavelength = d * sin(arctan(x / L))`, match the three
+   wavelengths. `d` is the spacing between grating lines, `x` is the
+   position on the sensor, and `L` is the grating distance.
+5. Keep the group with the smallest RMS error (the root of the mean squared
+   wavelength error, in nanometers). The tuner raises an error when the best
+   RMS error is above 10 nm. The report lists each line's pixel offset,
+   calibrated wavelength and deviation in nanometers.
+6. Save the fitted distance and the start of the spectrum to the camera's
+   configuration, together with the flare-mask and extraction-length checks.
+
+`utilities/test/test_calibration_tuner_sample_distances.py` builds frames
+with the Balmer lines at known positions and checks that the tuner recovers
+those positions to 0.5 pixel and the grating distance to 1 percent, with and
+without leading samples dropped. For exact behavior, read the code.
+
 ## The gate record
 
 Besides each star's own quality records, a run keeps one record per run-level check in the summary's `gates` (built in `post_processing/run_gates.py`, by both `runner.py` and `batch.py`). Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. The tests in `test/post_processing/test_run_gates.py` give every gate input that must fail it.

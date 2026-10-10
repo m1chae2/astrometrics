@@ -8,6 +8,7 @@ rainbow starts. Then, it saves those numbers for next time.
 
 import itertools
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -108,7 +109,9 @@ class SpectroscopyCalibrationTuner:
         star_pos = self._resolve_calibration_star_position(image_path, star_pos)
         logger.info("Target star identified at position: %s", star_pos)
 
-        detected_angle, smoothed = self._extract_smoothed_spectrum(spec_pipeline, image, star_pos)
+        detected_angle, smoothed, sample_distances_px = self._extract_smoothed_spectrum(
+            spec_pipeline, image, star_pos
+        )
 
         dips = self._detect_absorption_dips(smoothed)
         logger.info("Detected %s candidate absorption dips at indices: %s", len(dips), dips)
@@ -120,10 +123,9 @@ class SpectroscopyCalibrationTuner:
             BALMER_SERIES_NM["H-gamma"],
             BALMER_SERIES_NM["H-beta"],
         ])
-        current_start_px = float(spec_pipeline.instrument.zero_order_offset_px)
 
         best_rms, best_grating_distance_mm, best_combo = self._fit_grating_distance(
-            dips, current_start_px, spec_pipeline, target_wls
+            dips, sample_distances_px, spec_pipeline, target_wls
         )
 
         # Now that we know the distance (L), calculate exactly where the
@@ -148,7 +150,7 @@ class SpectroscopyCalibrationTuner:
             tuned_x0,
             best_rms,
             detected_angle,
-            current_start_px,
+            sample_distances_px,
             best_combo,
             target_wls,
             spec_pipeline,
@@ -349,8 +351,13 @@ class SpectroscopyCalibrationTuner:
     @staticmethod
     def _extract_smoothed_spectrum(
         spec_pipeline: SpectroscopyPipeline, image: AstrometricsImage, star_pos: tuple[float, float]
-    ) -> tuple[float, np.ndarray]:
+    ) -> tuple[float, np.ndarray, np.ndarray]:
         """Extract the star's spectrum and smooth it to suppress pixel noise.
+
+        The pipeline drops samples that are off the image or outside the
+        camera's wavelength range, so the first kept sample is often not
+        the first sample requested. The distance array returned here says
+        where every kept sample really lies.
 
         Returns
         -------
@@ -358,17 +365,22 @@ class SpectroscopyCalibrationTuner:
             The spectrum's detected rotation angle, in degrees.
         smoothed : `numpy.ndarray`
             The intensity profile, smoothed with a window of 5.
+        sample_distances_px : `numpy.ndarray`
+            The distance of each sample from the zero order, in pixels,
+            measured along the dispersion direction. It has one value per
+            entry of `smoothed`.
         """
         # auto_detect_angle is enabled to handle camera rotation tilts
         result = spec_pipeline._process_single_star(image, star_pos, auto_detect_angle=True)
         detected_angle = float(result["detected_angle"])
 
         intensities = np.array(result["intensities"])
+        sample_distances_px = np.asarray(result["sample_distances_px"], dtype=float)
 
         # Apply smoothing window of size 5 to suppress pixel noise and
         # highlight broad absorption bands
         smoothed = spec_pipeline.calibrator.apply_smoothing(intensities, window=5)
-        return detected_angle, smoothed
+        return detected_angle, smoothed, sample_distances_px
 
     @staticmethod
     def _detect_absorption_dips(smoothed: np.ndarray) -> list[int]:
@@ -426,7 +438,7 @@ class SpectroscopyCalibrationTuner:
     @staticmethod
     def _fit_grating_distance(
         dips: list[int],
-        current_start_px: float,
+        sample_distances_px: np.ndarray,
         spec_pipeline: SpectroscopyPipeline,
         target_wls: np.ndarray,
     ) -> tuple[float, float, tuple[int, ...]]:
@@ -435,6 +447,26 @@ class SpectroscopyCalibrationTuner:
         Tests every combination of 3 valleys against the known target
         wavelengths. For each combination, runs a math solver to
         figure out what grating distance (L) makes the lines fit best.
+
+        A dip index counts samples in the extracted spectrum, and the
+        pipeline may have dropped leading samples. So the position of a
+        dip comes from the recorded distance of its sample, never from
+        the index plus a fixed start.
+
+        Parameters
+        ----------
+        dips : `list` [`int`]
+            The indices of the candidate absorption dips in the extracted
+            spectrum.
+        sample_distances_px : `numpy.ndarray`
+            The distance of each sample from the zero order, in pixels,
+            measured along the dispersion direction. It has one value per
+            sample, so `sample_distances_px[i]` is the position of dip `i`.
+        spec_pipeline : `SpectroscopyPipeline`
+            The pipeline that holds the grating and camera settings.
+        target_wls : `numpy.ndarray`
+            The three reference wavelengths, in nanometers, in order of
+            increasing wavelength.
 
         Returns
         -------
@@ -455,25 +487,10 @@ class SpectroscopyCalibrationTuner:
         best_combo = None
 
         for combo in itertools.combinations(sorted(dips), 3):
-            combo_indices = np.array(combo)
-            absolute_offsets = current_start_px + combo_indices
-
-            def loss(grating_distance_param):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
-                grating_distance_mm = grating_distance_param[0]
-                if grating_distance_mm <= 0:
-                    return 1e10
-
-                # Delegate to the stateless optics_physics library for
-                # first-order grating calculations
-                calculated_wavelengths = calculate_wavelength(
-                    pixel_offset_px=absolute_offsets,  # ruff: ignore[function-uses-loop-variable] -- consumed synchronously, not deferred
-                    grating_distance_mm=grating_distance_mm,
-                    lines_per_mm=spec_pipeline.config.grating_lines_per_mm,
-                    pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
-                )
-                # Compute sum of squared errors between calibrated
-                # model wavelengths and target reference bands
-                return np.sum((calculated_wavelengths - target_wls) ** 2)
+            absolute_offsets = sample_distances_px[np.array(combo)]
+            loss = SpectroscopyCalibrationTuner._make_wavelength_loss(
+                absolute_offsets, spec_pipeline, target_wls
+            )
 
             # Run the math solver. We guess the grating is around 16.5 mm away
             # based on how the camera is physically built. We limit the solver
@@ -495,6 +512,64 @@ class SpectroscopyCalibrationTuner:
             )
 
         return best_rms, best_grating_distance_mm, best_combo
+
+    @staticmethod
+    def _make_wavelength_loss(
+        pixel_offsets_px: np.ndarray, spec_pipeline: SpectroscopyPipeline, target_wls: np.ndarray
+    ) -> Callable[[np.ndarray], float]:
+        """Build the function the solver minimizes for one set of dips.
+
+        Parameters
+        ----------
+        pixel_offsets_px : `numpy.ndarray`
+            The distances of the three dips from the zero order, in pixels.
+        spec_pipeline : `SpectroscopyPipeline`
+            The pipeline that holds the grating and camera settings.
+        target_wls : `numpy.ndarray`
+            The three reference wavelengths, in nanometers.
+
+        Returns
+        -------
+        loss : `Callable`
+            A function of the trial grating distance (a one-element array,
+            in millimeters). It returns the sum of squared differences, in
+            square nanometers, between the wavelengths the physical model
+            predicts at the dips and the reference wavelengths.
+        """
+
+        def loss(grating_distance_param: np.ndarray) -> float:
+            """Score one trial grating distance.
+
+            Parameters
+            ----------
+            grating_distance_param : `numpy.ndarray`
+                A one-element array with the trial grating distance, in
+                millimeters.
+
+            Returns
+            -------
+            squared_error : `float`
+                The sum of squared wavelength errors, in square
+                nanometers. A very large number if the distance is not
+                positive.
+            """
+            grating_distance_mm = grating_distance_param[0]
+            if grating_distance_mm <= 0:
+                return 1e10
+
+            # Delegate to the stateless optics_physics library for
+            # first-order grating calculations
+            calculated_wavelengths = calculate_wavelength(
+                pixel_offset_px=pixel_offsets_px,
+                grating_distance_mm=grating_distance_mm,
+                lines_per_mm=spec_pipeline.config.grating_lines_per_mm,
+                pixel_size_um=spec_pipeline.config.camera.pixel_size_um,
+            )
+            # Compute sum of squared errors between calibrated
+            # model wavelengths and target reference bands
+            return float(np.sum((calculated_wavelengths - target_wls) ** 2))
+
+        return loss
 
     def _save_tuned_calibration(
         self,
@@ -544,7 +619,7 @@ class SpectroscopyCalibrationTuner:
         tuned_x0: float,
         best_rms: float,
         detected_angle: float,
-        current_start_px: float,
+        sample_distances_px: np.ndarray,
         best_combo: tuple[int, ...],
         target_wls: np.ndarray,
         spec_pipeline: SpectroscopyPipeline,
@@ -553,13 +628,16 @@ class SpectroscopyCalibrationTuner:
     ) -> dict[str, Any]:
         """Build the final calibration report, including per-line deviations.
 
+        The `pixel_offset` of each line is the recorded distance of its dip
+        from the zero order, the same distance the fit used.
+
         Returns
         -------
         calibration_summary : `dict`
             A report of what settings were calculated and how accurate
             they are.
         """
-        px_offsets = current_start_px + np.array(best_combo)
+        px_offsets = sample_distances_px[np.array(best_combo)]
         calibrated_wls = calculate_wavelength(
             pixel_offset_px=px_offsets,
             grating_distance_mm=tuned_grating_distance_mm,
@@ -569,13 +647,13 @@ class SpectroscopyCalibrationTuner:
 
         detailed_calibration = []
         features_map = ["H-delta", "H-gamma", "H-beta"]
-        for name, idx, target, calc in zip(
-            features_map, best_combo, target_wls, calibrated_wls, strict=False
+        for name, idx, offset_px, target, calc in zip(
+            features_map, best_combo, px_offsets, target_wls, calibrated_wls, strict=False
         ):
             detailed_calibration.append({
                 "feature": name,
                 "extracted_index": int(idx),
-                "pixel_offset": float(tuned_x0 + idx),
+                "pixel_offset": float(offset_px),
                 "target_wavelength_nm": float(target),
                 "calibrated_wavelength_nm": float(round(calc, 2)),
                 "deviation_nm": float(round(calc - target, 2)),

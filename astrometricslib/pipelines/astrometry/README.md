@@ -17,6 +17,10 @@ This pipeline answers two questions about a single image: where in the sky is it
 - `pre_processing/`, `processing/`, and `post_processing/` hold the three stages described above.
 - `utilities/` holds tools that support astrometry but are not part of running the pipeline on an image — for example, downloading a region of the star catalog ahead of time so a batch of images does not overwhelm the remote database.
 
+## Searching the cached Gaia catalog near Right Ascension 0
+
+The star identifier reads cached Gaia stars from a box around the field, and Right Ascension (RA, the east-west sky coordinate) wraps from 360 deg back to 0 deg. When the box crosses that line, `_catalog_ra_ranges` in `processing/star_identifier.py` splits it into two RA ranges, one on each side, and the identifier runs one query per range. A field at RA = 0.01 deg therefore selects stars at 359.6 deg as well as at 0.4 deg. The shared helper `wrapped_ra_difference_deg` in `pipelines/shared/angles.py` handles the same wrap for code that compares two RA values.
+
 ## A note on scope
 
 This pipeline identifies stars and solves the sky position of an image. It does not measure star brightness (that is photometry) or star spectra (that is spectroscopy) — those pipelines depend on astrometry's output but live elsewhere.

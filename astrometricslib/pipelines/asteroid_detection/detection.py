@@ -15,7 +15,6 @@ import statistics
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import overload
 
 import numpy as np
 
@@ -26,6 +25,7 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.moving_object_config import MovingObjectConfig
+from astrometricslib.pipelines.shared.angles import wrapped_ra_difference_deg
 
 logger = logging.getLogger(__name__)
 
@@ -68,46 +68,6 @@ def _circular_mean_degrees(values_deg: Iterable[float]) -> float:
     mean_sin = statistics.mean(math.sin(r) for r in radians)
     mean_cos = statistics.mean(math.cos(r) for r in radians)
     return math.degrees(math.atan2(mean_sin, mean_cos)) % 360.0
-
-
-@overload
-def wrapped_ra_difference_deg(ra1_deg: float, ra2_deg: float) -> float: ...
-
-
-@overload
-def wrapped_ra_difference_deg(ra1_deg: np.ndarray, ra2_deg: float | np.ndarray) -> np.ndarray: ...
-
-
-def wrapped_ra_difference_deg(ra1_deg: float | np.ndarray, ra2_deg: float | np.ndarray) -> float | np.ndarray:
-    """Find the signed difference between two Right Ascensions (RA).
-
-    RA is an angle that wraps around at 0/360 deg: 359.9 deg and
-    0.1 deg are only 0.2 deg apart, but plain subtraction gives 359.8 deg.
-    This function returns the shorter way around the circle. The sign
-    tells the direction: positive when the first RA lies east of
-    (greater than) the second. Every place in this package that compares
-    two RA values should call this function instead of subtracting.
-
-    Parameters
-    ----------
-    ra1_deg : `float` or `numpy.ndarray`
-        The first Right Ascension, in degrees. Any value is accepted,
-        including values outside [0, 360).
-    ra2_deg : `float` or `numpy.ndarray`
-        The second Right Ascension, in degrees.
-
-    Returns
-    -------
-    difference_deg : `float` or `numpy.ndarray`
-        ``ra1_deg - ra2_deg`` wrapped into the range (-180, 180], in
-        degrees. For example, 359.9 and 0.1 give -0.2, and 10 and 350
-        give 20. The result is a ``float`` when both inputs are
-        ``float``, and an array otherwise.
-    """
-    difference_deg = 180.0 - np.mod(180.0 - (np.asarray(ra1_deg) - np.asarray(ra2_deg)), 360.0)
-    if difference_deg.ndim == 0:
-        return float(difference_deg)
-    return difference_deg
 
 
 def _tangent_plane_offset_arcsec(

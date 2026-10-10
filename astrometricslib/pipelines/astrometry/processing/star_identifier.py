@@ -449,6 +449,47 @@ def _is_unresolved_match(star_coord: SkyCoord, simbad_coords: SkyCoord) -> bool:
     return int(np.count_nonzero(separations <= UNRESOLVED_COMPANION_RADIUS_ARCSEC)) >= 2
 
 
+def _catalog_ra_ranges(ra_center: float, dec_center: float, radius_deg: float) -> list[tuple[float, float]]:
+    """Build the Right Ascension (RA) ranges of a catalog search box.
+
+    RA is an angle that wraps from 360 deg back to 0 deg. A box centred
+    near that line has edges below 0 or above 360, and the catalog stores
+    RA only inside [0, 360], so a single range would miss the rows on the
+    far side of the line. This function splits such a box into two
+    ranges, one on each side. The box is wider in RA than in declination
+    by ``1 / cos(dec)``, with the cosine held at 0.1 or more so the box
+    stays finite near a pole.
+
+    Parameters
+    ----------
+    ra_center : `float`
+        RA of the search centre, in degrees.
+    dec_center : `float`
+        Declination of the search centre, in degrees.
+    radius_deg : `float`
+        Search radius on the sky, in degrees.
+
+    Returns
+    -------
+    ranges : `list` [`tuple` [`float`, `float`]]
+        One or two ``(low, high)`` RA ranges in degrees, each inside
+        [0, 360]. Two ranges are returned when the box crosses the wrap
+        line, and they do not overlap. A single range ``(0, 360)`` is
+        returned when the box is at least half the circle wide.
+    """
+    half_width_deg = float(radius_deg / max(0.1, np.cos(np.radians(dec_center))))
+    if half_width_deg >= 180.0:
+        return [(0.0, 360.0)]
+    centre_deg = float(ra_center) % 360.0
+    low_deg = centre_deg - half_width_deg
+    high_deg = centre_deg + half_width_deg
+    if low_deg < 0.0:
+        return [(0.0, high_deg), (low_deg + 360.0, 360.0)]
+    if high_deg > 360.0:
+        return [(low_deg, 360.0), (0.0, high_deg - 360.0)]
+    return [(low_deg, high_deg)]
+
+
 class StarIdentifier:
     """The main tool for finding stars, mapping the image, and naming them."""
 
@@ -1090,13 +1131,16 @@ class StarIdentifier:
 
         cache_db_path = catalog_store.get_catalog_cache_path(config)
         try:
-            # Query existing cached sources within bounding box + radius
-            min_ra = ra_center - (radius_deg / max(0.1, np.cos(np.radians(dec_center))))
-            max_ra = ra_center + (radius_deg / max(0.1, np.cos(np.radians(dec_center))))
+            # Query existing cached sources within bounding box + radius.
+            # A box that crosses RA = 0 deg splits in two, one query per side.
             min_dec = dec_center - radius_deg
             max_dec = dec_center + radius_deg
 
-            cached_rows = catalog_store.query_gaia_sources_in_bounds(config, min_ra, max_ra, min_dec, max_dec)
+            cached_rows = []
+            for min_ra, max_ra in _catalog_ra_ranges(ra_center, dec_center, radius_deg):
+                cached_rows.extend(
+                    catalog_store.query_gaia_sources_in_bounds(config, min_ra, max_ra, min_dec, max_dec)
+                )
 
             if cached_rows and len(cached_rows) >= 5:
                 logger.info(

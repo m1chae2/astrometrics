@@ -1,11 +1,33 @@
-"""Pydantic model for the dark/bias/flat calibration frame library."""
+"""The library of dark, bias and flat frames, and how it picks them.
+
+The library files every calibration frame under the camera settings that
+decide whether the frame can calibrate a light frame, and picks the frames for
+a batch of lights. Each frame's slot is a "setting key": its gain, its camera
+offset and its binning, and for a dark also a temperature slot (see
+`calibration_setting_key`). Frames with different keys never mix into one
+master. When the lights have no frame under their own key, the library falls
+back where that is safe, and says so in a plain sentence:
+
+- A **gain or offset** mismatch falls back to the other settings. The frames
+  are used, and the sentence is a soft flag (`CalibrationSelection.flags`).
+- A **temperature** mismatch (no dark within the tolerance of the lights)
+  falls back to the nearest-temperature dark, also with a soft flag.
+- A **binning** mismatch never falls back. Frames binned differently have
+  different pixels, so none is used, and the sentence is a blocking flag
+  (`CalibrationSelection.blocking_flags`).
+
+The stacking run copies the flags into its diagnostics, and the stacking
+pipeline reports them in the input quality summary.
+"""
 
 import json
 import logging
+import math
 import os
+import re
 import threading
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from astropy.io import fits
@@ -33,57 +55,43 @@ BAADER_BESSEL_ASI533_TRANSFORM_COEFFICIENTS = {
 }
 
 
-# The text that joins a gain and a nonzero camera offset into one library key,
-# for example "0.0@offset=30". A key with no such suffix means offset 0 or
-# offset not recorded, which is every key the library held before offset was
-# tracked, so a saved library file needs no migration.
-_OFFSET_KEY_MARKER = "@offset="
+# How many degrees C a dark's capture temperature may differ from the light
+# frames it calibrates. The library files darks in temperature slots this wide
+# (see `temperature_slot_c`), and a dark master farther than this from the
+# lights is flagged (see `dark_temperature_flag`). It is a first-pass
+# estimate, not yet characterized against this camera's own measured
+# dark-current curve: it is deliberately loose (CMOS dark current can already
+# grow noticeably within a few degrees) so it flags real gaps rather than
+# ordinary cooler-setpoint jitter. Confirmed against a real incident:
+# Arcturus's 0.5s/gain-0 darks cluster at ~0C and ~-10C with nothing in
+# between, while its light frames drifted from -2.9C to -10.7C, and Siril
+# reported 57-64% negative pixels after dark subtraction against the
+# resulting mixed-temperature master.
+DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
 
+# The key in `ImageProcessing.last_run_diagnostics` that holds the blocking
+# calibration match flags, one sentence each. A flag here means a calibration
+# kind was not applied at all because the library's frames could never
+# calibrate the lights (for example, a binning mismatch). The stacking
+# pipeline reads it (see `calibration_gates` in `pipelines/stacking/`
+# `pre_processing/assess_input_quality.py`) and fails its
+# ``calibration_metadata`` gate when the list is not empty.
+CALIBRATION_MATCH_BLOCKING_FLAGS_KEY = "calibration_match_blocking_flags"
 
-def calibration_setting_key(gain: Any, offset: Any = None) -> str:
-    """Build the library key for a camera gain and offset.
+# The binning of a frame whose header names none: no binning at all.
+UNBINNED = "1x1"
 
-    A camera's offset is a baseline added to every pixel before it is
-    digitized. A frame taken at one offset cannot calibrate frames taken at
-    another, and at offset 0 much of the noise is clipped away, so the two
-    settings must not share a slot in the library.
+# The names of the parts of a library key after the gain, each written
+# ``@<name>=<value>``, for example "0.0@offset=30@bin=2x2@temp=-9". A key
+# with no such part means offset 0, 1x1 binning and no recorded temperature,
+# which is every key the library held before these were tracked, so a saved
+# library file needs no migration.
+_OFFSET_KEY_NAME = "offset"
+_BINNING_KEY_NAME = "bin"
+_TEMPERATURE_KEY_NAME = "temp"
 
-    Parameters
-    ----------
-    gain : `Any`
-        The gain or ISO, as written in the frame header.
-    offset : `Any`, optional
-        The camera offset. `None`, zero, or text that is not a number gives
-        the plain gain key.
-
-    Returns
-    -------
-    key : `str`
-        The gain as text, followed by ``@offset=<offset>`` when the offset is
-        a nonzero number.
-    """
-    offset_value = _as_float(offset)
-    if offset_value is None or offset_value == 0.0:  # ruff: ignore[float-equality-comparison] -- a setting read from a header, not a measurement
-        return str(gain)
-    return f"{gain}{_OFFSET_KEY_MARKER}{offset_value:g}"
-
-
-def split_calibration_setting_key(key: str) -> tuple[str, float]:
-    """Split a library key back into its gain and offset.
-
-    Parameters
-    ----------
-    key : `str`
-        A key made by `calibration_setting_key`, or an older gain-only key.
-
-    Returns
-    -------
-    gain, offset : `tuple` [`str`, `float`]
-        The gain text, and the offset (0.0 when the key has none).
-    """
-    gain, marker, offset_text = str(key).partition(_OFFSET_KEY_MARKER)
-    offset_value = _as_float(offset_text) if marker else None
-    return gain, 0.0 if offset_value is None else offset_value
+# What a selection calls the lights when the caller does not say which.
+_DEFAULT_LIGHT_LABEL = "the light frames"
 
 
 def _as_float(value: Any) -> float | None:
@@ -100,11 +108,267 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _binning_factor(value: Any) -> int | None:
+    """Read one binning factor (the number of pixels merged along an axis).
+
+    Returns
+    -------
+    factor : `int` or `None`
+        The factor as a whole number of at least 1, or `None` if the value is
+        missing, not a number, or below 1.
+    """
+    number = _as_float(value)
+    if number is None or not math.isfinite(number) or number < 1:
+        return None
+    return int(number)
+
+
+def format_binning(x_binning: Any = None, y_binning: Any = None) -> str:
+    """Write a binning as text, such as ``"2x2"``.
+
+    Binning merges neighbouring pixels on the sensor into one. A 2x2 frame has
+    half as many pixels along each axis, and each pixel holds the signal (and
+    the dark current and bias) of four sensor pixels. A frame binned one way
+    can never calibrate a frame binned another way.
+
+    Parameters
+    ----------
+    x_binning : `Any`, optional
+        The binning along the width (the ``XBINNING`` card). Missing or not a
+        number counts as 1.
+    y_binning : `Any`, optional
+        The binning along the height (the ``YBINNING`` card). Missing counts
+        as the same as `x_binning`.
+
+    Returns
+    -------
+    binning : `str`
+        ``"<x>x<y>"``. ``"1x1"`` (`UNBINNED`) when there is no binning.
+    """
+    x_factor = _binning_factor(x_binning) or 1
+    y_factor = _binning_factor(y_binning) or x_factor
+    return f"{x_factor}x{y_factor}"
+
+
+def normalize_binning(binning: Any) -> str:
+    """Write a binning given as text or as a number in the standard form.
+
+    Parameters
+    ----------
+    binning : `Any`
+        Text such as ``"2x2"`` or ``"2X2"``, or a number such as ``2`` (the
+        same factor along both axes). Anything else counts as unbinned.
+
+    Returns
+    -------
+    binning : `str`
+        The standard form, such as ``"2x2"`` (see `format_binning`).
+    """
+    match = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", str(binning))
+    if match:
+        return format_binning(match.group(1), match.group(2))
+    return format_binning(binning)
+
+
+def header_binning(header: Any) -> str:
+    """Read the binning of a frame from its header.
+
+    Parameters
+    ----------
+    header : `Any`
+        The image header (anything with ``get``).
+
+    Returns
+    -------
+    binning : `str`
+        The binning from the ``XBINNING`` and ``YBINNING`` cards, or
+        ``"1x1"`` when the header has neither.
+    """
+    return format_binning(header.get("XBINNING"), header.get("YBINNING"))
+
+
+def header_temperature_c(header: Any) -> float | None:
+    """Read the sensor temperature of a frame from its header.
+
+    Parameters
+    ----------
+    header : `Any`
+        The image header (anything with ``get``).
+
+    Returns
+    -------
+    temperature_c : `float` or `None`
+        The ``CCD-TEMP`` card (the measured sensor temperature). When the
+        header has none, the ``SET-TEMP`` card (the cooler's target), which
+        is the best guess a cooled camera leaves. `None` if neither is a
+        number.
+    """
+    for card in ("CCD-TEMP", "SET-TEMP"):
+        value = _as_float(header.get(card))
+        if value is not None and math.isfinite(value):
+            return value
+    return None
+
+
+def temperature_slot_c(
+    temperature_c: float | None, tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C
+) -> float | None:
+    """Round a sensor temperature to the middle of its temperature slot.
+
+    Slots are `tolerance_c` wide, so darks whose temperatures round to the
+    same slot differ by at most one tolerance and may be stacked into one
+    master. The slot is ``round(temperature / tolerance) * tolerance``. With
+    the default 3 C tolerance, -10.2 C and -9.0 C share the -9 C slot, and
+    +5 C is in the +6 C slot.
+
+    Parameters
+    ----------
+    temperature_c : `float` or `None`
+        The frame's sensor temperature in degrees C.
+    tolerance_c : `float`, optional
+        The slot width in degrees C. Zero or less rounds to 0.1 C instead.
+
+    Returns
+    -------
+    slot_c : `float` or `None`
+        The slot's middle, or `None` if the temperature is unknown.
+    """
+    if temperature_c is None or not math.isfinite(temperature_c):
+        return None
+    if tolerance_c <= 0:
+        return round(temperature_c, 1)
+    return round(temperature_c / tolerance_c) * tolerance_c
+
+
+def calibration_setting_key(
+    gain: Any,
+    offset: Any = None,
+    binning: Any = None,
+    temperature_c: float | None = None,
+    temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+) -> str:
+    """Build the library key for a calibration frame's camera settings.
+
+    A camera's offset is a baseline added to every pixel before it is
+    digitized. A frame taken at one offset cannot calibrate frames taken at
+    another, and at offset 0 much of the noise is clipped away, so the two
+    settings must not share a slot in the library. The same holds for the
+    gain, for the binning (a 2x2 frame has different pixels from a 1x1 one),
+    and, for a dark, for the sensor temperature (dark current roughly doubles
+    every few degrees).
+
+    Parameters
+    ----------
+    gain : `Any`
+        The gain or ISO, as written in the frame header.
+    offset : `Any`, optional
+        The camera offset. `None`, zero, or text that is not a number adds
+        nothing to the key.
+    binning : `Any`, optional
+        The binning, such as ``"2x2"`` (see `normalize_binning`). `None` or
+        1x1 adds nothing to the key.
+    temperature_c : `float`, optional
+        The sensor temperature of a dark frame. It is rounded to a slot
+        `temperature_tolerance_c` wide (see `temperature_slot_c`). Leave it
+        out for bias and flat frames and for darks with no temperature.
+    temperature_tolerance_c : `float`, optional
+        The slot width in degrees C.
+
+    Returns
+    -------
+    key : `str`
+        The gain as text, followed by ``@offset=<offset>`` when the offset is
+        a nonzero number, ``@bin=<binning>`` when the binning is not 1x1, and
+        ``@temp=<slot>`` when a temperature is given.
+    """
+    key = str(gain)
+    offset_value = _as_float(offset)
+    # A missing or zero offset adds nothing to the key.
+    if offset_value:
+        key += f"@{_OFFSET_KEY_NAME}={offset_value:g}"
+    if binning is not None and normalize_binning(binning) != UNBINNED:
+        key += f"@{_BINNING_KEY_NAME}={normalize_binning(binning)}"
+    slot = temperature_slot_c(temperature_c, temperature_tolerance_c)
+    if slot is not None:
+        key += f"@{_TEMPERATURE_KEY_NAME}={slot:g}"
+    return key
+
+
+@dataclass(frozen=True)
+class CalibrationSetting:
+    """The camera settings that a library key stands for.
+
+    Attributes
+    ----------
+    gain : `str`
+        The gain (or ISO) setting, as text.
+    offset : `float`
+        The camera offset (0.0 when the key has none).
+    binning : `str`
+        The binning, such as ``"2x2"`` (``"1x1"`` when the key has none).
+    temperature_c : `float` or `None`
+        The middle of the key's temperature slot, or `None` when the key has
+        no temperature (every bias and flat key, and darks filed before the
+        temperature was tracked or whose header had none).
+    """
+
+    gain: str
+    offset: float
+    binning: str
+    temperature_c: float | None
+
+
+def parse_calibration_setting_key(key: str) -> CalibrationSetting:
+    """Read a library key back into the settings it stands for.
+
+    Parameters
+    ----------
+    key : `str`
+        A key made by `calibration_setting_key`, or an older gain-only key.
+
+    Returns
+    -------
+    setting : `CalibrationSetting`
+        The gain, offset, binning and temperature slot of the key.
+    """
+    gain, *parts = str(key).split("@")
+    offset = 0.0
+    binning = UNBINNED
+    temperature_c = None
+    for part in parts:
+        name, _, value = part.partition("=")
+        if name == _OFFSET_KEY_NAME:
+            offset = _as_float(value) or 0.0
+        elif name == _BINNING_KEY_NAME:
+            binning = normalize_binning(value)
+        elif name == _TEMPERATURE_KEY_NAME:
+            temperature_c = _as_float(value)
+    return CalibrationSetting(gain, offset, binning, temperature_c)
+
+
+def split_calibration_setting_key(key: str) -> tuple[str, float]:
+    """Split a library key back into its gain and offset.
+
+    Parameters
+    ----------
+    key : `str`
+        A key made by `calibration_setting_key`, or an older gain-only key.
+
+    Returns
+    -------
+    gain, offset : `tuple` [`str`, `float`]
+        The gain text, and the offset (0.0 when the key has none).
+    """
+    setting = parse_calibration_setting_key(key)
+    return setting.gain, setting.offset
+
+
 def _is_same_setting(key: str, gain: Any, offset: Any) -> bool:
     """Tell whether a library key is the given gain and offset.
 
     Gains are compared as numbers when both are numbers ("0" equals "0.0"),
-    and as text otherwise (an ISO such as "800").
+    and as text otherwise (an ISO such as "800"). Binning and temperature are
+    not compared here.
 
     Returns
     -------
@@ -139,6 +403,8 @@ class FlatGroup:
         The camera offset (0.0 when the flats record none).
     paths : `list` [`str`]
         The flat frame file paths.
+    binning : `str`
+        The binning the flats were taken at, such as ``"2x2"``.
     """
 
     telescope: str
@@ -147,6 +413,31 @@ class FlatGroup:
     gain: str
     offset: float
     paths: list[str]
+    binning: str = UNBINNED
+
+
+@dataclass(frozen=True)
+class CalibrationSelection:
+    """The calibration frames chosen for a batch of lights, and why.
+
+    Attributes
+    ----------
+    frames : `list` [`str`]
+        The chosen frame file paths. Empty when no frame fits, or when a
+        blocking flag says none may be used.
+    flags : `list` [`str`]
+        One plain sentence for each mismatch that the library worked around:
+        frames of another gain or offset, or a dark from another temperature,
+        were used because nothing closer exists. The frames in `frames` are
+        still applied.
+    blocking_flags : `list` [`str`]
+        One plain sentence for each mismatch that stopped the frames from
+        being used at all (a binning mismatch). `frames` is empty then.
+    """
+
+    frames: list[str]
+    flags: list[str] = field(default_factory=list)
+    blocking_flags: list[str] = field(default_factory=list)
 
 
 def _without_duplicates(paths: list[str]) -> list[str]:
@@ -166,6 +457,247 @@ def _without_duplicates(paths: list[str]) -> list[str]:
         The paths with each one appearing once.
     """
     return list(dict.fromkeys(paths))
+
+
+def _existing(paths: Iterable[str], validate_paths: bool) -> list[str]:
+    """Keep only the paths whose files exist, when asked to.
+
+    Returns
+    -------
+    kept : `list` [`str`]
+        The paths without repeats, and without missing files when
+        `validate_paths` is `True`.
+    """
+    unique = _without_duplicates(list(paths))
+    return [path for path in unique if os.path.exists(path)] if validate_paths else unique
+
+
+def _describe_settings(keys: Iterable[str]) -> str:
+    """Name the gain and offset pairs that some library keys stand for.
+
+    Returns
+    -------
+    text : `str`
+        For example ``"gain 100, offset 30"``; several pairs are joined with
+        " or ".
+    """
+    pairs = sorted({(setting.gain, setting.offset) for setting in map(parse_calibration_setting_key, keys)})
+    return " or ".join(f"gain {gain}, offset {offset:g}" for gain, offset in pairs)
+
+
+def _choose_slots(
+    slots: dict[str, list[str]],
+    gain: Any,
+    offset: Any,
+    binning: Any,
+    kind: str,
+    light_label: str,
+) -> tuple[dict[str, list[str]], list[str], list[str]]:
+    """Pick the library slots that can calibrate the lights.
+
+    The binning must match exactly. If frames exist but none has the lights'
+    binning, nothing is chosen and a blocking flag says why. Among the slots
+    with the right binning, those at the lights' gain and offset are chosen
+    when there are any. Otherwise every slot is chosen, with a soft flag,
+    because a calibration frame at other settings is judged better than none.
+
+    Parameters
+    ----------
+    slots : `dict` [`str`, `list` [`str`]]
+        The slot keys that hold frames, with their file paths.
+    gain : `Any`
+        The lights' gain, or `None` to take every gain and offset without a
+        flag (a caller that does not say what the lights used).
+    offset : `Any`
+        The lights' camera offset.
+    binning : `Any`
+        The lights' binning, or `None` to take every binning.
+    kind : `str`
+        ``"dark"``, ``"bias"`` or ``"flat"``, for the sentences.
+    light_label : `str`
+        How the sentences name the lights.
+
+    Returns
+    -------
+    chosen, flags, blocking_flags : `tuple`
+        The chosen slots with their paths, the soft flag sentences and the
+        blocking flag sentences.
+    """
+    flags: list[str] = []
+    blocking_flags: list[str] = []
+    slots = {key: paths for key, paths in slots.items() if paths}
+    if binning is not None:
+        wanted_binning = normalize_binning(binning)
+        same_binning = {
+            key: paths
+            for key, paths in slots.items()
+            if parse_calibration_setting_key(key).binning == wanted_binning
+        }
+        if slots and not same_binning:
+            others = sorted({parse_calibration_setting_key(key).binning for key in slots})
+            blocking_flags.append(
+                f"No {kind} was applied to {light_label}: they were taken at binning "
+                f"{wanted_binning}, but the {kind} frames in the library were taken at binning "
+                f"{' or '.join(others)}, and frames binned differently cannot calibrate each other."
+            )
+            return {}, flags, blocking_flags
+        slots = same_binning
+    if gain is None or not slots:
+        return slots, flags, blocking_flags
+    exact = {key: paths for key, paths in slots.items() if _is_same_setting(key, gain, offset)}
+    if exact:
+        return exact, flags, blocking_flags
+    wanted_offset = _as_float(offset)
+    offset_text = f"{0.0 if wanted_offset is None else wanted_offset:g}"
+    flags.append(
+        f"No {kind} frames matched gain {gain} and offset {offset_text}, "
+        f"so {kind} frames taken at {_describe_settings(slots)} were applied to {light_label}."
+    )
+    return slots, flags, blocking_flags
+
+
+def _dark_paths_at_exposure(exposure_slots: dict[str, Any], exposure: Any) -> list[str]:
+    """Collect the dark frames whose exposure fits the lights'.
+
+    Parameters
+    ----------
+    exposure_slots : `dict` [`str`, `list` [`str`]]
+        One gain slot's darks, by exposure in seconds (as text).
+    exposure : `Any`
+        The lights' exposure in seconds; darks within 0.1 s of it are used.
+        When `None` (or not a number), every exposure is used.
+
+    Returns
+    -------
+    paths : `list` [`str`]
+        The matching dark frame paths.
+    """
+    try:
+        target_exposure = float(exposure) if exposure is not None else None
+    except ValueError, TypeError:
+        target_exposure = None
+    collected: list[str] = []
+    for exposure_key, file_list in exposure_slots.items():
+        try:
+            # Fuzzy exposure match (allow 0.1s jitter)
+            if target_exposure is None or abs(float(exposure_key) - target_exposure) < 0.1:
+                collected.extend(file_list)
+        except ValueError, TypeError:
+            # Fallback to exact string match
+            if str(exposure) == exposure_key:
+                collected.extend(file_list)
+    return collected
+
+
+def _read_dark_temperature(path: str) -> float | None:
+    """Read the sensor temperature a dark frame was taken at.
+
+    Returns
+    -------
+    temperature_c : `float` or `None`
+        The temperature from the frame's header (see `header_temperature_c`),
+        or `None` if the file cannot be read or records none.
+    """
+    try:
+        with fits.open(path, memmap=False) as hdu_list:
+            return header_temperature_c(hdu_list[0].header)
+    except FITS_READ_ERRORS:
+        return None
+
+
+def dark_temperature_flag(
+    light_temperature_c: float,
+    dark_paths: list[str],
+    tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+    light_label: str = _DEFAULT_LIGHT_LABEL,
+) -> str | None:
+    """Say whether a dark master is too far from the lights' temperature.
+
+    Every dark's own ``CCD-TEMP`` is read, not only the first. The master is
+    the combination of all of them, so its temperature is their mean. The
+    sentence also gives the coldest and warmest dark, because a master built
+    from darks that span a wide range hides how each frame behaves.
+
+    Parameters
+    ----------
+    light_temperature_c : `float`
+        The lights' sensor temperature in degrees C (for example the mean over
+        the batch).
+    dark_paths : `list` [`str`]
+        The dark frames that make the master.
+    tolerance_c : `float`, optional
+        How many degrees C the master may differ from the lights.
+    light_label : `str`, optional
+        How the sentence names the lights.
+
+    Returns
+    -------
+    flag : `str` or `None`
+        One sentence naming the lights' temperature, the master's temperature
+        and the tolerance when the master is farther away than the tolerance.
+        `None` when it is within the tolerance, or when no dark records a
+        temperature (there is nothing to judge).
+    """
+    temperatures = [t for t in map(_read_dark_temperature, dark_paths) if t is not None]
+    if not temperatures:
+        return None
+    master_temperature_c = sum(temperatures) / len(temperatures)
+    if is_dark_calibration_temperature_compatible(light_temperature_c, master_temperature_c, tolerance_c):
+        return None
+    difference_c = abs(light_temperature_c - master_temperature_c)
+    return (
+        f"No dark frame was within {tolerance_c:g} C of {light_label}, which were taken at "
+        f"{light_temperature_c:.1f} C, so the nearest dark master, taken at "
+        f"{master_temperature_c:.1f} C ({len(temperatures)} dark frame(s) from "
+        f"{min(temperatures):.1f} to {max(temperatures):.1f} C), was applied, "
+        f"{difference_c:.1f} C away."
+    )
+
+
+def _drop_path(node: Any, path: str) -> None:
+    """Remove a file path from every list below a library node.
+
+    Lists and dictionaries that the removal leaves empty are dropped, so the
+    library does not keep a slot with no frames.
+
+    Parameters
+    ----------
+    node : `Any`
+        A list of paths, or a dictionary of such lists nested to any depth.
+    path : `str`
+        The file path to remove.
+    """
+    if isinstance(node, list):
+        node[:] = [item for item in node if item != path]
+    elif isinstance(node, dict):
+        for key in list(node):
+            _drop_path(node[key], path)
+            if not node[key]:
+                del node[key]
+
+
+def _move_out_of_other_slots(slots: dict[str, Any], keep_key: str, path: str) -> None:
+    """Remove a frame from every slot except the one it is being filed under.
+
+    A frame is filed under the key made from its header. A library saved by an
+    older version filed the same frame under a shorter key (without binning or
+    temperature). Without this, a rescan would list the frame twice, and the
+    old slot would pool it back in with the frames of every other temperature.
+
+    Parameters
+    ----------
+    slots : `dict` [`str`, `Any`]
+        The setting keys of one camera (or filter), with their frame lists.
+    keep_key : `str`
+        The key the frame is being filed under now. Its slot is left alone.
+    path : `str`
+        The frame's file path.
+    """
+    for key in list(slots):
+        if key != keep_key:
+            _drop_path(slots[key], path)
+            if not slots[key]:
+                del slots[key]
 
 
 class CalibrationLibrary(BaseModel):
@@ -283,11 +815,13 @@ class CalibrationLibrary(BaseModel):
                             exposure = float(exp)
                         except ValueError, TypeError:
                             exposure = None
-                        gain, offset = split_calibration_setting_key(iso)
+                        setting = parse_calibration_setting_key(iso)
                         darks.append({
                             "camera": camera,
-                            "iso": gain,
-                            "offset": offset,
+                            "iso": setting.gain,
+                            "offset": setting.offset,
+                            "binning": setting.binning,
+                            "temperature_c": setting.temperature_c,
                             "exposure": exposure,
                             "count": len(file_list),
                         })
@@ -299,8 +833,14 @@ class CalibrationLibrary(BaseModel):
                 for iso, file_list in iso_dict.items():
                     if not isinstance(file_list, list):
                         continue
-                    gain, offset = split_calibration_setting_key(iso)
-                    biases.append({"camera": camera, "iso": gain, "offset": offset, "count": len(file_list)})
+                    setting = parse_calibration_setting_key(iso)
+                    biases.append({
+                        "camera": camera,
+                        "iso": setting.gain,
+                        "offset": setting.offset,
+                        "binning": setting.binning,
+                        "count": len(file_list),
+                    })
 
             # 3. Flat frames stats
             for _telescope, camera_dict in self.flat_frames.items():
@@ -315,12 +855,13 @@ class CalibrationLibrary(BaseModel):
                         for iso, file_list in iso_dict.items():
                             if not isinstance(file_list, list):
                                 continue
-                            gain, offset = split_calibration_setting_key(iso)
+                            setting = parse_calibration_setting_key(iso)
                             flats.append({
                                 "camera": camera,
                                 "filter": filt,
-                                "iso": gain,
-                                "offset": offset,
+                                "iso": setting.gain,
+                                "offset": setting.offset,
+                                "binning": setting.binning,
                                 "count": len(file_list),
                             })
 
@@ -353,50 +894,6 @@ class CalibrationLibrary(BaseModel):
         offset = header.get("OFFSET")
         return header.get("BLKLEVEL") if offset is None else offset
 
-    def _choose_setting_keys(
-        self, available_keys: Iterable[str], gain: Any, offset: Any, what: str
-    ) -> list[str]:
-        """Pick which gain-and-offset slots to take calibration frames from.
-
-        Frames at the light frames' own gain and offset are used when there
-        are any. Otherwise every slot is used, with a warning, because a
-        calibration frame at other settings is judged better than none (the
-        stacker also logs a soft flag for it).
-
-        Parameters
-        ----------
-        available_keys : `Iterable` [`str`]
-            The slot keys that exist.
-        gain : `Any`
-            The light frames' gain, or `None` to take every slot without a
-            warning (a caller that does not say what the lights used).
-        offset : `Any`
-            The light frames' camera offset.
-        what : `str`
-            What is being looked up, for the warning.
-
-        Returns
-        -------
-        keys : `list` [`str`]
-            The slot keys to read.
-        """
-        keys = list(available_keys)
-        if gain is None:
-            return keys
-        exact = [key for key in keys if _is_same_setting(key, gain, offset)]
-        if exact:
-            return exact
-        if keys:
-            logger.warning(
-                "No %s at gain %s and offset %s; using %s taken at other settings (%s).",
-                what,
-                gain,
-                offset,
-                what,
-                ", ".join(sorted(keys)),
-            )
-        return keys
-
     def _get_camera_name(self, header: Any) -> str:
         """Give the camera name to file a calibration frame under.
 
@@ -414,8 +911,20 @@ class CalibrationLibrary(BaseModel):
         """
         return record_name_for_camera(header.get("INSTRUME", header.get("CAMERA", "Unknown")))
 
-    def add_dark_frame(self, image_file) -> None:  # ruff: ignore[missing-type-function-argument]
-        """Add a dark frame to the library."""
+    def add_dark_frame(self, image_file: str) -> None:
+        """Add a dark frame to the library.
+
+        The dark is filed under its camera, then its setting key (gain,
+        offset, binning and temperature slot; see `calibration_setting_key`),
+        then its exposure. A dark that was already filed under another key,
+        such as an older key with no binning or temperature, is moved to the
+        new key, so a rescan of the library re-files it.
+
+        Parameters
+        ----------
+        image_file : `str`
+            Path to the dark frame. Files that are not FITS are ignored.
+        """
         if not image_file.lower().endswith((".fits", ".fit")):
             return
 
@@ -424,25 +933,34 @@ class CalibrationLibrary(BaseModel):
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
-                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                    self._get_iso_gain(header_info),
+                    self._get_offset(header_info),
+                    binning=header_binning(header_info),
+                    temperature_c=header_temperature_c(header_info),
                 )
                 exposure_time = str(header_info.get("EXPTIME", "30.0"))
 
                 with self._lock:
-                    if camera not in self.dark_frames:
-                        self.dark_frames[camera] = {}
-                    if iso_speed not in self.dark_frames[camera]:
-                        self.dark_frames[camera][iso_speed] = {}
-                    if exposure_time not in self.dark_frames[camera][iso_speed]:
-                        self.dark_frames[camera][iso_speed][exposure_time] = []
-
-                    if image_file not in self.dark_frames[camera][iso_speed][exposure_time]:
-                        self.dark_frames[camera][iso_speed][exposure_time].append(image_file)
+                    camera_slots = self.dark_frames.setdefault(camera, {})
+                    _move_out_of_other_slots(camera_slots, iso_speed, image_file)
+                    frames = camera_slots.setdefault(iso_speed, {}).setdefault(exposure_time, [])
+                    if image_file not in frames:
+                        frames.append(image_file)
         except FITS_READ_ERRORS:
             logger.exception("Error adding dark frame %s", image_file)
 
-    def add_bias_frame(self, image_file) -> None:  # ruff: ignore[missing-type-function-argument]
-        """Add a bias frame to the library."""
+    def add_bias_frame(self, image_file: str) -> None:
+        """Add a bias frame to the library.
+
+        The bias is filed under its camera, then its setting key (gain,
+        offset and binning). A bias frame has no temperature slot, because
+        the library does not treat the bias level as temperature dependent.
+
+        Parameters
+        ----------
+        image_file : `str`
+            Path to the bias frame. Files that are not FITS are ignored.
+        """
         if not image_file.lower().endswith((".fits", ".fit")):
             return
 
@@ -451,21 +969,33 @@ class CalibrationLibrary(BaseModel):
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
-                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                    self._get_iso_gain(header_info),
+                    self._get_offset(header_info),
+                    binning=header_binning(header_info),
                 )
 
                 with self._lock:
-                    if camera not in self.bias_frames:
-                        self.bias_frames[camera] = {}
-                    if iso_speed not in self.bias_frames[camera]:
-                        self.bias_frames[camera][iso_speed] = []
-                    if image_file not in self.bias_frames[camera][iso_speed]:
-                        self.bias_frames[camera][iso_speed].append(image_file)
+                    camera_slots = self.bias_frames.setdefault(camera, {})
+                    _move_out_of_other_slots(camera_slots, iso_speed, image_file)
+                    frames = camera_slots.setdefault(iso_speed, [])
+                    if image_file not in frames:
+                        frames.append(image_file)
         except FITS_READ_ERRORS:
             logger.exception("Error adding bias frame %s", image_file)
 
-    def add_flat_frame(self, image_file, telescope="Unknown") -> None:  # ruff: ignore[missing-type-function-argument]
-        """Add a flat frame to the library."""
+    def add_flat_frame(self, image_file: str, telescope: str = "Unknown") -> None:
+        """Add a flat frame to the library.
+
+        The flat is filed under its telescope, camera and filter, then its
+        setting key (gain, offset and binning).
+
+        Parameters
+        ----------
+        image_file : `str`
+            Path to the flat frame. Files that are not FITS are ignored.
+        telescope : `str`, optional
+            The telescope the flat was taken through.
+        """
         if not image_file.lower().endswith((".fits", ".fit")):
             return
 
@@ -479,21 +1009,22 @@ class CalibrationLibrary(BaseModel):
                 filter_type = get_filter_type(header_info)
                 filter_val = filter_type.value if hasattr(filter_type, "value") else str(filter_type)
                 iso_speed = calibration_setting_key(
-                    self._get_iso_gain(header_info), self._get_offset(header_info)
+                    self._get_iso_gain(header_info),
+                    self._get_offset(header_info),
+                    binning=header_binning(header_info),
                 )
 
                 with self._lock:
-                    if telescope not in self.flat_frames:
-                        self.flat_frames[telescope] = {}
-                    if camera not in self.flat_frames[telescope]:
-                        self.flat_frames[telescope][camera] = {}
-                    if filter_val not in self.flat_frames[telescope][camera]:
-                        self.flat_frames[telescope][camera][filter_val] = {}
-                    if iso_speed not in self.flat_frames[telescope][camera][filter_val]:
-                        self.flat_frames[telescope][camera][filter_val][iso_speed] = []
-
-                    if image_file not in self.flat_frames[telescope][camera][filter_val][iso_speed]:
-                        self.flat_frames[telescope][camera][filter_val][iso_speed].append(image_file)
+                    filter_slots = (
+                        self.flat_frames
+                        .setdefault(telescope, {})
+                        .setdefault(camera, {})
+                        .setdefault(filter_val, {})
+                    )
+                    _move_out_of_other_slots(filter_slots, iso_speed, image_file)
+                    frames = filter_slots.setdefault(iso_speed, [])
+                    if image_file not in frames:
+                        frames.append(image_file)
         except FITS_READ_ERRORS:
             logger.exception("Error adding flat frame %s", image_file)
 
@@ -583,6 +1114,157 @@ class CalibrationLibrary(BaseModel):
         camera_key = self._find_camera_key(frame_dict, camera)
         return {} if camera_key is None else frame_dict[camera_key]
 
+    def select_dark_frames(
+        self,
+        camera: str | None = None,
+        exposure: Any | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
+        binning: Any | None = None,
+        temperature_c: float | None = None,
+        temperature_tolerance_c: float = DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+        light_label: str = _DEFAULT_LIGHT_LABEL,
+    ) -> CalibrationSelection:
+        """Choose the dark frames for a batch of lights, and how well they fit.
+
+        The darks are narrowed in this order:
+
+        1. **Exposure.** Darks within 0.1 s of the lights' exposure are kept.
+        2. **Binning.** The lights' binning must match exactly. If darks fit
+           the exposure but none has the lights' binning, no dark is chosen
+           and a blocking flag says why.
+        3. **Gain and offset.** Darks at the lights' gain and offset are
+           kept. If there are none, darks at every other gain and offset are
+           used, with a soft flag naming both.
+        4. **Temperature.** Of the temperature slots that remain, the one
+           nearest the lights' temperature is used (ties go to the colder
+           slot, because a warmer dark would over-subtract). The header of
+           every dark in it is read, and if the mean is farther from the
+           lights than `temperature_tolerance_c`, a soft flag names both
+           temperatures and the tolerance. Darks with no recorded
+           temperature are used only when no dark has one.
+
+        Parameters
+        ----------
+        camera : `str`, optional
+            The camera name.
+        exposure : `Any`, optional
+            The light frames' exposure in seconds. When `None`, every
+            exposure is used.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO. When `None`, every gain and offset
+            is used with no flag.
+        offset : `Any`, optional
+            The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``. When `None`, every
+            binning is used with no flag.
+        temperature_c : `float`, optional
+            The light frames' sensor temperature in degrees C (for example
+            their mean). When `None`, it is unknown: if the darks span
+            several temperature slots, the slot with the most darks is used,
+            with a soft flag.
+        temperature_tolerance_c : `float`, optional
+            How many degrees C the dark master may differ from the lights
+            before it is flagged.
+        light_label : `str`, optional
+            How the flag sentences name the lights.
+
+        Returns
+        -------
+        selection : `CalibrationSelection`
+            The dark file paths, with the soft and blocking flag sentences.
+        """
+        return self._select_dark_frames(
+            camera,
+            exposure,
+            validate_paths,
+            iso,
+            offset,
+            binning,
+            temperature_c,
+            temperature_tolerance_c,
+            light_label,
+            judge_temperature=True,
+        )
+
+    def _select_dark_frames(
+        self,
+        camera: str | None,
+        exposure: Any | None,
+        validate_paths: bool,
+        iso: Any | None,
+        offset: Any | None,
+        binning: Any | None,
+        temperature_c: float | None,
+        temperature_tolerance_c: float,
+        light_label: str,
+        judge_temperature: bool,
+    ) -> CalibrationSelection:
+        """Do the work of `select_dark_frames`, or skip the temperature.
+
+        Parameters
+        ----------
+        camera, exposure, validate_paths, iso, offset, binning
+            As in `select_dark_frames`.
+        temperature_c, temperature_tolerance_c, light_label
+            As in `select_dark_frames`.
+        judge_temperature : `bool`
+            When `False`, every temperature slot is used and no temperature
+            flag is made (the way `get_dark_frames` works when it is given no
+            temperature).
+
+        Returns
+        -------
+        selection : `CalibrationSelection`
+            The dark file paths, with the soft and blocking flag sentences.
+        """
+        with self._lock:
+            camera_data = self._get_camera_dict(self.dark_frames, camera)
+            slots = {
+                setting_key: _existing(_dark_paths_at_exposure(exposure_slots, exposure), validate_paths)
+                for setting_key, exposure_slots in camera_data.items()
+                if isinstance(exposure_slots, dict)
+            }
+        chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "dark", light_label)
+
+        by_temperature: dict[float | None, list[str]] = {}
+        for setting_key, paths in chosen.items():
+            slot_c = parse_calibration_setting_key(setting_key).temperature_c
+            by_temperature.setdefault(slot_c, []).extend(paths)
+        recorded = {slot_c: paths for slot_c, paths in by_temperature.items() if slot_c is not None}
+
+        if not judge_temperature or not recorded:
+            frames = [path for paths in chosen.values() for path in paths]
+        elif temperature_c is None:
+            # Largest set first; the colder slot wins a tie.
+            slot_c = max(recorded, key=lambda slot: (len(recorded[slot]), -slot))
+            frames = recorded[slot_c]
+            if len(recorded) > 1:
+                flags.append(
+                    f"The temperature of {light_label} is not recorded and the library holds darks "
+                    f"at {len(recorded)} temperatures ({', '.join(f'{s:g} C' for s in sorted(recorded))}), "
+                    f"so the {len(frames)} dark frame(s) near {slot_c:g} C, the largest set, were "
+                    f"applied without a temperature check."
+                )
+        else:
+            slot_c = min(recorded, key=lambda slot: (abs(slot - temperature_c), slot))
+            frames = recorded[slot_c]
+            temperature_flag = dark_temperature_flag(
+                temperature_c, _without_duplicates(frames), temperature_tolerance_c, light_label
+            )
+            if temperature_flag is not None:
+                flags.append(temperature_flag)
+
+        for flag in flags:
+            logger.warning(flag)
+        for flag in blocking_flags:
+            logger.warning(flag)
+        return CalibrationSelection(_without_duplicates(frames), flags, blocking_flags)
+
     def get_dark_frames(
         self,
         camera: str | None = None,
@@ -590,15 +1272,21 @@ class CalibrationLibrary(BaseModel):
         validate_paths: bool = True,
         iso: Any | None = None,
         offset: Any | None = None,
-        **kwargs,  # ruff: ignore[missing-type-kwargs]
+        binning: Any | None = None,
+        temperature_c: float | None = None,
+        **kwargs: Any,
     ) -> list[str]:
-        """Retrieve dark frames for a camera, exposure, gain and offset.
+        """Retrieve dark frames for a camera, exposure and settings.
 
-        Darks taken at the given gain and camera offset are used when there
-        are any for the exposure. When there are none, darks from every other
-        gain and offset are used instead, with a warning, since a mismatched
-        dark is judged better than none. When `iso` is not given, every gain
-        and offset is used, as before.
+        This is `select_dark_frames` without the flags. Darks taken at the
+        given gain and camera offset are used when there are any for the
+        exposure. When there are none, darks from every other gain and offset
+        are used instead, with a warning, since a mismatched dark is judged
+        better than none. A binning that no dark has gives an empty list.
+        When `iso` is not given, every gain and offset is used. When
+        `binning` is not given, every binning is used. When `temperature_c`
+        is not given, darks at every temperature are returned together, so
+        pass it unless the aim is to list everything.
 
         Parameters
         ----------
@@ -613,6 +1301,12 @@ class CalibrationLibrary(BaseModel):
             The light frames' gain or ISO.
         offset : `Any`, optional
             The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``.
+        temperature_c : `float`, optional
+            The light frames' sensor temperature in degrees C.
+        **kwargs : `Any`
+            Ignored; accepted so older call sites keep working.
 
         Returns
         -------
@@ -620,61 +1314,102 @@ class CalibrationLibrary(BaseModel):
             Matching dark frame file paths, filtered to existing
             files if `validate_paths` is `True`.
         """
-        camera_data = self._get_camera_dict(self.dark_frames, camera)
+        return self._select_dark_frames(
+            camera,
+            exposure,
+            validate_paths,
+            iso,
+            offset,
+            binning,
+            temperature_c,
+            DEFAULT_DARK_TEMPERATURE_TOLERANCE_C,
+            _DEFAULT_LIGHT_LABEL,
+            judge_temperature=temperature_c is not None,
+        ).frames
 
-        try:
-            target_exp = float(exposure) if exposure is not None else None
-        except ValueError, TypeError:
-            target_exp = None
+    def select_bias_frames(
+        self,
+        camera: str | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
+        binning: Any | None = None,
+        light_label: str = _DEFAULT_LIGHT_LABEL,
+    ) -> CalibrationSelection:
+        """Choose the bias frames for a batch of lights, and how well they fit.
 
-        def frames_at_exposure(setting_keys):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
-            collected = []
-            for setting_key in setting_keys:
-                for exp_key, file_list in camera_data[setting_key].items():
-                    try:
-                        # Fuzzy exposure match (allow 0.1s jitter)
-                        if target_exp is None or abs(float(exp_key) - target_exp) < 0.1:
-                            collected.extend(file_list)
-                    except ValueError, TypeError:
-                        # Fallback to exact string match
-                        if str(exposure) == exp_key:
-                            collected.extend(file_list)
-            return collected
+        The binning must match exactly; if bias frames exist but none has the
+        lights' binning, none is chosen and a blocking flag says why. Bias
+        frames at the lights' gain and offset are used when there are any;
+        otherwise every gain and offset is used, with a soft flag. Bias
+        frames have no temperature slot.
 
-        if iso is None:
-            frames = frames_at_exposure(camera_data)
-        else:
-            frames = frames_at_exposure([key for key in camera_data if _is_same_setting(key, iso, offset)])
-            if not frames:
-                fallback_keys = self._choose_setting_keys(camera_data, None, offset, "dark frames")
-                frames = frames_at_exposure(fallback_keys)
-                if frames:
-                    logger.warning(
-                        "No dark frames at gain %s and offset %s for exposure %s; "
-                        "using darks taken at other settings.",
-                        iso,
-                        offset,
-                        exposure,
-                    )
+        Parameters
+        ----------
+        camera : `str`, optional
+            The camera name.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO. When `None`, every gain and offset
+            is used with no flag.
+        offset : `Any`, optional
+            The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``. When `None`, every
+            binning is used with no flag.
+        light_label : `str`, optional
+            How the flag sentences name the lights.
 
-        frames = _without_duplicates(frames)
-        if validate_paths:
-            return [f for f in frames if os.path.exists(f)]
-        return frames
+        Returns
+        -------
+        selection : `CalibrationSelection`
+            The bias file paths, with the soft and blocking flag sentences.
+        """
+        with self._lock:
+            camera_data = self._get_camera_dict(self.bias_frames, camera)
+            slots = {
+                setting_key: _existing(paths, validate_paths)
+                for setting_key, paths in camera_data.items()
+                if isinstance(paths, list)
+            }
+        chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "bias", light_label)
+        for flag in [*flags, *blocking_flags]:
+            logger.warning(flag)
+        frames = _without_duplicates([path for paths in chosen.values() for path in paths])
+        return CalibrationSelection(frames, flags, blocking_flags)
 
     def get_bias_frames(
         self,
-        camera=None,  # ruff: ignore[missing-type-function-argument]
-        validate_paths=True,  # ruff: ignore[missing-type-function-argument]
-        iso=None,  # ruff: ignore[missing-type-function-argument]
-        offset=None,  # ruff: ignore[missing-type-function-argument]
-        **kwargs,  # ruff: ignore[missing-type-kwargs]
+        camera: str | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
+        binning: Any | None = None,
+        **kwargs: Any,
     ) -> list[str]:
-        """Retrieve bias frames for a camera, gain and offset.
+        """Retrieve bias frames for a camera, gain, offset and binning.
 
-        Bias frames at the given gain and camera offset are used when there
-        are any; otherwise every gain and offset is used, with a warning. When
-        `iso` is not given, every gain and offset is used, as before.
+        This is `select_bias_frames` without the flags. Bias frames at the
+        given gain and camera offset are used when there are any; otherwise
+        every gain and offset is used, with a warning. A binning that no bias
+        frame has gives an empty list. When `iso` is not given, every gain and
+        offset is used. When `binning` is not given, every binning is used.
+
+        Parameters
+        ----------
+        camera : `str`, optional
+            The camera name.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO.
+        offset : `Any`, optional
+            The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``.
+        **kwargs : `Any`
+            Ignored; accepted so older call sites keep working.
 
         Returns
         -------
@@ -682,41 +1417,55 @@ class CalibrationLibrary(BaseModel):
             Matching bias frame file paths, filtered to existing
             files if `validate_paths` is `True`.
         """
-        camera_data = self._get_camera_dict(self.bias_frames, camera)
-        frames = []
+        return self.select_bias_frames(camera, validate_paths, iso, offset, binning).frames
 
-        for setting_key in self._choose_setting_keys(camera_data, iso, offset, "bias frames"):
-            setting_list = camera_data[setting_key]
-            if isinstance(setting_list, list):
-                frames.extend(setting_list)
-
-        frames = _without_duplicates(frames)
-        if validate_paths:
-            return [f for f in frames if os.path.exists(f)]
-        return frames
-
-    def get_flat_frames(
+    def select_flat_frames(
         self,
-        telescope=None,  # ruff: ignore[missing-type-function-argument]
-        camera=None,  # ruff: ignore[missing-type-function-argument]
-        filter_type=None,  # ruff: ignore[missing-type-function-argument]
-        validate_paths=True,  # ruff: ignore[missing-type-function-argument]
-        iso=None,  # ruff: ignore[missing-type-function-argument]
-        offset=None,  # ruff: ignore[missing-type-function-argument]
-        **kwargs,  # ruff: ignore[missing-type-kwargs]
-    ) -> list[str]:
-        """Retrieve flats for a telescope, camera, filter, gain and offset.
+        telescope: str | None = None,
+        camera: str | None = None,
+        filter_type: Any | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
+        binning: Any | None = None,
+        light_label: str = _DEFAULT_LIGHT_LABEL,
+    ) -> CalibrationSelection:
+        """Choose the flat frames for a batch of lights, and how well they fit.
 
-        Flats at the given gain and camera offset are used when there are any
-        for the filter; otherwise every gain and offset is used, with a
-        warning. When `iso` is not given, every gain and offset is used, as
-        before.
+        The binning must match exactly; if flats exist for the filter but none
+        has the lights' binning, none is chosen and a blocking flag says why.
+        Flats at the lights' gain and offset are used when there are any;
+        otherwise every gain and offset is used, with a soft flag. Flats have
+        no temperature slot.
+
+        Parameters
+        ----------
+        telescope : `str`, optional
+            The telescope the flats were taken through. When the library has
+            no flats for it, the first telescope's flats are used (so offline
+            stacking works without telescope metadata).
+        camera : `str`, optional
+            The camera name.
+        filter_type : `Any`, optional
+            The filter. Older and newer names of the same filter match (see
+            `FLAT_FILTER_ALIASES`).
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO. When `None`, every gain and offset
+            is used with no flag.
+        offset : `Any`, optional
+            The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``. When `None`, every
+            binning is used with no flag.
+        light_label : `str`, optional
+            How the flag sentences name the lights.
 
         Returns
         -------
-        frames : `list` [`str`]
-            Matching flat frame file paths, filtered to existing
-            files if `validate_paths` is `True`.
+        selection : `CalibrationSelection`
+            The flat file paths, with the soft and blocking flag sentences.
         """
         search_filters = flat_filter_names(filter_type)
 
@@ -728,20 +1477,66 @@ class CalibrationLibrary(BaseModel):
 
         camera_data = self._get_camera_dict(telescope_data, camera)
 
-        frames = []
-        for f_name in search_filters:
-            filter_data = camera_data.get(f_name, {})
-            # Take the light frames' own gain and offset when there are
-            # flats for it, otherwise every one, with a warning.
-            for iso_key in self._choose_setting_keys(filter_data, iso, offset, "flat frames"):
-                iso_list = filter_data[iso_key]
-                if isinstance(iso_list, list):
-                    frames.extend(iso_list)
+        slots: dict[str, list[str]] = {}
+        with self._lock:
+            for f_name in search_filters:
+                for setting_key, paths in camera_data.get(f_name, {}).items():
+                    if isinstance(paths, list):
+                        slots.setdefault(setting_key, []).extend(_existing(paths, validate_paths))
+        chosen, flags, blocking_flags = _choose_slots(slots, iso, offset, binning, "flat", light_label)
+        for flag in [*flags, *blocking_flags]:
+            logger.warning(flag)
+        frames = _without_duplicates([path for paths in chosen.values() for path in paths])
+        return CalibrationSelection(frames, flags, blocking_flags)
 
-        frames = _without_duplicates(frames)
-        if validate_paths:
-            return [f for f in frames if os.path.exists(f)]
-        return frames
+    def get_flat_frames(
+        self,
+        telescope: str | None = None,
+        camera: str | None = None,
+        filter_type: Any | None = None,
+        validate_paths: bool = True,
+        iso: Any | None = None,
+        offset: Any | None = None,
+        binning: Any | None = None,
+        **kwargs: Any,
+    ) -> list[str]:
+        """Retrieve flats for a telescope, camera, filter and settings.
+
+        This is `select_flat_frames` without the flags. Flats at the given
+        gain and camera offset are used when there are any for the filter;
+        otherwise every gain and offset is used, with a warning. A binning
+        that no flat has gives an empty list. When `iso` is not given, every
+        gain and offset is used. When `binning` is not given, every binning
+        is used.
+
+        Parameters
+        ----------
+        telescope : `str`, optional
+            The telescope the flats were taken through.
+        camera : `str`, optional
+            The camera name.
+        filter_type : `Any`, optional
+            The filter.
+        validate_paths : `bool`, optional
+            Drop files that no longer exist, by default `True`.
+        iso : `Any`, optional
+            The light frames' gain or ISO.
+        offset : `Any`, optional
+            The light frames' camera offset.
+        binning : `Any`, optional
+            The light frames' binning, such as ``"2x2"``.
+        **kwargs : `Any`
+            Ignored; accepted so older call sites keep working.
+
+        Returns
+        -------
+        frames : `list` [`str`]
+            Matching flat frame file paths, filtered to existing
+            files if `validate_paths` is `True`.
+        """
+        return self.select_flat_frames(
+            telescope, camera, filter_type, validate_paths, iso, offset, binning
+        ).frames
 
     def list_flat_groups(
         self,
@@ -752,11 +1547,11 @@ class CalibrationLibrary(BaseModel):
         offset: Any = None,
         validate_paths: bool = True,
     ) -> list[FlatGroup]:
-        """List the flat sets in the library, one per gain and offset.
+        """List the flat sets in the library, one per gain, offset and binning.
 
-        Flats at different gains or offsets never mix in one group, because
-        a flat only calibrates lights taken at the same settings. Leave an
-        argument as `None` to include every value of it.
+        Flats at different gains, offsets or binnings never mix in one group,
+        because a flat only calibrates lights taken at the same settings.
+        Leave an argument as `None` to include every value of it.
 
         Parameters
         ----------
@@ -803,9 +1598,15 @@ class CalibrationLibrary(BaseModel):
                             kept = [p for p in paths if os.path.exists(p)] if validate_paths else list(paths)
                             if not kept:
                                 continue
-                            key_gain, key_offset = split_calibration_setting_key(setting_key)
+                            setting = parse_calibration_setting_key(setting_key)
                             group = FlatGroup(
-                                telescope_name, camera_name, filter_name, key_gain, key_offset, kept
+                                telescope_name,
+                                camera_name,
+                                filter_name,
+                                setting.gain,
+                                setting.offset,
+                                kept,
+                                setting.binning,
                             )
                             groups.append(group)
         return groups
@@ -1014,23 +1815,6 @@ def is_dark_calibration_metadata_compatible(
     if not is_calibration_gain_compatible(light_gain, master_gain):
         return False
     return abs(float(light_exposure) - float(master_exposure)) <= exposure_tolerance_seconds
-
-
-# How many degrees C a dark master's own capture temperature may differ
-# from the light frames it calibrates before it gets flagged. `get_dark_frames`
-# has no temperature dimension at all -- it pools every dark at a given
-# camera/gain/exposure regardless of when it was captured -- so a library
-# built from sessions at very different sensor temperatures can silently
-# combine them into one mismatched master. This is a first-pass estimate,
-# not yet characterized against this camera's own measured dark-current
-# curve: it is deliberately loose (CMOS dark current can already grow
-# noticeably within a few degrees) so it flags real gaps rather than
-# ordinary cooler-setpoint jitter. Confirmed against a real incident:
-# Arcturus's 0.5s/gain-0 darks cluster at ~0C and ~-10C with nothing in
-# between, while its light frames drifted from -2.9C to -10.7C, and Siril
-# reported 57-64% negative pixels after dark subtraction against the
-# resulting mixed-temperature master.
-DEFAULT_DARK_TEMPERATURE_TOLERANCE_C = 3.0
 
 
 def is_dark_calibration_temperature_compatible(

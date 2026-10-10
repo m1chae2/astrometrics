@@ -836,6 +836,7 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
         "corrupt_frames_skipped",
         "calibration_mismatch_flags",
         "calibration_blocking_flags",
+        "calibration_match_blocking_flags",
         "symlinked_light_paths",
         "zero_order_stars",
     ):

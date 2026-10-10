@@ -9,6 +9,7 @@ own flag reasons.
 
 from typing import Any
 
+from astrometricslib.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.stacking_quality import StackingInputQuality
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
@@ -36,6 +37,45 @@ CALIBRATION_METADATA_GATE_NAME = "calibration_metadata"
 CALIBRATION_FRAME_COUNT_GATE_NAME = "calibration_frame_count"
 
 
+def calibration_metadata_reasons(diagnostics: dict[str, Any]) -> list[str]:
+    """Write the reasons the calibration did not match the lights.
+
+    Two lists in the stacking run's diagnostics feed this, and each becomes
+    one reason that names every sentence in it:
+
+    - ``calibration_mismatch_flags``: a soft flag for each calibration
+      frame that was still applied although its gain, offset or temperature
+      does not match the lights. The library's sentence says which frames
+      were applied to which lights.
+    - ``calibration_match_blocking_flags``: a blocking flag for each kind of
+      calibration frame that was **not** applied because it could never
+      calibrate the lights (a binning mismatch).
+
+    The ``calibration_metadata`` gate and the input quality summary both use
+    these reasons, so the two never disagree.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        What the stacking run reported.
+
+    Returns
+    -------
+    reasons : `list` [`str`]
+        Up to two reasons, soft first. Empty when nothing mismatched.
+    """
+    reasons = []
+    mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
+    unusable = list(diagnostics.get(CALIBRATION_MATCH_BLOCKING_FLAGS_KEY, []))
+    if mismatches:
+        reasons.append(f"{len(mismatches)} calibration metadata mismatch(es): " + "; ".join(mismatches))
+    if unusable:
+        reasons.append(
+            "calibration frames not applied because they cannot match the lights: " + "; ".join(unusable)
+        )
+    return reasons
+
+
 def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     """Build the gates for the flats, calibration metadata and frame counts.
 
@@ -44,6 +84,14 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     reason. The same goes for the metadata check when no calibration frame
     was applied. A failed gate's sentence is the same text the input quality
     lists as a flag reason, so the two never disagree.
+
+    The ``calibration_metadata`` gate fails when a calibration frame was
+    applied although its gain, offset or temperature differs from the lights,
+    and when a kind of calibration frame was left out because its binning
+    differs (see `calibration_metadata_reasons`). The second case fails the
+    gate even though no calibration frame of that kind was applied, because
+    leaving it out is the problem; the gate is ``not_checked`` only when no
+    calibration frame was applied and none was refused.
 
     The ``calibration_frame_count`` gate fails when a master bias, dark or flat
     was built from fewer frames than the configured minimum (see
@@ -55,7 +103,8 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
     ----------
     diagnostics : `dict`
         What the stacking run reported. Read: ``flat_calibration``,
-        ``calibration_applied``, ``calibration_mismatch_flags`` and
+        ``calibration_applied``, ``calibration_mismatch_flags``,
+        ``calibration_match_blocking_flags`` and
         ``calibration_blocking_flags``.
 
     Returns
@@ -129,21 +178,24 @@ def calibration_gates(diagnostics: dict[str, Any]) -> list[GateResult]:
                 )
 
     applied = diagnostics.get("calibration_applied") or {}
-    mismatches = list(diagnostics.get("calibration_mismatch_flags", []))
-    if not any(applied.values()):
+    metadata_reasons = calibration_metadata_reasons(diagnostics)
+    metadata_flag_count = len(diagnostics.get("calibration_mismatch_flags", [])) + len(
+        diagnostics.get(CALIBRATION_MATCH_BLOCKING_FLAGS_KEY, [])
+    )
+    if metadata_reasons:
+        gates.append(
+            failed_gate(
+                CALIBRATION_METADATA_GATE_NAME,
+                "; ".join(metadata_reasons),
+                measured_value=float(metadata_flag_count),
+                limit=0.0,
+            )
+        )
+    elif not any(applied.values()):
         gates.append(
             unchecked_gate(
                 CALIBRATION_METADATA_GATE_NAME,
                 "no calibration frame was applied, so there was nothing to compare",
-            )
-        )
-    elif mismatches:
-        gates.append(
-            failed_gate(
-                CALIBRATION_METADATA_GATE_NAME,
-                f"{len(mismatches)} calibration metadata mismatch(es)",
-                measured_value=float(len(mismatches)),
-                limit=0.0,
             )
         )
     else:
@@ -222,8 +274,9 @@ def assess_input_quality(
     background_split : `dict`, `list` [`dict`] or `None`
         What the background check found (see `describe_background_splits`).
     diagnostics : `dict`
-        What the stacking run reported. This reads the flat assessment and
-        the calibration mismatch flags from it.
+        What the stacking run reported. This reads the flat assessment, the
+        calibration mismatch flags and the flags for calibration frames that
+        could not be applied from it.
 
     Returns
     -------
@@ -247,8 +300,7 @@ def assess_input_quality(
         )
     if detail is not None:
         reasons.append(f"background split: {detail}")
-    if mismatches:
-        reasons.append(f"{len(mismatches)} calibration metadata mismatch(es)")
+    reasons.extend(calibration_metadata_reasons(diagnostics))
     if short_masters:
         reasons.append("calibration frame count too low: " + "; ".join(short_masters))
     reasons.extend(f"flat calibration: {issue}" for issue in flat_issues)

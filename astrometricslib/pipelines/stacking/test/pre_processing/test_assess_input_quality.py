@@ -75,7 +75,7 @@ def test_flat_issues_and_mismatches_become_reasons() -> None:
     }
     quality = assess_input_quality(10, 10, [], None, diagnostics)
     assert quality.flat_smoothing_sigma_px == pytest.approx(2.5)
-    assert "1 calibration metadata mismatch(es)" in quality.flag_reasons
+    assert "1 calibration metadata mismatch(es): dark gain differs" in quality.flag_reasons
     assert "flat calibration: master flat noise is 4.49% from 1 frame(s)" in quality.flag_reasons
 
 
@@ -115,3 +115,93 @@ def test_the_frame_count_gate_passes_with_enough_frames_and_is_unchecked_without
 
     assert applied[CALIBRATION_FRAME_COUNT_GATE_NAME].status is GateStatus.PASSED
     assert none_applied[CALIBRATION_FRAME_COUNT_GATE_NAME].status is GateStatus.NOT_CHECKED
+
+
+BINNING_BLOCK = (
+    "No dark was applied to the 12 light frame(s) starting with light_001.fits: they were taken at "
+    "binning 2x2, but the dark frames in the library were taken at binning 1x1, and frames binned "
+    "differently cannot calibrate each other."
+)
+TEMPERATURE_FLAG = (
+    "No dark frame was within 3 C of the 12 light frame(s) starting with light_001.fits, which were "
+    "taken at -10.0 C, so the nearest dark master, taken at 5.0 C (3 dark frame(s) from 5.0 to 5.0 C), "
+    "was applied, 15.0 C away."
+)
+
+
+def test_a_refused_calibration_fails_the_metadata_gate_and_names_the_reason() -> None:
+    """A binning mismatch applied no dark, yet the gate fails and says why."""
+    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_METADATA_GATE_NAME,
+        calibration_gates,
+    )
+
+    diagnostics = {
+        "calibration_applied": {"dark": False, "flat": False, "bias": False},
+        "calibration_match_blocking_flags": [BINNING_BLOCK],
+    }
+
+    quality = assess_input_quality(10, 10, [], None, diagnostics)
+    gates = {gate.name: gate for gate in calibration_gates(diagnostics)}
+
+    assert gates[CALIBRATION_METADATA_GATE_NAME].status is GateStatus.FAILED
+    assert BINNING_BLOCK in gates[CALIBRATION_METADATA_GATE_NAME].detail
+    assert gates[CALIBRATION_METADATA_GATE_NAME].detail in quality.flag_reasons
+    assert quality.is_flagged
+
+
+def test_a_far_temperature_dark_fails_the_metadata_gate_with_its_sentence() -> None:
+    """A dark applied from a far temperature fails the gate and is named."""
+    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_METADATA_GATE_NAME,
+        calibration_gates,
+    )
+
+    diagnostics = {"calibration_applied": {"dark": True}, "calibration_mismatch_flags": [TEMPERATURE_FLAG]}
+
+    quality = assess_input_quality(10, 10, [], None, diagnostics)
+    gates = {gate.name: gate for gate in calibration_gates(diagnostics)}
+
+    assert gates[CALIBRATION_METADATA_GATE_NAME].status is GateStatus.FAILED
+    assert TEMPERATURE_FLAG in gates[CALIBRATION_METADATA_GATE_NAME].detail
+    assert quality.calibration_mismatch_flags == [TEMPERATURE_FLAG]
+    assert gates[CALIBRATION_METADATA_GATE_NAME].detail in quality.flag_reasons
+
+
+def test_the_metadata_gate_names_both_kinds_of_flag_together() -> None:
+    """A soft and a blocking flag both appear in the gate and the reasons."""
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_METADATA_GATE_NAME,
+        calibration_gates,
+    )
+
+    diagnostics = {
+        "calibration_applied": {"flat": True},
+        "calibration_mismatch_flags": [TEMPERATURE_FLAG],
+        "calibration_match_blocking_flags": [BINNING_BLOCK],
+    }
+
+    quality = assess_input_quality(10, 10, [], None, diagnostics)
+    gates = {gate.name: gate for gate in calibration_gates(diagnostics)}
+    detail = gates[CALIBRATION_METADATA_GATE_NAME].detail
+
+    assert TEMPERATURE_FLAG in detail
+    assert BINNING_BLOCK in detail
+    assert len(quality.flag_reasons) == 2
+
+
+def test_the_metadata_gate_passes_when_matched_and_is_unchecked_without_calibration() -> None:
+    """No flag passes the gate; with nothing applied it is not checked."""
+    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
+        CALIBRATION_METADATA_GATE_NAME,
+        calibration_gates,
+    )
+
+    matched = {gate.name: gate for gate in calibration_gates({"calibration_applied": {"dark": True}})}
+    nothing = {gate.name: gate for gate in calibration_gates({"calibration_applied": {"dark": False}})}
+
+    assert matched[CALIBRATION_METADATA_GATE_NAME].status is GateStatus.PASSED
+    assert nothing[CALIBRATION_METADATA_GATE_NAME].status is GateStatus.NOT_CHECKED

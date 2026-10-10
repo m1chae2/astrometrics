@@ -199,7 +199,11 @@ def _calibration_files(frames: list[Any], library: Any) -> dict[str, list[list[A
     exposure. The lookups here use every combination found in the frames, so
     they cover whatever the batches use. A few extra frames in the list only
     mean a stack is rebuilt when calibration it did not use changes, never that
-    a changed one is missed.
+    a changed one is missed. The lookups also leave out the binning and the
+    sensor temperature, so they list the calibration frames of every binning
+    and every temperature slot. A frame added at another temperature may or
+    may not change a given stack's pick, and it is cheaper to rebuild than to
+    miss it.
 
     Parameters
     ----------

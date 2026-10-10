@@ -19,11 +19,17 @@ import tempfile
 import threading
 import time
 import weakref
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.drivers.calibration_library import (
+    CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    CalibrationSelection,
+    format_binning,
+    header_binning,
+)
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
 from astrometricslib.drivers.siril_output_parsing import (
     parse_negative_pixel_percentage,
     parse_registration_totals,
@@ -811,11 +817,9 @@ def dominant_exposure(frames: list[Any]) -> str:
 def representative_light_temperature_c(frames: list[Any]) -> float | None:
     """Find a light-frame batch's mean sensor temperature, for dark matching.
 
-    `get_dark_frames` has no temperature dimension -- it pools every dark
-    at a given camera/gain/exposure regardless of capture temperature --
-    so this is the only place a batch's actual sensor temperature is
-    available to compare a matched dark master against (see
-    `is_dark_calibration_temperature_compatible`).
+    The calibration library files darks by temperature slot and picks the
+    slot nearest this value (see `CalibrationLibrary.select_dark_frames`), so
+    this is where a batch's actual sensor temperature enters the match.
 
     A dict frame here is always a plain ``model_dump()`` (see
     `_stack_one_batch`), which uses the Python field name
@@ -849,6 +853,43 @@ def representative_light_temperature_c(frames: list[Any]) -> float | None:
     ]
     temperatures = [t for t in temperatures if t is not None]
     return sum(temperatures) / len(temperatures) if temperatures else None
+
+
+def representative_light_binning(frames: list[Any], light_paths: list[str]) -> str:
+    """Find the binning a batch of light frames was taken at, for matching.
+
+    The calibration library files frames by binning, and a frame binned
+    differently can never calibrate the lights. The binning is read from the
+    header of the first readable light (its ``XBINNING`` and ``YBINNING``
+    cards). One light speaks for the batch, because lights binned differently
+    have different image sizes and the stacker keeps only the most common
+    size. If no header can be read, the binning recorded on the frame
+    records is used (the most common value; the width factor stands for
+    both axes), and without one, no binning (``"1x1"``).
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records or dictionaries of them, with a ``binning``.
+    light_paths : `list` [`str`]
+        The light frame paths that can be read, in the order to try them.
+
+    Returns
+    -------
+    binning : `str`
+        The binning as text, such as ``"2x2"``.
+    """
+    for path in light_paths:
+        try:
+            return header_binning(read_header(path))
+        except FITS_READ_ERRORS:
+            continue
+    counts: dict[int, int] = {}
+    for frame in frames:
+        value = frame.get("binning") if isinstance(frame, dict) else getattr(frame, "binning", None)
+        if value is not None:
+            counts[int(value)] = counts.get(int(value), 0) + 1
+    return format_binning(max(counts, key=counts.__getitem__)) if counts else format_binning()
 
 
 def light_calibration_flags(num_darks: int, num_flats: int, num_biases: int) -> tuple[str, str, str]:
@@ -917,6 +958,7 @@ class ImageProcessing:
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
             CALIBRATION_BLOCKING_FLAGS_KEY: [],
+            CALIBRATION_MATCH_BLOCKING_FLAGS_KEY: [],
         }
         _active_image_processing_instances.add(self)
 
@@ -1164,6 +1206,48 @@ class ImageProcessing:
             if job_logger:
                 job_logger.info("Cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
 
+    def _record_calibration_selection(
+        self,
+        selection: CalibrationSelection,
+        kind: str,
+        log: Callable[[str], None],
+        warn: Callable[[str], None],
+    ) -> list[str]:
+        """Copy a calibration selection's flags into the run's diagnostics.
+
+        A soft flag (the library used frames of another gain, offset or
+        temperature because nothing closer exists) goes into
+        ``calibration_mismatch_flags``, and the frames are still applied. A
+        blocking flag (the frames could never calibrate the lights, such as a
+        binning mismatch) goes into ``calibration_match_blocking_flags``, and
+        the selection has no frames. The stacking pipeline reads both lists
+        (see `calibration_gates` in `pipelines/stacking/pre_processing/`
+        `assess_input_quality.py`) and fails its ``calibration_metadata`` gate.
+
+        Parameters
+        ----------
+        selection : `CalibrationSelection`
+            What the library chose for this kind of frame.
+        kind : `str`
+            ``"dark"``, ``"bias"`` or ``"flat"``, for the log lines.
+        log : `Callable` [[`str`], `None`]
+            Writes an information line to the run's log.
+        warn : `Callable` [[`str`], `None`]
+            Writes a warning line to the run's log.
+
+        Returns
+        -------
+        frames : `list` [`str`]
+            The chosen file paths.
+        """
+        for flag in selection.flags:
+            log(f"Calibration metadata mismatch (soft flag, {kind} still applied): {flag}")
+            self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(flag)
+        for flag in selection.blocking_flags:
+            warn(f"Calibration cannot be matched (blocking flag, {kind} not applied): {flag}")
+            self.last_run_diagnostics.setdefault(CALIBRATION_MATCH_BLOCKING_FLAGS_KEY, []).append(flag)
+        return selection.frames
+
     def build_directories(
         self,
         id: str,
@@ -1196,6 +1280,7 @@ class ImageProcessing:
             Path to the populated working directory for this target.
         """
         log = job_logger.info if job_logger else logger.info
+        warn = job_logger.warning if job_logger else logger.warning
 
         if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
             f = image_files[0]
@@ -1323,107 +1408,28 @@ class ImageProcessing:
                 filt = f.get("filter") if isinstance(f, dict) else getattr(f, "filter", "None")
 
                 light_temperature_c = representative_light_temperature_c(matching_frames)
+                staged_light_paths = sorted(readable_light_paths)
+                light_binning = representative_light_binning(matching_frames, staged_light_paths)
+                first_light = staged_light_paths[0] if staged_light_paths else ""
+                # How the calibration flags name this batch of lights.
+                light_label = (
+                    f"the {len(staged_light_paths)} light frame(s) starting with "
+                    f"{os.path.basename(first_light)}"
+                )
 
-                def soft_flag_calibration_mismatch(
-                    master_paths: list[str],
-                    master_kind: str,
-                    check_exposure: bool,
-                    check_temperature: bool = False,
-                ) -> None:
-                    """Log, without blocking, a relaxed-match mismatch.
-
-                    Checks whether a relaxed-matched calibration
-                    master's own gain (and, for darks only, exposure
-                    and sensor temperature) looks incompatible with
-                    the light frames it'll be applied to.
-
-                    calibration_library.py's get_dark_frames/
-                    get_bias_frames/get_flat_frames are documented
-                    to deliberately accept a
-                    mismatched-gain master over having none at all.
-                    This check doesn't override that: it only
-                    surfaces the mismatch as a soft flag, checked
-                    against the first matched master file as a
-                    low-cost approximation rather than reading every
-                    matched file's header. check_exposure and
-                    check_temperature must be False for bias/flat
-                    masters -- their exposure times are unrelated to
-                    the light frames' by design (bias is near-zero,
-                    flats are set by the flat panel's brightness), so
-                    comparing them against light exposure would flag
-                    normal, correct calibration setups as mismatched;
-                    temperature is likewise only characterized here
-                    for dark current, not bias/flat noise.
-                    """
-                    if not master_paths:
-                        return
-                    from astropy.io import fits
-
-                    from astrometricslib.drivers.calibration_library import (
-                        is_calibration_gain_compatible,
-                        is_calibration_offset_compatible,
-                        is_dark_calibration_metadata_compatible,
-                        is_dark_calibration_temperature_compatible,
-                    )
-
-                    try:
-                        with fits.open(master_paths[0], memmap=False) as hdul:
-                            header = hdul[0].header
-                        master_iso = str(header.get("ISOSPEED", header.get("GAIN", iso)))
-                        master_offset = header.get("OFFSET", header.get("BLKLEVEL", "0"))
-                        master_exp = float(header.get("EXPTIME", exp))
-                        master_temp = header.get("CCD-TEMP", header.get("SET-TEMP"))
-                        master_temp = float(master_temp) if master_temp is not None else None
-                    except FITS_READ_ERRORS:
-                        return
-
-                    if check_exposure:
-                        compatible = is_dark_calibration_metadata_compatible(
-                            light_exposure=float(exp),
-                            light_gain=str(iso),
-                            master_exposure=master_exp,
-                            master_gain=master_iso,
-                        )
-                    else:
-                        compatible = is_calibration_gain_compatible(
-                            light_gain=str(iso), master_gain=master_iso
-                        )
-
-                    # The camera offset is the baseline added to every pixel;
-                    # a master taken at another offset shifts every pixel of
-                    # the lights it is applied to.
-                    offset_compatible = is_calibration_offset_compatible(offset, master_offset)
-
-                    temperature_compatible = True
-                    if check_temperature:
-                        temperature_compatible = is_dark_calibration_temperature_compatible(
-                            light_temperature_c=light_temperature_c,
-                            master_temperature_c=master_temp,
-                        )
-
-                    if not compatible or not offset_compatible or not temperature_compatible:
-                        exposure_note = (
-                            f" exposure={master_exp}s vs light frames'... exposure={exp}s"
-                            if check_exposure
-                            else ""
-                        )
-                        temperature_note = (
-                            f" temperature={master_temp}C vs light frames' mean temperature="
-                            f"{light_temperature_c:.1f}C"
-                            if check_temperature and not temperature_compatible
-                            else ""
-                        )
-                        message = (
-                            f"{master_kind} master '{master_paths[0]}' has gain={master_iso} "
-                            f"offset={master_offset} vs light frames' gain={iso} offset={offset}."
-                            f"{exposure_note}{temperature_note}"
-                        )
-                        log(f"Calibration metadata mismatch (soft flag, master still applied): {message}")
-                        self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(message)
-
-                dark_frame_paths = library.get_dark_frames(camera=cam, iso=iso, offset=offset, exposure=exp)
-                soft_flag_calibration_mismatch(
-                    dark_frame_paths, "dark", check_exposure=True, check_temperature=True
+                dark_frame_paths = self._record_calibration_selection(
+                    library.select_dark_frames(
+                        camera=cam,
+                        exposure=exp,
+                        iso=iso,
+                        offset=offset,
+                        binning=light_binning,
+                        temperature_c=light_temperature_c,
+                        light_label=light_label,
+                    ),
+                    "dark",
+                    log,
+                    warn,
                 )
                 readable_dark_paths = find_readable_paths(dark_frame_paths)
                 for item in dark_frame_paths:
@@ -1436,8 +1442,14 @@ class ImageProcessing:
                     except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
-                bias_frame_paths = library.get_bias_frames(camera=cam, iso=iso, offset=offset)
-                soft_flag_calibration_mismatch(bias_frame_paths, "bias", check_exposure=False)
+                bias_frame_paths = self._record_calibration_selection(
+                    library.select_bias_frames(
+                        camera=cam, iso=iso, offset=offset, binning=light_binning, light_label=light_label
+                    ),
+                    "bias",
+                    log,
+                    warn,
+                )
                 readable_bias_paths = find_readable_paths(bias_frame_paths)
                 for item in bias_frame_paths:
                     if item not in readable_bias_paths:
@@ -1449,10 +1461,20 @@ class ImageProcessing:
                     except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
-                flat_frame_paths = library.get_flat_frames(
-                    telescope=tel, camera=cam, filter_type=filt, iso=iso, offset=offset
+                flat_frame_paths = self._record_calibration_selection(
+                    library.select_flat_frames(
+                        telescope=tel,
+                        camera=cam,
+                        filter_type=filt,
+                        iso=iso,
+                        offset=offset,
+                        binning=light_binning,
+                        light_label=light_label,
+                    ),
+                    "flat",
+                    log,
+                    warn,
                 )
-                soft_flag_calibration_mismatch(flat_frame_paths, "flat", check_exposure=False)
                 readable_flat_paths = find_readable_paths(flat_frame_paths)
                 for item in flat_frame_paths:
                     if item not in readable_flat_paths:
@@ -1896,6 +1918,7 @@ class ImageProcessing:
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
             CALIBRATION_BLOCKING_FLAGS_KEY: [],
+            CALIBRATION_MATCH_BLOCKING_FLAGS_KEY: [],
         }
         if filter_wfwhm is None:
             filter_wfwhm = self.config.get_stack_filter_wfwhm_percentile()

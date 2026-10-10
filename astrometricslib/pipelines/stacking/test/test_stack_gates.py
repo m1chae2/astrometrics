@@ -248,7 +248,7 @@ def test_calibration_metadata_gate_fails_on_a_mismatch() -> None:
     )["calibration_metadata"]
 
     assert gate.status is GateStatus.FAILED
-    assert gate.detail == "1 calibration metadata mismatch(es)"
+    assert gate.detail == "1 calibration metadata mismatch(es): dark gain differs"
 
 
 def test_calibration_metadata_gate_passes_when_calibration_matched() -> None:

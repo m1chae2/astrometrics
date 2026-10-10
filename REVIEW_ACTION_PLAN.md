@@ -122,6 +122,22 @@ done.
 | S15 | done | `pipelines/spectroscopy/test/test_extraction_aperture_stability.py`, `test_sky_estimate_bias.py`, `test_response_balmer_mask.py`, `test_extinction_correction.py` |
 | S20 | done | `test_layer_boundaries.py` blocks unseeded randomness under `pipelines/` |
 | RA wrap follow-ups | done | `test_pointing_correction_ra_wrap.py`; `test_gaia_cache_ra_wrap.py`; helper in `pipelines/shared/angles.py` |
+| S16 | done | `pipelines/spectroscopy/test/test_threshold_single_definition.py`; `models/test/test_spectral_match_fields.py`; gate `spectral_classification` fails on class-level ambiguity |
+| S17 | done | `pipelines/asteroid_detection/test/test_session_chaining.py`, `test_residual_criterion.py`, `test_mpc_report.py`; gate `track_residuals` |
+| S18 | done | `pipelines/photometry/test/test_variability_injection.py` (synthetic AUC 0.94); gate `variability_discrimination` fails below 0.7 |
+
+Decisions taken during the work, for the owner to confirm:
+
+- `AMBIGUOUS_RMS_GAP` is 0.02 RMS, the smallest adjacent-rung spacing of the template ladder.
+  Real stars show a median best-to-second gap of about 0.006, so most are ambiguous at subtype
+  level; the gate therefore fails only on ambiguity between spectral classes, and the subtype
+  count goes in its detail. Set the constant to about 0.0025 to recover the old behaviour.
+- Airmass extinction uses the mean Kitt Peak curve (2 km, dry site). Only the curve's shape
+  enters a difference correction, but a wetter or lower site has more blue extinction.
+- The stored instrument response still carries coefficients fitted with the old 60 Å Balmer
+  mask; re-derive it on the Vega stack with `scripts/derive_instrument_response.py`.
+- Variability thresholds (chi-square and Stetson J at the field's 99th percentile, excess
+  scatter 1.5, AUC floor 0.7) are design choices measured only on synthetic fields.
 
 Found while doing tier 1, now tracked as follow-ups:
 

@@ -1,8 +1,8 @@
 # Review Action Plan
 
 This plan lists the items from the 2026-10-09 architecture and scientific-rigor review of the
-repository. Each item names the problem, how to confirm it is real, how to measure that it is
-fixed, and what stops it from coming back. Section 4 describes the shared prevention mechanisms
+repository. Section 1 sets the order of work. Each item names the problem, how to confirm it
+is real, how to measure that it is fixed, and what stops it from coming back. Section 5 describes the shared prevention mechanisms
 that the per-item "Prevent" lines refer to.
 
 The code is the source of truth. Line numbers drift, so each item names files and functions.
@@ -14,12 +14,90 @@ How to read an item:
   anything. A fix that cannot reproduce its issue first is a guess.
 - **Success.** The measurable condition that closes the item.
 - **Prevent.** The mechanism that keeps the issue from returning. Mechanism names such as
-  "golden-data test" or "contract test" refer to section 4.
+  "golden-data test" or "contract test" refer to section 5.
 
-## 1. Decisions to make first
+## 1. Priorities and order of work
 
-Three of your instructions contradict the repository's own documents. Code changes in sections 2
-and 3 depend on these answers, so make them before starting the work.
+Scientific correctness comes first. Architecture work is limited to two aims: usability, meaning
+a person or a Python caller can do the task without surprises, and reliability, meaning one
+implementation of each function rather than copies in several places. Items that serve neither
+aim are deferred and listed at the end of this section.
+
+### 1.1 Science, by tier
+
+**Tier 1: produces wrong results today.** Fix each with its truth-known test (section 5.3) in the
+same change.
+
+| Item | What is wrong | Size |
+|---|---|---|
+| S1 | SIP distortion lost on WCS write-back | one line plus a test |
+| S2 | integer-pixel apertures, no per-star centroid | small |
+| S3 | cross-session rescaling erases long-term variability | small |
+| S4 | single calibration frames used raw; one-light stacks skip calibration | small |
+| S5 | missing `DATE-OBS` becomes the current time | small |
+| S7 | wavelength tuner index offset | small |
+| S13 | exposure-group gain measured on saturated pixels | medium |
+| S6 | RA wrap at 0h in asteroid chaining | small |
+
+**Tier 2: standards gaps that change conclusions.** S8 (uncertainties) and S9 (mid-exposure
+BJD_TDB times) come first because S10, S18, and the period searches depend on them.
+
+| Item | What is missing | Depends on |
+|---|---|---|
+| S8 | per-point flux uncertainties, gain and read noise | — |
+| S9 | mid-exposure BJD_TDB timestamps | — |
+| S10 | vetted fixed comparison set; ensemble-based detrending | S8 |
+| S11 | rejection floor or asymmetric bounds at small N | — |
+| S12 | temperature and binning in the dark-matching key | — |
+| S15 | spectral aperture, sky estimate, response mask width, extinction | — |
+
+**Tier 3: honesty of reported confidence.** S14, S16, S17, S18, S19, S20, S21. Do these after
+tiers 1 and 2; S18 only after S8.
+
+### 1.2 Architecture, filtered by the two aims
+
+Do first, because they block the science work or are small:
+
+- **A15** (agent sessions can run tests). Nothing in tier 1 can be confirmed without it.
+- **D3** (the copy rule) and **A11**, **A10**, **A12** (the copies that exist). These are the
+  "one implementation" aim directly.
+- **A1** (a served read tool connects to hardware). Reliability, and a one-line block today.
+- **A6** (driver injection in astrometricslib). Needed so S1 and S14 tests run without
+  astrometry.net and SIMBAD.
+
+Do as part of the science work when a touched file makes it cheap:
+
+- **A7** (ambient configuration reads), **A8** (typed returns), **A9** (argument names). Each is
+  a usability item for Python callers and should be fixed in the files the science items open,
+  not as a sweep.
+- **A2** (cross-process cancel). Reliability; fix when the job framework is next touched.
+
+Deferred. These concern the agent-control surface, the plan document, or UI typing and do not
+serve the two aims strongly enough to go before the science work:
+
+- **D1** and **D2**. Keep the current read-mostly MCP policy for now (D1 option 1) and defer the
+  process-model decision. A1 removes the one live hazard in the meantime.
+- **A3**, **A4**, **A5**, **A13**, **A14**.
+
+### 1.3 Suggested sequence
+
+1. A15, then run the full suite to get a baseline.
+2. Build the synthetic generators of section 5.3 (photometry frame, spectral frame). Every later
+   science fix adds one test to them.
+3. Tier 1 science items, one change each, each with its test and its golden-data pin
+   (section 5.4).
+4. A6, then S14's astrometry tests.
+5. S8 and S9 together, since both change `PhotometryResult` and the camera profile.
+6. S10, S11, S12, S15.
+7. D3 written into CLAUDE.md, then A11, A10, A12 as one "remove the copies" pass with the
+   dead-code check (section 5.7) turned on.
+8. Tier 3 science items.
+9. Deferred items as time allows.
+
+## 2. Decisions to make first
+
+Three of your instructions contradict the repository's own documents. Items D1 and D2 affect only the
+agent-control surface and can wait. D3 governs section 4 and should be made now.
 
 ### D1. How much control an AI agent gets through MCP
 
@@ -71,7 +149,8 @@ performance. `ARCHITECTURE_PLAN.md` section 1 says adapters hold no domain rules
 copies to delete, and CLAUDE.md section 2 says business logic lives in services. These cannot
 both hold.
 
-**Decision.** Adopt the rule that section 5.3 of the plan already applies to the planetarium
+**Decision.** Adopt the rule that section 5.3 of `ARCHITECTURE_PLAN.md` already applies to the
+planetarium
 projection math: a copy is allowed only with a measured performance reason recorded in the
 file's description block, and a reference test that compares the copy's output with the library
 function at fixed inputs (`ui/tests/test_projectionReference.test.ts` is the model). Write this
@@ -80,7 +159,357 @@ rule into CLAUDE.md section 2.
 **Success.** Every duplicate listed in item A12 either has a reference test and a recorded reason,
 or is deleted. A grep for the rule's marker comment finds every allowed copy.
 
-## 2. Architecture items
+## 3. Scientific items
+
+Ordered by effect on results. "Golden-data test" and "injection test" are defined in section 5.
+
+### S1. SIP distortion is lost when the WCS is written to the file
+
+**Issue.** `_write_solved_wcs_to_fits_header` in `astrometricslib/pipelines/astrometry/runner.py`
+calls `wcs.to_header()` without `relax=True`. astropy then omits the `A_*`/`B_*` coefficients and
+strips `-SIP` from `CTYPE`. Every later reader of the file header, including photometry,
+spectroscopy, and asteroid detection, gets a tangent-plane-only solution with distortion errors at
+the field edges. This is also the only `fits.open` in the library without `memmap=False`.
+
+**Confirm.** Solve a frame, then `fits.getheader(path)` and look for `A_ORDER`. It is absent
+while `context.wcs.sip` is not `None`.
+
+**Success.** `A_ORDER` is present after write-back, and a test computes pixel-to-sky at a corner
+with the in-memory WCS and the re-read header and finds them equal to 0.01 arcsec.
+
+**Prevent.** Golden-data test on the M 13 sample frame that pins the corner position. The
+`memmap=False` rule becomes a ruff `TID251`-style check or a grep test.
+
+### S2. Aperture photometry uses integer pixel centers and never re-centroids
+
+**Issue.** `_measure_aperture_flux` in `pipelines/photometry/pre_processing/frame_photometry.py`
+rounds `x` and `y` before building the aperture. Per-star positions are the reference position
+plus one global shift from the median of about 50 centroids. The architecture document says each
+star is re-located by its brightness-weighted centroid. With a 4 px aperture and 4 px FWHM
+(full width at half maximum, the star's apparent size), a 0.5 px offset loses 1 to 2 percent of
+flux and the loss changes with drift, which is the amplitude of the signals the pipeline searches
+for.
+
+**Confirm.** Injection test: place a Gaussian star of known flux at (100.5, 100.5) and at (100.0,
+100.0) on a flat background and measure both. The fluxes differ by more than 1 percent.
+
+**Success.** The injection test recovers flux to 0.2 percent at any sub-pixel position across a
+10 px drift. Positions pass through unrounded, and each star is re-centroided per frame within a
+small box.
+
+**Prevent.** The injection test runs in CI. Gate `registration_drift` records the per-star
+centroid shift distribution, not only the global one.
+
+### S3. Cross-session merge erases long-term variability
+
+**Issue.** `_merge_photometry_results` in `pipelines/photometry/batch.py` rescales each new
+session's `fluxes_normalized` and `fluxes_detrended` so their median equals the canonical
+session's median before concatenating. `identify_long_term_variable_candidates` in
+`processing/variability_analyzer.py` then measures only within-session scatter, while its
+docstring claims to find changes over weeks and months.
+
+**Confirm.** Injection test: build two sessions of one constant star and one star 0.3 mag fainter
+in the second session, merge, and run the long-term candidate search. The faint star is not
+flagged.
+
+**Success.** The injection test flags the star. The merge keeps the ensemble-relative level of each
+session and records per-session zero points separately.
+
+**Prevent.** Injection test in CI, and the `detectable_amplitude` gate extended to a
+between-session amplitude.
+
+### S4. Single calibration frames are used raw, and single-light stacks skip calibration
+
+**Issue.** In `drivers/siril_interface.py`, a lone flat is loaded and saved as the master without
+bias subtraction, so the bias pedestal stays in the flat and vignetting is under-corrected. A lone
+bias or dark becomes the master with no rejection. A one-light "stack" skips calibration entirely
+and is still recorded as the target's stacked image. No minimum frame count exists.
+
+**Confirm.** Run a stack with one flat and inspect the generated Siril script. There is no
+`calibrate flat` line.
+
+**Success.** A single flat is bias-subtracted. Masters from fewer than a configured minimum (3 is
+the usual floor) raise `InvalidArgumentError` or carry a blocking quality flag that
+`assess_flats` and the stack quality summary report. A one-light run is calibrated or refused.
+
+**Prevent.** Unit tests on the script generator for N = 1, 2, 3. The flat and dark quality gates
+record frame counts.
+
+### S5. Missing `DATE-OBS` becomes the current time
+
+**Issue.** `frame_photometry.py` and `variability_analyzer.py` fall back to `datetime.now()` when
+`DATE-OBS` is absent or `fromisoformat` cannot parse it. The frame then enters the light curve
+with a fabricated time.
+
+**Confirm.** Strip `DATE-OBS` from a test frame and run photometry. The frame has today's date.
+
+**Success.** The frame is rejected with a reason recorded in the `capture_timestamps` gate.
+Parsing goes through astropy `Time`, which accepts the FITS formats `fromisoformat` does not.
+
+**Prevent.** A test with a missing and a malformed `DATE-OBS`. Ruff ban on `datetime.now()` in
+`pipelines/` (a pipeline has no business reading the wall clock).
+
+### S6. Right ascension does not wrap at 0h in asteroid chaining
+
+**Issue.** `_tangent_plane_offset_arcsec` and the chaining bounding box in
+`pipelines/asteroid_detection/detection.py` subtract raw RA without wrapping at 360°. Fields that
+straddle RA = 0h break chains and the stationarity test.
+
+**Confirm.** Injection test with a mover crossing RA = 359.99° to 0.01°. No chain forms.
+
+**Success.** The test recovers the mover. Offsets use `astropy.coordinates` separation or an
+explicit wrap.
+
+**Prevent.** The injection test in CI. A library-wide rule in the pipeline README: angular
+differences go through one shared helper.
+
+### S7. Wavelength tuner index offset
+
+**Issue.** `calibration_tuner.py` maps a dip index `i` to pixel offset `current_start_px + i`. The
+pipeline (`pipelines/spectroscopy/pipeline.py`, `_process_single_star`) has already dropped
+leading samples that fall off the image or below `sensor_min_wavelength`. When any leading sample
+was dropped, every dip is mis-placed by that count and the fitted grating distance is biased.
+
+**Confirm.** Run the tuner on a Vega frame with the zero order placed so the first samples fall
+below the sensor minimum, and compare the fitted distance with a run where no samples are dropped.
+
+**Success.** The tuner uses `distances_from_zero_order_px` that the pipeline already records, and
+a test with a synthetic spectrum (known lines at known pixels, with leading samples off-image)
+recovers the lines to 0.5 px.
+
+**Prevent.** The synthetic-spectrum test in CI (section 5.3).
+
+### S8. Photometry carries no uncertainties
+
+**Issue.** `PhotometryResult` (`models/stellar_source.py`) has no error field. `CameraProfile`
+has no gain or read noise. The CCD equation (source Poisson noise plus sky, read, and dark noise,
+with gain in electrons per ADU) is never applied. Period searches substitute one scatter value
+from neighbor differences. Every downstream statistic (variability index, periodogram
+normalization, transit SNR) therefore has no per-point weight.
+
+**Confirm.** Grep `read_noise` and `gain` in `models/camera_profile.py` and
+`pipelines/photometry/`. No matches.
+
+**Success.** `CameraProfile` gains `gain_e_per_adu` and `read_noise_e`. `PhotometryResult` carries
+`flux_errors`. An injection test with a star of known flux and known noise recovers the predicted
+σ to 10 percent. Lomb-Scargle and BLS receive `dy`.
+
+**Prevent.** A model test that `PhotometryResult` arrays all have equal length including errors.
+The variability gates report the median σ.
+
+### S9. Times are exposure start in naive UTC
+
+**Issue.** Timestamps are `DATE-OBS` as written, with no half-exposure shift and no conversion to
+BJD_TDB (barycentric dynamical time, the standard time scale for light curves). A 300 s exposure
+gives a 150 s phase error. Light-travel time across Earth's orbit adds up to 8 minutes over a
+multi-month baseline, which shifts periods and defeats the alias and hold-out checks. The same
+applies to asteroid report times.
+
+**Confirm.** Inspect a stored `PhotometryResult.timestamps` entry against the frame's `DATE-OBS`
+and `EXPTIME`. They are equal.
+
+**Success.** Each sample stores `time_bjd_tdb` computed with astropy from mid-exposure, the
+observer location, and the target coordinates. A test checks one value against a published
+reference (for example the astropy documentation example) to 1 s.
+
+**Prevent.** The `capture_timestamps` gate records the time scale name. A model field named
+`time_bjd_tdb` cannot be filled with UTC by accident if a test compares it with the UTC value.
+
+### S10. Ensemble normalization and detrending
+
+**Issue.** In `variability_analyzer.py` the comparison signal is the median of raw fluxes of up to
+100 stars of very different brightness, with membership changing per frame. The median of a
+widely spread set has the noise of one star, so there is no root-N averaging, and membership
+changes produce steps. Comparison stars are not vetted for constancy; the known-variable labels
+in `post_processing/known_variability_labels.py` are not used to exclude them. Airmass detrending
+then fits a quadratic of each star's own flux against airmass and divides it out. Airmass is
+monotonic over half a night, so the quadratic can absorb a transit or half a pulsation cycle.
+
+**Confirm.** Injection test: constant field, one star with a 1 percent 2-hour box dip during a
+monotonic airmass run. After detrending, the dip depth is less than half its injected value.
+
+**Success.** The injection recovers the dip to 10 percent of its depth. Normalization is a
+weighted sum of fluxes from a fixed, vetted comparison set (bright, unsaturated, not labeled
+variable, scatter below a threshold). Detrending fits the ensemble, not the target.
+
+**Prevent.** Injection test in CI. The `comparison_ensemble` gate reports the comparison set size,
+its scatter, and that it is fixed across the session.
+
+### S11. Stack rejection is too aggressive at small N
+
+**Issue.** `chauvenet_sigma` in `utilities/rejection_thresholds.py` is correct, but
+`siril_interface.py` passes the same k as both the low and high bound of Winsorized clipping. At
+N = 5 that is 1.64σ, so about 10 percent of good samples are rejected by construction with σ
+estimated from five values. Standard practice loosens rejection at small N and sets a tighter
+high bound than low because satellites and cosmic rays are positive.
+
+**Confirm.** Read the `-rejmap` output of a 5-frame stack of a clean field. The rejected fraction
+is near 10 percent.
+
+**Success.** A floor on k (2.5 is common) or asymmetric bounds for N below about 15, with the
+rejected fraction of a clean 5-frame test stack below 2 percent.
+
+**Prevent.** Golden-data test on five M 13 sample frames pinning the rejected fraction.
+
+### S12. Dark matching ignores temperature and binning
+
+**Issue.** In `drivers/calibration_library.py`, darks at every temperature pool into one master.
+The 3 °C check reads only the first dark's `CCD-TEMP`. Gain and offset mismatches fall back to any
+dark and are soft flags. Binning and readout mode are not part of the calibration key.
+
+**Confirm.** Add a dark at a different `CCD-TEMP` to a library and build the master. It is
+included without a warning.
+
+**Success.** The calibration key includes temperature (binned to the tolerance), binning, and
+readout mode. A mismatch excludes the frame or blocks the master, and the quality summary names
+the reason.
+
+**Prevent.** Unit tests on the key builder for each dimension.
+
+### S13. Exposure-group gain breaks linearity
+
+**Issue.** `processing/exposure_groups.py` rescales each group by the median ratio over the
+reference's brightest 1 percent of pixels. Measured values of 0.65 to 0.88 between groups of one
+camera indicate near-full-well nonlinearity or zero clipping, not a gain. Applied to every pixel,
+this changes faint-star fluxes by up to 35 percent in the combined stack.
+
+**Confirm.** Compute the ratio on mid-range pixels (20th to 80th percentile) for the same groups
+and compare with the stored gain.
+
+**Success.** The gain is measured on mid-range pixels and the pipeline refuses to combine groups
+whose bright-end and mid-range ratios differ by more than a few percent, recording that in the
+stack quality summary.
+
+**Prevent.** Golden-data test with two synthetic exposure groups of known ratio.
+
+### S14. Astrometry residuals, epochs, and hints
+
+**Issue.** The "residual RMS" that the plate-solve gate judges is the RMS of nearest-neighbor
+distances to SIMBAD and Gaia within a 10 arcsec cutoff (`star_identifier.py`), not the fit
+residual, and solve-field's own statistics are discarded. Gaia DR3 positions (epoch 2016.0) are
+used without proper-motion propagation. The scale hint ignores `XBINNING`, so binned frames fall
+to blind solving. The Gaia cone search is truncated at 10,000 rows with no magnitude cut.
+
+**Confirm.** Compare the gate's residual with the `*.corr` or `*.rdls` output of solve-field for
+the same frame.
+
+**Success.** The gate uses solve-field's match residuals. Gaia positions are propagated to the
+observation epoch with `SkyCoord.apply_space_motion`. The hint uses binning. The cone search has
+a magnitude limit.
+
+**Prevent.** Golden-data test pinning the residual on the M 13 frame. A test with a high
+proper-motion star.
+
+### S15. Spectroscopy extraction and response
+
+**Issue.** In `pipelines/spectroscopy/pre_processing/spectrum_extractor.py`, the extraction
+half-width is `round(2.5σ)` with σ re-fitted per column, which flips the aperture by a pixel
+column to column and injects steps of about 3 percent. Sky is the lower of two band medians, which
+is biased low. In `instrument_response.py`, the response fit masks only ±60 Å around Balmer lines
+while the measured line spread is 100 to 150 Å, so Vega's line wings are divided into every
+target. No airmass extinction correction exists, though the differential effect across 4200 to
+8000 Å over a 0.3 airmass change is about 0.1 mag, the same as the classifier's subtype
+separation.
+
+**Confirm.** Synthetic-spectrum test: a flat continuum with Poisson noise; extract and look at
+the column-to-column step pattern against the per-column aperture width.
+
+**Success.** A fixed or smoothed aperture; sky as the mean of both bands or a sigma-clipped
+estimate; the response mask set from the measured line spread; an extinction curve applied with
+airmass. The synthetic test recovers a flat continuum to 1 percent.
+
+**Prevent.** Synthetic-spectrum test in CI (section 5.3).
+
+### S16. Classification confidence and duplicated thresholds
+
+**Issue.** `spectral_classifier.py` reports `confidence = 1 - rms` and a softmax with a hand-set
+temperature. Neither is a probability, but the UI and gates read them as one. The thresholds for
+"poor match", "differs from catalog", and "ambiguous" are defined in `spectral_classifier.py`,
+`models/stellar_source.py`, and `compare_to_catalog.py` with different values and different units
+(a probability gap versus an RMS gap).
+
+**Confirm.** Grep `POOR_MATCH_RMS_THRESHOLD`, `NO_GOOD_MATCH_RMS`, and the ambiguity margins.
+
+**Success.** One definition per threshold in `models/stellar_source.py`. Confidence is reported as
+the RMS gap between the best and second-best template, in RMS units, with the word "probability"
+removed from fields and UI labels.
+
+**Prevent.** A test that imports each threshold from one place and fails on a second definition.
+
+### S17. Asteroid chaining across sessions
+
+**Issue.** `asteroid_detection/runner.py` searches all of a target's frames across sessions, and
+the chain match radius in `detection.py` grows to 1° for gaps of hours to months. The single
+SkyBoT query in `ephemeris.py` is made at the mean epoch and mean position of all frames, which is
+only valid for a sequence a few minutes long. Linearity is judged by R² alone, which is near 1 for
+any three-point chain with a large displacement. No MPC 80-column or ADES output exists.
+
+**Confirm.** Injection test: two static stars 0.5° apart on frames a month apart. A "mover" is
+reported.
+
+**Success.** Chaining runs per session, SkyBoT is queried per epoch, and a residual-in-arcsec
+criterion against the per-frame astrometric error replaces R². The injection test reports nothing.
+An ADES export exists if reporting is a goal.
+
+**Prevent.** The null-field injection test in CI, extended with the two-session case.
+
+### S18. Variability index has no discriminating power
+
+**Issue.** The sole index is the coefficient of variation with a field-wide MAD cutoff. The
+pipeline's own `variability_discrimination` gate reports an AUC of 0.46 to 0.49 against catalog
+variables, which is chance. The honesty is good; the index is below standard.
+
+**Confirm.** Read the gate output on the M 81 dataset.
+
+**Success.** An RMS-versus-magnitude noise model plus at least one correlated-noise index
+(Stetson J or χ² against the S8 errors) lifts the AUC above 0.7 on the labeled set.
+
+**Prevent.** The gate already measures it; make the gate fail below a floor once S8 lands.
+
+### S19. The headline recompute is not independent
+
+**Issue.** `scripts/recompute_headline_numbers.py` re-reads the stored detrended arrays and runs
+the same `np.std/np.mean` and the same astropy Lomb-Scargle as the pipeline. It verifies storage
+integrity, not measurement correctness. The FWHM check is independent; the rest is not.
+
+**Confirm.** Compare the CV code path in the script with
+`_compute_star_coefficients_of_variation`.
+
+**Success.** The script re-measures pixels for a sample of stars with a different aperture
+method, re-derives normalization from a different comparison set, and uses a different period
+estimator (phase dispersion minimization). Disagreement beyond a stated tolerance fails.
+
+**Prevent.** Section 5.4: independent recomputation is a stated requirement for any "verified"
+claim.
+
+### S20. Unseeded randomness
+
+**Issue.** `pipelines/astrometry/pre_processing/source_detection.py` uses an unseeded
+`np.random.default_rng()` for the background subsample, and `pipelines/shared/image_scaling.py`
+uses `np.random.randint` for preview scaling. Detection thresholds can differ run to run.
+
+**Confirm.** Run detection twice on a large frame and diff the star lists.
+
+**Success.** Identical lists across runs. Every RNG takes a seed from the configuration.
+
+**Prevent.** Ruff ban on `np.random.` and `default_rng()` without a seed argument in `pipelines/`.
+
+### S21. Architecture documents describe algorithms the code does not run
+
+**Issue.** `documentation/library_design/Astrometrics_Library_Architecture.md` says stars are
+re-centroided per frame (S2), that a 2-D Gaussian is fitted for astrometric centroids (the solver
+receives DAOStarFinder centroids), that sky is subtracted only during spectral centroiding (the
+code subtracts it from every reading), and that comparison stars are a rank slice (the code uses
+the 100 brightest). A reader of the document believes rigor the code does not have.
+
+**Confirm.** Items S2, S10, S15, and the agent findings above.
+
+**Success.** Each algorithm claim in the document names the function that implements it, and a
+test (section 5.5) checks the function exists.
+
+**Prevent.** Claim-to-code links, checked in CI.
+
+## 4. Architecture items
 
 Ordered by risk, then by how much other work depends on them.
 
@@ -98,7 +527,7 @@ logs database from the MCP process, beside the backend's own guiding loop.
 `wayfinder.control.guiding.status(include=["live"])`, and observe the raise.
 
 **Success.** No served tool of class `observe` or `compute` reaches `connect_to_telescope`. A
-call-graph test (section 4.2) proves it for every served tool, not just this one.
+call-graph test (section 5.2) proves it for every served tool, not just this one.
 
 **Prevent.** Call-graph contract test. The `INTERIM_BLOCKS` table is a manual list; the test
 replaces it with a rule.
@@ -329,7 +758,7 @@ show they are not. A hand-written status section is a claim without a check.
 
 **Success.** Each "done" line in the status section names the test or lint rule that proves it.
 
-**Prevent.** Generate the status from checks (section 4.5) or delete it and rely on CI.
+**Prevent.** Generate the status from checks (section 5.5) or delete it and rely on CI.
 
 ### A15. Agent sessions cannot run the project's checks
 
@@ -346,357 +775,7 @@ and `lint-imports` without manual setup.
 **Prevent.** A `SessionStart` hook that runs `build/linux/setup_venv.sh` (or a cached subset) and
 installs Python 3.14. The `session-start-hook` skill documents how.
 
-## 3. Scientific items
-
-Ordered by effect on results. "Golden-data test" and "injection test" are defined in section 4.
-
-### S1. SIP distortion is lost when the WCS is written to the file
-
-**Issue.** `_write_solved_wcs_to_fits_header` in `astrometricslib/pipelines/astrometry/runner.py`
-calls `wcs.to_header()` without `relax=True`. astropy then omits the `A_*`/`B_*` coefficients and
-strips `-SIP` from `CTYPE`. Every later reader of the file header, including photometry,
-spectroscopy, and asteroid detection, gets a tangent-plane-only solution with distortion errors at
-the field edges. This is also the only `fits.open` in the library without `memmap=False`.
-
-**Confirm.** Solve a frame, then `fits.getheader(path)` and look for `A_ORDER`. It is absent
-while `context.wcs.sip` is not `None`.
-
-**Success.** `A_ORDER` is present after write-back, and a test computes pixel-to-sky at a corner
-with the in-memory WCS and the re-read header and finds them equal to 0.01 arcsec.
-
-**Prevent.** Golden-data test on the M 13 sample frame that pins the corner position. The
-`memmap=False` rule becomes a ruff `TID251`-style check or a grep test.
-
-### S2. Aperture photometry uses integer pixel centers and never re-centroids
-
-**Issue.** `_measure_aperture_flux` in `pipelines/photometry/pre_processing/frame_photometry.py`
-rounds `x` and `y` before building the aperture. Per-star positions are the reference position
-plus one global shift from the median of about 50 centroids. The architecture document says each
-star is re-located by its brightness-weighted centroid. With a 4 px aperture and 4 px FWHM
-(full width at half maximum, the star's apparent size), a 0.5 px offset loses 1 to 2 percent of
-flux and the loss changes with drift, which is the amplitude of the signals the pipeline searches
-for.
-
-**Confirm.** Injection test: place a Gaussian star of known flux at (100.5, 100.5) and at (100.0,
-100.0) on a flat background and measure both. The fluxes differ by more than 1 percent.
-
-**Success.** The injection test recovers flux to 0.2 percent at any sub-pixel position across a
-10 px drift. Positions pass through unrounded, and each star is re-centroided per frame within a
-small box.
-
-**Prevent.** The injection test runs in CI. Gate `registration_drift` records the per-star
-centroid shift distribution, not only the global one.
-
-### S3. Cross-session merge erases long-term variability
-
-**Issue.** `_merge_photometry_results` in `pipelines/photometry/batch.py` rescales each new
-session's `fluxes_normalized` and `fluxes_detrended` so their median equals the canonical
-session's median before concatenating. `identify_long_term_variable_candidates` in
-`processing/variability_analyzer.py` then measures only within-session scatter, while its
-docstring claims to find changes over weeks and months.
-
-**Confirm.** Injection test: build two sessions of one constant star and one star 0.3 mag fainter
-in the second session, merge, and run the long-term candidate search. The faint star is not
-flagged.
-
-**Success.** The injection test flags the star. The merge keeps the ensemble-relative level of each
-session and records per-session zero points separately.
-
-**Prevent.** Injection test in CI, and the `detectable_amplitude` gate extended to a
-between-session amplitude.
-
-### S4. Single calibration frames are used raw, and single-light stacks skip calibration
-
-**Issue.** In `drivers/siril_interface.py`, a lone flat is loaded and saved as the master without
-bias subtraction, so the bias pedestal stays in the flat and vignetting is under-corrected. A lone
-bias or dark becomes the master with no rejection. A one-light "stack" skips calibration entirely
-and is still recorded as the target's stacked image. No minimum frame count exists.
-
-**Confirm.** Run a stack with one flat and inspect the generated Siril script. There is no
-`calibrate flat` line.
-
-**Success.** A single flat is bias-subtracted. Masters from fewer than a configured minimum (3 is
-the usual floor) raise `InvalidArgumentError` or carry a blocking quality flag that
-`assess_flats` and the stack quality summary report. A one-light run is calibrated or refused.
-
-**Prevent.** Unit tests on the script generator for N = 1, 2, 3. The flat and dark quality gates
-record frame counts.
-
-### S5. Missing `DATE-OBS` becomes the current time
-
-**Issue.** `frame_photometry.py` and `variability_analyzer.py` fall back to `datetime.now()` when
-`DATE-OBS` is absent or `fromisoformat` cannot parse it. The frame then enters the light curve
-with a fabricated time.
-
-**Confirm.** Strip `DATE-OBS` from a test frame and run photometry. The frame has today's date.
-
-**Success.** The frame is rejected with a reason recorded in the `capture_timestamps` gate.
-Parsing goes through astropy `Time`, which accepts the FITS formats `fromisoformat` does not.
-
-**Prevent.** A test with a missing and a malformed `DATE-OBS`. Ruff ban on `datetime.now()` in
-`pipelines/` (a pipeline has no business reading the wall clock).
-
-### S6. Right ascension does not wrap at 0h in asteroid chaining
-
-**Issue.** `_tangent_plane_offset_arcsec` and the chaining bounding box in
-`pipelines/asteroid_detection/detection.py` subtract raw RA without wrapping at 360°. Fields that
-straddle RA = 0h break chains and the stationarity test.
-
-**Confirm.** Injection test with a mover crossing RA = 359.99° to 0.01°. No chain forms.
-
-**Success.** The test recovers the mover. Offsets use `astropy.coordinates` separation or an
-explicit wrap.
-
-**Prevent.** The injection test in CI. A library-wide rule in the pipeline README: angular
-differences go through one shared helper.
-
-### S7. Wavelength tuner index offset
-
-**Issue.** `calibration_tuner.py` maps a dip index `i` to pixel offset `current_start_px + i`. The
-pipeline (`pipelines/spectroscopy/pipeline.py`, `_process_single_star`) has already dropped
-leading samples that fall off the image or below `sensor_min_wavelength`. When any leading sample
-was dropped, every dip is mis-placed by that count and the fitted grating distance is biased.
-
-**Confirm.** Run the tuner on a Vega frame with the zero order placed so the first samples fall
-below the sensor minimum, and compare the fitted distance with a run where no samples are dropped.
-
-**Success.** The tuner uses `distances_from_zero_order_px` that the pipeline already records, and
-a test with a synthetic spectrum (known lines at known pixels, with leading samples off-image)
-recovers the lines to 0.5 px.
-
-**Prevent.** The synthetic-spectrum test in CI (section 4.3).
-
-### S8. Photometry carries no uncertainties
-
-**Issue.** `PhotometryResult` (`models/stellar_source.py`) has no error field. `CameraProfile`
-has no gain or read noise. The CCD equation (source Poisson noise plus sky, read, and dark noise,
-with gain in electrons per ADU) is never applied. Period searches substitute one scatter value
-from neighbor differences. Every downstream statistic (variability index, periodogram
-normalization, transit SNR) therefore has no per-point weight.
-
-**Confirm.** Grep `read_noise` and `gain` in `models/camera_profile.py` and
-`pipelines/photometry/`. No matches.
-
-**Success.** `CameraProfile` gains `gain_e_per_adu` and `read_noise_e`. `PhotometryResult` carries
-`flux_errors`. An injection test with a star of known flux and known noise recovers the predicted
-σ to 10 percent. Lomb-Scargle and BLS receive `dy`.
-
-**Prevent.** A model test that `PhotometryResult` arrays all have equal length including errors.
-The variability gates report the median σ.
-
-### S9. Times are exposure start in naive UTC
-
-**Issue.** Timestamps are `DATE-OBS` as written, with no half-exposure shift and no conversion to
-BJD_TDB (barycentric dynamical time, the standard time scale for light curves). A 300 s exposure
-gives a 150 s phase error. Light-travel time across Earth's orbit adds up to 8 minutes over a
-multi-month baseline, which shifts periods and defeats the alias and hold-out checks. The same
-applies to asteroid report times.
-
-**Confirm.** Inspect a stored `PhotometryResult.timestamps` entry against the frame's `DATE-OBS`
-and `EXPTIME`. They are equal.
-
-**Success.** Each sample stores `time_bjd_tdb` computed with astropy from mid-exposure, the
-observer location, and the target coordinates. A test checks one value against a published
-reference (for example the astropy documentation example) to 1 s.
-
-**Prevent.** The `capture_timestamps` gate records the time scale name. A model field named
-`time_bjd_tdb` cannot be filled with UTC by accident if a test compares it with the UTC value.
-
-### S10. Ensemble normalization and detrending
-
-**Issue.** In `variability_analyzer.py` the comparison signal is the median of raw fluxes of up to
-100 stars of very different brightness, with membership changing per frame. The median of a
-widely spread set has the noise of one star, so there is no root-N averaging, and membership
-changes produce steps. Comparison stars are not vetted for constancy; the known-variable labels
-in `post_processing/known_variability_labels.py` are not used to exclude them. Airmass detrending
-then fits a quadratic of each star's own flux against airmass and divides it out. Airmass is
-monotonic over half a night, so the quadratic can absorb a transit or half a pulsation cycle.
-
-**Confirm.** Injection test: constant field, one star with a 1 percent 2-hour box dip during a
-monotonic airmass run. After detrending, the dip depth is less than half its injected value.
-
-**Success.** The injection recovers the dip to 10 percent of its depth. Normalization is a
-weighted sum of fluxes from a fixed, vetted comparison set (bright, unsaturated, not labeled
-variable, scatter below a threshold). Detrending fits the ensemble, not the target.
-
-**Prevent.** Injection test in CI. The `comparison_ensemble` gate reports the comparison set size,
-its scatter, and that it is fixed across the session.
-
-### S11. Stack rejection is too aggressive at small N
-
-**Issue.** `chauvenet_sigma` in `utilities/rejection_thresholds.py` is correct, but
-`siril_interface.py` passes the same k as both the low and high bound of Winsorized clipping. At
-N = 5 that is 1.64σ, so about 10 percent of good samples are rejected by construction with σ
-estimated from five values. Standard practice loosens rejection at small N and sets a tighter
-high bound than low because satellites and cosmic rays are positive.
-
-**Confirm.** Read the `-rejmap` output of a 5-frame stack of a clean field. The rejected fraction
-is near 10 percent.
-
-**Success.** A floor on k (2.5 is common) or asymmetric bounds for N below about 15, with the
-rejected fraction of a clean 5-frame test stack below 2 percent.
-
-**Prevent.** Golden-data test on five M 13 sample frames pinning the rejected fraction.
-
-### S12. Dark matching ignores temperature and binning
-
-**Issue.** In `drivers/calibration_library.py`, darks at every temperature pool into one master.
-The 3 °C check reads only the first dark's `CCD-TEMP`. Gain and offset mismatches fall back to any
-dark and are soft flags. Binning and readout mode are not part of the calibration key.
-
-**Confirm.** Add a dark at a different `CCD-TEMP` to a library and build the master. It is
-included without a warning.
-
-**Success.** The calibration key includes temperature (binned to the tolerance), binning, and
-readout mode. A mismatch excludes the frame or blocks the master, and the quality summary names
-the reason.
-
-**Prevent.** Unit tests on the key builder for each dimension.
-
-### S13. Exposure-group gain breaks linearity
-
-**Issue.** `processing/exposure_groups.py` rescales each group by the median ratio over the
-reference's brightest 1 percent of pixels. Measured values of 0.65 to 0.88 between groups of one
-camera indicate near-full-well nonlinearity or zero clipping, not a gain. Applied to every pixel,
-this changes faint-star fluxes by up to 35 percent in the combined stack.
-
-**Confirm.** Compute the ratio on mid-range pixels (20th to 80th percentile) for the same groups
-and compare with the stored gain.
-
-**Success.** The gain is measured on mid-range pixels and the pipeline refuses to combine groups
-whose bright-end and mid-range ratios differ by more than a few percent, recording that in the
-stack quality summary.
-
-**Prevent.** Golden-data test with two synthetic exposure groups of known ratio.
-
-### S14. Astrometry residuals, epochs, and hints
-
-**Issue.** The "residual RMS" that the plate-solve gate judges is the RMS of nearest-neighbor
-distances to SIMBAD and Gaia within a 10 arcsec cutoff (`star_identifier.py`), not the fit
-residual, and solve-field's own statistics are discarded. Gaia DR3 positions (epoch 2016.0) are
-used without proper-motion propagation. The scale hint ignores `XBINNING`, so binned frames fall
-to blind solving. The Gaia cone search is truncated at 10,000 rows with no magnitude cut.
-
-**Confirm.** Compare the gate's residual with the `*.corr` or `*.rdls` output of solve-field for
-the same frame.
-
-**Success.** The gate uses solve-field's match residuals. Gaia positions are propagated to the
-observation epoch with `SkyCoord.apply_space_motion`. The hint uses binning. The cone search has
-a magnitude limit.
-
-**Prevent.** Golden-data test pinning the residual on the M 13 frame. A test with a high
-proper-motion star.
-
-### S15. Spectroscopy extraction and response
-
-**Issue.** In `pipelines/spectroscopy/pre_processing/spectrum_extractor.py`, the extraction
-half-width is `round(2.5σ)` with σ re-fitted per column, which flips the aperture by a pixel
-column to column and injects steps of about 3 percent. Sky is the lower of two band medians, which
-is biased low. In `instrument_response.py`, the response fit masks only ±60 Å around Balmer lines
-while the measured line spread is 100 to 150 Å, so Vega's line wings are divided into every
-target. No airmass extinction correction exists, though the differential effect across 4200 to
-8000 Å over a 0.3 airmass change is about 0.1 mag, the same as the classifier's subtype
-separation.
-
-**Confirm.** Synthetic-spectrum test: a flat continuum with Poisson noise; extract and look at
-the column-to-column step pattern against the per-column aperture width.
-
-**Success.** A fixed or smoothed aperture; sky as the mean of both bands or a sigma-clipped
-estimate; the response mask set from the measured line spread; an extinction curve applied with
-airmass. The synthetic test recovers a flat continuum to 1 percent.
-
-**Prevent.** Synthetic-spectrum test in CI (section 4.3).
-
-### S16. Classification confidence and duplicated thresholds
-
-**Issue.** `spectral_classifier.py` reports `confidence = 1 - rms` and a softmax with a hand-set
-temperature. Neither is a probability, but the UI and gates read them as one. The thresholds for
-"poor match", "differs from catalog", and "ambiguous" are defined in `spectral_classifier.py`,
-`models/stellar_source.py`, and `compare_to_catalog.py` with different values and different units
-(a probability gap versus an RMS gap).
-
-**Confirm.** Grep `POOR_MATCH_RMS_THRESHOLD`, `NO_GOOD_MATCH_RMS`, and the ambiguity margins.
-
-**Success.** One definition per threshold in `models/stellar_source.py`. Confidence is reported as
-the RMS gap between the best and second-best template, in RMS units, with the word "probability"
-removed from fields and UI labels.
-
-**Prevent.** A test that imports each threshold from one place and fails on a second definition.
-
-### S17. Asteroid chaining across sessions
-
-**Issue.** `asteroid_detection/runner.py` searches all of a target's frames across sessions, and
-the chain match radius in `detection.py` grows to 1° for gaps of hours to months. The single
-SkyBoT query in `ephemeris.py` is made at the mean epoch and mean position of all frames, which is
-only valid for a sequence a few minutes long. Linearity is judged by R² alone, which is near 1 for
-any three-point chain with a large displacement. No MPC 80-column or ADES output exists.
-
-**Confirm.** Injection test: two static stars 0.5° apart on frames a month apart. A "mover" is
-reported.
-
-**Success.** Chaining runs per session, SkyBoT is queried per epoch, and a residual-in-arcsec
-criterion against the per-frame astrometric error replaces R². The injection test reports nothing.
-An ADES export exists if reporting is a goal.
-
-**Prevent.** The null-field injection test in CI, extended with the two-session case.
-
-### S18. Variability index has no discriminating power
-
-**Issue.** The sole index is the coefficient of variation with a field-wide MAD cutoff. The
-pipeline's own `variability_discrimination` gate reports an AUC of 0.46 to 0.49 against catalog
-variables, which is chance. The honesty is good; the index is below standard.
-
-**Confirm.** Read the gate output on the M 81 dataset.
-
-**Success.** An RMS-versus-magnitude noise model plus at least one correlated-noise index
-(Stetson J or χ² against the S8 errors) lifts the AUC above 0.7 on the labeled set.
-
-**Prevent.** The gate already measures it; make the gate fail below a floor once S8 lands.
-
-### S19. The headline recompute is not independent
-
-**Issue.** `scripts/recompute_headline_numbers.py` re-reads the stored detrended arrays and runs
-the same `np.std/np.mean` and the same astropy Lomb-Scargle as the pipeline. It verifies storage
-integrity, not measurement correctness. The FWHM check is independent; the rest is not.
-
-**Confirm.** Compare the CV code path in the script with
-`_compute_star_coefficients_of_variation`.
-
-**Success.** The script re-measures pixels for a sample of stars with a different aperture
-method, re-derives normalization from a different comparison set, and uses a different period
-estimator (phase dispersion minimization). Disagreement beyond a stated tolerance fails.
-
-**Prevent.** Section 4.4: independent recomputation is a stated requirement for any "verified"
-claim.
-
-### S20. Unseeded randomness
-
-**Issue.** `pipelines/astrometry/pre_processing/source_detection.py` uses an unseeded
-`np.random.default_rng()` for the background subsample, and `pipelines/shared/image_scaling.py`
-uses `np.random.randint` for preview scaling. Detection thresholds can differ run to run.
-
-**Confirm.** Run detection twice on a large frame and diff the star lists.
-
-**Success.** Identical lists across runs. Every RNG takes a seed from the configuration.
-
-**Prevent.** Ruff ban on `np.random.` and `default_rng()` without a seed argument in `pipelines/`.
-
-### S21. Architecture documents describe algorithms the code does not run
-
-**Issue.** `documentation/library_design/Astrometrics_Library_Architecture.md` says stars are
-re-centroided per frame (S2), that a 2-D Gaussian is fitted for astrometric centroids (the solver
-receives DAOStarFinder centroids), that sky is subtracted only during spectral centroiding (the
-code subtracts it from every reading), and that comparison stars are a rank slice (the code uses
-the 100 brightest). A reader of the document believes rigor the code does not have.
-
-**Confirm.** Items S2, S10, S15, and the agent findings above.
-
-**Success.** Each algorithm claim in the document names the function that implements it, and a
-test (section 4.5) checks the function exists.
-
-**Prevent.** Claim-to-code links, checked in CI.
-
-## 4. Preventing these issues in AI-assisted development
+## 5. Preventing these issues in AI-assisted development
 
 The findings share a pattern. An agent made a change that satisfied the local test or lint rule
 and the plan's prose, while the scientific or architectural intent went unchecked. The agents
@@ -704,7 +783,7 @@ also left claims in documents that no check backs. The mechanisms below convert 
 checks that run on every change. They work for people too, but they matter more for agents,
 because an agent reads the repository's rules literally and optimizes for the checks it can see.
 
-### 4.1 Executable contracts instead of prose rules
+### 5.1 Executable contracts instead of prose rules
 
 Every rule in CLAUDE.md and `ARCHITECTURE_PLAN.md` that an agent could violate should have a
 check that fails. The repository already does this well for import direction. Gaps to close:
@@ -721,7 +800,7 @@ Rule of thumb for CLAUDE.md: a sentence that says "never" or "always" should nam
 enforces it. A rule without a check is a request, and agents treat requests as negotiable when a
 task is hard.
 
-### 4.2 A call-graph contract for hardware reach
+### 5.2 A call-graph contract for hardware reach
 
 Item A1 shows that a tool-by-tool block list cannot keep up with refactors. Replace
 `INTERIM_BLOCKS` with a test that builds each served tool, injects a driver whose connect methods
@@ -729,7 +808,7 @@ raise, calls the tool with representative arguments, and asserts no raise for an
 `observe` or `compute`. The `SimulatorIndiInterface` can host this as a "connection-counting"
 mode. The same test proves D2 once decided.
 
-### 4.3 Truth-known tests as the definition of done for science code
+### 5.3 Truth-known tests as the definition of done for science code
 
 A pipeline change is done when a test with known truth recovers that truth within a stated
 tolerance. The repository already has injection tests for periodicity and asteroid detection. Add
@@ -749,7 +828,7 @@ the missing ones and make them a CLAUDE.md requirement:
 Keep the generators in `astrometricslib/test/synthetic/` and document each in a README so an
 agent can extend rather than reinvent them.
 
-### 4.4 Golden-data regression on real frames
+### 5.4 Golden-data regression on real frames
 
 The sample data under `documentation/notebooks/astrometrics/sample_data/M 13/` is enough for a
 small golden-data suite: run each pipeline stage on it in CI and compare a short list of numbers
@@ -763,7 +842,7 @@ result rather than the code path.
 Separately, keep "independent recomputation" (S19) honest by requiring that the recompute script
 use different code for each number it checks, and say so in its description block.
 
-### 4.5 Claims that point to code
+### 5.5 Claims that point to code
 
 Two kinds of document drifted: the plan's status section (A14) and the architecture documents
 (S21). The fix is the same. A claim about behavior names the function or test that implements it,
@@ -775,7 +854,7 @@ named function. A claim with no implementation link is a design goal and should 
 The `code-documentation-style` skill already requires a README to end with "read the code" for
 exact thresholds. Extend it: a README that describes an algorithm names the test that checks it.
 
-### 4.6 An agent session that can run the checks
+### 5.6 An agent session that can run the checks
 
 Item A15 is the root cause of several others. An agent that cannot run `pytest`, `ruff`, or
 `lint-imports` falls back to reading, and reading is how the status section drifted. Add a
@@ -784,7 +863,7 @@ run the suite. Then add a `Stop` or pre-commit hook that runs `ruff check`, `lin
 the affected test folder before an agent reports completion. The existing
 `.claude/hooks/guard_destructive.py` shows the pattern.
 
-### 4.7 Scope and dead-code hygiene
+### 5.7 Scope and dead-code hygiene
 
 Plan rule 7 says a change that renames or removes something updates every caller. Items A11 and
 A12 show agents leaving the old path in place. A dead-code check (`vulture` for Python, an
@@ -792,7 +871,7 @@ unused-export rule for TypeScript) in the lint workflow catches this mechanicall
 CLAUDE.md: a task that adds a replacement is not done until the thing it replaces is deleted and
 the dead-code check passes.
 
-### 4.8 A review checklist for science changes
+### 5.8 A review checklist for science changes
 
 Add `astrometricslib/REVIEW_CHECKLIST.md` and have CLAUDE.md require that an agent answer each
 line in its summary when it touches `pipelines/`:
@@ -812,7 +891,7 @@ An agent that cannot answer a line should report the gap rather than fill it wit
 sentence. That instruction belongs in CLAUDE.md verbatim, because an agent's default is to fill
 it.
 
-### 4.9 Separate "measured" from "designed"
+### 5.9 Separate "measured" from "designed"
 
 Several documents state intended behavior as fact. Require two words in every README and gate
 description: **measured** for a number that a test or validation script produced, with the script

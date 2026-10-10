@@ -353,6 +353,26 @@ def test_a_dark_with_no_temperature_is_used_only_when_no_dark_has_one(tmp_path: 
     assert together.frames == [known]
 
 
+def test_a_library_saved_before_temperatures_does_not_pool_them(tmp_path: Path) -> None:
+    """Darks filed under a key with no temperature are sorted by their headers.
+
+    The real library file of 2026-10-03 had this shape: 0 C and -10 C darks
+    under one key, which gave -12 C lights a master made mostly of 0 C darks
+    with no flag.
+    """
+    library = make_library(tmp_path)
+    cold = [write_frame(tmp_path / f"cold_{i}.fits", temperature_c=-10.0) for i in range(2)]
+    warm = [write_frame(tmp_path / f"warm_{i}.fits", temperature_c=0.0) for i in range(3)]
+    library.deserialize({"dark_frames": {CAMERA: {"100@offset=30": {"30.0": cold + warm}}}})
+
+    selection = library.select_dark_frames(
+        camera=CAMERA, exposure=30.0, iso="100", offset="30", temperature_c=-12.0
+    )
+
+    assert selection.frames == cold
+    assert selection.flags == []
+
+
 def test_a_rescan_moves_a_dark_filed_under_an_older_key(tmp_path: Path) -> None:
     """A library saved before temperatures were tracked is re-filed."""
     library = make_library(tmp_path)

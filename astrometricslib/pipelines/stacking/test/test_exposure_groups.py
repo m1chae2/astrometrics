@@ -450,11 +450,38 @@ def test_a_real_bright_peak_is_not_mistaken_for_a_ceiling() -> None:
     assert estimate_saturation_mask_level(star) == SATURATION_FRACTION_OF_FULL_SCALE
 
 
+def _sky_and_stars(seed: int, shape: tuple[int, int] = (300, 300), stars: int = 150) -> np.ndarray:
+    """Build a noiseless sky-plus-stars image, the scene a gain is measured on.
+
+    Parameters
+    ----------
+    seed : `int`
+        Seed for the star positions and brightnesses.
+    shape : `tuple` [`int`, `int`], optional
+        The image shape.
+    stars : `int`, optional
+        How many Gaussian stars to place.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        The stars, with peaks from 0.02 to 0.6, on a flat sky of 0.05.
+    """
+    generator = np.random.default_rng(seed)
+    rows, columns = np.mgrid[0 : shape[0], 0 : shape[1]]
+    image = np.full(shape, 0.05)
+    for _ in range(stars):
+        row, column = generator.uniform(5, shape[0] - 5), generator.uniform(5, shape[1] - 5)
+        peak = generator.uniform(0.02, 0.6)
+        image += peak * np.exp(-((rows - row) ** 2 + (columns - column) ** 2) / (2 * 2.0**2))
+    return image
+
+
 def test_group_gains_recover_the_scale_each_stack_was_given() -> None:
     """Groups scaled by 0.7 and 1.2 are measured as such."""
     generator = np.random.default_rng(13)
-    truth = generator.uniform(0.0, 1.0, (300, 300)) ** 3
-    per_second = [truth * 1.0, truth * 0.7 + generator.normal(0, 0.001, truth.shape), truth * 1.2]
+    truth = _sky_and_stars(13)
+    per_second = [truth * 1.0, truth * 0.7 + generator.normal(0, 0.0002, truth.shape), truth * 1.2]
     usable = [np.ones(truth.shape, dtype=bool)] * 3
 
     gains = estimate_group_gains(per_second, usable, reference_index=0)
@@ -469,12 +496,43 @@ def test_too_few_bright_shared_pixels_leave_the_gain_at_one() -> None:
     assert estimate_group_gains([small, small * 0.5], [np.ones(small.shape, bool)] * 2, 0) == [1.0, 1.0]
 
 
+def test_a_different_sky_does_not_pass_for_a_gain() -> None:
+    """The gain follows the stars, not the ratio of the two skies.
+
+    Regression for the ASI 533MM stacks of 2026-10-10: on M 81 the 60 s
+    group's sky per second was 1.30 times the 300 s group's while its stars
+    were about 1.40 times brighter, and the old mid-range gain read 1.30.
+    Here the stars are 1.4 times brighter and the sky 2 times brighter.
+    """
+    stars = _sky_and_stars(31) - 0.05
+    reference = 0.05 + stars
+    brighter_night = 0.10 + 1.4 * stars + np.random.default_rng(32).normal(0, 0.0002, stars.shape)
+    usable = [np.ones(stars.shape, dtype=bool)] * 2
+
+    gains = estimate_group_gains([reference, brighter_night], usable, reference_index=0)
+
+    assert gains[1] == pytest.approx(1.4, rel=0.01)
+
+
+def test_combining_groups_of_different_sky_keeps_star_fluxes_and_one_sky() -> None:
+    """After combining, a star's flux and the sky match the reference group."""
+    stars = _sky_and_stars(33) - 0.05
+    reference = 0.05 + stars
+    other = 0.10 + 1.4 * stars
+    combined = combine_exposure_group_images(
+        [reference * 10.0, other * 10.0], [10.0, 10.0], frame_counts=[1, 1], frame_noises=[1.0, 1.0]
+    )
+
+    sky = float(np.median(combined))
+    assert sky == pytest.approx(10.0 * float(np.median(reference)), rel=0.01)
+    assert float((combined - sky).sum()) == pytest.approx(10.0 * float(stars.sum()), rel=0.01)
+
+
 def test_saturated_pixels_do_not_enter_the_gain() -> None:
     """A clipped core in one group must not drag its measured gain down."""
-    generator = np.random.default_rng(15)
-    truth = generator.uniform(0.0, 1.0, (300, 300)) ** 3
-    clipped = np.minimum(truth * 2.0, 1.0)
-    usable_clipped = clipped < 0.95
+    truth = _sky_and_stars(15)
+    clipped = np.minimum(truth * 2.0, 0.6)
+    usable_clipped = clipped < 0.57
 
     gains = estimate_group_gains([truth, clipped], [np.ones(truth.shape, bool), usable_clipped], 0)
 

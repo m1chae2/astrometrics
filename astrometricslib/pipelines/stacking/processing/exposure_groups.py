@@ -157,6 +157,27 @@ SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 GAIN_MID_RANGE_PERCENTILES = (20.0, 80.0)
 GAIN_MINIMUM_PIXELS = 200
 
+# The ratio above is taken after each group's own sky level is subtracted,
+# and only over pixels whose sky-subtracted reference value is at least
+# GAIN_SOURCE_SIGMAS times the reference's background noise. Without that,
+# the 20th to 80th percentile pixels of a deep-sky field are almost all sky,
+# and the "gain" is the ratio of the two nights' sky brightness. Measured on
+# the ASI 533MM stacks of 2026-10-10: the old gain equalled the sky-per-second
+# ratio to three decimals (M 81 1.297 vs 1.298, NGC 2403 1.048 vs 1.049),
+# while aperture photometry of the stars gave 1.40 and 1.12, so the shorter
+# group's stars were mis-scaled by 7-8%. At 10 sigma a pixel's noise moves its
+# ratio by at most about 10%, and the median over many pixels removes most of
+# that; noise alone puts fewer than one pixel of a 9-million-pixel image
+# above it. The value is a design choice checked on those two fields.
+GAIN_SOURCE_SIGMAS = 10.0
+
+# The sky level of a group is the median of its trusted pixels after
+# repeatedly dropping pixels more than SKY_CLIP_SIGMAS spreads from it (stars
+# and the target), as in a sigma-clipped median. Five passes settle it on the
+# fields above.
+SKY_CLIP_SIGMAS = 3.0
+SKY_CLIP_PASSES = 5
+
 # The brightest pixels give a second, diagnostic ratio: the median ratio over
 # the top GAIN_BRIGHTEST_FRACTION of the shared pixels (1% of a 3008 x 3008
 # image is about 90,000 pixels). This was the only estimator once. The
@@ -527,12 +548,60 @@ class GroupGainMeasurement:
         `True` when `disagreement` is larger than the tolerance. The group's
         brightness is then not one scale factor, and the group should not be
         combined with the reference.
+    sky_level : `float`
+        The group's own sky level per second (see `estimate_sky_level`). It
+        is subtracted before the ratios are taken.
+    measured : `bool`
+        `True` when `gain` was measured (always for the reference). Only
+        then does the combination move the group's sky to the reference's
+        sky level; a group left at a gain of 1 is combined as it is.
     """
 
     gain: float = 1.0
     bright_end_ratio: float | None = None
     disagreement: float | None = None
     nonlinear: bool = False
+    sky_level: float = 0.0
+    measured: bool = False
+
+
+def estimate_sky_level(image: np.ndarray, mask: np.ndarray) -> float:
+    """Measure the sky level of an image, ignoring stars and the target.
+
+    This is a sigma-clipped median: the median of the trusted pixels, then
+    the median of the pixels within `SKY_CLIP_SIGMAS` spreads of it, repeated
+    up to `SKY_CLIP_PASSES` times. The spread is the median absolute
+    deviation turned into a standard deviation.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        A 2-D image.
+    mask : `numpy.ndarray`
+        `True` where the image can be trusted.
+
+    Returns
+    -------
+    sky_level : `float`
+        The sky level, in the image's own units. 0.0 when no pixel is trusted.
+    """
+    values = np.asarray(image, dtype=np.float64)[np.asarray(mask, dtype=bool)]
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return 0.0
+    level = float(np.median(values))
+    for _ in range(SKY_CLIP_PASSES):
+        spread = 1.4826 * float(np.median(np.abs(values - level)))
+        if spread <= 0:
+            break
+        kept = values[np.abs(values - level) <= SKY_CLIP_SIGMAS * spread]
+        if kept.size == 0:
+            break
+        new_level = float(np.median(kept))
+        if new_level == level:
+            break
+        level = new_level
+    return level
 
 
 def _median_ratio(image: np.ndarray, reference: np.ndarray, selected: np.ndarray) -> float | None:
@@ -558,13 +627,16 @@ def measure_group_gains(
 ) -> list[GroupGainMeasurement]:
     """Measure each group's brightness scale and check that it is a scale.
 
-    The gain is the median of image / reference over the pixels whose
-    reference value lies between the 20th and 80th percentile
-    (`GAIN_MID_RANGE_PERCENTILES`) of the pixels that both images can be
+    Each image's own sky level (`estimate_sky_level`) is subtracted first,
+    because two nights rarely share one sky brightness. The gain is then the
+    median of image / reference over the source pixels: those whose
+    sky-subtracted reference value is at least `GAIN_SOURCE_SIGMAS` times the
+    reference's background noise, and lies between the 20th and 80th percentile
+    (`GAIN_MID_RANGE_PERCENTILES`) of such pixels that both images can be
     trusted at. Why that range: a sensor is linear between the sky floor and
     near full well, and in that range two exposures of one scene differ by a
-    single factor, the ratio of their light per second. That factor is the
-    true gain. Close to full well the sensor response flattens, and in a group
+    single factor, the ratio of their light per second. That factor is the true
+    gain. Close to full well the sensor response flattens, and in a group
     clipped at zero the faint end reads high, so at the extremes the ratio
     measures the sensor's nonlinearity and not the gain. The brightest 1% of
     pixels (`GAIN_BRIGHTEST_FRACTION`) lie in that nonlinear zone, so the
@@ -594,15 +666,31 @@ def measure_group_gains(
         gain of 1 and is never marked `nonlinear`, because there is nothing
         to compare.
     """
-    reference = per_second_images[reference_index]
+    sky_levels = [
+        estimate_sky_level(image, mask) for image, mask in zip(per_second_images, usable_masks, strict=True)
+    ]
+    reference = per_second_images[reference_index] - sky_levels[reference_index]
+    reference_noise = estimate_background_noise(per_second_images[reference_index])
+    source_floor = GAIN_SOURCE_SIGMAS * reference_noise if np.isfinite(reference_noise) else 0.0
     measurements = []
-    for index, image in enumerate(per_second_images):
+    for index, raw_image in enumerate(per_second_images):
+        sky_level = sky_levels[index]
         if index == reference_index:
-            measurements.append(GroupGainMeasurement(gain=1.0, bright_end_ratio=1.0, disagreement=0.0))
+            measurements.append(
+                GroupGainMeasurement(
+                    gain=1.0, bright_end_ratio=1.0, disagreement=0.0, sky_level=sky_level, measured=True
+                )
+            )
             continue
-        shared = usable_masks[index] & usable_masks[reference_index] & (reference > 0) & np.isfinite(image)
+        image = raw_image - sky_level
+        shared = (
+            usable_masks[index]
+            & usable_masks[reference_index]
+            & (reference > max(source_floor, 0.0))
+            & np.isfinite(image)
+        )
         if int(np.count_nonzero(shared)) < GAIN_MINIMUM_PIXELS:
-            measurements.append(GroupGainMeasurement())
+            measurements.append(GroupGainMeasurement(sky_level=sky_level))
             continue
         low, high = np.percentile(reference[shared], GAIN_MID_RANGE_PERCENTILES)
         gain = _median_ratio(image, reference, shared & (reference >= low) & (reference <= high))
@@ -615,7 +703,7 @@ def measure_group_gains(
                 "nothing" if gain is None else f"{gain:.3g}",
                 PLAUSIBLE_GAIN_RANGE,
             )
-            measurements.append(GroupGainMeasurement(bright_end_ratio=bright_end_ratio))
+            measurements.append(GroupGainMeasurement(bright_end_ratio=bright_end_ratio, sky_level=sky_level))
             continue
         disagreement = None if bright_end_ratio is None else abs(bright_end_ratio - gain) / gain
         measurements.append(
@@ -624,6 +712,8 @@ def measure_group_gains(
                 bright_end_ratio=bright_end_ratio,
                 disagreement=disagreement,
                 nonlinear=disagreement is not None and disagreement > tolerance,
+                sky_level=sky_level,
+                measured=True,
             )
         )
     return measurements
@@ -895,7 +985,15 @@ def combine_exposure_group_images(
         [None if m.bright_end_ratio is None else round(m.bright_end_ratio, 3) for m in measurements],
         exposures_seconds[reference_index],
     )
-    per_second = [image / gain for image, gain in zip(per_second, gains, strict=True)]
+    # A group with a measured gain has its stars put on the reference's scale
+    # and its sky moved to the reference's sky level, so groups from nights
+    # of different sky brightness do not leave steps where the weights
+    # change. A group whose gain could not be measured is used as it is.
+    reference_sky = measurements[reference_index].sky_level
+    per_second = [
+        (image - measurement.sky_level) / measurement.gain + reference_sky if measurement.measured else image
+        for image, measurement in zip(per_second, measurements, strict=True)
+    ]
 
     numerator = np.zeros_like(per_second[0])
     denominator = np.zeros_like(per_second[0])

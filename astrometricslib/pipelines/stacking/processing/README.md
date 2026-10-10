@@ -36,7 +36,11 @@ The zero order is the undispersed image of the target in a slitless spectrum fra
 
 Siril leaves each group stack with its own overall brightness. Before the groups are averaged, `exposure_groups.py` divides each group's counts-per-second image by a gain (a single number) so that all groups read the same.
 
-**How the gain is measured.** The reference group is the group with the most weight. For every other group, the step takes the reference pixels between the 20th and 80th percentile of brightness. It leaves out pixels that either image saturates or masks. It then takes the median of (group pixel / reference pixel) over those pixels. That median is the gain.
+**How the gain is measured.** The reference group is the group with the most weight. The step first subtracts each group's own sky level (`estimate_sky_level`, a sigma-clipped median), because two nights rarely have the same sky brightness. For every other group, it then takes the source pixels: reference pixels at least 10 times the reference's background noise above its sky (`GAIN_SOURCE_SIGMAS`), between the 20th and 80th percentile of those pixels' brightness. It leaves out pixels that either image saturates or masks. It then takes the median of (group pixel / reference pixel) over those pixels, both sky-subtracted. That median is the gain.
+
+**Why the sky is subtracted.** Without it, the mid-range pixels of a deep-sky field are almost all sky, and the gain is the ratio of the two nights' sky brightness. Measured on the ASI 533MM stacks of 2026-10-10, the earlier gain equalled the sky ratio to three decimals (M 81: 1.297 against 1.298; NGC 2403: 1.048 against 1.049), while aperture photometry of the stars in the group stacks gave 1.40 and 1.12. The shorter group's stars were therefore mis-scaled by 7 to 8%. `test_a_different_sky_does_not_pass_for_a_gain` checks this case.
+
+**Combining.** A group with a measured gain is sky-subtracted, divided by its gain and placed on the reference's sky level, so its stars match the reference and its sky does not leave a step where the weights change. A group whose gain could not be measured is combined as it is.
 
 **Why mid-range pixels.** A sensor responds in proportion to light between the sky level and a point near full well (the largest charge a pixel can hold). In that range, two exposures of one scene differ by one factor, the ratio of their light per second, and the median ratio measures that factor. Near full well the response flattens, and a group clipped at zero reads too high at its faint end. At the extremes the ratio measures the sensor's nonlinearity, not the gain. The brightest 1% of pixels sit in the flattened zone. Applying a gain measured there to every pixel changes faint-star fluxes by the wrong amount: gains of 0.65 to 0.88 between groups of one camera, measured on the brightest pixels, changed faint-star fluxes by up to 35%.
 
@@ -48,7 +52,7 @@ Siril leaves each group stack with its own overall brightness. Before the groups
 
 | Field | Meaning | Unit | Who reads it |
 |---|---|---|---|
-| `gainMidRange` | The gain applied to the group: median ratio on mid-range pixels | None (a ratio of two counts-per-second values) | People reading the summary; the UI |
+| `gainMidRange` | The gain applied to the group: median ratio on sky-subtracted mid-range source pixels | None (a ratio of two counts-per-second values) | People reading the summary; the UI |
 | `gainBrightEndRatio` | The same ratio on the brightest 1% of pixels, never applied | None | People reading the summary; the UI |
 | `gainDisagreement` | `abs(gainBrightEndRatio - gainMidRange) / gainMidRange` | Fraction (0.05 is 5%) | The linearity gate |
 | `gainNonlinear` | `true` when `gainDisagreement` is above the tolerance | None | The linearity gate; `leftOutReason` repeats it in words |

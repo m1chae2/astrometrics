@@ -1143,7 +1143,10 @@ class CalibrationLibrary(BaseModel):
            every dark in it is read, and if the mean is farther from the
            lights than `temperature_tolerance_c`, a soft flag names both
            temperatures and the tolerance. Darks with no recorded
-           temperature are used only when no dark has one.
+           temperature are used only when no dark has one. A dark filed
+           under a key with no temperature (a library saved before
+           temperatures were tracked) is placed in a slot by its own
+           ``CCD-TEMP`` header, so an old library never pools temperatures.
 
         Parameters
         ----------
@@ -1234,6 +1237,15 @@ class CalibrationLibrary(BaseModel):
         by_temperature: dict[float | None, list[str]] = {}
         for setting_key, paths in chosen.items():
             slot_c = parse_calibration_setting_key(setting_key).temperature_c
+            if slot_c is None and judge_temperature:
+                # A key with no temperature comes from a library saved before
+                # temperatures were tracked, or from darks that record none.
+                # Read each dark's own header so that an old library file
+                # cannot pool darks of every temperature into one master.
+                for path in paths:
+                    header_slot_c = temperature_slot_c(_read_dark_temperature(path), temperature_tolerance_c)
+                    by_temperature.setdefault(header_slot_c, []).append(path)
+                continue
             by_temperature.setdefault(slot_c, []).extend(paths)
         recorded = {slot_c: paths for slot_c, paths in by_temperature.items() if slot_c is not None}
 

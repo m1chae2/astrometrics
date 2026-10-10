@@ -139,6 +139,9 @@ peak-to-sky and saturation source.
 | `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD`, lower is better | The same saturation share as checkpoint 0, kept so the assessment's numbers are all here. |
 | `valid_fraction` | fraction | none | The same coverage as checkpoint 0. |
 | `signal_to_noise` | per resolution element | `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` (1.5), higher is better | How strongly the spectrum stands out from its own scatter. Below the limit the pipeline does not classify the spectrum. |
+| `median_snr_per_resolution_element` | per resolution element | none | The median, over 4200 to 8000 A, of the brightness summed over one resolution element divided by the error of that sum (from the per-sample errors; the element width comes from the line-spread profile). |
+| `fraction_samples_snr_below_5` | fraction | none | The share of samples in that range whose brightness is below 5 times their own error. |
+| `snr_estimate_ratio` | ratio | none | The variance-based signal-to-noise divided by `signal_to_noise`. A ratio far from 1 means one of the two is wrong. |
 
 **Checkpoint 2, processing result.** It judges the processing results on their
 own, before the catalog comparison. For an unclassified spectrum the
@@ -158,6 +161,9 @@ classification and colour metrics have no value, and the checkpoint carries the
 | `second_order_risky_fraction` | fraction | none | The share of samples where second-order light could add a tenth of the signal. |
 | `second_order_max_blue_to_red_ratio` | ratio | none | The largest ratio of the brightness at half a wavelength to the brightness at that wavelength. |
 | `emission_lines_detected` | lines | none | How many named emission lines or blends have a detected verdict. The `emission_line_source` flag marks two or more. |
+| `median_equivalent_width_relative_error` | fraction | none | The median of the equivalent-width error over its size, for features with a detected or possible verdict. |
+| `hbeta_equivalent_width_angstrom`, `halpha_equivalent_width_angstrom` | angstrom | none | The equivalent width of each Balmer line (positive for a dip). The note holds its error. |
+| `best_template_reduced_chi_square` | reduced chi-square | none | The chi-square per degree of freedom of the best reference by RMS, using the per-sample errors. Near 1 means a fit within the noise. It decides nothing. |
 
 The processing flags are `unclassified`, `emission_line_source` and
 `second_order_risk`. The two second-order metrics have no limit because their

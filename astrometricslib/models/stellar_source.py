@@ -625,6 +625,35 @@ class ExtinctionCorrectionRecord(BaseModel):
     reason: str | None = Field(default=None, alias="reason")
 
 
+class SpectralNoiseModelRecord(BaseModel):
+    """The camera numbers behind a spectrum's per-sample errors.
+
+    Mirrors `PixelNoiseModel` in the spectroscopy pipeline. The error of each
+    sample comes from the photon noise of its pixels (which needs the camera's
+    gain), the read noise, and the error of the sky level. When a number is
+    not known for the camera, the pipeline assumes one and says so here.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # Electrons per ADU (the step of the stored pixel number).
+    gain_e_per_adu: float = Field(alias="gainEPerAdu")
+    # Read noise per pixel, in electrons (RMS).
+    read_noise_e: float = Field(alias="readNoiseE")
+    # True when no source gave the gain and 1 electron per ADU was assumed.
+    gain_is_assumed: bool = Field(alias="gainIsAssumed")
+    # True when no source gave the read noise and zero was assumed.
+    read_noise_is_assumed: bool = Field(alias="readNoiseIsAssumed")
+    # ADU in one stored unit: 1 for a raw frame, 65535 for a Siril stack kept
+    # as a fraction of full scale.
+    adu_per_stored_unit: float = Field(default=1.0, alias="aduPerStoredUnit")
+    # How many frames were averaged into each stored pixel (1 for a raw frame).
+    frames_averaged: int = Field(default=1, alias="framesAveraged")
+    # True when the frame is a stack whose header gives no frame count, so one
+    # frame was assumed and the errors are too large by the real count.
+    frames_are_assumed: bool = Field(default=False, alias="framesAreAssumed")
+
+
 class SpectroscopyResult(BaseModel):
     """A star's own extracted spectrum, and what it suggests about the star.
 
@@ -638,6 +667,13 @@ class SpectroscopyResult(BaseModel):
 
     wavelengths_angstrom: list[float] = Field(default_factory=list, alias="wavelengthsAngstrom")
     intensities: list[float] = Field(default_factory=list, alias="intensities")
+    # The 1-sigma error of each value in `intensities`, in the same units and
+    # order (see `pre_processing.intensity_variance`). It holds the photon and
+    # read noise of the pixels in the extraction box and the error of the sky
+    # level. Neighbouring samples share image columns, so their errors are
+    # correlated; this list holds each sample's own error, not the covariance.
+    # `None` for a spectrum saved before this was recorded.
+    intensity_errors: list[float] | None = Field(default=None, alias="intensityErrors")
     # Only set for a camera with a known quantum-efficiency curve on
     # file -- see quantum_efficiency_correction.py.
     quantum_efficiency_corrected_intensities: list[float] | None = Field(
@@ -653,6 +689,19 @@ class SpectroscopyResult(BaseModel):
     response_corrected_intensities: list[float] | None = Field(
         default=None, alias="responseCorrectedIntensities"
     )
+    # The 1-sigma error of each value in `response_corrected_intensities`: the
+    # extraction errors scaled by the same quantum-efficiency, response and
+    # extinction factors as the brightness (NaN where the brightness is NaN).
+    # The response and the quantum-efficiency curve are taken to be exact.
+    # `None` when no response was applied, and for a spectrum saved before
+    # this was recorded.
+    response_corrected_intensity_errors: list[float] | None = Field(
+        default=None, alias="responseCorrectedIntensityErrors"
+    )
+    # The camera numbers (gain, read noise, stack scale) behind the error
+    # lists above, with a flag for each one that was assumed. `None` when no
+    # errors were computed.
+    intensity_noise_model: SpectralNoiseModelRecord | None = Field(default=None, alias="intensityNoiseModel")
     # A spectral type guessed from this star's own extracted spectrum,
     # via template matching against a reference library -- independent
     # of StellarObject.spectral_type, which comes from a catalog

@@ -10,14 +10,31 @@ built by `input_quality_checkpoint` in the common `StageQualityCheckpoint`
 shape. The limit for signal-to-noise is
 `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, defined once in
 `processing.spectrum_signal`.
+
+When the extractor computed a variance for every sample (see
+`intensity_variance`), the checkpoint also carries three numbers built from
+it: the median signal-to-noise per resolution element, the share of samples
+below a signal-to-noise of 5, and the ratio of the variance-based
+signal-to-noise to the post-hoc estimate above. None of the three has a
+limit. No measurement exists that says what value is too low, and the limit
+of the post-hoc estimate was set on that estimator's own scale, so it does
+not carry over.
 """
 
 from astrometricslib.models.spectroscopy_quality import (
     InputQualityAssessment,
     StageQualityCheckpoint,
+    StageQualityMetric,
     metric,
 )
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
+from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
+    LOW_SAMPLE_SIGNAL_TO_NOISE,
+    SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM,
+    SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM,
+    PixelNoiseModel,
+    SpectrumNoiseSummary,
+)
 from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
     MINIMUM_SPECTRUM_SIGNAL_TO_NOISE,
 )
@@ -53,13 +70,85 @@ def assess_input_quality(
     )
 
 
-def input_quality_checkpoint(assessment: InputQualityAssessment) -> StageQualityCheckpoint:
+def noise_metrics(
+    summary: SpectrumNoiseSummary, noise_model: PixelNoiseModel | None
+) -> list[StageQualityMetric]:
+    """Build the metrics that come from the per-sample variance.
+
+    Parameters
+    ----------
+    summary : `SpectrumNoiseSummary`
+        The signal-to-noise numbers of one spectrum.
+    noise_model : `PixelNoiseModel` or `None`
+        The camera noise the variance used. Its assumptions go in the notes.
+
+    Returns
+    -------
+    metrics : `list` [`StageQualityMetric`]
+        ``median_snr_per_resolution_element``, ``fraction_samples_snr_below_5``
+        and ``snr_estimate_ratio``, all without a limit.
+    """
+    assumed = []
+    if noise_model is not None and noise_model.gain_is_assumed:
+        assumed.append("gain assumed to be 1 electron per ADU")
+    if noise_model is not None and noise_model.read_noise_is_assumed:
+        assumed.append("read noise assumed to be zero")
+    if noise_model is not None and noise_model.frames_are_assumed:
+        assumed.append("one frame assumed in the stack")
+    assumption_note = f" Assumptions: {'; '.join(assumed)}." if assumed else ""
+    low_edge = SIGNAL_TO_NOISE_MINIMUM_WAVELENGTH_ANGSTROM
+    high_edge = SIGNAL_TO_NOISE_MAXIMUM_WAVELENGTH_ANGSTROM
+    span = f"{low_edge:.0f}-{high_edge:.0f} A"
+    return [
+        metric(
+            "median_snr_per_resolution_element",
+            summary.median_snr_per_resolution_element,
+            "per resolution element",
+            note=(
+                f"median over {span} of the brightness summed over one resolution element divided by the "
+                "error of that sum, from the per-sample variance; reported only, no measured limit."
+                + assumption_note
+            ),
+        ),
+        metric(
+            "fraction_samples_snr_below_5",
+            summary.fraction_samples_snr_below_5,
+            "fraction",
+            note=(
+                f"share of samples in {span} whose brightness is below {LOW_SAMPLE_SIGNAL_TO_NOISE:g} times "
+                "their own error; 5 is a convention, not a measured limit."
+            ),
+        ),
+        metric(
+            "snr_estimate_ratio",
+            summary.snr_estimate_ratio,
+            "ratio",
+            note=(
+                "variance-based signal-to-noise divided by the post-hoc estimate (signal_to_noise). The two "
+                "estimate the same quantity, so a ratio far from 1 means one of them is wrong (a wrong gain "
+                "or read noise, or scatter in the spectrum that the variance does not model); reported only."
+            ),
+        ),
+    ]
+
+
+def input_quality_checkpoint(
+    assessment: InputQualityAssessment,
+    noise_summary: SpectrumNoiseSummary | None = None,
+    noise_model: PixelNoiseModel | None = None,
+) -> StageQualityCheckpoint:
     """Build quality checkpoint 1 from an input-quality assessment.
 
     Parameters
     ----------
     assessment : `InputQualityAssessment`
         The result of `assess_input_quality`.
+    noise_summary : `SpectrumNoiseSummary`, optional
+        The signal-to-noise numbers built from the per-sample variance. When
+        given, the checkpoint also carries them (see `noise_metrics`).
+    noise_model : `PixelNoiseModel`, optional
+        The camera noise behind `noise_summary`. A gain or read noise that
+        was assumed adds the ``gain_assumed`` or ``read_noise_assumed`` flag.
 
     Returns
     -------
@@ -101,6 +190,8 @@ def input_quality_checkpoint(assessment: InputQualityAssessment) -> StageQuality
         metric("valid_fraction", assessment.valid_fraction, "fraction"),
         signal_to_noise,
     ]
+    if noise_summary is not None:
+        metrics.extend(noise_metrics(noise_summary, noise_model))
     flags = []
     if not assessment.is_resolution_measured:
         flags.append("resolution_assumed")
@@ -108,4 +199,8 @@ def input_quality_checkpoint(assessment: InputQualityAssessment) -> StageQuality
         flags.append("low_signal_to_noise")
     if saturation.passed is False:
         flags.append("zero_order_saturated")
+    if noise_model is not None and noise_model.gain_is_assumed:
+        flags.append("gain_assumed")
+    if noise_model is not None and noise_model.read_noise_is_assumed:
+        flags.append("read_noise_assumed")
     return StageQualityCheckpoint(stage="pre_processing", metrics=metrics, flags=flags)

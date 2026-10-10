@@ -13,6 +13,12 @@ The limits for the classification (`NO_GOOD_MATCH_RMS` and
 defines none of its own. Metrics without a limit (feature counts,
 second-order risk, emission lines) are reported for measurement only,
 because no validated limit exists for them yet.
+
+The metrics built from propagated errors are also reported only: the median
+relative error of the equivalent widths, the equivalent widths of H-beta and
+H-alpha, and the reduced chi-square of the best reference. No measurement
+says what value of any of them is too poor, so none has a limit. They are
+`None`-valued for a spectrum whose samples carry no errors.
 """
 
 from collections.abc import Mapping, Sequence
@@ -110,6 +116,85 @@ def _feature_metrics(features: Sequence[Mapping[str, object]]) -> list[StageQual
     ]
 
 
+# The feature names whose equivalent widths get their own metric, matched
+# against the detector's feature names (``"Hydrogen Balmer series (H-beta)"``).
+_HBETA_FEATURE = "H-beta"
+_HALPHA_FEATURE = "H-alpha"
+
+
+def _find_feature(features: Sequence[Mapping[str, object]], short_name: str) -> Mapping[str, object] | None:
+    """Find a named feature by the short name in its label.
+
+    Parameters
+    ----------
+    features : `Sequence` [`Mapping`]
+        The results of `detect_named_features`.
+    short_name : `str`
+        A fragment of the feature's name, such as ``"H-beta"``.
+
+    Returns
+    -------
+    feature : `Mapping` or `None`
+        The first feature whose name contains `short_name`, or `None`.
+    """
+    return next((feature for feature in features if short_name in str(feature.get("feature", ""))), None)
+
+
+def _equivalent_width_metrics(features: Sequence[Mapping[str, object]]) -> list[StageQualityMetric]:
+    """Build the metrics that describe the equivalent widths.
+
+    Parameters
+    ----------
+    features : `Sequence` [`Mapping`]
+        The results of `detect_named_features`, each with its equivalent
+        width and error when the spectrum carried sample errors.
+
+    Returns
+    -------
+    metrics : `list` [`StageQualityMetric`]
+        The median relative error over the features with a detected or
+        possible verdict, then the H-beta and H-alpha equivalent widths in
+        Angstroms. A value is `None` when no feature has a width.
+    """
+    relative_errors = []
+    for feature in features:
+        width = _optional_float(feature.get("equivalent_width_angstrom"))
+        error = _optional_float(feature.get("equivalent_width_error_angstrom"))
+        if (
+            feature.get("verdict") in (VERDICT_DETECTED, VERDICT_POSSIBLE)
+            and width is not None
+            and error is not None
+            and abs(width) > 0.0
+        ):
+            relative_errors.append(error / abs(width))
+    metrics = [
+        metric(
+            "median_equivalent_width_relative_error",
+            float(np.median(relative_errors)) if relative_errors else None,
+            "fraction",
+            note=(
+                "median of error / |equivalent width| over features with a detected or possible verdict; "
+                "reported only, no measured limit"
+            ),
+        )
+    ]
+    for short_name, name in ((_HBETA_FEATURE, "hbeta"), (_HALPHA_FEATURE, "halpha")):
+        feature = _find_feature(features, short_name)
+        width = _optional_float(feature.get("equivalent_width_angstrom")) if feature else None
+        error = _optional_float(feature.get("equivalent_width_error_angstrom")) if feature else None
+        if feature is None or width is None:
+            note = f"{short_name} equivalent width not measured (not covered, or no sample errors)"
+        else:
+            kind = str(feature.get("kind", ""))
+            note = (
+                f"{short_name} equivalent width {width:.1f} +/- "
+                f"{error if error is not None else float('nan'):.1f} A, verdict {feature.get('verdict')}, "
+                f"{kind}; positive means a dip below the continuum; reported only"
+            )
+        metrics.append(metric(f"{name}_equivalent_width_angstrom", width, "angstrom", note=note))
+    return metrics
+
+
 def assess_processing_quality(
     *,
     classification: Mapping[str, object],
@@ -184,6 +269,17 @@ def assess_processing_quality(
         ),
         metric("synthetic_b_minus_v", synthetic_b_minus_v, "magnitude"),
         *_feature_metrics(features),
+        *_equivalent_width_metrics(features),
+        metric(
+            "best_template_reduced_chi_square",
+            _optional_float(classification.get("reduced_chi_square")) if is_classified else None,
+            "reduced chi-square",
+            note=(
+                "chi-square per degree of freedom of the best reference by RMS, with the propagated sample "
+                "errors; near 1 means the reference fits within the noise, far above 1 means the mismatch "
+                "(reference and response errors) exceeds the noise; reported only, it decides nothing"
+            ),
+        ),
     ]
 
     risky_fraction: float | None = None

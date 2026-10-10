@@ -15,6 +15,7 @@ from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.models.stellar_source import (
     ExtinctionCorrectionRecord,
     SpectralExtractionDiagnostics,
+    SpectralNoiseModelRecord,
     SpectroscopyResult,
     StellarObject,
 )
@@ -43,6 +44,12 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response i
     load_instrument_response,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_scale import counts_per_second_factor
+from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
+    PixelNoiseModel,
+    build_pixel_noise_model,
+    propagate_calibration_errors,
+    summarize_spectrum_noise,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.neighbor_wing_correction import (
     STATUS_APPLIED,
     STATUS_NOT_NEEDED,
@@ -740,10 +747,35 @@ class SpectroscopyPipeline:
             reject_narrow_contaminants=config.reject_narrow_contaminants,
         )
         self.calibrator = SpectrumCalibrator(self.instrument)
+        # The camera noise for the latest image, found once per image because
+        # telling a stack from a raw frame scans every pixel. Holds the image
+        # itself so a new image is never mistaken for the old one.
+        self._noise_model_cache: tuple[Any, PixelNoiseModel] | None = None
         # Keeps track of how many stars were too bright (saturated) in the
         # center. We save this list so other parts of the program can check
         # the overall image quality later.
         self.last_run_zero_order_saturation_fractions: list[float] = []
+
+    def _noise_model_for(self, image: Any) -> PixelNoiseModel:
+        """Give the camera noise to use for the samples read from an image.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The frame being read.
+
+        Returns
+        -------
+        model : `PixelNoiseModel`
+            The model from `build_pixel_noise_model`, using the camera's
+            profile and the image's header. The latest answer is kept, so the
+            stars of one image share one model.
+        """
+        if self._noise_model_cache is not None and self._noise_model_cache[0] is image:
+            return self._noise_model_cache[1]
+        model = build_pixel_noise_model(self.camera_profile, getattr(image, "header", None), image.data)
+        self._noise_model_cache = (image, model)
+        return model
 
     def process(
         self, context: AnalysisContext, limit: int | None = None, auto_detect_angle: bool = True
@@ -1184,6 +1216,32 @@ class SpectroscopyPipeline:
             )
             logger.debug("Extinction correction: %s", extinction_record.as_dict())
 
+        # The extraction errors go through the same corrections as the
+        # brightness: each one multiplies the brightness by a factor and so
+        # the error by the size of that factor.
+        raw_errors = result.get("intensity_errors")
+        propagated = (
+            propagate_calibration_errors(
+                np.array(wavelengths_angstrom),
+                np.array(raw_errors),
+                self.quantum_efficiency_curve,
+                response,
+                extinction_record,
+            )
+            if raw_errors is not None
+            else None
+        )
+        best_available_errors = (
+            None
+            if propagated is None
+            else (
+                propagated.quantum_efficiency_corrected
+                if propagated.quantum_efficiency_corrected is not None
+                else np.array(raw_errors)
+            )
+        )
+        response_corrected_errors = None if propagated is None else propagated.response_corrected
+
         # Compute the visual overlay rectangle and total rotated
         # dispersion angle
         rectangle, dispersion_angle = self._dispersion_overlay_geometry(
@@ -1207,6 +1265,8 @@ class SpectroscopyPipeline:
             resolution_profile=self.line_spread_profile,
             possible_neighbor_contamination=result.get("possible_neighbor_contamination"),
             extinction_correction=extinction_record,
+            intensity_errors=best_available_errors,
+            response_corrected_intensity_errors=response_corrected_errors,
         )
         classification = analysis.classification
         probable_spectral_features = analysis.features
@@ -1220,6 +1280,22 @@ class SpectroscopyPipeline:
         )
         output_quality = assess_output_quality(
             classification, analysis.catalog_comparison, analysis.resolution_element_angstrom
+        )
+        # The signal-to-noise numbers from the per-sample errors use the same
+        # brightness the post-hoc estimate saw (`best_available_intensity`).
+        noise_model_record = result.get("intensity_noise_model")
+        noise_model = PixelNoiseModel(**noise_model_record) if noise_model_record is not None else None
+        noise_summary = (
+            summarize_spectrum_noise(
+                np.array(wavelengths_angstrom),
+                np.array(best_available_intensity),
+                best_available_errors,
+                analysis.resolution_element_angstrom,
+                analysis.signal_to_noise,
+                self.line_spread_profile,
+            )
+            if best_available_errors is not None
+            else None
         )
         second_order_blue_to_red_ratio = compute_second_order_blue_to_red_ratio(
             np.array(wavelengths_angstrom), np.array(intensities)
@@ -1238,7 +1314,7 @@ class SpectroscopyPipeline:
                 extraction_diagnostics=result.get("extraction_diagnostics"),
                 frame_check=result.get("frame_check"),
             ),
-            input_quality_checkpoint(input_quality),
+            input_quality_checkpoint(input_quality, noise_summary, noise_model),
             assess_processing_quality(
                 classification=classification,
                 features=probable_spectral_features,
@@ -1258,8 +1334,17 @@ class SpectroscopyPipeline:
         star.spectroscopy = SpectroscopyResult(
             wavelengths_angstrom=wavelengths_angstrom,
             intensities=intensities,
+            intensity_errors=raw_errors,
             quantum_efficiency_corrected_intensities=quantum_efficiency_corrected_intensities,
             response_corrected_intensities=analysis.response_corrected_intensity,
+            response_corrected_intensity_errors=(
+                response_corrected_errors.tolist() if response_corrected_errors is not None else None
+            ),
+            intensity_noise_model=(
+                SpectralNoiseModelRecord.model_validate(noise_model_record)
+                if noise_model_record is not None
+                else None
+            ),
             self_determined_spectral_type=classification["spectral_type"],
             self_determined_spectral_type_rms=classification["classification_rms"],
             self_determined_spectral_type_note=classification.get("reason") or "",
@@ -1344,7 +1429,10 @@ class SpectroscopyPipeline:
             and other math details about the extraction. The key
             `sample_distances_px` holds the distance of each kept sample
             from the zero order, in pixels, measured along the dispersion
-            direction. It has one value per wavelength.
+            direction. It has one value per wavelength. The key
+            `intensity_errors` holds the 1-sigma error of each intensity (one
+            per wavelength; see `intensity_variance`) and
+            `intensity_noise_model` the camera numbers behind it.
 
         Raises
         ------
@@ -1366,6 +1454,11 @@ class SpectroscopyPipeline:
                     else reject_narrow_contaminants
                 ),
             )
+
+        # Every reading also gets a variance from the camera noise. The
+        # extractor object may be shared, so the model is set on every star.
+        noise_model = self._noise_model_for(image)
+        extractor.noise_model = noise_model
 
         # 1. Auto-detect angle if requested
         detected_angle = self.config.dispersion_angle_degrees
@@ -1416,6 +1509,11 @@ class SpectroscopyPipeline:
                 details={"position": [float(pos[0]), float(pos[1])]},
             )
         valid_fraction = float(usable.mean())
+        # The extractor kept one variance per step. Dropping the unusable
+        # samples from it with the same mask keeps each error attached to its
+        # own sample.
+        sample_variance = np.asarray(extractor.last_diagnostics.sample_variance, dtype=float)
+        intensity_errors = np.sqrt(sample_variance[usable]) if sample_variance.shape == usable.shape else None
         wavelengths = wavelengths[usable]
         intensities = intensities[usable]
         sample_distances_px = sample_distances_px[usable]
@@ -1427,6 +1525,10 @@ class SpectroscopyPipeline:
         return {
             "wavelengths": wavelengths.tolist(),
             "intensities": intensities.tolist(),
+            # The 1-sigma error of each intensity, from the camera noise
+            # model (see `intensity_variance`), and the model's numbers.
+            "intensity_errors": intensity_errors.tolist() if intensity_errors is not None else None,
+            "intensity_noise_model": noise_model.as_record() if intensity_errors is not None else None,
             "target_pos": target_pos,
             "detected_angle": detected_angle,
             "extraction_radius": radius,

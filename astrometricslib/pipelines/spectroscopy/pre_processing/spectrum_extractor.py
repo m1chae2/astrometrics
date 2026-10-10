@@ -43,6 +43,17 @@ is a bright star in a sparse field, and only 0.6% of its spectrum was sky.
 Check a fainter star in a busier field before trusting a change to this
 stage.
 
+Per-sample uncertainty
+----------------------
+When the extractor has a `PixelNoiseModel`, every reading also gets a
+variance (the square of its 1-sigma error), kept in
+`last_diagnostics.sample_variance`. The variance is the photon and read
+noise of the pixels in the box, with each edge pixel's fraction squared,
+plus the variance of the sky level times the square of the box's total
+weight. A sample between two columns blends two readings, and its variance
+blends theirs with the squared weights. `intensity_variance` describes the
+model and its limits.
+
 What this stage does NOT do: it does not remove Earth's atmosphere
 absorption (telluric lines from oxygen and water vapour). Those are dips
 in the star's own light after it passes through the air, so they are not
@@ -93,6 +104,11 @@ from scipy.ndimage import binary_dilation, median_filter
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
+    PixelNoiseModel,
+    combine_neighbour_variances,
+    median_variance_factor,
+)
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -509,10 +525,17 @@ class SkyMeasurement:
         only the other band was used. `"upper_band_contaminated"`: the same
         for the band on the high-index side. `"single_band"`: only one band
         had enough pixels on the image. `"no_sky"`: neither had.
+    level_variance : `float`
+        The variance of `level_per_pixel` (the square of its 1-sigma
+        error), in ADU squared. Each band's median has a variance of about
+        ``(pi / 2) * s**2 / (n + 1.4)`` for `n` pixels with scatter `s` (see
+        `median_variance_factor`); the mean of two bands has a quarter of
+        the sum of their two variances. `0.0` when no sky could be measured.
     """
 
     level_per_pixel: float
     mode: str
+    level_variance: float = 0.0
 
 
 @dataclass
@@ -531,10 +554,17 @@ class ExtractionDiagnostics:
     sky_mode_counts : `dict` [`str`, `int`]
         How many sky readings used each `SkyMeasurement.mode`. Each step
         makes one reading, and a step between two columns makes two.
+    sample_variance : `list` [`float`]
+        The variance of each step's reading (the square of its 1-sigma
+        error), in the image's units squared, one value per step in the same
+        order as the profile the `extract_*` call returned. NaN for a step
+        that is off the image. Empty when the extractor has no
+        `PixelNoiseModel`. The summary from `as_dict` leaves it out.
     """
 
     aperture_half_width_px: list[float] = field(default_factory=list)
     sky_mode_counts: dict[str, int] = field(default_factory=dict)
+    sample_variance: list[float] = field(default_factory=list)
 
     @property
     def dominant_sky_mode(self) -> str | None:
@@ -631,8 +661,57 @@ def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | Non
     return float(np.median(pixels)), noise, int(pixels.size)
 
 
+def _sky_level_variance(bands: list[tuple[float, float, int]], noise_model: PixelNoiseModel | None) -> float:
+    """Give the variance of the sky level made from one or two bands.
+
+    Each band's median has a variance of ``s**2 * median_variance_factor(n)``
+    for `n` kept pixels with pixel variance ``s**2``. The sky level is the
+    mean of the medians of the bands in use, so its variance is the sum of
+    those over the square of the band count.
+
+    The pixel variance `s**2` is the scatter of the bands' pixels about their
+    medians, pooled over the bands in use (``n - 1`` degrees of freedom
+    each). A band of ten pixels gives a noisy scatter, and the 3-sigma
+    clipping in `_clipped_band_statistics` reads it about 12 percent low in
+    variance on plain noise. So when a noise model is given, `s**2` is never
+    taken below what the camera model predicts for pixels at the sky level
+    (``a * level + b``, see `PixelNoiseModel`): sky pixels cannot scatter
+    less than their photon and read noise. A larger measured scatter (a
+    neighbour's light in the band, flat-field residue) still counts in full.
+
+    Parameters
+    ----------
+    bands : `list` [`tuple` [`float`, `float`, `int`]]
+        The median, pixel scatter and kept-pixel count of each band in use,
+        as `_clipped_band_statistics` returns them. One or two entries.
+    noise_model : `PixelNoiseModel` or `None`
+        The camera noise, or `None` to use the measured scatter alone.
+
+    Returns
+    -------
+    variance : `float`
+        The variance of the sky level per pixel, in the image's units
+        squared.
+    """
+    degrees_of_freedom = sum(count - 1 for _, _, count in bands)
+    pixel_variance = (
+        sum((count - 1) * noise**2 for _, noise, count in bands) / degrees_of_freedom
+        if degrees_of_freedom > 0
+        else 0.0
+    )
+    if noise_model is not None:
+        level = max(sum(median for median, _, _ in bands) / len(bands), 0.0)
+        pixel_variance = max(
+            pixel_variance, noise_model.poisson_coefficient * level + noise_model.read_variance
+        )
+    return pixel_variance * sum(median_variance_factor(count) for _, _, count in bands) / len(bands) ** 2
+
+
 def measure_sky(
-    cross_section: np.ndarray, aperture_center: float, aperture_half_width: float
+    cross_section: np.ndarray,
+    aperture_center: float,
+    aperture_half_width: float,
+    noise_model: PixelNoiseModel | None = None,
 ) -> SkyMeasurement:
     """Measure how bright the night sky is beside the spectrum.
 
@@ -676,11 +755,16 @@ def measure_sky(
         How many pixels the reading box reaches on each side of its middle.
         A fractional value is rounded up, so the bands never overlap the
         box.
+    noise_model : `PixelNoiseModel`, optional
+        The camera noise. It sets a floor under the pixel scatter that the
+        variance of the sky level uses (see `_sky_level_variance`). Without
+        it, the measured scatter alone is used.
 
     Returns
     -------
     measurement : `SkyMeasurement`
-        The sky level per pixel, in ADU, and how it was found.
+        The sky level per pixel, in ADU, how it was found, and the variance
+        of that level.
     """
     centre = round(aperture_center)
     nearest_band_edge = math.ceil(aperture_half_width) + SKY_BAND_GAP_PX
@@ -698,7 +782,7 @@ def measure_sky(
         return SkyMeasurement(0.0, SKY_MODE_NO_SKY)
     if lower is None or upper is None:
         only = upper if lower is None else lower
-        return SkyMeasurement(only[0], SKY_MODE_SINGLE_BAND)
+        return SkyMeasurement(only[0], SKY_MODE_SINGLE_BAND, _sky_level_variance([only], noise_model))
 
     lower_median, lower_noise, lower_count = lower
     upper_median, upper_noise, upper_count = upper
@@ -713,9 +797,17 @@ def measure_sky(
     )
     if abs(upper_median - lower_median) > SKY_CONTAMINATION_SIGMA * difference_noise:
         if upper_median > lower_median:
-            return SkyMeasurement(lower_median, SKY_MODE_UPPER_BAND_CONTAMINATED)
-        return SkyMeasurement(upper_median, SKY_MODE_LOWER_BAND_CONTAMINATED)
-    return SkyMeasurement(0.5 * (lower_median + upper_median), SKY_MODE_BOTH_BANDS)
+            return SkyMeasurement(
+                lower_median, SKY_MODE_UPPER_BAND_CONTAMINATED, _sky_level_variance([lower], noise_model)
+            )
+        return SkyMeasurement(
+            upper_median, SKY_MODE_LOWER_BAND_CONTAMINATED, _sky_level_variance([upper], noise_model)
+        )
+    return SkyMeasurement(
+        0.5 * (lower_median + upper_median),
+        SKY_MODE_BOTH_BANDS,
+        _sky_level_variance([lower, upper], noise_model),
+    )
 
 
 def measure_sky_level_per_pixel(
@@ -897,6 +989,9 @@ class SpectrumExtractor:
         What the latest `extract_*` call did: the box half-width at each
         step and how the sky was found. Replaced at the start of every
         `extract_*` call.
+    noise_model : `PixelNoiseModel` or `None`
+        The camera noise used to give each reading a variance. `None` skips
+        the variance, and `last_diagnostics.sample_variance` stays empty.
     """
 
     def __init__(
@@ -904,6 +999,7 @@ class SpectrumExtractor:
         radius: int = 10,
         subtract_sky_background: bool = True,
         reject_narrow_contaminants: bool = False,
+        noise_model: PixelNoiseModel | None = None,
     ) -> None:
         """Set up the extractor.
 
@@ -921,25 +1017,32 @@ class SpectrumExtractor:
             nebula's wide box; a star's own narrow box loses its own real
             trace to this instead (see `replace_narrow_spikes` for the
             2026-09-27 regression that confirmed it).
+        noise_model : `PixelNoiseModel`, optional
+            The camera noise. When given, every reading also gets a
+            variance (see `intensity_variance`), kept in
+            `last_diagnostics.sample_variance`. The default `None` computes
+            no variance.
         """
         self.radius = radius
         self.subtract_sky_background = subtract_sky_background
         self.reject_narrow_contaminants = reject_narrow_contaminants
+        self.noise_model = noise_model
         self.last_diagnostics = ExtractionDiagnostics()
 
-    def _sum_aperture_minus_sky(
+    def _measure_aperture(
         self,
         data: np.ndarray,
         line_index: int,
         aperture_center: float,
         aperture_half_width: float,
         is_horizontal: bool,
-    ) -> float:
+    ) -> tuple[float, float]:
         """Add up the star's light in one reading box, without the sky.
 
         Every extraction method in this class reads its brightness through
-        this one method, so the sky background subtraction stage cannot be
-        skipped by accident in one of them.
+        this one method (directly or through `_sum_aperture_minus_sky`), so
+        the sky background subtraction stage cannot be skipped by accident
+        in one of them.
 
         The box can start and end part-way through a pixel. Each pixel at
         the edge counts for the fraction of it inside the box (see
@@ -970,20 +1073,26 @@ class SpectrumExtractor:
         flux : `float`
             The total light in the box minus the sky glow, in ADU, or `NaN`
             when the box is not on the image.
+        variance : `float`
+            The variance of `flux`, in the image's units squared: the box's
+            Poisson and read variance (`PixelNoiseModel.box_variance`) plus
+            the sky level's variance times the squared total pixel weight.
+            `NaN` when the box is not on the image or the extractor has no
+            noise model.
         """
         height, width = data.shape
         if is_horizontal:
             if not 0 <= line_index < width:
-                return np.nan
+                return np.nan, np.nan
             cross_section = data[:, line_index]
         else:
             if not 0 <= line_index < height:
-                return np.nan
+                return np.nan, np.nan
             cross_section = data[line_index, :]
 
         box_indices, box_weights = box_pixel_weights(cross_section.size, aperture_center, aperture_half_width)
         if box_indices.size == 0:
-            return np.nan
+            return np.nan, np.nan
 
         box_pixels = cross_section[box_indices]
         if self.reject_narrow_contaminants:
@@ -994,22 +1103,71 @@ class SpectrumExtractor:
             cleaned_with_margin = replace_narrow_spikes(cross_section[margin_start:margin_end])
             box_pixels = cleaned_with_margin[box_indices - margin_start]
         box_total = float(np.sum(box_weights * box_pixels))
+        # The box's own variance does not depend on the sky estimate: the raw
+        # pixels already hold source and sky together.
+        variance = (
+            self.noise_model.box_variance(box_pixels, box_weights) if self.noise_model is not None else np.nan
+        )
         if not self.subtract_sky_background:
-            return box_total
+            return box_total, variance
 
-        sky = measure_sky(cross_section, aperture_center, aperture_half_width)
+        sky = measure_sky(cross_section, aperture_center, aperture_half_width, self.noise_model)
         counts = self.last_diagnostics.sky_mode_counts
         counts[sky.mode] = counts.get(sky.mode, 0) + 1
-        return box_total - sky.level_per_pixel * float(np.sum(box_weights))
+        total_weight = float(np.sum(box_weights))
+        # The sky level is subtracted once for each pixel-area of the box, so
+        # its error is multiplied by the total weight, and its variance by the
+        # square of it. The band pixels are not in the box, so this term is
+        # independent of the box's own.
+        variance += total_weight**2 * sky.level_variance
+        return box_total - sky.level_per_pixel * total_weight, variance
 
-    def _sum_aperture_at_position(
+    def _sum_aperture_minus_sky(
+        self,
+        data: np.ndarray,
+        line_index: int,
+        aperture_center: float,
+        aperture_half_width: float,
+        is_horizontal: bool,
+    ) -> float:
+        """Add up the star's light in one reading box, without the sky.
+
+        This gives only the flux from `_measure_aperture`; read that method
+        for how the box, the edge pixels and the sky are handled.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        line_index : `int`
+            Which position along the spectrum to read: the column when the
+            spectrum runs left to right, or the row when it runs top to
+            bottom.
+        aperture_center : `float`
+            Where the middle of the reading box is, across the spectrum.
+        aperture_half_width : `float`
+            How many pixels the box reaches on each side of its middle.
+        is_horizontal : `bool`
+            `True` when the spectrum runs left to right.
+
+        Returns
+        -------
+        flux : `float`
+            The total light in the box minus the sky glow, in ADU, or `NaN`
+            when the box is not on the image.
+        """
+        return self._measure_aperture(data, line_index, aperture_center, aperture_half_width, is_horizontal)[
+            0
+        ]
+
+    def _measure_aperture_at_position(
         self,
         data: np.ndarray,
         along_position: float,
         aperture_center: float,
         aperture_half_width: float,
         is_horizontal: bool,
-    ) -> float:
+    ) -> tuple[float, float]:
         """Read the box at a position along the spectrum, whole pixel or not.
 
         A sample is meant to sit at one exact distance from the zero-order
@@ -1022,6 +1180,14 @@ class SpectrumExtractor:
         pixel). The reading here is the reading of the two whole pixels on
         either side of the position, weighted by how near each is, so it is
         the reading at the position itself.
+
+        The two readings use different pixels (their sky bands too), so they
+        are independent and the blend has variance
+        ``(1 - u)**2 * V_lower + u**2 * V_upper`` for an upper weight `u`
+        (see `combine_neighbour_variances`). The next position along the
+        spectrum shares one of the two readings, so neighbouring samples
+        have correlated errors. The variance returned here is the sample's
+        own and does not hold that covariance.
 
         Parameters
         ----------
@@ -1043,22 +1209,73 @@ class SpectrumExtractor:
         flux : `float`
             The light in the box minus the sky glow, in ADU, or `NaN` when
             the position is not on the image.
+        variance : `float`
+            The variance of `flux` (see `_measure_aperture`), `NaN` when the
+            position is off the image or the extractor has no noise model.
         """
         lower_index = math.floor(along_position)
         upper_weight = along_position - lower_index
-        lower = self._sum_aperture_minus_sky(
+        lower, lower_variance = self._measure_aperture(
             data, lower_index, aperture_center, aperture_half_width, is_horizontal
         )
         if upper_weight <= 0.0:
-            return lower
-        upper = self._sum_aperture_minus_sky(
+            return lower, lower_variance
+        upper, upper_variance = self._measure_aperture(
             data, lower_index + 1, aperture_center, aperture_half_width, is_horizontal
         )
         if np.isnan(upper):
-            return lower
+            return lower, lower_variance
         if np.isnan(lower):
-            return upper
-        return (1.0 - upper_weight) * lower + upper_weight * upper
+            return upper, upper_variance
+        return (
+            (1.0 - upper_weight) * lower + upper_weight * upper,
+            combine_neighbour_variances(lower_variance, upper_variance, upper_weight),
+        )
+
+    def _sum_aperture_at_position(
+        self,
+        data: np.ndarray,
+        along_position: float,
+        aperture_center: float,
+        aperture_half_width: float,
+        is_horizontal: bool,
+    ) -> float:
+        """Read the box at a position along the spectrum, flux only.
+
+        Parameters
+        ----------
+        data : `numpy.ndarray`
+            The 2-D image.
+        along_position : `float`
+            The position along the spectrum, in pixels.
+        aperture_center : `float`
+            Where the middle of the reading box is, across the spectrum.
+        aperture_half_width : `float`
+            How many pixels the box reaches on each side of its middle.
+        is_horizontal : `bool`
+            `True` when the spectrum runs left to right.
+
+        Returns
+        -------
+        flux : `float`
+            The light in the box minus the sky glow, in ADU, or `NaN` when
+            the position is not on the image.
+        """
+        return self._measure_aperture_at_position(
+            data, along_position, aperture_center, aperture_half_width, is_horizontal
+        )[0]
+
+    def _store_sample_variance(self, variances: list[float]) -> None:
+        """Keep the per-step variances of the latest extraction.
+
+        Parameters
+        ----------
+        variances : `list` [`float`]
+            The variance of each step, in order. Dropped (the stored list
+            stays empty) when the extractor has no noise model.
+        """
+        if self.noise_model is not None:
+            self.last_diagnostics.sample_variance = [float(value) for value in variances]
 
     def extract_line(
         self, image: AstrometricsImage, start_pos: tuple[float, float], vector: np.ndarray, length: float
@@ -1095,6 +1312,7 @@ class SpectrumExtractor:
         # (future). Assuming horizontal/vertical for now as per config.
 
         pixels = []
+        variances = []
         for i in range(int(length)):
             exact_x = x0 + i * vx
             exact_y = y0 + i * vy
@@ -1104,15 +1322,22 @@ class SpectrumExtractor:
             if 0 <= curr_x < w and 0 <= curr_y < h:
                 # Sum over radius, minus the sky glow measured beside it, at
                 # the exact position along the spectrum (see
-                # `_sum_aperture_at_position`).
+                # `_measure_aperture_at_position`).
                 if abs(vx) > abs(vy):  # Horizontal-ish
-                    val = self._sum_aperture_at_position(data, exact_x, curr_y, self.radius, True)
+                    val, variance = self._measure_aperture_at_position(
+                        data, exact_x, curr_y, self.radius, True
+                    )
                 else:  # Vertical-ish
-                    val = self._sum_aperture_at_position(data, exact_y, curr_x, self.radius, False)
+                    val, variance = self._measure_aperture_at_position(
+                        data, exact_y, curr_x, self.radius, False
+                    )
                 pixels.append(val)
+                variances.append(variance)
             else:
                 pixels.append(np.nan)
+                variances.append(np.nan)
 
+        self._store_sample_variance(variances)
         return np.array(pixels)
 
     def extract_line_traced(
@@ -1182,6 +1407,7 @@ class SpectrumExtractor:
 
         aperture_half_widths = traced_aperture_half_widths_px(raw_sigmas, float(self.radius))
         pixels = []
+        variances = []
         trail_width_px: list[float] = []
         for i in range(int(length)):
             curr_x = x0 + i * vx
@@ -1194,12 +1420,18 @@ class SpectrumExtractor:
                 # line to be.
                 if 0 <= int_x < width and 0 <= int_y < height:
                     if abs(vx) > abs(vy):
-                        val = self._sum_aperture_at_position(data, curr_x, int_y, self.radius, True)
+                        val, variance = self._measure_aperture_at_position(
+                            data, curr_x, int_y, self.radius, True
+                        )
                     else:
-                        val = self._sum_aperture_at_position(data, curr_y, int_x, self.radius, False)
+                        val, variance = self._measure_aperture_at_position(
+                            data, curr_y, int_x, self.radius, False
+                        )
                     pixels.append(val)
+                    variances.append(variance)
                 else:
                     pixels.append(np.nan)
+                    variances.append(np.nan)
                 trail_width_px.append(0.0)
                 self.last_diagnostics.aperture_half_width_px.append(float(self.radius))
                 continue
@@ -1210,13 +1442,19 @@ class SpectrumExtractor:
             true_center_y = curr_y + perpendicular_vector[1] * smoothed_centerline[i]
 
             if abs(vx) > abs(vy):
-                val = self._sum_aperture_at_position(data, curr_x, true_center_y, aperture_radius, True)
+                val, variance = self._measure_aperture_at_position(
+                    data, curr_x, true_center_y, aperture_radius, True
+                )
             else:
-                val = self._sum_aperture_at_position(data, curr_y, true_center_x, aperture_radius, False)
+                val, variance = self._measure_aperture_at_position(
+                    data, curr_y, true_center_x, aperture_radius, False
+                )
             pixels.append(val)
+            variances.append(variance)
             trail_width_px.append(sigma)
             self.last_diagnostics.aperture_half_width_px.append(aperture_radius)
 
+        self._store_sample_variance(variances)
         return np.array(pixels), smoothed_centerline, trail_width_px
 
     def extract_with_flare_mask(
@@ -1278,6 +1516,7 @@ class SpectrumExtractor:
 
         # 2. Bounding Box & Profile Extraction with Dynamic Tilt Tracking
         profile = []
+        variances = []
         slope = -np.tan(np.radians(angle_degrees))
 
         if orientation == "horizontal":
@@ -1288,7 +1527,9 @@ class SpectrumExtractor:
                 # Calculate dynamically tilted y center
                 y_center = anchor_y + slope * (x - anchor_x)
                 iy_center = round(y_center)
-                profile.append(self._sum_aperture_minus_sky(data, x, iy_center, radius, True))
+                value, variance = self._measure_aperture(data, x, iy_center, radius, True)
+                profile.append(value)
+                variances.append(variance)
         else:  # vertical
             # Vertical dispersion: from anchor_y + flare_offset_pixels to
             # anchor_y + max_offset_pixels
@@ -1301,8 +1542,11 @@ class SpectrumExtractor:
                 ix_center = round(x_center)
                 # Sum rows horizontally in the bounding box centered
                 # around the tilted x center
-                profile.append(self._sum_aperture_minus_sky(data, y, ix_center, radius, False))
+                value, variance = self._measure_aperture(data, y, ix_center, radius, False)
+                profile.append(value)
+                variances.append(variance)
 
+        self._store_sample_variance(variances)
         return np.array(profile), anchor_x, anchor_y
 
     def _compute_centroid_reference_point(
@@ -1702,6 +1946,7 @@ class SpectrumExtractor:
 
         aperture_half_widths = traced_aperture_half_widths_px(raw_sigmas, float(radius))
         profile = []
+        variances = []
         trail_width_px: list[float] = []
         for index, step in enumerate(steps):
             nominal_x, nominal_y = nominal_centers[index]
@@ -1711,10 +1956,11 @@ class SpectrumExtractor:
                 # No fit here, so read a plain fixed-size box (still with
                 # the sky taken out).
                 if is_horizontal:
-                    val = self._sum_aperture_minus_sky(data, step, int_step_y, radius, True)
+                    val, variance = self._measure_aperture(data, step, int_step_y, radius, True)
                 else:
-                    val = self._sum_aperture_minus_sky(data, step, int_step_x, radius, False)
+                    val, variance = self._measure_aperture(data, step, int_step_x, radius, False)
                 profile.append(val)
+                variances.append(variance)
                 trail_width_px.append(0.0)
                 self.last_diagnostics.aperture_half_width_px.append(float(radius))
                 continue
@@ -1725,11 +1971,13 @@ class SpectrumExtractor:
             true_y = nominal_y + perpendicular_vector[1] * smoothed_centerline[index]
 
             if is_horizontal:
-                val = self._sum_aperture_minus_sky(data, step, true_y, aperture_radius, True)
+                val, variance = self._measure_aperture(data, step, true_y, aperture_radius, True)
             else:
-                val = self._sum_aperture_minus_sky(data, step, true_x, aperture_radius, False)
+                val, variance = self._measure_aperture(data, step, true_x, aperture_radius, False)
             profile.append(val)
+            variances.append(variance)
             trail_width_px.append(sigma)
             self.last_diagnostics.aperture_half_width_px.append(aperture_radius)
 
+        self._store_sample_variance(variances)
         return np.array(profile), trail_width_px

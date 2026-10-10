@@ -42,6 +42,10 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution i
     blur_sigma_in_samples,
     blur_to_resolution_profile,
 )
+from astrometricslib.pipelines.spectroscopy.processing.equivalent_width import (
+    EquivalentWidthMeasurement,
+    measure_equivalent_width,
+)
 
 # Rest wavelengths of features broad or strong enough for a low-resolution
 # slitless grism to plausibly resolve as a distinct dip. window_angstrom is
@@ -359,6 +363,65 @@ def _measure_dip(
         return None
 
     return _DipMeasurement(center, depth, depth_uncertainty, depth / depth_uncertainty)
+
+
+def _feature_equivalent_width(
+    wavelength_angstrom: np.ndarray,
+    intensity: np.ndarray,
+    errors: np.ndarray,
+    center: float,
+    half_window: float,
+    resolution_element_angstrom: float,
+    resolution_profile: ResolutionProfile | None,
+) -> EquivalentWidthMeasurement | None:
+    """Measure the equivalent width of one feature with the detector's bands.
+
+    The continuum is the quadratic the dip measurement fits (see
+    `_measure_dip`), from the same bands unless the integration window is
+    wider than the detector's inner band edge (see `equivalent_width`). The
+    window is 1.5 line-spread widths either side of the center, where the
+    line spread is the profile's value at the center, or the resolution
+    element when there is no profile.
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        Wavelengths, sorted, in Angstroms.
+    intensity : `np.ndarray`
+        The brightness at each wavelength.
+    errors : `np.ndarray`
+        The 1-sigma error of each brightness.
+    center : `float`
+        Where the feature was measured, in Angstroms.
+    half_window : `float`
+        The feature's core half-width, in Angstroms. It sets the width of
+        the continuum bands.
+    resolution_element_angstrom : `float`
+        The width of one independent measurement, in Angstroms.
+    resolution_profile : `ResolutionProfile`, optional
+        How the blur changes along the spectrum.
+
+    Returns
+    -------
+    measurement : `EquivalentWidthMeasurement` or `None`
+        The measurement, or `None` when it could not be made.
+    """
+    inner, outer = _shoulder_edges(half_window, resolution_element_angstrom)
+    line_spread = (
+        float(resolution_profile.at(np.array([center]))[0])
+        if resolution_profile is not None
+        else resolution_element_angstrom
+    )
+    return measure_equivalent_width(
+        wavelength_angstrom,
+        intensity,
+        errors,
+        center,
+        line_spread,
+        inner,
+        outer - inner,
+        CONTINUUM_POLYNOMIAL_DEGREE,
+    )
 
 
 def _candidate_dips(
@@ -702,6 +765,7 @@ def detect_named_features(
     reference_spectral_type: str | None = None,
     resolution_element_angstrom: float = FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,
     resolution_profile: ResolutionProfile | None = None,
+    errors: np.ndarray | None = None,
 ) -> list[dict[str, object]]:
     """Test a spectrum for each named line, as absorption or as emission.
 
@@ -732,6 +796,12 @@ def detect_named_features(
         How the blur changes along the spectrum, used to blur the
         reference for the expected depths (see `expected_feature_depth`).
         The observed dips are still measured at the single width above.
+    errors : `np.ndarray`, optional
+        The 1-sigma error of each brightness, in the same units and order as
+        `intensity` (see `intensity_variance`). When given, each covered
+        feature also gets an equivalent width and its error (see
+        `equivalent_width`). Without it those entries are `None`. The
+        verdicts and p-values never use it.
 
     Returns
     -------
@@ -756,21 +826,31 @@ def detect_named_features(
         emission: the reference spectra hold absorption only)
         and ``"blended_with"`` (the name of a nearby feature that keeps the
         same dip, or `None`; see `_mark_features_sharing_a_dip`).
+        A covered feature also has ``"equivalent_width_angstrom"`` (positive
+        for a dip, negative for a bump), ``"equivalent_width_error_angstrom"``
+        and ``"equivalent_width_window_half_width_angstrom"``, all `None`
+        when no `errors` were given or the equivalent width could not be
+        measured. It is measured at ``"measured_wavelength_angstrom"``.
         The probability assumes the star really is the reference type and
         the 50% and prior settings above; it is not a calibrated
         probability.
     """
     wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
+    sample_errors = None if errors is None else np.asarray(errors, dtype=float)
     valid = np.isfinite(wavelength_angstrom) & np.isfinite(intensity)
     wavelength_angstrom = wavelength_angstrom[valid]
     intensity = intensity[valid]
+    if sample_errors is not None:
+        sample_errors = sample_errors[valid]
     if wavelength_angstrom.size < _MINIMUM_SPECTRUM_POINTS:
         return []
 
     order = np.argsort(wavelength_angstrom)
     wavelength_angstrom = wavelength_angstrom[order]
     intensity = intensity[order]
+    if sample_errors is not None:
+        sample_errors = sample_errors[order]
 
     entries: list[dict[str, object]] = []
     for feature in NAMED_FEATURES:
@@ -882,6 +962,20 @@ def detect_named_features(
 
         verdict = _verdict_for(magnitude, p_value)
 
+        width = (
+            _feature_equivalent_width(
+                wavelength_angstrom,
+                intensity,
+                sample_errors,
+                observed.center_angstrom,
+                half_window,
+                resolution_element_angstrom,
+                resolution_profile,
+            )
+            if sample_errors is not None
+            else None
+        )
+
         limited_by_noise = observed.depth_uncertainty > MAXIMUM_UNCERTAINTY_FOR_A_VERDICT
         if limited_by_noise and verdict in (VERDICT_DETECTED, VERDICT_POSSIBLE):
             verdict = VERDICT_INCONCLUSIVE
@@ -900,6 +994,13 @@ def detect_named_features(
             "probability_present": probability_present,
             "limited_by_noise": limited_by_noise,
             "blended_with": None,
+            "equivalent_width_angstrom": None if width is None else width.equivalent_width_angstrom,
+            "equivalent_width_error_angstrom": (
+                None if width is None else width.equivalent_width_error_angstrom
+            ),
+            "equivalent_width_window_half_width_angstrom": (
+                None if width is None else width.window_half_width_angstrom
+            ),
         })
         entries.append(entry)
 

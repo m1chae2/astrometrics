@@ -214,6 +214,8 @@ def analyze_spectrum(
     resolution_profile: ResolutionProfile | None = None,
     possible_neighbor_contamination: list[dict[str, float | None]] | None = None,
     extinction_correction: ExtinctionCorrection | None = None,
+    intensity_errors: np.ndarray | None = None,
+    response_corrected_intensity_errors: np.ndarray | None = None,
 ) -> SpectrumAnalysis:
     """Classify a spectrum and test it for the named absorption features.
 
@@ -280,6 +282,15 @@ def analyze_spectrum(
         `pre_processing.atmospheric_extinction`). The analysis does not
         apply it; it stores the record in the result so the airmasses and
         the applied or skipped status travel with the spectrum.
+    intensity_errors : `np.ndarray`, optional
+        The 1-sigma error of each `intensity` value (see
+        `pre_processing.intensity_variance`). The feature test uses it to give
+        each feature an equivalent width and its error. It changes no
+        verdict.
+    response_corrected_intensity_errors : `np.ndarray`, optional
+        The 1-sigma error of each `response_corrected_intensity` value. The
+        classifier uses it to give each reference a reduced chi-square next to
+        its RMS. It changes no ranking, decision or threshold.
 
     Returns
     -------
@@ -377,6 +388,7 @@ def analyze_spectrum(
         reference_spectral_type=expected_reference_type,
         resolution_element_angstrom=resolution_element_angstrom,
         resolution_profile=resolution_profile,
+        errors=intensity_errors,
     )
     emission_windows, emission_names = _emission_windows(features, resolution_element_angstrom)
     # Two unrelated causes can each make part of the spectrum untrustworthy
@@ -401,6 +413,7 @@ def analyze_spectrum(
             resolution_element_angstrom=resolution_element_angstrom,
             excluded_windows_angstrom=excluded_windows,
             resolution_profile=resolution_profile,
+            intensity_errors=response_corrected_intensity_errors,
         )
 
     comparison: CatalogComparison | None = None
@@ -418,6 +431,7 @@ def analyze_spectrum(
                 reference_types=GIANT_REFERENCE_SPECTRAL_TYPES,
                 excluded_windows_angstrom=excluded_windows,
                 resolution_profile=resolution_profile,
+                intensity_errors=response_corrected_intensity_errors,
             )
             giant_rms = giant_result["classification_rms"]
             if giant_result["spectral_type"] != "Unknown" and isinstance(giant_rms, int | float):
@@ -458,6 +472,7 @@ def analyze_spectrum(
             reference_spectral_type=str(classification["spectral_type"]),
             resolution_element_angstrom=resolution_element_angstrom,
             resolution_profile=resolution_profile,
+            errors=intensity_errors,
         )
     return SpectrumAnalysis(
         classification,

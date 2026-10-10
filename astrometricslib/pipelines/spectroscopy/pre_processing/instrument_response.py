@@ -238,6 +238,37 @@ def apply_instrument_response(
     return corrected
 
 
+def instrument_response_correction_factor(
+    wavelength_angstrom: np.ndarray, response: InstrumentResponse
+) -> np.ndarray:
+    """Give the number that removing the instrument's tilt multiplies by.
+
+    `apply_instrument_response` divides the brightness by the response, so it
+    multiplies by one over the response. A brightness error is multiplied by
+    the same number (see `intensity_variance`).
+
+    Parameters
+    ----------
+    wavelength_angstrom : `np.ndarray`
+        The spectrum's wavelengths, in Angstroms.
+    response : `InstrumentResponse`
+        The response that is divided out.
+
+    Returns
+    -------
+    factor : `np.ndarray`
+        One over the response at each wavelength, NaN outside the response's
+        valid range, where `apply_instrument_response` also gives NaN.
+    """
+    wavelength_angstrom = np.asarray(wavelength_angstrom, dtype=float)
+    factor = 1.0 / response.value_at(wavelength_angstrom)
+    outside = (wavelength_angstrom < response.minimum_wavelength_angstrom) | (
+        wavelength_angstrom > response.maximum_wavelength_angstrom
+    )
+    factor[outside] = np.nan
+    return factor
+
+
 def line_skip_half_widths_angstrom(
     line_spread_profile: ResolutionProfile | None, fallback_line_spread_angstrom: float
 ) -> np.ndarray:

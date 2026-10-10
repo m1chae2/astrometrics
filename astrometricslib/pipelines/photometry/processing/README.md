@@ -105,6 +105,15 @@ Both searches report a verdict on whether the pattern found actually stands out 
 
 The searches weight each point by its uncertainty when the star has them (`dy` in astropy's `LombScargle` and `BoxLeastSquares`). They use the star's detrended errors with the detrended brightness, or the normalized errors with the normalized brightness. If any error is missing, zero or not a number, or the list has the wrong length, the searches ignore all of them: the cycle search then weights every point equally, and the dip search uses one scatter estimated from the differences between neighboring points. The noise-only versions that set the false-alarm probability shuffle each brightness value together with its own error, so a shuffled light curve has the same weights as the real one.
 
+The cycle search samples the frequency axis about ten times per periodogram peak. A peak is about 1/T wide in frequency, where T is the time span from the first to the last point, so the step is 1/(10 T). A long span with a short minimum period can need more than 20,000 samples (`_MAXIMUM_SEARCH_GRID_POINTS`). The search then runs in two stages:
+
+1. The code evaluates every second, third, or n-th sample of the full grid (the coarse grid), so that at most 20,000 samples remain.
+2. The code finds the 20 strongest separate peaks on the coarse grid. It evaluates the full-resolution grid within three coarse steps either side of each one, and keeps the strongest point from either stage as the best period.
+
+The noise-only versions that set the false-alarm probability go through the same two stages, so the shuffled and real results come from the same procedure. When the grid is thinned, the result's `note` gives the coarse and fine steps in peak widths (a step of 1 is one full peak width, and above 1 a sample can step over a peak). `describe_frequency_grid` in `periodicity_search.py` returns the same numbers. The box search does not use the two-stage search; it still searches its thinned period grid only.
+
+The `holdout_cycle` check in `period_checks.py` finds the period again from the training nights. Its search window is 25 percent of the frequency either side of the full-data one, and its step is 1/(5 T) for the training span T. If the window would need more than 20,000 points, the window narrows around the full-data frequency and the step stays the same.
+
 The time axis is days since the first point, taken from the star's BJD_TDB times (`timeBjdTdb`, mid-exposure) when it has one per timestamp, and from the UTC capture times otherwise. The held-out and alias checks in `period_checks.py` use that axis and the brightness only, not the errors.
 
 ## Long-term variability

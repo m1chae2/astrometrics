@@ -41,6 +41,17 @@ points equally, and the box search uses one scatter estimated from the
 differences between neighboring measurements. In the noise-only versions each
 measurement is shuffled together with its own uncertainty, so a shuffled light
 curve has the same set of weights as the real one.
+
+The Lomb-Scargle search samples frequency about ten times per periodogram peak
+(a peak is about 1/T wide, where T is the time span). A long span with a short
+minimum period can need more than 20,000 samples, which is too slow to repeat
+for every shuffle. The search then runs in two stages. A thinned grid finds the
+20 strongest peaks, and the full-resolution grid is searched a few thinned
+steps either side of each. The shuffled light curves go through the same two
+stages, so the noise-only distribution is built the same way as the real
+result. The result's ``note`` says when the grid was thinned and gives the
+coarse and fine steps in peak widths; `describe_frequency_grid` returns the
+same numbers.
 """
 
 import math
@@ -165,10 +176,27 @@ _LONGEST_DIP_CADENCES = 12.0
 # run for hours instead of the "several seconds per star" this search was
 # designed for. Thinning an oversized grid down to this many points keeps
 # worst-case runtime bounded regardless of any future target's span/cadence
-# ratio, at the cost of coarser period resolution only in that pathological
-# case -- a well-behaved grid (like the 1,133-point one a same-night search
-# produces) is never touched.
+# ratio. A well-behaved grid (like the 1,133-point one a same-night search
+# produces) is never touched. The Lomb-Scargle search recovers the period
+# resolution lost to thinning with a second, refining stage (see
+# `_CANDIDATE_PEAK_COUNT`); the box search still searches the thinned grid
+# only.
 _MAXIMUM_SEARCH_GRID_POINTS = 20_000
+
+# The Lomb-Scargle grid is sampled this many times per periodogram peak. A
+# peak is about 1/T wide in frequency (T is the time span), so the full grid
+# steps by 1/(10 T).
+_SAMPLES_PER_PEAK = 10
+
+# When the full Lomb-Scargle grid is thinned to `_MAXIMUM_SEARCH_GRID_POINTS`,
+# the thinned (coarse) step can be wider than a peak, and a sample can then
+# step over the true peak. The search therefore runs in two stages. The
+# coarse grid finds the strongest peaks; the full-resolution grid is then
+# evaluated within this many coarse steps either side of each of the
+# `_CANDIDATE_PEAK_COUNT` strongest ones. Three steps covers the coarse
+# sample being off the true peak by up to half a step, with margin.
+_CANDIDATE_PEAK_COUNT = 20
+_REFINE_HALF_WIDTH_COARSE_STEPS = 3
 
 
 @dataclass(frozen=True)
@@ -256,6 +284,201 @@ def _cap_grid_size(grid_values: np.ndarray, maximum_points: int = _MAXIMUM_SEARC
         return grid_values
     keep_indices = np.linspace(0, grid_values.size - 1, maximum_points).round().astype(int)
     return grid_values[keep_indices]
+
+
+@dataclass(frozen=True)
+class GridResolution:
+    """How finely the Lomb-Scargle search samples the frequency axis.
+
+    Steps are given in peak widths. A periodogram peak is about 1/T wide in
+    frequency, where T is the time span, so a step of 0.1 peak widths samples
+    each peak about ten times and a step above 1 can step over a peak.
+
+    Attributes
+    ----------
+    thinned : `bool`
+        True when the full-resolution grid had more than
+        `_MAXIMUM_SEARCH_GRID_POINTS` points and the two-stage search was used.
+    coarse_step_peak_widths : `float`
+        The step of the first-stage grid, in peak widths. Equal to
+        `fine_step_peak_widths` when `thinned` is false.
+    fine_step_peak_widths : `float`
+        The step of the full-resolution grid, in peak widths.
+    full_point_count : `int`
+        Points in the full-resolution grid.
+    coarse_point_count : `int`
+        Points in the first-stage grid.
+    candidate_peak_count : `int`
+        How many first-stage peaks are refined; 0 when `thinned` is false.
+    """
+
+    thinned: bool
+    coarse_step_peak_widths: float
+    fine_step_peak_widths: float
+    full_point_count: int
+    coarse_point_count: int
+    candidate_peak_count: int
+
+
+@dataclass(frozen=True)
+class _FrequencyPlan:
+    """The frequency grids of one Lomb-Scargle search.
+
+    Attributes
+    ----------
+    frequency : `np.ndarray`
+        The full-resolution, evenly spaced frequency grid.
+    stride : `int`
+        Every `stride`-th point of `frequency` forms the coarse grid. It is 1
+        when the full grid is small enough to use whole.
+    span_days : `float`
+        The time span T, in days, used to express steps in peak widths.
+    """
+
+    frequency: np.ndarray
+    stride: int
+    span_days: float
+
+    @property
+    def coarse_frequency(self) -> np.ndarray:
+        """The first-stage grid (the whole grid when it was not thinned)."""
+        return self.frequency[:: self.stride]
+
+    @property
+    def resolution(self) -> GridResolution:
+        """The grid steps, as a `GridResolution`."""
+        fine_step = (float(self.frequency[1]) - float(self.frequency[0])) * self.span_days
+        return GridResolution(
+            thinned=self.stride > 1,
+            coarse_step_peak_widths=fine_step * self.stride,
+            fine_step_peak_widths=fine_step,
+            full_point_count=int(self.frequency.size),
+            coarse_point_count=int(self.coarse_frequency.size),
+            candidate_peak_count=_CANDIDATE_PEAK_COUNT if self.stride > 1 else 0,
+        )
+
+
+def _plan_frequency_grid(model: LombScargle, grid: SearchGrid) -> _FrequencyPlan:
+    """Build the frequency grids for a Lomb-Scargle search.
+
+    Parameters
+    ----------
+    model : `astropy.timeseries.LombScargle`
+        A model on the measurement times; only the times matter here.
+    grid : `SearchGrid`
+        The searchable period range.
+
+    Returns
+    -------
+    plan : `_FrequencyPlan`
+        The full-resolution grid and the stride that thins it to at most
+        `_MAXIMUM_SEARCH_GRID_POINTS` points. A grid already within the limit
+        has a stride of 1 and is used unchanged.
+    """
+    frequency = model.autofrequency(
+        minimum_frequency=1.0 / grid.maximum_period_days,
+        maximum_frequency=1.0 / grid.minimum_period_days,
+        samples_per_peak=_SAMPLES_PER_PEAK,
+    )
+    stride = max(1, math.ceil(frequency.size / _MAXIMUM_SEARCH_GRID_POINTS))
+    return _FrequencyPlan(frequency=frequency, stride=stride, span_days=grid.span_days)
+
+
+def describe_frequency_grid(time_days: np.ndarray) -> GridResolution | None:
+    """Say how finely a Lomb-Scargle search of these times samples frequency.
+
+    Parameters
+    ----------
+    time_days : `np.ndarray`
+        The measurement times, in days.
+
+    Returns
+    -------
+    resolution : `GridResolution` or `None`
+        The grid steps in peak widths and whether the search is two-stage, or
+        `None` when the times are too few or too short to search.
+    """
+    time_days = np.asarray(time_days, dtype=float)
+    grid = build_search_grid(time_days)
+    if grid is None:
+        return None
+    return _plan_frequency_grid(LombScargle(time_days, np.zeros_like(time_days)), grid).resolution
+
+
+def _strongest_peak_indices(power: np.ndarray, count: int) -> np.ndarray:
+    """Find the positions of the strongest separate peaks in a power curve.
+
+    A peak is a point at least as high as both neighbors. Taking peaks, not
+    the highest points, keeps one broad peak from using up every slot.
+
+    Parameters
+    ----------
+    power : `np.ndarray`
+        The periodogram power on an evenly spaced grid.
+    count : `int`
+        The most peaks to return.
+
+    Returns
+    -------
+    indices : `np.ndarray`
+        Positions in `power`, strongest first. At least one (the maximum).
+    """
+    padded = np.concatenate([[-np.inf], power, [-np.inf]])
+    is_peak = (power >= padded[:-2]) & (power >= padded[2:])
+    peaks = np.flatnonzero(is_peak)
+    if peaks.size == 0:
+        return np.array([int(np.argmax(power))])
+    return peaks[np.argsort(-power[peaks], kind="stable")][:count]
+
+
+def _strongest_peak(model: LombScargle, plan: _FrequencyPlan) -> tuple[float, float]:
+    """Find the strongest periodogram peak, refining it if thinned.
+
+    Without thinning, this is the highest point of the full grid. With
+    thinning, the coarse grid picks the `_CANDIDATE_PEAK_COUNT` strongest
+    peaks, and the full-resolution grid is evaluated within
+    `_REFINE_HALF_WIDTH_COARSE_STEPS` coarse steps of each. The answer is the
+    highest point found in either stage. The noise-only versions of the data
+    go through this same function, so their strongest peaks are found the
+    same way as the real one.
+
+    Parameters
+    ----------
+    model : `astropy.timeseries.LombScargle`
+        The model whose periodogram is searched.
+    plan : `_FrequencyPlan`
+        The grids to use.
+
+    Returns
+    -------
+    frequency, power : `tuple` [`float`, `float`]
+        The frequency and power of the strongest point evaluated.
+    """
+    coarse_frequency = plan.coarse_frequency
+    # The grid is evenly spaced (thinning by a whole-number stride keeps it
+    # so), which allows the fast method. Without this flag power() falls back
+    # to a much slower method, and the fallback would repeat for every
+    # noise-only version of the data.
+    coarse_power = model.power(coarse_frequency, assume_regular_frequency=True)
+    best_coarse = int(np.argmax(coarse_power))
+    best_frequency, best_power = float(coarse_frequency[best_coarse]), float(coarse_power[best_coarse])
+    if plan.stride == 1:
+        return best_frequency, best_power
+
+    count = plan.frequency.size
+    reach = _REFINE_HALF_WIDTH_COARSE_STEPS * plan.stride
+    wanted = np.zeros(count, dtype=bool)
+    for peak in _strongest_peak_indices(coarse_power, _CANDIDATE_PEAK_COUNT):
+        centre = int(peak) * plan.stride
+        wanted[max(0, centre - reach) : min(count, centre + reach + 1)] = True
+    wanted[:: plan.stride] = False  # the coarse stage already evaluated these
+    fine_frequency = plan.frequency[wanted]
+    if fine_frequency.size:
+        fine_power = model.power(fine_frequency)
+        best_fine = int(np.argmax(fine_power))
+        if float(fine_power[best_fine]) > best_power:
+            best_frequency, best_power = float(fine_frequency[best_fine]), float(fine_power[best_fine])
+    return best_frequency, best_power
 
 
 def _verdict_from(
@@ -453,6 +676,31 @@ def _null_order(count: int, random_generator: np.random.Generator, block_length:
     return null_flux(np.arange(count), random_generator, block_length)
 
 
+def _grid_note(resolution: GridResolution) -> str:
+    """Say in a sentence how the frequency grid was thinned, if it was.
+
+    Parameters
+    ----------
+    resolution : `GridResolution`
+        The grid steps of the search.
+
+    Returns
+    -------
+    note : `str`
+        An empty string when the grid was not thinned. Otherwise a sentence
+        giving the coarse and fine steps in peak widths and the number of
+        peaks refined.
+    """
+    if not resolution.thinned:
+        return ""
+    return (
+        f"The period grid was too large to search whole. The first pass stepped "
+        f"{resolution.coarse_step_peak_widths:.2g} peak widths (1/T in frequency) at a time; "
+        f"the {resolution.candidate_peak_count} strongest peaks were then searched again at "
+        f"{resolution.fine_step_peak_widths:.2g} peak widths."
+    )
+
+
 def lomb_scargle_search(
     time_days: np.ndarray,
     flux: np.ndarray,
@@ -492,43 +740,28 @@ def lomb_scargle_search(
     if grid is None:
         return PeriodogramResult(verdict=VERDICT_INSUFFICIENT_DATA, note=_insufficient_note(time_days))
 
-    minimum_frequency = 1.0 / grid.maximum_period_days
-    maximum_frequency = 1.0 / grid.minimum_period_days
     errors = _usable_flux_errors(flux_errors, flux.size)
     model = LombScargle(time_days, flux, errors)
-    frequency = _cap_grid_size(
-        model.autofrequency(
-            minimum_frequency=minimum_frequency, maximum_frequency=maximum_frequency, samples_per_peak=10
-        )
-    )
-    # autofrequency() always returns an evenly-spaced grid (thinning it
-    # in _cap_grid_size keeps that even spacing, just coarser), so this
-    # is safe to assert. Without it, power() defaults to
-    # assume_regular_frequency=False and falls back to a much slower
-    # O[N^2] method instead of the O[N log N] fast method -- the same
-    # slowdown autopower() avoids by asserting this internally, and
-    # this matters even more here since the same fallback applies to
-    # each of the (possibly hundreds of) shuffle iterations below.
-    power = model.power(frequency, assume_regular_frequency=True)
-    best_index = int(np.argmax(power))
-    best_period = float(1.0 / frequency[best_index])
-    best_power = float(power[best_index])
+    plan = _plan_frequency_grid(model, grid)
+    best_frequency, best_power = _strongest_peak(model, plan)
+    best_period = 1.0 / best_frequency
 
     # A fixed seed makes repeated searches of the same data agree.
     random_generator = np.random.default_rng(time_days.size)
     shuffles = shuffle_count or (
         _SHUFFLE_COUNT
-        if time_days.size * frequency.size <= _SLOW_SEARCH_WORK_LIMIT
+        if time_days.size * plan.coarse_frequency.size <= _SLOW_SEARCH_WORK_LIMIT
         else _REDUCED_SHUFFLE_COUNT
     )
     block = block_length or correlation_block_length(flux)
     at_least_as_strong = 0
     for _ in range(shuffles):
         order = _null_order(flux.size, random_generator, block)
-        shuffled_power = LombScargle(time_days, flux[order], None if errors is None else errors[order]).power(
-            frequency, assume_regular_frequency=True
-        )
-        at_least_as_strong += int(np.max(shuffled_power) >= best_power)
+        shuffled_model = LombScargle(time_days, flux[order], None if errors is None else errors[order])
+        # The same two-stage search as the real data, so the noise-only
+        # strongest peaks come from the same procedure as the real one.
+        _, shuffled_power = _strongest_peak(shuffled_model, plan)
+        at_least_as_strong += int(shuffled_power >= best_power)
     false_alarm = (1 + at_least_as_strong) / (1 + shuffles)
 
     cycles = grid.span_days / best_period
@@ -542,6 +775,7 @@ def lomb_scargle_search(
         cycles_observed=float(cycles),
         searched_min_period_days=grid.minimum_period_days,
         searched_max_period_days=grid.maximum_period_days,
+        note=_grid_note(plan.resolution),
     )
 
 

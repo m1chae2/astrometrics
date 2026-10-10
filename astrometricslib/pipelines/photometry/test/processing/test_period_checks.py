@@ -4,6 +4,8 @@ Artificial multi-night light curves with a known answer: a real cycle repeats
 on every night and is predicted by the others; noise is not; a single night
 cannot be left out; and a nightly schedule really does put an alias beside a
 signal. The last tests check the rule that combines the checks into a verdict.
+Long-baseline tests check that the hold-out's period search keeps a step fine
+enough to resolve a periodogram peak when the training nights span months.
 """
 
 import numpy as np
@@ -259,3 +261,92 @@ def test_the_failed_checks_are_counted_across_results() -> None:
     second.verdict_checks = [unchecked_gate("holdout_nights", "y"), failed_gate("holdout_nights", "z")]
 
     assert checks.count_failed_checks([first, second, None]) == 2
+
+
+LONG_PERIOD = 0.21
+
+
+def long_baseline(nights: int, spacing_days: float, seed: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """Build six-hour nights spread over months with a 0.21 d sinusoid in them.
+
+    Parameters
+    ----------
+    nights : `int`
+        How many nights.
+    spacing_days : `float`
+        Days from the start of one night to the next.
+    seed : `int`, optional
+        Seed for the noise.
+
+    Returns
+    -------
+    time_days, flux : `tuple` [`numpy.ndarray`, `numpy.ndarray`]
+        Measurements every 5 minutes (amplitude 0.05, noise 0.01).
+    """
+    one_night = np.arange(0.0, 6.0 / 24.0, 5.0 / 1440.0)
+    times = np.concatenate([night * spacing_days + one_night for night in range(nights)])
+    generator = np.random.default_rng(seed)
+    flux = 1.0 + 0.05 * np.sin(2 * np.pi * times / LONG_PERIOD) + generator.normal(0.0, 0.01, times.size)
+    return times, flux
+
+
+def test_the_training_window_step_stays_within_a_fifth_of_a_peak_width() -> None:
+    """The step is at most 1/(5 T) at every span, with the window centred."""
+    centre = 1.0 / LONG_PERIOD
+    for span in (0.5, 30.0, 117.0, 390.0, 2950.0):
+        frequency = checks._training_frequency_window(span, centre)
+
+        assert float(np.diff(frequency).max()) <= 1.0 / (5.0 * span) * (1 + 1e-9)
+        assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS
+        assert frequency[frequency.size // 2] == np.float64(centre)
+        assert frequency.min() > 0.0
+
+
+def test_a_very_long_span_narrows_the_training_window_instead_of_coarsening_the_step() -> None:
+    """Past the point cap, the window narrows and the step is kept."""
+    centre = 1.0 / LONG_PERIOD
+    span = 50_000.0
+
+    frequency = checks._training_frequency_window(span, centre)
+
+    assert frequency.size >= checks._MAXIMUM_WINDOW_POINTS - 1
+    assert frequency.size <= checks._MAXIMUM_WINDOW_POINTS
+    assert float(np.diff(frequency).max()) <= 1.0 / (5.0 * span) * (1 + 1e-9)
+    assert frequency[-1] - frequency[0] < 2 * checks._FREQUENCY_WINDOW * centre
+    assert frequency[0] < centre < frequency[-1]
+    assert (frequency[-1] - frequency[0]) * span > 6.0  # still several peak widths either side
+
+
+def test_the_training_search_finds_the_period_on_a_120_day_span() -> None:
+    """Forty nights over 117 days: the training search returns 0.21 d."""
+    times, flux = long_baseline(nights=40, spacing_days=3.0)
+
+    found = checks._train_cycle_period(times, flux, LONG_PERIOD)
+
+    assert found is not None
+    assert abs(1.0 / found - 1.0 / LONG_PERIOD) <= 1.0 / float(times.max() - times.min())
+
+
+def test_the_training_search_finds_the_period_on_a_390_day_span() -> None:
+    """Forty nights over 390 days: the old fixed window returned 0.190 d.
+
+    The span is 1,858 cycles, so the fixed window's step was 0.4 of a peak
+    width and a nightly-schedule alias won; the window sized from the span
+    returns 0.21 d.
+    """
+    times, flux = long_baseline(nights=40, spacing_days=10.0)
+
+    found = checks._train_cycle_period(times, flux, LONG_PERIOD)
+
+    assert found is not None
+    assert abs(1.0 / found - 1.0 / LONG_PERIOD) <= 1.0 / float(times.max() - times.min())
+
+
+def test_the_holdout_passes_a_real_cycle_on_a_120_day_span() -> None:
+    """Twenty-four nights over 115 days: every left-out night agrees."""
+    times, flux = long_baseline(nights=24, spacing_days=5.0)
+
+    gate = checks.holdout_cycle(times, flux, LONG_PERIOD)
+
+    assert gate.status is GateStatus.PASSED
+    assert gate.detail == "24 of 24 nights agree"

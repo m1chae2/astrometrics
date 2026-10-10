@@ -63,6 +63,17 @@ MINIMUM_TRAINING_POINTS = 15
 # near the full-data one; the check is whether it is the same period.
 _FREQUENCY_WINDOW = 0.25
 
+# The training search steps through frequency by at most 1/(5 T), where T is
+# the span of the training nights. A periodogram peak is about 1/T wide, so
+# this puts at least five samples across each peak. The step is set by T alone
+# and is never made coarser to save time.
+_SAMPLES_PER_PEAK = 5
+
+# The most frequencies the training search evaluates. A long span needs a fine
+# step, so a wide window could need more points than this. The window then
+# narrows around the full-data frequency instead of the step growing.
+_MAXIMUM_WINDOW_POINTS = 20_000
+
 # A held-out night agrees when the model from the other nights predicts it
 # better than a model of the same shape at a random phase does in all but this
 # share of random phases (a one-sided 5% test).
@@ -142,8 +153,44 @@ def _skill(
     return 1.0 - float(np.sum((held_f - predicted) ** 2)) / error_mean if error_mean > 0 else 0.0
 
 
+def _training_frequency_window(span_days: float, centre: float) -> np.ndarray:
+    """Build the frequencies the training search tries.
+
+    The step is 1/(`_SAMPLES_PER_PEAK` x span), so each periodogram peak
+    (about 1/span wide) gets several samples however long the span is. The
+    window is `_FREQUENCY_WINDOW` of the frequency either side of `centre`.
+    If that needs more than `_MAXIMUM_WINDOW_POINTS` points, the window
+    shrinks around `centre` and the step stays the same.
+
+    Parameters
+    ----------
+    span_days : `float`
+        Time from the first to the last training measurement, in days.
+    centre : `float`
+        The frequency (one over the full-data period), in cycles per day.
+
+    Returns
+    -------
+    frequency : `numpy.ndarray`
+        Evenly spaced frequencies centred on `centre`, with at most
+        `_MAXIMUM_WINDOW_POINTS` points.
+    """
+    step = 1.0 / (_SAMPLES_PER_PEAK * span_days)
+    half_points = min(math.ceil(_FREQUENCY_WINDOW * centre / step), (_MAXIMUM_WINDOW_POINTS - 1) // 2)
+    return centre + step * np.arange(-half_points, half_points + 1)
+
+
 def _train_cycle_period(train_t: np.ndarray, train_f: np.ndarray, period_days: float) -> float | None:
     """Find the best period near the full-data one from the training nights.
+
+    Parameters
+    ----------
+    train_t : `numpy.ndarray`
+        The training measurement times, in days.
+    train_f : `numpy.ndarray`
+        The training brightness.
+    period_days : `float`
+        The period found from all the data.
 
     Returns
     -------
@@ -154,9 +201,8 @@ def _train_cycle_period(train_t: np.ndarray, train_f: np.ndarray, period_days: f
     span = float(train_t.max() - train_t.min())
     if span <= 0:
         return None
-    centre = 1.0 / period_days
-    frequency = np.linspace(centre * (1 - _FREQUENCY_WINDOW), centre * (1 + _FREQUENCY_WINDOW), 2000)
-    power = LombScargle(train_t, train_f).power(frequency)
+    frequency = _training_frequency_window(span, 1.0 / period_days)
+    power = LombScargle(train_t, train_f).power(frequency, assume_regular_frequency=True)
     return float(1.0 / frequency[int(np.argmax(power))])
 
 

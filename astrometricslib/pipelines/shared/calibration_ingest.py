@@ -125,7 +125,7 @@ def assess_flat_group(group: FlatGroup) -> FlatSetAssessment:
         The set's size, brightness, expected master-flat noise and any
         problems found.
     """
-    measured = assess_flats(group.paths)
+    measured = assess_flats(group.paths, camera=group.camera)
     return FlatSetAssessment(
         telescope=group.telescope,
         camera=group.camera,

@@ -554,3 +554,87 @@ def test_the_floor_and_extra_default_when_the_entries_are_absent() -> None:
     extra = AppConfiguration.get_stack_rejection_low_extra_sigma(configuration)  # type: ignore[arg-type]
     assert floor == pytest.approx(2.5)
     assert extra == pytest.approx(0.5)
+
+
+# ------------------------------------------------------ output bit depth
+
+
+def _first_convert_or_stack_index(script: list[str]) -> int:
+    """Find the first command that reads or writes frames.
+
+    Parameters
+    ----------
+    script : `list` [`str`]
+        The Siril commands `process_target` would have sent.
+
+    Returns
+    -------
+    index : `int`
+        The position of the first ``convert`` or ``stack`` command.
+    """
+    return next(index for index, line in enumerate(script) if line.startswith(("convert", "stack")))
+
+
+@pytest.mark.parametrize(
+    ("num_biases", "num_darks", "num_flats", "num_lights"),
+    [
+        (5, 5, 5, 20),  # every master built from several frames, several lights
+        (1, 1, 1, 20),  # every master from a lone frame
+        (0, 0, 0, 20),  # lights only, no calibration
+        (5, 5, 5, 1),  # a lone calibrated light
+        (0, 0, 0, 1),  # a lone light, no calibration
+    ],
+)
+def test_every_script_pins_32_bit_output_before_its_first_convert_or_stack(
+    run_with_staged_frames: Callable[..., Any],
+    num_biases: int,
+    num_darks: int,
+    num_flats: int,
+    num_lights: int,
+) -> None:
+    """``set32bits`` comes once, right after ``setext``, before frame work."""
+    script, _ = run_with_staged_frames(
+        num_biases=num_biases, num_darks=num_darks, num_flats=num_flats, num_lights=num_lights
+    )
+
+    assert script.count("set32bits") == 1
+    assert "set16bits" not in script
+    assert script[:2] == ["setext fits", "set32bits"]
+    assert script.index("set32bits") < _first_convert_or_stack_index(script)
+
+
+def test_the_script_preamble_is_what_the_generators_start_with() -> None:
+    """The shared preamble holds both the file type and the bit depth."""
+    assert siril_interface.SIRIL_SCRIPT_PREAMBLE == ("setext fits", "set32bits")
+
+
+def test_process_target_passes_the_camera_name_to_the_flat_assessment(
+    run_with_staged_frames: Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flat check learns which camera took the lights."""
+    seen_cameras: list[str | None] = []
+
+    def fake_assess(self: Any, *args: Any, **kwargs: Any) -> Any:
+        """Record the camera the run asked about.
+
+        Parameters
+        ----------
+        self : `Any`
+            The processor, unused.
+        *args : `Any`
+            The positional arguments, unused.
+        **kwargs : `Any`
+            The keyword arguments, including ``camera``.
+
+        Returns
+        -------
+        assessment : `MagicMock`
+            A stand-in assessment that asks for no smoothing.
+        """
+        seen_cameras.append(kwargs.get("camera"))
+        return MagicMock(smoothing_sigma_pixels=None, as_diagnostics=lambda: {})
+
+    monkeypatch.setattr(siril_interface.ImageProcessing, "assess_staged_flats", fake_assess)
+    run_with_staged_frames(num_biases=5, num_darks=5, num_flats=5, num_lights=20)
+
+    assert seen_cameras == ["Cam"]

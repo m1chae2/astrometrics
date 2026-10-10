@@ -68,7 +68,10 @@ __all__ = [
 # to have the bias subtracted and a lone light began to be calibrated.
 # Raised to 3 when adaptive rejection began to use a floor and a looser low
 # bound, which changes the rejection limits of every small stack.
-STACKING_ALGORITHM_VERSION = 3
+# Raised to 4 when every Siril script began to pin ``set32bits``. A stack made
+# before that was saved in the bit depth of the user's Siril preference, which
+# was 16-bit on some machines and quantised the normalised pixels.
+STACKING_ALGORITHM_VERSION = 4
 
 # What follows a stack's own name (without .fits) in the name of its record.
 STACK_INPUTS_SUFFIX = "_inputs.json"

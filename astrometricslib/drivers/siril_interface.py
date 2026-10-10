@@ -116,6 +116,18 @@ SIRIL_COMMAND_TIMEOUT_SECONDS = 300
 SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS = 30
 
 
+# The commands that start every Siril script this module writes.
+# ``setext fits`` makes Siril save FITS files, not another format.
+# ``set32bits`` makes Siril save 32-bit floating-point pixels. Without it,
+# Siril uses the bit depth in the user's own preferences. If that is 16-bit,
+# Siril rounds the normalised stack to 65536 levels. Faint signal then loses
+# precision, and the stack no longer scales linearly with the light collected
+# after ``-norm=addscale``. Both commands last for the whole Siril session,
+# so one line at the top of a script covers every ``convert``, ``calibrate``
+# and ``stack`` after it. Siril 1.2 and later have ``set32bits``.
+SIRIL_SCRIPT_PREAMBLE = ("setext fits", "set32bits")
+
+
 # Master calibration frames (bias, dark, flat) take a long time to build.
 # To save time, they are cached. This turns hours of processing into
 # minutes by reusing masters that have already been built for the same
@@ -1108,6 +1120,7 @@ class ImageProcessing:
         target_folder: str,
         uses_color_filter_array: bool,
         job_logger: logging.Logger | None = None,
+        camera: str | None = None,
     ) -> Any:
         """Measure the staged flat frames and decide whether to smooth them.
 
@@ -1130,6 +1143,10 @@ class ImageProcessing:
             Whether the lights come from a colour sensor.
         job_logger : `logging.Logger`, optional
             Logger for the findings.
+        camera : `str`, optional
+            The name of the camera that took the flats. Its profile sets
+            the full-scale value the flat brightness is judged against.
+            Without it, the assessment guesses the scale from the pixels.
 
         Returns
         -------
@@ -1143,7 +1160,7 @@ class ImageProcessing:
 
         flat_directory = os.path.join(target_folder, "flats")
         flat_paths = sorted(os.path.join(flat_directory, name) for name in os.listdir(flat_directory))
-        assessment = assess_flats(flat_paths)
+        assessment = assess_flats(flat_paths, camera=camera)
         for issue in assessment.issues:
             (job_logger or logger).warning("Flat calibration: %s", issue)
         if assessment.needs_smoothing and uses_color_filter_array:
@@ -2138,7 +2155,7 @@ class ImageProcessing:
             )
             log_reader_thread.start()
 
-            script = ["setext fits"]
+            script = list(SIRIL_SCRIPT_PREAMBLE)
 
             # Masters already built for this exact set of calibration
             # frames are copied straight in, and their build steps below
@@ -2156,7 +2173,7 @@ class ImageProcessing:
             flat_smoothing_sigma = None
             if num_flats > 0:
                 flat_assessment = self.assess_staged_flats(
-                    target_folder, uses_color_filter_array, job_logger=job_logger
+                    target_folder, uses_color_filter_array, job_logger=job_logger, camera=camera_filter
                 )
                 self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
                 # A master restored from the cache was built, smoothed or not,
@@ -2581,7 +2598,8 @@ class ImageProcessing:
             the calibration script the same way `process_target` always
             does.
         calibration_script : `list` [`str`]
-            The commands to run before alignment: `setext`, master
+            The commands to run before alignment: the
+            `SIRIL_SCRIPT_PREAMBLE` (``setext`` and ``set32bits``), master
             calibration generation, `convert`, and `calibrate`.
         seq : `str`
             The calibrated sequence's name (``"pp_light_source"``, or
@@ -2688,7 +2706,7 @@ class ImageProcessing:
         stack_process = self.run_siril_headless(stack_command_pipe, stack_output_pipe, job_logger=job_logger)
         stack_status_queue: queue.Queue[str] = queue.Queue()
         stack_script = [
-            "setext fits",
+            *SIRIL_SCRIPT_PREAMBLE,
             f"cd {aligned_directory}",
             f"convert {ALIGNED_SIRIL_SEQUENCE_NAME} -out=.",
             f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),

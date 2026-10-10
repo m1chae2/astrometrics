@@ -251,6 +251,7 @@ def _siril_register(
     commands = [
         "requires 1.2.0",
         "setext fits",
+        "set32bits",
         "cd lights",
         "convert light_source -out=../process",
         "cd ../process",
@@ -289,6 +290,7 @@ def _siril_blend(images: list[np.ndarray], work: Path, siril_executable: str) ->
     commands = [
         "requires 1.2.0",
         "setext fits",
+        "set32bits",
         "cd lights",
         "convert light_source -out=../process",
         "cd ../process",

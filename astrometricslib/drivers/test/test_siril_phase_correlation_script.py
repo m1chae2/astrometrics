@@ -21,6 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.pipelines.stacking.processing import spectral_frame_alignment
 
 
 @pytest.fixture
@@ -76,7 +77,7 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
     monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
 
-    def run_process_target() -> list[str]:
+    def run_process_target(through_stacking: bool = False) -> list[str] | list[list[str]]:
         mock_config = MagicMock()
         mock_config.get_siril_executable.return_value = "siril"
         mock_config.get_logs_path.return_value = str(tmp_path)
@@ -91,6 +92,18 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         mock_config.get_stack_filter_round_percentile.return_value = None
         mock_config.get_minimum_calibration_frames.return_value = 3
 
+        if through_stacking:
+            # Pretend the calibrated frames exist and align, so the second
+            # (stacking) Siril run is built too.
+            monkeypatch.setattr(
+                spectral_frame_alignment, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]
+            )
+            monkeypatch.setattr(
+                spectral_frame_alignment,
+                "align_calibrated_frames",
+                lambda paths, directory: (["b.fits"], {"registered": 1, "failed": 0}),
+            )
+
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
         driver.workdir = str(tmp_path / "work")
         result = driver.process_target(
@@ -99,6 +112,9 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             is_spectral=True,
             spectral_star_detection="phase_correlation",
         )
+        if through_stacking:
+            assert len(sent_scripts) == 2, "calibration run, then stacking run"
+            return sent_scripts
         assert result is None, "no real calibrated frames exist in this stubbed setup"
         assert len(sent_scripts) == 1, "alignment should find nothing and stop before a second Siril run"
         return sent_scripts[0]
@@ -154,3 +170,16 @@ def test_phase_correlation_still_calibrates_the_lights(captured_calibration_scri
 
     calibrate_commands = [command for command in commands if command.startswith("calibrate light_source")]
     assert len(calibrate_commands) == 1
+
+
+def test_phase_correlation_pins_32_bit_output_in_both_siril_runs(captured_calibration_script: Any) -> None:
+    """Both Siril runs set 32-bit output before any convert or stack."""
+    calibration_script, stacking_script = captured_calibration_script(through_stacking=True)
+
+    for script in (calibration_script, stacking_script):
+        assert "set32bits" in script
+        first_work = next(
+            index for index, command in enumerate(script) if command.startswith(("convert", "stack"))
+        )
+        assert script.index("set32bits") < first_work
+    assert any(command.startswith("stack ") for command in stacking_script)

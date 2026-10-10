@@ -172,3 +172,108 @@ def test_two_identical_copies_are_not_read_as_a_noiseless_flat(tmp_path: Path) -
     assert assessment.noise_fraction is not None
     assert assessment.noise_fraction > 0.01
     assert assessment.needs_smoothing
+
+
+# ------------------------------------------------ full scale from the camera
+
+
+def write_counts_flat(path: Path, mean_adu: float, seed: int, noise: float = 0.01) -> str:
+    """Write a flat frame whose mean is a chosen number of counts.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        File to write.
+    mean_adu : `float`
+        Mean pixel value in counts, stored unscaled in a 16-bit integer.
+    seed : `int`
+        Seed of the noise.
+    noise : `float`, optional
+        Relative noise of each pixel.
+
+    Returns
+    -------
+    path : `str`
+        The file written.
+    """
+    generator = np.random.default_rng(seed)
+    data = mean_adu * (1.0 + noise * generator.standard_normal((SIZE, SIZE)))
+    fits.writeto(path, np.clip(data, 0, 65535).astype(np.uint16), overwrite=True)
+    return str(path)
+
+
+def test_a_14_bit_flat_is_judged_against_the_camera_clip_ceiling(tmp_path: Path) -> None:
+    """A D5300 flat at 4000 counts is 24% of 16383, not 6% of 65535."""
+    path = write_counts_flat(tmp_path / "flat.fits", 4000.0, seed=40)
+    guessed = fc.assess_flats([path])
+    profiled = fc.assess_flats([path], camera="Nikon D5300")
+    assert guessed.level_fraction == pytest.approx(4000.0 / 65535.0, rel=0.01)
+    assert any(issue.startswith(fc.FAINT_FLAT_ISSUE_PREFIX) for issue in guessed.issues)
+    assert profiled.level_fraction == pytest.approx(4000.0 / 16383.0, rel=0.01)
+    assert not any(issue.startswith(fc.FAINT_FLAT_ISSUE_PREFIX) for issue in profiled.issues)
+    assert not any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in profiled.issues)
+
+
+def test_a_14_bit_flat_at_8000_counts_passes_the_level_check(tmp_path: Path) -> None:
+    """8000 counts is 49% of the D5300's 16383 and passes the 10-90% window."""
+    path = write_counts_flat(tmp_path / "flat.fits", 8000.0, seed=41)
+    assessment = fc.assess_flats([path], camera="Nikon D5300")
+    assert assessment.level_fraction == pytest.approx(8000.0 / 16383.0, rel=0.01)
+    assert fc.MINIMUM_FLAT_LEVEL_FRACTION < assessment.level_fraction < fc.MAXIMUM_FLAT_LEVEL_FRACTION
+    assert assessment.full_scale == pytest.approx(16383.0)
+    assert not any(issue.startswith(fc.FAINT_FLAT_ISSUE_PREFIX) for issue in assessment.issues)
+    assert not any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in assessment.issues)
+
+
+def test_a_14_bit_flat_near_the_clip_ceiling_is_reported_as_bright(tmp_path: Path) -> None:
+    """At 16000 counts a D5300 flat is nearly clipped. The guess missed it."""
+    path = write_counts_flat(tmp_path / "flat.fits", 16000.0, seed=42, noise=0.002)
+    guessed = fc.assess_flats([path])
+    profiled = fc.assess_flats([path], camera="Nikon D5300")
+    assert not any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in guessed.issues)
+    assert any(issue.startswith(fc.BRIGHT_FLAT_ISSUE_PREFIX) for issue in profiled.issues)
+
+
+def test_the_assessment_records_where_the_full_scale_came_from(tmp_path: Path) -> None:
+    """The diagnostics name the camera profile, or say the scale is a guess."""
+    path = write_counts_flat(tmp_path / "flat.fits", 8000.0, seed=43)
+    profiled = fc.assess_flats([path], camera="Nikon D5300").as_diagnostics()
+    assert profiled["full_scale"] == pytest.approx(16383.0)
+    assert str(profiled["full_scale_source"]).startswith(fc.FULL_SCALE_SOURCE_CAMERA_PROFILE)
+    assert "Nikon D5300" in str(profiled["full_scale_source"])
+    guessed = fc.assess_flats([path]).as_diagnostics()
+    assert guessed["full_scale"] == pytest.approx(65535.0)
+    assert guessed["full_scale_source"] == fc.FULL_SCALE_SOURCE_16_BIT_GUESS
+
+
+def test_a_camera_without_a_profile_keeps_the_16_bit_guess(tmp_path: Path) -> None:
+    """An unlisted camera gives the same result as no camera at all."""
+    path = write_counts_flat(tmp_path / "flat.fits", 4000.0, seed=44)
+    assessment = fc.assess_flats([path], camera="Some Unlisted Camera 9000")
+    assert assessment.full_scale == pytest.approx(65535.0)
+    assert assessment.full_scale_source == fc.FULL_SCALE_SOURCE_16_BIT_GUESS
+    assert assessment.level_fraction == fc.assess_flats([path]).level_fraction
+
+
+def test_an_asi533_flat_is_unchanged_by_the_camera_profile(tmp_path: Path) -> None:
+    """The ASI533's 65532 ceiling is within 0.005% of the 16-bit guess."""
+    path = write_counts_flat(tmp_path / "flat.fits", 30000.0, seed=45)
+    guessed = fc.assess_flats([path])
+    profiled = fc.assess_flats([path], camera="ZWO ASI533MM Pro")
+    assert profiled.full_scale == pytest.approx(65532.0)
+    assert profiled.level_fraction == pytest.approx(guessed.level_fraction, rel=1e-4)
+    assert profiled.issues == guessed.issues
+    assert profiled.noise_fraction == guessed.noise_fraction
+    assert str(profiled.full_scale_source).startswith(fc.FULL_SCALE_SOURCE_CAMERA_PROFILE)
+
+
+def test_a_floating_point_flat_keeps_a_full_scale_of_one_for_any_camera(tmp_path: Path) -> None:
+    """Values within 0-1 are a normalised image, whatever the camera."""
+    generator = np.random.default_rng(46)
+    data = (0.4 * (1.0 + 0.01 * generator.standard_normal((SIZE, SIZE)))).astype(np.float32)
+    path = tmp_path / "flat.fits"
+    fits.writeto(path, data)
+    assessment = fc.assess_flats([str(path)], camera="Nikon D5300")
+    assert assessment.full_scale == pytest.approx(1.0)
+    assert assessment.full_scale_source == fc.FULL_SCALE_SOURCE_FLOAT_RANGE
+    assert assessment.level_fraction == pytest.approx(0.4, rel=0.01)

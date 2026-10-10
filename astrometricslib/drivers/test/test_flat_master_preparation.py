@@ -132,3 +132,19 @@ def test_the_recipe_changes_the_fingerprint_of_the_same_frames(tmp_path: Path) -
     plain = _calibration_source_fingerprint(str(staging))
     assert _calibration_source_fingerprint(str(staging), "") == plain
     assert _calibration_source_fingerprint(str(staging), "flat-recipe-2") != plain
+
+
+def test_staged_flats_are_judged_against_the_named_cameras_clip_ceiling(tmp_path: Path) -> None:
+    """A D5300 flat at 4000 counts passes only when the camera is named."""
+    (tmp_path / "flats").mkdir()
+    generator = np.random.default_rng(7)
+    data = 4000.0 * (1.0 + 0.01 * generator.standard_normal((SIZE, SIZE)))
+    fits.writeto(tmp_path / "flats" / "flat_00000.fits", data.astype(np.uint16))
+    processor = make_processor()
+    without_camera = processor.assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
+    with_camera = processor.assess_staged_flats(
+        str(tmp_path), uses_color_filter_array=False, camera="Nikon D5300"
+    )
+    assert any(issue.startswith("flats are faint:") for issue in without_camera.issues)
+    assert not any(issue.startswith("flats are faint:") for issue in with_camera.issues)
+    assert with_camera.full_scale == pytest.approx(16383.0)

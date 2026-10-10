@@ -132,3 +132,22 @@ def test_photometry_sub_pixel_matches_pins(
     data, header = detection_frame
     values = measurements.measure_photometry(data, header, detected_sources, whole_pixel_centres=False)
     golden.check("photometry_sub_pixel", measurements.DETECTION_FRAME, values)
+
+
+def test_photometry_sequence_matches_pins(golden: Any) -> None:
+    """Shifts, unsaturated star count and flux scatter match the pins.
+
+    The photometry worker measures about 60 stars on all five luminance
+    lights. The pins hold the shift of lights 020 to 023 from 019, the number
+    of stars that stayed unsaturated, and the median scatter of their fluxes.
+
+    Parameters
+    ----------
+    golden : `GoldenStore`
+        The pinned numbers.
+    """
+    golden.check(
+        "photometry_sequence",
+        f"{measurements.LUMINANCE_FRAMES[0]}_to_{measurements.LUMINANCE_FRAMES[-1][-3:]}",
+        measurements.measure_photometry_sequence(),
+    )

@@ -33,7 +33,7 @@ machines that run this suite, so nothing that depends on them is pinned.
 .venv/bin/pytest astrometricslib/test/golden -q -p no:cacheprovider
 ```
 
-The suite takes 35 to 50 seconds. Every test carries the `golden` marker (registered in
+The suite takes 45 to 60 seconds. Every test carries the `golden` marker (registered in
 `pyproject.toml`), so `-m golden` selects these tests and `-m "not golden"` leaves them out.
 
 ## What is pinned
@@ -51,6 +51,7 @@ the change that last set the number.
 | `spectral_frame` | spectroscopy `024` | whether the zero-order finder found a star, sky level, zero-order peak, peak-to-sky ratio, spectrum peak above sky, cross-streak FWHM, bands that held the streak, saturated pixels, streak tilt, tilt contrast | `find_zero_order_position`, `analyze_spectral_frame`, `SpectroscopyPipeline.measure_dispersion_trail` |
 | `photometry_pre_S2` | `020` | flux (ADU per second) and saturated flag of the 10 brightest stars, apertures on whole-pixel centres | `_measure_aperture_flux` |
 | `photometry_sub_pixel` | `020` | the same ten stars, apertures on the exact detected positions | `_measure_aperture_flux` |
+| `photometry_sequence` | `019` to `023` | shift (x, y) of lights `020` to `023` from `019`, number of measured stars, number that stayed unsaturated in all five lights, median flux scatter (coefficient of variation) of those stars | `_process_single_frame_worker` |
 
 Two terms in the table:
 
@@ -71,6 +72,7 @@ pin.
 | Counts (stars, sources, saturated pixels, flags, bands) and the finder flag | exact |
 | Sky and background levels (ADU) | 0.5 ADU |
 | Positions (pixels), shifts and the streak tilt (degrees) | 0.05 |
+| Flux scatter of a light curve (coefficient of variation, in percent) | 5 percent |
 | FWHM, flux, roundness, noise, saturated fraction, spectrum width, peaks, contrast | 1 percent |
 
 A name that no rule covers raises `KeyError`, so a new number cannot enter the file with a guessed
@@ -96,7 +98,22 @@ that fix is not available.
   The cross-streak FWHM is large (about 43 pixels) because the zero order is an extended cluster
   and not a point star.
 - Frame `020` has 934 detected bright regions, against 602 to 635 in the other four lights. The
-  suite pins the value as measured and does not explain it.
+  suite pins the value as measured. The cause is a faint, straight trail that crosses the whole
+  frame, from about (x, y) = (1268, 0) to (3007, 2703). It is about 4 pixels wide and adds about
+  50 to 70 ADU per pixel, which is too faint to form a region of its own. It lifts faint stars
+  that lie under it just above the raw check's cut-off, and about 360 of them appear as extra
+  small regions. No quality flag looks for this: the flags test for too few stars, long star
+  streaks, soft or elongated stars, and a field shift, and none for too many stars or a line that
+  sits below the cut-off. The photometry pins in `photometry_sequence` are not affected, because
+  no measured star lies within 25 pixels of the trail.
+- `photometry_sequence` copies how `VariabilityAnalyzer` sets up a run. `SourceDetector` (3 sigma,
+  FWHM 4 px) runs on light `019`. Detections ranked 10 to 69, at least 50 pixels from every edge,
+  are the measured stars (58 of them). Detections ranked 50 to 99 are the `(x, y, flux)`
+  alignment anchors. Light `019` is measured in the test process, and lights `020` to `023` go
+  through `_process_single_frame_worker` one after the other. The whole run takes about 8 seconds.
+  Each light's shift agrees with the independent shift from the raw check to within 0.05 pixel (largest gap 0.043).
+  The gain and read noise are assumed values (1 e-/ADU and 0), so only the fluxes are pinned, not
+  their errors.
 - `photometry_pre_S2` reproduces the whole-pixel aperture centres that the pipeline used before
   review item S2 (sub-pixel apertures). It rounds each position before calling
   `_measure_aperture_flux`. `photometry_sub_pixel` passes the exact positions. The difference

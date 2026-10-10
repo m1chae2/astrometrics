@@ -31,9 +31,12 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.photometry.pre_processing.detector_noise import resolve_detector_noise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     _measure_aperture_flux,
+    _process_single_frame_worker,
     _read_exposure_seconds,
+    measure_aperture_photometry,
 )
 from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
 from astrometricslib.pipelines.shared.quality.spectral_frame_check import analyze_spectral_frame
@@ -72,6 +75,28 @@ BRIGHTEST_SOURCE_COUNT = 10
 FWHM_STAR_COUNT = 5
 """How many of the brightest stars the FWHM fit uses."""
 
+SEQUENCE_REFERENCE_FRAME = LUMINANCE_FRAMES[0]
+"""The first light, which gives the star list and the alignment anchors."""
+
+SEQUENCE_MEASURED_RANKS = (10, 70)
+"""Detections ranked 10 up to (not including) 70 are the measured stars.
+
+The ten brightest are skipped because they come closest to saturating. The
+rule follows ``VariabilityAnalyzer``, whose star list also starts below the
+brightest sources."""
+
+SEQUENCE_ANCHOR_RANKS = (50, 100)
+"""Detections ranked 50 up to (not including) 100 are the alignment anchors.
+
+This is the slice ``VariabilityAnalyzer.process_sequence`` hands to the
+worker as ``(x, y, flux)`` tuples."""
+
+SEQUENCE_EDGE_MARGIN_PX = 50
+"""Measured stars closer than this to a frame edge are dropped.
+
+The worker looks for each star in a 40 pixel box, and a box that leaves the
+frame gives no centroid, so the margin keeps every star measurable."""
+
 CAMERA_NAME = "ZWO ASI533MM Pro"
 """Camera of the sample frames (the header says ``ZWO CCD ASI533MM Pro``)."""
 
@@ -101,6 +126,7 @@ They are written out here so the pinned numbers do not depend on the
 settings file of the machine that runs the test."""
 
 _TOLERANCE_RULES: tuple[tuple[str, str, float], ...] = (
+    (r"cv_percent$", "relative", 0.05),
     (
         r"(count|saturated_pixels|longest_trail_px|matched_stars|bands_found|_saturated|zero_order_found)$",
         "absolute",
@@ -112,9 +138,12 @@ _TOLERANCE_RULES: tuple[tuple[str, str, float], ...] = (
 )
 """Rules that give each pinned number its tolerance, first match wins.
 
-Counts must match exactly. Sky levels may move by 0.5 ADU (analog-to-digital
-units, the camera's counts). Positions and the tilt may move by 0.05 pixel or
-degree. FWHM values, fluxes and the other measured sizes may move by 1 percent.
+The scatter of a light curve (``cv_percent``, the coefficient of variation
+in percent) may move by 5 percent of its value, because it is a small number
+built from noise. Counts must match exactly. Sky levels may move by 0.5 ADU
+(analog-to-digital units, the camera's counts). Positions and the tilt may
+move by 0.05 pixel or degree. FWHM values, fluxes and the other measured sizes
+may move by 1 percent.
 """
 
 
@@ -443,6 +472,80 @@ def measure_photometry(
         flux, saturated = _measure_aperture_flux(data, x, y, saturation_threshold_adu=threshold)
         values[f"star_{rank:02d}_flux_adu_per_s"] = flux / exposure_seconds
         values[f"star_{rank:02d}_saturated"] = int(bool(saturated))
+    return values
+
+
+def measure_photometry_sequence() -> dict[str, float]:
+    """Run the photometry worker over the five luminance lights.
+
+    The steps copy ``VariabilityAnalyzer.process_sequence``. The first light
+    is searched for stars with ``SourceDetector`` (3 sigma, FWHM 4 px, the
+    analyzer's first setting). Detections in `SEQUENCE_MEASURED_RANKS` that
+    sit at least `SEQUENCE_EDGE_MARGIN_PX` from every edge are the measured
+    stars. Detections in `SEQUENCE_ANCHOR_RANKS` become the ``(x, y, flux)``
+    anchors that line the later lights up with the first. The first light is
+    measured in this process, as the analyzer does. Lights 020 to 023 go
+    through ``_process_single_frame_worker``, one after the other.
+
+    Returns
+    -------
+    values : `dict` [`str`, `float`]
+        ``frame_NNN_shift_x_px`` and ``frame_NNN_shift_y_px``: how far the
+        light moved against the first one. ``measured_star_count`` and
+        ``unsaturated_star_count``: how many stars were measured, and how
+        many stayed below saturation in all five lights.
+        ``median_star_cv_percent``: the median over the unsaturated stars of
+        the standard deviation of the five fluxes divided by their mean
+        (the coefficient of variation, CV), in percent.
+
+    Raises
+    ------
+    RuntimeError
+        If the worker returns no measurement for a light.
+    """
+    reference, header = load_frame(SEQUENCE_REFERENCE_FRAME)
+    threshold = _saturation_threshold_adu(header)
+    noise = resolve_detector_noise(resolve_camera_profile(header.get("INSTRUME")), header)
+    sources = SourceDetector(threshold_sigma=3.0, fwhm=4.0).detect(reference)
+    height, width = reference.shape
+    margin = SEQUENCE_EDGE_MARGIN_PX
+    stars = [
+        (f"star_{rank}", float(source["x_centroid"]), float(source["y_centroid"]))
+        for rank, source in enumerate(sources[: SEQUENCE_MEASURED_RANKS[1]])
+        if rank >= SEQUENCE_MEASURED_RANKS[0]
+        and margin <= source["x_centroid"] < width - margin
+        and margin <= source["y_centroid"] < height - margin
+    ]
+    anchors = [
+        (float(source["x_centroid"]), float(source["y_centroid"]), float(source["flux"]))
+        for source in sources[slice(*SEQUENCE_ANCHOR_RANKS)]
+    ]
+    exposure_seconds = _read_exposure_seconds(header)
+    fluxes = [[], [], [], [], []]
+    saturated = [[], [], [], [], []]
+    for _, x, y in stars:
+        measurement = measure_aperture_photometry(
+            reference, x, y, saturation_threshold_adu=threshold, noise=noise
+        )
+        fluxes[0].append(measurement.net_flux_adu / exposure_seconds)
+        saturated[0].append(measurement.is_saturated)
+    values: dict[str, float] = {}
+    for index, name in enumerate(LUMINANCE_FRAMES[1:], start=1):
+        _, result = _process_single_frame_worker((str(frame_path(name)), stars, anchors, threshold, noise))
+        if not isinstance(result, tuple):
+            raise RuntimeError(f"The photometry worker returned no measurement for {name}: {result!r}")
+        star_fluxes, shift_x, shift_y = result[1], result[2], result[3]
+        values[f"frame_{name[-3:]}_shift_x_px"] = float(shift_x)
+        values[f"frame_{name[-3:]}_shift_y_px"] = float(shift_y)
+        fluxes[index] = [star_fluxes[star_id][0] for star_id, _, _ in stars]
+        saturated[index] = [star_fluxes[star_id][1] for star_id, _, _ in stars]
+    flux_table = np.asarray(fluxes, dtype=float)
+    unsaturated = ~np.asarray(saturated, dtype=bool).any(axis=0)
+    kept = flux_table[:, unsaturated]
+    variation = kept.std(axis=0, ddof=1) / kept.mean(axis=0)
+    values["measured_star_count"] = len(stars)
+    values["unsaturated_star_count"] = int(unsaturated.sum())
+    values["median_star_cv_percent"] = float(100.0 * np.median(variation))
     return values
 
 

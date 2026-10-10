@@ -918,5 +918,76 @@
         "why": "baseline 2026-10-10 sub-pixel apertures (S2) as in the working tree, before tier 1 fixes"
       }
     }
+  },
+  "photometry_sequence": {
+    "_comment": "The committed photometry worker run over the five luminance lights. About 60 stars (detections ranked 10 to 70 of the first light) are measured. Detections ranked 50 to 100 line the lights up. Shifts are for lights 020 to 023 against 019. The scatter is the median coefficient of variation of the unsaturated stars, in percent.",
+    "M_13_Light_Luminance_019_to_023": {
+      "frame_020_shift_x_px": {
+        "value": -0.617944416,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_020_shift_y_px": {
+        "value": -0.107647187,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_021_shift_x_px": {
+        "value": -1.04486467,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_021_shift_y_px": {
+        "value": 0.0749118311,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_022_shift_x_px": {
+        "value": -1.33495053,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_022_shift_y_px": {
+        "value": 0.121033266,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_023_shift_x_px": {
+        "value": -0.059673596,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "frame_023_shift_y_px": {
+        "value": 0.195236417,
+        "tolerance": 0.05,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "measured_star_count": {
+        "value": 58,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "unsaturated_star_count": {
+        "value": 58,
+        "tolerance": 0.0,
+        "tolerance_type": "absolute",
+        "why": "add the five-frame photometry sequence pins"
+      },
+      "median_star_cv_percent": {
+        "value": 0.636474997,
+        "tolerance": 0.05,
+        "tolerance_type": "relative",
+        "why": "add the five-frame photometry sequence pins"
+      }
+    }
   }
 }

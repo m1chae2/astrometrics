@@ -45,6 +45,12 @@ _SECTION_COMMENTS = {
         "Aperture photometry with every aperture centred on the exact detected position (item S2). The "
         "difference from photometry_pre_S2 is the effect of S2 on these ten stars."
     ),
+    "photometry_sequence": (
+        "The committed photometry worker run over the five luminance lights. About 60 stars (detections "
+        "ranked 10 to 70 of the first light) are measured. Detections ranked 50 to 100 line the lights up. "
+        "Shifts are for lights 020 to 023 against 019. The scatter is the median coefficient of variation "
+        "of the unsaturated stars, in percent."
+    ),
     "source_detection": (
         "Source detection on one frame. The detector draws a random subsample for its background "
         "only when the 2-D background map fails; on these 3008 x 3008 frames the map works, so the "

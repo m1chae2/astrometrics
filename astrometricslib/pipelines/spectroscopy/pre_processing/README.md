@@ -107,8 +107,12 @@ lower or higher side of the streak was dropped), `single_band` and `no_sky`.
 `dominant_sky_mode` is the most common mode, and `contaminated_sky_fraction`
 is the share of readings that dropped a strip, from 0 to 1. A fraction well
 above a few percent means a neighbour's light lies beside the streak, and
-the star's spectrum deserves a closer look. The pipeline does not yet copy
-these diagnostics onto the star's saved result.
+the star's spectrum deserves a closer look. The pipeline copies a summary
+onto the star's saved result as `SpectroscopyResult.extraction_diagnostics`
+(a `SpectralExtractionDiagnostics`). It holds the sky mode counts, the
+dominant mode, the contaminated fraction, and the median and standard
+deviation of the box half-width in pixels. The two half-width values are
+empty (`None`) for an untraced extraction.
 
 ## Airmass extinction
 
@@ -132,8 +136,9 @@ no reference airmass. The result of the correction is an
 `ExtinctionCorrection` record: `is_applied`, `target_airmass`,
 `reference_airmass`, `curve_name` and `reason` (set only when skipped). The
 spectrum analysis carries this record as `SpectrumAnalysis.extinction_correction`.
-The pipeline does not yet copy the record onto the star's saved result,
-because the result model has no field for it.
+The pipeline copies the record onto the star's saved result as
+`SpectroscopyResult.extinction_correction` (an `ExtinctionCorrectionRecord`).
+It is empty (`None`) when no instrument response was applied.
 
 The stored curve is the mean Kitt Peak curve, a dry site at 2 km altitude.
 A site at lower altitude has somewhat more extinction in the blue. The

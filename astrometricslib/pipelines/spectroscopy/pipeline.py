@@ -12,7 +12,12 @@ import numpy as np
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.foundation.errors import ProcessingError
-from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
+from astrometricslib.models.stellar_source import (
+    ExtinctionCorrectionRecord,
+    SpectralExtractionDiagnostics,
+    SpectroscopyResult,
+    StellarObject,
+)
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 from astrometricslib.pipelines.shared.quality.saturation import (
     compute_saturated_pixel_fraction,
@@ -1242,6 +1247,16 @@ class SpectroscopyPipeline:
             catalog_comparison=analysis.catalog_comparison,
             input_quality=input_quality,
             output_quality=output_quality,
+            extraction_diagnostics=(
+                SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
+                if result.get("extraction_diagnostics") is not None
+                else None
+            ),
+            extinction_correction=(
+                ExtinctionCorrectionRecord.model_validate(analysis.extinction_correction)
+                if analysis.extinction_correction is not None
+                else None
+            ),
         )
 
         if isinstance(star.star_data, dict):
@@ -1377,6 +1392,10 @@ class SpectroscopyPipeline:
             "trail_width_px": trail_width_px,
             "valid_fraction": valid_fraction,
             "requested_wavelength_range_nm": requested_wavelength_range_nm,
+            # What the extractor did for this star: sky modes and the width of
+            # the reading box. Taken now because the extractor resets it at
+            # the start of its next extraction.
+            "extraction_diagnostics": extractor.last_diagnostics.as_dict(),
             # Both extraction paths record this, so the calibration tuner can
             # place each sample on the physical model after leading samples
             # were dropped.

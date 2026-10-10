@@ -37,11 +37,13 @@ from astrometricslib.models.spectroscopy_quality import (
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "AnalysisResult",
+    "ExtinctionCorrectionRecord",
     "FileItem",
     "GroupedFrameStat",
     "PeriodogramResult",
     "PhotometryResult",
     "PlotData",
+    "SpectralExtractionDiagnostics",
     "StellarObject",
     "StellarSessionMatch",
     "TargetFilesResponse",
@@ -568,6 +570,60 @@ class StellarSessionMatch(BaseModel):
     angular_separation_arcsec: float = Field(alias="angularSeparationArcsec")
 
 
+class SpectralExtractionDiagnostics(BaseModel):
+    """What the extractor did while it read one star's spectrum.
+
+    A short summary of the extractor's `ExtractionDiagnostics`. It shows
+    whether the sky background was read cleanly and how wide the reading
+    box was, so a reader can judge the spectrum without re-running the
+    extraction.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # How many sky readings used each mode, keyed by mode name (for example
+    # "both_bands" or "upper_band_contaminated"). Each step along the
+    # spectrum makes one reading.
+    sky_mode_counts: dict[str, int] = Field(default_factory=dict, alias="skyModeCounts")
+    # The mode used by the most readings. `None` when no sky was read.
+    dominant_sky_mode: str | None = Field(default=None, alias="dominantSkyMode")
+    # The share of sky readings (0 to 1) that had to drop one sky band
+    # because a neighbouring star's light fell in it. 0.0 when no sky was read.
+    contaminated_sky_fraction: float = Field(default=0.0, alias="contaminatedSkyFraction")
+    # The median half-width of the reading box, in pixels. A box reaches this
+    # far each side of its centre. `None` for an extraction that does not
+    # trace the spectrum, which uses one fixed radius.
+    aperture_half_width_median_px: float | None = Field(default=None, alias="apertureHalfWidthMedianPx")
+    # How much the half-width varied along the spectrum, as a standard
+    # deviation in pixels. `None` for an untraced extraction.
+    aperture_half_width_spread_px: float | None = Field(default=None, alias="apertureHalfWidthSpreadPx")
+
+
+class ExtinctionCorrectionRecord(BaseModel):
+    """Whether the airmass correction was applied to a spectrum, and with what.
+
+    Mirrors `ExtinctionCorrection` in the spectroscopy pipeline. Airmass is
+    how much air the light crossed (1.0 straight overhead, larger nearer the
+    horizon). The instrument response removes the air's dimming at the
+    standard star's airmass, and this correction rescales the spectrum for
+    the airmass of the target's frame.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    # True when the correction scaled the spectrum.
+    is_applied: bool = Field(alias="isApplied")
+    # The airmass of the target's frame. `None` when unknown.
+    target_airmass: float | None = Field(default=None, alias="targetAirmass")
+    # The airmass of the standard star the instrument response was fitted
+    # to. `None` when unknown.
+    reference_airmass: float | None = Field(default=None, alias="referenceAirmass")
+    # The extinction curve used (or that would have been used).
+    curve_name: str = Field(alias="curveName")
+    # Why the correction was skipped. `None` when it was applied.
+    reason: str | None = Field(default=None, alias="reason")
+
+
 class SpectroscopyResult(BaseModel):
     """A star's own extracted spectrum, and what it suggests about the star.
 
@@ -725,6 +781,19 @@ class SpectroscopyResult(BaseModel):
     # (see `post_processing.assess_output_quality`). `None` for a spectrum
     # saved before this was recorded, or one that was never classified.
     output_quality: OutputQualityAssessment | None = Field(default=None, alias="outputQuality")
+    # How the extractor read the sky and how wide its reading box was (see
+    # `SpectralExtractionDiagnostics`). `None` for a spectrum saved before
+    # this was recorded.
+    extraction_diagnostics: SpectralExtractionDiagnostics | None = Field(
+        default=None, alias="extractionDiagnostics"
+    )
+    # Whether the airmass correction was applied to the response-corrected
+    # spectrum, and with which airmasses (see `ExtinctionCorrectionRecord`).
+    # `None` when no response correction was run, and for a spectrum saved
+    # before this was recorded.
+    extinction_correction: ExtinctionCorrectionRecord | None = Field(
+        default=None, alias="extinctionCorrection"
+    )
     # The id of the job (see astrometricslib.models.provenance.Activity)
     # that last wrote this spectrum, so its exact pipeline version can be
     # looked up. `None` for a spectrum saved before this was recorded, or

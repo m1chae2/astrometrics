@@ -416,6 +416,8 @@ export interface SpectroscopyResult {
   catalogComparison?: CatalogComparison | null;
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
+  extractionDiagnostics?: SpectralExtractionDiagnostics | null;
+  extinctionCorrection?: ExtinctionCorrectionRecord | null;
   generatedByJobId?: string | null;
   /** Check if even the closest reference spectrum fits badly. */
   isPoorMatch?: boolean;
@@ -427,6 +429,39 @@ export interface SpectroscopyResult {
   rmsGapToNextClass?: number | null;
   /** Check if another spectral class fits almost as well as the best. */
   isClassAmbiguous?: boolean | null;
+}
+
+/**
+ * What the extractor did while it read one star's spectrum.
+ *
+ * A short summary of the extractor's `ExtractionDiagnostics`. It shows
+ * whether the sky background was read cleanly and how wide the reading
+ * box was, so a reader can judge the spectrum without re-running the
+ * extraction.
+ */
+export interface SpectralExtractionDiagnostics {
+  skyModeCounts?: Record<string, number>;
+  dominantSkyMode?: string | null;
+  contaminatedSkyFraction?: number;
+  apertureHalfWidthMedianPx?: number | null;
+  apertureHalfWidthSpreadPx?: number | null;
+}
+
+/**
+ * Whether the airmass correction was applied to a spectrum, and with what.
+ *
+ * Mirrors `ExtinctionCorrection` in the spectroscopy pipeline. Airmass is
+ * how much air the light crossed (1.0 straight overhead, larger nearer the
+ * horizon). The instrument response removes the air's dimming at the
+ * standard star's airmass, and this correction rescales the spectrum for
+ * the airmass of the target's frame.
+ */
+export interface ExtinctionCorrectionRecord {
+  isApplied: boolean;
+  targetAirmass?: number | null;
+  referenceAirmass?: number | null;
+  curveName: string;
+  reason?: string | null;
 }
 
 /**
@@ -1206,6 +1241,8 @@ export interface CalibrationEntry {
   camera: string;
   iso: string;
   offset?: number | null;
+  binning?: string | null;
+  temperatureC?: number | null;
   exposure?: number | null;
   filter?: string | null;
   count: number;
@@ -1671,6 +1708,19 @@ export interface FrameEnsembleComposition {
   framePath: string;
   ensembleSize: number;
   excludedComparisonStarIds?: string[];
+}
+
+/**
+ * One point of a photometry run's noise-model curve.
+ *
+ * The curve says how much scatter a constant star of each brightness shows
+ * in the run's field. A plot of these points, with the stars' own
+ * `instrumentalMag` and `rmsMag`, shows which stars sit above the curve.
+ */
+export interface NoiseModelPoint {
+  instrumentalMag: number;
+  rmsMag: number;
+  starCount: number;
 }
 
 /**

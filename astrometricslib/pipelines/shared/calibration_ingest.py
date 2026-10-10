@@ -132,6 +132,7 @@ def assess_flat_group(group: FlatGroup) -> FlatSetAssessment:
         filter=group.filter,
         gain=group.gain,
         offset=group.offset,
+        binning=group.binning,
         frame_count=measured.frame_count,
         level_fraction=measured.level_fraction,
         noise_fraction=measured.noise_fraction,

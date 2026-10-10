@@ -31,6 +31,9 @@ class FlatSetAssessment(BaseModel):
     # The gain (or ISO) setting, as text, and the camera offset.
     gain: str
     offset: float
+    # The binning the flats were taken at, such as "2x2" ("1x1" for none).
+    # Flats at another binning cannot calibrate these lights.
+    binning: str | None = None
     # How many flat frames are in the set.
     frame_count: int = Field(alias="frameCount")
     # Mean brightness of a flat as a fraction of full scale (0 to 1). The

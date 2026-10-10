@@ -568,6 +568,33 @@ class ExtractionDiagnostics:
         )
         return contaminated / total
 
+    def as_dict(self) -> dict[str, object]:
+        """Give a short summary of the extraction as plain values.
+
+        The summary is what the pipeline saves on the star's spectroscopy
+        result. The list of half-widths is boiled down to its median and its
+        spread, so a long trace does not bloat the saved record.
+
+        Returns
+        -------
+        summary : `dict`
+            ``sky_mode_counts`` (`dict` [`str`, `int`]), ``dominant_sky_mode``
+            (`str` or `None`), ``contaminated_sky_fraction`` (`float`),
+            ``aperture_half_width_median_px`` (`float` or `None`) and
+            ``aperture_half_width_spread_px`` (`float` or `None`, the
+            standard deviation). Both half-width values are `None` for the
+            untraced methods, which keep no half-widths.
+        """
+        half_widths = np.asarray(self.aperture_half_width_px, dtype=float)
+        has_widths = half_widths.size > 0
+        return {
+            "sky_mode_counts": {mode: int(count) for mode, count in self.sky_mode_counts.items()},
+            "dominant_sky_mode": self.dominant_sky_mode,
+            "contaminated_sky_fraction": float(self.contaminated_sky_fraction),
+            "aperture_half_width_median_px": float(np.median(half_widths)) if has_widths else None,
+            "aperture_half_width_spread_px": float(np.std(half_widths)) if has_widths else None,
+        }
+
 
 def _clipped_band_statistics(band: np.ndarray) -> tuple[float, float, int] | None:
     """Find a sky band's median and noise after clipping outlying pixels.

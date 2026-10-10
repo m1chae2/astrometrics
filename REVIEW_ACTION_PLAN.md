@@ -112,13 +112,21 @@ done.
 | S6 | done | `pipelines/asteroid_detection/test/test_detection_ra_wrap.py` |
 | S7 | done | `pipelines/spectroscopy/utilities/test/test_calibration_tuner_sample_distances.py` |
 | S13 | done | `pipelines/stacking/test/test_exposure_group_linearity.py`; gate `exposure_group_linearity` |
+| A6 | done | `api/test/test_driver_injection.py`; `test/test_driver_construction.py` blocks direct construction under `pipelines/` |
+| S8 | done | `pipelines/photometry/test/pre_processing/test_flux_uncertainty.py`; gate `flux_uncertainty` |
+| S9 | done | `pipelines/photometry/test/pre_processing/test_observation_times.py`; gate `capture_timestamps` names the time basis |
+| S10 | done | `pipelines/photometry/test/test_comparison_ensemble_injection.py`; gate `comparison_ensemble` |
+| S11 | done | `utilities/test/test_rejection_thresholds.py`; `scripts/rejection_small_n_check.py` measures the rejected fractions |
+| S12 | done | `drivers/test/test_calibration_matching.py`; gate `calibration_metadata` |
+| S14 | done | `drivers/test/test_astrometry_net_fit_statistics.py`, `test_gaia_proper_motion.py`, `test_scale_hint_binning.py`, `test_gaia_search_depth.py` |
+| S15 | done | `pipelines/spectroscopy/test/test_extraction_aperture_stability.py`, `test_sky_estimate_bias.py`, `test_response_balmer_mask.py`, `test_extinction_correction.py` |
+| S20 | done | `test_layer_boundaries.py` blocks unseeded randomness under `pipelines/` |
+| RA wrap follow-ups | done | `test_pointing_correction_ra_wrap.py`; `test_gaia_cache_ra_wrap.py`; helper in `pipelines/shared/angles.py` |
 
 Found while doing tier 1, now tracked as follow-ups:
 
 - The global-shift centroid in `frame_photometry.py` counted noise as light and under-measured
   drift by about half. Fixed with S2.
-- RA is still differenced without wrapping in `asteroid_detection/pipeline.py` (pointing
-  correction) and `astrometry/processing/star_identifier.py` (catalog bounding box).
 - `find_zero_order_position` returns `None` on every M 13 spectroscopy frame, because the target
   is an extended cluster. The spectral frame check therefore cannot run on cluster targets.
 - The tuner's dip detector uses an absolute prominence in the spectrum's own units and can find

@@ -15,6 +15,7 @@ import statistics
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
+from typing import overload
 
 import numpy as np
 
@@ -69,6 +70,46 @@ def _circular_mean_degrees(values_deg: Iterable[float]) -> float:
     return math.degrees(math.atan2(mean_sin, mean_cos)) % 360.0
 
 
+@overload
+def wrapped_ra_difference_deg(ra1_deg: float, ra2_deg: float) -> float: ...
+
+
+@overload
+def wrapped_ra_difference_deg(ra1_deg: np.ndarray, ra2_deg: float | np.ndarray) -> np.ndarray: ...
+
+
+def wrapped_ra_difference_deg(ra1_deg: float | np.ndarray, ra2_deg: float | np.ndarray) -> float | np.ndarray:
+    """Find the signed difference between two Right Ascensions (RA).
+
+    RA is an angle that wraps around at 0/360 deg: 359.9 deg and
+    0.1 deg are only 0.2 deg apart, but plain subtraction gives 359.8 deg.
+    This function returns the shorter way around the circle. The sign
+    tells the direction: positive when the first RA lies east of
+    (greater than) the second. Every place in this package that compares
+    two RA values should call this function instead of subtracting.
+
+    Parameters
+    ----------
+    ra1_deg : `float` or `numpy.ndarray`
+        The first Right Ascension, in degrees. Any value is accepted,
+        including values outside [0, 360).
+    ra2_deg : `float` or `numpy.ndarray`
+        The second Right Ascension, in degrees.
+
+    Returns
+    -------
+    difference_deg : `float` or `numpy.ndarray`
+        ``ra1_deg - ra2_deg`` wrapped into the range (-180, 180], in
+        degrees. For example, 359.9 and 0.1 give -0.2, and 10 and 350
+        give 20. The result is a ``float`` when both inputs are
+        ``float``, and an array otherwise.
+    """
+    difference_deg = 180.0 - np.mod(180.0 - (np.asarray(ra1_deg) - np.asarray(ra2_deg)), 360.0)
+    if difference_deg.ndim == 0:
+        return float(difference_deg)
+    return difference_deg
+
+
 def _tangent_plane_offset_arcsec(
     right_ascension_deg: float,
     declination_deg: float,
@@ -79,7 +120,9 @@ def _tangent_plane_offset_arcsec(
 
     Because the sky is curved, measuring distance directly is hard. For
     small distances, we can pretend the sky is flat (a 'tangent plane')
-    to make the math simpler.
+    to make the math simpler. The RA difference goes through
+    `wrapped_ra_difference_deg`, so two points on opposite sides of
+    RA = 0 deg are still close together.
 
     Parameters
     ----------
@@ -100,7 +143,7 @@ def _tangent_plane_offset_arcsec(
         How far up or down the point is from center, in arcseconds.
     """
     right_ascension_offset_arcsec = (
-        (right_ascension_deg - reference_right_ascension_deg)
+        wrapped_ra_difference_deg(right_ascension_deg, reference_right_ascension_deg)
         * math.cos(math.radians(reference_declination_deg))
         * 3600.0
     )
@@ -299,19 +342,22 @@ class MovingObjectDetector:
                 # accidentally divide by zero when calculating how far away
                 # to look for the next dot.
                 ra_bbox_half_width_deg = max_deg / max(abs(cos_dec), 1e-6)
-                ra_min = last_detection.right_ascension_deg - ra_bbox_half_width_deg
-                ra_max = last_detection.right_ascension_deg + ra_bbox_half_width_deg
                 dec_min = last_detection.declination_deg - max_deg
                 dec_max = last_detection.declination_deg + max_deg
 
+                # The RA difference wraps at 0/360 deg, so a chain near
+                # RA = 0 still finds detections on the other side of it.
+                ra_diff_all = wrapped_ra_difference_deg(ra_arr, last_detection.right_ascension_deg)
                 bbox_mask = (
-                    (ra_arr >= ra_min) & (ra_arr <= ra_max) & (dec_arr >= dec_min) & (dec_arr <= dec_max)
+                    (np.abs(ra_diff_all) <= ra_bbox_half_width_deg)
+                    & (dec_arr >= dec_min)
+                    & (dec_arr <= dec_max)
                 )
                 candidate_indices = np.where(bbox_mask)[0]
                 if candidate_indices.size == 0:
                     continue
 
-                ra_diff = ra_arr[candidate_indices] - last_detection.right_ascension_deg
+                ra_diff = ra_diff_all[candidate_indices]
                 ra_offsets = ra_diff * cos_dec * 3600.0
                 dec_offsets = (dec_arr[candidate_indices] - last_detection.declination_deg) * 3600.0
                 distances = np.hypot(ra_offsets, dec_offsets)

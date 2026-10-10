@@ -33,6 +33,7 @@ from astrometricslib.models.spectroscopy_quality import (
     OutputQualityAssessment,
     StageQualityCheckpoint,
 )
+from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -864,6 +865,11 @@ class SpectroscopyResult(BaseModel):
     # limits in one common shape. Empty for a spectrum saved before this was
     # recorded.
     stage_quality: list[StageQualityCheckpoint] = Field(default_factory=list, alias="stageQuality")
+    # The wavelength zero-point offset measured from known lines, and whether
+    # the pipeline removed it from `wavelengths_angstrom` (see
+    # `WavelengthZeroPointRecord`). `None` for a spectrum saved before this
+    # was recorded.
+    wavelength_zero_point: WavelengthZeroPointRecord | None = Field(default=None, alias="wavelengthZeroPoint")
     # How the extractor read the sky and how wide its reading box was (see
     # `SpectralExtractionDiagnostics`). `None` for a spectrum saved before
     # this was recorded.

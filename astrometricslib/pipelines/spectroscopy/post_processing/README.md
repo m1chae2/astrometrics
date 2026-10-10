@@ -119,7 +119,9 @@ ambiguity, catalog-agreement, colour-agreement and trustworthy verdicts as 1 or
 catalog type, judged against `DIFFERS_FROM_CATALOG_SUBTYPES`. For an
 unclassified spectrum every value is empty. `run_gates.py` also rolls the four
 checkpoints of all spectra up into the run summary's `stage_quality_summary`
-and builds the `processing_quality` gate. The [pipeline README](../README.md)
-describes both.
+and builds the `processing_quality` gate. `wavelength_scale.py` reads the
+wavelength zero-point metrics from the pre-processing checkpoints and builds
+the run-level `wavelength_scale_summary` and the `wavelength_scale` gate. The
+[pipeline README](../README.md) describes all three.
 
 For exact behavior, read the code.

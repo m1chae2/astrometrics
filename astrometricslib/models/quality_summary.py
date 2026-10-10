@@ -16,6 +16,7 @@ from astrometricslib.models.gaia_xp_comparison import GaiaXpRunSummary
 from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.spectroscopy_quality import StageQualityRollup
 from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 
 class ExcludedFrame(BaseModel):
@@ -608,6 +609,14 @@ class SpectroscopyPipelineQualityMetrics(StarIdentificationMetrics):
     # tilt (see `GaiaXpRunSummary`). `None` for a summary saved before this was
     # recorded, and for a run in which no star was compared.
     gaia_xp_summary: GaiaXpRunSummary | None = Field(default=None, alias="gaiaXpSummary")
+    # How much the spectra's wavelength zero points scatter across the run,
+    # before and after the pipeline's correction, and how the offsets relate
+    # to zero-order saturation (see `WavelengthScaleSummary`). `None` for a
+    # summary saved before this was recorded, and for a run in which no
+    # spectrum had a measured offset.
+    wavelength_scale_summary: WavelengthScaleSummary | None = Field(
+        default=None, alias="wavelengthScaleSummary"
+    )
 
 
 class SpectroscopyQualitySummary(PipelineQualitySummaryBase):

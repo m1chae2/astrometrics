@@ -94,6 +94,7 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "processing_quality": ALL_THREE,
         # Not checked with fewer than three compared stars.
         "gaia_xp_agreement": ALL_THREE,
+        "wavelength_scale": ALL_THREE,
     },
     "asteroid_detection": {
         # Too few frames means "could not look", never a failure.

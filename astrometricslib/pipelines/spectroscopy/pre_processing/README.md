@@ -44,7 +44,9 @@ turns out to be. The pipeline runs this stage the same way for every star.
    below). It does this before every step that reads a wavelength, and it
    skips the step when it lacks an observatory site, a sky coordinate
    system (WCS) or a time.
-7. **Remove signals that are not the star.** The pipeline corrects for
+7. **Check the zero point.** The pipeline then checks the wavelength
+   scale against known lines (see "Wavelength zero point" below).
+8. **Remove signals that are not the star.** The pipeline corrects for
    four things that are not properties of the star itself:
    - the camera sensor's uneven sensitivity to different colours,
    - the whole instrument's own tilt (the grating, the telescope's
@@ -55,10 +57,10 @@ turns out to be. The pipeline runs this stage the same way for every star.
      below),
    - the wavelengths where Earth's own atmosphere absorbs light, which
      would otherwise look like a feature of the star.
-8. **Record what the numbers mean.** The pipeline records whether a stored
+9. **Record what the numbers mean.** The pipeline records whether a stored
    spectrum's brightness values are raw camera counts or an averaged,
    stacked scale, since the two scales are not directly comparable.
-9. **Measure the input quality.** Before finding anything in the spectrum,
+10. **Measure the input quality.** Before finding anything in the spectrum,
    the pipeline measures the raw data itself: how much the instrument
    blurred it, how saturated the brightest part was, how much of the
    intended spectrum actually landed on the image, and how strongly it
@@ -260,6 +262,69 @@ because that shift changes no wavelength.
 Checkpoint 0 reports the refraction metrics (see "Quality checkpoints 0 and
 1" below).
 
+## Wavelength zero point
+
+The wavelength scale is the grating equation with one fitted number, the
+grating distance, and an anchor at the centre of the star's zero-order image.
+A saturated or crowded zero order, or a centroid pulled toward a neighbour,
+moves the anchor. Every wavelength of that spectrum then shifts by the same
+amount, the zero-point error. Nothing before this step measures it for one
+spectrum. `wavelength_zero_point.py` measures it and, when the evidence is
+enough, removes it.
+
+1. **Look for six known lines.** The pipeline tries H-alpha (6562.8 A),
+   H-beta (4861.3 A), H-gamma (4340.5 A), Na D (5892.9 A), Mg b (5175 A) and
+   the oxygen A band (7605 A). All wavelengths are in air. It does not know
+   the star's type yet, so it tries every line and keeps only the ones it
+   finds. The oxygen A band comes from Earth's air, so every spectrum has it
+   whatever the star is.
+2. **Fit each line.** The pipeline fits a smooth continuum on both sides of
+   the line and slides a Gaussian dip, as wide as the instrument blur at that
+   wavelength (`load_line_spread_profile`), over plus or minus one blur width
+   around the known wavelength. The dip's centre minus the known wavelength is
+   the line's offset.
+3. **Keep a line only if it is significant.** A dip must be at least 6 noise
+   widths deep (`MINIMUM_LINE_SIGNIFICANCE`) and its centre must lie inside
+   the search range. A noise-only spectrum finds no line.
+4. **Combine the lines.** The spectrum's offset is the error-weighted mean of
+   the lines' offsets. Each line's error is its fit error and the uncertainty
+   of its own position (blended lines, stellar motion), added in quadrature.
+5. **Apply or only record.** The pipeline subtracts the offset from every
+   wavelength when at least two lines were found and they agree within their
+   errors (a chi-square test, p-value at least 0.01). Otherwise it records the
+   offset as measured only. One line cannot be told apart from a misidentified
+   feature. Lines that disagree point to a stretched scale, not a shifted one.
+
+The shift happens in `_apply_result_to_stellar_object` right after the
+refraction correction, so it measures only the constant offset that is left
+and does not remove the refraction shift a second time. Both come before the
+quantum-efficiency, instrument-response and airmass-extinction corrections.
+All three depend on wavelength, so they must see the corrected values.
+
+Checkpoint 1 carries these metrics:
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `wavelength_zero_point_offset_angstrom` | angstrom | 20, lower is better (designed) | The size of the offset before correction. The limit is half a resolution element at 5000 A (about 40 A). It is a designed value, not a measured one. |
+| `wavelength_zero_point_uncertainty_angstrom` | angstrom | none | The error of the offset. |
+| `wavelength_zero_point_line_count` | lines | none | How many lines passed the significance test. |
+| `wavelength_zero_point_applied` | flag | none | 1 when the pipeline removed the offset, 0 when it only measured it. |
+
+The checkpoint raises `wavelength_zero_point_unconstrained` when fewer than two
+lines were found, `wavelength_zero_point_lines_disagree` when two or more lines
+were found but failed the chi-square test, and `wavelength_zero_point_large`
+when the offset is over its limit. The `wavelength_zero_point` field of the
+result keeps the signed offset, the chi-square, each line and whether the zero
+order was saturated. The run-level scatter of these offsets is described in the
+[pipeline README](../README.md).
+
+Limits of the method: the correction is a constant shift, so it fixes an
+anchor error but not a wrong grating distance. A line can be measured only
+when the true offset is smaller than about one blur width. A different feature
+near a line can be mistaken for it, for example the CH G band at 4304 A beside
+H-gamma in G and K stars; the chi-square test catches that only when other
+lines are present to disagree with it.
+
 ## What this stage produces
 
 This stage produces a calibrated spectrum, brightness by wavelength, for
@@ -308,7 +373,8 @@ shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
   three flags described below.
 - **Checkpoint 1, calibrated spectrum** (`input_quality_checkpoint` in
   `assess_input_quality.py`): it carries the five numbers of the input quality
-  assessment above. Its signal-to-noise metric uses the limit
+  assessment above and the four wavelength zero-point metrics. Its
+  signal-to-noise metric uses the limit
   `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE`, below which the pipeline does not
   classify the spectrum.
 

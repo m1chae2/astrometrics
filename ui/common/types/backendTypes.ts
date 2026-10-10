@@ -418,6 +418,7 @@ export interface SpectroscopyResult {
   inputQuality?: InputQualityAssessment | null;
   outputQuality?: OutputQualityAssessment | null;
   stageQuality?: StageQualityCheckpoint[];
+  wavelengthZeroPoint?: WavelengthZeroPointRecord | null;
   extractionDiagnostics?: SpectralExtractionDiagnostics | null;
   extinctionCorrection?: ExtinctionCorrectionRecord | null;
   differentialRefraction?: DifferentialRefractionRecord | null;
@@ -670,6 +671,56 @@ export interface StageQualityRollup {
   spectrumCount?: number;
   failedSpectrumCount?: number;
   metricMedians?: Record<string, number>;
+}
+
+/**
+ * One absorption line used to measure a spectrum's zero-point offset.
+ *
+ * The pipeline looks for the dip a known line makes and compares where it
+ * found the dip with the line's known (rest) wavelength.
+ */
+export interface WavelengthZeroPointLine {
+  name: string;
+  restWavelengthAngstrom: number;
+  measuredWavelengthAngstrom: number;
+  offsetAngstrom: number;
+  uncertaintyAngstrom: number;
+  depth: number;
+  significance: number;
+}
+
+/**
+ * The zero-point offset measured for one spectrum, and what was done.
+ *
+ * The offset is the error-weighted mean of measured minus rest wavelength
+ * over the lines found. The pipeline shifts the spectrum's wavelengths by it
+ * only when at least two lines agree with each other within their errors.
+ */
+export interface WavelengthZeroPointRecord {
+  offsetAngstrom?: number | null;
+  uncertaintyAngstrom?: number | null;
+  lineCount?: number;
+  chiSquare?: number | null;
+  agreementPValue?: number | null;
+  isApplied?: boolean;
+  zeroOrderSaturatedPixelFraction?: number | null;
+  isZeroOrderSaturated?: boolean | null;
+  lines?: WavelengthZeroPointLine[];
+}
+
+/**
+ * How well the wavelength scale held across the spectra of a run.
+ *
+ * Built from the pre-processing checkpoint of each spectrum. It counts only
+ * spectra with a measured offset.
+ */
+export interface WavelengthScaleSummary {
+  spectrumCount: number;
+  appliedCount: number;
+  rmsBeforeCorrectionAngstrom: number;
+  rmsAfterCorrectionAngstrom: number;
+  offsetSaturationCorrelation?: number | null;
+  correlationSpectrumCount?: number;
 }
 
 /**
@@ -1960,6 +2011,7 @@ export interface SpectroscopyPipelineQualityMetrics {
   flaggedSpectralClassifications?: SpectralClassificationConcern[];
   stageQualitySummary?: StageQualityRollup[] | null;
   gaiaXpSummary?: GaiaXpRunSummary | null;
+  wavelengthScaleSummary?: WavelengthScaleSummary | null;
 }
 
 /**

@@ -74,12 +74,19 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_co
     apply_quantum_efficiency_correction,
     curve_from_profile_record,
 )
-from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import load_line_spread_profile
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+    load_line_spread_profile,
+    resolve_resolution_element_angstrom,
+)
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectroscopy_instrument import (
     SpectroscopyInstrument,
 )
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_calibrator import SpectrumCalibrator
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point import (
+    measure_wavelength_zero_point,
+    shift_wavelengths,
+)
 from astrometricslib.pipelines.spectroscopy.processing.assess_processing_quality import (
     assess_processing_quality,
 )
@@ -1239,6 +1246,22 @@ class SpectroscopyPipeline:
     ) -> None:
         """Copy a single star's extraction result onto its `StellarObject`.
 
+        The steps run in this order, because each one reads the wavelengths
+        the one before it left:
+
+        1. Shift each wavelength back for atmospheric differential
+           refraction, when the site, WCS and exposure time are known.
+        2. Measure the wavelength zero point from known lines on the
+           refraction-corrected scale and, when at least two lines agree,
+           shift the wavelengths by it.
+        3. Correct for the sensor's quantum efficiency (QE).
+        4. Remove the instrument response, then rescale for the airmass.
+        5. Classify the spectrum and build the four quality checkpoints.
+
+        Steps 3 and 4 depend on wavelength, which is why steps 1 and 2 come
+        first. Step 1 comes before step 2 so the zero point measures only
+        the constant offset left after refraction.
+
         "Quantum Efficiency" (QE) corrects for the fact that camera
         sensors see some colors of light better than others. If we
         know the camera's exact QE curve, we fix the data here. If we
@@ -1254,16 +1277,35 @@ class SpectroscopyPipeline:
             dispersion_angle_degrees=result["detected_angle"],
         )
 
-        # Atmospheric differential refraction (DAR). The wavelength scale is
-        # already computed (`_process_single_star` calibrated every sample
-        # from its distance to the zero order). The air has displaced each
-        # wavelength's light along the trail, so each sample's wavelength is
-        # shifted back here, before every step below that reads a wavelength:
-        # the QE correction, the instrument response and the airmass
-        # correction. `result["wavelengths"]` keeps the unshifted scale.
-        corrected_wavelengths, differential_refraction = self._correct_differential_refraction(
+        # Atmospheric differential refraction (DAR) comes first. The
+        # wavelength scale is already computed (`_process_single_star`
+        # calibrated every sample from its distance to the zero order). The
+        # air has displaced each wavelength's light along the trail, by an
+        # amount that changes with wavelength, so each sample's wavelength is
+        # shifted back here. `result["wavelengths"]` keeps the unshifted scale.
+        refraction_corrected_angstrom, differential_refraction = self._correct_differential_refraction(
             result, image, dispersion_angle
         )
+
+        # The wavelength zero point comes next, measured on the
+        # refraction-corrected scale, so it picks up only the constant offset
+        # that is left (for example from a misplaced zero-order centroid) and
+        # does not remove the refraction shift a second time. The
+        # quantum-efficiency, instrument-response and extinction corrections
+        # below all depend on wavelength, so each must see the corrected one.
+        # A shift measured from known lines is removed only when at least two
+        # lines agree (see `pre_processing.wavelength_zero_point`).
+        blur_angstrom, _is_blur_measured = resolve_resolution_element_angstrom(
+            refraction_corrected_angstrom, result.get("trail_width_px")
+        )
+        zero_point = measure_wavelength_zero_point(
+            refraction_corrected_angstrom,
+            np.array(intensities, dtype=float),
+            blur_angstrom,
+            self.line_spread_profile,
+            result.get("zero_order_saturated_pixel_fraction"),
+        )
+        corrected_wavelengths = shift_wavelengths(refraction_corrected_angstrom, zero_point)
         wavelengths_angstrom = corrected_wavelengths.tolist()
 
         quantum_efficiency_corrected_intensities = None
@@ -1353,7 +1395,7 @@ class SpectroscopyPipeline:
                 frame_check=result.get("frame_check"),
                 differential_refraction=differential_refraction,
             ),
-            input_quality_checkpoint(input_quality),
+            input_quality_checkpoint(input_quality, zero_point),
             assess_processing_quality(
                 classification=classification,
                 features=probable_spectral_features,
@@ -1408,6 +1450,7 @@ class SpectroscopyPipeline:
             input_quality=input_quality,
             output_quality=output_quality,
             stage_quality=stage_quality,
+            wavelength_zero_point=zero_point,
             extraction_diagnostics=(
                 SpectralExtractionDiagnostics.model_validate(result["extraction_diagnostics"])
                 if result.get("extraction_diagnostics") is not None

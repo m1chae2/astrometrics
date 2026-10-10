@@ -38,6 +38,9 @@ from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
     stage_quality_rows,
     summarize_stage_quality,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
+    summarize_wavelength_scale,
+)
 from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
     record_and_flag_spectroscopy_stars,
 )
@@ -491,6 +494,8 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
         median_trail_width_px = statistics.median(all_trail_widths) if trail_width_profile_available else None
 
         flagged_spectral_classifications = result.payload["flagged_spectral_classifications"]
+        quality_rows = stage_quality_rows(stellar_objects)
+        wavelength_scale = summarize_wavelength_scale(quality_rows)
         poor_match_count = sum(
             1 for concern in flagged_spectral_classifications if "poor_match" in concern["reason"]
         )
@@ -513,12 +518,16 @@ class SpectroscopyPipelineAdapter(AnalysisPipeline):
                 poor_match_classification_count=poor_match_count,
                 ambiguous_classification_count=ambiguous_count,
                 flagged_spectral_classifications=flagged_spectral_classifications,
-                stage_quality_summary=summarize_stage_quality(stage_quality_rows(stellar_objects)) or None,
+                stage_quality_summary=summarize_stage_quality(quality_rows) or None,
                 gaia_xp_summary=summarize_gaia_xp(gaia_rows),
+                wavelength_scale_summary=wavelength_scale,
             ),
         )
         for gate in spectroscopy_run_gates(
-            spectrum_facts(stellar_objects), zero_order_fractions, flagged_spectral_classifications
+            spectrum_facts(stellar_objects),
+            zero_order_fractions,
+            flagged_spectral_classifications,
+            wavelength_scale,
         ):
             summary.record_gate(gate)
         summary.record_gate(gaia_xp_gate(gaia_rows))

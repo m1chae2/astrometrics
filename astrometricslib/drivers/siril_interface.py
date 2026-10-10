@@ -7,19 +7,36 @@ retrieve the resulting stacked image.
 
 import atexit
 import contextlib
+import contextvars
 import logging
 import os
 import queue
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import threading
 import time
 import weakref
-from collections.abc import Iterator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from astrometricslib.drivers.calibration_library import (
+    CALIBRATION_MATCH_BLOCKING_FLAGS_KEY,
+    CalibrationSelection,
+    format_binning,
+    header_binning,
+)
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.drivers.siril_output_parsing import (
+    parse_negative_pixel_percentage,
+    parse_registration_totals,
+    parse_stacked_image_count,
+)
+from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
+from astrometricslib.foundation.jobs.runner import capture_job_logs
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -42,6 +59,43 @@ _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 # in parallel to save time.
 SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
 
+# The two ways to find the stars that line spectroscopy frames up with one
+# another, keyed by the name `process_target` takes in
+# `spectral_star_detection`. Siril finds stars in every frame and matches
+# them against a reference frame, so the number of stars found in the
+# reference decides which frames can be matched at all.
+#
+# "standard" is what the pipeline used until 2026-09-19 (it is also the line
+# every other stack uses). On the Vega spectroscopy session (140 frames,
+# 0.5-5 s, 2026-05-24) it found 19 stars in the reference frame, matched 16
+# of them in every frame, and registered all 140 frames (the 2026-08-25
+# stack, logs/stack_Vega.log).
+#
+# "relaxed" accepts less round and smaller stars, to find more of them in
+# crowded fields. It was made the only setting on 2026-09-19. On the same
+# Vega frames it found 76 "stars" in the reference frame (a mix of real stars
+# and pieces of dispersed trails, with a typical size of 27 px against 3.6 px
+# for the standard setting) and could not match 46 of the 140 frames; the
+# frames it lost were mostly the short ones, which show fewer stars. It was
+# added for fields with many stars (the comment it came with mentions 99-125
+# stars per frame), and that case has not been re-tested here; that is why it
+# is kept as a fallback (see `stack_frames`) instead of removed.
+SPECTRAL_STAR_DETECTION_COMMANDS = {
+    "standard": "setfindstar -relax=on",
+    "relaxed": "setfindstar -relax=on -roundness=0.15 -radius=3",
+}
+
+# Siril's own two per-frame `stack -weight=` modes ("nbstars" and "wfwhm")
+# both read numbers that only exist because Siril's own registration step
+# measured them for every frame. The phase-correlation path never runs
+# that step (see `_stack_phase_correlation_aligned_spectral_frames`), so
+# asking for either one aborts the stack outright with "Sequence does not
+# have registration info" -- confirmed against a real Albireo run, where
+# the configured default of "wfwhm" did exactly that. "noise" is measured
+# straight from each frame's own pixels and needs no registration data.
+WEIGHT_MODES_NEEDING_REGISTRATION_DATA = frozenset({"nbstars", "wfwhm"})
+PHASE_CORRELATION_FALLBACK_WEIGHT_MODE = "noise"
+
 # How long send_commands waits for one Siril command to report its own
 # completion before giving up on the whole script. This is a deadlock
 # guard, not a per-command budget: it has to exceed the slowest single
@@ -60,6 +114,18 @@ SIRIL_COMMAND_TIMEOUT_SECONDS = 300
 # not the run itself: SIRIL_COMMAND_TIMEOUT_SECONDS above covers a
 # Siril that connects but then hangs mid-command.
 SIRIL_PIPE_CONNECT_TIMEOUT_SECONDS = 30
+
+
+# The commands that start every Siril script this module writes.
+# ``setext fits`` makes Siril save FITS files, not another format.
+# ``set32bits`` makes Siril save 32-bit floating-point pixels. Without it,
+# Siril uses the bit depth in the user's own preferences. If that is 16-bit,
+# Siril rounds the normalised stack to 65536 levels. Faint signal then loses
+# precision, and the stack no longer scales linearly with the light collected
+# after ``-norm=addscale``. Both commands last for the whole Siril session,
+# so one line at the top of a script covers every ``convert``, ``calibrate``
+# and ``stack`` after it. Siril 1.2 and later have ``set32bits``.
+SIRIL_SCRIPT_PREAMBLE = ("setext fits", "set32bits")
 
 
 # Master calibration frames (bias, dark, flat) take a long time to build.
@@ -148,7 +214,261 @@ _CALIBRATION_MASTER_KINDS = (
 )
 
 
-def _calibration_source_fingerprint(frames_directory: str) -> str | None:
+# The key in `ImageProcessing.last_run_diagnostics` that holds the blocking
+# calibration flags, one sentence each. The stacking pipeline reads it (see
+# `calibration_gates` in `pipelines/stacking/pre_processing/`
+# `assess_input_quality.py`) and fails its ``calibration_frame_count`` gate
+# when the list is not empty.
+CALIBRATION_BLOCKING_FLAGS_KEY = "calibration_blocking_flags"
+
+# What a master built from too few frames costs, for each master kind. It ends
+# the sentence that `calibration_count_flags` writes.
+_SHORT_MASTER_CONSEQUENCES = {
+    "bias": "the master bias keeps the read noise of its few frames and any cosmic ray hit in them",
+    "dark": "the master dark keeps the noise of its few frames and any cosmic ray hit in them",
+    "flat": "the master flat copies the noise of its few frames into every light frame",
+}
+
+
+def calibration_count_flags(
+    num_biases: int, num_darks: int, num_flats: int, minimum_frames: int
+) -> list[str]:
+    """Find the masters that would be built from too few frames.
+
+    A master is the combination of its source frames. The stacker averages the
+    frames and rejects outlier pixel values (such as cosmic ray hits), and both
+    steps need several frames. A master built from fewer frames than
+    `minimum_frames` is still built, because the observatory's library can
+    legitimately hold a single flat or dark. The shortfall is recorded
+    instead, as a blocking flag: the stacking pipeline reads it, fails its
+    ``calibration_frame_count`` gate and flags the stack, so the stack is not
+    mistaken for a fully calibrated one. A master with no source frames at all
+    is not built and is not flagged here.
+
+    Parameters
+    ----------
+    num_biases : `int`
+        How many bias frames are staged.
+    num_darks : `int`
+        How many dark frames are staged.
+    num_flats : `int`
+        How many flat frames are staged.
+    minimum_frames : `int`
+        The fewest frames a master should be built from
+        (`AppConfiguration.get_minimum_calibration_frames`).
+
+    Returns
+    -------
+    flags : `list` [`str`]
+        One plain sentence for each master built from fewer than
+        `minimum_frames` frames, in the order bias, dark, flat. Empty when
+        every master that is built has enough frames.
+    """
+    flags = []
+    for kind, count in (("bias", num_biases), ("dark", num_darks), ("flat", num_flats)):
+        if 0 < count < minimum_frames:
+            flags.append(
+                f"{kind} master built from {count} frame(s), fewer than the minimum of "
+                f"{minimum_frames}: {_SHORT_MASTER_CONSEQUENCES[kind]}"
+            )
+    return flags
+
+
+def build_bias_master_commands(num_biases: int) -> list[str]:
+    """Write the Siril commands that build the master bias.
+
+    One bias frame is used as it is, because Siril's ``convert`` writes no
+    sequence for a single frame and there is nothing to reject. Several are
+    stacked with sigma rejection (``rej 3 3``), without normalisation, since
+    a bias level is an absolute number. A master from fewer frames than the
+    configured minimum is reported by `calibration_count_flags`, not changed
+    here.
+
+    Parameters
+    ----------
+    num_biases : `int`
+        How many bias frames are staged. Must be at least 1.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the biases
+        folder and ending with the master saved as ``bias_stacked``.
+    """
+    if num_biases == 1:
+        return [
+            "convert bias -out=../process",
+            "cd ../process",
+            "load bias_00001.fits",
+            "save bias_stacked",
+        ]
+    return [
+        "convert bias -out=../process -fitseq",
+        "cd ../process",
+        "stack bias rej 3 3 -nonorm -out=bias_stacked",
+    ]
+
+
+def build_dark_master_commands(num_darks: int) -> list[str]:
+    """Write the Siril commands that build the master dark.
+
+    One dark frame is used as it is, with no rejection, because Siril's
+    ``convert`` writes no sequence for a single frame and there is nothing to
+    compare it with. Several are stacked with sigma rejection (``rej 3 3``),
+    without normalisation, since dark current is an absolute signal. A master
+    from fewer frames than the configured minimum is reported by
+    `calibration_count_flags`, not changed here.
+
+    Parameters
+    ----------
+    num_darks : `int`
+        How many dark frames are staged. Must be at least 1.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the darks
+        folder and ending with the master saved as ``dark_stacked``.
+    """
+    if num_darks == 1:
+        return [
+            "convert dark -out=../process",
+            "cd ../process",
+            "load dark_00001.fits",
+            "save dark_stacked",
+        ]
+    return [
+        "convert dark -out=../process -fitseq",
+        "cd ../process",
+        "stack dark rej 3 3 -nonorm -out=dark_stacked",
+    ]
+
+
+def build_flat_master_commands(
+    num_flats: int, has_bias: bool, color_filter_array_flags: str, smoothing_sigma: float | None
+) -> list[str]:
+    """Write the Siril commands that build the master flat.
+
+    The bias master is subtracted from the flats whenever there is one, for a
+    single flat as well as for several. A flat frame holds the bias level (the
+    constant offset the camera adds to every pixel) on top of the light that
+    reached the sensor. Dividing a light frame by a flat that still holds a
+    bias pedestal divides by a number that is too large and too flat. The
+    vignette (the dimming toward the corners) then looks shallower than it
+    is, and the lights are under-corrected. A lone flat needs this as much as
+    a set of flats does.
+
+    Several flats are converted to one sequence, calibrated with the bias and
+    stacked with rejection. Siril's ``convert`` writes no sequence for a
+    single frame, so a lone flat is calibrated with ``calibrate_single``,
+    which works on one file and writes it with the prefix ``pp_``. Without a
+    bias master, a lone flat is used as it is. A flat set too noisy to use as
+    it is gets a Gaussian blur (see `assess_staged_flats`). Siril's ``gauss``
+    mirrors the image at its border. The master flat's own noise is white, so
+    the blur removes it and keeps the vignette and dust shadows.
+
+    Parameters
+    ----------
+    num_flats : `int`
+        How many flat frames are staged.
+    has_bias : `bool`
+        Whether a master bias is available to subtract from the flats.
+    color_filter_array_flags : `str`
+        The colour-sensor flags for ``calibrate``, or an empty string.
+    smoothing_sigma : `float` or `None`
+        The Gaussian width in pixels, or `None` for no blur.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the flats
+        folder and ending with the master saved as ``flat_stacked``.
+    """
+    smoothing = [f"gauss {smoothing_sigma:.4f}"] if smoothing_sigma else []
+    if num_flats == 1:
+        commands = ["convert flat -out=../process", "cd ../process"]
+        if has_bias:
+            commands += [
+                f"calibrate_single flat_00001.fits -bias=bias_stacked{color_filter_array_flags}",
+                "load pp_flat_00001.fits",
+            ]
+        else:
+            commands.append("load flat_00001.fits")
+        return [*commands, *smoothing, "save flat_stacked"]
+    commands = [
+        "convert flat -out=../process -fitseq",
+        "cd ../process",
+        f"calibrate flat {'-bias=bias_stacked' if has_bias else ''}{color_filter_array_flags}",
+        "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
+    ]
+    if smoothing:
+        commands += ["load flat_stacked", *smoothing, "save flat_stacked"]
+    return commands
+
+
+def build_single_light_commands(
+    dark_flag: str, flat_flag: str, bias_flag: str, color_filter_array_flags: str, debayer_flag: str
+) -> list[str]:
+    """Write the Siril commands for a stack of exactly one light frame.
+
+    A single light has nothing to register or reject against, but it still
+    needs the same calibration as every other light: the dark removes the
+    sensor's thermal signal and bias, and the flat removes vignetting and
+    dust shadows. Siril's ``convert`` writes no sequence for one frame, so the
+    sequence command ``calibrate`` cannot be used. ``calibrate_single`` takes
+    the same options for one file and writes it with the prefix ``pp_``. When
+    no calibration master exists, there is nothing to apply and the frame is
+    saved as it is.
+
+    Parameters
+    ----------
+    dark_flag, flat_flag, bias_flag : `str`
+        The ``calibrate`` options for each master, or an empty string when it
+        is not applied (see `light_calibration_flags`).
+    color_filter_array_flags : `str`
+        The colour-sensor flags for ``calibrate``, or an empty string.
+    debayer_flag : `str`
+        ``" -debayer"`` for a colour sensor, otherwise an empty string.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The commands, one per entry, starting after ``cd`` into the lights
+        folder and ending with the frame saved as ``result_stacked``.
+    """
+    commands = ["convert light_source -out=../process", "cd ../process"]
+    if dark_flag or flat_flag or bias_flag:
+        options = " ".join(flag for flag in (dark_flag, flat_flag, bias_flag) if flag)
+        commands += [
+            f"calibrate_single light_source_00001.fits {options}{color_filter_array_flags}{debayer_flag}",
+            "load pp_light_source_00001.fits",
+        ]
+    else:
+        commands.append("load light_source_00001.fits")
+    return [*commands, "save result_stacked"]
+
+
+def _master_recipe(kind: str) -> str:
+    """Name how a master of this kind is built, for its cache key.
+
+    Parameters
+    ----------
+    kind : `str`
+        The master kind: "bias", "dark" or "flat".
+
+    Returns
+    -------
+    recipe : `str`
+        The recipe name. Empty for kinds built the standard way.
+    """
+    if kind != "flat":
+        return ""
+    from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import FLAT_MASTER_RECIPE
+
+    return FLAT_MASTER_RECIPE
+
+
+def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
     """Fingerprint the calibration frames staged in a directory.
 
     Each staged frame is a symlink into the shared calibration library,
@@ -158,6 +478,10 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
     ----------
     frames_directory : `str`
         Staging directory holding one master's source frames.
+    recipe : `str`, optional
+        A name for how the master is built from the frames. It is part of
+        the fingerprint, so a master built a different way from the same
+        frames is not mistaken for this one.
 
     Returns
     -------
@@ -175,6 +499,7 @@ def _calibration_source_fingerprint(frames_directory: str) -> str | None:
         return None
 
     digest = hashlib.sha256()
+    digest.update(recipe.encode("utf-8"))
     for frame_name in frame_names:
         frame_path = os.path.join(frames_directory, frame_name)
         try:
@@ -239,7 +564,7 @@ def _record_siril_lock_wait(wait_seconds: float) -> None:
 @contextlib.contextmanager
 def siril_process_lock(
     job_logger: logging.Logger | None = None, max_concurrent_runs: int | None = None
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold one of a limited number of machine-wide Siril slots.
 
     Siril is very demanding on the CPU. If too many instances are run at
@@ -268,17 +593,17 @@ def siril_process_lock(
     `None`
         Control returns to the caller holding a slot.
     """
-    from datastore.process_locks import acquire_resource_slot
+    from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
     slot_count = max_concurrent_runs
     configuration = None
     if slot_count is None:
         try:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             configuration = get_configuration()
             slot_count = configuration.get_max_concurrent_jobs()
-        except Exception as configuration_error:
+        except (ConfigurationError, OSError, ValueError) as configuration_error:
             # A missing configuration must not make Siril unrunnable;
             # one slot is the safe reading, matching the old behaviour.
             logger.debug("Could not read max_concurrent_jobs, using 1 slot: %s", configuration_error)
@@ -385,11 +710,9 @@ def _open_pipe_or_die(
 
     Raises
     ------
-    RuntimeError
-        If `process` exits before the open completes.
-    TimeoutError
-        If `process` is still running but the open does not complete
-        within `timeout` seconds.
+    ExternalServiceError
+        If `process` exits before the open completes, or if it is still
+        running but the open does not complete within `timeout` seconds.
     """
     outcome: dict[str, Any] = {}
 
@@ -411,12 +734,12 @@ def _open_pipe_or_die(
             # going to open the other end of `path`.
             opener.join(timeout=0.5)
             if opener.is_alive():
-                raise RuntimeError(
+                raise ExternalServiceError(
                     f"Siril exited (return code {process.returncode}) before opening {path!r}."
                 )
             break
         if time.monotonic() > deadline:
-            raise TimeoutError(f"Timed out waiting for Siril to open {path!r}.")
+            raise ExternalServiceError(f"Timed out waiting for Siril to open {path!r}.")
         opener.join(timeout=0.2)
 
     if "error" in outcome:
@@ -441,6 +764,178 @@ def _cleanup_all_active_image_processing_instances() -> None:
 atexit.register(_cleanup_all_active_image_processing_instances)
 
 
+def work_directory_name(target_id: str, output_file: str | None) -> str:
+    """Name the Siril work folder (and default log) of one stacking run.
+
+    The folder used to be named after the target alone, so two stacks of the
+    same target running at once (its luminance and spectral stacks, or the
+    exposure groups of one stack) shared one folder, and each run deleted the
+    other's frames when it set up. Adding the name of the output file gives
+    each run its own.
+
+    Parameters
+    ----------
+    target_id : `str`
+        The target's name.
+    output_file : `str` or `None`
+        The file the run will write, or `None` to name the folder after the
+        target alone.
+
+    Returns
+    -------
+    name : `str`
+        The target's name with spaces as underscores, followed by ``__`` and
+        the output file's name without its extension when there is one.
+    """
+    name = target_id.replace(" ", "_")
+    if not output_file:
+        return name
+    stem = os.path.splitext(os.path.basename(output_file))[0].replace(" ", "_")
+    return f"{name}__{stem}"
+
+
+def dominant_exposure(frames: list[Any]) -> str:
+    """Find the exposure length that most of a batch of frames share.
+
+    The dark master is chosen by exposure length, so a batch is calibrated with
+    the dark of its most common length. Before this, the dark of the *first*
+    frame's length was applied to every frame, which put a 600 s dark on 300 s
+    frames in the NGC 2244 and NGC 2903 sessions (2026-01-17/18) and no dark at
+    all on the NGC 1893 session, whose first frame had no dark.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records or dictionaries of them, with an ``exposure``.
+
+    Returns
+    -------
+    exposure : `str`
+        The most common exposure, as it was written on the frames (ties go to
+        the one that appears first); ``"0"`` when no frame has one.
+    """
+    counts: dict[str, int] = {}
+    for frame in frames:
+        value = frame.get("exposure") if isinstance(frame, dict) else getattr(frame, "exposure", None)
+        if value is None:
+            continue
+        key = str(value)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return "0"
+    return max(counts, key=counts.__getitem__)
+
+
+def representative_light_temperature_c(frames: list[Any]) -> float | None:
+    """Find a light-frame batch's mean sensor temperature, for dark matching.
+
+    The calibration library files darks by temperature slot and picks the
+    slot nearest this value (see `CalibrationLibrary.select_dark_frames`), so
+    this is where a batch's actual sensor temperature enters the match.
+
+    A dict frame here is always a plain ``model_dump()`` (see
+    `_stack_one_batch`), which uses the Python field name
+    (``sensor_temperature_c``), not the camelCase JSON alias
+    (``sensorTemperatureC``) -- confirmed against a real incident where
+    checking the alias silently found no temperature on every dict
+    frame, so Arcturus's dark-temperature mismatch (a dark master at
+    ~0C applied to light frames that drifted from -2.9C to -10.7C,
+    which Siril reported as 57-64% negative pixels after dark
+    subtraction) went undetected even after this check was added.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records or dictionaries of them, with a
+        ``sensor_temperature_c``.
+
+    Returns
+    -------
+    mean_temperature_c : `float` or `None`
+        The mean of every frame's recorded temperature, or `None` if
+        none of them have one.
+    """
+    temperatures = [
+        (
+            frame.get("sensor_temperature_c")
+            if isinstance(frame, dict)
+            else getattr(frame, "sensor_temperature_c", None)
+        )
+        for frame in frames
+    ]
+    temperatures = [t for t in temperatures if t is not None]
+    return sum(temperatures) / len(temperatures) if temperatures else None
+
+
+def representative_light_binning(frames: list[Any], light_paths: list[str]) -> str:
+    """Find the binning a batch of light frames was taken at, for matching.
+
+    The calibration library files frames by binning, and a frame binned
+    differently can never calibrate the lights. The binning is read from the
+    header of the first readable light (its ``XBINNING`` and ``YBINNING``
+    cards). One light speaks for the batch, because lights binned differently
+    have different image sizes and the stacker keeps only the most common
+    size. If no header can be read, the binning recorded on the frame
+    records is used (the most common value; the width factor stands for
+    both axes), and without one, no binning (``"1x1"``).
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records or dictionaries of them, with a ``binning``.
+    light_paths : `list` [`str`]
+        The light frame paths that can be read, in the order to try them.
+
+    Returns
+    -------
+    binning : `str`
+        The binning as text, such as ``"2x2"``.
+    """
+    for path in light_paths:
+        try:
+            return header_binning(read_header(path))
+        except FITS_READ_ERRORS:
+            continue
+    counts: dict[int, int] = {}
+    for frame in frames:
+        value = frame.get("binning") if isinstance(frame, dict) else getattr(frame, "binning", None)
+        if value is not None:
+            counts[int(value)] = counts.get(int(value), 0) + 1
+    return format_binning(max(counts, key=counts.__getitem__)) if counts else format_binning()
+
+
+def light_calibration_flags(num_darks: int, num_flats: int, num_biases: int) -> tuple[str, str, str]:
+    """Choose which calibration masters Siril applies to the light frames.
+
+    A dark master is made from raw dark frames, so it already holds the
+    camera's bias level. Siril subtracts a bias master as well when both are
+    given, which removes the bias twice: on the Nikon D5300 (bias 598, a 30 s
+    light of about 672) that left every pixel below zero and the stack was
+    blank (see `logs/stack_exposure_groups_20260920.json`). So a bias master is
+    applied to the lights only when there is no dark master. Flats are
+    calibrated with the bias master in their own command and are not affected.
+
+    Parameters
+    ----------
+    num_darks : `int`
+        How many dark frames were found for the lights' exposure.
+    num_flats : `int`
+        How many flat frames were found.
+    num_biases : `int`
+        How many bias frames were found.
+
+    Returns
+    -------
+    dark_flag, flat_flag, bias_flag : `str`
+        The ``calibrate`` options for each master, or an empty string when it
+        is not applied.
+    """
+    dark_flag = "-dark=dark_stacked" if num_darks > 0 else ""
+    flat_flag = "-flat=flat_stacked" if num_flats > 0 else ""
+    bias_flag = "-bias=bias_stacked" if num_biases > 0 and num_darks == 0 else ""
+    return dark_flag, flat_flag, bias_flag
+
+
 class ImageProcessing:
     """Drive Siril to calibrate, register, and stack target frames.
 
@@ -449,10 +944,10 @@ class ImageProcessing:
     image (and optional diagnostics) back out to the target library.
     """
 
-    def __init__(self, config=None, calibration_library=None, job_repository=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None, calibration_library=None, job_repository=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize the ImageProcessing class with optional dependencies."""
         from astrometricslib.drivers.calibration_library import CalibrationLibrary
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         self.config = config or get_configuration()
         if calibration_library is None:
@@ -474,6 +969,8 @@ class ImageProcessing:
         self.last_run_diagnostics: dict[str, Any] = {
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
+            CALIBRATION_BLOCKING_FLAGS_KEY: [],
+            CALIBRATION_MATCH_BLOCKING_FLAGS_KEY: [],
         }
         _active_image_processing_instances.add(self)
 
@@ -504,15 +1001,15 @@ class ImageProcessing:
             pgid = os.getpgid(process.pid)
             try:
                 os.killpg(pgid, signal.SIGTERM)
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("SIGTERM to process group %s failed (likely already exited): %s", pgid, exc)
             time.sleep(0.2)
             try:
                 os.killpg(pgid, signal.SIGKILL)
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("SIGKILL to process group %s failed (likely already exited): %s", pgid, exc)
             process.wait(timeout=2)
-        except Exception:
+        except OSError, subprocess.TimeoutExpired:
             log("Process group termination completed.")
 
         if workdir and os.path.exists(workdir):
@@ -527,7 +1024,7 @@ class ImageProcessing:
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
-                    except Exception as exc:
+                    except (OSError, subprocess.SubprocessError) as exc:
                         logger.debug("fuser cleanup failed for pipe '%s': %s", pipe, exc)
                 # Safety net for sandboxed processes linked to workdir pipes
                 subprocess.run(
@@ -535,7 +1032,7 @@ class ImageProcessing:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-            except Exception as exc:
+            except (OSError, subprocess.SubprocessError) as exc:
                 logger.debug("Failed to force-kill lingering Siril processes for '%s': %s", workdir, exc)
 
     def _is_fits_file_readable(self, path: str) -> bool:
@@ -562,7 +1059,7 @@ class ImageProcessing:
                 if hdu.data is None:
                     return False
             return True
-        except Exception:
+        except FITS_READ_ERRORS:
             return False
 
     def restore_cached_calibration_masters(
@@ -592,7 +1089,9 @@ class ImageProcessing:
         os.makedirs(process_directory, exist_ok=True)
 
         for kind, frames_subdirectory, master_filename in _CALIBRATION_MASTER_KINDS:
-            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            fingerprint = _calibration_source_fingerprint(
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+            )
             if fingerprint is None:
                 continue
             cached_master_path = os.path.join(
@@ -610,19 +1109,67 @@ class ImageProcessing:
                 logger.debug("Could not restore cached %s master: %s", kind, copy_error)
                 continue
             restored_kinds.add(kind)
-            if job_logger:
-                job_logger.info(f"Reusing cached master {kind} frame (fingerprint {fingerprint[:12]}).")
-            # Also emitted on this module's own logger, which propagates
-            # to the "astrometricslib" package logger that carries the
-            # database handler. `process_target`'s job_logger sets
-            # propagate=False and only gains a DbLogHandler when a job
-            # repository was supplied, which the batch path does not do,
-            # so hits were recorded solely in per-target file logs and a
-            # run appeared to have zero cache reuse while actually
-            # serving 59 masters from cache.
-            logger.info("Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
+            (job_logger or logger).info(
+                "Reusing cached master %s frame (fingerprint %s).", kind, fingerprint[:12]
+            )
 
         return restored_kinds
+
+    def assess_staged_flats(
+        self,
+        target_folder: str,
+        uses_color_filter_array: bool,
+        job_logger: logging.Logger | None = None,
+        camera: str | None = None,
+    ) -> Any:
+        """Measure the staged flat frames and decide whether to smooth them.
+
+        The master flat's noise is copied into every calibrated light, and
+        stacking does not average it away unless the frames were dithered
+        (see `stacking/pre_processing/flat_calibration.py`). When the
+        master would be noisier than the limit set there, the assessment
+        carries the Gaussian width to blur it with. The Siril script
+        applies the blur (its ``gauss`` command) to the master flat it
+        builds.
+
+        A colour (Bayer) sensor's flat is measured but never smoothed,
+        because blurring the mosaic would mix its colours.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            This run's staging directory.
+        uses_color_filter_array : `bool`
+            Whether the lights come from a colour sensor.
+        job_logger : `logging.Logger`, optional
+            Logger for the findings.
+        camera : `str`, optional
+            The name of the camera that took the flats. Its profile sets
+            the full-scale value the flat brightness is judged against.
+            Without it, the assessment guesses the scale from the pixels.
+
+        Returns
+        -------
+        assessment : `FlatAssessment`
+            What was measured about the flat set. `smoothing_sigma_pixels` is
+            `None` when no smoothing is to be applied.
+        """
+        import dataclasses
+
+        from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
+
+        flat_directory = os.path.join(target_folder, "flats")
+        flat_paths = sorted(os.path.join(flat_directory, name) for name in os.listdir(flat_directory))
+        assessment = assess_flats(flat_paths, camera=camera)
+        for issue in assessment.issues:
+            (job_logger or logger).warning("Flat calibration: %s", issue)
+        if assessment.needs_smoothing and uses_color_filter_array:
+            note = "not smoothed: blurring a colour sensor's flat would mix its colours"
+            (job_logger or logger).warning("Flat calibration: %s", note)
+            return dataclasses.replace(
+                assessment, smoothing_sigma_pixels=None, issues=[*assessment.issues, note]
+            )
+        return assessment
 
     def store_calibration_masters_in_cache(
         self, target_folder: str, job_logger: logging.Logger | None = None
@@ -651,7 +1198,9 @@ class ImageProcessing:
             built_master_path = os.path.join(target_folder, "process", master_filename)
             if not os.path.exists(built_master_path):
                 continue
-            fingerprint = _calibration_source_fingerprint(os.path.join(target_folder, frames_subdirectory))
+            fingerprint = _calibration_source_fingerprint(
+                os.path.join(target_folder, frames_subdirectory), _master_recipe(kind)
+            )
             if fingerprint is None:
                 continue
             cached_master_path = os.path.join(cache_directory, f"{kind}_{fingerprint}.fits")
@@ -672,7 +1221,49 @@ class ImageProcessing:
                         os.unlink(partial_path)
                 continue
             if job_logger:
-                job_logger.info(f"Cached master {kind} frame (fingerprint {fingerprint[:12]}).")
+                job_logger.info("Cached master %s frame (fingerprint %s).", kind, fingerprint[:12])
+
+    def _record_calibration_selection(
+        self,
+        selection: CalibrationSelection,
+        kind: str,
+        log: Callable[[str], None],
+        warn: Callable[[str], None],
+    ) -> list[str]:
+        """Copy a calibration selection's flags into the run's diagnostics.
+
+        A soft flag (the library used frames of another gain, offset or
+        temperature because nothing closer exists) goes into
+        ``calibration_mismatch_flags``, and the frames are still applied. A
+        blocking flag (the frames could never calibrate the lights, such as a
+        binning mismatch) goes into ``calibration_match_blocking_flags``, and
+        the selection has no frames. The stacking pipeline reads both lists
+        (see `calibration_gates` in `pipelines/stacking/pre_processing/`
+        `assess_input_quality.py`) and fails its ``calibration_metadata`` gate.
+
+        Parameters
+        ----------
+        selection : `CalibrationSelection`
+            What the library chose for this kind of frame.
+        kind : `str`
+            ``"dark"``, ``"bias"`` or ``"flat"``, for the log lines.
+        log : `Callable` [[`str`], `None`]
+            Writes an information line to the run's log.
+        warn : `Callable` [[`str`], `None`]
+            Writes a warning line to the run's log.
+
+        Returns
+        -------
+        frames : `list` [`str`]
+            The chosen file paths.
+        """
+        for flag in selection.flags:
+            log(f"Calibration metadata mismatch (soft flag, {kind} still applied): {flag}")
+            self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(flag)
+        for flag in selection.blocking_flags:
+            warn(f"Calibration cannot be matched (blocking flag, {kind} not applied): {flag}")
+            self.last_run_diagnostics.setdefault(CALIBRATION_MATCH_BLOCKING_FLAGS_KEY, []).append(flag)
+        return selection.frames
 
     def build_directories(
         self,
@@ -706,6 +1297,7 @@ class ImageProcessing:
             Path to the populated working directory for this target.
         """
         log = job_logger.info if job_logger else logger.info
+        warn = job_logger.warning if job_logger else logger.warning
 
         if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
             f = image_files[0]
@@ -807,7 +1399,7 @@ class ImageProcessing:
                     # for the spectral registration-quality check.
                     self.last_run_diagnostics.setdefault("symlinked_light_paths", []).append(path)
                     light_idx += 1
-                except Exception as e:
+                except OSError as e:
                     log(f"Error symlinking light {path}: {e}")
 
             # Populate calibrations from the first matching frame
@@ -822,79 +1414,40 @@ class ImageProcessing:
                 tel = f.get("telescope") if isinstance(f, dict) else getattr(f, "telescope", "Unknown")
                 cam = f.get("camera") if isinstance(f, dict) else getattr(f, "camera", camera_filter)
                 iso = f.get("iso") if isinstance(f, dict) else getattr(f, "iso", "800")
-                exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
+                offset = f.get("offset") if isinstance(f, dict) else getattr(f, "offset", "0")
+                # The dark frames are chosen by exposure length. Take the
+                # length most of the batch has, not the first frame's: a
+                # batch that holds a few frames of another length (small
+                # exposure groups are folded into their nearest neighbour)
+                # must get the dark of the majority, not of whichever frame
+                # happens to be first.
+                exp = dominant_exposure(matching_frames)
                 filt = f.get("filter") if isinstance(f, dict) else getattr(f, "filter", "None")
 
-                def soft_flag_calibration_mismatch(
-                    master_paths: list[str], master_kind: str, check_exposure: bool
-                ) -> None:
-                    """Log, without blocking, a relaxed-match gain mismatch.
+                light_temperature_c = representative_light_temperature_c(matching_frames)
+                staged_light_paths = sorted(readable_light_paths)
+                light_binning = representative_light_binning(matching_frames, staged_light_paths)
+                first_light = staged_light_paths[0] if staged_light_paths else ""
+                # How the calibration flags name this batch of lights.
+                light_label = (
+                    f"the {len(staged_light_paths)} light frame(s) starting with "
+                    f"{os.path.basename(first_light)}"
+                )
 
-                    Checks whether a relaxed-matched calibration
-                    master's own gain (and, for darks only,
-                    exposure) looks incompatible with the light
-                    frames it'll be applied to.
-
-                    calibration_library.py's get_dark_frames/
-                    get_bias_frames/get_flat_frames are documented
-                    to deliberately accept a
-                    mismatched-gain master over having none at all.
-                    This check doesn't override that: it only
-                    surfaces the mismatch as a soft flag, checked
-                    against the first matched master file as a
-                    low-cost approximation rather than reading every
-                    matched file's header. check_exposure must be
-                    False for bias/flat masters -- their exposure
-                    times are unrelated to the light frames' by
-                    design (bias is near-zero, flats are set by the
-                    flat panel's brightness), so comparing them
-                    against light exposure would flag normal,
-                    correct calibration setups as mismatched.
-                    """
-                    if not master_paths:
-                        return
-                    from astropy.io import fits
-
-                    from astrometricslib.drivers.calibration_library import (
-                        is_calibration_gain_compatible,
-                        is_dark_calibration_metadata_compatible,
-                    )
-
-                    try:
-                        with fits.open(master_paths[0], memmap=False) as hdul:
-                            header = hdul[0].header
-                        master_iso = str(header.get("ISOSPEED", header.get("GAIN", iso)))
-                        master_exp = float(header.get("EXPTIME", exp))
-                    except Exception:
-                        return
-
-                    if check_exposure:
-                        compatible = is_dark_calibration_metadata_compatible(
-                            light_exposure=float(exp),
-                            light_gain=str(iso),
-                            master_exposure=master_exp,
-                            master_gain=master_iso,
-                        )
-                    else:
-                        compatible = is_calibration_gain_compatible(
-                            light_gain=str(iso), master_gain=master_iso
-                        )
-
-                    if not compatible:
-                        exposure_note = (
-                            f" exposure={master_exp}s vs light frames'... exposure={exp}s"
-                            if check_exposure
-                            else ""
-                        )
-                        message = (
-                            f"{master_kind} master '{master_paths[0]}' has gain={master_iso} vs "
-                            f"light frames' gain={iso}.{exposure_note}"
-                        )
-                        log(f"Calibration metadata mismatch (soft flag, master still applied): {message}")
-                        self.last_run_diagnostics.setdefault("calibration_mismatch_flags", []).append(message)
-
-                dark_frame_paths = library.get_dark_frames(camera=cam, iso=iso, exposure=exp)
-                soft_flag_calibration_mismatch(dark_frame_paths, "dark", check_exposure=True)
+                dark_frame_paths = self._record_calibration_selection(
+                    library.select_dark_frames(
+                        camera=cam,
+                        exposure=exp,
+                        iso=iso,
+                        offset=offset,
+                        binning=light_binning,
+                        temperature_c=light_temperature_c,
+                        light_label=light_label,
+                    ),
+                    "dark",
+                    log,
+                    warn,
+                )
                 readable_dark_paths = find_readable_paths(dark_frame_paths)
                 for item in dark_frame_paths:
                     if item not in readable_dark_paths:
@@ -903,11 +1456,17 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "darks", f"dark_{dark_idx:05d}.fits"))
                         dark_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking dark {item}: {e}")
 
-                bias_frame_paths = library.get_bias_frames(camera=cam, iso=iso)
-                soft_flag_calibration_mismatch(bias_frame_paths, "bias", check_exposure=False)
+                bias_frame_paths = self._record_calibration_selection(
+                    library.select_bias_frames(
+                        camera=cam, iso=iso, offset=offset, binning=light_binning, light_label=light_label
+                    ),
+                    "bias",
+                    log,
+                    warn,
+                )
                 readable_bias_paths = find_readable_paths(bias_frame_paths)
                 for item in bias_frame_paths:
                     if item not in readable_bias_paths:
@@ -916,13 +1475,23 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "biases", f"bias_{bias_idx:05d}.fits"))
                         bias_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking bias {item}: {e}")
 
-                flat_frame_paths = library.get_flat_frames(
-                    telescope=tel, camera=cam, filter_type=filt, iso=iso
+                flat_frame_paths = self._record_calibration_selection(
+                    library.select_flat_frames(
+                        telescope=tel,
+                        camera=cam,
+                        filter_type=filt,
+                        iso=iso,
+                        offset=offset,
+                        binning=light_binning,
+                        light_label=light_label,
+                    ),
+                    "flat",
+                    log,
+                    warn,
                 )
-                soft_flag_calibration_mismatch(flat_frame_paths, "flat", check_exposure=False)
                 readable_flat_paths = find_readable_paths(flat_frame_paths)
                 for item in flat_frame_paths:
                     if item not in readable_flat_paths:
@@ -931,7 +1500,7 @@ class ImageProcessing:
                     try:
                         os.symlink(item, os.path.join(target_folder, "flats", f"flat_{flat_idx:05d}.fits"))
                         flat_idx += 1
-                    except Exception as e:
+                    except OSError as e:
                         log(f"Error symlinking flat {item}: {e}")
 
             return target_folder
@@ -1008,7 +1577,7 @@ class ImageProcessing:
             args = [*parts, "-p", "-r", command_pipe, "-w", output_pipe]
 
         if job_logger:
-            job_logger.info(f"Executing: {' '.join(args)}")
+            job_logger.info("Executing: %s", " ".join(args))
         # start_new_session=True makes this process the leader of its
         # own process group, so the whole sandboxed tree
         # (flatpak/bwrap/siril) can be killed together via os.killpg
@@ -1082,21 +1651,23 @@ class ImageProcessing:
                     try:
                         result_line = status_queue.get(timeout=SIRIL_COMMAND_TIMEOUT_SECONDS)
                     except queue.Empty:
+                        result_line = None
+                    if result_line is None:
                         if job_logger:
-                            job_logger.error(f"Timed out waiting for Siril to finish command: {cmd!r}")
+                            job_logger.error("Timed out waiting for Siril to finish command: %r", cmd)
                         break
 
                     if "status: error" in result_line:
                         if job_logger:
                             job_logger.error(
-                                f"Siril reported an error after command {cmd!r}: {result_line.strip()}"
+                                "Siril reported an error after command %r: %s", cmd, result_line.strip()
                             )
                         break
                 pipe.write("exit\n")
                 pipe.flush()
-        except Exception as e:
+        except ExternalServiceError, OSError:
             if job_logger:
-                job_logger.error(f"Pipe write error: {e}")
+                job_logger.exception("Pipe write error")
 
     def read_output(
         self,
@@ -1170,6 +1741,22 @@ class ImageProcessing:
             with pipe_context as pipe:
                 for line in pipe:
                     log(line.strip())
+                    registration_totals = parse_registration_totals(line)
+                    if registration_totals is not None:
+                        self.last_run_diagnostics["registration_failed_frames"] = registration_totals[0]
+                        self.last_run_diagnostics["registered_frames"] = registration_totals[1]
+                    stacked_count = parse_stacked_image_count(line)
+                    if stacked_count is not None:
+                        self.last_run_diagnostics["images_stacked"] = stacked_count
+                    negative_percentage = parse_negative_pixel_percentage(line)
+                    if negative_percentage is not None:
+                        # One warning per frame: keep how many frames were
+                        # warned about and the worst share of negative pixels.
+                        diagnostics = self.last_run_diagnostics
+                        diagnostics["negative_pixel_frames"] = diagnostics.get("negative_pixel_frames", 0) + 1
+                        diagnostics["negative_pixel_max_percent"] = max(
+                            diagnostics.get("negative_pixel_max_percent", 0), negative_percentage
+                        )
                     if status_queue is not None and ("status: success" in line or "status: error" in line):
                         status_queue.put(line)
                     if "status: success stack" in line:
@@ -1261,9 +1848,9 @@ class ImageProcessing:
                     elif "status: error" in line:
                         return None
                 return None
-        except Exception as e:
+        except ExternalServiceError, OSError, ValueError:
             if job_logger:
-                job_logger.error(f"Pipe read error: {e}")
+                job_logger.exception("Pipe read error")
             return None
 
     def process_target(
@@ -1280,6 +1867,7 @@ class ImageProcessing:
         filter_round: str | None = None,
         stack_weight: str | None = None,
         generate_rejmap: bool | None = None,
+        spectral_star_detection: str = "standard",
     ) -> str | None:
         """Calibrate, register, and stack a target's frames via Siril.
 
@@ -1346,6 +1934,8 @@ class ImageProcessing:
         self.last_run_diagnostics: dict[str, Any] = {
             "corrupt_frames_skipped": [],
             "calibration_mismatch_flags": [],
+            CALIBRATION_BLOCKING_FLAGS_KEY: [],
+            CALIBRATION_MATCH_BLOCKING_FLAGS_KEY: [],
         }
         if filter_wfwhm is None:
             filter_wfwhm = self.config.get_stack_filter_wfwhm_percentile()
@@ -1355,40 +1945,37 @@ class ImageProcessing:
             stack_weight = self.config.get_stack_weight()
         if generate_rejmap is None:
             generate_rejmap = self.config.get_stack_generate_rejmap()
-        job_logger = logging.getLogger(f"siril_{id}")
-        job_logger.setLevel(logging.INFO)
-        # Isolate this job's log to its own dedicated file (below)
-        # instead of bubbling up to the root logger, which may be
-        # shared with unrelated activity in the calling process
-        # (e.g. the backend/planetarium server).
-        job_logger.propagate = False
-        if job_logger.handlers:
-            job_logger.handlers.clear()
         if not log_file:
             try:
                 logs_path = self.config.get_logs_path()
-                safe_id = id.replace(" ", "_")
-                log_file = os.path.join(str(logs_path), f"stack_{safe_id}.log")
-            except Exception:
+                log_file = os.path.join(str(logs_path), f"stack_{work_directory_name(id, output_file)}.log")
+            except ConfigurationError, OSError:
                 log_file = "siril.log"
+        # Each run starts its log file afresh.
+        with contextlib.suppress(OSError), open(log_file, "w", encoding="utf-8"):
+            pass
 
-        handler = logging.FileHandler(log_file, mode="w")
-        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-        job_logger.addHandler(handler)
+        # This run's own log file. The job log router writes every message
+        # the run logs into it, and into the job's rows when the run is not
+        # already inside its job's own capture.
+        run_log = contextlib.ExitStack()
+        run_log.enter_context(
+            capture_job_logs(
+                job_id=job_id or f"siril:{id}",
+                log_file_path=log_file,
+                job_store=self.job_repository if job_id else None,
+            )
+        )
+        job_logger = logger
 
-        db_handler = None
-        if self.job_repository is not None:
-            from astrometricslib.drivers.logger_interface import DbLogHandler
-
-            db_handler = DbLogHandler(self.job_repository, job_id=job_id)
-            job_logger.addHandler(db_handler)
-
-        job_logger.info(f"JOB START: {id}")
+        job_logger.info("JOB START: %s", id)
 
         try:
-            frames_path = self.config.get_frames_path()
-            library_dest = os.path.join(frames_path, "lights", id)
-        except Exception:
+            # Stacks and the files made with them go to the stacks path, which
+            # is the frames path unless the configuration sets another disk.
+            stacks_path = self.config.get_stacks_path()
+            library_dest = os.path.join(stacks_path, "lights", id)
+        except ConfigurationError, OSError:
             library_dest = None
 
         if not camera_filter and isinstance(image_files, list) and len(image_files) > 0:
@@ -1399,9 +1986,11 @@ class ImageProcessing:
         res = None
         siril_lock = contextlib.ExitStack()
         try:
-            safe_id = id.replace(" ", "_")
             target_folder = self.build_directories(
-                safe_id, image_files, camera_filter=camera_filter, job_logger=job_logger
+                work_directory_name(id, output_file),
+                image_files,
+                camera_filter=camera_filter,
+                job_logger=job_logger,
             )
             command_pipe, output_pipe = self.create_named_pipes(target_folder)
             # Lets send_commands wait for each command's own completion
@@ -1435,8 +2024,9 @@ class ImageProcessing:
             # defect found only by reading Siril's own logs.
             self.last_run_diagnostics["debayer_applied"] = uses_color_filter_array
             job_logger.info(
-                f"Sensor type detected as {'color (CFA)' if uses_color_filter_array else 'monochrome'}; "
-                f"{'applying' if uses_color_filter_array else 'skipping'} CFA/debayer calibration flags."
+                "Sensor type detected as %s; %s CFA/debayer calibration flags.",
+                "color (CFA)" if uses_color_filter_array else "monochrome",
+                "applying" if uses_color_filter_array else "skipping",
             )
 
             # rejection_sigma passed by the caller is an explicit
@@ -1444,8 +2034,15 @@ class ImageProcessing:
             # (the default) derives sigma from num_lights via
             # Chauvenet's criterion rather than using one fixed
             # constant for every stack -- see
-            # utilities/rejection_thresholds.py for why. "fixed"
-            # mode uses the configured constant unconditionally.
+            # utilities/rejection_thresholds.py for why. Adaptive mode
+            # keeps the high bound at or above a configured floor and sets
+            # the low bound a configured amount above the high bound, so a
+            # stack of 5 frames does not throw out about 7% of its good
+            # samples. "fixed" mode uses the configured constant
+            # unconditionally.
+            rejection_sigma_floor: float | None = None
+            rejection_sigma_low_extra: float | None = None
+            rejection_sigma_floor_applied = False
             if rejection_sigma is not None:
                 rejection_sigma_low, rejection_sigma_high = rejection_sigma
                 rejection_sigma_mode_used = "override"
@@ -1453,10 +2050,16 @@ class ImageProcessing:
                 rejection_sigma_low, rejection_sigma_high = self.config.get_stack_rejection_sigma()
                 rejection_sigma_mode_used = "fixed"
             else:
-                from astrometricslib.utilities.rejection_thresholds import chauvenet_sigma
+                from astrometricslib.utilities.rejection_thresholds import rejection_bounds
 
-                adaptive_sigma = chauvenet_sigma(max(num_lights, 1))
-                rejection_sigma_low = rejection_sigma_high = adaptive_sigma
+                rejection_sigma_floor = self.config.get_stack_rejection_sigma_floor()
+                rejection_sigma_low_extra = self.config.get_stack_rejection_low_extra_sigma()
+                adaptive_bounds = rejection_bounds(
+                    max(num_lights, 1), floor=rejection_sigma_floor, low_extra=rejection_sigma_low_extra
+                )
+                rejection_sigma_low = adaptive_bounds.low
+                rejection_sigma_high = adaptive_bounds.high
+                rejection_sigma_floor_applied = adaptive_bounds.floor_applied
                 rejection_sigma_mode_used = "adaptive"
 
             # Applies the minimum-surviving-frames floor to a
@@ -1475,8 +2078,11 @@ class ImageProcessing:
             filter_wfwhm, filter_wfwhm_loosened = resolve_filter_wfwhm_with_floor(num_lights, filter_wfwhm)
             if filter_wfwhm_loosened:
                 job_logger.info(
-                    f"filter_wfwhm loosened from {requested_filter_wfwhm!r} to {filter_wfwhm!r} "
-                    f"to keep at least the minimum-surviving-frames floor with {num_lights} input frames."
+                    "filter_wfwhm loosened from %r to %r to keep at least the "
+                    "minimum-surviving-frames floor with %s input frames.",
+                    requested_filter_wfwhm,
+                    filter_wfwhm,
+                    num_lights,
                 )
 
             self.last_run_diagnostics.update({
@@ -1484,6 +2090,9 @@ class ImageProcessing:
                 "rejection_sigma_low": rejection_sigma_low,
                 "rejection_sigma_high": rejection_sigma_high,
                 "rejection_sigma_mode": rejection_sigma_mode_used,
+                "rejection_sigma_floor": rejection_sigma_floor,
+                "rejection_sigma_low_extra": rejection_sigma_low_extra,
+                "rejection_sigma_floor_applied": rejection_sigma_floor_applied,
                 "filter_wfwhm_requested": requested_filter_wfwhm,
                 "filter_wfwhm_effective": filter_wfwhm,
                 "filter_wfwhm_loosened": filter_wfwhm_loosened,
@@ -1515,7 +2124,7 @@ class ImageProcessing:
                 job_logger=job_logger,
             )
 
-            def read_siril_stdout():  # ruff: ignore[missing-return-type-private-function]
+            def read_siril_stdout() -> None:
                 progress_regex = re.compile(r"progress:.*?([0-9.]+)\s*%")
                 try:
                     with open(siril_debug_log, "w") as debug_out:
@@ -1533,16 +2142,20 @@ class ImageProcessing:
                                     if job:
                                         job.progress_current = int(val)
                                         self.job_repository.upsert_job(job)
-                                except Exception as exc:
+                                except (ValueError, sqlite3.Error) as exc:
                                     logger.debug("Failed to parse/record Siril progress line: %s", exc)
-                except Exception as e:
+                except OSError:
                     if job_logger:
-                        job_logger.error(f"Error in Siril stdout reader thread: {e}")
+                        job_logger.exception("Error in Siril stdout reader thread")
 
-            log_reader_thread = threading.Thread(target=read_siril_stdout, daemon=True)
+            # The reader runs in the run's log context, so its lines reach
+            # this run's log file.
+            log_reader_thread = threading.Thread(
+                target=contextvars.copy_context().run, args=(read_siril_stdout,), daemon=True
+            )
             log_reader_thread.start()
 
-            script = ["setext fits"]
+            script = list(SIRIL_SCRIPT_PREAMBLE)
 
             # Masters already built for this exact set of calibration
             # frames are copied straight in, and their build steps below
@@ -1557,85 +2170,97 @@ class ImageProcessing:
             restored_master_kinds = self.restore_cached_calibration_masters(
                 target_folder, job_logger=job_logger
             )
+            flat_smoothing_sigma = None
+            if num_flats > 0:
+                flat_assessment = self.assess_staged_flats(
+                    target_folder, uses_color_filter_array, job_logger=job_logger, camera=camera_filter
+                )
+                self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
+                # A master restored from the cache was built, smoothed or not,
+                # under the same recipe, so only a master built now is blurred.
+                if "flat" not in restored_master_kinds:
+                    flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
+
+            # A master built from fewer frames than the minimum is still
+            # built (the library can legitimately hold one flat), but the run
+            # records a blocking flag that the stack quality summary reports.
+            # Masters restored from the cache count too: the flag describes
+            # the frames behind the master, not whether it was rebuilt now.
+            minimum_calibration_frames = self.config.get_minimum_calibration_frames()
+            count_flags = calibration_count_flags(
+                num_biases, num_darks, num_flats, minimum_calibration_frames
+            )
+            self.last_run_diagnostics[CALIBRATION_BLOCKING_FLAGS_KEY] = count_flags
+            for count_flag in count_flags:
+                job_logger.warning("Calibration frame count too low (blocking flag): %s", count_flag)
 
             # Automated Master Calibration Generation
             if num_biases > 0 and "bias" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'biases')}"]
-                if num_biases == 1:
-                    # Single bias: convert and use directly as master
-                    script += [
-                        "convert bias -out=../process",
-                        "cd ../process",
-                        "load bias_00001.fits",
-                        "save bias_stacked",
-                    ]
-                else:
-                    script += [
-                        "convert bias -out=../process -fitseq",
-                        "cd ../process",
-                        "stack bias rej 3 3 -nonorm -out=bias_stacked",
-                    ]
+                script += build_bias_master_commands(num_biases)
 
             if num_darks > 0 and "dark" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'darks')}"]
-                if num_darks == 1:
-                    # Single dark: convert and use directly as master
-                    script += [
-                        "convert dark -out=../process",
-                        "cd ../process",
-                        "load dark_00001.fits",
-                        "save dark_stacked",
-                    ]
-                else:
-                    script += [
-                        "convert dark -out=../process -fitseq",
-                        "cd ../process",
-                        "stack dark rej 3 3 -nonorm -out=dark_stacked",
-                    ]
+                script += build_dark_master_commands(num_darks)
 
             if num_flats > 0 and "flat" not in restored_master_kinds:
                 script += [f"cd {os.path.join(target_folder, 'flats')}"]
-                if num_flats == 1:
-                    script += [
-                        "convert flat -out=../process",
-                        "cd ../process",
-                        "load flat_00001.fits",
-                        "save flat_stacked",
-                    ]
-                else:
-                    script += ["convert flat -out=../process -fitseq", "cd ../process"]
-                    # Calibrate flat with bias if available
-                    script += [
-                        f"calibrate flat {'-bias=bias_stacked' if num_biases > 0 else ''}"
-                        f"{color_filter_array_flags}",
-                        "stack pp_flat rej 3 3 -norm=mul -out=flat_stacked",
-                    ]
+                script += build_flat_master_commands(
+                    num_flats, num_biases > 0, color_filter_array_flags, flat_smoothing_sigma
+                )
 
             # Process Lights
             script += [f"cd {os.path.join(target_folder, 'lights')}"]
             # only set in the multi-frame branch below; single-frame
             # stacks skip registration entirely
             seq = None
+            # Read below and in the tail of this method, past the
+            # num_lights branch, so it needs to exist either way -- a
+            # single-frame "stack" never has more than one frame to align.
+            use_phase_correlation_alignment = (
+                num_lights > 1 and is_spectral and spectral_star_detection == "phase_correlation"
+            )
             if num_lights == 1:
                 # Siril's 'convert' does not create a .seq file for
                 # a single input frame, so sequence-based
                 # calibrate/register/stack commands can't be used
-                # here. Load and save the single converted frame
-                # directly; calibration is skipped in this case.
-                script += [
-                    "convert light_source -out=../process",
-                    "cd ../process",
-                    "load light_source_00001.fits",
-                    "save result_stacked",
-                ]
+                # here. The frame is calibrated as a single file and
+                # saved as the result: skipping the dark and flat would
+                # record an uncalibrated frame as the target's stack.
+                dark_flag, flat_flag, bias_flag = light_calibration_flags(num_darks, num_flats, num_biases)
+                self.last_run_diagnostics["calibration_applied"] = {
+                    "dark": bool(dark_flag),
+                    "flat": bool(flat_flag),
+                    "bias": bool(bias_flag),
+                }
+                script += build_single_light_commands(
+                    dark_flag,
+                    flat_flag,
+                    bias_flag,
+                    color_filter_array_flags,
+                    " -debayer" if uses_color_filter_array else "",
+                )
             else:
-                script += ["convert light_source -out=../process -fitseq", "cd ../process"]
+                # -fitseq stores the whole sequence as one file, which is
+                # fine when Siril also does the registration -- but the
+                # phase-correlation path (see
+                # `_stack_phase_correlation_aligned_spectral_frames`)
+                # reads each calibrated frame back out in Python, which a
+                # loose per-frame FITS file (Siril's other convert format)
+                # makes trivial and a packed fitseq file does not.
+                convert_flags = "" if use_phase_correlation_alignment else " -fitseq"
+                script += [f"convert light_source -out=../process{convert_flags}", "cd ../process"]
 
                 has_cal = num_darks > 0 or num_biases > 0 or num_flats > 0
                 if has_cal:
-                    dark_flag = "-dark=dark_stacked" if num_darks > 0 else ""
-                    flat_flag = "-flat=flat_stacked" if num_flats > 0 else ""
-                    bias_flag = "-bias=bias_stacked" if num_biases > 0 else ""
+                    dark_flag, flat_flag, bias_flag = light_calibration_flags(
+                        num_darks, num_flats, num_biases
+                    )
+                    self.last_run_diagnostics["calibration_applied"] = {
+                        "dark": bool(dark_flag),
+                        "flat": bool(flat_flag),
+                        "bias": bool(bias_flag),
+                    }
                     # -debayer belongs only to the lights: it is what turns
                     # a CFA mosaic into an RGB image, and is meaningless
                     # (and harmful) on monochrome data.
@@ -1647,6 +2272,11 @@ class ImageProcessing:
                     seq = "pp_light_source"
                 else:
                     seq = "light_source"
+                    self.last_run_diagnostics["calibration_applied"] = {
+                        "dark": False,
+                        "flat": False,
+                        "bias": False,
+                    }
 
                 # Multi-frame Stacking
                 # Spectroscopy frames need a shift-only transform: a
@@ -1686,7 +2316,14 @@ class ImageProcessing:
                 if filter_round:
                     frame_filter_options.append(f"-filter-round={filter_round}")
 
-                if is_spectral:
+                if use_phase_correlation_alignment:
+                    # No register/stack commands go into this script at
+                    # all: `_stack_phase_correlation_aligned_spectral_frames`
+                    # sends what has been built so far (calibration only)
+                    # as its own complete run, then drives a second Siril
+                    # run itself once the frames are aligned in Python.
+                    pass
+                elif is_spectral:
                     # Multi-frame Stacking
                     # Spectroscopy frames need a shift-only transform: a
                     # diffraction grating disperses every star's light,
@@ -1709,6 +2346,11 @@ class ImageProcessing:
                     # Single-pass `register` applies its transforms as
                     # it goes and offers no separate filtering step, so
                     # this path's frame filters stay on `stack` below.
+                    # Which stars register the frames is chosen by
+                    # `spectral_star_detection`; see
+                    # SPECTRAL_STAR_DETECTION_COMMANDS for the two
+                    # settings and why the standard one is the default.
+                    register_commands = [SPECTRAL_STAR_DETECTION_COMMANDS[spectral_star_detection]]
                     register_commands.append(f"register {seq} -transf=shift")
                     registered_seq = f"r_{seq}"
                     stack_filter_options = frame_filter_options
@@ -1748,40 +2390,67 @@ class ImageProcessing:
                     # compounding to 81% of the input for a 90% setting.
                     stack_filter_options = []
 
-                stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
-                stack_options += stack_filter_options
-                if stack_weight:
-                    stack_options.append(f"-weight={stack_weight}")
-                if generate_rejmap:
-                    stack_options.append("-rejmap")
-                stack_options += ["-norm=addscale", "-out=result_stacked"]
+                if not use_phase_correlation_alignment:
+                    stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
+                    stack_options += stack_filter_options
+                    if stack_weight:
+                        stack_options.append(f"-weight={stack_weight}")
+                    if generate_rejmap:
+                        stack_options.append("-rejmap")
+                    stack_options += ["-norm=addscale", "-out=result_stacked"]
 
-                script += [
-                    *register_commands,
-                    f"stack {registered_seq} " + " ".join(stack_options),
-                ]
+                    script += [
+                        *register_commands,
+                        f"stack {registered_seq} " + " ".join(stack_options),
+                    ]
 
-            def write_commands():  # ruff: ignore[missing-return-type-private-function]
-                self.send_commands(
-                    command_pipe, script, job_logger=job_logger, status_queue=status_queue, process=process
+            if use_phase_correlation_alignment:
+                res = self._stack_phase_correlation_aligned_spectral_frames(
+                    command_pipe=command_pipe,
+                    output_pipe=output_pipe,
+                    process=process,
+                    status_queue=status_queue,
+                    calibration_script=script,
+                    seq=seq,
+                    target_folder=target_folder,
+                    output_file=output_file,
+                    library_dest=library_dest,
+                    generate_rejmap=generate_rejmap,
+                    rejection_sigma_low=rejection_sigma_low,
+                    rejection_sigma_high=rejection_sigma_high,
+                    stack_weight=stack_weight,
+                    job_logger=job_logger,
+                )
+            else:
+
+                def write_commands() -> None:
+                    self.send_commands(
+                        command_pipe,
+                        script,
+                        job_logger=job_logger,
+                        status_queue=status_queue,
+                        process=process,
+                    )
+
+                writer = threading.Thread(target=write_commands)
+                writer.daemon = True
+                writer.start()
+
+                res = self.read_output(
+                    output_pipe,
+                    target_folder,
+                    id,
+                    output_file=output_file,
+                    library_dest=library_dest,
+                    job_logger=job_logger,
+                    generate_rejmap=generate_rejmap,
+                    registered_seq_name=seq,
+                    status_queue=status_queue,
+                    process=process,
                 )
 
-            writer = threading.Thread(target=write_commands)
-            writer.daemon = True
-            writer.start()
-
-            res = self.read_output(
-                output_pipe,
-                target_folder,
-                id,
-                output_file=output_file,
-                library_dest=library_dest,
-                job_logger=job_logger,
-                generate_rejmap=generate_rejmap,
-                registered_seq_name=seq,
-                status_queue=status_queue,
-                process=process,
-            )
+                writer.join(timeout=5)
+                self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
 
             self.last_run_diagnostics["stacking_duration_seconds"] = round(
                 time.monotonic() - siril_started_at, 1
@@ -1799,8 +2468,11 @@ class ImageProcessing:
             # exists, before the finally block's cleanup) rather
             # than preserving the raw .lst files out, since
             # stacking_operations.py only needs the parsed values,
-            # not the files themselves.
-            if is_spectral and seq and res:
+            # not the files themselves. Not available for the
+            # phase-correlation path: those .lst files are Siril's own
+            # star-detection registration output, and that path never
+            # runs Siril's register command.
+            if is_spectral and seq and res and not use_phase_correlation_alignment:
                 import glob as _glob
 
                 from astrometricslib.drivers.siril_output_parsing import parse_zero_order_star
@@ -1823,28 +2495,25 @@ class ImageProcessing:
                             exp = f.get("exposure") if isinstance(f, dict) else getattr(f, "exposure", "0")
                             try:
                                 total_exp += float(exp)
-                            except Exception as exc:
+                            except (ValueError, TypeError) as exc:
                                 logger.debug("Skipping unparsable exposure value '%s': %s", exp, exc)
 
                     if total_exp > 0:
-                        with fits.open(res, mode="update") as hdul:
+                        with fits.open(res, mode="update", memmap=False) as hdul:
                             hdul[0].header["EXPTIME"] = total_exp
                             hdul[0].header["EXPOSURE"] = total_exp
                             hdul[0].header.add_comment(
                                 f"Total exposure time summed from {len(image_files)} frames."
                             )
-                        job_logger.info(f"Updated stacked header: EXPTIME={total_exp}s")
-                except Exception as e:
-                    job_logger.error(f"Failed to update stacked header EXPTIME: {e}")
-
-            writer.join(timeout=5)
-            self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
+                        job_logger.info("Updated stacked header: EXPTIME=%ss", total_exp)
+                except FITS_READ_ERRORS:
+                    job_logger.exception("Failed to update stacked header EXPTIME")
 
             # Wait for log reader thread to finish reading all output
             log_reader_thread.join(timeout=10)
             return res
-        except Exception as fatal:
-            job_logger.error(f"FATAL: {fatal}", exc_info=True)
+        except Exception:
+            job_logger.exception("FATAL: Siril processing stopped with an unexpected error")
             return None
         finally:
             self.cleanup_subprocesses()
@@ -1852,10 +2521,6 @@ class ImageProcessing:
             # Siril run never starts while this one's process tree is
             # still being torn down.
             siril_lock.close()
-            job_logger.removeHandler(handler)
-            handler.close()
-            if db_handler is not None:
-                job_logger.removeHandler(db_handler)
             # Only remove the scratch work directory once the final stack has
             # been copied out to library_dest. If library_dest wasn't
             # resolvable, the returned file lives inside target_folder itself,
@@ -1865,10 +2530,10 @@ class ImageProcessing:
             if res and library_dest and target_folder and os.path.exists(target_folder):
                 try:
                     shutil.rmtree(target_folder)
-                    job_logger.info(f"Removed temporary work directory: {target_folder}")
-                except Exception as cleanup_error:
+                    job_logger.info("Removed temporary work directory: %s", target_folder)
+                except OSError as cleanup_error:
                     job_logger.warning(
-                        f"Failed to remove temporary work directory {target_folder}: {cleanup_error}"
+                        "Failed to remove temporary work directory %s: %s", target_folder, cleanup_error
                     )
             elif target_folder and os.path.exists(target_folder):
                 # Keeping the whole directory to preserve diagnostics was
@@ -1880,6 +2545,201 @@ class ImageProcessing:
                 # to 1.1MB. Dropping only the intermediates keeps every
                 # artifact that has ever been useful.
                 self._discard_stacking_intermediates(target_folder, job_logger)
+            run_log.close()
+
+    def _stack_phase_correlation_aligned_spectral_frames(
+        self,
+        command_pipe: str,
+        output_pipe: str,
+        process: subprocess.Popen,
+        status_queue: queue.Queue[str],
+        calibration_script: list[str],
+        seq: str,
+        target_folder: str,
+        output_file: str,
+        library_dest: str | None,
+        generate_rejmap: bool,
+        rejection_sigma_low: float,
+        rejection_sigma_high: float,
+        stack_weight: str | None,
+        job_logger: logging.Logger,
+    ) -> str | None:
+        """Calibrate with Siril, align in Python, then stack with Siril again.
+
+        Used in place of Siril's own star-detection registration for a
+        spectral batch whose frames don't give Siril's star finder enough
+        real point sources to register reliably -- a close visual double
+        star's field, for instance, where every star (not just the
+        target's) is smeared into a trail rather than a compact dot. See
+        `spectral_frame_alignment` for the alignment itself.
+
+        `calibration_script` (everything `process_target` built up
+        through the ``calibrate`` command, with no ``register``/``stack``
+        appended) is sent through the Siril process already running on
+        `command_pipe`. Once it finishes, the calibrated frames it wrote
+        are read back, aligned in Python, and handed to a second,
+        separate Siril process for a plain rejection stack with no
+        registration step at all -- Siril's own ``stack`` command does
+        not require one; the bias, dark and flat master steps earlier in
+        `process_target` already rely on exactly that.
+
+        Parameters
+        ----------
+        command_pipe : `str`
+            The command FIFO of the Siril process already running,
+            reused to send `calibration_script`.
+        output_pipe : `str`
+            That same process's output FIFO.
+        process : `subprocess.Popen`
+            That already-running Siril process.
+        status_queue : `queue.Queue`
+            The queue `process`'s paired `read_output` call publishes
+            command status lines to, reused so `send_commands` can pace
+            the calibration script the same way `process_target` always
+            does.
+        calibration_script : `list` [`str`]
+            The commands to run before alignment: the
+            `SIRIL_SCRIPT_PREAMBLE` (``setext`` and ``set32bits``), master
+            calibration generation, `convert`, and `calibrate`.
+        seq : `str`
+            The calibrated sequence's name (``"pp_light_source"``, or
+            plain ``"light_source"`` when there were no calibration
+            masters to apply), used to find the frames `calibrate` wrote.
+        target_folder : `str`
+            This run's working directory.
+        output_file : `str`
+            The stacked file's name.
+        library_dest : `str` or `None`
+            Where to copy the stacked file, forwarded to `read_output`.
+        generate_rejmap : `bool`
+            Whether to also produce a rejection map.
+        rejection_sigma_low, rejection_sigma_high : `float`
+            The stack's sigma-clipping rejection bounds.
+        stack_weight : `str` or `None`
+            Siril's ``-weight`` value, if any.
+        job_logger : `logging.Logger`
+            Logger for this run.
+
+        Returns
+        -------
+        stacked_path : `str` or `None`
+            The path to the copied-out stacked file, or `None` if either
+            Siril run, or the alignment step in between, produced nothing
+            to stack.
+        """
+        from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
+            ALIGNED_SIRIL_SEQUENCE_NAME,
+            align_calibrated_frames,
+            find_calibrated_frame_paths,
+        )
+
+        def write_calibration_commands() -> None:
+            self.send_commands(
+                command_pipe,
+                calibration_script,
+                job_logger=job_logger,
+                status_queue=status_queue,
+                process=process,
+            )
+
+        calibration_writer = threading.Thread(target=write_calibration_commands, daemon=True)
+        calibration_writer.start()
+        # No stack command was sent, so this only ever reaches Siril's
+        # own exit and returns None; it is read for its side effect of
+        # keeping status_queue fed while calibration_writer paces itself
+        # against it, and for blocking until Siril has actually written
+        # every calibrated frame to disk.
+        self.read_output(
+            output_pipe,
+            target_folder,
+            os.path.basename(target_folder),
+            job_logger=job_logger,
+            status_queue=status_queue,
+            process=process,
+        )
+        calibration_writer.join(timeout=5)
+        self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
+
+        process_directory = os.path.join(target_folder, "process")
+        calibrated_paths = find_calibrated_frame_paths(process_directory, seq)
+        if not calibrated_paths:
+            job_logger.error(
+                "No calibrated frames were found in %s after Siril's calibration run; cannot align.",
+                process_directory,
+            )
+            return None
+
+        aligned_directory = os.path.join(process_directory, "aligned")
+        aligned_paths, counts = align_calibrated_frames(calibrated_paths, aligned_directory)
+        self.last_run_diagnostics["registered_frames"] = counts["registered"]
+        self.last_run_diagnostics["registration_failed_frames"] = counts["failed"]
+        if not aligned_paths:
+            job_logger.error("No frames could be aligned by phase correlation; nothing to stack.")
+            return None
+
+        if stack_weight in WEIGHT_MODES_NEEDING_REGISTRATION_DATA:
+            job_logger.warning(
+                "Configured stack weight %r needs registration data this run never produces; "
+                "using %r instead.",
+                stack_weight,
+                PHASE_CORRELATION_FALLBACK_WEIGHT_MODE,
+            )
+            stack_weight = PHASE_CORRELATION_FALLBACK_WEIGHT_MODE
+
+        stack_options = [f"rej {rejection_sigma_low:.4f} {rejection_sigma_high:.4f}"]
+        if stack_weight:
+            stack_options.append(f"-weight={stack_weight}")
+        if generate_rejmap:
+            stack_options.append("-rejmap")
+        # `-out=../result_stacked`, not the bare name every other stack in
+        # this file uses: this run's `cd` below puts Siril's working
+        # directory in the "aligned" subfolder (kept separate from
+        # `process/` itself so `convert` below only picks up this run's
+        # own aligned frames, not the calibrated frames or masters already
+        # sitting in `process/`), but `read_output` always looks for
+        # `result_stacked.fits` directly in `process/`. The extra `../`
+        # writes it where `read_output` expects it without moving
+        # `read_output` itself.
+        stack_options += ["-norm=addscale", "-out=../result_stacked"]
+
+        stack_command_pipe, stack_output_pipe = self.create_named_pipes(target_folder)
+        stack_process = self.run_siril_headless(stack_command_pipe, stack_output_pipe, job_logger=job_logger)
+        stack_status_queue: queue.Queue[str] = queue.Queue()
+        stack_script = [
+            *SIRIL_SCRIPT_PREAMBLE,
+            f"cd {aligned_directory}",
+            f"convert {ALIGNED_SIRIL_SEQUENCE_NAME} -out=.",
+            f"stack {ALIGNED_SIRIL_SEQUENCE_NAME} " + " ".join(stack_options),
+        ]
+
+        def write_stack_commands() -> None:
+            self.send_commands(
+                stack_command_pipe,
+                stack_script,
+                job_logger=job_logger,
+                status_queue=stack_status_queue,
+                process=stack_process,
+            )
+
+        stack_writer = threading.Thread(target=write_stack_commands, daemon=True)
+        stack_writer.start()
+        res = self.read_output(
+            stack_output_pipe,
+            target_folder,
+            os.path.basename(target_folder),
+            output_file=output_file,
+            library_dest=library_dest,
+            job_logger=job_logger,
+            generate_rejmap=generate_rejmap,
+            # No Siril registration ran, so there is no .seq file of
+            # per-frame registration data to preserve.
+            registered_seq_name=None,
+            status_queue=stack_status_queue,
+            process=stack_process,
+        )
+        stack_writer.join(timeout=5)
+        self._kill_process_tree(stack_process, job_logger=job_logger, workdir=target_folder)
+        return res
 
     def _discard_stacking_intermediates(
         self, target_folder: str, job_logger: logging.Logger | None = None
@@ -1955,5 +2815,5 @@ class ImageProcessing:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.debug("Failed to launch Siril GUI for '%s': %s", file_path, exc)

@@ -5,9 +5,10 @@ date.
 """
 
 import logging
+import sqlite3
 import sys
 
-from astrometricslib import Astrometrics
+from astrometricslib import FITS_READ_ERRORS, Astrometrics, AstrometricsError, configure_logging
 
 
 def run_batch_processing() -> None:
@@ -24,9 +25,7 @@ def run_batch_processing() -> None:
     target does not halt the batch run.
     """
     # Configure logging to output Siril stacking details to stdout
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
-    )
+    configure_logging("reindex_all_targets", level=logging.INFO, log_dir="", console_stream=sys.stdout)
 
     print("Initializing Astrometrics...")
     astrometrics = Astrometrics()
@@ -49,7 +48,7 @@ def run_batch_processing() -> None:
             astrometrics.targets.reindex_frames(target, prune_missing=True)
             success_count += 1
             astrometrics.targets.save()
-        except Exception as err:
+        except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS) as err:
             print(f"\n[ERROR] Failed to process target '{target.id}': {err}")
             failed_targets.append((target.id, str(err)))
             # Continue to next target

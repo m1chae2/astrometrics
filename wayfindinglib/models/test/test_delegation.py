@@ -13,7 +13,7 @@ from wayfindinglib.models.policy.delegation import (
 )
 
 
-def test_state_for_defaults_to_delegated_when_unconfigured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_state_for_defaults_to_delegated_when_unconfigured() -> None:
     """Verify an empty policy resolves every capability to DELEGATED."""
     policy = DelegationPolicy(id="policy1")
     assert policy.state_for(ObservatoryCapability.MOUNT_CONTROL) == DelegationState.DELEGATED
@@ -21,7 +21,7 @@ def test_state_for_defaults_to_delegated_when_unconfigured():  # ruff: ignore[mi
     assert policy.is_shadowed(ObservatoryCapability.MOUNT_CONTROL) is False
 
 
-def test_state_for_reads_configured_entry():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_state_for_reads_configured_entry() -> None:
     """Verify a configured entry overrides the DELEGATED default."""
     policy = DelegationPolicy(
         id="policy1",
@@ -38,7 +38,7 @@ def test_state_for_reads_configured_entry():  # ruff: ignore[missing-return-type
     assert policy.state_for(ObservatoryCapability.AUTOGUIDING) == DelegationState.DELEGATED
 
 
-def test_is_shadowed_true_for_shadowed_capability():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_is_shadowed_true_for_shadowed_capability() -> None:
     """Verify is_shadowed() correctly identifies a SHADOWED entry."""
     policy = DelegationPolicy(
         id="policy1",
@@ -53,7 +53,7 @@ def test_is_shadowed_true_for_shadowed_capability():  # ruff: ignore[missing-ret
     assert policy.is_authoritative(ObservatoryCapability.AUTOGUIDING) is False
 
 
-def test_all_six_capabilities_distinct():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_all_six_capabilities_distinct() -> None:
     """Verify all six delegation-tracked capabilities are distinct."""
     capabilities = {
         ObservatoryCapability.MOUNT_CONTROL,

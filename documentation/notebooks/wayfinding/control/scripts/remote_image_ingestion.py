@@ -13,19 +13,76 @@ from astrometricslib import Astrometrics
 from wayfindinglib import Wayfinder
 
 
+class _DryRunRemote:
+    """Stand-in for the observatory computer, used by ``--dry-run``.
+
+    It answers the few calls this demo makes with fixed values.
+    """
+
+    def check_connection(self) -> bool:
+        """Report that the stand-in computer is reachable.
+
+        Returns
+        -------
+        connected : `bool`
+            Always `True`.
+        """
+        return True
+
+    def list_remote_targets(self) -> list[str]:
+        """List the target folders on the stand-in computer.
+
+        Returns
+        -------
+        folders : `list` [`str`]
+            Three fixed folder names.
+        """
+        return ["M 13", "M 81", "Unassociated Target"]
+
+    def list_remote_files(self, folder_name: str) -> list[str]:
+        """List the files in one folder on the stand-in computer.
+
+        Parameters
+        ----------
+        folder_name : `str`
+            The folder to list. Every folder holds the same two files.
+
+        Returns
+        -------
+        files : `list` [`str`]
+            Two fixed file names.
+        """
+        return ["frame1.fits", "frame2.fits"]
+
+    def resolve_remote_folder_name(self, name: str) -> str:
+        """Match a target name to a folder name.
+
+        Parameters
+        ----------
+        name : `str`
+            The target name.
+
+        Returns
+        -------
+        folder_name : `str`
+            The same name, unchanged.
+        """
+        return name
+
+
 def run_sync() -> None:
     """Synchronize local target frames with remote telescope storage.
 
     Resolves (or creates) the requested `Target`, lists the files
     available on the remote telescope, and downloads any selected or
-    new frames via `Wayfinder.control.download_remote_targets`,
+    new frames via `Wayfinder.control.remote.sync_frames`,
     persisting the refreshed target index afterward.
 
     Raises
     ------
     SystemExit
         Raised with exit code 1 if remote synchronization fails
-        outside of testing mode, or if `download_remote_targets`
+        outside of testing mode, or if `control.remote.sync_frames`
         reports failure.
 
     Notes
@@ -82,43 +139,21 @@ def run_sync() -> None:
     # 2. Check remote pictures on the telescope and download
     try:
         if os.getenv("ASTROMETRICS_TESTING") == "1":
-            print("[Testing Mode] Mocking remote StellarMate connections using unittest.mock...")
-            from unittest.mock import patch
+            print("[Testing Mode] Replacing the observatory computer with a stand-in...")
+            # A stand-in transfer driver goes in through the public
+            # driver property, so no real connection is made.
+            wayfinder.control.remote_transfer_driver = _DryRunRemote()
+            # Check the connection and list the folders that match no
+            # target, through the public `wayfinder.control.remote` API.
+            connected = wayfinder.control.remote.check_connection()
+            print(f"[Testing Mode] Stand-in connection result: {connected}")
 
-            from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
+            unassociated = wayfinder.control.remote.list("unassociated_folders")
+            print(f"[Testing Mode] Stand-in folders that match no target: {unassociated}")
 
-            # Setup mock patches
-            with (
-                patch.object(StellarMateInterface, "check_connection", return_value=True),
-                patch.object(
-                    StellarMateInterface,
-                    "list_remote_targets",
-                    return_value=["M 13", "M 81", "Unassociated Target"],
-                ),
-                patch.object(
-                    StellarMateInterface, "list_remote_files", return_value=["frame1.fits", "frame2.fits"]
-                ),
-                patch.object(StellarMateInterface, "download_target_folder", return_value=True),
-            ):
-                # Probes remote connection status and lists
-                # unassociated remote targets, all through the
-                # public wayfinder.control astrometrics
-                connected = wayfinder.control.check_remote_connection()
-                print(f"[Testing Mode] Mocked check connection result: {connected}")
-
-                unassociated = wayfinder.control.discover_unassociated_remote_targets()
-                print(f"[Testing Mode] Mocked discovered unassociated targets: {unassociated}")
-
-                remote_files = wayfinder.control.list_remote_files(target_id)
-
-                wayfinder.control.check_for_new_remote_images(target)
-
-                # Exercise the no-remote-files branch of
-                # check_for_new_remote_images
-                with patch.object(StellarMateInterface, "list_remote_files", return_value=[]):
-                    wayfinder.control.check_for_new_remote_images(target)
+            remote_files = wayfinder.control.remote.list("files", folder_name=target_id)
         else:
-            remote_files = wayfinder.control.list_remote_files(target_id)
+            remote_files = wayfinder.control.remote.list("files", folder_name=target_id)
 
         print(f"Found {len(remote_files)} files in {target_id} remotely.")
         print(f"Downloading telescope frames for Target {target_id}...")
@@ -132,11 +167,10 @@ def run_sync() -> None:
         if os.getenv("ASTROMETRICS_TESTING") == "1":
             # Mock download success directly
             success = True
-            print("[Testing Mode] Simulated download_remote_targets completed successfully.")
+            print("[Testing Mode] Simulated remote.sync_frames completed successfully.")
         else:
-            success = wayfinder.control.download_remote_targets(
-                target_id=target_id, selected_files=selected_list, log_callback=print
-            )
+            result = wayfinder.control.remote.sync_frames(target_id, files=selected_list, log_callback=print)
+            success = result.get("success", False)
         elapsed = time.time() - start_time
 
         if success:

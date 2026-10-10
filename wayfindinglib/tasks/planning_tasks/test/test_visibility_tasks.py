@@ -10,16 +10,19 @@ tests and what matters here is the visibility *policy* logic.
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from astropy.coordinates import EarthLocation
+from astropy.time import Time
 
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 from wayfindinglib.tasks.planning_tasks import visibility_tasks
 
 
-def _telescope(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _telescope(**overrides: Any) -> Telescope:
     defaults = {
         "id": "t1",
         "name": "Test Scope",
@@ -31,13 +34,13 @@ def _telescope(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return
     return Telescope(**defaults)
 
 
-def _site(**overrides):  # ruff: ignore[missing-type-kwargs, missing-return-type-private-function]
+def _site(**overrides: Any) -> SiteProfile:
     defaults = {"id": "s1", "name": "Test Site", "latitude_deg": 39.7392, "longitude_deg": -104.9903}
     defaults.update(overrides)
     return SiteProfile(**defaults)
 
 
-def test_effective_altitude_floor_uses_stricter_of_telescope_and_package():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_effective_altitude_floor_uses_stricter_of_telescope_and_package() -> None:
     """Verify the effective floor is the stricter (higher) of the two."""
     telescope = _telescope(min_altitude_deg=10.0)
     assert visibility_tasks.effective_altitude_floor(telescope, 30.0) == pytest.approx(30.0)
@@ -45,13 +48,13 @@ def test_effective_altitude_floor_uses_stricter_of_telescope_and_package():  # r
     assert visibility_tasks.effective_altitude_floor(telescope, None) == pytest.approx(10.0)
 
 
-def test_effective_altitude_floor_ignores_telescope_limit_when_disabled():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_effective_altitude_floor_ignores_telescope_limit_when_disabled() -> None:
     """Verify a disabled telescope limit no longer constrains the floor."""
     telescope = _telescope(altitude_limits_enabled=False, min_altitude_deg=30.0)
     assert visibility_tasks.effective_altitude_floor(telescope, None) == pytest.approx(-90.0)
 
 
-def test_visibility_state_at_visible_above_floor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_visibility_state_at_visible_above_floor() -> None:
     """Verify a target above the floor and outside any zone is visible."""
     telescope = _telescope()
     site = _site()
@@ -65,7 +68,7 @@ def test_visibility_state_at_visible_above_floor():  # ruff: ignore[missing-retu
     assert zone is None
 
 
-def test_visibility_state_at_blocked_below_floor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_visibility_state_at_blocked_below_floor() -> None:
     """Verify a target below the floor is not visible."""
     telescope = _telescope()
     site = _site()
@@ -79,7 +82,7 @@ def test_visibility_state_at_blocked_below_floor():  # ruff: ignore[missing-retu
     assert zone is None
 
 
-def test_visibility_state_at_blocked_by_avoidance_zone():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_visibility_state_at_blocked_by_avoidance_zone() -> None:
     """Verify a stricter avoidance zone blocks a target above the floor."""
     telescope = _telescope()
     zone = AvoidanceZone(
@@ -96,7 +99,7 @@ def test_visibility_state_at_blocked_by_avoidance_zone():  # ruff: ignore[missin
     assert blocking_zone is zone
 
 
-def test_visibility_state_at_zone_outside_azimuth_range_does_not_block():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_visibility_state_at_zone_outside_azimuth_range_does_not_block() -> None:
     """Verify a zone at a different azimuth does not block visibility."""
     telescope = _telescope()
     zone = AvoidanceZone(
@@ -113,7 +116,7 @@ def test_visibility_state_at_zone_outside_azimuth_range_does_not_block():  # ruf
     assert blocking_zone is None
 
 
-def test_find_earliest_visible_window_finds_continuous_span():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_earliest_visible_window_finds_continuous_span() -> None:
     """Verify the first sufficiently long continuous span is found."""
     telescope = _telescope()
     site = _site()
@@ -122,7 +125,9 @@ def test_find_earliest_visible_window_finds_continuous_span():  # ruff: ignore[m
     step = timedelta(minutes=10)
 
     # Altitude climbs above the floor starting 30 minutes in and stays there.
-    def fake_altaz(ra_deg, dec_deg, location, obstime):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_altaz(
+        ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+    ) -> tuple[float, float]:
         elapsed_min = (obstime.datetime - window_start).total_seconds() / 60.0
         return (40.0 if elapsed_min >= 30 else 5.0), 180.0
 
@@ -134,7 +139,7 @@ def test_find_earliest_visible_window_finds_continuous_span():  # ruff: ignore[m
     assert span[0] == window_start + timedelta(minutes=30)
 
 
-def test_find_earliest_visible_window_none_when_never_long_enough():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_find_earliest_visible_window_none_when_never_long_enough() -> None:
     """Verify None is returned when no span meets the required duration."""
     telescope = _telescope()
     site = _site()
@@ -151,7 +156,7 @@ def test_find_earliest_visible_window_none_when_never_long_enough():  # ruff: ig
     assert span is None
 
 
-def test_ever_clears_floor_true_when_any_sample_clears():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ever_clears_floor_true_when_any_sample_clears() -> None:
     """Verify ever_clears_floor detects a single clearing sample."""
     telescope = _telescope()
     site = _site()
@@ -168,7 +173,7 @@ def test_ever_clears_floor_true_when_any_sample_clears():  # ruff: ignore[missin
         )
 
 
-def test_ever_clears_floor_false_when_never_clears():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ever_clears_floor_false_when_never_clears() -> None:
     """Verify ever_clears_floor is False when the altitude never clears."""
     telescope = _telescope()
     site = _site()
@@ -185,7 +190,7 @@ def test_ever_clears_floor_false_when_never_clears():  # ruff: ignore[missing-re
         )
 
 
-def test_ever_visible_detects_single_isolated_clear_sample():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ever_visible_detects_single_isolated_clear_sample() -> None:
     """Verify ever_visible detects a lone clear sample a run-search misses.
 
     A run's first sample always has zero elapsed time from itself, so
@@ -199,7 +204,9 @@ def test_ever_visible_detects_single_isolated_clear_sample():  # ruff: ignore[mi
     window_end = window_start + timedelta(hours=1)
     step = timedelta(minutes=10)
 
-    def single_clear_sample(ra_deg, dec_deg, location, obstime):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def single_clear_sample(
+        ra_deg: float, dec_deg: float, location: EarthLocation, obstime: Time
+    ) -> tuple[float, float]:
         return (40.0 if obstime.datetime == window_start else 5.0), 180.0
 
     with patch(
@@ -219,7 +226,7 @@ def test_ever_visible_detects_single_isolated_clear_sample():  # ruff: ignore[mi
         )
 
 
-def test_ever_visible_false_when_blocked_by_zone_everywhere_it_clears():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ever_visible_false_when_blocked_by_zone_everywhere_it_clears() -> None:
     """Verify ever_visible is False when a zone blocks every clear instant."""
     telescope = _telescope()
     zone = AvoidanceZone(

@@ -14,6 +14,8 @@ import { usePlanningContext } from './context/PlanningContext';
 import { AddTargetModal } from '../common/components/AddTargetModal';
 import { createTarget } from '../common/services/targetService';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
+import { useExecutionQueueQuery } from '../common/queries/useExecutionQueueQuery';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './observationManager.css';
 
 /**
@@ -30,9 +32,12 @@ export const ObservationManager: React.FC = () => {
         removeFromQueue,
         updateQueueItem,
         reorderQueue,
-        error,
-        clearError
     } = useExecutionQueue();
+    // Reuses the same shared query useExecutionQueue() is built on (same query
+    // key, so React Query dedupes this rather than firing a second fetch)
+    // purely to read its isLoading flag, which useExecutionQueue doesn't expose.
+    const { isLoading: isQueueLoading } = useExecutionQueueQuery();
+    useReportModeReady('Observation Manager', !isQueueLoading);
 
     // Lifted state for target selection shared with child components
     const {
@@ -155,8 +160,6 @@ export const ObservationManager: React.FC = () => {
 
     return (
         <>
-            {error && <div className="om-error-toast" onClick={clearError}>{error}</div>}
-
             <AddTargetModal
                 isOpen={isAddModalOpen}
                 onClose={() => setIsAddModalOpen(false)}

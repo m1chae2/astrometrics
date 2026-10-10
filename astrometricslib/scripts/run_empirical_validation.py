@@ -11,7 +11,7 @@ import argparse
 import sys
 import traceback
 
-from astrometricslib import Astrometrics
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError
 
 
 def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) -> dict:
@@ -36,16 +36,16 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
 
     # Target 1: Vega calibration tuning
     vega_target = astrometrics.targets.get("Vega")
-    if vega_target and vega_target.stacked_spectral_target:
-        print(f"Executing Vega calibration tuning on: {vega_target.stacked_spectral_target}")
+    if vega_target and vega_target.spectral_stacking.stacked_image:
+        print(f"Executing Vega calibration tuning on: {vega_target.spectral_stacking.stacked_image}")
         try:
             tune_res = astrometrics.stars.tune_spectroscopy_calibration(
-                vega_target.stacked_spectral_target, camera_name=camera_name
+                vega_target.spectral_stacking.stacked_image, camera_id=camera_name
             )
             rms_err = tune_res.get("rms_error_nm", 0.0)
             print(f"  Vega Calibration RMS Error: {rms_err:.3f} nm")
             results["vega_calibration"] = tune_res
-        except Exception as err:
+        except (AstrometricsError, *DATA_ERRORS) as err:
             print(f"  Vega calibration tuning notice: {err}")
 
     # Target 2: Field spectroscopy analysis on Vega & M 13
@@ -54,15 +54,17 @@ def run_spectroscopy_validation(astrometrics: Astrometrics, camera_name: str) ->
         if t:
             print(f"Running spectroscopy analysis on target: {t.id}")
             try:
-                res = astrometrics.processing.run_spectroscopy(t, limit=10)
+                res = astrometrics.processing.process_target(
+                    t, stages=["spectroscopy"], spectroscopy={"limit": 10}
+                ).results["spectroscopy"]
                 if res and "context" in res:
-                    summary = getattr(t, "spectroscopy_quality_summary", None)
+                    summary = t.quality.spectroscopy
                     flagged = summary.flagged if summary else False
                     print(f"  Target {t.id} Spectroscopy Completed. Flagged: {flagged}")
                     results[t.id] = {"status": "success", "flagged": flagged}
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {t.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Spectroscopy analysis error for {t.id}: {err}")
                 results[t.id] = {"status": "error", "message": str(err)}
 
@@ -99,11 +101,11 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
             ]
             print(f"Running Photometry Analysis on target: {target.id} ({len(zwo_frames)} matching frames)")
             try:
-                res = astrometrics.processing.run_photometry(
+                res = astrometrics.processing.process_target(
                     target,
-                    frames=zwo_frames,
-                    filter_type="Luminance",
-                )
+                    stages=["photometry"],
+                    photometry={"frames": zwo_frames, "filter_type": "Luminance"},
+                ).results["photometry"]
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)
                 stars_proc = res.get("starsProcessed", 0)
@@ -115,7 +117,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Photometry error on {target.id}: {err}")
                 results[target.id] = {"status": "error", "message": str(err)}
 
@@ -154,11 +156,13 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
 
     for tid in ["NGC 2403", "M 81", "M 1", "M 45", "M 67", "NGC 2903", "M 16", "NGC 1893"]:
         target = astrometrics.targets.get(tid)
-        if target and target.stacked_image:
+        if target and target.stacking.stacked_image:
             print(f"Running Asteroid Detection Analysis on target: {target.id}")
             try:
-                candidates = astrometrics.moving_objects.detect_asteroids(target)
-                metrics = astrometrics.moving_objects.last_run_metrics
+                astrometrics.processing.process_target(target, stages=["asteroids"])
+                candidates = target.asteroid_detection.candidates
+                summary = target.asteroid_detection.quality_summary
+                metrics = summary.asteroid_detection_metrics.model_dump() if summary is not None else {}
                 det = metrics.get("candidates_detected", 0)
                 lin = metrics.get("candidates_rate_linearity_confirmed", 0)
                 eph = metrics.get("candidates_ephemeris_matched", 0)
@@ -170,7 +174,7 @@ def run_asteroid_detection_validation(astrometrics: Astrometrics, camera_name: s
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Asteroid detection notice for {target.id}: {err}")
                 results[target.id] = {"status": "notice", "message": str(err)}
 
@@ -199,10 +203,11 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
     for tid in ["NGC 1893", "M 45", "NGC 2403", "M 81"]:
         target = astrometrics.targets.get(tid)
-        if target and target.stacked_image:
+        if target and target.stacking.stacked_image:
             print(f"Running Astrometry WCS Plate-Solve on target: {target.id}")
             try:
-                res = astrometrics.processing.run_astrometry(target)
+                answer = astrometrics.processing.process_target(target, stages=["astrometry"])
+                res = answer.results["astrometry"]
                 if res:
                     wcs_found = res.get("wcs") is not None
                     stars_count = len(res.get("stellar_objects", []))
@@ -214,7 +219,7 @@ def run_astrometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
 
                 astrometrics.targets.save()
                 print(f"  Incremental save completed for target: {target.id}")
-            except Exception as err:
+            except (AstrometricsError, OSError, *DATA_ERRORS) as err:
                 print(f"  Astrometry error for {target.id}: {err}")
                 results[target.id] = {"status": "error", "message": str(err)}
 
@@ -244,7 +249,7 @@ def run_stacking_validation(astrometrics: Astrometrics, camera_name: str) -> dic
     for tid in ["NGC 2403", "M 81", "M 13"]:
         target = astrometrics.targets.get(tid)
         if target:
-            summary = getattr(target, "stack_quality_summary", None)
+            summary = target.stacking.quality_summary
             if summary:
                 print(f"  Target {target.id} Stack Quality Summary Found:")
                 print(f"    Flagged: {summary.flagged}, Reasons: {summary.flag_reasons}")
@@ -300,7 +305,7 @@ def main() -> None:
         print("==================================================")
         print("All target quality summaries have been generated and recorded to astrometrics.db.")
 
-    except Exception as fatal_err:
+    except AstrometricsError as fatal_err:
         print(f"\nFatal error during validation execution: {fatal_err}")
         traceback.print_exc()
         sys.exit(1)

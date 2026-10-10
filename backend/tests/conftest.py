@@ -1,56 +1,27 @@
 """Shared pytest fixtures and test-session bootstrapping for backend tests.
 
-Configures an isolated temporary library directory, patches
-``AppConfiguration`` to use it, and stubs out ``astroquery`` before any
-backend module is imported, so the test suite never touches the real
-astrometrics library index or the network.
+The temporary library, database and settings file are made once for the whole
+repository, in the root `conftest.py`. This file adds only what the backend
+tests need on top of them: fake connections to online astronomy databases,
+the shared container, and a test client for the web app.
 """
 
 import os
 import sys
-import tempfile
-from pathlib import Path
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
-# 1. Set testing flag immediately so any module loading later sees it
+from pytest_mock import MockerFixture
+
+# Set the testing flag immediately so any module loading later sees it
 os.environ["ASTROMETRICS_TESTING"] = "1"
 
-# 2. Configure Matplotlib to use the headless Agg backend to avoid
-# Tkinter warnings
+# Use the headless Agg backend for Matplotlib, to avoid Tkinter warnings
 import matplotlib
 
 matplotlib.use("Agg")
 
-# 2. Setup a global temporary directory for tests
-_test_tmp_dir = tempfile.TemporaryDirectory()
-TEST_TEMP_DIR = Path(_test_tmp_dir.name)
-
-# 3. Create isolated library and frames directories
-test_library_path = TEST_TEMP_DIR / "libraryIndex"
-test_frames_path = test_library_path / "frames"
-test_logs_path = TEST_TEMP_DIR / "logs"
-test_targets_path = test_library_path / "targets"
-test_calibration_path = test_library_path / "calibration"
-
-test_library_path.mkdir(parents=True, exist_ok=True)
-test_frames_path.mkdir(parents=True, exist_ok=True)
-test_logs_path.mkdir(parents=True, exist_ok=True)
-test_targets_path.mkdir(parents=True, exist_ok=True)
-test_calibration_path.mkdir(parents=True, exist_ok=True)
-
-test_config_path = TEST_TEMP_DIR / "astrometrics.config"
-test_config_path.write_text(f"""[Image Library]
-path = {test_library_path}
-frames_path = {test_frames_path}
-""")
-
-# 4. Patch AppConfiguration so it always uses this temporary directory
-from astrometricslib import AppConfiguration
-
-# Monkeypatch the class methods directly
-AppConfiguration._find_config_file = lambda self: test_config_path
-AppConfiguration.get_project_root = lambda self: TEST_TEMP_DIR
-
-# Also mock astroquery to avoid external calls, just like tests/conftest.py did
+# Mock astroquery to avoid external calls
 from unittest.mock import MagicMock
 
 mock_astroquery = MagicMock()
@@ -58,30 +29,41 @@ sys.modules["astroquery"] = mock_astroquery
 sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.gaia"] = mock_astroquery.gaia
+# Code catches astroquery's own TimeoutError, so the stand-in must be a
+# real exception class rather than a mock attribute.
+mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})
+sys.modules["astroquery.exceptions"] = mock_astroquery.exceptions
 
 import pytest
 from fastapi.testclient import TestClient
 
+if TYPE_CHECKING:
+    from backend.container import Container
+
 
 @pytest.fixture(scope="session", autouse=True)
-def setup_test_environment():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Ensure the environment remains setup during the session."""
-    yield
-    # Cleanup temp directory when test session ends. SQLite connections
-    # can lazily create -wal/-shm files after the last query, which
-    # occasionally races shutil.rmtree's directory walk and raises
-    # ENOTEMPTY; retry once after a short pause to absorb that.
-    import time
+def initialized_container() -> Iterator[Container]:
+    """Build the shared container once for the whole test session.
 
-    try:
-        _test_tmp_dir.cleanup()
-    except OSError:
-        time.sleep(0.5)
-        _test_tmp_dir.cleanup()
+    Importing `backend.main_backend` builds nothing; the server's lifespan
+    does it. The `client` fixture does not run the lifespan, so tests that
+    need the services get them from this fixture instead. It uses the
+    simulated INDI driver because `ASTROMETRICS_TESTING` is set above.
+
+    Yields
+    ------
+    container : `Container`
+        The initialized shared container.
+    """
+    from backend.container import container
+
+    container.init_resources()
+    yield container
+    container.shutdown_resources()
 
 
 @pytest.fixture
-def client():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def client() -> TestClient:
     """FastAPI test client fixture.
 
     Returns
@@ -95,7 +77,7 @@ def client():  # ruff: ignore[missing-return-type-undocumented-public-function]
 
 
 @pytest.fixture
-def mock_container(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def mock_container(mocker: MockerFixture) -> Container:
     """Fixture to mock the DI container and its services.
 
     Returns

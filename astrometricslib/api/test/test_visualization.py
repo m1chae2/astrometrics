@@ -1,163 +1,184 @@
-"""Purpose: Delegation-contract tests for the Visualization facade.
+"""Purpose: Delegation tests for the `Visualization` sub-API.
 
-Description: Every method here is a thin pass-through to a function in
-visualization.helpers or pipelines.shared.image_conversions. Nothing
-about that logic needs re-testing -- the underlying functions already
-have their own thorough tests -- but the forwarding itself has broken
-silently before (a renamed kwarg swallowed into **kwargs, a helper
-added but never wired into this class), so each method gets one test
-asserting it calls the right function with the right arguments and
-returns its result unchanged.
+Description: `render_fits` and `plot` check their arguments and hand the
+work to `pipelines.shared.image_conversions` and the `visualization`
+package. The drawing code has its own tests. These tests check the
+hand-off: each kind reaches the right function with the right arguments,
+the result comes back unchanged, and an argument a kind does not use is
+refused instead of being dropped.
 """
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from astrometricslib.api.visualization import Visualization
+from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared import image_conversions
-from astrometricslib.visualization import helpers
+from astrometricslib.visualization import focus_plots, helpers
 
 
-def _make_visualization() -> Visualization:
-    astrometrics = MagicMock()
-    return Visualization(astrometrics)
+def _make_visualization(target: Target | None = None) -> tuple[Visualization, MagicMock, MagicMock]:
+    """Build a `Visualization` over mock catalogs.
+
+    Returns
+    -------
+    visualization : `Visualization`
+        The sub-API under test.
+    targets : `MagicMock`
+        The mock target catalog. Its ``get`` returns ``target``.
+    stars : `MagicMock`
+        The mock star catalog.
+    """
+    targets = MagicMock()
+    targets.get.return_value = target
+    stars = MagicMock()
+    config = MagicMock()
+    return Visualization(config, MagicMock(), targets=targets, stars=stars), targets, stars
 
 
-def test_convert_fits_to_png_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify arguments and the return value both pass through unchanged."""
-    visualization = _make_visualization()
-    mock = MagicMock(return_value={"png": "data"})
-    monkeypatch.setattr(image_conversions, "convert_fits_to_png", mock)
+def test_render_fits_data_url_delegates_to_image_conversions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the data-URL kind passes its arguments and result through."""
+    visualization, _, _ = _make_visualization()
+    mock = MagicMock(return_value="picture")
+    monkeypatch.setattr(image_conversions, "render_data_url", mock)
 
-    result = visualization.convert_fits_to_png("/fake.fits", max_dimensions=500, stretch=False)
-
-    assert result == {"png": "data"}
-    mock.assert_called_once_with("/fake.fits", 500, False)
-
-
-def test_convert_fits_to_png_with_stats_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify arguments and the return value both pass through unchanged."""
-    visualization = _make_visualization()
-    mock = MagicMock(return_value=(b"bytes", 1.0, 2.0))
-    monkeypatch.setattr(image_conversions, "convert_fits_to_png_with_stats", mock)
-
-    result = visualization.convert_fits_to_png_with_stats(
-        "/fake.fits", max_dimensions=500, center=1.0, width=2.0, cmap="viridis", stretch=False
+    result = visualization.render_fits(
+        "/fake.fits", kind="data_url", max_dimensions=500, stretch=False, center=1.0, width=2.0
     )
 
-    assert result == (b"bytes", 1.0, 2.0)
-    mock.assert_called_once_with("/fake.fits", 500, 1.0, 2.0, "viridis", False)
+    assert result == "picture"
+    mock.assert_called_once_with("/fake.fits", "", 500, False, 1.0, 2.0)
 
 
-def test_get_light_frame_data_delegates_to_image_conversions(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify arguments and the return value both pass through unchanged."""
-    visualization = _make_visualization()
+def test_render_fits_finds_a_target_frame_by_gain_and_exposure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify ``iso`` and ``exposure`` pick the frame through `get_frame`."""
     target = Target(id="M13")
-    mock = MagicMock(return_value={"png": "data"})
-    monkeypatch.setattr(image_conversions, "get_light_frame_data", mock)
+    visualization, _, _ = _make_visualization(target)
+    monkeypatch.setattr(image_conversions, "get_frame", MagicMock(return_value=__file__))
+    render = MagicMock(return_value="picture")
+    monkeypatch.setattr(image_conversions, "render_data_url", render)
 
-    result = visualization.get_light_frame_data(target, "800", "60", index=2, stretch=False)
+    result = visualization.render_fits(target="M13", iso="800", exposure="60", index=2, kind="data_url")
 
-    assert result == {"png": "data"}
-    mock.assert_called_once_with(target, "800", "60", 2, False)
+    assert result == "picture"
+    image_conversions.get_frame.assert_called_once_with(target, "800", "60", 2)
+    render.assert_called_once_with(__file__, "M13", 2000, True, None, None)
 
 
-def test_get_last_captured_image_delegates_with_the_astrometrics_config(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the parent Astrometrics' config is forwarded, not a new one."""
-    astrometrics = MagicMock()
-    visualization = Visualization(astrometrics)
-    mock = MagicMock(return_value={"png": "data"})
+def test_render_fits_refuses_a_crop_for_the_data_url_kind() -> None:
+    """Verify an argument the kind does not use raises."""
+    visualization, _, _ = _make_visualization()
+    with pytest.raises(InvalidArgumentError):
+        visualization.render_fits(
+            "/fake.fits", kind="data_url", crop_center_x=1, crop_center_y=1, crop_size=5
+        )
+
+
+def test_render_fits_refuses_a_frame_named_two_ways() -> None:
+    """Verify a path together with a target is refused."""
+    visualization, _, _ = _make_visualization(Target(id="M13"))
+    with pytest.raises(InvalidArgumentError):
+        visualization.render_fits("/fake.fits", target="M13", file_name="001")
+
+
+def test_get_last_captured_image_delegates_with_the_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the sub-API's own configuration is forwarded."""
+    visualization, _, _ = _make_visualization()
+    mock = MagicMock(return_value="picture")
     monkeypatch.setattr(image_conversions, "get_last_captured_image", mock)
 
     result = visualization.get_last_captured_image(stretch=False)
 
-    assert result == {"png": "data"}
-    mock.assert_called_once_with(astrometrics.config, False)
+    assert result == "picture"
+    mock.assert_called_once_with(visualization._config, False)
 
 
-def test_plot_target_dashboard_delegates_with_the_astrometrics_stars(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the parent Astrometrics' stars catalog is forwarded."""
-    astrometrics = MagicMock()
-    visualization = Visualization(astrometrics)
+@pytest.mark.parametrize(
+    ("kind", "helper_name"),
+    [
+        ("astrometry", "plot_astrometry"),
+        ("photometry", "plot_target_photometry"),
+        ("spectroscopy", "plot_target_spectroscopy"),
+    ],
+)
+def test_target_plots_delegate_with_the_star_catalog(
+    monkeypatch: pytest.MonkeyPatch, kind: str, helper_name: str
+) -> None:
+    """Verify each target chart reaches its helper with the star catalog."""
     target = Target(id="M13")
+    visualization, _, stars = _make_visualization(target)
+    mock = MagicMock(return_value="figure")
+    monkeypatch.setattr(helpers, helper_name, mock)
+
+    result = visualization.plot(kind, "M13", limit=5, figsize=(1, 1))
+
+    assert result == "figure"
+    mock.assert_called_once_with(target, stars, limit=5, figsize=(1, 1))
+
+
+def test_dashboard_plot_passes_the_selected_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the dashboard gets the highlighted star as a record."""
+    target = Target(id="M13")
+    visualization, _, stars = _make_visualization(target)
+    selected = MagicMock()
+    stars.get.return_value = selected
     mock = MagicMock(return_value="figure")
     monkeypatch.setattr(helpers, "plot_target_dashboard", mock)
 
-    result = visualization.plot_target_dashboard(target, limit=5, figsize=(1, 1), selected_star=None)
+    result = visualization.plot("dashboard", target, selected_star="star-1")
 
     assert result == "figure"
-    mock.assert_called_once_with(target, astrometrics.stars, limit=5, figsize=(1, 1), selected_star=None)
+    mock.assert_called_once_with(target, stars, limit=15, figsize=(16, 9), selected_star=selected)
 
 
-def test_plot_star_dashboard_delegates_to_plot_stellar_analysis(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify arguments and the return value both pass through unchanged."""
-    visualization = _make_visualization()
-    star = MagicMock()
-    spectral_star = MagicMock()
+def test_star_plot_delegates_to_plot_stellar_analysis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the star chart gets both records unchanged."""
+    from astrometricslib.models.stellar_source import StellarObject
+
+    visualization, _, _ = _make_visualization()
+    star = StellarObject(id="a")
+    spectral_star = StellarObject(id="b")
     mock = MagicMock(return_value="figure")
     monkeypatch.setattr(helpers, "plot_stellar_analysis", mock)
 
-    result = visualization.plot_star_dashboard(star, spectral_star=spectral_star, figsize=(2, 2))
+    result = visualization.plot("star", star=star, spectral_star=spectral_star, figsize=(2, 2))
 
     assert result == "figure"
     mock.assert_called_once_with(star, spectral_star=spectral_star, figsize=(2, 2))
 
 
-def test_plot_astrometry_delegates_with_the_astrometrics_stars(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the parent Astrometrics' stars catalog is forwarded."""
-    astrometrics = MagicMock()
-    visualization = Visualization(astrometrics)
+def test_focus_and_asteroid_plots_delegate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify the focus and asteroid charts reach their drawing functions."""
     target = Target(id="M13")
-    mock = MagicMock(return_value="figure")
-    monkeypatch.setattr(helpers, "plot_astrometry", mock)
+    visualization, _, _ = _make_visualization(target)
+    focus = MagicMock(return_value="focus figure")
+    asteroids = MagicMock(return_value="asteroid figure")
+    monkeypatch.setattr(focus_plots, "plot_focus_vs_temperature", focus)
+    monkeypatch.setattr(helpers, "plot_asteroid_detection", asteroids)
 
-    result = visualization.plot_astrometry(target, limit=5, figsize=(1, 1))
-
-    assert result == "figure"
-    mock.assert_called_once_with(target, astrometrics.stars, limit=5, figsize=(1, 1))
-
-
-def test_plot_photometry_delegates_with_the_astrometrics_stars(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the parent Astrometrics' stars catalog is forwarded."""
-    astrometrics = MagicMock()
-    visualization = Visualization(astrometrics)
-    target = Target(id="M13")
-    mock = MagicMock(return_value="figure")
-    monkeypatch.setattr(helpers, "plot_target_photometry", mock)
-
-    result = visualization.plot_photometry(target, limit=5, figsize=(1, 1))
-
-    assert result == "figure"
-    mock.assert_called_once_with(target, astrometrics.stars, limit=5, figsize=(1, 1))
+    assert visualization.plot("focus", target) == "focus figure"
+    assert visualization.plot("asteroids", target, figsize=(3, 3)) == "asteroid figure"
+    focus.assert_called_once_with(target, figsize=(14, 9))
+    asteroids.assert_called_once_with(target, figsize=(3, 3))
 
 
-def test_plot_spectroscopy_delegates_with_the_astrometrics_stars(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the parent Astrometrics' stars catalog is forwarded."""
-    astrometrics = MagicMock()
-    visualization = Visualization(astrometrics)
-    target = Target(id="M13")
-    mock = MagicMock(return_value="figure")
-    monkeypatch.setattr(helpers, "plot_target_spectroscopy", mock)
+def test_plot_refuses_arguments_the_kind_does_not_use() -> None:
+    """Verify an unknown kind, a stray argument or a missing subject raises."""
+    visualization, _, _ = _make_visualization(Target(id="M13"))
+    with pytest.raises(InvalidArgumentError):
+        visualization.plot("histogram", "M13")
+    with pytest.raises(InvalidArgumentError):
+        visualization.plot("focus", "M13", limit=3)
+    with pytest.raises(InvalidArgumentError):
+        visualization.plot("star")
+    with pytest.raises(InvalidArgumentError):
+        visualization.plot("astrometry")
 
-    result = visualization.plot_spectroscopy(target, limit=5, figsize=(1, 1))
 
-    assert result == "figure"
-    mock.assert_called_once_with(target, astrometrics.stars, limit=5, figsize=(1, 1))
-
-
-def test_plot_asteroid_detection_delegates_to_helpers(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the newly wired method reaches visualization.helpers.
-
-    This method exists in helpers.py but, until now, was never exposed
-    on this facade -- so nothing outside the library could actually
-    call it through the public API.
-    """
-    visualization = _make_visualization()
-    target = Target(id="M13")
-    mock = MagicMock(return_value="figure")
-    monkeypatch.setattr(helpers, "plot_asteroid_detection", mock)
-
-    result = visualization.plot_asteroid_detection(target, figsize=(3, 3))
-
-    assert result == "figure"
-    mock.assert_called_once_with(target, figsize=(3, 3))
+def test_plot_of_an_unknown_target_raises_not_found() -> None:
+    """Verify a target id that names no target raises `NotFoundError`."""
+    visualization, _, _ = _make_visualization(None)
+    with pytest.raises(NotFoundError):
+        visualization.plot("astrometry", "No Such Target")

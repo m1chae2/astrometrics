@@ -8,29 +8,34 @@
   height: var(--control-btn-height);
   font-size: var(--control-font-size);
   font-weight: 500;
-  font-family: 'Noto Sans', sans-serif;
+  font-family: var(--font-family-base);
   background-color: var(--primary-blue);
   color: var(--white);
-  border: none;
-  border-radius: 4px;
+  border: 1px solid rgba(53, 132, 228, 0.25);
+  border-radius: 6px;
   cursor: pointer;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
   touch-action: manipulation;
-  transition: filter 0.2s, outline 0.2s;
+  transition: filter 0.2s, outline 0.2s, background-color 0.2s;
 }
 
 .btn:hover,
-.btn:active,
 .btn:focus {
   outline: none;
-  filter: brightness(1.1);
+  background-color: var(--adwaita-blue-hover, #2b5984);
+  filter: brightness(1.08);
+}
+
+.btn:active {
+  outline: none;
+  background-color: var(--adwaita-blue, #244a70);
 }
 
 .btn:focus-visible {
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.4);
 }
 
 .btn:disabled {
@@ -42,6 +47,24 @@
 }
 
 /* Modifiers */
+.btn--primary {
+  background-color: var(--slate-blue, #1f4868);
+  border: 1px solid var(--slate-blue-light, #4b8ec8);
+}
+
+.btn--primary:hover {
+  background-color: var(--slate-blue-hover, #295d86);
+}
+
+.btn--neutral {
+  background-color: var(--slate-blue, #1f4868);
+  border: 1px solid rgba(75, 142, 200, 0.3);
+}
+
+.btn--neutral:hover {
+  background-color: var(--slate-blue-hover, #295d86);
+}
+
 .btn--secondary {
   background-color: var(--grey-dark, #36454a);
   border: 1px solid var(--grey-light, #555);
@@ -66,12 +89,15 @@
   filter: brightness(1.2);
 }
 
+/* Neutral actions previously styled with green now map to system slate-blue */
 .btn--success {
-  background-color: var(--success-green);
+  background-color: var(--slate-blue, #1f4868);
+  border: 1px solid rgba(75, 142, 200, 0.4);
 }
 
 .btn--success:hover {
-  filter: brightness(1.1);
+  background-color: var(--slate-blue-hover, #295d86);
+  filter: brightness(1.08);
 }
 
 .btn--active {

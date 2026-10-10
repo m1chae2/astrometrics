@@ -1,0 +1,602 @@
+"""Purpose: Regression tests for SIMBAD-based star identification.
+
+Description: Verifies that StarIdentifier._identify_stars_with_simbad never
+assigns a non-stellar catalog entry (e.g. a LEDA/PGC galaxy designation) to a
+detected point source, even when that entry is closer to the hint/plate-solved
+coordinates than the actual star, or is listed first in the SIMBAD result
+table. Covers both the plate-solved (WCS) matching path and the RA/Dec-hint
+fallback path used when plate solving is skipped.
+"""
+
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import numpy as np
+import pytest
+from astropy.table import Column, MaskedColumn, Table
+
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.astrometry.processing import star_identifier as star_identifier_module
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier, _block_average
+
+# Real-world J2000 coordinates for Vega (alf Lyr), in degrees.
+VEGA_RA_DEG = 279.23473479
+VEGA_DEC_DEG = 38.78368896
+
+
+def _build_simbad_table() -> Table:
+    """Build a SIMBAD region-query result with a closer galaxy listed first.
+
+    The galaxy is physically closer to Vega's position than Vega's own
+    entry, reproducing the conditions that previously produced a false
+    "LEDA ####" identification for a bright, well-known star.
+
+    Returns
+    -------
+    Table
+        A two-row SIMBAD-shaped result table: a galaxy entry followed by
+        Vega's own stellar entry.
+    """
+    return Table({
+        "main_id": Column(["LEDA 2131369", "* alf Lyr"], dtype=object),
+        "ids": Column(["LEDA 2131369", "NAME Vega|* alf Lyr|HD 172167"], dtype=object),
+        "sp_type": MaskedColumn(["", "A0Va"], mask=[True, False], dtype=object),
+        "otype": Column(["G", "*"], dtype=object),
+        "V": MaskedColumn([0.0, 0.03], mask=[True, False]),
+        "ra": [VEGA_RA_DEG + 0.0002, VEGA_RA_DEG],
+        "dec": [VEGA_DEC_DEG + 0.0002, VEGA_DEC_DEG],
+    })
+
+
+def _make_star_identifier() -> StarIdentifier:
+    config = MagicMock()
+    config.get_value.return_value = None
+    return StarIdentifier(config=config)
+
+
+def _make_center_stellar_object(width: int, height: int) -> StellarObject:
+    obj = StellarObject()
+    obj.name = "Star 1"
+    obj.star_data = {"x_centroid": width / 2.0, "y_centroid": height / 2.0, "flux": 50000.0}
+    return obj
+
+
+def test_hint_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No-WCS path: must not fall back to result_table[0]."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
+
+    identifier._identify_stars_with_simbad(
+        wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
+    )
+
+    identified = identifier.stellar_objects[0]
+    assert "LEDA" not in identified.name
+    assert "PGC" not in identified.name
+    assert identified.name in ("Vega", "* alf Lyr")
+
+
+def test_hint_based_identification_stores_the_catalog_stars_own_position(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The star gets SIMBAD's position, not the (slightly off) hint."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
+    # The Vega session's hint was the solved stack's centre, 22 arcsec away.
+    hint_ra, hint_dec = VEGA_RA_DEG + 0.0079, VEGA_DEC_DEG + 0.0032
+
+    identifier._identify_stars_with_simbad(
+        wcs=None, center_ra=hint_ra, center_dec=hint_dec, width=1000, height=1000
+    )
+
+    identified = identifier.stellar_objects[0]
+    assert identified.right_ascension == pytest.approx(VEGA_RA_DEG, abs=1e-6)
+    assert identified.declination == pytest.approx(VEGA_DEC_DEG, abs=1e-6)
+
+
+def test_wcs_based_identification_skips_closer_galaxy_and_uses_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WCS path: nearest-neighbor matching must not consider galaxies."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
+
+    fake_wcs = MagicMock()
+    fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
+    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+
+    identifier._identify_stars_with_simbad(
+        wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
+    )
+
+    identified = identifier.stellar_objects[0]
+    assert "LEDA" not in identified.name
+    assert "PGC" not in identified.name
+    assert identified.name in ("Vega", "* alf Lyr")
+    assert identified.is_catalog_identified is True
+
+
+def test_is_catalog_identified_stays_false_without_a_simbad_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A star with no SIMBAD match must not be marked catalog-identified."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+
+    galaxy_only_table = Table({
+        "main_id": Column(["LEDA 2131369"], dtype=object),
+        "ids": Column(["LEDA 2131369"], dtype=object),
+        "sp_type": MaskedColumn([""], mask=[True], dtype=object),
+        "otype": Column(["G"], dtype=object),
+        "V": MaskedColumn([0.0], mask=[True]),
+        "ra": [VEGA_RA_DEG],
+        "dec": [VEGA_DEC_DEG],
+    })
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
+
+    identifier._identify_stars_with_simbad(
+        wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
+    )
+
+    assert identifier.stellar_objects[0].is_catalog_identified is False
+
+
+def test_identify_stars_with_wcs_public_api_identifies_every_star(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The public identify_stars_with_wcs() API works decoupled.
+
+    Unlike process_image's attempt_plate_solving=False fallback (which only
+    ever identifies the single star nearest the image center), this API
+    should attempt identification for every star in the supplied list.
+    """
+    identifier = _make_star_identifier()
+    center_star = _make_center_stellar_object(1000, 1000)
+    off_center_star = StellarObject()
+    off_center_star.name = "Star 2"
+    off_center_star.star_data = {"x_centroid": 100.0, "y_centroid": 100.0, "flux": 20000.0}
+    stellar_objects = [center_star, off_center_star]
+
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
+
+    fake_wcs = MagicMock()
+    fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
+    # Both stars map to Vega's own coordinates for this test; the
+    # point is that the API attempts to identify both, not just the
+    # one nearest the image center.
+    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+
+    result = identifier.identify_stars_with_wcs(stellar_objects, fake_wcs, width=1000, height=1000)
+
+    assert result is stellar_objects
+    for star in stellar_objects:
+        assert "LEDA" not in star.name
+        assert star.name in ("Vega", "* alf Lyr")
+
+
+def test_identify_stars_with_wcs_returns_input_unchanged_when_empty() -> None:
+    """Verify empty input list returns empty list without error."""
+    identifier = _make_star_identifier()
+    fake_wcs = MagicMock()
+
+    result = identifier.identify_stars_with_wcs([], fake_wcs, width=1000, height=1000)
+
+    assert result == []
+
+
+def test_process_image_delegates_to_identify_stars_with_wcs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify process_image delegates WCS-given path to public API."""
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+
+    called_with = {}
+    original = identifier.identify_stars_with_wcs
+
+    def _spy(stellar_objects, wcs, width, height):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
+        called_with["stellar_objects"] = stellar_objects
+        called_with["wcs"] = wcs
+        return original(stellar_objects, wcs, width, height)
+
+    monkeypatch.setattr(identifier, "identify_stars_with_wcs", _spy)
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=_build_simbad_table()))
+
+    fake_wcs = MagicMock()
+    fake_wcs.wcs.crval = [VEGA_RA_DEG, VEGA_DEC_DEG]
+    fake_wcs.wcs_pix2world.return_value = (VEGA_RA_DEG, VEGA_DEC_DEG)
+
+    identifier._identify_stars_with_simbad(
+        wcs=fake_wcs, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
+    )
+
+    assert called_with["stellar_objects"] is identifier.stellar_objects
+    assert called_with["wcs"] is fake_wcs
+
+
+def test_filter_stellar_rows_excludes_galaxy_type() -> None:
+    """_filter_stellar_rows drops galaxy-typed rows, keeps star-typed."""
+    filtered = StarIdentifier._filter_stellar_rows(_build_simbad_table())
+
+    assert len(filtered) == 1
+    assert filtered["main_id"][0] == "* alf Lyr"
+
+
+def test_no_stellar_matches_leaves_generic_name_and_logs_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a star keeps its generic name when all SIMBAD hits are galaxies.
+
+    A warning is logged so the fallback is visible in script output.
+    """
+    identifier = _make_star_identifier()
+    identifier.stellar_objects = [_make_center_stellar_object(1000, 1000)]
+
+    galaxy_only_table = Table({
+        "main_id": Column(["LEDA 2131369"], dtype=object),
+        "ids": Column(["LEDA 2131369"], dtype=object),
+        "sp_type": MaskedColumn([""], mask=[True], dtype=object),
+        "otype": Column(["G"], dtype=object),
+        "V": MaskedColumn([0.0], mask=[True]),
+        "ra": [VEGA_RA_DEG],
+        "dec": [VEGA_DEC_DEG],
+    })
+    monkeypatch.setattr(identifier.simbad, "query_region", MagicMock(return_value=galaxy_only_table))
+
+    with caplog.at_level("WARNING", logger=star_identifier_module.logger.name):
+        identifier._identify_stars_with_simbad(
+            wcs=None, center_ra=VEGA_RA_DEG, center_dec=VEGA_DEC_DEG, width=1000, height=1000
+        )
+
+    identified = identifier.stellar_objects[0]
+    assert identified.name == "Star 1"
+    assert any("no stellar-type simbad entries" in record.message.lower() for record in caplog.records)
+
+
+def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _query_gaia_region pins Gaia DR3's table and limits the search.
+
+    astroquery's cone search defaults to whichever table the ESA archive
+    server reports as current, which is not something this code pins. Every
+    other Gaia access in this file hardcodes gaiadr3.gaia_source (the
+    bulk-seed ADQL query, the local cache schema, every "Gaia DR3 ..." id
+    string), so the search names the table in its own ADQL query. The query
+    also carries the magnitude limit and the row limit, and asks for proper
+    motions.
+    """
+    import astroquery.gaia as gaia_module
+
+    import astrometricslib.foundation.config as config_loader_module
+    from astrometricslib.foundation.config import AppConfiguration
+
+    config = AppConfiguration()
+    config.update_config({"Image Library": {"path": str(tmp_path)}})
+    monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+    captured_queries: list[str] = []
+
+    class _FakeJob:
+        """A finished job whose result table is empty."""
+
+        def get_results(self) -> Table:
+            """Return an empty result table.
+
+            Returns
+            -------
+            table : `astropy.table.Table`
+                A table with no rows.
+            """
+            return Table({"ra": [], "dec": []})
+
+    def _fake_launch_job_async(query: str, **_keywords: object) -> _FakeJob:
+        """Record the ADQL text and return a finished empty job.
+
+        Parameters
+        ----------
+        query : `str`
+            The ADQL query text.
+        **_keywords
+            Ignored job options.
+
+        Returns
+        -------
+        job : `_FakeJob`
+            A job that returns an empty table.
+        """
+        captured_queries.append(query)
+        return _FakeJob()
+
+    monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", _fake_launch_job_async)
+
+    StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+    assert len(captured_queries) == 1
+    query = captured_queries[0]
+    assert "FROM gaiadr3.gaia_source" in query
+    assert f"phot_g_mean_mag < {star_identifier_module.GAIA_DEFAULT_MAGNITUDE_LIMIT}" in query
+    assert f"TOP {star_identifier_module.GAIA_ROW_LIMIT}" in query
+    assert "pmra" in query
+    assert "pmdec" in query
+
+
+class TestGaiaCircuitBreaker:
+    """Unit tests for the Gaia remote-query circuit breaker.
+
+    If the remote Gaia database is unresponsive, trying is stopped after
+    a few consecutive failures to save time. This should not affect
+    local cache lookups.
+    """
+
+    def setup_method(self) -> None:
+        """Start each test with a clean breaker (state is module-global)."""
+        star_identifier_module.reset_gaia_circuit_breaker()
+
+    def teardown_method(self) -> None:
+        """Leave no tripped breaker behind for other tests."""
+        star_identifier_module.reset_gaia_circuit_breaker()
+
+    def test_starts_closed(self) -> None:
+        """A fresh process attempts remote Gaia queries."""
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+    def test_trips_only_at_the_configured_limit(self) -> None:
+        """Failures below the limit must not disable Gaia."""
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
+            star_identifier_module._record_gaia_failure("test")
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+        star_identifier_module._record_gaia_failure("test")
+        assert star_identifier_module._gaia_remote_queries_disabled() is True
+
+    def test_success_resets_the_failure_run(self) -> None:
+        """Intermittent failures never accumulate into a trip."""
+        for _ in range(10):
+            for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT - 1):
+                star_identifier_module._record_gaia_failure("test")
+            star_identifier_module._record_gaia_success()
+
+        assert star_identifier_module._gaia_remote_queries_disabled() is False
+
+    def test_open_breaker_skips_the_remote_cone_search(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the breaker open, no network call is attempted."""
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.foundation.config import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        remote_query_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+        assert table is None
+        assert coords is None
+        remote_query_spy.assert_not_called()
+
+    def test_open_breaker_skips_the_cache_seed_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The seed path is gated by the same breaker."""
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.foundation.config import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        launch_job_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", launch_job_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        cached_count = StarIdentifier._seed_gaia_cache_for_field(VEGA_RA_DEG, VEGA_DEC_DEG, 0.2)
+
+        assert cached_count == 0
+        launch_job_spy.assert_not_called()
+
+    def test_open_breaker_still_serves_locally_cached_gaia_data(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The breaker must not disable the local cache.
+
+        Cached Gaia rows are the one Gaia source that still works while
+        the service is down -- a real run served 4 cache hits during the
+        same pass that saw 67 remote failures. Gating those behind the
+        breaker would throw away working data.
+        """
+        import os
+        import sqlite3
+
+        import astroquery.gaia as gaia_module
+
+        import astrometricslib.foundation.config as config_loader_module
+        from astrometricslib.drivers import catalog_store
+        from astrometricslib.foundation.config import AppConfiguration
+
+        config = AppConfiguration()
+        config.update_config({"Image Library": {"path": str(tmp_path)}})
+        monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
+
+        cache_dir = tmp_path / "catalogs"
+        os.makedirs(cache_dir, exist_ok=True)
+        connection = sqlite3.connect(cache_dir / "catalog_cache.db")
+        cursor = connection.cursor()
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS gaia_sources "
+            "(source_id TEXT PRIMARY KEY, ra REAL, dec REAL, phot_g_mean_mag REAL, designation TEXT)"
+        )
+        for index in range(8):
+            cursor.execute(
+                "INSERT OR REPLACE INTO gaia_sources VALUES (?, ?, ?, ?, ?)",
+                (
+                    f"{index}",
+                    VEGA_RA_DEG + index * 0.0001,
+                    VEGA_DEC_DEG + index * 0.0001,
+                    12.0,
+                    f"Gaia DR3 {index}",
+                ),
+            )
+        connection.commit()
+        connection.close()
+        # The cache is trusted only for a region recorded as completely
+        # downloaded, so record one that covers the query below.
+        catalog_store.record_gaia_region(config, VEGA_RA_DEG, VEGA_DEC_DEG, 0.1, 18.0, row_limit_hit=False)
+
+        remote_query_spy = MagicMock()
+        monkeypatch.setattr(gaia_module.Gaia, "launch_job_async", remote_query_spy)
+
+        for _ in range(star_identifier_module.GAIA_CONSECUTIVE_FAILURE_LIMIT):
+            star_identifier_module._record_gaia_failure("test")
+
+        table, coords = StarIdentifier._query_gaia_region(VEGA_RA_DEG, VEGA_DEC_DEG, 0.05)
+
+        assert table is not None, "cached Gaia rows must still be served with the breaker open"
+        assert len(table) == 8
+        assert coords is not None
+        remote_query_spy.assert_not_called()
+
+
+def _apply_simbad_match_for_v_column(v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
+    """Run `_apply_simbad_match` on a one-row table with the given V value.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star after the SIMBAD match was applied to it.
+    """
+    table = Table({
+        "main_id": Column(["* alf Lyr"], dtype=object),
+        "ids": Column(["NAME Vega|* alf Lyr"], dtype=object),
+        "sp_type": MaskedColumn(["A0Va"], mask=[False], dtype=object),
+        "V": MaskedColumn(v_values, mask=v_mask),
+    })
+    stellar_object = StellarObject()
+    _make_star_identifier()._apply_simbad_match(stellar_object, table[0], VEGA_RA_DEG, VEGA_DEC_DEG)
+    return stellar_object
+
+
+def test_simbad_match_keeps_real_magnitude() -> None:
+    """A SIMBAD V magnitude is copied onto the star unchanged."""
+    stellar_object = _apply_simbad_match_for_v_column([0.03], [False])
+
+    assert stellar_object.magnitude == pytest.approx(0.03)
+
+
+def test_simbad_match_without_v_magnitude_leaves_magnitude_unknown() -> None:
+    """A masked V value must give `None`, not a fake magnitude of 0.0.
+
+    Regression test: the placeholder 0.0 was stored for every catalog star
+    that SIMBAD had no V magnitude for, and the Planetarium then showed it
+    as a real magnitude of 0.00.
+    """
+    stellar_object = _apply_simbad_match_for_v_column([0.0], [True])
+
+    assert stellar_object.magnitude is None
+    assert stellar_object.is_catalog_identified is True
+
+
+def test_simbad_match_with_nan_v_magnitude_leaves_magnitude_unknown() -> None:
+    """A NaN V value is treated as missing rather than stored."""
+    stellar_object = _apply_simbad_match_for_v_column([float("nan")], [False])
+
+    assert stellar_object.magnitude is None
+
+
+def _apply_gaia_match_for_g_column(g_values, g_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
+    """Run `_apply_gaia_match` on a one-row table with the given G value.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star after the Gaia match was applied to it.
+    """
+    table = Table({
+        "designation": Column(["Gaia DR3 1234567890"], dtype=object),
+        "phot_g_mean_mag": MaskedColumn(g_values, mask=g_mask),
+    })
+    stellar_object = StellarObject()
+    _make_star_identifier()._apply_gaia_match(stellar_object, table[0], 250.76, 36.72)
+    return stellar_object
+
+
+def test_gaia_match_keeps_real_magnitude() -> None:
+    """A Gaia G magnitude is copied onto the star unchanged."""
+    stellar_object = _apply_gaia_match_for_g_column([15.25], [False])
+
+    assert stellar_object.magnitude == pytest.approx(15.25)
+
+
+def test_gaia_match_without_g_magnitude_leaves_magnitude_unknown() -> None:
+    """A masked G value must give `None`, not a fake magnitude of 0.0."""
+    stellar_object = _apply_gaia_match_for_g_column([0.0], [True])
+
+    assert stellar_object.magnitude is None
+    assert stellar_object.is_catalog_identified is True
+
+
+def _apply_simbad_match_for_colour(b_values, b_mask, v_values, v_mask) -> StellarObject:  # ruff: ignore[missing-type-function-argument]
+    """Run `_apply_simbad_match` on a one-row table with the given B and V.
+
+    Returns
+    -------
+    stellar_object : `StellarObject`
+        The star after the SIMBAD match was applied to it.
+    """
+    table = Table({
+        "main_id": Column(["* alf Lyr"], dtype=object),
+        "ids": Column(["NAME Vega|* alf Lyr"], dtype=object),
+        "sp_type": MaskedColumn(["A0Va"], mask=[False], dtype=object),
+        "V": MaskedColumn(v_values, mask=v_mask),
+        "B": MaskedColumn(b_values, mask=b_mask),
+    })
+    stellar_object = StellarObject()
+    _make_star_identifier()._apply_simbad_match(stellar_object, table[0], VEGA_RA_DEG, VEGA_DEC_DEG)
+    return stellar_object
+
+
+def test_simbad_match_records_the_catalog_colour() -> None:
+    """B minus V is stored when SIMBAD has both."""
+    stellar_object = _apply_simbad_match_for_colour([0.03], [False], [0.03], [False])
+    assert stellar_object.b_minus_v == pytest.approx(0.0)
+
+    stellar_object = _apply_simbad_match_for_colour([12.05], [False], [11.58], [False])
+    assert stellar_object.b_minus_v == pytest.approx(0.47)
+
+
+def test_simbad_match_without_b_or_v_leaves_the_colour_unknown() -> None:
+    """A missing B or V gives `None`, never a made-up colour."""
+    assert _apply_simbad_match_for_colour([12.05], [True], [11.58], [False]).b_minus_v is None
+    assert _apply_simbad_match_for_colour([12.05], [False], [11.58], [True]).b_minus_v is None
+
+
+def test_block_average_matches_hand_computed_2x2_blocks() -> None:
+    """A known 4x4 image averages into the 2x2 blocks worked out by hand."""
+    data = np.array([
+        [0.0, 0.0, 2.0, 2.0],
+        [0.0, 0.0, 2.0, 2.0],
+        [4.0, 4.0, 6.0, 6.0],
+        [4.0, 4.0, 6.0, 6.0],
+    ])
+
+    binned = _block_average(data, 2)
+
+    assert binned == pytest.approx(np.array([[0.0, 2.0], [4.0, 6.0]]))
+
+
+def test_block_average_crops_a_size_not_divisible_by_the_factor() -> None:
+    """A non-divisible 5x5 image drops its last row/col, like the old code."""
+    data = np.arange(25, dtype=float).reshape(5, 5)
+
+    binned = _block_average(data, 2)
+
+    assert binned.shape == (2, 2)
+    assert binned[0, 0] == pytest.approx(data[:2, :2].mean())

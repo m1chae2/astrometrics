@@ -39,17 +39,17 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
 ) -> None:
     """A Siril that exits before opening its pipes fails fast, not forever."""
 
-    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_build_directories(self, id, image_files, camera_filter=None, job_logger=None):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         target_folder = tmp_path / "work" / id
         for subdirectory in ("biases", "darks", "flats", "lights", "process"):
             (target_folder / subdirectory).mkdir(parents=True, exist_ok=True)
         (target_folder / "lights" / "light_00000.fits").touch()
         return str(target_folder)
 
-    def fake_run_siril_headless(self, command_pipe, output_pipe, **kwargs: object):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def fake_run_siril_headless(self, command_pipe, output_pipe, **kwargs: object):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         # Stands in for a Siril that crashes immediately: a real process
         # that exits right away, having opened neither FIFO.
-        process = subprocess.Popen(["true"])
+        process = subprocess.Popen(["true"], stdout=subprocess.PIPE)
         self.subprocesses.append(process)
         process.wait()
         return process
@@ -72,6 +72,7 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
     mock_config.get_siril_executable.return_value = "siril"
     mock_config.get_logs_path.return_value = str(tmp_path)
     mock_config.get_frames_path.return_value = str(tmp_path / "frames")
+    mock_config.get_stacks_path.return_value = str(tmp_path / "frames")
     mock_config.get_stack_rejection_sigma_mode.return_value = "fixed"
     mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
     mock_config.get_stack_weight.return_value = None
@@ -79,6 +80,7 @@ def test_process_target_does_not_hang_when_siril_dies_at_launch(
     mock_config.get_auto_open_siril_gui.return_value = False
     mock_config.get_stack_filter_wfwhm_percentile.return_value = None
     mock_config.get_stack_filter_round_percentile.return_value = None
+    mock_config.get_minimum_calibration_frames.return_value = 3
 
     driver = siril_interface.ImageProcessing(mock_config, MagicMock())
     driver.workdir = str(tmp_path / "work")

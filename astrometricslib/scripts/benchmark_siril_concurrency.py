@@ -20,7 +20,7 @@ import shutil
 import sys
 from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ def time_one_slot_count(
         "from astrometricslib import Astrometrics;"
         "a = Astrometrics();"
         "t0 = time.monotonic();"
-        f"s = a.process_all_targets(target_ids={target_ids!r}, camera_name={camera_name!r},"
+        f"s = a.processing.process_target({target_ids!r}, camera_id={camera_name!r},"
         f" focal_length_mm={focal_length_mm!r});"
         "print('BENCHMARK_RESULT ' + json.dumps({"
         "'wall_seconds': round(time.monotonic() - t0, 1),"
@@ -157,7 +157,7 @@ def time_one_slot_count(
                     ["/usr/bin/pgrep", "-x", "-c", "siril"], capture_output=True, text=True
                 )
                 peak_siril = max(peak_siril, int(running.stdout.strip() or 0))
-            except Exception as sampling_error:
+            except (OSError, subprocess.SubprocessError, ValueError) as sampling_error:
                 logger.debug("Siril process sample failed: %s", sampling_error)
                 continue
 
@@ -201,8 +201,8 @@ def run_benchmark(argv: list[str] | None = None) -> int:
         ``0`` on success, ``2`` when the targets could not be resolved.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "benchmark_siril_concurrency", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     astrometrics = Astrometrics()

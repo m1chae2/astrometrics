@@ -2,11 +2,10 @@
 
 `astrometricslib/__init__.py` is the only door into this library that
 anything outside it is supposed to use. The UI backend imports from
-`astrometricslib` directly at 35 call sites and never reaches into a
-submodule, and the Sphinx documentation only ever documents this
-top-level namespace -- so the 46 names listed in `__all__` are, in a
-very real sense, the entire contract this library makes with the rest
-of the repository.
+`astrometricslib` directly and never reaches into a submodule, and the
+Sphinx documentation only ever documents this top-level namespace --
+so the names listed in `__all__` are, in a very real sense, the entire
+contract this library makes with the rest of the repository.
 
 That contract is easy to break by accident during a refactor. Moving a
 class to a new home, renaming it, or forgetting to re-export it after
@@ -21,71 +20,197 @@ a casual smoke test.
 
 So this file pins both halves of the contract: the exact set of names
 `__all__` promises, and the promise that every one of them actually
-resolves to something. Together they are the one test a large,
-multi-step reorganization of this library's internal layers can be
-checked against without re-deriving, each time, whether the outside
-world would notice.
+resolves to something. It also pins the public members of the root
+`Astrometrics` object (which holds only its sub-APIs) and of each sub-API,
+so a method renamed or folded into another shows up here. Together they
+are the one test a large, multi-step reorganization of this library's
+internal layers can be checked against without re-deriving, each time,
+whether the outside world would notice.
 """
 
 import astrometricslib
 
-# The public surface as it exists today. Changing this set on purpose
-# -- adding, removing, or renaming an export -- is a real, visible
-# change to the library's contract with the rest of the repo, so it
-# should be a deliberate edit to this list, not a side effect of moving
-# code around internally.
+# The public surface. Changing this set on purpose -- adding, removing, or
+# renaming an export -- is a real, visible change to the library's contract
+# with the rest of the repo, so it should be a deliberate edit to this list,
+# not a side effect of moving code around internally.
 EXPECTED_PUBLIC_NAMES = frozenset({
+    "check_choice",
+    "check_include",
+    "registered_job",
+    "run_as_background_job",
+    "reject_unused_arguments",
+    "resolve_target",
+    "to_epoch_seconds",
+    "preview_path_for",
+    "AbstractButler",
     "AbstractCatalogAccess",
+    "Activity",
+    "ActivityDescription",
+    "Agent",
+    "AgentType",
     "AnalysisResult",
     "AppConfiguration",
+    "AppliedCameraProfile",
     "AsteroidDetectionCandidate",
     "Astrometrics",
-    "AstrometryPipeline",
+    "AstrometricsError",
     "AstrometryPipelineQualityMetrics",
     "AstrometryQualitySummary",
     "BatchRunSummary",
+    "Butler",
     "CalibrationCatalog",
+    "CalibrationQueryResult",
     "CatalogAccess",
+    "Collection",
+    "ConfigFile",
+    "ConfigFileDescription",
+    "ConfigurationError",
+    "ConflictError",
+    "DATA_ERRORS",
+    "DEFAULT_DARK_TEMPERATURE_TOLERANCE_C",
+    "FITS_READ_ERRORS",
+    "ONLINE_QUERY_ERRORS",
+    "DatasetDescription",
+    "DatasetEntity",
+    "DatasetSpec",
     "DbLogHandler",
+    "DeviceInUseError",
+    "Entity",
+    "EntityDescription",
+    "ErrorInfo",
+    "ExposureGroupSummary",
+    "ExternalServiceError",
     "FileItem",
     "FilterType",
     "FitsHeaderEntry",
     "FrameRecord",
+    "FrameSelection",
+    "GaiaXpDriver",
+    "GenerationDescription",
     "GroupedFrameStat",
+    "HardwareError",
     "ImageProcessing",
-    "JobHandle",
-    "LoggerInterface",
+    "InputQualityReport",
+    "InvalidArgumentError",
+    "Jobs",
+    "JobStore",
     "MovingObjectConfig",
-    "MovingObjectRecovery",
+    "NotFoundError",
+    "NumpyEncoder",
+    "Parameter",
+    "ParameterDescription",
+    "PermissionDeniedError",
     "PhotometryResult",
+    "PlateSolveDriver",
+    "PlateSolveHeader",
+    "PlateSolveFailedError",
     "PlotData",
+    "PreviewRemakeResult",
+    "ProcessTargetResult",
+    "ProcessingError",
     "ProcessingJob",
     "ProcessingPipelines",
+    "ProvenanceStore",
     "QualityDiagnostics",
+    "QuarantinePreview",
+    "RPC_CODES",
+    "RawFrameCheckReport",
+    "ReddeningDriver",
+    "ReddeningEstimate",
+    "OverlayStar",
+    "ReindexReport",
     "RenderedImage",
-    "SpectralObservation",
+    "RestoreReport",
+    "SATURATED_BLOB_MINIMUM_PIXELS",
+    "SATURATED_FRAME_FRACTION",
+    "SetAsideFrame",
+    "SimbadDriver",
+    "SpectralFrameCheckReport",
     "SpectroscopyResult",
-    "StarIdentifier",
+    "StackQualityReport",
+    "StackResult",
+    "StackRunResult",
+    "StackSettings",
+    "StackSummary",
+    "StackingDriver",
+    "StarQueryResult",
     "StellarCatalog",
     "StellarObject",
+    "StorageError",
+    "StorageNotMountedError",
     "Target",
     "TargetCatalog",
     "TargetFilesResponse",
+    "TargetQueryResult",
+    "TargetReindexChange",
+    "TargetStarCount",
     "TargetSessionContribution",
+    "UsageDescription",
+    "Used",
+    "ValueDescription",
+    "ValueEntity",
     "VariableCandidate",
+    "ViewableImage",
     "Visualization",
+    "WasAssociatedWith",
+    "WasAttributedTo",
+    "WasConfiguredBy",
+    "WasGeneratedBy",
+    "acquire_resource_slot",
+    "background_job",
     "capture_job_logs",
     "classify_and_sort_fits_files",
+    "close_interrupted_jobs",
+    "configure_logging",
+    "configure_offline_iers",
+    "connect_db",
     "derive_target_sessions",
+    "error_from_info",
+    "export_target_lineage_as_prov_xml",
+    "file_lock",
+    "frame_is_spectral",
     "get_configuration",
+    "get_current_job",
+    "get_log_context",
+    "has_catalog_magnitude",
+    "is_path_inside",
+    "log_context",
+    "new_request_id",
+    "observing_night_id",
     "parse_coordinate_string",
-    "registered_job",
-    "resolve_worker_counts",
-    "run_parallel_batch",
+    "parse_iso_time",
+    "require_mounted_storage",
+    "resolve_camera_profile",
+    "resolve_mounted_path",
+    "safe_json_dumps",
+    "select_library_frames",
+    "to_error_info",
+    "warm_earth_orientation_data",
 })
 
+# Internal names the root still exports because code outside the library
+# imports them from here. wayfindinglib may import only the package root
+# (the import-linter contract). Each one should leave the root once its
+# last outside caller has a public alternative.
+#
+# Everything else in `EXPECTED_PUBLIC_NAMES` is public on purpose. That
+# includes the job and storage tools of `astrometricslib.foundation`
+# (`capture_job_logs`, `background_job`, `connect_db`, `file_lock`, ...),
+# which wayfindinglib, the backend and the MCP servers share, and the
+# frame helpers wayfindinglib calls (`FrameSelection`,
+# `select_library_frames`, `derive_target_sessions`,
+# `classify_and_sort_fits_files`, `frame_is_spectral`, the `SATURATED_*`
+# limits). wayfindinglib's plate solving goes through `stars.plate_solve`
+# and its field-center list through `targets.imaged_field_centers`.
+KEPT_FOR_OUTSIDE_CALLERS = {
+    # The backend container builds the Siril driver and hands it to its
+    # stacking service.
+    "ImageProcessing": "the backend",
+}
 
-def test_public_all_matches_the_pinned_name_set():  # ruff: ignore[missing-return-type-undocumented-public-function]
+
+def test_public_all_matches_the_pinned_name_set() -> None:
     """Verify `astrometricslib.__all__` is exactly the pinned name set.
 
     A mismatch in either direction is a real change to the library's
@@ -109,7 +234,7 @@ def test_public_all_matches_the_pinned_name_set():  # ruff: ignore[missing-retur
     )
 
 
-def test_every_public_name_actually_resolves():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_every_public_name_actually_resolves() -> None:
     """Verify every name in `__all__` can actually be fetched.
 
     Several exports are only resolved on demand through `__init__.py`'s
@@ -130,3 +255,117 @@ def test_every_public_name_actually_resolves():  # ruff: ignore[missing-return-t
         f"{sorted(unresolvable_names)}. Each one is declared as part of the public "
         f"surface but fetching it raises AttributeError."
     )
+
+
+SUB_API_MEMBERS = {
+    "targets": {
+        "add",
+        "catalog_access",
+        "create",
+        "delete",
+        "delete_images",
+        "get",
+        "get_frame",
+        "get_header",
+        "imaged_field_centers",
+        "list",
+        "query",
+        "read_saved",
+        "reindex_frames",
+        "save",
+    },
+    "stars": {
+        "analyze_periodicity",
+        "catalog_access",
+        "create",
+        "delete",
+        "detect_point_sources",
+        "find_or_create_by_position",
+        "get",
+        "plate_solve",
+        "query",
+        "save_all",
+        "tune_spectroscopy_calibration",
+        "update",
+    },
+    "processing": {
+        "acquire_analysis_slot",
+        "acquire_stacking_slot",
+        "calibration",
+        "diagnostics",
+        "discard_previous_stack",
+        "process_target",
+        "remake_preview",
+        "restore_excluded_frames",
+        "run_spectroscopy_by_session",
+        "stack",
+        "stack_summary",
+        "swap_with_previous_stack",
+    },
+    "processing.calibration": {"add", "assess_flats", "get", "library", "query", "refresh", "save"},
+    "processing.diagnostics": {
+        "flag_value_outliers",
+        "frame_quality",
+        "spectral_frame_check",
+        "spectral_registration_thresholds",
+        "stack_quality",
+    },
+    "visualization": {"get_last_captured_image", "plot", "render_fits"},
+    "jobs": {"query"},
+}
+"""Each sub-API of `Astrometrics`, by attribute path, and its members."""
+
+
+def _public_members(instance: object) -> set[str]:
+    """Return the public attribute names of an object's class and itself.
+
+    Parameters
+    ----------
+    instance : `object`
+        The object to inspect.
+
+    Returns
+    -------
+    names : `set` [`str`]
+        Every name without a leading underscore.
+    """
+    return {name for name in dir(instance) if not name.startswith("_")}
+
+
+def test_the_root_object_only_holds_its_sub_apis() -> None:
+    """`Astrometrics` has no methods: only settings, storage and sub-APIs."""
+    from unittest.mock import MagicMock
+
+    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    assert _public_members(astrometrics) == {
+        "catalog_access",
+        "config",
+        "jobs",
+        "processing",
+        "stars",
+        "targets",
+        "visualization",
+    }
+
+
+def test_each_sub_api_offers_exactly_its_pinned_members() -> None:
+    """Every sub-API's public members match the pinned list."""
+    from unittest.mock import MagicMock
+
+    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    for path, expected in SUB_API_MEMBERS.items():
+        instance = astrometrics
+        for part in path.split("."):
+            instance = getattr(instance, part)
+        assert _public_members(instance) == expected, path
+
+
+def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
+    """The sub-APIs share the children they are built with."""
+    from unittest.mock import MagicMock
+
+    astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
+    assert astrometrics.processing._targets is astrometrics.targets
+    assert astrometrics.processing.diagnostics._targets is astrometrics.targets
+    assert astrometrics.processing.calibration._targets is astrometrics.targets
+    assert astrometrics.visualization._stars is astrometrics.stars

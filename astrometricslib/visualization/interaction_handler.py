@@ -1,5 +1,8 @@
 """Component for managing interactive mouse events and state."""
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 from matplotlib.widgets import Button
 
@@ -16,7 +19,7 @@ class InteractionHandler:
     decoupled from the star-field data it operates on.
     """
 
-    def __init__(self, fig, ax_image, ax_spectrum, config: VisualizationConfig):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, fig, ax_image, ax_spectrum, config: VisualizationConfig) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize interaction state on the given figure and axes."""
         self.fig = fig
         self.ax_image = ax_image
@@ -41,8 +44,9 @@ class InteractionHandler:
         self.on_star_select = None
         self.on_star_drag = None
         self.on_crosshair_sync = None
+        self.on_find_star: Callable[[float, float], int | None] | None = None
 
-    def add_measurement_toggle(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def add_measurement_toggle(self) -> None:
         """Add the measurement mode toggle button."""
         bbox = self.ax_image.get_position()
         width, height = 0.25, 0.04
@@ -58,7 +62,7 @@ class InteractionHandler:
         )
         self.btn_measurement.on_clicked(self.toggle_line_mode)
 
-    def toggle_line_mode(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def toggle_line_mode(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Toggle line-measurement mode and reset any in-progress line."""
         self.line_mode = not self.line_mode
         self.line_points = []
@@ -67,7 +71,7 @@ class InteractionHandler:
         self.btn_measurement.label.set_text(f"Measurement Mode: {'ON' if self.line_mode else 'OFF'}")
         self.fig.canvas.draw_idle()
 
-    def clear_measurement_artists(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def clear_measurement_artists(self) -> None:
         """Remove the measurement line and annotation artists, if present."""
         if self.line_artist:
             self.line_artist.remove()
@@ -76,13 +80,13 @@ class InteractionHandler:
             self.annotation_artist.remove()
             self.annotation_artist = None
 
-    def connect_events(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def connect_events(self) -> None:
         """Connect mouse press, motion, and release events to handlers."""
         self.fig.canvas.mpl_connect("button_press_event", self.on_press)
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_motion)
         self.fig.canvas.mpl_connect("button_release_event", self.on_release)
 
-    def on_press(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def on_press(self, event: Any) -> None:
         """Route a mouse button press to click, drag-start, or line handling.
 
         Parameters
@@ -91,6 +95,12 @@ class InteractionHandler:
             The mouse press event, used for its axes and data
             coordinates.
         """
+        # Let the Matplotlib navigation toolbar handle events when in Pan
+        # or Zoom mode
+        toolbar = getattr(getattr(self.fig.canvas, "manager", None), "toolbar", None)
+        if toolbar is not None and getattr(toolbar, "mode", ""):
+            return
+
         if event.inaxes == self.ax_spectrum:
             self.handle_spectrum_click(event)
             return
@@ -112,7 +122,7 @@ class InteractionHandler:
         else:
             self.handle_image_click(event)
 
-    def on_motion(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def on_motion(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Forward mouse motion to the drag callback while dragging a star.
 
         Parameters
@@ -125,19 +135,19 @@ class InteractionHandler:
             if self.on_star_drag:
                 self.on_star_drag(self.dragged_star_index, event.xdata, event.ydata)
 
-    def on_release(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def on_release(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Clear drag state on mouse button release."""
         self.dragging = False
         self.dragged_star_index = None
 
-    def find_star_at(self, x, y):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def find_star_at(self, x: float | None, y: float | None) -> int | None:
         """Find the index of the star under the given data coordinates.
 
         Parameters
         ----------
-        x : `float`
+        x : `float` or `None`
             X data coordinate to hit-test.
-        y : `float`
+        y : `float` or `None`
             Y data coordinate to hit-test.
 
         Returns
@@ -146,11 +156,12 @@ class InteractionHandler:
             The index of the star patch at this position, or `None`
             if no ``on_find_star`` callback is set or no star is hit.
         """
-        # This will be delegated to the orchestrator which owns the
-        # star patches
-        return self.on_find_star(x, y) if hasattr(self, "on_find_star") else None
+        if x is None or y is None:
+            return None
+        handler = getattr(self, "on_find_star", None)
+        return handler(x, y) if handler is not None else None
 
-    def handle_measurement_click(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def handle_measurement_click(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Record a measurement click, drawing the line after two clicks.
 
         Parameters
@@ -165,7 +176,7 @@ class InteractionHandler:
             self.line_points = []
             self.line_points_axes = []
 
-    def draw_measurement_line(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def draw_measurement_line(self) -> None:
         """Draw the two-point measurement line with a length/angle label."""
         (x0, y0), (x1, y1) = self.line_points
         self.clear_measurement_artists()
@@ -185,17 +196,17 @@ class InteractionHandler:
         )
         self.fig.canvas.draw_idle()
 
-    def handle_image_click(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def handle_image_click(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Sync crosshairs from an image-panel click, if callback is set."""
         if self.on_crosshair_sync:
             self.on_crosshair_sync("image", event.xdata, event.ydata)
 
-    def handle_spectrum_click(self, event):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def handle_spectrum_click(self, event) -> None:  # ruff: ignore[missing-type-function-argument]
         """Sync crosshairs from a spectrum-panel click, if callback is set."""
         if self.on_crosshair_sync:
             self.on_crosshair_sync("spectrum", event.xdata, event.ydata)
 
-    def clear_crosshairs(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def clear_crosshairs(self) -> None:
         """Remove the image and spectrum crosshair artists, if present."""
         if self.image_cross_artist:
             self.image_cross_artist.remove()
@@ -203,3 +214,35 @@ class InteractionHandler:
         if self.spectrum_cross_artist:
             self.spectrum_cross_artist.remove()
             self.spectrum_cross_artist = None
+
+    def update_image_crosshairs(self, x: float, y: float) -> None:
+        """Move the image-panel crosshair marker to a data coordinate.
+
+        Parameters
+        ----------
+        x : `float`
+            Image-space X coordinate to mark.
+        y : `float`
+            Image-space Y coordinate to mark.
+        """
+        if self.image_cross_artist is not None:
+            self.image_cross_artist.remove()
+        (self.image_cross_artist,) = self.ax_image.plot(
+            [x], [y], marker="+", color=self.config.crosshair_color, markersize=14, markeredgewidth=2
+        )
+        self.fig.canvas.draw_idle()
+
+    def update_spectrum_crosshair(self, wavelength_angstrom: float) -> None:
+        """Move the spectrum-panel crosshair line to a wavelength.
+
+        Parameters
+        ----------
+        wavelength_angstrom : `float`
+            Wavelength, in Angstrom, to mark on the spectrum panel.
+        """
+        if self.spectrum_cross_artist is not None:
+            self.spectrum_cross_artist.remove()
+        self.spectrum_cross_artist = self.ax_spectrum.axvline(
+            wavelength_angstrom, color=self.config.crosshair_color, lw=1, linestyle=":"
+        )
+        self.fig.canvas.draw_idle()

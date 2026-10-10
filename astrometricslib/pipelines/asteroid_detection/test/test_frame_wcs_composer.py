@@ -58,7 +58,7 @@ def _build_frame_header(right_ascension_deg, declination_deg, width_px=1024, hei
     return header
 
 
-def test_estimate_frame_wcs_centers_on_frames_own_reported_pointing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_frame_wcs_centers_on_frames_own_reported_pointing() -> None:
     """Test that it uses the photo's own coordinates, not the target's."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(150.05, 30.02, width_px=2000, height_px=2000)
@@ -70,7 +70,7 @@ def test_estimate_frame_wcs_centers_on_frames_own_reported_pointing():  # ruff: 
     assert sky_at_frame_center == pytest.approx([150.05, 30.02])
 
 
-def test_estimate_frame_wcs_reuses_stack_pixel_scale_matrix():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_frame_wcs_reuses_stack_pixel_scale_matrix() -> None:
     """Test that it copies rotation and scale from the main target image."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(150.05, 30.02)
@@ -81,14 +81,14 @@ def test_estimate_frame_wcs_reuses_stack_pixel_scale_matrix():  # ruff: ignore[m
     assert frame_wcs.pixel_scale_matrix == pytest.approx(stack_wcs.pixel_scale_matrix)
 
 
-def test_estimate_frame_wcs_returns_none_when_ra_dec_missing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_frame_wcs_returns_none_when_ra_dec_missing() -> None:
     """Test that it safely fails if the photo is missing its coordinates."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(None, None)
     assert estimate_frame_wcs_from_mount_pointing(stack_wcs, frame_header) is None
 
 
-def test_estimate_frame_wcs_returns_none_when_naxis_missing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_frame_wcs_returns_none_when_naxis_missing() -> None:
     """Test that it safely fails if the photo is missing its size."""
     stack_wcs = _build_stack_wcs()
     frame_header = fits.Header()
@@ -97,7 +97,7 @@ def test_estimate_frame_wcs_returns_none_when_naxis_missing():  # ruff: ignore[m
     assert estimate_frame_wcs_from_mount_pointing(stack_wcs, frame_header) is None
 
 
-def test_estimate_frame_wcs_returns_none_for_non_numeric_ra_dec():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_estimate_frame_wcs_returns_none_for_non_numeric_ra_dec() -> None:
     """Test it safely fails if the coordinates are letters, not numbers."""
     stack_wcs = _build_stack_wcs()
     frame_header = _build_frame_header(0, 0, width_px=1024, height_px=1024)

@@ -15,13 +15,13 @@ from wayfindinglib.models.planning.observation_package import (
 )
 
 
-def test_exposure_request_total_time_with_no_delay():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_exposure_request_total_time_with_no_delay() -> None:
     """Verify total_exposure_sec is exposure x count with zero pacing delay."""
     request = ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)
     assert request.total_exposure_sec() == pytest.approx(3000.0)
 
 
-def test_exposure_request_total_time_includes_pacing_delay():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_exposure_request_total_time_includes_pacing_delay() -> None:
     """Verify delay_sec is applied between frames, not after the last one.
 
     10 frames have only 9 gaps between them.
@@ -30,13 +30,13 @@ def test_exposure_request_total_time_includes_pacing_delay():  # ruff: ignore[mi
     assert request.total_exposure_sec() == pytest.approx(3000.0 + 9 * 5.0)
 
 
-def test_exposure_request_single_frame_has_no_delay_applied():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_exposure_request_single_frame_has_no_delay_applied() -> None:
     """Verify a single-frame request applies no pacing delay."""
     request = ExposureRequest(frame_type=FrameType.DARK, exposure_sec=300.0, count=1, delay_sec=5.0)
     assert request.total_exposure_sec() == pytest.approx(300.0)
 
 
-def test_observation_package_sums_mixed_frame_types():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_observation_package_sums_mixed_frame_types() -> None:
     """Verify total_duration_sec sums light and calibration exposures."""
     package = ObservationPackage(
         id="pkg1",
@@ -50,7 +50,7 @@ def test_observation_package_sums_mixed_frame_types():  # ruff: ignore[missing-r
     assert package.total_duration_sec() == pytest.approx(3000.0 + 1500.0)
 
 
-def test_observation_package_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_observation_package_defaults() -> None:
     """Verify default priority, quality weighting, and optional fields."""
     package = ObservationPackage(id="pkg1", name="M 81", target_id="M 81")
     assert package.priority == 0
@@ -59,7 +59,7 @@ def test_observation_package_defaults():  # ruff: ignore[missing-return-type-und
     assert package.minimum_altitude_deg is None
 
 
-def test_dither_config_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dither_config_defaults() -> None:
     """Verify DitherConfig's default cadence and amplitude."""
     dither = DitherConfig()
     assert dither.enabled is False

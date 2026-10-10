@@ -4,13 +4,19 @@ Handles slewing, parking, and tracking.
 """
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 import astropy.units as u
 from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
+from astrometricslib import ConflictError
+
 from .property_wait import wait_for_switch_state
-from .pyindi_compatibility import PyIndi
+from .pyindi_compatibility import INDI_ERRORS, PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +24,11 @@ logger = logging.getLogger(__name__)
 class MountController:
     """Manages telescope mount operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
         self.config = client.config
 
-    def slew(self, telescope, ra: float, dec: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def slew(self, telescope: PyIndi.BaseDevice, ra: float, dec: float) -> bool:
         """Slews the telescope to the specified coordinates.
 
         Parameters
@@ -63,7 +69,7 @@ class MountController:
             return True
         return False
 
-    def park(self, telescope, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def park(self, telescope: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Parks the telescope, waiting for the driver to confirm the change.
 
         Parameters
@@ -98,7 +104,7 @@ class MountController:
             telescope, "TELESCOPE_PARK", "PARK", PyIndi.ISS_ON, timeout=timeout, fallback_name="PARK"
         )
 
-    def unpark(self, telescope, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def unpark(self, telescope: PyIndi.BaseDevice, timeout: float = 5.0) -> bool:
         """Unparks the telescope, waiting for the driver to confirm the change.
 
         Parameters
@@ -144,7 +150,7 @@ class MountController:
             telescope, "TELESCOPE_PARK", "UNPARK", PyIndi.ISS_ON, timeout=timeout, fallback_name="PARK"
         )
 
-    def set_tracking(self, telescope, enabled: bool, timeout: float = 5.0) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_tracking(self, telescope: PyIndi.BaseDevice, enabled: bool, timeout: float = 5.0) -> bool:
         """Set the tracking state and confirm the change with the driver.
 
         Parameters
@@ -203,19 +209,58 @@ class MountController:
             telescope, "TELESCOPE_TRACK_STATE", expected_name, PyIndi.ISS_ON, timeout=timeout
         )
 
+    def set_slew_rate(self, telescope: PyIndi.BaseDevice, rate_index: int, timeout: float = 5.0) -> bool:
+        """Set the manual-slew rate by indexed switch element.
+
+        Verified gap fix: the real `IndiInterface` had no `set_slew_rate`
+        implementation at all (only the simulator did), so this call
+        would `AttributeError` against real hardware.
+
+        Parameters
+        ----------
+        telescope
+            INDI device handle for the mount.
+        rate_index : int
+            Index into the `TELESCOPE_SLEW_RATE` switch vector (e.g.
+            0 for the slowest configured rate).
+        timeout : float
+            Maximum number of seconds to wait for the driver to confirm
+            the rate change.
+
+        Returns
+        -------
+        bool
+            True if the slew rate was set and confirmed, False
+            otherwise.
+        """
+        if not telescope:
+            return False
+        rate_switch = telescope.getSwitch("TELESCOPE_SLEW_RATE")
+        if not rate_switch or not (0 <= rate_index < len(rate_switch)):
+            return False
+
+        for i in range(len(rate_switch)):
+            rate_switch[i].s = PyIndi.ISS_ON if i == rate_index else PyIndi.ISS_OFF
+        self.client.sendNewSwitch(rate_switch)
+
+        expected_name = rate_switch[rate_index].getName()
+        return wait_for_switch_state(
+            telescope, "TELESCOPE_SLEW_RATE", expected_name, PyIndi.ISS_ON, timeout=timeout
+        )
+
     def _resolve_altitude_envelope(self) -> tuple[float, float, bool]:
         """Resolve the altitude envelope slews are validated against.
 
         Prefers the active per-rig `Telescope`'s configured envelope
         when one is configured; falls back to the global
         `[Observatory.Constraints]` section otherwise, per
-        `Wayfinding_Library_Architecture.md`
-        §2.2.2's "Documented Safety Fallback" invariant -- a rig that
+        `Wayfinding_Library_Architecture.md`'s "Documented Safety Fallback"
+        invariant -- a rig that
         has not yet been given its own section does not silently
         change behavior. Reading a `Telescope` model here is legal
         (models are Foundation, same as this driver); the observer
         position this envelope is evaluated at, below, is a separate,
-        deliberately deferred concern (§2.5.2).
+        deliberately deferred concern.
 
         Returns
         -------
@@ -235,14 +280,24 @@ class MountController:
             )
         return self.config.get_min_altitude(), self.config.get_max_altitude(), True
 
-    def validate_altitude_limits(self, telescope, ra: float, dec: float):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Calculate and validates altitude for target coordinates.
+    def validate_altitude_limits(self, telescope: Any, ra: float, dec: float) -> None:
+        """Calculate and validate the altitude of a slew destination.
 
         REQ: OBS-1.1
 
+        Parameters
+        ----------
+        telescope : `Any`
+            INDI device handle for the mount.
+        ra : `float`
+            Destination Right Ascension in hours, in the current-epoch
+            frame (JNow) the mount takes.
+        dec : `float`
+            Destination Declination in degrees, in the same frame.
+
         Raises
         ------
-        AstrometryHardwareError
+        ConflictError
             If the target altitude falls outside the configured
             minimum/maximum safe operating envelope.
         """
@@ -262,16 +317,18 @@ class MountController:
         observation_time = Time.now()
         location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg, height=elevation * u.m)
 
-        from wayfindinglib.skylib.coordinate_operations import compute_altaz
+        from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs
+        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 
-        # ra is in Hours (INDI convention); compute_altaz's contract
-        # is degrees.
-        target_altitude, _target_azimuth = compute_altaz(ra * 15.0, dec, location, observation_time)
+        # ra is in hours and in the current-epoch frame (INDI convention);
+        # compute_altaz takes ICRS degrees.
+        icrs_ra_deg, icrs_dec_deg = current_epoch_to_icrs((ra * 15.0) % 360.0, dec, observation_time)
+        target_altitude, _target_azimuth = compute_altaz(
+            icrs_ra_deg, icrs_dec_deg, location, observation_time
+        )
 
         if target_altitude < min_altitude or target_altitude > max_altitude:
-            from wayfindinglib import AstrometryHardwareError
-
-            raise AstrometryHardwareError(
+            raise ConflictError(
                 f"Slew rejected: Target altitude ({target_altitude:.1f}°) is outside safe operating "
                 f"envelope ({min_altitude}° to {max_altitude}°)"
             )
@@ -298,14 +355,14 @@ class MountController:
             return active_telescope.max_hour_angle_hours, active_telescope.hour_angle_limits_enabled
         return 0.0, False
 
-    def validate_hour_angle_limits(self, telescope, ra: float):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def validate_hour_angle_limits(self, telescope: PyIndi.BaseDevice, ra: float) -> None:
         """Calculate and validate hour angle for a target right ascension.
 
         REQ: OBS-1.1
 
         Raises
         ------
-        AstrometryHardwareError
+        ConflictError
             If the target's hour angle falls outside the configured
             maximum east/west bound.
         """
@@ -327,14 +384,12 @@ class MountController:
         hour_angle = ((hour_angle + 12.0) % 24.0) - 12.0
 
         if abs(hour_angle) > max_hour_angle_hours:
-            from wayfindinglib import AstrometryHardwareError
-
-            raise AstrometryHardwareError(
+            raise ConflictError(
                 f"Slew rejected: Target hour angle ({hour_angle:.2f}h) is outside safe operating "
                 f"envelope (±{max_hour_angle_hours}h)"
             )
 
-    def sync_coordinates(self, telescope, ra: float, dec: float) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def sync_coordinates(self, telescope: PyIndi.BaseDevice, ra: float, dec: float) -> bool:
         """Sync the telescope to the specified coordinates.
 
         This is a recalibration, not a movement. Uses ON_COORD_SET = SYNC.
@@ -370,7 +425,7 @@ class MountController:
             return True
         return False
 
-    def move(self, telescope, direction: str, start: bool = True) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def move(self, telescope: PyIndi.BaseDevice, direction: str, start: bool = True) -> bool:
         """Start or stop manual jogging in a direction.
 
         Fire-and-forget: this drives interactive jog controls (mouse down/up),
@@ -397,12 +452,12 @@ class MountController:
 
         if direction == "STOP":
             north_south_motion = telescope.getSwitch("TELESCOPE_MOTION_NS")
-            if north_south_motion:
+            if north_south_motion and any(s.s == PyIndi.ISS_ON for s in north_south_motion):
                 for i in range(len(north_south_motion)):
                     north_south_motion[i].s = PyIndi.ISS_OFF
                 self.client.sendNewSwitch(north_south_motion)
             west_east_motion = telescope.getSwitch("TELESCOPE_MOTION_WE")
-            if west_east_motion:
+            if west_east_motion and any(s.s == PyIndi.ISS_ON for s in west_east_motion):
                 for i in range(len(west_east_motion)):
                     west_east_motion[i].s = PyIndi.ISS_OFF
                 self.client.sendNewSwitch(west_east_motion)
@@ -412,34 +467,46 @@ class MountController:
         if any(direction_char in direction for direction_char in ("N", "S")):
             north_south_motion = telescope.getSwitch("TELESCOPE_MOTION_NS")
             if north_south_motion:
+                needs_update = False
                 for i in range(len(north_south_motion)):
                     name = north_south_motion[i].getName()
-                    if "N" in direction and name == "MOTION_NORTH":
-                        north_south_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    elif "S" in direction and name == "MOTION_SOUTH":
-                        north_south_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    else:
-                        north_south_motion[i].s = PyIndi.ISS_OFF
-                self.client.sendNewSwitch(north_south_motion)
-                success = True
+                    desired_state = PyIndi.ISS_OFF
+                    if "N" in direction and name == "MOTION_NORTH" and start:
+                        desired_state = PyIndi.ISS_ON
+                    elif "S" in direction and name == "MOTION_SOUTH" and start:
+                        desired_state = PyIndi.ISS_ON
+
+                    if north_south_motion[i].s != desired_state:
+                        north_south_motion[i].s = desired_state
+                        needs_update = True
+
+                if needs_update:
+                    self.client.sendNewSwitch(north_south_motion)
+                    success = True
 
         if any(direction_char in direction for direction_char in ("E", "W")):
             west_east_motion = telescope.getSwitch("TELESCOPE_MOTION_WE")
             if west_east_motion:
+                needs_update = False
                 for i in range(len(west_east_motion)):
                     name = west_east_motion[i].getName()
-                    if "E" in direction and name == "MOTION_EAST":
-                        west_east_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    elif "W" in direction and name == "MOTION_WEST":
-                        west_east_motion[i].s = PyIndi.ISS_ON if start else PyIndi.ISS_OFF
-                    else:
-                        west_east_motion[i].s = PyIndi.ISS_OFF
-                self.client.sendNewSwitch(west_east_motion)
-                success = True
+                    desired_state = PyIndi.ISS_OFF
+                    if "E" in direction and name == "MOTION_EAST" and start:
+                        desired_state = PyIndi.ISS_ON
+                    elif "W" in direction and name == "MOTION_WEST" and start:
+                        desired_state = PyIndi.ISS_ON
+
+                    if west_east_motion[i].s != desired_state:
+                        west_east_motion[i].s = desired_state
+                        needs_update = True
+
+                if needs_update:
+                    self.client.sendNewSwitch(west_east_motion)
+                    success = True
 
         return success
 
-    def abort(self, telescope) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def abort(self, telescope: PyIndi.BaseDevice) -> bool:
         """Abort all telescope mount motion immediately.
 
         Parameters
@@ -463,7 +530,7 @@ class MountController:
             return True
         return self.move(telescope, "STOP", False)
 
-    def _set_coord_mode(self, telescope, mode: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def _set_coord_mode(self, telescope: PyIndi.BaseDevice, mode: str) -> bool:
         """Set ON_COORD_SET mode (SLEW, TRACK, SYNC) by name or label.
 
         Parameters
@@ -499,6 +566,6 @@ class MountController:
             if found:
                 self.client.sendNewSwitch(coordinate_set_switch)
                 return True
-        except Exception as coord_mode_error:
+        except INDI_ERRORS as coord_mode_error:
             logger.warning("Failed to set coord mode %s: %s", mode, coord_mode_error)
         return False

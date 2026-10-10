@@ -2,7 +2,7 @@
 
 Description: Summarizes recorded `DivergenceRecord` evidence against a
 phase gate and applies an operator's decision, per
-`Wayfinding_Library_Architecture.md` §2.5.2. Building on
+`Wayfinding_Library_Architecture.md`. Building on
 `data_access/delegation_policy_reader.py`'s `promote_capability` (which
 already re-validates shadow precedence and every snapshot-checkable
 policy rule before returning a candidate policy), this module adds the
@@ -11,14 +11,52 @@ agreement-rate summary an operator can judge a phase gate against, and
 recording the validated decision.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from wayfindinglib.data_access.delegation_policy_reader import (
+    DelegationPolicyValidationError,
     get_delegation_policy,
     promote_capability,
 )
+from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.models.policy.delegation import DelegationPolicy, DelegationState, ObservatoryCapability
 from wayfindinglib.models.session.divergence import DivergenceRecord
+
+_AUTHORITATIVE_ORDER = (
+    ObservatoryCapability.OBSERVATORY_SAFETY,
+    ObservatoryCapability.MOUNT_CONTROL,
+    ObservatoryCapability.PLATE_SOLVE_ALIGNMENT,
+    ObservatoryCapability.AUTOGUIDING,
+    ObservatoryCapability.AUTOFOCUS,
+    ObservatoryCapability.CAPTURE_ORCHESTRATION,
+)
+"""Order to promote toward AUTHORITATIVE ("controller mode") in: safety
+and mount first (no dependency), then the three correction capabilities
+(each only succeeds if already SHADOWED -- `promote_capability`'s own
+shadow-precedence check), then capture last (only succeeds once the
+three corrections above it just became AUTHORITATIVE -- the dependency
+rule `validate_delegation_policy` enforces)."""
+
+_DELEGATED_ORDER = tuple(reversed(_AUTHORITATIVE_ORDER))
+"""Order to demote toward DELEGATED ("monitoring mode") in -- the exact
+reverse, since DELEGATED has no dependency ordering of its own and
+always succeeds, but demoting capture before the capabilities it
+depends on keeps the policy in a valid state at every intermediate
+step rather than only at the end."""
+
+
+@dataclass(frozen=True)
+class BulkDelegationOutcome:
+    """The result of a `set_all_capabilities` bulk delegation-state change.
+
+    A capability that could not legally reach `target_state` is
+    recorded in `rejected` with the validation error explaining why,
+    never silently skipped or forced -- see
+    `Wayfinding_Library_Architecture.md`'s `set_all_capabilities`.
+    """
+
+    applied: dict[ObservatoryCapability, DelegationState] = field(default_factory=dict)
+    rejected: dict[ObservatoryCapability, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -83,7 +121,7 @@ def summarize_divergence_evidence(
 
 
 def apply_promotion_decision(
-    butler,  # ruff: ignore[missing-type-function-argument]
+    butler: DiskButler,
     capability: ObservatoryCapability,
     new_state: DelegationState,
     *,
@@ -130,3 +168,67 @@ def apply_promotion_decision(
     )
     butler.put(new_policy, "delegation_policy", {"id": new_policy.id})
     return new_policy
+
+
+def set_all_capabilities(
+    butler: DiskButler,
+    target_state: DelegationState,
+    *,
+    evidence_note: str = "",
+    has_guider_calibration: bool = False,
+    has_focus_model: bool = False,
+) -> BulkDelegationOutcome:
+    """Move every capability toward `target_state`, one at a time.
+
+    A convenience layered on top of the existing per-capability
+    `apply_promotion_decision`, mirroring how N.I.N.A. bundles
+    per-device driver choices into one profile switch -- this does
+    **not** bypass shadow precedence, the safety shadow exemption,
+    capture's dependency ordering, or calibration presence. Each
+    capability is promoted individually, in the order `target_state`
+    requires (see `_AUTHORITATIVE_ORDER`/`_DELEGATED_ORDER`), and a
+    capability that cannot legally reach `target_state` yet -- e.g. a
+    correction capability not already `SHADOWED`, when moving toward
+    `AUTHORITATIVE` -- is recorded in `rejected` rather than silently
+    skipped or forced.
+
+    Parameters
+    ----------
+    butler : `wayfindinglib.drivers.butler.DiskButler`
+        The storage layer to read the current policy from and write
+        each successful transition to.
+    target_state : `DelegationState`
+        The state to move every capability toward. `AUTHORITATIVE`
+        ("controller mode") and `DELEGATED` ("monitoring mode") are the
+        two states this is meant for; any other value is promoted in
+        the same reverse order `DELEGATED` uses.
+    evidence_note : `str`, optional
+        A human-readable note recorded on every successful transition.
+    has_guider_calibration, has_focus_model : `bool`, optional
+        Passed through to each capability's validation.
+
+    Returns
+    -------
+    outcome : `BulkDelegationOutcome`
+        Which capabilities reached `target_state`, and why any that
+        didn't were rejected.
+    """
+    order = _AUTHORITATIVE_ORDER if target_state == DelegationState.AUTHORITATIVE else _DELEGATED_ORDER
+
+    applied: dict[ObservatoryCapability, DelegationState] = {}
+    rejected: dict[ObservatoryCapability, str] = {}
+    for capability in order:
+        try:
+            policy = apply_promotion_decision(
+                butler,
+                capability,
+                target_state,
+                evidence_note=evidence_note,
+                has_guider_calibration=has_guider_calibration,
+                has_focus_model=has_focus_model,
+            )
+            applied[capability] = policy.state_for(capability)
+        except DelegationPolicyValidationError as validation_error:
+            rejected[capability] = str(validation_error)
+
+    return BulkDelegationOutcome(applied=applied, rejected=rejected)

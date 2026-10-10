@@ -2,29 +2,30 @@
 
 Description: Verifies that stacking sub-filters produces distinct output
 filenames like M_13_L_Stacked.fits and M_13_SPEC_Stacked.fits, populating
-target.stacked_image for standard filters and target.stacked_spectral_target
+target.stacking.stacked_image for standard filters and
+target.spectral_stacking.stacked_image
 for SPEC filters.
 """
 
 from unittest.mock import MagicMock, patch
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
-from astrometricslib.utilities.enums import FilterType
 
 
-def test_filter_stack_naming_and_target_properties():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_filter_stack_naming_and_target_properties() -> None:
     """Verify filter-aware output filenames and Target property updates.
 
     Confirms that:
     - Standard filters (L, NONE) generate output names like
-      <Target>_<Filter>_Stacked.fits and update target.stacked_image.
+      <Target>_<Filter>_Stacked.fits and update target.stacking.stacked_image.
     - Spectral filters (SPEC) generate <Target>_SPEC_Stacked.fits and
-      update target.stacked_spectral_target.
+      update target.spectral_stacking.stacked_image.
     """
     target = Target(
         id="M 13",
@@ -66,7 +67,7 @@ def test_filter_stack_naming_and_target_properties():  # ruff: ignore[missing-re
         stacked_l = stacking_tasks.stack_frames(target, frames_to_stack=l_frames, filter_type=FilterType.L)
 
         assert stacked_l == "/library/lights/M_13/M_13_L_Stacked.fits"
-        assert target.stacked_image == "/library/lights/M_13/M_13_L_Stacked.fits"
+        assert target.stacking.stacked_image == "/library/lights/M_13/M_13_L_Stacked.fits"
         assert mock_driver.process_target.call_args.kwargs["output_file"] == "M_13_L_Stacked.fits"
 
         # 2. Stack SPEC frames
@@ -76,5 +77,5 @@ def test_filter_stack_naming_and_target_properties():  # ruff: ignore[missing-re
         )
 
         assert stacked_spec == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
-        assert target.stacked_spectral_target == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
+        assert target.spectral_stacking.stacked_image == "/library/lights/M_13/M_13_SPEC_Stacked.fits"
         assert mock_driver.process_target.call_args.kwargs["output_file"] == "M_13_SPEC_Stacked.fits"

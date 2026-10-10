@@ -1,43 +1,40 @@
 """Purpose: Equipment Selection.
 
 Description: Changes which configured telescope or camera is active,
-per `Wayfinding_Library_Architecture.md` §2.2.2 / §2.5.2: reading the
+per `Wayfinding_Library_Architecture.md`: reading the
 equipment catalog is a Foundation concern both Control and Planning
 need, but *changing* which entry is active is a Control operation, so
 it lives here rather than in `data_access/equipment_catalog_reader.py`.
 
-Carries forward the validate-before-record pattern of the deprecated
-`observatorylib.equipment_configuration.EquipmentConfigurationManager.set_active_camera`:
-an unrecognized id is rejected rather than silently recorded, so a
-typo cannot leave the active selection pointing at nothing.
+Selection validates before it records. An unrecognized id is rejected
+instead of being saved, so a typo cannot leave the active selection
+pointing at nothing.
 
-`list_camera_profiles`/`get_equipment_configuration` delegate to the
-still-existing `observatorylib.equipment_configuration
-.EquipmentConfigurationManager` (composition, not duplication, mirroring
-`api.planning_registry.ObservationPlanning`'s Sky/Observation engines):
-the frontend's `observatory:list_cameras`/`observatory
-:get_equipment_configuration` RPC endpoints depend on that class's exact
-`CameraProfile`/`EquipmentConfiguration` dict shapes, so reimplementing
-against the new `Camera`/`Telescope` Foundation models here would change
-a live UI contract.
+`list_camera_profiles` and `get_equipment_configuration` read the same
+equipment catalog and report it in the camelCase dictionary shapes the
+frontend's `observatory:list_cameras` and
+`observatory:get_equipment_configuration` RPC methods return.
 """
 
 import logging
 from typing import Any
 
+from astrometricslib import AppConfiguration
 from wayfindinglib.data_access.equipment_catalog_reader import (
     ACTIVE_CAMERA_KEY,
     ACTIVE_TELESCOPE_KEY,
     CAMERA_SECTION,
     TELESCOPE_SECTION,
+    get_equipment_catalog,
     list_cameras,
     list_telescopes,
 )
+from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration
 
 logger = logging.getLogger(__name__)
 
 
-def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def set_active_telescope(config: AppConfiguration, telescope_id: str) -> bool:
     """Record a new active telescope selection.
 
     Parameters
@@ -62,7 +59,7 @@ def set_active_telescope(config, telescope_id: str) -> bool:  # ruff: ignore[mis
     return True
 
 
-def set_active_camera(config, camera_id: str) -> bool:  # ruff: ignore[missing-type-function-argument]
+def set_active_camera(config: AppConfiguration, camera_id: str) -> bool:
     """Record a new active camera selection.
 
     Parameters
@@ -87,33 +84,69 @@ def set_active_camera(config, camera_id: str) -> bool:  # ruff: ignore[missing-t
     return True
 
 
-def list_camera_profiles(config) -> list[dict[str, Any]]:  # ruff: ignore[missing-type-function-argument]
-    """Return all camera profiles defined in the config as dicts.
+def _camera_profile(camera: Camera) -> dict[str, Any]:
+    """Report one camera's sensor in the frontend's camera-profile shape.
+
+    Returns
+    -------
+    profile : `dict`
+        ``name``, ``pixelSizeUm``, ``sensorWidthPx`` and ``sensorHeightPx``.
+    """
+    return {
+        "name": camera.name,
+        "pixelSizeUm": camera.pixel_size_um,
+        "sensorWidthPx": camera.sensor_width_px,
+        "sensorHeightPx": camera.sensor_height_px,
+    }
+
+
+def list_camera_profiles(config: Any) -> list[dict[str, Any]]:
+    """Return every configured camera's sensor profile.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration.
 
     Returns
     -------
     profiles : `list` [`dict`]
-        Serialized camera profile configurations.
+        One camera profile per configured camera, in the shape
+        `_camera_profile` gives.
     """
-    from wayfindinglib.observatorylib.equipment_configuration import EquipmentConfigurationManager
-
-    manager = EquipmentConfigurationManager(config)
-    return [profile.model_dump(by_alias=True) for profile in manager.list_camera_profiles()]
+    return [_camera_profile(camera) for camera in list_cameras(config)]
 
 
-def get_equipment_configuration(config) -> dict[str, Any] | None:  # ruff: ignore[missing-type-function-argument]
-    """Return the active equipment configuration with FOV geometry.
+def get_equipment_configuration(config: Any) -> dict[str, Any] | None:
+    """Return the active telescope and camera with their imaging geometry.
+
+    Parameters
+    ----------
+    config : `AppConfiguration`
+        The application configuration.
 
     Returns
     -------
     configuration : `dict` or `None`
-        Serialized `EquipmentConfiguration` with ``telescope``,
-        ``camera``, ``plate_scale_arcsec_per_px``, ``fov_width_deg``,
-        and ``fov_height_deg`` keys, or `None` if no camera is
-        configured.
+        ``telescope`` (``name``, ``focalLengthMm``, ``focalRatio``),
+        ``camera`` (a camera profile), ``plateScaleArcsecPerPx``,
+        ``fovWidthDeg`` and ``fovHeightDeg``, or `None` if no telescope
+        or no camera is configured.
     """
-    from wayfindinglib.observatorylib.equipment_configuration import EquipmentConfigurationManager
-
-    manager = EquipmentConfigurationManager(config)
-    active_configuration = manager.get_active_configuration()
-    return active_configuration.to_dict() if active_configuration else None
+    catalog = get_equipment_catalog(config)
+    telescope = catalog.active_telescope()
+    camera = catalog.active_camera()
+    if telescope is None or camera is None:
+        return None
+    configuration = EquipmentConfiguration(telescope=telescope, camera=camera)
+    return {
+        "telescope": {
+            "name": telescope.name,
+            "focalLengthMm": telescope.focal_length_mm,
+            "focalRatio": telescope.focal_ratio,
+        },
+        "camera": _camera_profile(camera),
+        "plateScaleArcsecPerPx": round(configuration.plate_scale_arcsec_per_px, 4),
+        "fovWidthDeg": round(configuration.fov_width_deg, 6),
+        "fovHeightDeg": round(configuration.fov_height_deg, 6),
+    }

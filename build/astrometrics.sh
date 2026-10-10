@@ -49,10 +49,14 @@ if [ $INSTALL -eq 1 ] || [ ! -d "$ROOT_DIR/.venv" ]; then
   echo ""
 fi
 
-# Start backend in background
-echo "[2/3] Starting backend..."
-"$ROOT_DIR/build/linux/run_backend.sh" start
-sleep 2  # Give backend time to start
+# Launch the backend in the background and return immediately. It takes ~15s
+# to start answering and ~10s more to load the star catalog. Electron holds its
+# splash screen until the backend reports ready (/api/ready), so the frontend
+# must start now, not after the backend has finished: `run_backend.sh start`
+# blocks until the backend answers, which would keep the splash from appearing
+# until the backend was already up.
+echo "[2/3] Launching backend (the splash screen will cover its startup)..."
+"$ROOT_DIR/build/linux/run_backend.sh" launch
 echo ""
 
 # Start frontend in foreground

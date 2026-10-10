@@ -2,27 +2,35 @@
 
 This is where astrometrics.db is actually read and written. The generic
 plumbing -- opening the file, encoding values as JSON -- comes from the
-shared `datastore.local_database` module; what lives here is everything
-that knows what a target or a stellar object actually is.
+shared storage module in `astrometricslib.foundation.storage`; what lives here
+is everything that knows what a target or a stellar object actually is.
 """
 
 import json
 import logging
 import os
-from typing import Any
+import shutil
+import sqlite3
+import time
+from typing import TYPE_CHECKING, Any
 
-from datastore.local_database import connect_db as _connect_db
-from datastore.local_database import safe_json_dumps as _safe_json_dumps
+from astrometricslib.foundation.storage.local_database import connect_db as _connect_db
+from astrometricslib.foundation.storage.local_database import safe_json_dumps as _safe_json_dumps
 
 __all__ = [
+    "backup_catalog_database",
     "load_targets",
     "save_target",
 ]
 
+if TYPE_CHECKING:
+    from astrometricslib.foundation.config import AppConfiguration
+    from astrometricslib.models.target import Target
+
 logger = logging.getLogger(__name__)
 
 
-def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
+def load_targets(app_config: AppConfiguration | None = None) -> list[Any]:
     """Load targets from the SQLite database.
 
     Parameters
@@ -39,7 +47,7 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
     from astrometricslib.models.target import Target
 
     if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         app_config = get_configuration()
 
@@ -67,15 +75,17 @@ def load_targets(app_config=None) -> list[Any]:  # ruff: ignore[missing-type-fun
         for row in rows:
             data = json.loads(row["data_json"])
             targets.append(Target.model_validate(data))
-    except Exception as e:
-        logger.error(f"Error loading targets from SQLite: {e}")
+    except sqlite3.Error, ValueError:
+        # ValueError covers bad JSON and a stored target that no longer
+        # passes validation. The targets read so far are still returned.
+        logger.exception("Error loading targets from SQLite")
     finally:
         conn.close()
 
     return targets
 
 
-def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-type-function-argument]
+def save_target(app_config: AppConfiguration | None = None, target: Target | None = None) -> str:
     """Save a single target to the SQLite database.
 
     Parameters
@@ -92,7 +102,7 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
         Database path saved to.
     """
     if app_config is None:
-        from astrometricslib.utilities.config_loader import get_configuration
+        from astrometricslib.foundation.config import get_configuration
 
         app_config = get_configuration()
     db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
@@ -116,9 +126,35 @@ def save_target(app_config=None, target=None) -> str:  # ruff: ignore[missing-ty
             (target.id, target.common_name, target.ra, target.dec, _safe_json_dumps(target.serialize())),
         )
         conn.commit()
-    except Exception as e:
-        logger.error(f"Error saving target to SQLite: {e}")
-        raise e
+    except Exception:
+        logger.exception("Error saving target to SQLite")
+        raise
     finally:
         conn.close()
     return db_path
+
+
+def backup_catalog_database(app_config: AppConfiguration) -> str | None:
+    """Copy the catalog database aside before a script writes to it.
+
+    Parameters
+    ----------
+    app_config : `AppConfiguration`
+        Provides the library path the database lives under.
+
+    Returns
+    -------
+    backup_path : `str` or `None`
+        Where the copy was written, or `None` if the source database
+        doesn't exist yet (nothing to back up) or the copy failed.
+    """
+    db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
+    if not os.path.exists(db_path):
+        return None
+    backup_path = f"{db_path}.{time.strftime('%Y%m%d_%H%M%S')}.bak"
+    try:
+        shutil.copy2(db_path, backup_path)
+    except OSError:
+        logger.exception("Could not back up %s before writing", db_path)
+        return None
+    return backup_path

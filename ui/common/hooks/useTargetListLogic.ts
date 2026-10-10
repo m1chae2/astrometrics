@@ -1,25 +1,46 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTargetListQuery } from '../queries/useTargetListQuery';
 import { useAstronomyListQuery } from '../queries/useAstronomyListQuery';
-import { useToast } from './useToast';
+import { reportError } from '../utils/reportError';
+import { useTargetCameraIndexQuery } from '../queries/useTargetCameraIndexQuery';
 import { SelectableItem } from '../components/SelectableList';
+import { updateTargetListFilter, useTargetListFilterState } from '../state/targetListFilterStore';
+import {
+    CAMERA_ALL,
+    CATALOG_ALL,
+    CATALOG_MESSIER,
+    CATALOG_NGC_IC,
+    CATALOG_NO_IMAGE,
+    CATALOG_PLANETS,
+    CATALOG_STARS,
+    SORT_NEWEST,
+    TargetListEntry,
+    cleanTargetName,
+    formatLastImaged,
+    hasProcessedImage,
+    lastImagedTime,
+    matchesCamera,
+    matchesCatalog,
+    sortTargets,
+    targetListId,
+} from './targetListFiltering';
+import type { TargetListFilterPanelProps } from '../radioList/TargetListFilterPanel';
 
-interface Target {
-    id?: string;
-    name?: string;
+interface Target extends TargetListEntry {
     [key: string]: unknown;
 }
 
-const BASE_FILTER_OPTIONS = ['Target Objects', 'Messier Objects', 'NGC IC Objects', 'No Image'];
-
 /**
- * Fetches, filters, and manages selection state for the target/star radio list
- * shown in the left-hand panel of the Planetarium and Astronomy displays.
+ * Fetches, filters, sorts, and manages selection state for the target radio list
+ * shown in the left-hand panel of the Image Processing, Image Viewer, Observatory
+ * and Observation displays.
  *
- * Fetches the target list (and, lazily, the star list) from the backend, applies
- * the active dropdown/text/processed-only filters, computes fuzzy-matched
- * highlighted IDs against remote ingestion folders, and auto-selects the first
- * filtered item when nothing is already selected or pending.
+ * Fetches the target list (and, lazily, the star list) from the backend and applies
+ * the shared catalog, camera, sort and text filters. The catalog, camera and sort
+ * choices are shared by every screen and saved between sessions. Also computes
+ * fuzzy-matched highlighted IDs against remote ingestion folders, and auto-selects
+ * the first filtered item when nothing is already selected or pending. A selected
+ * target stays selected even when the filters hide it.
  *
  * @param {number | undefined} reloadKey - Changing this value re-triggers the target/star fetch.
  * @param {string | undefined} pendingTarget - ID of a target awaiting confirmation of selection.
@@ -28,9 +49,8 @@ const BASE_FILTER_OPTIONS = ['Target Objects', 'Messier Objects', 'NGC IC Object
  * @param {(t: string) => void} [setSelectedTarget] - Optional setter invoked to confirm the selected target.
  * @param {Set<string>} [remoteTargets] - Remote ingestion folder names used to compute highlighted IDs.
  * @param {boolean} [filterProcessedOnly] - When true, restricts the list to targets with a processed/stacked image.
- * @param {boolean} [includeStars] - When true, adds a "Stars" filter option and includes the star list.
  * @param {boolean} [disableAutoSelect] - When true, suppresses auto-selecting the first filtered item.
- * @returns {object} List items, raw targets/stars, filter state and setters, highlighted IDs, and isLocalTarget.
+ * @returns {object} List items, raw targets/stars, filter panel props, text filter state, highlighted IDs, and isLocalTarget.
  */
 export const useTargetListLogic = (
     reloadKey: number | undefined,
@@ -40,19 +60,33 @@ export const useTargetListLogic = (
     setSelectedTarget?: (t: string) => void,
     remoteTargets: Set<string> = new Set(),
     filterProcessedOnly: boolean = false,
-    includeStars: boolean = false,
     disableAutoSelect: boolean = false
 ) => {
-    const [dropdown, setDropdown] = useState<string>('Target Objects');
+    const { catalog: savedCatalog, camera: savedCamera, sort } = useTargetListFilterState();
     const [filterText, setFilterText] = useState<string>('');
-    const toast = useToast();
 
     // Shared queries: multiple views consume the same cached target/star
     // lists instead of each independently fetching them on mount.
     const targetListQuery = useTargetListQuery();
     const astronomyListQuery = useAstronomyListQuery();
+    const cameraIndexQuery = useTargetCameraIndexQuery();
     const targets = useMemo(() => (targetListQuery.data as Target[]) ?? [], [targetListQuery.data]);
     const stars = useMemo(() => astronomyListQuery.data ?? [], [astronomyListQuery.data]);
+    const cameraIndex = cameraIndexQuery.data;
+
+    const catalogOptions = useMemo(
+        () => [CATALOG_ALL, CATALOG_MESSIER, CATALOG_NGC_IC, CATALOG_STARS, CATALOG_PLANETS, CATALOG_NO_IMAGE],
+        []
+    );
+
+    // A saved choice can name something this screen (or the current
+    // equipment config) no longer offers; fall back to "no filter" then.
+    const catalog = catalogOptions.includes(savedCatalog) ? savedCatalog : CATALOG_ALL;
+    const configuredCameraNames = useMemo(
+        () => (cameraIndex?.cameras ?? []).map((cameraSummary) => cameraSummary.name),
+        [cameraIndex]
+    );
+    const camera = configuredCameraNames.includes(savedCamera) ? savedCamera : CAMERA_ALL;
 
     // Callers change reloadKey (e.g. after a new ingestion) to force a
     // refresh. Force a refetch on every change except the initial mount,
@@ -65,23 +99,14 @@ export const useTargetListLogic = (
         }
         targetListQuery.refetch();
         astronomyListQuery.refetch();
+        cameraIndexQuery.refetch();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reloadKey]);
 
     useEffect(() => {
         if (!targetListQuery.error) return;
-        console.error(targetListQuery.error);
-        try {
-            toast.show(
-                targetListQuery.error instanceof Error
-                    ? targetListQuery.error.message
-                    : String(targetListQuery.error),
-                'error'
-            );
-        } catch {
-            // Ignore toast errors
-        }
-    }, [targetListQuery.error, toast]);
+        reportError(targetListQuery.error, 'target-list');
+    }, [targetListQuery.error]);
 
     useEffect(() => {
         if (astronomyListQuery.error) {
@@ -98,7 +123,7 @@ export const useTargetListLogic = (
         const remoteNorm = new Set(Array.from(remoteTargets).map(normalize));
 
         targets.forEach((t) => {
-            const val = typeof t === 'string' ? t : String(t.id || t.name || '');
+            const val = typeof t === 'string' ? t : targetListId(t);
             if (remoteNorm.has(normalize(val))) {
                 highlights.add(val);
             }
@@ -106,72 +131,27 @@ export const useTargetListLogic = (
         return highlights;
     }, [targets, remoteTargets]);
 
-    // Filtering Logic
-    const applyDropdownFilter = useCallback(
-        (t: Target) => {
-            const processedPath = typeof t === 'string'
-                ? ''
-                : (t.processed_image || t.processedImage || '');
-            const isProcessed = typeof processedPath === 'string' && processedPath.trim() !== '';
-
-            if (dropdown === 'No Image') {
-                return !isProcessed;
-            }
-
-            // By default, hide targets without a processed image in standard categories
-            if (!isProcessed) {
-                return false;
-            }
-
-            const nameRaw = typeof t === 'string' ? t : String(t.name ?? t.id ?? '');
-            const name = nameRaw.replace(/\u00A0/g, ' ').replace(/_/g, ' ').trim();
-            if (!dropdown || dropdown === 'Target Objects') return true;
-            if (dropdown === 'Messier Objects') {
-                return /^M(?=[\s\d]|$)/i.test(name);
-            }
-            if (dropdown === 'NGC IC Objects') {
-                return /^NGC(?=[\s\d]|$)/i.test(name) || /^IC(?=[\s\d]|$)/i.test(name);
-            }
-            return true;
-        },
-        [dropdown]
-    );
-
     const applyTextFilter = useCallback(
         (t: Target) => {
             if (!filterText || filterText.trim() === '') return true;
             const needle = filterText.trim().toLowerCase();
             const nameRaw = typeof t === 'string' ? t : String(t.name ?? t.id ?? '');
-            const name = nameRaw.replace(/\u00A0/g, ' ').replace(/_/g, ' ').trim().toLowerCase();
-            return name.includes(needle);
+            return cleanTargetName(nameRaw).toLowerCase().includes(needle);
         },
         [filterText]
     );
 
-    const applyProcessedFilter = useCallback(
-        (t: Target) => {
-            if (!filterProcessedOnly) return true;
-            const processedPath = typeof t === 'string'
-                ? ''
-                : (t.processed_image || t.processedImage || '');
-            return typeof processedPath === 'string' && processedPath.trim() !== '';
-        },
-        [filterProcessedOnly]
-    );
-
     // Memoized Filtered Targets
     const filteredTargets = useMemo(() => {
-        if (dropdown === 'Stars') {
-            if (!filterText || filterText.trim() === '') return stars;
-            const needle = filterText.trim().toLowerCase();
-            return stars.filter((star: any) => {
-                const nameRaw = String(star.name ?? star.id ?? '');
-                const name = nameRaw.replace(/\u00A0/g, ' ').replace(/_/g, ' ').trim().toLowerCase();
-                return name.includes(needle);
-            });
-        }
-        return targets.filter((t) => applyDropdownFilter(t) && applyTextFilter(t) && applyProcessedFilter(t));
-    }, [targets, stars, dropdown, applyDropdownFilter, applyTextFilter, applyProcessedFilter, filterText]);
+        const matching = targets.filter(
+            (t) =>
+                matchesCatalog(t, catalog) &&
+                matchesCamera(t, camera, cameraIndex) &&
+                applyTextFilter(t) &&
+                (!filterProcessedOnly || hasProcessedImage(t))
+        );
+        return sortTargets(matching, sort, camera, cameraIndex);
+    }, [targets, catalog, camera, cameraIndex, sort, applyTextFilter, filterText, filterProcessedOnly]);
 
     // Auto-selection Logic
     useEffect(() => {
@@ -211,36 +191,40 @@ export const useTargetListLogic = (
                 id: value,
                 value: value,
                 label: label,
-                isProcessed: dropdown === 'Stars'
-                    ? undefined
-                    : (typeof target === 'string'
-                        ? false
-                        : typeof (target.processed_image || target.processedImage) === 'string' &&
-                          (target.processed_image || target.processedImage).trim() !== '')
+                isProcessed: typeof target === 'string' ? false : hasProcessedImage(target),
+                // Under "Newest" the date explains the order.
+                subtitle: sort === SORT_NEWEST && typeof target !== 'string'
+                    ? formatLastImaged(lastImagedTime(target, camera, cameraIndex)) ?? 'No frames'
+                    : undefined,
             };
         });
-    }, [filteredTargets, dropdown]);
+    }, [filteredTargets, camera, cameraIndex, sort]);
 
-    const filterOptions = useMemo(() => {
-        const options = [...BASE_FILTER_OPTIONS];
-        if (includeStars) {
-            options.push('Stars');
-        }
-        return options;
-    }, [includeStars]);
+    const filterPanel: TargetListFilterPanelProps = useMemo(
+        () => ({
+            catalogOptions,
+            selectedCatalog: catalog,
+            onCatalogChange: (nextCatalog: string) => updateTargetListFilter({ catalog: nextCatalog }),
+            cameras: cameraIndex?.cameras ?? [],
+            selectedCamera: camera,
+            onCameraChange: (nextCamera: string) => updateTargetListFilter({ camera: nextCamera }),
+            sort,
+            onSortChange: (nextSort) => updateTargetListFilter({ sort: nextSort }),
+        }),
+        [catalogOptions, catalog, cameraIndex, camera, sort]
+    );
 
     return {
         items: filteredItems,
         targets,
         stars,
-        filterOptions,
-        selectedFilterOption: dropdown,
-        setFilterOption: setDropdown,
+        isLoading: targetListQuery.isLoading,
+        filterPanel,
         filterText,
         setFilterText,
         highlightedIds: highlightedIds,
-        isLocalTarget: !!selectedTarget && (dropdown === 'Stars' ? stars : targets).some(t => {
-            const val = typeof t === 'string' ? t : String(t.id || t.name || '');
+        isLocalTarget: !!selectedTarget && targets.some(t => {
+            const val = typeof t === 'string' ? t : targetListId(t);
             const normalize = (s: string) => s.replace(/[_\s]/g, '').toLowerCase();
             return normalize(val) === normalize(selectedTarget);
         })

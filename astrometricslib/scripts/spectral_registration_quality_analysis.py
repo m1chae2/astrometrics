@@ -34,20 +34,22 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import Any
 
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib import Astrometrics
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 from astrometricslib.drivers.fits_access import collapse_to_2d
+from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
 ZERO_ORDER_FWHM_BOX_RADIUS_PX = 15
 
 
-def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def resolve_spec_frames(target, camera: str, date_prefix: str | None = None) -> list[Any]:  # ruff: ignore[missing-type-function-argument]
     """Select a target's SPEC (Star Analyzer 200) light frames.
 
     Excludes derived products (stacked, starless, or starmask
@@ -68,7 +70,7 @@ def resolve_spec_frames(target, camera: str, date_prefix: str | None = None):  #
         The subset of target.frames with FilterType.SPEC matching
         the given criteria.
     """
-    from astrometricslib.utilities.enums import FilterType
+    from astrometricslib.foundation.enums import FilterType
 
     return [
         frame
@@ -103,7 +105,7 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
     combined_output : `str`
         The subprocess's combined stdout and stderr.
     """
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     siril_executable = get_configuration().get_siril_executable()
 
@@ -123,7 +125,7 @@ def run_siril_script(work_dir: str, commands: list[str], timeout: int = 600) -> 
     return result.stdout + result.stderr
 
 
-def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  # ruff: ignore[missing-type-function-argument]
+def measure_zero_order_stacked_fwhm(astrometrics: Astrometrics, path: str) -> float | None:
     """Measure the FWHM of the brightest detected star in a stacked image.
 
     For an SA200 stack this is the zero-order star -- the point
@@ -174,11 +176,11 @@ def measure_zero_order_stacked_fwhm(astrometrics, path: str) -> float | None:  #
         _, median, _ = sigma_clipped_stats(cutout, sigma=3.0)
         fwhm = float(data_properties(cutout - median).fwhm.value)
         return fwhm if np.isfinite(fwhm) and fwhm > 0 else None
-    except Exception:
+    except DATA_ERRORS:
         return None
 
 
-def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore[missing-type-function-argument]
+def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any]) -> None:  # ruff: ignore[missing-type-function-argument]
     """Sweep filter_wfwhm settings, measuring the zero-order star's FWHM.
 
     Tests whether field-star-population filtering (previously gated
@@ -215,15 +217,16 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
 
         start_time = time.time()
         try:
-            stacked_path = astrometrics.processing.run_stacking(
+            stacked_path = astrometrics.processing.stack(
                 target,
-                frames_to_stack=spec_frames,
+                frames=spec_frames,
+                kind="spectral",
                 rejection_sigma=SWEEP_SIGMA,
                 filter_wfwhm=filter_wfwhm,
                 stack_weight="wfwhm",
                 generate_rejmap=True,
-            )
-        except Exception as stack_err:
+            ).stacked_path
+        except (AstrometricsError, OSError, *DATA_ERRORS) as stack_err:
             row["error"] = str(stack_err)
             row["elapsed_s"] = time.time() - start_time
             print(f"Stacking failed for {label}: {stack_err}")
@@ -239,9 +242,9 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.processing.diagnostics.measure_stack_rejected_fraction(
-            stacked_path
-        )
+        row["rejected_fraction"] = astrometrics.processing.diagnostics.stack_quality(
+            stacked_path, include=["rejected_fraction"]
+        ).rejected_fraction
         print(
             f"Result: zero_order_fwhm={row['zero_order_fwhm']}, "
             f"rejected_fraction={row['rejected_fraction']}, elapsed={row['elapsed_s']:.1f}s"
@@ -258,7 +261,7 @@ def run_filter_sweep(astrometrics, target, spec_frames) -> None:  # ruff: ignore
         elapsed_str = f"{r['elapsed_s']:.1f}" if r["elapsed_s"] is not None else "n/a"
         print(f"{r['filter_wfwhm']:>13} {fwhm_str:>11} {rej_str:>9} {elapsed_str:>10}")
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     safe_id = target.id.replace(" ", "_")
@@ -288,8 +291,8 @@ def run_analysis() -> None:
         matching SPEC frames are available, or Siril registration
         does not complete successfully.
     """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "spectral_registration_quality_analysis", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     parser = argparse.ArgumentParser(description="SA200 Spectral Registration Quality Validity Check")
@@ -355,14 +358,12 @@ def run_analysis() -> None:
         print(output[-4000:])
         raise SystemExit(1)
 
-    seq_frames = astrometrics.processing.diagnostics.parse_stack_registration_seq(
-        os.path.join(process_dir, "light_source.seq")
-    )
+    seq_frames = parse_seq_file(os.path.join(process_dir, "light_source.seq"))
     lst_paths = sorted(
         glob.glob(os.path.join(process_dir, "cache", "light_source*.lst")),
         key=lambda p: int(os.path.splitext(os.path.basename(p))[0].replace("light_source", "")),
     )
-    zero_order_stars = [astrometrics.processing.diagnostics.parse_stack_zero_order_star(p) for p in lst_paths]
+    zero_order_stars = [parse_zero_order_star(p) for p in lst_paths]
 
     if len(seq_frames) != len(spec_frames) or len(zero_order_stars) != len(spec_frames):
         print(
@@ -445,7 +446,7 @@ def run_analysis() -> None:
     flagged_count = sum(1 for r in results if r["flags"])
     print(f"\n{flagged_count} of {len(results)} frames flagged.")
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     date_tag = f"_{args.date}" if args.date else ""

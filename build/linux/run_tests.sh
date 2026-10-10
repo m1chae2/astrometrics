@@ -42,6 +42,7 @@ suite_targets() {
     astrometricslib) echo "astrometricslib/" ;;
     wayfindinglib)   echo "wayfindinglib/ --ignore=wayfindinglib/scripts/commissioning/test" ;;
     backend)         echo "backend/tests/" ;;
+    mcp_servers)     echo "mcp_servers/" ;;
     *) echo "unknown suite: $1" >&2; return 1 ;;
   esac
 }
@@ -69,15 +70,15 @@ case "$SUITE" in
   all)
     # Coverage is per-package and each run overwrites coverage.xml, so the
     # combined run is for local use and leaves coverage to the CI jobs.
-    for suite in astrometricslib wayfindinglib backend; do
+    for suite in astrometricslib wayfindinglib backend mcp_servers; do
       COVERAGE=0 run_suite "$suite" "$@"
     done
     ;;
-  astrometricslib|wayfindinglib|backend)
+  astrometricslib|wayfindinglib|backend|mcp_servers)
     run_suite "$SUITE" "$@"
     ;;
   *)
-    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend] [pytest args...]" >&2
+    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers] [pytest args...]" >&2
     exit 2
     ;;
 esac

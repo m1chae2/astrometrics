@@ -14,14 +14,14 @@ This manual is the desktop user guide for the Astrometrics application. The appl
 - [2. Getting Started & Setup](#2-getting-started--setup)
 - [3. Interface Topology & Global Navigation](#3-interface-topology--global-navigation)
   - [3.1 Top Status Bar](#31-top-status-bar)
-- [4. Image Viewer & Target Inspector (`TargetDisplay`)](#4-image-viewer--target-inspector-targetdisplay)
+- [4. Image Viewer & Target Inspector (`ImageViewerDisplay`)](#4-image-viewer--target-inspector-imageviewerdisplay)
   - [4.1 Step-by-Step Instructions](#41-step-by-step-instructions)
 - [5. Image Processing & Stacking (`ImageProcessingDisplay`)](#5-image-processing--stacking-imageprocessingdisplay)
   - [5.1 Step-by-Step Stacking Workflow](#51-step-by-step-stacking-workflow)
-- [6. Astronomy Manager (`AstronomyDisplay`)](#6-astronomy-manager-astronomydisplay)
+- [6. Astronomy Manager (`AstronomyManager`)](#6-astronomy-manager-astronomymanager)
   - [6.1 Photometry & Transit Search](#61-photometry--transit-search)
   - [6.2 1D Spectroscopy Analysis](#62-1d-spectroscopy-analysis)
-- [7. Observatory Manager (`ObservatoryDisplay`)](#7-observatory-manager-observatorydisplay)
+- [7. Observatory Manager (`ObservatoryManager`)](#7-observatory-manager-observatorymanager)
   - [7.1 Control Panels & Operations](#71-control-panels--operations)
 - [8. Planetarium & 3D Sky Map (`PlanetariumDisplay`)](#8-planetarium--3d-sky-map-planetariumdisplay)
   - [8.1 Sky Map Navigation & Controls](#81-sky-map-navigation--controls)
@@ -69,7 +69,7 @@ The top bar is visible across all modes and provides instant system telemetry an
 
 ---
 
-## 4. Image Viewer & Target Inspector (`TargetDisplay`)
+## 4. Image Viewer & Target Inspector (`ImageViewerDisplay`)
 
 The **Image Viewer** is the primary workspace for reviewing captured target packages, inspecting FITS image headers, adjusting visual stretching, and identifying catalog stars.
 
@@ -127,7 +127,7 @@ Click **Process Target** to initiate stacking. Progress is shown on the live pro
 
 ---
 
-## 6. Astronomy Manager (`AstronomyDisplay`)
+## 6. Astronomy Manager (`AstronomyManager`)
 
 The **Astronomy Manager** provides tools for stellar photometry light curves and 1D spectroscopy analysis.
 
@@ -152,7 +152,7 @@ The **Astronomy Manager** provides tools for stellar photometry light curves and
 
 ---
 
-## 7. Observatory Manager (`ObservatoryDisplay`)
+## 7. Observatory Manager (`ObservatoryManager`)
 
 The **Observatory Manager** gives direct manual control over the telescope mount, focuser, filter wheel, autoguider, and weather safety systems.
 
@@ -188,7 +188,7 @@ The Observatory Manager allows for discovering and downloading images captured b
 2. **Review Targets**: A list of unassociated remote targets will appear, displaying the target name, filter type, and number of sub-exposures.
 3. **Download & Sync**: Select the desired targets and click **Download Selected**. The files will be transferred to the local machine and automatically registered into the Library Sidebar, ready for Image Processing.
 
-*(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control_registry.ObservatoryControl` API Reference)*
+*(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control.remote.RemoteControl` API Reference)*
 
 ---
 
@@ -225,6 +225,6 @@ The **Planetarium** renders a 3D celestial sphere view of the sky above the obse
 | UI Display | Primary Functional Capabilities |
 |---|---|
 | `PlanetariumDisplay` | 3D WebGL Sky Map, Constellation overlays, FOV rectangle projection, object context slews. |
-| `ObservatoryDisplay` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking (`AlignmentStatus.tsx`), focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
-| `ImageProcessingDisplay` & `TargetDisplay` | FITS image inspection, header search, star FWHM/HFR measurement, Master Dark/Flat/Bias calibration, star alignment, Winsorized Sigma Clipping stacking. |
-| `AstronomyDisplay` | 1D stellar profile extraction, neon/argon arc lamp wavelength calibration, continuum baseline fitting, Balmer line identification, Equivalent Width, and BLS exoplanet transit light curve fitting. |
+| `ObservatoryManager` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking (`AlignmentStatus.tsx`), focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
+| `ImageProcessingDisplay` & `ImageViewerDisplay` | FITS image inspection, header search, star FWHM/HFR measurement, Master Dark/Flat/Bias calibration, star alignment, Winsorized Sigma Clipping stacking. |
+| `AstronomyManager` | 1D stellar profile extraction, neon/argon arc lamp wavelength calibration, continuum baseline fitting, Balmer line identification, Equivalent Width, and BLS exoplanet transit light curve fitting. |

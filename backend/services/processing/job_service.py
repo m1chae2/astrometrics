@@ -8,8 +8,9 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from astrometricslib import LoggerInterface, ProcessingJob
+from astrometricslib import ConflictError, JobStore, NotFoundError, ProcessingJob
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,26 @@ logger = logging.getLogger(__name__)
 class JobService:
     """Coordinates job creation, updates, and historical retrieval.
 
-    Acts as a bridge between high-level services and the JobRepository.
+    Acts as a bridge between high-level services and the job store.
     """
 
-    def __init__(self, job_repository: LoggerInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, job_repository: JobStore) -> None:
+        """Keep the job store this service reads and writes.
+
+        Parameters
+        ----------
+        job_repository : `JobStore`
+            The logs database's job list.
+        """
         self.repository = job_repository
 
-    def create_job(self, target_id: str, job_type: str, log_file: str | None = None) -> ProcessingJob:
+    def create_job(
+        self,
+        target_id: str,
+        job_type: str,
+        log_file: str | None = None,
+        input_metrics: dict[str, Any] | None = None,
+    ) -> ProcessingJob:
         """Create a new job and record it to the database.
 
         Returns
@@ -41,17 +55,21 @@ class JobService:
             log_file_path=log_file,
             created_at=datetime.now().isoformat(),
             updated_at=datetime.now().isoformat(),
+            input_metrics=input_metrics or {},
+            output_metrics={},
         )
         self.repository.upsert_job(job)
         return job
 
-    def update_job(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def update_job(
         self,
         job_id: str,
         status: str | None = None,
         progress: float | None = None,
         status_message: str | None = None,
-    ):
+        input_metrics: dict[str, Any] | None = None,
+        output_metrics: dict[str, Any] | None = None,
+    ) -> None:
         """Update job state in the database."""
         job = self.repository.get_job(job_id)
         if not job:
@@ -67,6 +85,12 @@ class JobService:
 
         if status_message:
             job.message = status_message
+
+        if input_metrics is not None:
+            job.input_metrics = input_metrics
+
+        if output_metrics is not None:
+            job.output_metrics = output_metrics
 
         job.updated_at = datetime.now().isoformat()
         self.repository.upsert_job(job)
@@ -165,9 +189,9 @@ class JobService:
             if path.exists():
                 try:
                     os.remove(str(path))
-                    logger.info(f"Deleted log file for job {job_id}: {path}")
-                except Exception as e:
-                    logger.error(f"Error removing log file {path}: {e}")
+                    logger.info("Deleted log file for job %s: %s", job_id, path)
+                except OSError:
+                    logger.exception("Error removing log file %s", path)
 
         return self.repository.delete_job(job_id)
 
@@ -186,9 +210,9 @@ class JobService:
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If no job exists for ``job_id``.
-        TimeoutError
+        ConflictError
             If the job does not reach a terminal state within
             ``timeout`` seconds.
         """
@@ -198,13 +222,13 @@ class JobService:
         while True:
             job = self.get_job(job_id)
             if not job:
-                raise ValueError(f"Job {job_id} not found")
+                raise NotFoundError(f"Job {job_id} not found")
 
             if job.status in ["completed", "failed", "cancelled"]:
                 return job
 
             if (datetime.now() - start_time).total_seconds() > timeout:
-                raise TimeoutError(f"Job {job_id} timed out after {timeout} seconds")
+                raise ConflictError(f"Job {job_id} is still running after {timeout} seconds.", retryable=True)
 
             await asyncio.sleep(poll_interval)
 
@@ -222,37 +246,3 @@ class JobService:
             if self.delete_job(job.id):
                 count += 1
         return count
-
-    # --- Agent LTM Methods ---
-
-    def log_agent_interaction(self, session_id: str, prompt: str, response_json: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
-        """Log a raw LLM interaction for auditing and future reflection."""
-        interaction_id = str(uuid.uuid4())
-        self.repository.log_interaction(interaction_id, session_id, prompt, response_json)
-
-    def get_session_interactions(self, session_id: str) -> list[dict]:
-        """Retrieve interaction history for reflection.
-
-        Returns
-        -------
-        interactions : `list`
-            The logged interactions for the session.
-        """
-        return self.repository.get_session_interactions(session_id)
-
-    def add_agent_knowledge(  # ruff: ignore[missing-return-type-undocumented-public-function]
-        self, category: str, content: str, summary: str | None = None, importance: int = 1
-    ):
-        """Record distilled agent knowledge."""
-        knowledge_id = str(uuid.uuid4())
-        self.repository.add_knowledge(knowledge_id, category, content, summary, importance)
-
-    def get_relevant_agent_knowledge(self, limit: int = 5) -> list[dict]:
-        """Retrieve the most relevant knowledge for prompt injection.
-
-        Returns
-        -------
-        knowledge : `list`
-            The most relevant knowledge entries.
-        """
-        return self.repository.get_relevant_knowledge(limit)

@@ -5,11 +5,14 @@ simulation.
 """
 
 import logging
+from typing import Any
 
-from wayfindinglib.drivers.indi_interface import IndiInterface
+from astrometricslib import AppConfiguration
+from wayfindinglib.drivers.indi_interface import IndiInterface, TelescopeStatus
+from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
 # Filter names the simulated filter wheel reports -- matches the real filter
-# wheel's expected name set (see astrometricslib.utilities.enums.FilterType)
+# wheel's expected name set (see astrometricslib.foundation.enums.FilterType)
 # closely enough for resolve_filter_name's fuzzy matching to exercise
 # realistic paths in tests.
 _SIMULATED_FILTER_NAMES = ["Luminance", "Red", "Green", "Blue", "H_Alpha", "OIII", "SII", "SPEC"]
@@ -23,35 +26,39 @@ class _SimulatedDeviceDiscovery:
     controllers below, which read simulator state directly instead).
     """
 
-    def find_telescope(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_telescope(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_focuser(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_focuser(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_filterwheel(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_filterwheel(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_guide_camera(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_guide_camera(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_main_camera(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_main_camera(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_powerbox(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_powerbox(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def find_device_with_property(self, property_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def find_enclosure(self) -> None:
         """Return None: the simulator has no real INDI device object."""
         return None
 
-    def refresh_device_map(self):  # ruff: ignore[missing-return-type-private-function]
+    def find_device_with_property(self, property_name: str) -> None:
+        """Return None: the simulator has no real INDI device object."""
+        return None
+
+    def refresh_device_map(self) -> None:
         """No-op: the simulator has no live device map to refresh."""
 
 
@@ -65,11 +72,11 @@ class _SimulatedMountController:
     the higher-level slew/park/unpark/set_tracking/move methods directly.
     """
 
-    def __init__(self, simulator: SimulatorIndiInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, simulator: SimulatorIndiInterface) -> None:
         """Initialize the stand-in with a reference to the owning simulator."""
         self._simulator = simulator
 
-    def validate_altitude_limits(self, telescope, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def validate_altitude_limits(self, telescope: object, ra: float, dec: float) -> bool:
         """Permit the move: the simulator has no altitude-limit config.
 
         Returns
@@ -79,7 +86,7 @@ class _SimulatedMountController:
         """
         return True
 
-    def slew(self, telescope, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def slew(self, telescope: object, ra: float, dec: float) -> bool:
         """Delegate to the simulator's own slew() implementation.
 
         Returns
@@ -89,7 +96,7 @@ class _SimulatedMountController:
         """
         return self._simulator.slew(ra, dec)
 
-    def park(self, telescope):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def park(self, telescope: object) -> bool:
         """Delegate to the simulator's own park() implementation.
 
         Returns
@@ -99,7 +106,7 @@ class _SimulatedMountController:
         """
         return self._simulator.park()
 
-    def unpark(self, telescope):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def unpark(self, telescope: object) -> bool:
         """Delegate to the simulator's own unpark() implementation.
 
         Returns
@@ -109,7 +116,7 @@ class _SimulatedMountController:
         """
         return self._simulator.unpark()
 
-    def set_tracking(self, telescope, enabled):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def set_tracking(self, telescope: object, enabled: bool) -> bool:
         """Delegate to the simulator's own set_tracking() implementation.
 
         Returns
@@ -119,7 +126,7 @@ class _SimulatedMountController:
         """
         return self._simulator.set_tracking(enabled)
 
-    def sync_coordinates(self, telescope, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def sync_coordinates(self, telescope: object, ra: float, dec: float) -> bool:
         """Report success: the simulator has no real sync state.
 
         Returns
@@ -129,7 +136,7 @@ class _SimulatedMountController:
         """
         return True
 
-    def move(self, device, direction, start=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def move(self, device: object, direction: str, start: bool = True) -> bool:
         """Delegate to the simulator's own move() implementation.
 
         Returns
@@ -139,7 +146,7 @@ class _SimulatedMountController:
         """
         return self._simulator.move(direction, start)
 
-    def _set_coord_mode(self, telescope_device, mode):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _set_coord_mode(self, telescope_device: object, mode: str) -> bool:
         """Report success: the simulator has no real coordinate mode.
 
         Returns
@@ -153,11 +160,11 @@ class _SimulatedMountController:
 class _SimulatedFocuserController:
     """Stand-in for indi.focuser_controller.FocuserController."""
 
-    def __init__(self, simulator: SimulatorIndiInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, simulator: SimulatorIndiInterface) -> None:
         """Initialize the stand-in with a reference to the owning simulator."""
         self._simulator = simulator
 
-    def get_position(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def get_position(self, device: object) -> int:
         """Delegate to the simulator's own get_focuser_position().
 
         Returns
@@ -167,7 +174,7 @@ class _SimulatedFocuserController:
         """
         return self._simulator.get_focuser_position()
 
-    def move_relative(self, device, steps):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def move_relative(self, device: object, steps: int) -> bool:
         """Delegate to the simulator's own focus_move() implementation.
 
         Returns
@@ -181,11 +188,11 @@ class _SimulatedFocuserController:
 class _SimulatedFilterWheelController:
     """Stand-in for indi.filter_wheel_controller.FilterWheelController."""
 
-    def __init__(self, simulator: SimulatorIndiInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, simulator: SimulatorIndiInterface) -> None:
         """Initialize the stand-in with a reference to the owning simulator."""
         self._simulator = simulator
 
-    def get_names(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def get_names(self, device: object) -> list[str]:
         """Return the simulator's fixed simulated filter name list.
 
         Returns
@@ -195,7 +202,7 @@ class _SimulatedFilterWheelController:
         """
         return self._simulator.filter_names
 
-    def get_current_filter(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def get_current_filter(self, device: object) -> str | None:
         """Return the simulator's current filter name from its status dict.
 
         Returns
@@ -205,7 +212,7 @@ class _SimulatedFilterWheelController:
         """
         return self._simulator.status.get("FILTER")
 
-    def resolve_name(self, device, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def resolve_name(self, device: object, filter_name: str) -> str | None:
         """Case-insensitive exact match against the simulated filter names.
 
         Returns
@@ -219,7 +226,7 @@ class _SimulatedFilterWheelController:
                 return candidate_name
         return None
 
-    def set_position(self, device, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def set_position(self, device: object, filter_name: str) -> bool:
         """Delegate to the simulator's own set_filterwheel_position().
 
         Returns
@@ -234,11 +241,11 @@ class _SimulatedFilterWheelController:
 class _SimulatedCameraController:
     """Stand-in for indi.camera_controller.CameraController."""
 
-    def __init__(self, simulator: SimulatorIndiInterface):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, simulator: SimulatorIndiInterface) -> None:
         """Initialize the stand-in with a reference to the owning simulator."""
         self._simulator = simulator
 
-    def pulse_guide(self, device, direction, duration_ms):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def pulse_guide(self, device: object, direction: str, duration_ms: float) -> bool:
         """Report success: the simulator has no real pulse-guide hardware.
 
         Returns
@@ -248,7 +255,7 @@ class _SimulatedCameraController:
         """
         return True
 
-    def expose(self, device, exposure_seconds, gain=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def expose(self, device: object, exposure_seconds: float, gain: float | None = None) -> bool:
         """Report success: the simulator has no real camera hardware.
 
         Returns
@@ -258,8 +265,8 @@ class _SimulatedCameraController:
         """
         return True
 
-    def get_guide_image(self, device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        """Return None: the simulator has no real guide-camera image data.
+    def get_last_image(self, device: object) -> None:
+        """Return None: the simulator has no real camera image data.
 
         Returns
         -------
@@ -269,15 +276,55 @@ class _SimulatedCameraController:
         return None
 
 
+class _SimulatedEnclosureController:
+    """Stand-in for indi.enclosure_controller.EnclosureController.
+
+    No roll-off-roof/dome is simulated -- `get_state` honestly reports
+    `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than
+    fabricating an open/closed value, and `open`/`close` report failure
+    rather than pretending to move hardware that doesn't exist.
+    """
+
+    def get_state(self, enclosure_device: object) -> EnclosureState:
+        """Return `UNKNOWN`: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        state : `EnclosureState`
+            Always `EnclosureState.UNKNOWN`.
+        """
+        return EnclosureState.UNKNOWN
+
+    def open(self, enclosure_device: object) -> bool:
+        """Report failure: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        success : `bool`
+            Always `False`.
+        """
+        return False
+
+    def close(self, enclosure_device: object) -> bool:
+        """Report failure: the simulator has no real enclosure hardware.
+
+        Returns
+        -------
+        success : `bool`
+            Always `False`.
+        """
+        return False
+
+
 class _SimulatedConnectionManager:
     """Stand-in for indi.connection_manager.ConnectionManager."""
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
         """Initialize minimal connection-health state IndiInterface reads."""
         self.hostname = None
         self.last_connection_attempt = None
 
-    def is_server_responsive(self):  # ruff: ignore[missing-return-type-private-function]
+    def is_server_responsive(self) -> bool:
         """Report responsive: the simulator has no real socket to check.
 
         Returns
@@ -287,6 +334,29 @@ class _SimulatedConnectionManager:
         """
         return True
 
+    def can_attempt_reconnect(self) -> bool:
+        """Allow every attempt: the simulator has no connection to wait for.
+
+        Returns
+        -------
+        can_reconnect : `bool`
+            Always `True`.
+        """
+        return True
+
+    def is_host_resolvable(self, host: str, port: int, timeout: float = 1.0) -> bool:
+        """Report resolvable: the simulator has no host to look up.
+
+        Returns
+        -------
+        resolvable : `bool`
+            Always `True`.
+        """
+        return True
+
+    def record_connection_result(self, connected: bool) -> None:
+        """Ignore the result: the simulator keeps no back-off."""
+
 
 class SimulatorIndiInterface(IndiInterface):
     """In-memory simulator for INDI hardware.
@@ -295,14 +365,12 @@ class SimulatorIndiInterface(IndiInterface):
     connections.
     """
 
-    def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config: AppConfiguration | None = None) -> None:
         # We generally do NOT call super().__init__() because we don't want
         # the real socket connection logic. But if IndiInterface has other
         # setup, we might need to mimic it. For now, we assume we are
         # replacing the connection logic entirely.
         self.config = config
-        get_allow_commands = getattr(config, "get_allow_commands", None)
-        self.allow_commands = get_allow_commands() if callable(get_allow_commands) else False
 
         self.connected = False
         self.telescope_coords = {"ra": "00:00:00", "dec": "00:00:00"}
@@ -326,6 +394,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.focuser_controller = _SimulatedFocuserController(self)
         self.filter_wheel_controller = _SimulatedFilterWheelController(self)
         self.camera_controller = _SimulatedCameraController(self)
+        self.enclosure_controller = _SimulatedEnclosureController()
         self.connection_manager = _SimulatedConnectionManager()
 
         self.status = {
@@ -347,7 +416,7 @@ class SimulatorIndiInterface(IndiInterface):
 
         logging.getLogger(__name__).info("SimulatorIndiInterface initialized.")
 
-    def _ensure_connection(self):  # ruff: ignore[missing-return-type-private-function]
+    def _ensure_connection(self) -> None:
         """Mark the simulator connected without touching any real socket.
 
         Prevents AttributeError from missing C++ backend connection state
@@ -356,7 +425,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.connected = True
         self.status["CONNECTION_STATUS"] = "Connected"
 
-    def connect(self, host="localhost", port=7624):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def connect(self, host: str = "localhost", port: int = 7624) -> bool:
         """Mock connecting to establish a simulated INDI server connection.
 
         Returns
@@ -371,7 +440,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["CONNECTION_STATUS"] = "Connected"
         return True
 
-    def connect_to_server(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def connect_to_server(self) -> bool:
         """Mock connecting to the server, ensuring connected status is set.
 
         Returns
@@ -382,7 +451,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.connect()
         return True
 
-    def connect_to_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def connect_to_telescope(self) -> bool:
         """Mock connecting to the telescope, always reporting success.
 
         Returns
@@ -393,11 +462,11 @@ class SimulatorIndiInterface(IndiInterface):
         self.connect()
         return True
 
-    def disconnect(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def disconnect(self) -> None:
         """Mark the simulator as disconnected."""
         self.connected = False
 
-    def is_connected(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def is_connected(self) -> bool:
         """Return the simulator's current connection state.
 
         Returns
@@ -407,7 +476,7 @@ class SimulatorIndiInterface(IndiInterface):
         """
         return self.connected
 
-    def isServerConnected(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def isServerConnected(self) -> bool:
         """Return the connection state directly.
 
         Bypasses PyIndi's uninitialized C++ SWIG bindings.
@@ -419,7 +488,7 @@ class SimulatorIndiInterface(IndiInterface):
         """
         return self.connected
 
-    def getDevices(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def getDevices(self) -> list[Any]:
         """Return no devices: `deviceMap` is always empty in simulation.
 
         Bypasses PyIndi's `AbstractBaseClient.getDevices` C++ overload,
@@ -435,7 +504,7 @@ class SimulatorIndiInterface(IndiInterface):
 
     # --- Telescope Control ---
 
-    def slew(self, ra, dec):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def slew(self, ra: float, dec: float) -> bool:
         """Simulate slewing to the given coordinates.
 
         Returns
@@ -456,7 +525,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["TRACKING_STATUS"] = "Tracking"
         return True
 
-    def park(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def park(self) -> bool:
         """Simulate parking the telescope.
 
         Returns
@@ -467,7 +536,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["TRACKING_STATUS"] = "Parked"
         return True
 
-    def abort_motion(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def abort_motion(self) -> bool:
         """Simulate aborting telescope motion.
 
         Returns
@@ -478,7 +547,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["TRACKING_STATUS"] = "Idle"
         return True
 
-    def unpark(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def unpark(self) -> bool:
         """Simulate unparking the telescope.
 
         Returns
@@ -489,7 +558,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["TRACKING_STATUS"] = "Idle"
         return True
 
-    def set_tracking(self, enabled):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_tracking(self, enabled: bool) -> bool:
         """Simulate toggling tracking on or off.
 
         Returns
@@ -500,7 +569,7 @@ class SimulatorIndiInterface(IndiInterface):
         self.status["TRACKING_STATUS"] = "Tracking" if enabled else "Idle"
         return True
 
-    def move(self, direction, start=True):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def move(self, direction: str, start: bool = True) -> bool:
         """Simulate a directional move command, always reporting success.
 
         Returns
@@ -510,7 +579,7 @@ class SimulatorIndiInterface(IndiInterface):
         """
         return True
 
-    def set_slew_rate(self, rate_index):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_slew_rate(self, rate_index: int) -> bool:
         """Simulate setting the slew rate, always reporting success.
 
         Returns
@@ -521,7 +590,7 @@ class SimulatorIndiInterface(IndiInterface):
         return True
 
     # --- Focuser ---
-    def focus_move(self, steps):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def focus_move(self, steps: int) -> bool:
         """Simulate a relative focuser move, always reporting success.
 
         Returns
@@ -532,7 +601,7 @@ class SimulatorIndiInterface(IndiInterface):
         # Simulator logic
         return True
 
-    def get_focuser_position(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_focuser_position(self) -> int:
         """Return a fixed focuser position of zero.
 
         Returns
@@ -543,7 +612,7 @@ class SimulatorIndiInterface(IndiInterface):
         return 0
 
     # --- Filter Wheel ---
-    def set_filterwheel_position(self, filter_name):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def set_filterwheel_position(self, filter_name: str) -> bool:
         """Simulate moving the filter wheel to the given filter.
 
         Returns
@@ -556,7 +625,7 @@ class SimulatorIndiInterface(IndiInterface):
         return True
 
     # --- Status ---
-    def get_status(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def get_status(self) -> TelescopeStatus:
         """Build a TelescopeStatus object from the simulator's status dict.
 
         Returns
@@ -567,7 +636,6 @@ class SimulatorIndiInterface(IndiInterface):
         # TelescopeService.get_status calls self._driver.get_status(),
         # which returns a Pydantic model in IndiInterface (TelescopeStatus),
         # so we return a TelescopeStatus object here to match.
-        from wayfindinglib.drivers.indi_interface import TelescopeStatus
 
         return TelescopeStatus(
             ra=self.status.get("RA", "00:00:00"),
@@ -581,4 +649,5 @@ class SimulatorIndiInterface(IndiInterface):
             focuser_position=self.get_focuser_position(),
             filter=str(self.filter_wheel_position),
             guiding_history=[],
+            parked=self.status.get("TRACKING_STATUS") == "Parked",
         )

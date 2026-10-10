@@ -8,6 +8,7 @@ be penalized for their wait time.
 import os
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,17 +20,17 @@ from astrometricslib.pipelines.tasks import (
 )
 
 
-def test_a_tiny_stack_still_gets_the_historical_budget():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_tiny_stack_still_gets_the_historical_budget() -> None:
     """Scaling must never hand a small stack less time than it used to."""
     assert compute_stacking_timeout_seconds(2) == STACKING_TIMEOUT_SECONDS
 
 
-def test_budget_grows_with_frame_count():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_budget_grows_with_frame_count() -> None:
     """Cost is dominated by per-frame work, so the budget must track it."""
     assert compute_stacking_timeout_seconds(535) > compute_stacking_timeout_seconds(84)
 
 
-def test_the_largest_real_target_gets_more_than_its_measured_cost():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_largest_real_target_gets_more_than_its_measured_cost() -> None:
     """NGC 7023's 535 frames must not be killed mid-stack.
 
     NGC 7000 needed roughly 800s of Siril for 84 colour frames. Scaling
@@ -42,19 +43,19 @@ def test_the_largest_real_target_gets_more_than_its_measured_cost():  # ruff: ig
     assert compute_stacking_timeout_seconds(535) > 535 * measured_seconds_per_frame
 
 
-def test_a_negative_frame_count_is_not_a_negative_budget():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_negative_frame_count_is_not_a_negative_budget() -> None:
     """A nonsense count must degrade to the floor, not to zero."""
     assert compute_stacking_timeout_seconds(-5) == STACKING_TIMEOUT_SECONDS
 
 
-def test_lock_wait_starts_at_zero_after_reset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_lock_wait_starts_at_zero_after_reset() -> None:
     """Each stacking attempt measures only its own queueing."""
     siril_interface.reset_siril_lock_wait_seconds()
 
     assert siril_interface.get_siril_lock_wait_seconds() == pytest.approx(0.0)
 
 
-def test_an_uncontended_slot_records_a_negligible_wait():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_uncontended_slot_records_a_negligible_wait() -> None:
     """A free slot must not inflate anyone's stacking budget.
 
     The wait is measured unconditionally now, so an uncontended
@@ -70,7 +71,7 @@ def test_an_uncontended_slot_records_a_negligible_wait():  # ruff: ignore[missin
     assert siril_interface.get_siril_lock_wait_seconds() < 0.5
 
 
-def test_time_blocked_on_a_slot_is_recorded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_time_blocked_on_a_slot_is_recorded() -> None:
     """The wait has to be measured before it can be given back.
 
     Both sides run as subprocesses sharing this working directory, so
@@ -119,7 +120,7 @@ def test_time_blocked_on_a_slot_is_recorded():  # ruff: ignore[missing-return-ty
         holder.wait(timeout=20)
 
 
-def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     """A target queued behind another Siril run keeps its full budget.
 
     The regression this pins: NGC 1499 was given 600s at 06:27:21 but
@@ -129,7 +130,7 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: 
     stack_duration_seconds = 0.6
     reported_lock_wait = 5.0
 
-    def _slow_stack(target, frames_to_stack=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _slow_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
         time.sleep(stack_duration_seconds)
         return "/stacked/output.fits"
 
@@ -148,11 +149,11 @@ def test_queue_time_does_not_consume_the_stacking_budget(monkeypatch):  # ruff: 
     assert result == "/stacked/output.fits"
 
 
-def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch: pytest.MonkeyPatch) -> None:
     """Excluding queue time must not disarm hang detection."""
     release_hung_stack = threading.Event()
 
-    def _hung_stack(target, frames_to_stack=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def _hung_stack(target, frames_to_stack=None) -> str:  # ruff: ignore[missing-type-function-argument]
         release_hung_stack.wait(30)
         return "/never/reached.fits"
 
@@ -162,6 +163,7 @@ def test_a_genuinely_hung_stack_is_still_abandoned(monkeypatch):  # ruff: ignore
 
     class _Target:
         id = "HungTarget"
+        stacking = SimpleNamespace(quality_summary=None)
 
     try:
         result = tasks.stack_frames_with_timeout(_Target(), [], timeout_seconds=1)

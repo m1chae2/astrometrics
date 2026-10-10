@@ -7,13 +7,15 @@ caused silent data loss before -- see the module docstring on
 header/data correctly rather than HDU0's near-empty one.
 """
 
+from pathlib import Path
+
 import numpy as np
 from astropy.io import fits
 
 from astrometricslib.drivers import fits_access
 
 
-def _write_two_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_two_hdu_frame(path, width, height, bayer_pattern=None) -> str:  # ruff: ignore[missing-type-function-argument]
     """Write a FITS file with a bare HDU0 and the real image in HDU1.
 
     Returns
@@ -30,7 +32,7 @@ def _write_two_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: igno
     return str(path)
 
 
-def _write_single_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_single_hdu_frame(path, width, height, bayer_pattern=None) -> str:  # ruff: ignore[missing-type-function-argument]
     """Write a plain, single-HDU FITS file.
 
     Returns
@@ -47,7 +49,7 @@ def _write_single_hdu_frame(path, width, height, bayer_pattern=None):  # ruff: i
     return str(path)
 
 
-def test_read_header_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_read_header_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path: Path) -> None:
     """Verify the header comes from HDU1, not HDU0's near-empty one."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40, bayer_pattern="RGGB")
 
@@ -58,7 +60,7 @@ def test_read_header_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: ig
     assert header["BAYERPAT"] == "RGGB"
 
 
-def test_read_header_uses_hdu0_when_it_has_data(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_read_header_uses_hdu0_when_it_has_data(tmp_path: Path) -> None:
     """Verify a normal single-HDU file is read from HDU0 as expected."""
     path = _write_single_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
@@ -68,7 +70,7 @@ def test_read_header_uses_hdu0_when_it_has_data(tmp_path):  # ruff: ignore[missi
     assert header["NAXIS2"] == 40
 
 
-def test_read_data_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_read_data_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path: Path) -> None:
     """Verify the pixel data comes from HDU1, not a missing HDU0 array."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
@@ -78,7 +80,7 @@ def test_read_data_falls_back_to_hdu1_when_hdu0_is_bare(tmp_path):  # ruff: igno
     assert data.shape == (40, 60)
 
 
-def test_frame_dimensions_falls_back_to_hdu1(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frame_dimensions_falls_back_to_hdu1(tmp_path: Path) -> None:
     """Verify dimensions are read from HDU1 rather than reported as unknown.
 
     Before this module existed, `select_dominant_frame_dimensions`
@@ -91,14 +93,14 @@ def test_frame_dimensions_falls_back_to_hdu1(tmp_path):  # ruff: ignore[missing-
     assert fits_access.frame_dimensions(path) == (60, 40)
 
 
-def test_frame_dimensions_is_none_for_an_unreadable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frame_dimensions_is_none_for_an_unreadable_file(tmp_path: Path) -> None:
     """Verify a file that cannot be read returns None, not an exception."""
     missing_path = str(tmp_path / "does_not_exist.fits")
 
     assert fits_access.frame_dimensions(missing_path) is None
 
 
-def test_frame_uses_color_filter_array_falls_back_to_hdu1(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frame_uses_color_filter_array_falls_back_to_hdu1(tmp_path: Path) -> None:
     """Verify BAYERPAT is found in HDU1, not missed because HDU0 lacks it.
 
     This is the exact bug behind the real ZWO ASI 533MM Pro incident
@@ -110,21 +112,21 @@ def test_frame_uses_color_filter_array_falls_back_to_hdu1(tmp_path):  # ruff: ig
     assert fits_access.frame_uses_color_filter_array(path) is True
 
 
-def test_frame_uses_color_filter_array_is_false_when_absent(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frame_uses_color_filter_array_is_false_when_absent(tmp_path: Path) -> None:
     """Verify no BAYERPAT reads as a definitive, non-guessing "mono"."""
     path = _write_two_hdu_frame(tmp_path / "frame.fits", 60, 40)
 
     assert fits_access.frame_uses_color_filter_array(path) is False
 
 
-def test_frame_uses_color_filter_array_is_none_for_an_unreadable_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_frame_uses_color_filter_array_is_none_for_an_unreadable_file(tmp_path: Path) -> None:
     """Verify an unreadable file is None, not misread as a definitive mono."""
     missing_path = str(tmp_path / "does_not_exist.fits")
 
     assert fits_access.frame_uses_color_filter_array(missing_path) is None
 
 
-def test_select_dominant_frame_dimensions_reads_hdu1_geometry(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_select_dominant_frame_dimensions_reads_hdu1_geometry(tmp_path: Path) -> None:
     """Verify the dominant-geometry filter itself sees HDU1-stored frames.
 
     Four majority-geometry frames stored the HDU0/HDU1 way against one
@@ -141,7 +143,7 @@ def test_select_dominant_frame_dimensions_reads_hdu1_geometry(tmp_path):  # ruff
     assert dominant_dimensions == (60, 40)
 
 
-def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path: Path) -> None:
     """Verify a frame with no readable header is kept, not dropped."""
     good = [_write_single_hdu_frame(tmp_path / f"g{i}.fits", 60, 40) for i in range(3)]
     broken_path = str(tmp_path / "broken.fits")
@@ -153,12 +155,12 @@ def test_select_dominant_frame_dimensions_keeps_unreadable_frames(tmp_path):  # 
     assert dimensions == (60, 40)
 
 
-def test_select_dominant_frame_dimensions_of_an_empty_list():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_select_dominant_frame_dimensions_of_an_empty_list() -> None:
     """Verify the empty-input edge case returns an empty set, no dimensions."""
     assert fits_access.select_dominant_frame_dimensions([]) == (set(), None)
 
 
-def test_collapse_to_2d_leaves_a_2d_array_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_collapse_to_2d_leaves_a_2d_array_unchanged() -> None:
     """Verify a plain mono frame passes through untouched."""
     data = np.arange(12, dtype=float).reshape(3, 4)
 
@@ -167,7 +169,7 @@ def test_collapse_to_2d_leaves_a_2d_array_unchanged():  # ruff: ignore[missing-r
     assert result is data
 
 
-def test_collapse_to_2d_averages_a_leading_rgb_channel_axis():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_collapse_to_2d_averages_a_leading_rgb_channel_axis() -> None:
     """Verify a (3, H, W) debayered stack collapses across its channel axis."""
     data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)])
 
@@ -177,7 +179,7 @@ def test_collapse_to_2d_averages_a_leading_rgb_channel_axis():  # ruff: ignore[m
     assert np.allclose(result, 20.0)
 
 
-def test_collapse_to_2d_averages_a_trailing_channel_axis():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_collapse_to_2d_averages_a_trailing_channel_axis() -> None:
     """Verify an (H, W, 3) array collapses across its trailing axis."""
     data = np.stack([np.full((5, 6), value, dtype=float) for value in (10.0, 20.0, 30.0)], axis=-1)
 
@@ -187,7 +189,7 @@ def test_collapse_to_2d_averages_a_trailing_channel_axis():  # ruff: ignore[miss
     assert np.allclose(result, 20.0)
 
 
-def test_collapse_to_2d_handles_a_degenerate_single_channel_cube():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_collapse_to_2d_handles_a_degenerate_single_channel_cube() -> None:
     """Regression test for the (1, H, W) bug this function replaces.
 
     Every call site this function consolidates checked `shape[0] in (3,

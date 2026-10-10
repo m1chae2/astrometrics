@@ -1,7 +1,10 @@
 """Auto-generate TypeScript interfaces and enums from backend Pydantic models.
 
 Enforces synchronization between backend data models and frontend
-TypeScript contracts.
+TypeScript contracts. It also writes the backend's public interface from
+`backend.public_interface`: the list of RPC method names (`RPC_METHODS`,
+`RpcMethod`) and the paths of the other routes (`BACKEND_ROUTES`), so the
+UI can only name methods and routes the backend serves.
 """
 
 import os
@@ -15,7 +18,19 @@ from pydantic import BaseModel
 # Ensure we can import from backend
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from astrometricslib import FilterType
+from astrometricslib import ErrorInfo, FilterType
+from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
+from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
+from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
+from astrometricslib.models.gaia_xp_comparison import (
+    GaiaXpBandResidual,
+    GaiaXpBandSummary,
+    GaiaXpComparison,
+    GaiaXpRunSummary,
+)
+from astrometricslib.models.gate_result import GateResult, GateStatus
+from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
     CascadeStage,
@@ -24,12 +39,15 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality_summary import (
+    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExcludedFrame,
+    ExposureGroupSummary,
     FrameEnsembleComposition,
+    NoiseModelPoint,
     PhotometryPipelineQualityMetrics,
     PhotometryQualitySummary,
     SpectralClassificationConcern,
@@ -39,14 +57,28 @@ from astrometricslib.models.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
+from astrometricslib.models.spectroscopy_quality import (
+    CatalogComparison,
+    InputQualityAssessment,
+    OutputQualityAssessment,
+    StageQualityCheckpoint,
+    StageQualityMetric,
+    StageQualityRollup,
+)
+from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
+    DifferentialRefractionRecord,
+    ExtinctionCorrectionRecord,
     FileItem,
     GroupedFrameStat,
     PeriodogramResult,
     PhotometryResult,
     PlotData,
-    SpectralObservation,
+    SessionPhotometrySummary,
+    SpectralExtractionDiagnostics,
+    SpectralNoiseModelRecord,
     SpectroscopyResult,
     StellarObject,
     StellarSessionMatch,
@@ -55,14 +87,25 @@ from astrometricslib.models.stellar_source import (
     VariableCandidate,
 )
 from astrometricslib.models.target import (
+    AsteroidDetectionResult,
     FitsHeaderEntry,
+    FrameMeasurements,
     FrameRecord,
     ImageType,
     RenderedImage,
     StackConfigurationResult,
+    StretchParameters,
     Target,
+    TargetObjectType,
+    TargetQualitySummaries,
+    TargetStackingResult,
 )
-from astrometricslib.utilities.pipeline_models import ProcessingJob, ProcessStatus
+from astrometricslib.models.wavelength_scale import (
+    WavelengthScaleSummary,
+    WavelengthZeroPointLine,
+    WavelengthZeroPointRecord,
+)
+from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
     IntrospectionEndpoint,
     IntrospectionMethod,
@@ -72,22 +115,40 @@ from backend.services.infrastructure.system_status_service import (
     TelescopePulse,
 )
 from wayfindinglib.drivers.indi_interface import TelescopeStatus
+from wayfindinglib.models.equipment_and_site.performance_envelope import (
+    PerformanceEnvelope,
+    PerformanceThreshold,
+    ThresholdStatus,
+    ThresholdTier,
+    TrackingRiskMap,
+)
+from wayfindinglib.models.planning.mosaic import MosaicPanel
+from wayfindinglib.models.planning.sequence_plan import SequenceItem, SequencePlan
+from wayfindinglib.models.planning.sky_source import SkySource
+from wayfindinglib.models.planning.visibility import (
+    MeridianCrossing,
+    MeridianStatus,
+    ObjectVisibility,
+    SeparationRange,
+    TimeSpan,
+    VisibilitySample,
+    VisibilitySpan,
+)
 from wayfindinglib.models.session.observation_session import WeatherSample
 from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
+    AlignmentSessionSummary,
+    AlignmentTargetSession,
+    AlignmentTrackPoint,
     GuidingSample,
+    GuidingSpectrumAnalysis,
+    GuidingSpectrumPeak,
     GuidingStats,
-    GuidingStatus,
     IndiStatus,
+    LiveGuidingStatus,
+    MountPointingModel,
+    PolarAlignmentStatus,
 )
-from wayfindinglib.observation import (
-    CalibrationEntry,
-    CalibrationStats,
-    MosaicPanel,
-    SequenceItem,
-    SequencePlan,
-)
-from wayfindinglib.observationlib.observation_session import ObservationSession
 
 
 def get_ts_type(py_type: Any) -> str:
@@ -230,6 +291,14 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
 
         lines.append(f"  {ts_name}{'?' if optional else ''}: {ts_type};")
 
+    # Computed fields are sent in every reply too. They are marked optional
+    # so the app's own test data need not spell them out.
+    for field_name, computed_info in model.model_computed_fields.items():
+        ts_name = computed_info.alias or field_name
+        if computed_info.description:
+            lines.append(f"  /** {computed_info.description.strip().splitlines()[0]} */")
+        lines.append(f"  {ts_name}?: {get_ts_type(computed_info.return_type)};")
+
     # Add flexible index for known models
     if name in ("TelescopeStatus", "TargetObject", "Spectrum"):
         lines.append("  /** Flexible index to accommodate additional data from the backend. */")
@@ -239,19 +308,67 @@ def generate_interface(model: type[BaseModel], name: str) -> str:
     return "\n".join(lines)
 
 
-def main() -> None:
-    """Run the entry point for generating backend TypeScript interfaces."""
+def generate_public_interface() -> str:
+    """Generate the TypeScript list of the backend's methods and routes.
+
+    Returns
+    -------
+    text : `str`
+        ``RPC_METHODS`` and its ``RpcMethod`` type, then
+        ``BACKEND_ROUTES``, one path per route name.
+    """
+    lines = [
+        "/**",
+        " * Every RPC method the backend serves, from backend/public_interface.py.",
+        " */",
+        "export const RPC_METHODS = [",
+    ]
+    lines.extend(f'  "{method}",' for method in RPC_METHODS)
+    lines.extend([
+        "] as const;",
+        "",
+        "/** The name of one RPC method the backend serves. */",
+        "export type RpcMethod = (typeof RPC_METHODS)[number];",
+        "",
+        "/**",
+        " * The path of every other route the backend serves, by name, from",
+        " * backend/public_interface.py.",
+        " */",
+        "export const BACKEND_ROUTES = {",
+    ])
+    for route in ROUTES:
+        lines.append(f"  /** {route.purpose} */")
+        lines.append(f'  {route.name}: "{route.path}",')
+    lines.append("} as const;")
+    return "\n".join(lines)
+
+
+def render_types() -> str:
+    """Render the TypeScript text for every backend model the UI uses.
+
+    Returns
+    -------
+    content : `str`
+        The full text of ``ui/common/types/backendTypes.ts``.
+    """
     header = """/**
- * @fileoverview Auto-generated TypeScript interfaces from Pydantic models.
+ * @fileoverview Auto-generated TypeScript interfaces from Pydantic models,
+ * and the backend's public interface (its RPC methods and routes).
  */
 """
 
     interfaces = [
         generate_enum(FilterType, "FilterType"),
         generate_enum(ImageType, "ImageType"),
+        generate_enum(TargetObjectType, "TargetObjectType"),
+        generate_interface(ErrorInfo, "ErrorInfo"),
+        generate_interface(FrameMeasurements, "FrameMeasurements"),
         generate_interface(FrameRecord, "FrameRecord"),
         generate_interface(TelescopeStatus, "TelescopeStatus"),
         generate_interface(StackConfigurationResult, "StackConfigurationResult"),
+        generate_interface(TargetStackingResult, "TargetStackingResult"),
+        generate_interface(AsteroidDetectionResult, "AsteroidDetectionResult"),
+        generate_interface(TargetQualitySummaries, "TargetQualitySummaries"),
         generate_interface(Target, "TargetObject"),
         generate_interface(FileItem, "FileItem"),
         generate_interface(TargetFilesResponse, "TargetFilesResponse"),
@@ -259,16 +376,51 @@ def main() -> None:
         generate_interface(PlotData, "PlotData"),
         generate_interface(StellarObject, "Spectrum"),
         generate_interface(StellarSessionMatch, "StellarSessionMatch"),
-        generate_interface(SpectralObservation, "SpectralObservation"),
+        generate_interface(CatalogMatchQuality, "CatalogMatchQuality"),
+        generate_interface(OverlayStar, "OverlayStar"),
+        generate_interface(TargetStarCount, "TargetStarCount"),
         generate_interface(SpectroscopyResult, "SpectroscopyResult"),
+        generate_interface(SpectralExtractionDiagnostics, "SpectralExtractionDiagnostics"),
+        generate_interface(DifferentialRefractionRecord, "DifferentialRefractionRecord"),
+        generate_interface(MeasuredLineSpread, "MeasuredLineSpread"),
+        generate_interface(SpectralNoiseModelRecord, "SpectralNoiseModelRecord"),
+        generate_interface(ReddeningRecord, "ReddeningRecord"),
+        generate_interface(LineIndexClassification, "LineIndexClassification"),
+        generate_interface(GaiaXpBandResidual, "GaiaXpBandResidual"),
+        generate_interface(GaiaXpComparison, "GaiaXpComparison"),
+        generate_interface(GaiaXpBandSummary, "GaiaXpBandSummary"),
+        generate_interface(GaiaXpRunSummary, "GaiaXpRunSummary"),
+        generate_interface(ExtinctionCorrectionRecord, "ExtinctionCorrectionRecord"),
+        generate_interface(CatalogComparison, "CatalogComparison"),
+        generate_interface(InputQualityAssessment, "InputQualityAssessment"),
+        generate_interface(OutputQualityAssessment, "OutputQualityAssessment"),
+        generate_interface(StageQualityMetric, "StageQualityMetric"),
+        generate_interface(StageQualityCheckpoint, "StageQualityCheckpoint"),
+        generate_interface(StageQualityRollup, "StageQualityRollup"),
+        generate_interface(WavelengthZeroPointLine, "WavelengthZeroPointLine"),
+        generate_interface(WavelengthZeroPointRecord, "WavelengthZeroPointRecord"),
+        generate_interface(WavelengthScaleSummary, "WavelengthScaleSummary"),
         generate_interface(PeriodogramResult, "PeriodogramResult"),
         generate_interface(TransitCandidate, "TransitCandidate"),
+        generate_interface(SessionPhotometrySummary, "SessionPhotometrySummary"),
         generate_interface(PhotometryResult, "PhotometryResult"),
         generate_interface(TelescopePulse, "TelescopePulse"),
         generate_interface(ProcessingJobPulse, "ProcessingJobPulse"),
         generate_interface(SystemPulse, "SystemPulse"),
         generate_interface(GuidingSample, "GuidingSample"),
         generate_interface(AlignmentAttempt, "AlignmentAttempt"),
+        generate_interface(PolarAlignmentStatus, "PolarAlignmentStatus"),
+        generate_interface(AlignmentSessionSummary, "AlignmentSessionSummary"),
+        generate_interface(AlignmentTrackPoint, "AlignmentTrackPoint"),
+        generate_interface(AlignmentTargetSession, "AlignmentTargetSession"),
+        generate_interface(MountPointingModel, "MountPointingModel"),
+        generate_enum(ThresholdTier, "ThresholdTier"),
+        generate_enum(ThresholdStatus, "ThresholdStatus"),
+        generate_interface(PerformanceThreshold, "PerformanceThreshold"),
+        generate_interface(TrackingRiskMap, "TrackingRiskMap"),
+        generate_interface(PerformanceEnvelope, "PerformanceEnvelope"),
+        generate_interface(GuidingSpectrumPeak, "GuidingSpectrumPeak"),
+        generate_interface(GuidingSpectrumAnalysis, "GuidingSpectrumAnalysis"),
         generate_interface(ProcessStatus, "ProcessStatus"),
         generate_interface(ProcessingJob, "ProcessingJob"),
         generate_interface(AnalysisResult, "AnalysisResult"),
@@ -279,20 +431,36 @@ def main() -> None:
         generate_interface(IntrospectionMethod, "IntrospectionMethod"),
         generate_interface(IntrospectionEndpoint, "IntrospectionEndpoint"),
         generate_interface(GuidingStats, "GuidingStats"),
-        generate_interface(GuidingStatus, "GuidingStatus"),
+        generate_interface(LiveGuidingStatus, "LiveGuidingStatus"),
+        generate_interface(StretchParameters, "StretchParameters"),
         generate_interface(RenderedImage, "RenderedImage"),
         generate_interface(SequenceItem, "SequenceItem"),
         generate_interface(SequencePlan, "SequencePlan"),
         generate_interface(CalibrationEntry, "CalibrationEntry"),
         generate_interface(CalibrationStats, "CalibrationStats"),
         generate_interface(MosaicPanel, "MosaicPanel"),
+        generate_interface(TimeSpan, "TimeSpan"),
+        generate_interface(MeridianStatus, "MeridianStatus"),
+        generate_interface(MeridianCrossing, "MeridianCrossing"),
+        generate_interface(SeparationRange, "SeparationRange"),
+        generate_interface(VisibilitySample, "VisibilitySample"),
+        generate_interface(VisibilitySpan, "VisibilitySpan"),
+        generate_interface(ObjectVisibility, "ObjectVisibility"),
+        generate_interface(SkySource, "SkySource"),
+        generate_enum(GateStatus, "GateStatus"),
+        generate_interface(GateResult, "GateResult"),
         generate_interface(ExcludedFrame, "ExcludedFrame"),
         generate_interface(TargetSessionContribution, "TargetSessionContribution"),
+        generate_interface(ExposureGroupSummary, "ExposureGroupSummary"),
+        generate_interface(AppliedCameraProfile, "AppliedCameraProfile"),
+        generate_interface(StackingInputQuality, "StackingInputQuality"),
+        generate_interface(StackingOutputQuality, "StackingOutputQuality"),
         generate_interface(StackingPipelineQualityMetrics, "StackingPipelineQualityMetrics"),
         generate_interface(StackQualitySummary, "StackQualitySummary"),
         generate_interface(AstrometryPipelineQualityMetrics, "AstrometryPipelineQualityMetrics"),
         generate_interface(AstrometryQualitySummary, "AstrometryQualitySummary"),
         generate_interface(FrameEnsembleComposition, "FrameEnsembleComposition"),
+        generate_interface(NoiseModelPoint, "NoiseModelPoint"),
         generate_interface(PhotometryPipelineQualityMetrics, "PhotometryPipelineQualityMetrics"),
         generate_interface(PhotometryQualitySummary, "PhotometryQualitySummary"),
         generate_interface(SpectralClassificationConcern, "SpectralClassificationConcern"),
@@ -308,7 +476,7 @@ def main() -> None:
         ),
         generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
-        generate_interface(ObservationSession, "ObservationSession"),
+        generate_public_interface(),
     ]
 
     content = header + "\n" + "\n\n".join(interfaces) + "\n"
@@ -318,10 +486,13 @@ def main() -> None:
     # strips -- and this generator would re-add on the next run, so the two
     # hooks never converge and `pre-commit run` fails forever. Emitting the
     # already-stripped form makes the generated file a fixed point of both.
-    content = "\n".join(line.rstrip() for line in content.split("\n"))
+    return "\n".join(line.rstrip() for line in content.split("\n"))
 
+
+def main() -> None:
+    """Run the entry point for generating backend TypeScript interfaces."""
     with open("ui/common/types/backendTypes.ts", "w") as f:
-        f.write(content)
+        f.write(render_types())
     print("Successfully generated ui/common/types/backendTypes.ts")
 
 

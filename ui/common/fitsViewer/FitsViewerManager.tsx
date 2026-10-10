@@ -1,11 +1,12 @@
 import React from 'react';
-import { ImageViewer } from '../../targetDisplay/targetViewerManager/imageViewer/ImageViewer';
+import { ImageViewer } from '../../imageViewerDisplay/targetViewerManager/imageViewer/ImageViewer';
 import { FitsRenderer } from './FitsRenderer';
 import type { FitsRendererHandle } from './FitsRenderer';
 
-export type { FitsRendererHandle };
+import { AstrometryOverlayStar } from '../services/astronomyService';
+import { StretchParameters } from '../types/backendTypes';
 
-/** Props for the FitsViewerManager component. */
+export type { FitsRendererHandle };
 
 /** Props for the FitsViewerManager component. */
 interface Props {
@@ -34,6 +35,18 @@ interface Props {
   disableStretch?: boolean;
   /** Explicit stretch toggle. */
   stretch?: boolean;
+  /** Pixel values drawn black and white when `stretch` is false (default: the file's own range). */
+  displayRange?: readonly [number, number];
+  /** The library's automatic stretch for a FITS image, sent by the backend. */
+  stretchParameters?: StretchParameters | null;
+  /** Identified star overlay items. */
+  overlayStars?: AstrometryOverlayStar[];
+  /** Whether astrometry overlay is enabled. */
+  showOverlay?: boolean;
+  /** Callback when a star in the overlay is clicked. */
+  onStarClick?: (star: AstrometryOverlayStar) => void;
+  /** Currently selected star identifier for overlay highlighting. */
+  selectedStarId?: string | null;
 }
 
 /**
@@ -49,7 +62,13 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
   frameInfo,
   autoPanTrigger,
   disableStretch,
-  stretch
+  stretch,
+  displayRange,
+  stretchParameters,
+  overlayStars,
+  showOverlay,
+  onStarClick,
+  selectedStarId
 }, ref) => {
   // REQ: IMG-3: Image Visualization
   // REQ: IMG-3.1: The display SHALL render FITS format images directly in the browser.
@@ -70,6 +89,12 @@ export const FitsViewerManager = React.forwardRef<FitsRendererHandle, Props>(({
         selectedTarget={selectedTarget || null}
         disableStretch={disableStretch}
         stretch={stretch}
+        displayRange={displayRange}
+        stretchParameters={stretchParameters}
+        overlayStars={overlayStars}
+        showOverlay={showOverlay}
+        onStarClick={onStarClick}
+        selectedStarId={selectedStarId}
       />
     );
   }

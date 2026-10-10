@@ -1,10 +1,10 @@
 """Purpose: Verify the watchdog is out of process from what it watches.
 
 Description: A static source-text scan for "Watchdog Is Out Of Process"
-(`Wayfinding_Library_Architecture.md` §2.5.9): the watchdog module
+(`Wayfinding_Library_Architecture.md`): the watchdog module
 tree must never import the session runner, since a hang in the process
 being watched must not also disable the mechanism meant to catch it.
-Mirrors `test_planning_registry.py`'s static-scan approach over a
+Mirrors `test_planning.py`'s static-scan approach over a
 runtime import-graph check, since the watchdog and the session runner
 may both be imported elsewhere in the same pytest session, making a
 `sys.modules` snapshot order-dependent.
@@ -13,7 +13,7 @@ may both be imported elsewhere in the same pytest session, making a
 import pathlib
 
 
-def test_watchdog_module_tree_never_imports_session_runner():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_watchdog_module_tree_never_imports_session_runner() -> None:
     """Verify no file under wayfindinglib/watchdog/ imports session_runner."""
     watchdog_root = pathlib.Path(__file__).resolve().parents[1]
     forbidden_substrings = ("session_runner", "tasks.execution_tasks.session_runner")

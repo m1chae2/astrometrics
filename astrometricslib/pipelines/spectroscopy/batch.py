@@ -8,15 +8,173 @@ uses those same stars for all the other images in the session.
 """
 
 import logging
+import math
 from collections.abc import Callable
 from typing import Any
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+    gaia_xp_gate,
+    gaia_xp_rows,
+    summarize_gaia_xp,
+)
+from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+    merge_spectrum_facts,
+    spectroscopy_run_gates,
+    spectrum_facts,
+    stage_quality_rows,
+    summarize_stage_quality,
+)
+from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
+    summarize_wavelength_scale,
+)
 from astrometricslib.utilities import parallel_batch
 from astrometricslib.utilities.concurrency import resolve_worker_counts
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# The most stars followed in each raw frame. Following the spectrum of a
+# star over time only needs the target itself and a few well-known
+# reference stars, and every extra star is one more spectrum to extract
+# from every frame of every night. Ten matches the per-image limit the
+# other spectroscopy entry points already use.
+MAXIMUM_TRACKED_STARS_PER_FRAME = 10
+
+# A magnitude below this is an instrument reading, not a catalog
+# magnitude. Must match _BRIGHTEST_CATALOG_MAGNITUDE in
+# backend/services/data/stellar_service.py.
+_BRIGHTEST_CATALOG_MAGNITUDE = -2.0
+
+# Prefix of the id given to a star that was found in an image but never
+# matched to a catalog. Must match POSITION_ONLY_STAR_ID_PREFIX in
+# astrometricslib/drivers/catalog_access.py.
+_POSITION_ONLY_STAR_ID_PREFIX = "FIELD_J"
+
+
+def _is_verified_catalog_star(star: StellarObject) -> bool:
+    """Say whether a star's identity and properties are known from a catalog.
+
+    A star counts as verified when it was matched to a catalog entry (for
+    example SIMBAD or Gaia) and that entry gave both a real magnitude and
+    a spectral type. A star found only by its position in an image, or
+    matched but with no spectral type on record, is not verified.
+
+    Parameters
+    ----------
+    star : `StellarObject`
+        The star to check.
+
+    Returns
+    -------
+    is_verified : `bool`
+        `True` when the star is a catalog match with a magnitude and a
+        spectral type.
+    """
+    if not star.is_catalog_identified or star.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX):
+        return False
+    magnitude = star.magnitude
+    has_magnitude = (
+        isinstance(magnitude, int | float)
+        and not isinstance(magnitude, bool)
+        and math.isfinite(magnitude)
+        and magnitude >= _BRIGHTEST_CATALOG_MAGNITUDE
+    )
+    spectral_type = (star.spectral_type or "").strip()
+    return has_magnitude and spectral_type not in ("", "Unknown")
+
+
+def select_temporal_tracking_stars(
+    stellar_objects: list[StellarObject],
+    center_ra: float | None,
+    center_dec: float | None,
+    limit: int = MAXIMUM_TRACKED_STARS_PER_FRAME,
+) -> list[StellarObject]:
+    """Choose the few stars whose spectra are followed across raw frames.
+
+    A noisy raw frame can show over a hundred detections, and most of them
+    are faint, unnamed, or not real stars. Extracting a spectrum for each
+    would cost a lot of time and mostly record noise. Following how a
+    spectrum changes over time only needs:
+
+    1. The primary target star: the identified star closest to the
+       target's coordinates.
+    2. Verified catalog stars (see `_is_verified_catalog_star`), brightest
+       first.
+
+    Stars known only by their position (ids starting with ``FIELD_J``)
+    are never chosen.
+
+    Parameters
+    ----------
+    stellar_objects : `list` [`StellarObject`]
+        The stars identified in the session's reference image.
+    center_ra : `float` or `None`
+        The target's right ascension in degrees, if known.
+    center_dec : `float` or `None`
+        The target's declination in degrees, if known.
+    limit : `int`, optional
+        The most stars to return.
+
+    Returns
+    -------
+    tracked_stars : `list` [`StellarObject`]
+        The primary target star first (when it can be found), then
+        verified catalog stars by increasing magnitude, at most `limit`.
+    """
+    candidates = [
+        star
+        for star in stellar_objects
+        if star.is_catalog_identified
+        and not star.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+        and star.right_ascension not in (None, "")
+        and star.declination not in (None, "")
+    ]
+
+    primary_star = None
+    if center_ra is not None and center_dec is not None and candidates:
+        primary_star = min(
+            candidates,
+            key=lambda star: _angular_separation_degrees(
+                float(star.right_ascension), float(star.declination), center_ra, center_dec
+            ),
+        )
+
+    verified_stars = sorted(
+        (star for star in candidates if star is not primary_star and _is_verified_catalog_star(star)),
+        key=lambda star: float(star.magnitude),
+    )
+    tracked_stars = ([primary_star] if primary_star is not None else []) + verified_stars
+    return tracked_stars[:limit]
+
+
+def _angular_separation_degrees(
+    ra_first: float, dec_first: float, ra_second: float, dec_second: float
+) -> float:
+    """Measure the angle between two points on the sky.
+
+    Parameters
+    ----------
+    ra_first, dec_first : `float`
+        The first point's right ascension and declination, in degrees.
+    ra_second, dec_second : `float`
+        The second point's right ascension and declination, in degrees.
+
+    Returns
+    -------
+    separation : `float`
+        The angle between the points, in degrees.
+    """
+    ra_first_rad, dec_first_rad = math.radians(ra_first), math.radians(dec_first)
+    ra_second_rad, dec_second_rad = math.radians(ra_second), math.radians(dec_second)
+    # The haversine formula stays accurate for very small angles, where a
+    # plain arccos of a dot product would lose precision.
+    half_delta_dec = math.sin((dec_second_rad - dec_first_rad) / 2.0)
+    half_delta_ra = math.sin((ra_second_rad - ra_first_rad) / 2.0)
+    haversine = half_delta_dec**2 + math.cos(dec_first_rad) * math.cos(dec_second_rad) * half_delta_ra**2
+    return math.degrees(2.0 * math.asin(min(1.0, math.sqrt(haversine))))
 
 
 def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict:
@@ -60,6 +218,10 @@ def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict
         result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
         result["status"] = "success"
     except Exception as processing_error:
+        # This runs in a worker process, so it is the last place that can
+        # catch an error from one frame. The traceback is logged and the
+        # frame is recorded as failed, so the rest of the batch goes on.
+        logger.exception("Spectroscopy analysis failed for frame %s", path)
         result["error"] = str(processing_error)
 
     return result
@@ -137,7 +299,11 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         pipeline_type="spectroscopy",
         catalog_access=astrometrics.catalog_access,
     )
-    result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
+    fallback_stars = analysis_outcome.get("stellar_objects") or []
+    result["stars_processed"] = len(fallback_stars)
+    result["spectrum_facts"] = spectrum_facts(fallback_stars)
+    result["stage_quality"] = stage_quality_rows(fallback_stars)
+    result["gaia_xp"] = gaia_xp_rows(fallback_stars)
     result["status"] = "success"
     return result
 
@@ -170,7 +336,7 @@ def _project_session_stars_to_frame_pixels(
                 dec=float(star.declination) * astropy_units.deg,
             )
             x, y = wcs.world_to_pixel(coord)
-        except Exception as exc:
+        except DATA_ERRORS as exc:
             logger.debug("Skipping star projection for one identified star: %s", exc)
             continue
 
@@ -212,11 +378,13 @@ def _process_single_spectroscopy_frame_worker_v2(
         "trail_widths": [],
         "zero_order_saturation_fractions": [],
         "spectral_classification_concerns": [],
+        "spectrum_facts": {},
+        "stage_quality": [],
+        "gaia_xp": [],
     }
     try:
         from astrometricslib import Astrometrics
         from astrometricslib.drivers.image import AstrometricsImage
-        from astrometricslib.pipelines.shared.star_recording import merge_spectroscopy_stellar_object
 
         astrometrics = Astrometrics()
 
@@ -252,15 +420,20 @@ def _process_single_spectroscopy_frame_worker_v2(
         )
         stellar_objects = [res["star_source"] for res in extraction_results if "error" not in res]
 
-        for obj in stellar_objects:
-            if target_id not in obj.target_ids:
-                obj.target_ids.append(target_id)
+        from astrometricslib.pipelines.spectroscopy.record_and_flag_spectroscopy_stars import (
+            record_and_flag_spectroscopy_stars,
+        )
 
-        astrometrics.catalog_access.merge_and_record(
-            "stellar_catalog", stellar_objects, merge_spectroscopy_stellar_object
+        stellar_objects, _breakdown, result["spectral_classification_concerns"] = (
+            record_and_flag_spectroscopy_stars(
+                stellar_objects, catalog_access=astrometrics.catalog_access, target_id=target_id
+            )
         )
 
         result["stars_processed"] = len(stellar_objects)
+        result["spectrum_facts"] = spectrum_facts(stellar_objects)
+        result["stage_quality"] = stage_quality_rows(stellar_objects)
+        result["gaia_xp"] = gaia_xp_rows(stellar_objects)
         result["dispersion_angles"] = [
             obj.spectroscopy.dispersion_angle
             for obj in stellar_objects
@@ -279,13 +452,12 @@ def _process_single_spectroscopy_frame_worker_v2(
             if "zero_order_saturated_pixel_fraction" in res
         ]
 
-        from astrometricslib.pipelines.spectroscopy.spectral_classifier import (
-            build_spectral_classification_concerns,
-        )
-
-        result["spectral_classification_concerns"] = build_spectral_classification_concerns(stellar_objects)
         result["status"] = "success"
     except Exception as processing_error:
+        # This runs in a worker process, so it is the last place that can
+        # catch an error from one frame. The traceback is logged and the
+        # frame is recorded as failed, so the rest of the batch goes on.
+        logger.exception("Spectroscopy analysis failed for frame %s", path)
         result["error"] = str(processing_error)
 
     return result
@@ -314,6 +486,8 @@ def process_spectroscopy_frames_by_session(
     frame_records: list[FrameRecord],
     max_workers: int | None = None,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
+    job_id: str | None = None,
+    drivers: Drivers | None = None,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
     """Process a target's spectroscopy images, grouped by observing session.
 
@@ -335,6 +509,12 @@ def process_spectroscopy_frames_by_session(
         How many processes to run at once.
     on_item_complete : `Callable`, optional
         A function called every time an image finishes processing.
+    job_id : `str`, optional
+        The tracked job this run is running under, if any -- recorded
+        as this run's IVOA provenance Activity when given.
+    drivers : `Drivers`, optional
+        The plate solver and SIMBAD driver the star identification uses.
+        Any left out is the built-in one.
 
     Returns
     -------
@@ -345,10 +525,10 @@ def process_spectroscopy_frames_by_session(
         star identification data.
     """
     from astrometricslib.drivers.image import AstrometricsImage
-    from astrometricslib.pipelines.astrometry.session_identification import (
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
+    from astrometricslib.pipelines.shared.session_identification import (
         identify_session_stars,
     )
-    from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
     from astrometricslib.pipelines.shared.target_center_hint import resolve_target_center_hint
     from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
@@ -361,7 +541,7 @@ def process_spectroscopy_frames_by_session(
 
     center_ra, center_dec = resolve_target_center_hint(target)
 
-    star_identifier = StarIdentifier()
+    star_identifier = StarIdentifier(drivers=drivers)
     session_results = []
     session_summaries = []
 
@@ -372,12 +552,26 @@ def process_spectroscopy_frames_by_session(
         )
         session_results.append((session, identify_result))
 
-        session_wcs_header = identify_result.wcs.to_header() if identify_result.wcs is not None else None
+        session_wcs_header = (
+            identify_result.wcs.to_header(relax=True) if identify_result.wcs is not None else None
+        )
+        # Only follow the target star and a few verified catalog stars.
+        # Sending every detection would extract hundreds of unvetted
+        # spectra from every frame.
+        tracked_stars = select_temporal_tracking_stars(identify_result.stellar_objects, center_ra, center_dec)
+        logger.info(
+            "[%s] Following %d of %d identified stars across %d frame(s) of session %s.",
+            target.id,
+            len(tracked_stars),
+            len(identify_result.stellar_objects),
+            len(session.frame_paths),
+            session.id,
+        )
         session_summaries.append(
             parallel_batch.run_parallel_batch(
                 session.frame_paths,
                 _process_single_spectroscopy_frame_worker_v2,
-                worker_arguments=(target.id, identify_result.stellar_objects, session_wcs_header),
+                worker_arguments=(target.id, tracked_stars, session_wcs_header),
                 max_workers=max_workers,
                 niceness=api.config.get_worker_niceness(),
                 on_item_complete=on_item_complete,
@@ -385,12 +579,12 @@ def process_spectroscopy_frames_by_session(
         )
 
     merged_summary = _merge_batch_summaries(session_summaries)
-    _attach_spectroscopy_quality_summary(target, merged_summary, session_results)
+    _attach_spectroscopy_quality_summary(target, merged_summary, session_results, job_id)
     return merged_summary, session_results
 
 
 def _attach_spectroscopy_quality_summary(
-    target: Target, summary: parallel_batch.BatchRunSummary, session_results: list
+    target: Target, summary: parallel_batch.BatchRunSummary, session_results: list, job_id: str | None = None
 ) -> None:
     """Gather up all the worker results into a single quality report.
 
@@ -410,6 +604,17 @@ def _attach_spectroscopy_quality_summary(
     all_trail_widths = []
     all_zero_order_fractions = []
     all_spectral_classification_concerns = []
+    all_stage_quality_rows: list[list[dict]] = []
+    all_gaia_xp_rows: list[dict] = []
+    all_spectrum_facts = merge_spectrum_facts(
+        frame_result.get("spectrum_facts") for frame_result in summary.results.values()
+    )
+    # Every star a worker processed has a spectrum; this count does not
+    # depend on the optional per-check counts above.
+    all_spectrum_facts["spectra"] = max(
+        all_spectrum_facts["spectra"],
+        sum(int(frame_result.get("stars_processed") or 0) for frame_result in summary.results.values()),
+    )
     for frame_result in summary.results.values():
         all_dispersion_angles.extend(frame_result.get("dispersion_angles") or [])
         all_trail_widths.extend(frame_result.get("trail_widths") or [])
@@ -417,9 +622,11 @@ def _attach_spectroscopy_quality_summary(
         all_spectral_classification_concerns.extend(
             frame_result.get("spectral_classification_concerns") or []
         )
+        all_stage_quality_rows.extend(frame_result.get("stage_quality") or [])
+        all_gaia_xp_rows.extend(frame_result.get("gaia_xp") or [])
 
-    low_confidence_count = sum(
-        1 for concern in all_spectral_classification_concerns if "low_confidence" in concern["reason"]
+    poor_match_count = sum(
+        1 for concern in all_spectral_classification_concerns if "poor_match" in concern["reason"]
     )
     ambiguous_count = sum(
         1 for concern in all_spectral_classification_concerns if "ambiguous" in concern["reason"]
@@ -436,7 +643,8 @@ def _attach_spectroscopy_quality_summary(
     sessions = [session for session, _identify_result in session_results]
     target_session_breakdown = build_target_session_breakdown(sessions, failed_paths)
 
-    target.spectroscopy_quality_summary = SpectroscopyQualitySummary(
+    wavelength_scale = summarize_wavelength_scale(all_stage_quality_rows)
+    target.quality.spectroscopy = SpectroscopyQualitySummary(
         target_id=target.id,
         target_session_ids=[session.id for session, _identify_result in session_results],
         target_session_breakdown=target_session_breakdown,
@@ -450,18 +658,37 @@ def _attach_spectroscopy_quality_summary(
             dispersion_angle_deg=all_dispersion_angles[0] if all_dispersion_angles else None,
             trail_width_profile_available=trail_width_profile_available,
             median_trail_width_px=median_trail_width_px,
-            low_confidence_classification_count=low_confidence_count,
+            poor_match_classification_count=poor_match_count,
             ambiguous_classification_count=ambiguous_count,
             flagged_spectral_classifications=all_spectral_classification_concerns,
+            stage_quality_summary=summarize_stage_quality(all_stage_quality_rows) or None,
+            gaia_xp_summary=summarize_gaia_xp(all_gaia_xp_rows),
+            wavelength_scale_summary=wavelength_scale,
         ),
     )
-    if zero_order_flagged:
-        target.spectroscopy_quality_summary.flagged = True
-        target.spectroscopy_quality_summary.flag_reasons.append(
-            "zero-order saturated in at least one processed star"
-        )
-    if all_spectral_classification_concerns:
-        target.spectroscopy_quality_summary.flagged = True
-        target.spectroscopy_quality_summary.flag_reasons.append(
-            f"spectral classification uncertain for {len(all_spectral_classification_concerns)} star(s)"
-        )
+    for gate in spectroscopy_run_gates(
+        all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns, wavelength_scale
+    ):
+        target.quality.spectroscopy.record_gate(gate)
+    target.quality.spectroscopy.record_gate(gaia_xp_gate(all_gaia_xp_rows))
+
+    from astrometricslib.pipelines.shared.applied_camera_profile import (
+        camera_name_for_paths,
+        record_camera_profile,
+    )
+
+    record_camera_profile(
+        target.quality.spectroscopy,
+        camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
+    )
+
+    from astrometricslib.models.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run
+
+    record_pipeline_run(
+        summary=target.quality.spectroscopy,
+        job_id=job_id,
+        target_id=target.id,
+        pipeline_name="spectroscopy",
+        pipeline_version=SPECTROSCOPY_PIPELINE_VERSION,
+    )

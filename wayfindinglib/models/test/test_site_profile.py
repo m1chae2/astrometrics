@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from wayfindinglib.models.equipment_and_site.site_profile import AvoidanceZone, SiteProfile
 
 
-def test_avoidance_zone_contains_azimuth_normal_range():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_avoidance_zone_contains_azimuth_normal_range() -> None:
     """Verify containment within a non-wrapping azimuth range."""
     zone = AvoidanceZone(
         id="z1", name="Oak Tree", azimuth_start_deg=80.0, azimuth_end_deg=110.0, min_clear_altitude_deg=25.0
@@ -19,7 +19,7 @@ def test_avoidance_zone_contains_azimuth_normal_range():  # ruff: ignore[missing
     assert zone.contains_azimuth(70.0) is False
 
 
-def test_avoidance_zone_contains_azimuth_wraps_north():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_avoidance_zone_contains_azimuth_wraps_north() -> None:
     """Verify containment correctly wraps past due north (360 -> 0)."""
     zone = AvoidanceZone(
         id="z1", name="Roofline", azimuth_start_deg=350.0, azimuth_end_deg=10.0, min_clear_altitude_deg=30.0
@@ -29,7 +29,7 @@ def test_avoidance_zone_contains_azimuth_wraps_north():  # ruff: ignore[missing-
     assert zone.contains_azimuth(180.0) is False
 
 
-def test_site_profile_rejects_duplicate_avoidance_zone_ids():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_site_profile_rejects_duplicate_avoidance_zone_ids() -> None:
     """Verify duplicate avoidance zone identifiers are rejected."""
     zone_a = AvoidanceZone(
         id="z1", name="A", azimuth_start_deg=0.0, azimuth_end_deg=10.0, min_clear_altitude_deg=20.0
@@ -47,7 +47,7 @@ def test_site_profile_rejects_duplicate_avoidance_zone_ids():  # ruff: ignore[mi
         )
 
 
-def test_site_profile_constructs_with_no_obstructions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_site_profile_constructs_with_no_obstructions() -> None:
     """Verify a SiteProfile constructs with an empty avoidance_zones list."""
     profile = SiteProfile(id="site1", name="Backyard", latitude_deg=39.7392, longitude_deg=-104.9903)
     assert profile.avoidance_zones == []

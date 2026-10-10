@@ -3,96 +3,62 @@
 /* Shared list and radio styles used by TargetList and SpectroscopyList.
    Centralizing these rules means changes here affect both lists. */
 
-/* Custom radio button */
+/* Radio input maintained for accessibility, but visual form circle replaced by native row selection */
 .radio {
-  position: relative;
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  margin-right: 12px;
-  vertical-align: middle;
-  box-sizing: border-box;
-}
-
-.radio__input {
-  opacity: 0;
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  left: 0;
-  top: 0;
-  margin: 0;
-  cursor: pointer;
-  z-index: 1;
-}
-
-.radio__indicator {
-  display: block;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--grey-light);
-  background: transparent;
-  box-sizing: border-box;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-}
-
-.radio__input:checked+.radio__indicator {
-  border-color: var(--primary-blue);
-}
-
-.radio__input:checked+.radio__indicator::after,
-.radio__input:not(:checked)+.radio__indicator::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-sizing: border-box;
-  transition: all 0.2s ease-in-out;
-}
-
-.radio__input:checked+.radio__indicator::after {
-  background: var(--primary-blue);
-}
-
-.radio__input:not(:checked)+.radio__indicator::after {
-  background: transparent;
+  display: none;
 }
 
 .selectable-list {
   width: 100%;
-  padding: 0;
+  padding: 2px 4px;
   margin: 0;
-  background: var(--grey-dark);
+  background: transparent;
   flex: 1 1 auto;
   min-height: 0;
   margin-top: 0;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .selectable-list__item {
   width: 100%;
   box-sizing: border-box;
-  background: var(--grey-dark);
+  background: transparent;
   white-space: nowrap;
   overflow: hidden;
   font-size: var(--target-list-font-size, 13px);
   font-family: inherit;
-  padding: 4px 12px;
+  padding: 6px 12px;
   margin: 0;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   min-height: 32px;
   user-select: none;
   color: var(--white);
-  transition: background-color 0.15s;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   cursor: pointer;
+  border-left: 3px solid transparent;
+}
+
+.selectable-list__item:hover:not(.selectable-list__item--selected) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.selectable-list__item--selected {
+  background: rgba(36, 74, 112, 0.45);
+  border-left: 3px solid var(--adwaita-blue-light, #3584e4);
+  color: #ffffff;
+}
+
+.selectable-list__item--selected .selectable-list__label-text {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.selectable-list__item--two-line {
+  min-height: 48px;
 }
 
 .selectable-list__label {
@@ -116,6 +82,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* Label over a smaller subtitle, for lists whose rows carry a second line. */
+.selectable-list__label-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  line-height: 1.25;
+}
+
+.selectable-list__subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-height: 1.25em;
+  font-size: 11px;
+  color: var(--text-dim, #9aa5b5);
 }
 
 .selectable-list__badge,

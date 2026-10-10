@@ -9,7 +9,7 @@ Note: Import from this folder should not be done directly. Import these
 classes from the main `astrometricslib` package instead.
 """
 
-from astrometricslib.api.moving_objects import MovingObjectRecovery
+from astrometricslib.api.jobs import Jobs
 from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines, QualityDiagnostics
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
@@ -20,7 +20,7 @@ __all__ = [
     "AbstractCatalogAccess",
     "CalibrationCatalog",
     "CatalogAccess",
-    "MovingObjectRecovery",
+    "Jobs",
     "ProcessingPipelines",
     "QualityDiagnostics",
     "StellarCatalog",

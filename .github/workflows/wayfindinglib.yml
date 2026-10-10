@@ -47,6 +47,11 @@ jobs:
       - name: Setup Python Environment
         uses: ./.github/actions/setup-python-env
 
+      # The MCP SDK is an optional extra that only mcp_servers/ needs.
+      # Removing it here proves the library runs without it.
+      - name: Remove the Optional MCP SDK
+        run: .venv/bin/pip uninstall --yes mcp
+
       - name: Run Unit Tests with Coverage
         env:
           PYTHONPATH: .

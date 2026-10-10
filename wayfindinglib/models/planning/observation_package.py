@@ -1,15 +1,16 @@
 """Purpose: Observation Package Domain Models.
 
 Description: A reusable imaging request for one target, authored
-independent of any specific night (`Wayfinding_Library_Architecture.md`
-§2.3). `ExposureRequest.frame_type` covers light and calibration
+independent of any specific night (`Wayfinding_Library_Architecture.md`).
+`ExposureRequest.frame_type` covers light and calibration
 exposures alike in one list rather than a separate request mechanism,
 matching how package authoring is actually used today
-(`Wayfinding_Library_Architecture.md` §2.3.2). `filter` is typed
-`astrometricslib.utilities.enums.FilterType` -- a deliberate
+(`Wayfinding_Library_Architecture.md`). `filter` is typed
+`astrometricslib.foundation.enums.FilterType` -- a deliberate
 cross-library type dependency in the direction this library already
-depends, per Design Invariant 1's scope (`Wayfinding_Library_Architecture.md`
-§2.1): it constrains dependencies within this library's layers, not
+depends, per Design Invariant 1's scope
+(`Wayfinding_Library_Architecture.md`): it constrains dependencies within this
+library's layers, not
 against the science library.
 """
 
@@ -54,7 +55,7 @@ class ExposureRequest(BaseModel):
     def total_exposure_sec(self) -> float:
         """Total wall-clock time this request occupies, exposures plus pacing.
 
-        Per `Wayfinding_Library_Architecture.md` §2.3.2: a package's
+        Per `Wayfinding_Library_Architecture.md`: a package's
         total duration sums every requested exposure's
         `total_exposure_sec` including calibration entries.
 
@@ -71,7 +72,7 @@ class ObservationPackage(BaseModel):
 
     `target_id` references an existing `astrometricslib.models.target.Target`
     by identifier only, never embedded -- resolved live at placement
-    time, never cached (`Wayfinding_Library_Architecture.md` §2.3.2,
+    time, never cached (`Wayfinding_Library_Architecture.md`,
     the "Live Target Resolution" invariant).
     """
 

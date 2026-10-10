@@ -2,15 +2,15 @@
 
 Description: Evaluates a configured `SafetyRuleSet` against sensor
 readings and publishes a `SafetyAssessment`, per
-`Wayfinding_Library_Architecture.md` §2.5.6. Readings are passed in
+`Wayfinding_Library_Architecture.md`. Readings are passed in
 as a plain mapping rather than read from a live driver directly, so
 rule evaluation is exercisable with no hardware or Execution package
-present (§2.5.9, "Safety Runs Without Execution") -- gathering the
+present ("Safety Runs Without Execution") -- gathering the
 mapping from `drivers/indi/weather_controller.py` is a thin, separate
 step layered on top.
 
 Three properties are architectural rather than incidental
-(`Wayfinding_Library_Architecture.md` §2.5.4):
+(`Wayfinding_Library_Architecture.md`):
 
 * **Unknown is unsafe.** A reading that is missing, stale, or whose
   rule set is itself unconfigured yields `UNKNOWN`, which
@@ -24,6 +24,7 @@ Three properties are architectural rather than incidental
 
 from datetime import datetime
 
+from astrometricslib import ConfigurationError
 from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRule, SafetyRuleSet, SafetyVerdict
 
 # Readings are measurement name -> (value, observed_at); a measurement
@@ -59,7 +60,7 @@ def _evaluate_rule(rule: SafetyRule, readings: SensorReadings, now: datetime) ->
 
     Raises
     ------
-    ValueError
+    ConfigurationError
         If `rule.comparison` names an unrecognized comparison -- a
         configuration error, not a runtime reading problem.
     """
@@ -77,7 +78,7 @@ def _evaluate_rule(rule: SafetyRule, readings: SensorReadings, now: datetime) ->
         is_unsafe = value < rule.unsafe_threshold
         is_marginal = rule.marginal_threshold is not None and value < rule.marginal_threshold
     else:
-        raise ValueError(f"SafetyRule {rule.id!r} has unrecognized comparison {rule.comparison!r}")
+        raise ConfigurationError(f"SafetyRule {rule.id!r} has unrecognized comparison {rule.comparison!r}")
 
     if is_unsafe:
         return SafetyVerdict.UNSAFE

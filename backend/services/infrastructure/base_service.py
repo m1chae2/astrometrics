@@ -3,8 +3,13 @@
 import os
 import threading
 import uuid
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from backend.services.infrastructure.astrometrics_service import AstrometricsService
+    from backend.services.processing.job_service import JobService
 
 
 class BaseBackgroundService:
@@ -14,7 +19,12 @@ class BaseBackgroundService:
     tracking and optional recording via `JobService`.
     """
 
-    def __init__(self, max_workers: int | None = None, job_service=None, astrometrics_service=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        job_service: JobService | None = None,
+        astrometrics_service: AstrometricsService | None = None,
+    ) -> None:
         self._executor = ThreadPoolExecutor(max_workers=max_workers or os.cpu_count() or 4)
         # Unified job tracking: {job_id: {"future": Future, "type": str,
         # "target_id": str, "status": str}}
@@ -23,7 +33,7 @@ class BaseBackgroundService:
         self._job_service = job_service
         self._astrometrics_service = astrometrics_service
 
-    def _update_central_processing_jobs(self):  # ruff: ignore[missing-return-type-private-function]
+    def _update_central_processing_jobs(self) -> None:
         """Update high-level interfaceservice with active jobs."""
         if self._astrometrics_service and self._job_service:
             active = self._job_service.get_active_jobs()
@@ -32,12 +42,22 @@ class BaseBackgroundService:
                 jobs_payload.append({"target_id": j.target_id, "job_id": j.id, "status": j.status})
             self._astrometrics_service.update_processing_jobs(jobs_payload)
 
-    def _submit_job(self, target_id, job_type, task_fn, *args, log_file_path=None, **kwargs):  # ruff: ignore[missing-type-function-argument, missing-type-args, missing-type-kwargs, missing-return-type-private-function]
+    def _submit_job(
+        self,
+        target_id: str,
+        job_type: str,
+        task_fn: Callable[..., Any],
+        *args: Any,
+        log_file_path: str | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Create a job record, submit the task, and return its id.
 
         Creates a `ProcessingJob` in the database (when a job service
         is configured), submits the task to the thread pool, and
-        returns the job id.
+        returns the job id. A task fails by raising. A task that
+        returns a falsy value (such as `None` for "no output") is also
+        recorded as failed.
 
         Returns
         -------
@@ -58,21 +78,22 @@ class BaseBackgroundService:
         job_id = job.id
 
         # Wrap task to update database on completion/failure
-        def job_wrapper(jid, tid, *a, **k):  # ruff: ignore[missing-type-function-argument, missing-type-args, missing-type-kwargs, missing-return-type-private-function]
+        def job_wrapper(jid: str, tid: str, *a: Any, **k: Any) -> Any:
+            """Run the task and record how it ended in the job table.
+
+            Returns
+            -------
+            result : `Any`
+                Whatever the task returned.
+            """
             try:
                 # Add log_file_path to kwargs if provided
                 if log_file_path:
                     k["log_file_path"] = log_file_path
                 result = task_fn(jid, tid, *a, **k)
 
-                # Determine status based on result
-                status = "completed"
-                if not result:
-                    status = "failed"
-                elif isinstance(result, dict) and result.get("status") == "error":
-                    status = "failed"
-                elif isinstance(result, dict) and result.get("status") == "failed":
-                    status = "failed"
+                # A task fails by raising; a falsy result means no output.
+                status = "completed" if result else "failed"
 
                 self._job_service.update_job(jid, status=status, progress=100.0)
                 self._update_central_processing_jobs()
@@ -161,17 +182,12 @@ class BaseBackgroundService:
                 if future.done():
                     if future.cancelled():
                         status = "cancelled"
+                    elif future.exception() is not None:
+                        # exception() returns the job's error without
+                        # raising it. It does not wait, since the job is done.
+                        status = "failed"
                     else:
-                        try:
-                            # result() shouldn't block if done() is true
-                            res = future.result(timeout=0)
-                            status = "finished"
-                            if not res:
-                                status = "failed"
-                            elif isinstance(res, dict) and res.get("status") in ["error", "failed"]:
-                                status = "failed"
-                        except Exception:
-                            status = "failed"
+                        status = "finished" if future.result() else "failed"
                 else:
                     status = "started"
 
@@ -199,35 +215,7 @@ class BaseBackgroundService:
                     return future.cancel()
         return False
 
-    def _setup_worker_logger(self, name: str, log_file_path: str | None):  # ruff: ignore[missing-return-type-private-function]
-        """Set up an isolated logger for a worker task.
-
-        REQ: IMG-5.3
-
-        Returns
-        -------
-        worker_logger : `logging.Logger` or `None`
-            The configured logger, or `None` if `log_file_path` is
-            not provided.
-        """
-        import logging
-
-        if log_file_path:
-            # Clear old logs for this target at the start of a new job
-            handler = logging.FileHandler(log_file_path, mode="w")
-            handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-            worker_logger = logging.getLogger(name)
-            worker_logger.propagate = False
-            # Remove existing handlers to avoid duplicates if
-            # re-using logger name
-            for h in worker_logger.handlers[:]:
-                worker_logger.removeHandler(h)
-            worker_logger.addHandler(handler)
-            worker_logger.setLevel(logging.INFO)
-            return worker_logger
-        return None
-
-    def stream_log(self, job_id: str, log_file: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def stream_log(self, job_id: str, log_file: str) -> Iterator[str]:
         """Yield log lines from `log_file` as they are written.
 
         REQ: IMG-5.3
@@ -259,5 +247,5 @@ class BaseBackgroundService:
 
                 # One last drain
                 yield from f.readlines()
-        except Exception as e:
+        except (OSError, ValueError) as e:
             yield f"Error reading log: {e!s}\n"

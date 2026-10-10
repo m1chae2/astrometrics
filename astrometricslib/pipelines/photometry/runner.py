@@ -8,13 +8,31 @@ cross-session mechanics live in `batch.py` -- this file is the thin
 """
 
 import logging
+import os
+import sqlite3
+import statistics
 from typing import Any
 
+from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.models.quality_summary import NoiseModelPoint
+from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,
     _run_variability_analysis_for_session,
+    search_periods_and_save,
 )
+from astrometricslib.pipelines.photometry.post_processing.known_variability_labels import (
+    label_known_variability,
+    split_scores_by_catalog_status,
+)
+from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
+from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
+    TIME_BASIS_BJD_TDB,
+    TIME_BASIS_BJD_TDB_GEOCENTRIC,
+    TIME_BASIS_UTC_START,
+)
+from astrometricslib.pipelines.photometry.processing.variability_indices import NoiseModel, fit_noise_model
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -25,20 +43,135 @@ from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
 )
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
-# The percentage of rejected frames needed to trigger a quality warning flag.
-# Normal processing naturally rejects a small number of frames (around 7.2%
-# based on past runs). If we trigger a warning for anything less, we get
-# too many false alarms. Setting the limit to 0.25 (25%) helps us catch
-# real issues (like passing clouds) that need a human to check.
-MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG = 0.25
 
-# The minimum number of rejected frames needed to trigger a quality warning.
-# This prevents false alarms when dealing with a small number of frames
-# (under 20), where a single rejected frame could cause a high percentage.
-MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG = 5
+def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCandidate]:
+    """Build the `VariableCandidate` payload rows for a list of stars.
+
+    Shared between the raw (pre-merge) per-session candidates and the
+    cross-session long-term candidates -- both are formatted identically.
+
+    Returns
+    -------
+    candidates : `list` [`VariableCandidate`]
+        One entry per star, in the same order given.
+    """
+    return [
+        VariableCandidate(
+            id=star.id,
+            meanFlux=star.photometry.mean_flux,
+            coefficientOfVariation=star.photometry.coefficient_of_variation,
+            excessScatter=star.photometry.excess_scatter,
+            reducedChiSquare=star.photometry.reduced_chi_square,
+            stetsonJ=star.photometry.stetson_j,
+            variabilityScore=star.photometry.variability_score,
+            ra=float(star.right_ascension) if star.right_ascension else 0.0,
+            dec=float(star.declination) if star.declination else 0.0,
+        )
+        for star in stars
+    ]
+
+
+def _noise_model_inputs(star_photometry: list[PhotometryResult]) -> tuple[list[float], list[float]]:
+    """Collect the brightness and scatter that the noise model is fitted to.
+
+    Each session stores them on its stars when it flags variables, so the run's
+    curve is fitted from those stored values, not from the merged light
+    curves.
+
+    Parameters
+    ----------
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    inputs : `tuple` [`list` [`float`], `list` [`float`]]
+        The instrumental magnitudes and the scatters, in magnitudes, of the
+        stars that have both.
+    """
+    pairs = [
+        (photometry.instrumental_mag, photometry.rms_mag)
+        for photometry in star_photometry
+        if photometry.instrumental_mag is not None and photometry.rms_mag
+    ]
+    return [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+
+
+def _noise_curve_points(model: NoiseModel | None) -> list[NoiseModelPoint]:
+    """Turn a noise model into the small list recorded on the run.
+
+    Parameters
+    ----------
+    model : `NoiseModel` or `None`
+        The run's noise model.
+
+    Returns
+    -------
+    points : `list` [`NoiseModelPoint`]
+        One point per bin, brightest first. Empty without a model.
+    """
+    if model is None:
+        return []
+    return [
+        NoiseModelPoint(instrumentalMag=magnitude, rmsMag=rms, starCount=count)
+        for magnitude, rms, count in zip(model.magnitudes, model.rms_mag, model.star_counts, strict=True)
+    ]
+
+
+def _typical_noise_mag(model: NoiseModel | None, star_photometry: list[PhotometryResult]) -> float | None:
+    """Give the scatter the noise model expects of a typical star.
+
+    Parameters
+    ----------
+    model : `NoiseModel` or `None`
+        The run's noise model.
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    rms_mag : `float` or `None`
+        The model's scatter at the median instrumental magnitude of the
+        stars, in magnitudes. `None` without a model.
+    """
+    magnitudes = _noise_model_inputs(star_photometry)[0]
+    if model is None or not magnitudes:
+        return None
+    return model.expected_rms_mag(float(statistics.median(magnitudes)))
+
+
+def _run_time_basis(star_photometry: list[PhotometryResult]) -> str | None:
+    """Name the time scale of a run's light curves, for the timestamp gate.
+
+    The run's basis is the least exact one any light curve has. A star with
+    no BJD_TDB times counts as the UTC-start basis, so one such star is
+    enough to make the whole run read UTC start. Stars with no light-curve
+    points are ignored.
+
+    Parameters
+    ----------
+    star_photometry : `list` [`PhotometryResult`]
+        The light curves of the run's stars.
+
+    Returns
+    -------
+    basis : `str` or `None`
+        One of the `observation_times` time-basis sentences, or `None` when
+        no star has any point.
+    """
+    bases = {
+        (photometry.time_basis if photometry.time_bjd_tdb and photometry.time_basis else TIME_BASIS_UTC_START)
+        for photometry in star_photometry
+        if photometry.timestamps
+    }
+    for basis in (TIME_BASIS_UTC_START, TIME_BASIS_BJD_TDB_GEOCENTRIC, TIME_BASIS_BJD_TDB):
+        if basis in bases:
+            return basis
+    return next(iter(bases), None)
 
 
 def _empty_photometry_result(no_work_reason: str) -> Result:
@@ -72,7 +205,10 @@ def _empty_photometry_result(no_work_reason: str) -> Result:
             ),
             "photometry_sessions": [],
             "all_rejected_files": [],
+            "unreadable_date_obs_frames": [],
             "all_frame_ensemble_composition": [],
+            "all_comparison_sets": [],
+            "all_centroid_shift_summaries": [],
             "session_empty_reasons": [],
             "sessions_missing_wcs": [],
             "cross_session_match_count": 0,
@@ -124,6 +260,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             sessions carried in `payload`, so `run` does not have to
             redo this work.
         """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
         from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 
         target = request.target
@@ -134,6 +271,14 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         target_frames = request.frames if request.frames is not None else target.frames
         for frame in target_frames:
             if not frame.path:
+                continue
+            # A dispersed (grating) frame has no normal point-source PSF,
+            # so aperture photometry on it measures something other than
+            # a star's brightness -- mixing one into an ensemble with
+            # ordinary imaging frames corrupts that frame's (and its
+            # ensemble members') normalization. Frames captured through
+            # this filter belong to the spectroscopy pipeline instead.
+            if frame_is_spectral(frame):
                 continue
             if not filter_type:
                 image_paths.append(frame.path)
@@ -190,8 +335,6 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             own session. Everything `validate_output` and
             `to_result_dict` need is in `payload`.
         """
-        from astrometricslib.models.stellar_source import VariableCandidate
-
         target = request.target
         catalog_access = request.catalog_access
         options = request.options
@@ -202,7 +345,17 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         per_session_results = []
         all_candidates = []
         all_rejected_files = []
+        # Frames whose DATE-OBS header was missing or unreadable, with the
+        # reason (`ExcludedFrame`). Reported through `capture_timestamps`.
+        all_unreadable_date_obs_frames = []
         all_frame_ensemble_composition = []
+        # One comparison-set record per session that had stars to normalize
+        # (see `ComparisonSetResult`), for the `comparison_ensemble` gate.
+        all_comparison_sets = []
+        # One per-star centroid offset summary per session with more than
+        # one frame (see `CentroidShiftSummary`), for the
+        # `registration_drift` gate.
+        all_centroid_shift_summaries = []
         session_empty_reasons = []
         # Only session-prefix ids when there's more than one session,
         # so the common single-session target keeps today's plain
@@ -220,7 +373,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         use_astrometry_seed = bool(options.get("use_astrometry_seed", True))
         star_identifier = None
         if use_astrometry_seed:
-            from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+            from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
             star_identifier = StarIdentifier()
 
@@ -229,11 +382,22 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         sessions_with_reused_header_wcs: list[str] = []
         sessions_with_replaced_header_wcs: list[str] = []
 
+        # With no worker count given, use the configured photometry
+        # workers, checked against the CPUs and memory this computer has.
+        max_workers = options.get("max_workers")
+        if max_workers is None:
+            from astrometricslib.foundation.config import get_configuration
+            from astrometricslib.utilities.concurrency import resolve_worker_counts
+
+            max_workers = resolve_worker_counts(
+                "1", get_configuration().get_photometry_workers()
+            ).inner_worker_count
+
         for session in photometry_sessions:
             id_prefix = f"{session.id}:" if id_prefix_enabled else ""
             analyzer, session_candidates, identify_result = _run_variability_analysis_for_session(
                 session,
-                options.get("max_workers"),
+                max_workers,
                 id_prefix,
                 target=target,
                 star_identifier=star_identifier,
@@ -247,30 +411,33 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 if identify_result.header_wcs_replaced_after_verification:
                     sessions_with_replaced_header_wcs.append(session.id)
             if not analyzer.stellar_objects:
-                session_empty_reasons.append(
-                    f"session {session.id}: reference-frame star detection failed, 0 stars processed"
-                )
+                if analyzer.frames_without_usable_date_obs:
+                    session_empty_reasons.append(
+                        f"session {session.id}: reference frame has no usable DATE-OBS, 0 stars processed"
+                    )
+                else:
+                    session_empty_reasons.append(
+                        f"session {session.id}: reference-frame star detection failed, 0 stars processed"
+                    )
             per_session_results.append((analyzer, session_candidates))
             all_candidates.extend(session_candidates)
             all_rejected_files.extend(analyzer.rejected_files)
+            all_unreadable_date_obs_frames.extend(analyzer.frames_without_usable_date_obs)
             all_frame_ensemble_composition.extend(analyzer.frame_ensemble_composition)
+            if analyzer.comparison_set is not None:
+                all_comparison_sets.append(analyzer.comparison_set)
+            centroid_shift_summary = analyzer.centroid_shift_summary()
+            if centroid_shift_summary is not None:
+                all_centroid_shift_summaries.append(centroid_shift_summary)
 
         # Captured before cross-session merging/re-flagging below so
         # each candidate reflects its own session's local adaptive
         # cutoff -- VariableCandidate copies plain float values, so
-        # later mutating the underlying StellarObjects (merging
-        # light curves, recomputing a long-term CV) cannot retroactively
-        # change an already-built VariableCandidate.
-        candidates_formatted = [
-            VariableCandidate(
-                id=star.id,
-                meanFlux=star.photometry.mean_flux,
-                coefficientOfVariation=star.photometry.coefficient_of_variation,
-                ra=float(star.right_ascension) if star.right_ascension else 0.0,
-                dec=float(star.declination) if star.declination else 0.0,
-            )
-            for star in all_candidates
-        ]
+        # later mutating the underlying StellarObjects (merging light
+        # curves, adding the between-session amplitude fields) cannot
+        # retroactively change an already-built VariableCandidate.
+        candidates_formatted = _format_variable_candidates(all_candidates)
+        label_known_variability(candidates_formatted, catalog_access)
 
         sessions_missing_wcs: list[str] = []
         cross_session_match_count = 0
@@ -283,7 +450,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 )
             )
             if cross_session_match_count > 0:
-                from astrometricslib.pipelines.photometry.variability_analyzer import (
+                from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
                     identify_long_term_variable_candidates,
                 )
 
@@ -291,16 +458,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         else:
             all_stellar_objects = per_session_results[0][0].stellar_objects
 
-        long_term_candidates_formatted = [
-            VariableCandidate(
-                id=star.id,
-                meanFlux=star.photometry.mean_flux,
-                coefficientOfVariation=star.photometry.coefficient_of_variation,
-                ra=float(star.right_ascension) if star.right_ascension else 0.0,
-                dec=float(star.declination) if star.declination else 0.0,
-            )
-            for star in long_term_candidates
-        ]
+        long_term_candidates_formatted = _format_variable_candidates(long_term_candidates)
+        label_known_variability(long_term_candidates_formatted, catalog_access)
 
         all_stellar_objects, star_id_breakdown = record_pipeline_stars(
             all_stellar_objects,
@@ -310,8 +469,18 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             pipeline_name="photometry",
         )
 
-        frames_processed = sum(len(session.frame_paths) for session in photometry_sessions) - len(
-            all_rejected_files
+        # The light curves are saved now. Search the target's own star and
+        # its brightest stars for repeating patterns, in a step of its own so
+        # that a failure here can never cost a photometry result.
+        try:
+            search_periods_and_save(all_stellar_objects, target, catalog_access)
+        except (AstrometricsError, sqlite3.Error, *DATA_ERRORS) as search_error:
+            logger.warning("[%s] Period search step failed: %s", target.id, search_error)
+
+        frames_processed = (
+            sum(len(session.frame_paths) for session in photometry_sessions)
+            - len(all_rejected_files)
+            - len(all_unreadable_date_obs_frames)
         )
 
         return Result(
@@ -321,7 +490,10 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 "star_id_breakdown": star_id_breakdown,
                 "photometry_sessions": photometry_sessions,
                 "all_rejected_files": all_rejected_files,
+                "unreadable_date_obs_frames": all_unreadable_date_obs_frames,
                 "all_frame_ensemble_composition": all_frame_ensemble_composition,
+                "all_comparison_sets": all_comparison_sets,
+                "all_centroid_shift_summaries": all_centroid_shift_summaries,
                 "session_empty_reasons": session_empty_reasons,
                 "sessions_missing_wcs": sessions_missing_wcs,
                 "cross_session_match_count": cross_session_match_count,
@@ -344,7 +516,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         -------
         summary : `PhotometryQualitySummary`
             Flagged for a high global-outlier rejection rate, frames
-            excluded for a missing timestamp, a session with zero stars
+            excluded for a missing timestamp or an unreadable `DATE-OBS`,
+            a session with zero stars
             detected, a session that could not be plate-solved for
             cross-session matching, or (when `process_input` found
             nothing to do) the reason why -- any, all, or none of these.
@@ -354,7 +527,8 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,
         )
-        from astrometricslib.pipelines.photometry.variability_analyzer import (
+        from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
+            median_flux_error_mag,
             median_light_curve_scatter_mag,
         )
         from astrometricslib.pipelines.shared.target_sessions import build_target_session_breakdown
@@ -364,12 +538,13 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         photometry_sessions = payload["photometry_sessions"]
         all_rejected_files = payload["all_rejected_files"]
         photometry_frames_without_timestamp = payload["photometry_frames_without_timestamp"]
+        unreadable_date_obs_frames = payload.get("unreadable_date_obs_frames", [])
         star_id_breakdown = payload["star_id_breakdown"]
         sessions_missing_wcs = payload["sessions_missing_wcs"]
         session_empty_reasons = payload["session_empty_reasons"]
         frames_processed = payload["frames_processed"]
 
-        rejected_paths = set(all_rejected_files)
+        rejected_paths = set(all_rejected_files) | {frame.path for frame in unreadable_date_obs_frames}
         photometry_session_breakdown = build_target_session_breakdown(photometry_sessions, rejected_paths)
 
         rejected_frames = [
@@ -382,7 +557,12 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             )
             for frame in photometry_frames_without_timestamp
         ]
+        rejected_frames += [
+            ExcludedFrame(path=frame.path, reason=frame.reason) for frame in unreadable_date_obs_frames
+        ]
 
+        star_photometry = [star.photometry for star in result.stellar_objects if star.photometry is not None]
+        noise_model = fit_noise_model(*_noise_model_inputs(star_photometry))
         summary = PhotometryQualitySummary(
             target_id=target.id,
             target_session_ids=[session.id for session in photometry_sessions],
@@ -404,6 +584,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
                 position_only_star_count=star_id_breakdown.position_only,
                 unresolved_star_count=star_id_breakdown.unresolved,
                 light_curve_scatter_rms_mag=median_light_curve_scatter_mag(result.stellar_objects),
+                noise_model_curve=_noise_curve_points(noise_model),
             ),
         )
         # The rejected frames are recorded in the metrics either way;
@@ -412,37 +593,65 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_contributed_total = sum(
             contribution.frames_contributed for contribution in photometry_session_breakdown
         )
-        rejection_fraction = (
-            len(all_rejected_files) / frames_contributed_total if frames_contributed_total else 0.0
+        known_variable_scores, unlisted_scores = split_scores_by_catalog_status(
+            result.stellar_objects, request.catalog_access
         )
-        if (
-            len(all_rejected_files) >= MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG
-            and rejection_fraction >= MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG
+
+        cutoffs = [
+            photometry.output_quality.adaptive_cutoff
+            for photometry in star_photometry
+            if photometry.output_quality
+        ]
+        frames_without_timestamp_total = len(photometry_frames_without_timestamp) + len(
+            unreadable_date_obs_frames
+        )
+        for gate in photometry_run_gates(
+            frames_contributed=frames_contributed_total,
+            rejected_frame_count=len(all_rejected_files),
+            frames_without_timestamp=frames_without_timestamp_total,
+            timestamp_exclusion_reasons=[
+                f"{os.path.basename(frame.path)}: {frame.reason}" for frame in unreadable_date_obs_frames
+            ],
+            session_count=len(photometry_sessions),
+            session_empty_reasons=session_empty_reasons,
+            sessions_missing_wcs=sessions_missing_wcs,
+            no_work_reason=payload.get("no_work_reason"),
+            comparison_sets=payload.get("all_comparison_sets", []),
+            registration_drifts_px=[
+                photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
+                for photometry in star_photometry
+            ],
+            centroid_shift_summaries=payload.get("all_centroid_shift_summaries", []),
+            stars_with_scatter=sum(
+                1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
+            ),
+            known_variable_scores=known_variable_scores,
+            unlisted_scores=unlisted_scores,
+            cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
+            noise_model_stars=len(_noise_model_inputs(star_photometry)[0]),
+            noise_floor_mag=_typical_noise_mag(noise_model, star_photometry),
+            time_basis=_run_time_basis(star_photometry),
+            median_flux_error_mag=median_flux_error_mag(result.stellar_objects),
+            errors_assume_unit_gain=any(photometry.errors_assume_unit_gain for photometry in star_photometry),
+            errors_assume_zero_read_noise=any(
+                photometry.errors_assume_zero_read_noise for photometry in star_photometry
+            ),
         ):
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(all_rejected_files)} of {frames_contributed_total} frame(s) "
-                f"({rejection_fraction:.0%}) rejected as global ensemble outliers, which is high "
-                "enough to suspect the comparison ensemble or the observing conditions"
-            )
-        if photometry_frames_without_timestamp:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(photometry_frames_without_timestamp)} frame(s) excluded for missing capture timestamp"
-            )
-        if session_empty_reasons:
-            summary.flagged = True
-            summary.flag_reasons.extend(session_empty_reasons)
-        if sessions_missing_wcs:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{len(sessions_missing_wcs)} session(s) could not be plate-solved for "
-                f"cross-session star matching: {', '.join(sessions_missing_wcs)}"
-            )
-        no_work_reason = payload.get("no_work_reason")
-        if no_work_reason:
-            summary.flagged = True
-            summary.flag_reasons.append(no_work_reason)
+            summary.record_gate(gate)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_for_paths,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The camera of the frames that were actually measured; the target's
+        # frames are the fallback when the run measured none.
+        record_camera_profile(
+            summary,
+            camera_name_for_paths(target.frames, payload.get("image_paths") or [])
+            or most_common_camera_name(target.frames),
+        )
         return summary
 
     def to_result_dict(self, request: PipelineRequest, result: Result, summary: Any) -> dict[str, Any]:
@@ -474,9 +683,9 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
 def run_photometry_analysis(
     target: Target,
     frames,  # ruff: ignore[missing-type-function-argument]
-    filter_type,  # ruff: ignore[missing-type-function-argument]
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
-    path,  # ruff: ignore[missing-type-function-argument] -- unused; photometry works from `frames`/`target.frames`
+    filter_type: str | None,
+    catalog_access: Any,
+    path: Any,  # unused; photometry works from `frames`/`target.frames`
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Track star brightness across a target's images, session by session.
@@ -506,7 +715,7 @@ def run_photometry_analysis(
         The completed dict carrying every brightness-tracking metric,
         even when there was no usable data -- in that case every metric
         is zero/empty and the reason surfaces as a flag in
-        `target.photometry_quality_summary.flag_reasons` rather than as
+        `target.quality.photometry.flag_reasons` rather than as
         a differently-structured return value.
     """
     request = PipelineRequest(

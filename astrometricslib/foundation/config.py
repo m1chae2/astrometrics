@@ -1,0 +1,1496 @@
+"""Load, save, and expose access to the application configuration."""
+
+import configparser
+import logging
+import math
+import os
+import threading
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import tomlkit
+
+from astrometricslib.foundation.camera_names import normalize_camera_name
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
+from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
+from astrometricslib.foundation.paths import resolve_mounted_path
+
+_instance = None
+
+_UNSET = object()
+
+# How often, at most, a config file is checked for changes, in seconds. A
+# check is one `stat` call, so this keeps even a tight loop of settings reads
+# cheap, while an edit still reaches a running process within a second.
+CONFIG_RECHECK_SECONDS = 1.0
+
+reload_logger = logging.getLogger(__name__)
+
+
+class _TomlSectionedConfig:
+    """A configparser-compatible view over a flat-sectioned TOML document.
+
+    Every section is stored as a single top-level TOML table keyed by its
+    full historical dotted name (e.g. ``"Observatory.Camera.Nikon D5300"``)
+    rather than as real nested TOML tables, so every accessor on
+    `AppConfiguration` written against `configparser`'s flat-section model
+    keeps working unchanged -- this class only swaps what parses/writes the
+    file on disk. Plain values are stored and returned as strings, matching
+    `configparser`'s own everything-is-a-string behavior, so existing
+    `float()`/`int()`/`.lower()` conversions elsewhere keep working. Inline
+    tables (used by camera profile fields such as `clip_ceiling_adu`) are
+    the one exception: they come back as `tomlkit`'s own dict-like objects
+    with real, native types, since those are read by a purpose-built loader
+    (`camera_profile_store.py`), not by these generic string-based getters.
+    """
+
+    def __init__(self, after_reload: Callable[[], None] | None = None) -> None:
+        """Start with an empty TOML document.
+
+        Parameters
+        ----------
+        after_reload : `Callable`, optional
+            Called after the file was read again because it changed on disk,
+            so the owner can put back anything the file does not hold, such
+            as default values.
+        """
+        self._document: tomlkit.TOMLDocument = tomlkit.document()
+        self._after_reload = after_reload
+        self._watched_path: str | None = None
+        self._watched_encoding = "utf-8"
+        self._watching = False
+        self._seen_modified_time: int | None = None
+        self._next_check_time = 0.0
+        self._reload_lock = threading.Lock()
+
+    def read(self, path: str, encoding: str = "utf-8") -> list[str]:
+        """Parse a TOML file into this config, `configparser.read`-style.
+
+        The file is remembered, and once `watch_for_changes` has been called,
+        later reads of this config re-read it if it changes on disk (see
+        `_reload_if_file_changed`).
+
+        Returns
+        -------
+        read_paths : `list` [`str`]
+            `[path]` if the file was read successfully, `[]` otherwise.
+        """
+        try:
+            text = Path(path).read_text(encoding=encoding)
+        except OSError:
+            return []
+        self._document = tomlkit.parse(text)
+        self._watched_path = path
+        self._watched_encoding = encoding
+        self.note_file_written()
+        return [path]
+
+    def watch_for_changes(self) -> None:
+        """Start re-reading the file whenever it changes on disk.
+
+        Off by default, so a config object only follows its file when it is
+        told to. The backend and the MCP server turn it on, so an edit
+        reaches them without a restart. Tests leave it off, so a settings
+        file changed by one test cannot reach another.
+        """
+        self._watching = True
+        self.note_file_written()
+
+    def note_file_written(self) -> None:
+        """Record the file's current modification time as already loaded.
+
+        Called after this config reads or writes the file itself, so its own
+        save is not mistaken for an edit made by someone else.
+        """
+        if self._watched_path is None:
+            return
+        try:
+            self._seen_modified_time = os.stat(self._watched_path).st_mtime_ns
+        except OSError:
+            self._seen_modified_time = None
+
+    def _reload_if_file_changed(self) -> None:
+        """Read the file again if it changed since it was last read.
+
+        Lets a running process pick up a settings edit without a restart, once
+        `watch_for_changes` has been called. It checks at most once per
+        `CONFIG_RECHECK_SECONDS`. A file that cannot
+        be read or parsed, such as one caught half written, is skipped with a
+        warning and the settings already loaded stay in use; the change is
+        tried again when the file changes next. The edit replaces the values
+        in place, so every holder of this config sees it.
+        """
+        if not self._watching or self._watched_path is None:
+            return
+        now = time.perf_counter()
+        if now < self._next_check_time:
+            return
+        self._next_check_time = now + CONFIG_RECHECK_SECONDS
+        try:
+            modified_time = os.stat(self._watched_path).st_mtime_ns
+        except OSError:
+            return
+        if modified_time == self._seen_modified_time:
+            return
+        with self._reload_lock:
+            if modified_time == self._seen_modified_time:
+                return
+            self._seen_modified_time = modified_time
+            try:
+                text = Path(self._watched_path).read_text(encoding=self._watched_encoding)
+                document = tomlkit.parse(text)
+            except (OSError, ValueError) as error:
+                reload_logger.warning(
+                    "The configuration file '%s' changed but could not be read (%s). "
+                    "The settings already loaded stay in use.",
+                    self._watched_path,
+                    error,
+                )
+                return
+            self._document = document
+            reload_logger.info("Reloaded the configuration from '%s' after it changed.", self._watched_path)
+        if self._after_reload is not None:
+            self._after_reload()
+
+    def write(self, fileobj) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Serialize this config to `fileobj`, keeping comments/formatting."""
+        fileobj.write(tomlkit.dumps(self._document))
+
+    def read_string(self, text: str) -> None:
+        """Parse TOML text into this config, `configparser`-style."""
+        self._document = tomlkit.parse(text)
+
+    def sections(self) -> list[str]:
+        """Return every section's full flat name.
+
+        Returns
+        -------
+        section_names : `list` [`str`]
+            Every top-level section name, in document order.
+        """
+        self._reload_if_file_changed()
+        return list(self._document.keys())
+
+    def has_section(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        self._reload_if_file_changed()
+        return section in self._document
+
+    def add_section(self, section: str) -> None:
+        """Add an empty section named `section`."""
+        self._document[section] = tomlkit.table()
+
+    def set(self, section: str, key: str, value: object) -> None:
+        """Set `key` within `section` to `str(value)`."""
+        self._document[section][key] = str(value)
+
+    def get(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key`, `configparser.get`-style.
+
+        Returns
+        -------
+        value : `Any`
+            The stored value, stringified, or `fallback` if `section`/`key`
+            does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        self._reload_if_file_changed()
+        try:
+            return str(self._document[section][key])
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+
+    def getboolean(self, section: str, key: str, fallback: object = _UNSET) -> object:
+        """Return `section`'s `key` as a bool, `configparser.getboolean`-style.
+
+        Returns
+        -------
+        value : `bool` or `Any`
+            The stored value interpreted as a bool, or `fallback` if
+            `section`/`key` does not exist and `fallback` was given.
+
+        Raises
+        ------
+        KeyError
+            If `section`/`key` does not exist and no `fallback` was given.
+        """
+        self._reload_if_file_changed()
+        try:
+            raw = self._document[section][key]
+        except KeyError:
+            if fallback is _UNSET:
+                raise
+            return fallback
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+
+    def __contains__(self, section: str) -> bool:
+        """Return whether `section` exists.
+
+        Returns
+        -------
+        exists : `bool`
+            `True` if `section` is present.
+        """
+        self._reload_if_file_changed()
+        return section in self._document
+
+    def __getitem__(self, section: str) -> object:
+        """Return `section`'s table.
+
+        Returns
+        -------
+        table : `Any`
+            The section's underlying TOML table.
+        """
+        self._reload_if_file_changed()
+        return self._document[section]
+
+
+def get_configuration() -> AppConfiguration:
+    """Return a singleton instance of the AppConfiguration.
+
+    Ensures the config is only loaded from disk once.
+
+    Returns
+    -------
+    configuration : `AppConfiguration`
+        The process-wide singleton configuration instance.
+    """
+    global _instance
+    if _instance is None:
+        _instance = AppConfiguration()
+    return _instance
+
+
+class AppConfiguration:
+    """Load and save the configuration of the app.
+
+    Uses pathlib for robust cross-platform path management.
+    """
+
+    def __init__(self) -> None:
+        # Get the directory of the current script
+        self.base_dir = Path(__file__).parent.absolute()
+        self.app_config = _TomlSectionedConfig(after_reload=self._populate_defaults)
+        self.config_file_path: Path | None = None
+        self.load_configuration()
+
+    def _find_config_file(self) -> Path:
+        """Locates the high-level interface.
+
+        config file in expected locations.
+
+        Returns
+        -------
+        config_path : `Path`
+            The resolved configuration file path, existing or not.
+        """
+        import os
+
+        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
+        if env_path:
+            p = Path(env_path)
+            if p.is_file():
+                return p
+            # If specified but doesn't exist yet, it is still defaulted to so
+            # it gets created there on save
+            return p
+
+        candidates = [
+            self.base_dir.parent
+            / "astrometrics.config.toml",  # astrometricslib/astrometrics.config.toml (primary user location)
+            self.base_dir.parent.parent
+            / "backend"
+            / "astrometrics.config.toml",  # Backend root folder (Repo/backend/astrometrics.config.toml)
+        ]
+
+        for p in candidates:
+            if p.is_file():
+                return p
+
+        # Default to primary astrometrics folder if not found
+        return candidates[0]
+
+    def watch_for_changes(self) -> None:
+        """Pick up edits to the config file without a restart.
+
+        Settings are then re-read from the file when it changes, at most once
+        a second, in place, so everything holding this configuration sees the
+        new values. Off by default: the backend and the MCP server turn it
+        on, and tests do not.
+        """
+        self.app_config.watch_for_changes()
+
+    def save_configuration(self) -> None:
+        """Save the current config to the resolved astrometrics config file."""
+        import os
+
+        path = self.config_file_path or self._find_config_file()
+        if os.getenv("ASTROMETRICS_TESTING") == "1" and not (
+            os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
+        ):
+            # Guard against writing to repository production config
+            # during testing.
+            return
+        with open(path, "w", encoding="utf-8") as configfile:
+            self.app_config.write(configfile)
+        self.app_config.note_file_written()
+
+    def _populate_defaults(self) -> None:
+        """Populate the config with sensible defaults if it's empty."""
+        defaults = {
+            "Image Library": {
+                "path": "./library",
+            },
+            "Observatory.Telescope": {
+                "hostname": "localhost",
+                "indi_port": "7624",
+                "focal_length_mm": "0.0",
+                "focal_ratio": "0.0",
+                "remote_pictures_path": "/home/stellarmate/Pictures",
+            },
+            "Observatory.Camera": {"default_primary_camera": "Unknown", "models": "Unknown"},
+            "Observatory.Constraints": {"min_altitude": "0.0", "max_altitude": "90.0"},
+            "Processing.Siril": {
+                # The -cli entry point, matching the config template.
+                # Plain "siril" is the GUI build: it needs a display
+                # connection and so fails in headless pipe mode, which is how
+                # every stack runs. This default is what a configuration
+                # written before [Processing.Siril] existed falls back to, so
+                # it has to be the working value, not the historical one.
+                "siril_executable": "siril-cli",
+                "rejection_sigma_mode": "adaptive",
+                "rejection_sigma_low": "3.0",
+                "rejection_sigma_high": "3.0",
+                "stack_rejection_sigma_floor": "2.5",
+                "stack_rejection_low_extra_sigma": "0.5",
+                "filter_wfwhm_percentile": "",
+                "filter_round_percentile": "",
+                # Blank, matching the config template: -weight= needs
+                # a newer Siril than the default apt install provides, and a
+                # default that breaks the default install is not a default.
+                "stack_weight": "",
+                "generate_rejmap": "true",
+                "exposure_group_gain_tolerance": "0.05",
+                "minimum_calibration_frames": "3",
+                "background_homogeneity_check_enabled": "true",
+                "quarantine_bad_frames_enabled": "true",
+                "preview_star_tone_enabled": "true",
+                "keep_previous_stack_enabled": "true",
+                "trim_noisy_stack_edges_enabled": "true",
+                "skip_unchanged_stacks_enabled": "true",
+                "auto_open_gui": "false",
+            },
+            # Blank: no gradient removal. Stack previews are then stretched
+            # without it. See get_graxpert_executable.
+            "Processing.GraXpert": {"graxpert_executable": ""},
+            # Blank: no denoising. See get_cosmic_clarity_denoise_executable.
+            "Processing.CosmicClarity": {
+                "denoise_executable": "",
+                "denoise_enabled": "true",
+                "denoise_strength": "0.9",
+            },
+            # 500; see get_maximum_identified_stars for why this isn't 0
+            # (unlimited) despite that having been this setting's first
+            # default.
+            "Processing.Astrometry": {"maximum_identified_stars": "500"},
+        }
+        for section, values in defaults.items():
+            if section not in self.app_config:
+                self.app_config.add_section(section)
+            for key, value in values.items():
+                if key not in self.app_config[section]:
+                    self.app_config.set(section, key, value)
+
+    def load_configuration(self) -> None:
+        """Load the configuration from the best available candidate.
+
+        Creates one with defaults if missing.
+        """
+        path = self._find_config_file()
+        self.config_file_path = path
+
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if path.is_file():
+            if self.app_config.read(str(path), encoding="utf-8"):
+                logger.info("Loaded configuration from: %s", path)
+                self._populate_defaults()
+            else:
+                logger.warning("Failed to read configuration from: %s. Using defaults.", path)
+                self._populate_defaults()
+                self.save_configuration()
+        else:
+            logger.warning("Configuration file not found at %s. Creating with defaults.", path)
+            self._populate_defaults()
+            self.save_configuration()
+
+    def get_siril_executable(self) -> str | None:
+        """Retrieve the Siril executable path from the configuration.
+
+        Returns
+        -------
+        executable_path : `str` or `None`
+            Path or command name for the Siril executable.
+        """
+        # Special case: check Processing.Siril first, then Image Library
+        val = self.app_config.get("Processing.Siril", "siril_executable", fallback=None)
+        if val is not None:
+            return val
+        return self.app_config.get("Image Library", "siril_executable", fallback=None)
+
+    def get_graxpert_executable(self) -> str | None:
+        """Retrieve the command that starts GraXpert, if one is set.
+
+        GraXpert removes the sky gradient from a stack before its preview
+        picture is stretched. A blank setting turns that step off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The command (a path, or a command with arguments), or `None` if
+            the setting is blank or missing.
+        """
+        return self.get_value("Processing.GraXpert", "graxpert_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_executable(self) -> str | None:
+        """Retrieve the path of Cosmic Clarity's denoise program, if set.
+
+        Cosmic Clarity (SetiAstro) removes noise with an AI model. It runs on
+        the stretched copy of a stack, after the sky gradient is removed and
+        the stretch is applied, and before that copy is saved as the preview
+        picture. A blank setting turns the step off.
+
+        Returns
+        -------
+        executable : `str` or `None`
+            The path of ``SetiAstroCosmicClarity_denoise``, or `None` if the
+            setting is blank or missing. The program works in the ``input``
+            and ``output`` folders next to it.
+        """
+        if not self.get_cosmic_clarity_denoise_enabled():
+            return None
+        return self.get_cosmic_clarity_denoise_path()
+
+    def get_cosmic_clarity_denoise_path(self) -> str | None:
+        """Retrieve the path of Cosmic Clarity's denoise program, on or off.
+
+        The path is kept apart from the on/off switch so the denoise can be
+        switched off in the settings and still be turned on for a single
+        preview run (see `get_cosmic_clarity_denoise_enabled`).
+
+        Returns
+        -------
+        path : `str` or `None`
+            The path of ``SetiAstroCosmicClarity_denoise``, or `None` if the
+            setting is blank or missing.
+        """
+        return self.get_value("Processing.CosmicClarity", "denoise_executable", fallback="") or None
+
+    def get_cosmic_clarity_denoise_enabled(self) -> bool:
+        """Return whether previews are denoised by default.
+
+        A single preview run can still turn the denoise on or off, whatever
+        this says (see `PreviewSettings`).
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` (the default) if Cosmic Clarity runs on previews whenever
+            its path is set.
+        """
+        raw = self.get_value("Processing.CosmicClarity", "denoise_enabled", fallback="true")
+        return str(raw).strip().lower() in ("true", "1", "yes", "on")
+
+    def get_cosmic_clarity_denoise_strength(self) -> float:
+        """Return how strongly Cosmic Clarity removes noise, from 0 to 1.
+
+        Returns
+        -------
+        strength : `float`
+            The configured strength, kept between 0 and 1. A missing or
+            unreadable setting gives 0.9. On the M 101, M 57, NGC 4438 and
+            M 81 stacks, 0.9 cut the sky grain by 14-39% compared with 0.75
+            and left star peaks unchanged. On the M 13 stack, 0.5 left
+            visible grain. The denoise runs after the stretch.
+        """
+        raw = self.get_value("Processing.CosmicClarity", "denoise_strength", fallback="0.9")
+        try:
+            return min(1.0, max(0.0, float(raw)))
+        except TypeError, ValueError:
+            return 0.9
+
+    def get_stack_rejection_sigma_mode(self) -> str:
+        """Return the configured stack-time pixel rejection sigma mode.
+
+        Either "adaptive" (Chauvenet's criterion, scaled to frame count)
+        or "fixed". Adaptive is the default. rejection_threshold_analysis.py
+        sweeps against M 81, M 13, and NGC 2403 (40 or more frames each)
+        measured no difference in stacked-image FWHM between sigma=2.5 and
+        sigma=3.0, so a lower, frame-count-derived Chauvenet sigma (see
+        utilities/rejection_thresholds.py) costs no measurable sharpness
+        at those frame counts. Those sweeps did not include stacks of 5 to 15
+        frames. For those, the floor and the looser low bound
+        (get_stack_rejection_sigma_floor() and
+        get_stack_rejection_low_extra_sigma()) rest on the simulation in
+        scripts/rejection_small_n_check.py, not on a sharpness measurement.
+        "fixed" falls back to get_stack_rejection_sigma()'s configured
+        constant for callers that want the old fixed-sigma behavior.
+
+        Returns
+        -------
+        mode : `str`
+            Either ``"adaptive"`` or ``"fixed"``.
+        """
+        val = self.get_value("Processing.Siril", "rejection_sigma_mode", fallback="adaptive")
+        return str(val).lower()
+
+    def get_stack_rejection_sigma(self) -> tuple[float, float]:
+        """Return the configured (sigma_low, sigma_high) rejection pair.
+
+        This fixed pair is only used when get_stack_rejection_sigma_mode()
+        is "fixed", or as an explicit rejection_override passed by a
+        caller -- adaptive mode computes its own sigma from frame count
+        instead of reading this value.
+
+        Returns
+        -------
+        sigma_pair : `tuple` [`float`, `float`]
+            The configured ``(sigma_low, sigma_high)`` pair.
+        """
+        low = self.get_value("Processing.Siril", "rejection_sigma_low", fallback="3.0")
+        high = self.get_value("Processing.Siril", "rejection_sigma_high", fallback="3.0")
+        return (float(low), float(high))
+
+    def get_stack_rejection_sigma_floor(self) -> float:
+        """Return the smallest high rejection limit adaptive mode may use.
+
+        Adaptive mode (Chauvenet's criterion) gives 1.64 standard deviations
+        for 5 frames and 1.86 for 8. The stacker estimates the spread of each
+        pixel from those few values, and the estimate is noisy, so limits that
+        tight throw out good values. In a simulation of pure noise
+        (scripts/rejection_small_n_check.py), 7.4% of the samples of 5-frame
+        pixels were rejected at 1.64 and 3.0% at 2.5. The floor stops the
+        limit from dropping below this value. For 40 frames the Chauvenet
+        limit is already 2.5, so the floor changes nothing there.
+
+        Returns
+        -------
+        floor : `float`
+            The configured floor, in standard deviations. An entry that is not
+            a number above zero gives the default, 2.5.
+        """
+        raw = self.get_value("Processing.Siril", "stack_rejection_sigma_floor", fallback="2.5")
+        try:
+            floor = float(str(raw).strip())
+        except TypeError, ValueError:
+            return 2.5
+        return floor if math.isfinite(floor) and floor > 0 else 2.5
+
+    def get_stack_rejection_low_extra_sigma(self) -> float:
+        """Return how much looser the low rejection limit is than the high one.
+
+        Adaptive mode sets the low limit to the high limit plus this amount.
+        Satellite trails, cosmic ray hits and hot pixels are brighter than the
+        true value, so they fall above the middle value and the high limit
+        has to catch them. Values far below the middle value are rare, so a
+        looser low limit removes fewer good values at no cost to that
+        cleanup. Use 0 for equal limits.
+
+        Returns
+        -------
+        extra : `float`
+            The configured amount, in standard deviations, at least 0. An
+            entry that is not a number gives the default, 0.5.
+        """
+        raw = self.get_value("Processing.Siril", "stack_rejection_low_extra_sigma", fallback="0.5")
+        try:
+            extra = float(str(raw).strip())
+        except TypeError, ValueError:
+            return 0.5
+        return max(0.0, extra) if math.isfinite(extra) else 0.5
+
+    def get_stack_filter_wfwhm_percentile(self) -> str | None:
+        """Return the configured -filter-wfwhm value, or None if disabled.
+
+        Returns
+        -------
+        percentile : `str` or `None`
+            The configured percentile, or `None` if disabled.
+        """
+        return self.get_value("Processing.Siril", "filter_wfwhm_percentile", fallback="") or None
+
+    def get_stack_filter_round_percentile(self) -> str | None:
+        """Return the configured -filter-round value, or None if disabled.
+
+        Returns
+        -------
+        percentile : `str` or `None`
+            The configured percentile, or `None` if disabled.
+        """
+        return self.get_value("Processing.Siril", "filter_round_percentile", fallback="") or None
+
+    def get_stack_weight(self) -> str | None:
+        """Return the configured Siril -weight= mode, or None if disabled.
+
+        Returns
+        -------
+        weight_mode : `str` or `None`
+            The configured weight mode, or `None` if disabled.
+        """
+        return self.get_value("Processing.Siril", "stack_weight", fallback="") or None
+
+    def get_minimum_calibration_frames(self) -> int:
+        """Return the fewest frames a master calibration frame needs.
+
+        A master bias, dark or flat is the combination of several frames. The
+        combination averages out each frame's random noise, and the stacker
+        throws out pixel values that sit far from the rest (outliers, such as
+        cosmic ray hits). Both need several frames. With one frame, the master
+        keeps that frame's noise and its cosmic ray hits. With two, an outlier
+        cannot be told from a good value. Three is the smallest count where
+        the middle value can outvote one bad frame.
+
+        A master built from fewer frames is still built, and the stack is
+        flagged (see `calibration_count_flags` in `siril_interface.py`).
+
+        Returns
+        -------
+        minimum : `int`
+            The configured count, at least 1. An entry that is not a whole
+            number gives the default, 3.
+        """
+        raw = self.get_value("Processing.Siril", "minimum_calibration_frames", fallback="3")
+        try:
+            return max(1, int(str(raw).strip()))
+        except TypeError, ValueError:
+            return 3
+
+    def get_exposure_group_gain_tolerance(self) -> float:
+        """Return how far two brightness ratios may differ.
+
+        A group is dropped from the combined image when they differ by more
+        than this.
+
+        When a stack is made from several exposure lengths, each group is put
+        on the brightness scale of a reference group. The scale is measured
+        twice: on mid-range pixels (the value used) and on the brightest
+        pixels (a check). The two agree when the camera is linear. When the
+        bright end of a group is compressed (near full well) or clipped, they
+        differ. If the difference, as a fraction of the mid-range value, is
+        larger than this setting, the group is left out of the combined image
+        and the stack is flagged with the "exposure_group_linearity" gate.
+
+        Returns
+        -------
+        tolerance : `float`
+            The allowed fractional difference, for example 0.05 for 5%. An
+            entry that is not a number, or is not above zero, gives the
+            default, 0.05.
+        """
+        raw = self.get_value("Processing.Siril", "exposure_group_gain_tolerance", fallback="0.05")
+        try:
+            tolerance = float(raw)
+        except TypeError, ValueError:
+            return 0.05
+        return tolerance if math.isfinite(tolerance) and tolerance > 0 else 0.05
+
+    def get_stack_generate_rejmap(self) -> bool:
+        """Return whether Siril should generate a rejection map (-rejmap).
+
+        Returns
+        -------
+        generate_rejmap : `bool`
+            `True` if a rejection map should be generated.
+        """
+        val = self.get_value("Processing.Siril", "generate_rejmap", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_background_homogeneity_check_enabled(self) -> bool:
+        """Return whether the per-frame background-homogeneity check runs.
+
+        Reads and computes sigma-clipped background stats for every input
+        frame (~1.4s/frame measured against real ZWO ASI 533MM Pro FITS
+        data), so this adds real, bounded overhead per stack (e.g. ~100s
+        for a 70-frame session) on top of the stacking job itself.
+        Defaults on since it's what caught the real NGC 2403 cloud event
+        that rejection-fraction and gain/calibration checks all missed,
+        but exposed as a toggle for cases where that per-stack cost isn't
+        acceptable.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the background-homogeneity check should run.
+        """
+        val = self.get_value("Processing.Siril", "background_homogeneity_check_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_quarantine_bad_frames_enabled(self) -> bool:
+        """Return whether stacking moves cloudy or trailed frames aside.
+
+        When on, each stack measures its light frames and moves the ones with
+        clouds or trailed stars into an ``_excluded`` folder beside them (see
+        `pipelines/stacking/pre_processing/frame_quarantine.py`). The frames
+        are never deleted and `restore_excluded_frames.py` moves them back.
+        Measuring takes about a second per frame.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the quarantine step should run.
+        """
+        val = self.get_value("Processing.Siril", "quarantine_bad_frames_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_trim_noisy_stack_edges_enabled(self) -> bool:
+        """Return whether a finished imaging stack has its noisy edges trimmed.
+
+        When on, each imaging stack (and its rejection map) is cut back to
+        where the edge noise falls within 15% of the interior's (see
+        `pipelines/stacking/post_processing/stack_crop.py`). A stack with
+        clean edges is not changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the trim should run.
+        """
+        val = self.get_value("Processing.Siril", "trim_noisy_stack_edges_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_skip_unchanged_stacks_enabled(self) -> bool:
+        """Return whether stacking skips a stack that would come out the same.
+
+        When on, a stack is not rebuilt if the frames to stack, the
+        calibration frames chosen for them, the stacking settings and the
+        stacking code are all the same as when the stack on disk was made (see
+        `pipelines/stacking/pre_processing/stack_inputs.py`). A restack can
+        always be forced, with ``force=True`` in the API or
+        ``--force-restack`` in the batch script.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if an unchanged stack should be skipped.
+        """
+        val = self.get_value("Processing.Siril", "skip_unchanged_stacks_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_keep_previous_stack_enabled(self) -> bool:
+        """Return whether a restack keeps the stack it replaces.
+
+        When on, a restack first moves the current stack and its pictures into
+        a ``_previous`` folder beside it (see
+        `pipelines/stacking/post_processing/previous_stack.py`). Only one
+        previous version is kept; the next restack replaces it. Nothing
+        deletes it until the user calls `discard_previous_stack`.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the previous stack should be kept.
+        """
+        val = self.get_value("Processing.Siril", "keep_previous_stack_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_star_tone_enabled(self) -> bool:
+        """Return whether the stack preview tones down its stars.
+
+        When on, the preview dims stars in proportion to their brightness and
+        compresses the brightest values below pure white (see
+        `pipelines/stacking/post_processing/star_tone.py`). The stack itself
+        is never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the star toning step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_maximum_identified_stars(self) -> int | None:
+        """Return the maximum number of stars to identify in an image.
+
+        Defaults to 500. This limits how many detected stars are matched
+        against a database. Identifying every single star in a dense area
+        takes a lot of time and uses too much memory (RAM), which can crash
+        the computer.
+
+        Limiting it to the 500 brightest stars gives us plenty of data for
+        tracking and analysis without overloading the system. A user who
+        has enough memory and wants to find every single star can change
+        this setting to 0 (unlimited).
+
+        Returns
+        -------
+        limit : int or None
+            The maximum number of stars to identify. 0 means unlimited.
+        """
+        val = self.get_value("Processing.Astrometry", "maximum_identified_stars", fallback="500")
+        try:
+            maximum = int(str(val).strip())
+        except TypeError, ValueError:
+            return None
+        return maximum if maximum > 0 else None
+
+    def get_auto_open_siril_gui(self) -> bool:
+        """Return whether Siril GUI should be opened when stacking finishes.
+
+        Returns
+        -------
+        auto_open : `bool`
+            `True` if Siril GUI should automatically open post-stacking.
+        """
+        val = self.get_value("Processing.Siril", "auto_open_gui", fallback="false")
+        return str(val).lower() == "true"
+
+    def get_telescope_hostname(self) -> str:
+        """Retrieve the telescope hostname from the configuration.
+
+        Returns
+        -------
+        hostname : `str`
+            The configured telescope hostname, defaulting to
+            ``"localhost"``.
+        """
+        return self.app_config.get("Observatory.Telescope", "hostname", fallback="localhost")
+
+    def get_indi_host(self) -> str:
+        """Return the INDI server host, i.e. the telescope hostname.
+
+        Returns
+        -------
+        hostname : `str`
+            The configured telescope hostname.
+        """
+        return self.get_telescope_hostname()
+
+    def get_indi_port(self) -> int:
+        """Return the INDI server port, falling back to 7624.
+
+        Returns
+        -------
+        port : `int`
+            The configured INDI server port.
+        """
+        val = self.app_config.get("Observatory.Telescope", "indi_port", fallback="7624")
+        return int(val)
+
+    def get_camera_config(self, camera_name: str | None = None) -> dict[str, Any]:
+        """Return the configuration section for a named camera.
+
+        Parameters
+        ----------
+        camera_name : `str`, optional
+            The camera to look up. If `None` (default), the configured
+            default primary camera is used instead.
+
+        Returns
+        -------
+        config : `dict`
+            The matching section's key/value pairs, checked in order of
+            ``Observatory.Camera.<camera_name>`` (exact, then matched
+            ignoring spaces/case), then ``Observatory.Camera``. Returns
+            an empty dict if no camera name is resolved or no section
+            matches.
+        """
+        if not camera_name:
+            # Fallback to default primary camera
+            camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback=None)
+            if not camera_name:
+                return {}
+
+        exact_section = f"Observatory.Camera.{camera_name}"
+        if exact_section in self.app_config:
+            return dict(self.app_config[exact_section])
+
+        # Camera names in settings and image files often differ slightly
+        # in spacing/capitalization (e.g. "ZWO ASI533MM Pro" in a config
+        # file typed by hand vs. "ZWO ASI 533MM Pro" as the camera's own
+        # FITS header spells it). Matching loosely here, with the same
+        # `normalize_camera_name` the rest of the library uses, keeps a
+        # real per-camera section (dispersion geometry, grating spacing,
+        # etc.) from being
+        # silently skipped over a formatting difference -- which
+        # otherwise falls through to the generic `[Observatory.Camera]`
+        # section's bare model list and produces nonsensical spectroscopy
+        # defaults (e.g. a zero-length extraction) with no error at all.
+        camera_prefix = "Observatory.Camera."
+        for section in self.app_config.sections():
+            if not section.startswith(camera_prefix):
+                continue
+            section_camera_name = section[len(camera_prefix) :]
+            if normalize_camera_name(section_camera_name) == normalize_camera_name(camera_name):
+                return dict(self.app_config[section])
+
+        if "Observatory.Camera" in self.app_config:
+            return dict(self.app_config["Observatory.Camera"])
+
+        return {}
+
+    def get_available_cameras(self) -> list[str]:
+        """Return a list of available camera names from configuration.
+
+        Returns
+        -------
+        camera_names : `list` [`str`]
+            Configured camera model names.
+        """
+        models_str = self.app_config.get("Observatory.Camera", "models", fallback=None)
+        return [m.strip() for m in models_str.split(",")] if models_str else []
+
+    def get_available_filters(self) -> list[FilterType]:
+        """Return the optical filters installed at this observatory.
+
+        This is the static inventory of filters the filter wheel is
+        loaded with -- not its live position, which is queried directly
+        from the INDI device (see wayfindinglib's ``FilterWheelController``).
+
+        Returns
+        -------
+        filters : `list` [`FilterType`]
+            Configured filters, in the order listed under
+            ``[Observatory.Filters] available``.
+        """
+        filters_str = self.app_config.get("Observatory.Filters", "available", fallback="")
+        if not filters_str:
+            return []
+        return [FilterType[name.strip().upper()] for name in filters_str.split(",") if name.strip()]
+
+    def get_all_config(self) -> dict[str, Any]:
+        """Return the entire configuration as a dictionary of sections.
+
+        Returns
+        -------
+        config_dict : `dict`
+            Mapping of section name to its key/value pairs.
+        """
+        config_dict = {}
+        for section in self.app_config.sections():
+            config_dict[section] = dict(self.app_config[section])
+        return config_dict
+
+    def get_value(self, section, key, fallback=None) -> Any:  # ruff: ignore[missing-type-function-argument]
+        """Safe wrapper for getting a config value.
+
+        Returns
+        -------
+        value : `Any`
+            The resolved config value, or `fallback` if not found.
+        """
+        try:
+            return self.app_config.get(section, key, fallback=fallback)
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            return fallback
+
+    def get_focal_length_mm(self) -> float:
+        """Return the telescope focal length in mm from the configuration.
+
+        Returns
+        -------
+        focal_length_mm : `float`
+            The configured focal length, in millimeters.
+        """
+        val = self.app_config.get("Observatory.Telescope", "focal_length_mm", fallback="0.0")
+        return float(val)
+
+    def get_primary_focal_length_mm(self) -> float | None:
+        """Return the focal length of the observer's primary optic, in mm.
+
+        A library may hold frames from several optics -- this one holds
+        1,596 at 300mm and 1,055 at 405mm -- and each needs its own
+        stack, since blending scales that differ by 1.35x produces an
+        image with no single pixel scale. This value decides which of
+        those stacks a target's `stacked_image` points at by default.
+
+        Reads ``[Observatory.Telescope] focal_length_mm``, i.e. the optic
+        already described as the observatory's own.
+
+        Returns
+        -------
+        focal_length_mm : `float` or `None`
+            The configured primary focal length, or `None` when it is
+            unset or zero, in which case callers fall back to whichever
+            configuration has the most frames.
+        """
+        focal_length = self.get_focal_length_mm()
+        return focal_length if focal_length and focal_length > 0 else None
+
+    def get_primary_camera_name(self) -> str | None:
+        """Return the observer's primary camera name, if one is configured.
+
+        Used with `get_primary_focal_length_mm` to decide which of a
+        target's stacks its `stacked_image` points at. Camera alone is
+        not enough -- one camera used through two optics produces two
+        stacks that must not be conflated -- and focal length alone is
+        not either, since two cameras can share a focal length.
+
+        Returns
+        -------
+        camera_name : `str` or `None`
+            The configured ``default_primary_camera``, or `None` when
+            unset.
+        """
+        camera_name = self.app_config.get("Observatory.Camera", "default_primary_camera", fallback="")
+        camera_name = (camera_name or "").strip()
+        return camera_name or None
+
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Return the optics and the camera-and-optic pairings in the config.
+
+        The pairings say which cameras are really used with which optics.
+        They are read from the ``[Observatory.Optics]``,
+        ``[Observatory.Optic.<name>]``, ``[Observatory.Setups]`` and
+        ``[Observatory.Setup.<name>]`` sections (see
+        `astrometricslib.foundation.observatory_setups`).
+
+        Returns
+        -------
+        observatory_setups : `ObservatorySetups`
+            The optics and setups. Both are empty when the config has none.
+        """
+        return load_observatory_setups(self)
+
+    def get_observatory_site(self) -> ObservatorySite | None:
+        """Return the observatory's position on Earth, if the config gives one.
+
+        Read from ``latitude``, ``longitude`` and ``elevation`` in the
+        ``[Observatory.Location]`` section (see
+        `astrometricslib.foundation.observatory_site`).
+
+        Returns
+        -------
+        site : `ObservatorySite` or `None`
+            The site, or `None` when the section has no usable latitude and
+            longitude. No default site is substituted.
+        """
+        return load_observatory_site(self)
+
+    def get_camera_default_iso(self, camera_name: str | None) -> str | None:
+        """Return the ISO or gain to assume for a camera whose header has none.
+
+        Read from the ``default_iso`` key of the camera's section. It is used
+        only when an image's header records neither ``ISOSPEED`` nor ``GAIN``.
+
+        Parameters
+        ----------
+        camera_name : `str` or `None`
+            The camera, written in any spelling that matches its section.
+
+        Returns
+        -------
+        default_iso : `str` or `None`
+            The configured value, or `None` when the camera's section does
+            not give one.
+        """
+        if not camera_name:
+            return None
+        value = self.get_camera_config(camera_name).get("default_iso")
+        value = (value or "").strip()
+        return value or None
+
+    def get_focal_ratio(self) -> float:
+        """Return the telescope focal ratio from the configuration.
+
+        Returns
+        -------
+        focal_ratio : `float`
+            The configured focal ratio.
+        """
+        val = self.app_config.get("Observatory.Telescope", "focal_ratio", fallback="0.0")
+        return float(val)
+
+    def get(self, *args, **kwargs) -> Any:  # ruff: ignore[missing-type-args, missing-type-kwargs]
+        """Proxy to internal ConfigParser get method.
+
+        Returns
+        -------
+        value : `Any`
+            The value returned by the underlying `ConfigParser.get`
+            call.
+        """
+        return self.app_config.get(*args, **kwargs)
+
+    def update_config(self, new_config_dict) -> None:  # ruff: ignore[missing-type-function-argument]
+        """Update the configuration with the provided dictionary and saves it.
+
+        Args: new_config_dict: Dictionary { "SectionName": { "Key": "Value" } }
+        """
+        for section, params in new_config_dict.items():
+            if not self.app_config.has_section(section):
+                self.app_config.add_section(section)
+            for key, value in params.items():
+                self.app_config.set(section, key, str(value))
+        self.save_configuration()
+
+    def get_project_root(self) -> Path:
+        """Return the absolute path to the project root.
+
+        Returns
+        -------
+        project_root : `Path`
+            Absolute path to the project root directory.
+        """
+        # self.base_dir = <repo root>/astrometricslib/utilities/
+        return self.base_dir.parent.parent.absolute()
+
+    def get_library_path(self) -> Path:
+        """Return the absolute path to the image library's `library` path.
+
+        Returns
+        -------
+        library_path : `Path`
+            Absolute path to the resolved library directory.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "path")
+            path = Path(path_str)
+            if not path.is_absolute():
+                # If path starts with ./, resolve relative to project root.
+                # If `library` was moved to astrometricslib/library,
+                # check there.
+                check_path = self.get_project_root() / "astrometricslib" / path
+                if check_path.exists():
+                    return check_path.absolute()
+                return (self.get_project_root() / path).absolute()
+            return path.absolute()
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            check_path = self.get_project_root() / "astrometricslib" / "library"
+            if check_path.exists():
+                return check_path.absolute()
+            return (self.get_project_root() / "library").absolute()
+
+    def get_frames_path(self) -> Path:
+        """Return the absolute path to the frames directory.
+
+        Reads the ``"frames_path"`` entry from the ``[Image Library]`` section.
+        If omitted or empty, defaults to a `"frames"` subfolder of the library
+        path. Handles mount path resolution between ``/run/media`` and
+        ``/media`` if one is configured but the other is currently mounted.
+
+        Returns
+        -------
+        frames_path : `Path`
+            Absolute path to the resolved frames directory.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_path")
+            if path_str:
+                path = Path(path_str)
+                if not path.is_absolute():
+                    check_path = self.get_project_root() / "astrometricslib" / path
+                    if check_path.exists():
+                        path = check_path.absolute()
+                    else:
+                        path = (self.get_project_root() / path).absolute()
+                else:
+                    path = path.absolute()
+                if not path.exists():
+                    path = Path(resolve_mounted_path(str(path)))
+                return path
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            pass
+        return self.get_library_path() / "frames"
+
+    def get_frames_mount_point(self) -> Path | None:
+        """Return the folder where the raw frames' drive must be mounted.
+
+        Reads the optional ``"frames_mount_point"`` entry from the
+        ``[Image Library]`` section. Set it when the frames live on a drive
+        that is not always attached, such as a USB disk or a network share.
+        Downloads and file sorting then refuse to write below it unless
+        something is mounted there (see
+        `astrometricslib.foundation.storage.mount`). It is usually the frames
+        path or a folder above it.
+
+        Returns
+        -------
+        mount_point : `Path` or `None`
+            The absolute mount point, or `None` if the entry is missing or
+            empty, which turns the check off.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "frames_mount_point")
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            return None
+        if not path_str:
+            return None
+        return Path(path_str).absolute()
+
+    def get_stacks_path(self) -> Path:
+        """Return the absolute path where stacks and other derived files go.
+
+        Reads the optional ``"stacks_path"`` entry from the ``[Image Library]``
+        section. Stacks, group stacks, rejection maps, previews and processed
+        pictures are written under ``<stacks_path>/lights/<target>/``. This
+        lets the large raw frames stay on one disk while the files the
+        pipeline makes go to another. If the entry is omitted or empty, the
+        files go beside the raw frames, in the frames path.
+
+        Returns
+        -------
+        stacks_path : `Path`
+            Absolute path of the folder that holds the ``lights`` folder for
+            derived files. The folder is not created here.
+        """
+        try:
+            path_str = self.app_config.get("Image Library", "stacks_path")
+        except configparser.NoSectionError, configparser.NoOptionError, KeyError:
+            path_str = None
+        if not path_str:
+            return self.get_frames_path()
+        path = Path(path_str)
+        if not path.is_absolute():
+            path = self.get_project_root() / path
+        return path.absolute()
+
+    def get_library_file_path(self, filename: str) -> Path:
+        """Return the absolute path to a file within `library`.
+
+        Returns
+        -------
+        file_path : `Path`
+            Absolute path to `filename` within the library directory.
+        """
+        return self.get_library_path() / filename
+
+    def get_logs_db_path(self) -> str:
+        """Return the absolute path to the logs database (astrometrics_log.
+
+        db).
+
+        Returns
+        -------
+        logs_db_path : `str`
+            Absolute path to the logs database file.
+        """
+        return str(self.get_library_file_path("astrometrics_log.db"))
+
+    def get_logs_path(self) -> Path:
+        """Return the absolute path to the logs directory.
+
+        Returns
+        -------
+        logs_path : `Path`
+            Absolute path to the logs directory, created if it did
+            not already exist.
+        """
+        path = self.get_project_root() / "logs"
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def get_frames_file_path(self, filename: str) -> Path:
+        """Return the absolute path to a file within the frames directory.
+
+        Returns
+        -------
+        file_path : `Path`
+            Absolute path to `filename` within the frames directory.
+        """
+        return self.get_frames_path() / filename
+
+    def get_remote_pictures_path(self) -> str:
+        """Return the remote path for pictures on the telescope controller.
+
+        Returns
+        -------
+        remote_pictures_path : `str`
+            Configured remote pictures path on the telescope host.
+        """
+        return self.app_config.get(
+            "Observatory.Telescope", "remote_pictures_path", fallback="/home/stellarmate/Pictures"
+        )
+
+    def get_remote_transfer_driver_name(self) -> str:
+        """Return the configured remote file-transfer protocol name.
+
+        Selects which `RemoteTransferDriver` implementation
+        `ObservatoryControl.remote_transfer_driver` builds
+        (`wayfindinglib/drivers/interfaces/remote_transfer_driver.py`) --
+        a separate, pluggable choice from the hardware-control protocol,
+        since pulling files off a telescope host is not part of INDI or
+        ASCOM.
+
+        Returns
+        -------
+        driver_name : `str`
+            The configured remote-transfer driver name, defaulting to
+            ``"stellarmate"``.
+        """
+        return self.app_config.get("Observatory.RemoteTransfer", "driver", fallback="stellarmate")
+
+    def get_min_altitude(self) -> float:
+        """Return the minimum allowed altitude for telescope slews.
+
+        Returns
+        -------
+        min_altitude : `float`
+            Minimum allowed altitude, in degrees.
+        """
+        try:
+            return float(self.app_config.get("Observatory.Constraints", "min_altitude", fallback="0.0"))
+        except ValueError, configparser.Error:
+            return 0.0
+
+    def get_max_altitude(self) -> float:
+        """Return the maximum allowed altitude for telescope slews.
+
+        Returns
+        -------
+        max_altitude : `float`
+            Maximum allowed altitude, in degrees.
+        """
+        try:
+            return float(self.app_config.get("Observatory.Constraints", "max_altitude", fallback="90.0"))
+        except ValueError, configparser.Error:
+            return 90.0
+
+    def get_target_workers(self) -> str:
+        """Return the configured target worker count, or "auto" for sizing.
+
+        Returns
+        -------
+        target_workers : `str`
+            Configured worker count, or ``"auto"``.
+        """
+        return self.get_value("Processing.Parallelism", "target_workers", fallback="auto")
+
+    def get_max_concurrent_jobs(self) -> int:
+        """Return the max concurrent heavy jobs allowed, system-wide.
+
+        Covers both Siril stacking and photometry/spectroscopy analysis
+        sessions, sharing one slot pool: they answer the same question
+        ("how many heavy background jobs at once") for a single-machine
+        deployment, so one setting throttles both rather than requiring
+        two independently-tuned resource pools.
+
+        Returns
+        -------
+        max_concurrent_jobs : `int`
+            Maximum number of concurrent heavy jobs.
+        """
+        # An environment override is honoured first so a value can reach
+        # worker processes. Batch work runs across a ProcessPoolExecutor,
+        # and those workers re-import and re-read configuration, so
+        # patching this accessor in the parent reaches none of them --
+        # which silently made a concurrency benchmark measure the
+        # configured value at every setting: two Siril processes were
+        # running during its "1 slot" measurement. The environment is
+        # inherited by workers, so it does cross.
+        environment_override = os.environ.get("ASTROMETRICS_MAX_CONCURRENT_JOBS")
+        if environment_override:
+            try:
+                return max(1, int(environment_override))
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Ignoring non-numeric ASTROMETRICS_MAX_CONCURRENT_JOBS=%r", environment_override
+                )
+        return int(self.get_value("Processing.Parallelism", "max_concurrent_jobs", fallback="2"))
+
+    def get_photometry_workers(self) -> str:
+        """Return the photometry worker count per target, or "auto".
+
+        Returns
+        -------
+        photometry_workers : `str`
+            Configured worker count, or ``"auto"``.
+        """
+        return self.get_value("Processing.Parallelism", "photometry_workers", fallback="auto")
+
+    def get_worker_niceness(self) -> int:
+        """Return the OS niceness value applied to batch worker processes.
+
+        Returns
+        -------
+        worker_niceness : `int`
+            OS niceness value for batch worker processes.
+        """
+        return int(self.get_value("Processing.Parallelism", "worker_niceness", fallback="10"))
+
+    def get_schema(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        """Return a validated AppConfigSchema for the current configuration.
+
+        Returns
+        -------
+        schema : `AppConfigSchema`
+            Validated configuration schema built from current values.
+        """
+        from astrometricslib.foundation.config_schema import (
+            AppConfigSchema,
+            CameraConfig,
+            ParallelismConfig,
+            ProcessingConfig,
+            TelescopeConfig,
+        )
+
+        # Build telescope config
+        telescope = TelescopeConfig(
+            hostname=self.get_telescope_hostname(),
+            focal_length_mm=self.get_focal_length_mm(),
+            focal_ratio=self.get_focal_ratio(),
+            remote_pictures_path=self.get_remote_pictures_path(),
+        )
+
+        # Build processing config
+        rejection_sigma_low, rejection_sigma_high = self.get_stack_rejection_sigma()
+        processing = ProcessingConfig(
+            siril_executable=self.get_siril_executable(),
+            path=str(self.get_library_path()),
+            frames_path=str(self.get_frames_path()),
+            rejection_sigma_mode=self.get_stack_rejection_sigma_mode(),
+            rejection_sigma_low=rejection_sigma_low,
+            rejection_sigma_high=rejection_sigma_high,
+            filter_wfwhm_percentile=self.get_stack_filter_wfwhm_percentile(),
+            filter_round_percentile=self.get_stack_filter_round_percentile(),
+            stack_weight=self.get_stack_weight(),
+            generate_rejmap=self.get_stack_generate_rejmap(),
+            background_homogeneity_check_enabled=self.get_background_homogeneity_check_enabled(),
+            quarantine_bad_frames_enabled=self.get_quarantine_bad_frames_enabled(),
+        )
+
+        # Build camera configs
+        cameras = []
+        for cam_name in self.get_available_cameras():
+            cameras.append(
+                CameraConfig(
+                    name=cam_name,
+                    models=self.get_available_cameras(),  # Simplified for now
+                    default_primary_camera=self.app_config.get(
+                        "Observatory.Camera", "default_primary_camera", fallback=None
+                    ),
+                )
+            )
+
+        # Build parallelism config
+        parallelism = ParallelismConfig(
+            target_workers=str(self.get_target_workers()),
+            max_concurrent_jobs=self.get_max_concurrent_jobs(),
+            photometry_workers=str(self.get_photometry_workers()),
+            worker_niceness=self.get_worker_niceness(),
+        )
+
+        return AppConfigSchema(
+            telescope=telescope, processing=processing, cameras=cameras, parallelism=parallelism
+        )

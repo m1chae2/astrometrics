@@ -6,14 +6,44 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { socketClient } from '../utils/socketClient';
-import { SystemPulse, SystemHealth, TelescopePulse, ProcessingJobPulse } from '../types/backendTypes';
+import { SystemPulse, SystemHealth, TelescopePulse, ProcessingJobPulse, ProcessingJob } from '../types/backendTypes';
 import { getSystemConfig } from '../services/systemService';
+import { fetchAllProcesses } from '../services/imaging/processingService';
+
+/** Job statuses that still count as "in progress" (mirrors JobService.get_active_jobs on the backend). */
+const ACTIVE_JOB_STATUSES = new Set(['started', 'running']);
+
+/** How often to poll for job progress while at least one job is active. */
+const JOB_PROGRESS_POLL_MS = 2000;
+
+/**
+ * Deep-equality check for plain JSON-shaped telemetry payloads (arrays and
+ * objects of primitives). The backend's telemetry loop rebroadcasts the full
+ * system state every tick whether or not anything changed, so this lets
+ * `setState` bail out and keep the previous reference instead of forcing
+ * every consumer of this context to re-render on an unchanged pulse.
+ */
+function isEqualPulse(a: unknown, b: unknown): boolean {
+    if (a === b) return true;
+    try {
+        return JSON.stringify(a) === JSON.stringify(b);
+    } catch {
+        return false;
+    }
+}
 
 export interface AstrometricsContextValue {
     /** Telecope pulse status */
     telescope: TelescopePulse;
     /** Background processing jobs queue pulse */
     processing: ProcessingJobPulse[];
+    /**
+     * Full detail (including progress) for jobs currently active anywhere in
+     * the app, shared so feature hooks (stacking, analysis, ...) can read
+     * live job progress without each running their own polling loop against
+     * the same backend data.
+     */
+    activeJobs: ProcessingJob[];
     /** Diagnostic system health metrics */
     health: SystemHealth;
     /** Real-time WebSocket connection status */
@@ -56,6 +86,7 @@ interface AstrometricsProviderProps {
 export const AstrometricsProvider: React.FC<AstrometricsProviderProps> = ({ children }) => {
     const [telescope, setTelescope] = useState<TelescopePulse>(defaultTelescopeState);
     const [processing, setProcessing] = useState<ProcessingJobPulse[]>([]);
+    const [activeJobs, setActiveJobs] = useState<ProcessingJob[]>([]);
     const [health, setHealth] = useState<SystemHealth>(defaultHealthState);
     const [connected, setConnected] = useState<boolean>(false);
     const [config, setConfig] = useState<Record<string, Record<string, any>>>({});
@@ -91,14 +122,18 @@ export const AstrometricsProvider: React.FC<AstrometricsProviderProps> = ({ chil
         // Listen for unified backend telemetry updates
         const onAction = (action: string, payload: any) => {
             if (action === 'system_state_update' && payload) {
+                // The backend rebroadcasts the whole state every tick regardless of
+                // whether anything changed; bail out per-field instead of calling
+                // setState unconditionally, so unrelated tabs/views don't re-render
+                // every couple of seconds while the app sits idle.
                 if (payload.telescope) {
-                    setTelescope(payload.telescope);
+                    setTelescope((prev) => (isEqualPulse(prev, payload.telescope) ? prev : payload.telescope));
                 }
                 if (payload.processing) {
-                    setProcessing(payload.processing);
+                    setProcessing((prev) => (isEqualPulse(prev, payload.processing) ? prev : payload.processing));
                 }
                 if (payload.health) {
-                    setHealth(payload.health);
+                    setHealth((prev) => (isEqualPulse(prev, payload.health) ? prev : payload.health));
                 }
             }
         };
@@ -116,14 +151,69 @@ export const AstrometricsProvider: React.FC<AstrometricsProviderProps> = ({ chil
         // exhaustive-deps rule without altering subscription behaviour.
     }, [refetchConfig]);
 
+    // Every pipeline (stacking, astrometry, photometry, spectroscopy, asteroid
+    // detection, ingestion, ...) registers through the same job service, whose
+    // pulses land here. This is the ONLY poll for full job detail (including
+    // progress) anywhere in the app: it drives the OS taskbar/dock progress
+    // indicator directly, and feature hooks read `activeJobs` from context
+    // instead of each running their own competing poll against the same data.
+    const activeJobIds = useMemo(
+        () => processing
+            .filter((job) => ACTIVE_JOB_STATUSES.has(job.status))
+            .map((job) => job.job_id)
+            .sort()
+            .join(','),
+        [processing]
+    );
+
+    useEffect(() => {
+        if (!activeJobIds) {
+            setActiveJobs((prev) => (prev.length === 0 ? prev : []));
+            window.astrometrics?.app?.setProgress(0, 'none');
+            return;
+        }
+
+        let cancelled = false;
+
+        const updateActiveJobs = async () => {
+            const jobs = await fetchAllProcesses();
+            if (cancelled) return;
+
+            setActiveJobs((prev) => (isEqualPulse(prev, jobs) ? prev : jobs));
+            if (jobs.length === 0) return;
+
+            const fractions = jobs
+                .filter((job) => typeof job.progressTotal === 'number' && job.progressTotal > 0)
+                .map((job) => Math.min(1, Math.max(0, (job.progressCurrent ?? 0) / (job.progressTotal as number))));
+
+            if (fractions.length === 0) {
+                // Jobs are active but haven't reported a progress fraction yet.
+                window.astrometrics?.app?.setProgress(1, 'indeterminate');
+                return;
+            }
+
+            const averageFraction = fractions.reduce((sum, fraction) => sum + fraction, 0) / fractions.length;
+            window.astrometrics?.app?.setProgress(averageFraction, 'normal');
+        };
+
+        updateActiveJobs();
+        const interval = setInterval(updateActiveJobs, JOB_PROGRESS_POLL_MS);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [activeJobIds]);
+
     const value: AstrometricsContextValue = useMemo(() => ({
         telescope,
         processing,
+        activeJobs,
         health,
         connected,
         config,
         refetchConfig,
-    }), [telescope, processing, health, connected, config, refetchConfig]);
+    }), [telescope, processing, activeJobs, health, connected, config, refetchConfig]);
 
     return (
         <AstrometricsContext.Provider value={value}>

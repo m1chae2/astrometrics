@@ -1,0 +1,177 @@
+"""Purpose: Tests for the live telescope, guiding and INDI parts of app_status.
+
+Description: The backend holds the hardware connection, so these parts of
+`app_status` ask it through the RPC call. The tests replace that call with
+canned answers and check the layers are unwrapped, the mount's pier side
+comes with the telescope status, guide samples are trimmed, a missing device
+or unknown section is refused, and a failed section is reported as data.
+"""
+
+import asyncio
+
+import pytest
+
+from astrometricslib import HardwareError, InvalidArgumentError
+from mcp_servers.backend import definition
+from mcp_servers.backend.definition import _unwrap, tool_app_controls, tool_app_status
+
+MOUNT_PROPERTIES = {
+    "TELESCOPE_PIER_SIDE": {"state": "Idle", "elements": {"PIER_WEST": "On", "PIER_EAST": "Off"}},
+    "TELESCOPE_TRACK_STATE": {"elements": {"TRACK_ON": "Off", "TRACK_OFF": "On"}},
+    "TELESCOPE_PARK": {"elements": {"PARK": "On", "UNPARK": "Off"}},
+    "TELESCOPE_TRACK_MODE": {"elements": {"TRACK_SIDEREAL": "On", "TRACK_SOLAR": "Off"}},
+    "EQUATORIAL_EOD_COORD": {"elements": {"RA": 12.4, "DEC": 84.9}},
+}
+
+
+def wrapped(payload: object) -> dict:
+    """Wrap a payload the way some services wrap their own answers.
+
+    Returns
+    -------
+    response : `dict`
+        Two layers of success and data around the payload.
+    """
+    return {"status": "success", "data": {"status": "success", "data": payload}}
+
+
+@pytest.fixture
+def fake_backend(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
+    """Replace the backend call with canned answers.
+
+    Returns
+    -------
+    calls : `list` [`tuple` [`str`, `dict`]]
+        Every method and its parameters, in order.
+    """
+    calls: list[tuple[str, dict]] = []
+    answers = {
+        "telescope:status": {
+            "ra": "12 00 00",
+            "trackingStatus": "Parked",
+            "pierSide": "WEST",
+            "parked": True,
+            "connectionStatus": "Connected",
+            "focuserPosition": 29863,
+            "guidingHistory": [{"time": 1}],
+        },
+        "telescope:indi_devices": ["GPSD", "Star Adventurer GTi", "ZWO EFW"],
+        "telescope:indi_properties": MOUNT_PROPERTIES,
+        "guiding:status": {
+            "is_guiding": False,
+            "stats": {"rms_total": 1.9},
+            "history": [
+                {"time": index, "dra": 0.1, "ddec": 0.2, "pulseRa": 5.0, "starMass": 1.0}
+                for index in range(50)
+            ],
+        },
+        "system:health": {"resources": {"system_ram_usage_percent": 40}, "indi": {"status": "Disconnected"}},
+        "guiding:broken": HardwareError("Guide camera offline."),
+    }
+
+    async def fake_execute_rpc(method: str, params: dict | None = None) -> dict:
+        """Answer a backend call from the canned table.
+
+        Returns
+        -------
+        response : `dict`
+            The canned answer, wrapped.
+        """
+        await asyncio.sleep(0)
+        calls.append((method, params or {}))
+        answer = answers[method]
+        if isinstance(answer, Exception):
+            raise answer
+        return wrapped(answer)
+
+    monkeypatch.setattr(definition, "execute_rpc", fake_execute_rpc)
+    return calls
+
+
+def test_the_layers_around_an_answer_are_removed() -> None:
+    """The layers of success and data come off."""
+    assert _unwrap(wrapped({"a": 1})) == {"a": 1}
+    assert _unwrap([1, 2]) == [1, 2]
+
+
+def test_telescope_status_includes_the_pier_side_and_drops_the_history(fake_backend: list) -> None:
+    """The header values come back with the pier side the backend reports."""
+    answer = asyncio.run(tool_app_status(["telescope"]))["telescope"]
+    assert answer["trackingStatus"] == "Parked"
+    assert answer["focuserPosition"] == 29863
+    assert answer["pierSide"] == "WEST"
+    assert answer["parked"] is True
+    assert "guidingHistory" not in answer
+    assert [method for method, _ in fake_backend] == ["telescope:status"]
+
+
+def test_guiding_lists_only_the_newest_samples_with_the_reported_keys(fake_backend: list) -> None:
+    """Twenty samples are kept with only the fields worth reporting."""
+    answer = asyncio.run(tool_app_status(["guiding"]))["guiding"]
+    assert answer["samples_total"] == 50
+    assert len(answer["recent_samples"]) == 20
+    assert answer["recent_samples"][0]["pulseRa"] == pytest.approx(5.0)
+    assert "starMass" not in answer["recent_samples"][0]
+    assert answer["recent_samples"][-1]["time"] == 49
+
+
+def test_connections_and_system_are_read_from_the_health_answer(fake_backend: list) -> None:
+    """The nested health answer is no longer read as null."""
+    answer = asyncio.run(tool_app_status(["connections", "system"]))
+    assert answer["connections"]["indi"] == {"status": "Disconnected"}
+    assert answer["system"] == {"system_ram_usage_percent": 40}
+
+
+def test_indi_properties_need_a_device_and_can_be_filtered(fake_backend: list) -> None:
+    """A missing device is refused; a filter keeps the named ones."""
+    with pytest.raises(InvalidArgumentError, match="needs a device"):
+        asyncio.run(tool_app_status(["indi_properties"]))
+    answer = asyncio.run(
+        tool_app_status(["indi_properties"], device="Star Adventurer GTi", property_names=["TELESCOPE_PARK"])
+    )["indi_properties"]
+    assert list(answer["properties"]) == ["TELESCOPE_PARK"]
+    assert answer["properties_total"] == 5
+
+
+def test_an_unknown_section_is_refused(fake_backend: list) -> None:
+    """Asking for a section that does not exist raises InvalidArgumentError."""
+    with pytest.raises(InvalidArgumentError, match="Unknown section"):
+        asyncio.run(tool_app_status(["weather"]))
+
+
+def test_a_failed_section_is_reported_as_error_info(
+    fake_backend: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed section holds an ErrorInfo; the others still answer."""
+    original = definition.execute_rpc
+
+    async def broken_guiding(method: str, params: dict | None = None) -> object:
+        """Fail the guiding call and answer the rest from the canned table.
+
+        Returns
+        -------
+        response : `object`
+            The canned answer.
+        """
+        return await original("guiding:broken" if method == "guiding:status" else method, params)
+
+    monkeypatch.setattr(definition, "execute_rpc", broken_guiding)
+    answer = asyncio.run(tool_app_status(["guiding", "system"]))
+
+    assert answer["guiding"]["error"]["code"] == "hardware"
+    assert answer["guiding"]["error"]["message"] == "Guide camera offline."
+    assert answer["system"] == {"system_ram_usage_percent": 40}
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"action": "navigate"}, "needs mode"),
+        ({"action": "notify", "title": "Hi"}, "needs title and body"),
+        ({"action": "pause"}, "action must be one of"),
+    ],
+)
+def test_app_controls_refuses_bad_arguments(arguments: dict, message: str) -> None:
+    """A bad action or a missing argument raises InvalidArgumentError."""
+    with pytest.raises(InvalidArgumentError, match=message):
+        asyncio.run(tool_app_controls(**arguments))

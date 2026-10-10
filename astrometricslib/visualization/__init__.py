@@ -1,5 +1,6 @@
 """Purpose: Draws interactive charts and images from astronomical data."""
 
+from .focus_plots import plot_focus_vs_temperature
 from .helpers import (
     plot_fits_star_field,
     plot_photometry_analysis,
@@ -29,6 +30,7 @@ __all__ = [
     "StarOverlay",
     "StarSelectionOverlay",
     "plot_fits_star_field",
+    "plot_focus_vs_temperature",
     "plot_photometry_analysis",
     "plot_spectroscopy_analysis",
     "plot_stellar_analyses",

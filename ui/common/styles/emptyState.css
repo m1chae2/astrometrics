@@ -1,0 +1,18 @@
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim, #9aa5b5);
+}
+
+.empty-state--error {
+  color: var(--accent-red);
+}
+
+.empty-state__text {
+  line-height: 1.4;
+}

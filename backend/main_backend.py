@@ -1,13 +1,20 @@
-"""Main entry point for the high-level interface FastAPI backend server.
+"""Main entry point for the FastAPI backend server.
 
-Configures global logging, suppresses noisy libraries, registers
-middleware, initializes the dependency injection container, and
-defines API/WebSocket routes.
+Sets up logging, builds the app, adds the CORS middleware and the error
+handlers, mounts the routes declared in `backend.public_interface`, and
+wires the lifespan that starts and stops the services. The routes live in
+`backend/routers/`, and the start-up work in `backend/startup.py`.
 """
 
+import asyncio
 import logging
 import os
+import queue
 import warnings
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from logging.handlers import QueueHandler, QueueListener
+from typing import Any
 
 import uvicorn
 
@@ -15,10 +22,7 @@ import uvicorn
 # REQ: SYS-1.4: Maintain clean logs
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.wcs import FITSFixedWarning
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-
-from backend.routers import rpc_router
+from fastapi import FastAPI, Request
 
 warnings.filterwarnings("ignore", category=FITSFixedWarning)
 warnings.filterwarnings("ignore", category=AstropyDeprecationWarning)
@@ -26,102 +30,230 @@ warnings.filterwarnings("ignore", category=AstropyWarning, message=".*extra padd
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from astrometricslib import get_configuration
+from astrometricslib import (
+    AstrometricsError,
+    DbLogHandler,
+    ErrorInfo,
+    StorageNotMountedError,
+    close_interrupted_jobs,
+    configure_logging,
+    configure_offline_iers,
+    get_configuration,
+    new_request_id,
+    require_mounted_storage,
+    to_error_info,
+)
+from backend import startup
 from backend.container import container
+from backend.routers import figures, rpc_router, startup_routes, static_files, websockets
+from backend.services.infrastructure.session_auth import ALLOWED_ORIGINS, LAN_ORIGIN_REGEX
+from backend.services.infrastructure.socket_manager import SocketLoggingHandler
 
 # Configure Logging
 # REQ: SYS-1.4: Maintain clean logs
 app_configuration = get_configuration()
-log_directory = str(app_configuration.get_logs_path())
-log_file_path = os.path.join(log_directory, "astrometrics.log")
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(log_file_path)],
+configure_logging(
+    "backend", level=getattr(logging, os.environ.get("ASTROMETRICS_LOG_LEVEL", "INFO").upper(), logging.INFO)
 )
-# Suppress noisy library logs
-# REQ: SYS-1.4: Maintain clean logs
-logging.getLogger("httpx").setLevel(logging.ERROR)
-logging.getLogger("httpcore").setLevel(logging.ERROR)
-logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
-logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# Initialize Container Resources
-container.init_resources()
 
-# Register Socket Logging Handler
-from backend.services.infrastructure import session_auth
-from backend.services.infrastructure.socket_manager import SocketLoggingHandler
+# Astropy must use its bundled Earth-rotation (IERS) table and never download
+# one. Importing astrometricslib already does this; the call states it here
+# because the backend depends on it.
+configure_offline_iers()
 
-socket_handler = SocketLoggingHandler(container.socket_manager)
-socket_handler.setLevel(logging.INFO)  # Only send INFO and above to UI to avoid flood
-socket_handler.setFormatter(logging.Formatter("%(message)s"))
-logging.getLogger().addHandler(socket_handler)
+#: The handlers made by `attach_log_handlers`, kept so `detach_log_handlers`
+#: can remove them.
+_log_handlers: dict[str, Any] = {}
 
-# Register DB Log Handler (general/unscoped logs; job-scoped loggers attach
-# their own job_id-bound instance directly and do not propagate here since
-# they set propagate = False).
-# REQ: SYS-1.4: Record astrometricslib/wayfindinglib/backend logs to
-# astrometrics_log.db
-#
-# DbLogHandler.emit() opens its own SQLite connection and commits per record,
-# which is too slow to run inline on whatever thread emitted the log (a single
-# request that logs thousands of warnings would block for tens of seconds).
-# Route it through a QueueListener so the DB write happens on a dedicated
-# background thread instead of the request thread.
-import queue
-from logging.handlers import QueueHandler, QueueListener
 
-from astrometricslib import DbLogHandler
+def attach_log_handlers() -> None:
+    """Send log records to the app and to the log database.
 
-db_log_handler = DbLogHandler(container.job_repository)
-db_log_handler.setLevel(logging.INFO)
+    Needs the container's socket manager and job repository, so it runs
+    after `container.init_resources()`.
 
-db_log_queue: queue.Queue = queue.Queue()
-db_log_queue_handler = QueueHandler(db_log_queue)
-db_log_queue_handler.setLevel(logging.INFO)
-logging.getLogger().addHandler(db_log_queue_handler)
+    The database handler opens its own SQLite connection and commits each
+    record. That is too slow to run on the thread that logged: one request
+    that logs thousands of warnings would block for tens of seconds. So the
+    records go through a queue, and a background thread writes them.
+    """
+    socket_handler = SocketLoggingHandler(container.socket_manager)
+    # Only INFO and above go to the app, so it is not flooded.
+    socket_handler.setLevel(logging.INFO)
+    socket_handler.setFormatter(logging.Formatter("%(message)s"))
 
-db_log_listener = QueueListener(db_log_queue, db_log_handler)
-db_log_listener.start()
+    db_log_handler = DbLogHandler(container.job_repository)
+    db_log_handler.setLevel(logging.INFO)
+    db_log_queue: queue.Queue = queue.Queue()
+    db_log_queue_handler = QueueHandler(db_log_queue)
+    db_log_queue_handler.setLevel(logging.INFO)
+    db_log_listener = QueueListener(db_log_queue, db_log_handler)
 
-# Initialize FastAPI App
-app = FastAPI(title="Astrometrics API", version="2.0.0")
+    root_logger = logging.getLogger()
+    root_logger.addHandler(socket_handler)
+    root_logger.addHandler(db_log_queue_handler)
+    db_log_listener.start()
+    _log_handlers.update(
+        socket_handler=socket_handler,
+        db_log_queue_handler=db_log_queue_handler,
+        db_log_listener=db_log_listener,
+    )
 
-# Configure CORS
-origins = [
-    "http://localhost:5173",  # Vite Dev Server
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-    "http://localhost:5175",
-    "http://127.0.0.1:5175",
-    "http://localhost:8000",  # Development Server
-    "http://127.0.0.1:8000",
-    "http://localhost:3000",
-    "app://.",  # Electron
-]
+
+def detach_log_handlers() -> None:
+    """Remove the handlers added by `attach_log_handlers`."""
+    root_logger = logging.getLogger()
+    for name in ("socket_handler", "db_log_queue_handler"):
+        handler = _log_handlers.pop(name, None)
+        if handler is not None:
+            root_logger.removeHandler(handler)
+    listener = _log_handlers.pop("db_log_listener", None)
+    if listener is not None:
+        listener.stop()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    """Start the services when the server starts and stop them after.
+
+    Importing this module builds nothing. The services, the log handlers and
+    the background tasks all start here, when uvicorn starts the app. This
+    runs on the event loop thread before the server accepts requests, so the
+    socket manager and the astrometrics service capture the running loop
+    when they are built.
+
+    Parameters
+    ----------
+    app : `FastAPI`
+        The application being started.
+
+    Yields
+    ------
+    None
+        Control, while the server runs.
+    """
+    container.init_resources()
+    attach_log_handlers()
+    # Close the jobs an earlier run left open and put back any stack it left
+    # parked in a staging folder. Another program's running jobs are left as
+    # they are.
+    app_configuration.watch_for_changes()
+    close_interrupted_jobs(app_configuration)
+    try:
+        require_mounted_storage(app_configuration.get_frames_path(), app_configuration)
+    except StorageNotMountedError as not_mounted:
+        # Not fatal: images from the stacks folder still load, and the frames
+        # folder is served as soon as the drive is mounted.
+        logger.warning("%s", not_mounted)
+    app.state.telemetry_task = asyncio.create_task(startup.periodic_telemetry_loop())
+    app.state.sky_warmup_task = asyncio.create_task(asyncio.to_thread(startup.warm_start_up_caches))
+    try:
+        yield
+    finally:
+        app.state.telemetry_task.cancel()
+        detach_log_handlers()
+        container.shutdown_resources()
+
+
+# The app serves only the routes in `backend.public_interface`, so FastAPI's
+# own documentation pages are turned off.
+app = FastAPI(
+    title="Astrometrics API",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize Services
-# scripting_service is now in container
+
+#: HTTP status for each error code on the plain HTTP routes. The RPC route
+#: always answers with status 200 and puts the error code in the reply.
+HTTP_STATUS_BY_CODE: dict[str, int] = {
+    "invalid_argument": 400,
+    "permission_denied": 403,
+    "not_found": 404,
+    "conflict": 409,
+    "processing": 422,
+    "internal": 500,
+    "hardware": 502,
+    "external_service": 502,
+    "configuration": 503,
+    "storage": 503,
+}
+
+
+def _error_response(request: Request, info: ErrorInfo) -> JSONResponse:
+    """Build the JSON reply for a failed HTTP request.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The request that failed.
+    info : `ErrorInfo`
+        The error to send.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        ``{"error": ErrorInfo}`` with the HTTP status for the error's
+        code, and CORS headers set by hand for allowed origins.
+    """
+    response = JSONResponse(
+        status_code=HTTP_STATUS_BY_CODE.get(info.code, 500),
+        content={"error": info.model_dump(by_alias=True)},
+    )
+    # Set CORS headers by hand so the frontend can still read the error.
+    origin = request.headers.get("origin")
+    if origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
+@app.exception_handler(AstrometricsError)
+# ruff: ignore[unused-async] -- required async signature for FastAPI's
+# exception_handler decorator, which awaits this handler.
+async def expected_error_handler(request: Request, exc: AstrometricsError) -> JSONResponse:
+    """Turn an expected error from an HTTP route into an error reply.
+
+    Parameters
+    ----------
+    request : `~fastapi.Request`
+        The incoming request during which the error was raised.
+    exc : `AstrometricsError`
+        The error that was raised.
+
+    Returns
+    -------
+    response : `~fastapi.responses.JSONResponse`
+        The error reply built by `_error_response`.
+    """
+    info = to_error_info(exc, new_request_id())
+    logger.warning("%s %s failed (%s): %s", request.method, request.url.path, info.code, info.message)
+    return _error_response(request, info)
 
 
 @app.exception_handler(Exception)
 # ruff: ignore[unused-async] -- required async signature for FastAPI's
 # exception_handler decorator, which awaits this handler.
-async def global_exception_handler(request: Request, exc: Exception):  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Catch any unhandled exception and return a JSON 500 response.
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Turn an unexpected exception into a generic 500 error reply.
+
+    The reply carries a request id but no internal detail. The log keeps
+    the traceback under the same id.
 
     Parameters
     ----------
@@ -133,212 +265,31 @@ async def global_exception_handler(request: Request, exc: Exception):  # ruff: i
     Returns
     -------
     response : `~fastapi.responses.JSONResponse`
-        A 500 response with ``{"status": "error", "error": str(exc)}``
-        as its body, with CORS headers set manually for allowed
-        origins.
+        The ``internal`` error reply built by `_error_response`.
     """
-    logger.error(f"Global error: {exc}", exc_info=True)
-    response = JSONResponse(
-        status_code=500,
-        content={"status": "error", "error": str(exc)},
+    info = to_error_info(exc, new_request_id())
+    logger.error(
+        "%s %s raised an unexpected error (request %s)",
+        request.method,
+        request.url.path,
+        info.request_id,
+        exc_info=exc,
     )
-    # Manual CORS headers for exceptions to avoid frontend being
-    # blinded by CORS on 500
-    origin = request.headers.get("origin")
-    if origin in origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+    return _error_response(request, info)
 
 
-# Import Routers
-
-# Mount RPC Router and Static Files serving
+# Mount the routes of `backend.public_interface.ROUTES`. The file folders are
+# mounted before the figure routes so ``/figure/_images`` is matched first.
 app.include_router(rpc_router.router)
-
-# Mount static file servers for both the frames directory (external
-# image library) and the library index directory (metadata/DB files).
-# The frames path is where actual image data lives (_Astrophotography,
-# lights, darks, etc.) while the library path holds index/metadata
-# files. Frames is mounted first as a separate prefix so both
-# locations are reachable.
-_frames_path = container.config_service.get_frames_path()
-_library_path = container.config_service.get_library_path()
-
-if _frames_path.is_dir() and _frames_path != _library_path:
-    app.mount("/static/frames", StaticFiles(directory=str(_frames_path)), name="static_frames")
-app.mount("/static", StaticFiles(directory=str(_library_path)), name="static")
+static_files.mount_library_files(app, app_configuration)
+figures.mount_figure_assets(app)
+app.include_router(startup_routes.router)
+app.include_router(figures.router)
+app.include_router(websockets.router)
 
 
-async def authorize_websocket(websocket: WebSocket) -> bool:
-    """Enforce the origin allowlist and session token on a handshake.
-
-    Closes the connection before accepting it when either check fails,
-    so an unauthorized client never reaches the endpoint body. See
-    `backend.services.infrastructure.session_auth` for why CORS alone
-    does not cover WebSocket endpoints.
-
-    Parameters
-    ----------
-    websocket : `~fastapi.WebSocket`
-        The connection being negotiated.
-
-    Returns
-    -------
-    is_authorized : `bool`
-        `True` if the caller may proceed to `websocket.accept()`.
-    """
-    origin = websocket.headers.get("origin")
-    if not session_auth.is_origin_allowed(origin, origins):
-        logger.warning(f"Rejected WebSocket handshake from disallowed origin: {origin!r}")
-        await websocket.close(code=4403)
-        return False
-    if not session_auth.is_token_valid(websocket.query_params.get("token")):
-        logger.warning(f"Rejected WebSocket handshake with missing/invalid token (origin {origin!r})")
-        await websocket.close(code=4401)
-        return False
-    return True
-
-
-@app.get("/api/session-token")
-async def session_token():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Hand the session token to a same-origin UI client.
-
-    Protected by the CORS allowlist above: a browser will not expose
-    this response body to a page whose origin is not listed, which is
-    what keeps a hostile site from reading the token and connecting to
-    the WebSocket endpoints itself.
-
-    Returns
-    -------
-    token : `dict`
-        A ``{"token": str}`` payload for the UI to attach to its
-        WebSocket URLs.
-    """
-    return {"token": session_auth.SESSION_TOKEN}
-
-
-@app.get("/")
-async def root():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Return a simple liveness message for the backend root route.
-
-    Returns
-    -------
-    message : `dict`
-        A ``{"message": str}`` payload confirming the backend is up.
-    """
-    return {"message": "Astrometrics Backend Running"}
-
-
-@app.websocket("/ws/terminal")
-async def websocket_endpoint(websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Serve an interactive scripting terminal over a WebSocket.
-
-    Accepts the connection, then treats every received text message
-    as Python code to execute via `container.scripting_service`,
-    sending any output back to the client.
-
-    Parameters
-    ----------
-    websocket : `~fastapi.WebSocket`
-        The client WebSocket connection.
-    """
-    if not await authorize_websocket(websocket):
-        return
-
-    await websocket.accept()
-    await websocket.send_text("Connected to Astrometrics Terminal")
-    await websocket.send_text("Type 'list_commands()' to see available objects.\n")
-
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Handle "Load Script" logic or direct commands
-            # For simplicity, we assume all text is code to run
-            output = container.scripting_service.run_code(data)
-            if output:
-                await websocket.send_text(output)
-    except WebSocketDisconnect:
-        logger.info("Terminal disconnected")
-
-
-import asyncio
-import json
-
-
-async def periodic_telemetry_loop():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Poll telescope status on an interval to keep telemetry fresh.
-
-    Periodically polls the telescope status from the hardware and
-    updates the centralized state, which broadcasts telemetry
-    updates to connected WebSocket clients in near real-time. Runs
-    forever as a background task until cancelled.
-    """
-    while True:
-        try:
-            if container.initialized and container.telescope_service:
-                container.telescope_service.get_status()
-        except Exception as e:
-            logger.error(f"Error in periodic telemetry loop: {e}")
-        await asyncio.sleep(2.0)
-
-
-@app.on_event("startup")
-# ruff: ignore[unused-async] -- required async signature for FastAPI's
-# on_event("startup") decorator, which awaits this handler.
-async def startup_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Launch the background telemetry loop on FastAPI startup."""
-    app.state.telemetry_task = asyncio.create_task(periodic_telemetry_loop())
-
-
-@app.on_event("shutdown")
-# ruff: ignore[unused-async] -- required async signature for FastAPI's
-# on_event("shutdown") decorator, which awaits this handler.
-async def shutdown_event():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Stop the background DB-log listener thread on FastAPI shutdown."""
-    app.state.telemetry_task.cancel()
-    db_log_listener.stop()
-
-
-@app.websocket("/ws/events")
-async def websocket_events(websocket: WebSocket):  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Serve real-time system events and telemetry updates.
-
-    Parameters
-    ----------
-    websocket : `~fastapi.WebSocket`
-        The client WebSocket connection to register with the
-        `SocketManager` and stream events to.
-    """
-    if not await authorize_websocket(websocket):
-        return
-
-    await container.socket_manager.connect(websocket)
-
-    # Send the current system state immediately on connection so the
-    # UI doesn't show default zero values
-    try:
-        if container.initialized and container.telescope_service:
-            # Query telescope status once to get fresh data, which
-            # updates astrometrics_service
-            container.telescope_service.get_status()
-
-        state = container.astrometrics_service.get_state()
-        event = {"type": "UI_EVENT", "action": "system_state_update", "payload": state}
-        await websocket.send_text(json.dumps(event))
-    except Exception as e:
-        logger.error(f"Failed to send initial system state on websocket connection: {e}")
-
-    try:
-        while True:
-            # Keep alive / listen for client messages (optional)
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        container.socket_manager.disconnect(websocket)
-
-
-def main():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Run the high-level interface backend with uvicorn.
+def main() -> None:
+    """Run the backend with uvicorn.
 
     Reads the bind host and port from the ``ASTROMETRICS_BIND_HOST``
     and ``ASTROMETRICS_PORT`` environment variables, defaulting to
@@ -346,7 +297,7 @@ def main():  # ruff: ignore[missing-return-type-undocumented-public-function]
     """
     host = os.environ.get("ASTROMETRICS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("ASTROMETRICS_PORT", "5000"))
-    logger.info(f"Starting Astrometrics backend on {host}:{port}")
+    logger.info("Starting Astrometrics backend on %s:%s", host, port)
     uvicorn.run(app, host=host, port=port, access_log=False)
 
 

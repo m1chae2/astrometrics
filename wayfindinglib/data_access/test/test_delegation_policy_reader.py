@@ -7,6 +7,8 @@ shadow precedence at the point of transition plus re-validates the
 resulting policy.
 """
 
+from pathlib import Path
+
 import pytest
 
 from wayfindinglib.data_access.delegation_policy_reader import (
@@ -25,7 +27,7 @@ from wayfindinglib.models.policy.delegation import (
 
 
 @pytest.fixture
-def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_butler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DiskButler:
     """Build a DiskButler backed by a fully isolated temporary database.
 
     Overrides `_find_config_file` directly via `monkeypatch.setattr`
@@ -41,7 +43,7 @@ def isolated_butler(tmp_path, monkeypatch):  # ruff: ignore[missing-type-functio
     """
     from astrometricslib import AppConfiguration
 
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     config = AppConfiguration()
     config.update_config({"Wayfinding Library": {"path": str(tmp_path / "wayfinding_library")}})
@@ -52,14 +54,14 @@ def _policy(*entries: CapabilityDelegation) -> DelegationPolicy:
     return DelegationPolicy(id="default", capability_delegations=list(entries))
 
 
-def test_get_delegation_policy_defaults_all_delegated_when_unconfigured(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_delegation_policy_defaults_all_delegated_when_unconfigured(isolated_butler: DiskButler) -> None:
     """Verify no recorded policy resolves to an all-DELEGATED policy."""
     policy = get_delegation_policy(isolated_butler)
     assert policy.state_for(ObservatoryCapability.MOUNT_CONTROL) == DelegationState.DELEGATED
     assert policy.capability_delegations == []
 
 
-def test_get_delegation_policy_reads_persisted_value(isolated_butler):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_get_delegation_policy_reads_persisted_value(isolated_butler: DiskButler) -> None:
     """Verify a recorded policy is returned as-is."""
     recorded = _policy(
         CapabilityDelegation(
@@ -71,7 +73,7 @@ def test_get_delegation_policy_reads_persisted_value(isolated_butler):  # ruff: 
     assert policy.is_authoritative(ObservatoryCapability.MOUNT_CONTROL) is True
 
 
-def test_validate_rejects_shadowed_safety():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_validate_rejects_shadowed_safety() -> None:
     """Verify OBSERVATORY_SAFETY may never be SHADOWED."""
     policy = _policy(
         CapabilityDelegation(
@@ -82,7 +84,7 @@ def test_validate_rejects_shadowed_safety():  # ruff: ignore[missing-return-type
         validate_delegation_policy(policy, has_guider_calibration=True, has_focus_model=True)
 
 
-def test_validate_rejects_capture_orchestration_without_dependencies_authoritative():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_validate_rejects_capture_orchestration_without_dependencies_authoritative() -> None:
     """Verify CAPTURE_ORCHESTRATION needs alignment/guiding/focus ready."""
     policy = _policy(
         CapabilityDelegation(
@@ -93,7 +95,7 @@ def test_validate_rejects_capture_orchestration_without_dependencies_authoritati
         validate_delegation_policy(policy, has_guider_calibration=True, has_focus_model=True)
 
 
-def test_validate_accepts_capture_orchestration_when_dependencies_authoritative():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_validate_accepts_capture_orchestration_when_dependencies_authoritative() -> None:
     """Verify CAPTURE_ORCHESTRATION passes once dependencies are ready."""
     policy = _policy(
         CapabilityDelegation(
@@ -110,7 +112,7 @@ def test_validate_accepts_capture_orchestration_when_dependencies_authoritative(
     validate_delegation_policy(policy, has_guider_calibration=True, has_focus_model=True)  # does not raise
 
 
-def test_validate_rejects_autoguiding_without_calibration():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_validate_rejects_autoguiding_without_calibration() -> None:
     """Verify AUTOGUIDING needs a GuiderCalibration to leave DELEGATED."""
     policy = _policy(
         CapabilityDelegation(capability=ObservatoryCapability.AUTOGUIDING, state=DelegationState.SHADOWED)
@@ -119,7 +121,7 @@ def test_validate_rejects_autoguiding_without_calibration():  # ruff: ignore[mis
         validate_delegation_policy(policy, has_guider_calibration=False, has_focus_model=True)
 
 
-def test_validate_rejects_autofocus_without_focus_model():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_validate_rejects_autofocus_without_focus_model() -> None:
     """Verify AUTOFOCUS cannot leave DELEGATED without a FocusModel."""
     policy = _policy(
         CapabilityDelegation(capability=ObservatoryCapability.AUTOFOCUS, state=DelegationState.SHADOWED)
@@ -128,7 +130,7 @@ def test_validate_rejects_autofocus_without_focus_model():  # ruff: ignore[missi
         validate_delegation_policy(policy, has_guider_calibration=True, has_focus_model=False)
 
 
-def test_promote_rejects_authoritative_without_prior_shadow():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_rejects_authoritative_without_prior_shadow() -> None:
     """Verify a capability cannot jump DELEGATED to AUTHORITATIVE directly."""
     policy = _policy()  # AUTOGUIDING defaults to DELEGATED
     with pytest.raises(DelegationPolicyValidationError, match="SHADOWED"):
@@ -140,7 +142,7 @@ def test_promote_rejects_authoritative_without_prior_shadow():  # ruff: ignore[m
         )
 
 
-def test_promote_allows_delegated_to_shadowed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_allows_delegated_to_shadowed() -> None:
     """Verify DELEGATED -> SHADOWED is always allowed for a correction."""
     policy = _policy()
     promoted = promote_capability(
@@ -149,7 +151,7 @@ def test_promote_allows_delegated_to_shadowed():  # ruff: ignore[missing-return-
     assert promoted.is_shadowed(ObservatoryCapability.AUTOGUIDING) is True
 
 
-def test_promote_allows_shadowed_to_authoritative():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_allows_shadowed_to_authoritative() -> None:
     """Verify SHADOWED -> AUTHORITATIVE satisfies shadow precedence."""
     policy = _policy(
         CapabilityDelegation(capability=ObservatoryCapability.AUTOGUIDING, state=DelegationState.SHADOWED)
@@ -160,14 +162,14 @@ def test_promote_allows_shadowed_to_authoritative():  # ruff: ignore[missing-ret
     assert promoted.is_authoritative(ObservatoryCapability.AUTOGUIDING) is True
 
 
-def test_promote_mount_control_exempt_from_shadow_precedence():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_mount_control_exempt_from_shadow_precedence() -> None:
     """Verify MOUNT_CONTROL goes DELEGATED -> AUTHORITATIVE directly."""
     policy = _policy()
     promoted = promote_capability(policy, ObservatoryCapability.MOUNT_CONTROL, DelegationState.AUTHORITATIVE)
     assert promoted.is_authoritative(ObservatoryCapability.MOUNT_CONTROL) is True
 
 
-def test_promote_preserves_other_capabilities_unchanged():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_preserves_other_capabilities_unchanged() -> None:
     """Verify promoting one capability does not disturb another's state."""
     policy = _policy(
         CapabilityDelegation(
@@ -181,7 +183,7 @@ def test_promote_preserves_other_capabilities_unchanged():  # ruff: ignore[missi
     assert promoted.is_shadowed(ObservatoryCapability.AUTOGUIDING) is True
 
 
-def test_promote_rejects_when_resulting_policy_violates_snapshot_rule():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_promote_rejects_when_resulting_policy_violates_snapshot_rule() -> None:
     """Verify promote_capability re-validates the resulting policy.
 
     Promoting AUTOGUIDING to SHADOWED without a calibration should fail

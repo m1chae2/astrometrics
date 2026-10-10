@@ -1,10 +1,10 @@
 ---
-description: Manage the Astrometrics Split MCP Servers lifecycle (Restart/Start)
+description: Stop and start the Astrometrics MCP servers
 ---
 
 # Manage MCP Servers
 
-Use this workflow to restart or start the split MCP servers (Core, Backend, and UI). This is necessary when any server code or tool implementation has been modified.
+Use this workflow to stop and start the Python MCP servers in `mcp_servers/` and the UI server in `ui/mcp/`. Restart them after you change a server's code or a library method it offers. A client such as Claude Code normally starts the servers itself from `.mcp.json`, so this is only needed for servers started by hand.
 
 ## 1. Stop Existing Processes
 
@@ -12,10 +12,8 @@ Use this workflow to restart or start the split MCP servers (Core, Backend, and 
 // turbo
 ```bash
 # Stop all Python and Node MCP servers
-pkill -f astrometrics_core_mcp_server.py
-pkill -f astrometrics_mcp_server.py
-pkill -f astrometrics_ui_mcp_server.sh
-pkill -f "node dist/index.js"
+pkill -f "mcp_servers\.(astrometrics_core|wayfinding_core|backend|gaps)"
+pkill -f "ui/mcp/dist/index.js"
 ```
 
 ## 2. Start Processes
@@ -26,10 +24,12 @@ pkill -f "node dist/index.js"
 cd "$(git rev-parse --show-toplevel)"
 
 # 1. Start Core MCP in background
-.venv/bin/python -m astrometricslib.mcp &
+.venv/bin/python -m mcp_servers.astrometrics_core &
 
-# 2. Start Backend MCP in background
-.venv/bin/python -m backend.mcp &
+# 2. Start the other Python servers in background
+.venv/bin/python -m mcp_servers.wayfinding_core &
+.venv/bin/python -m mcp_servers.backend &
+.venv/bin/python -m mcp_servers.gaps &
 ```
 
 ## 3. Verify
@@ -39,5 +39,5 @@ cd "$(git rev-parse --show-toplevel)"
 ```bash
 sleep 2
 # Verify all processes are active
-ps aux | grep -E "astrometrics_core_mcp_server|astrometrics_mcp_server|astrometrics_ui" | grep -v grep
+ps aux | grep -E "mcp_servers\.|ui/mcp/dist/index.js" | grep -v grep
 ```

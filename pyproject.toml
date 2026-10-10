@@ -47,8 +47,8 @@ dependencies = [
     "customtkinter",
     "datamodel-code-generator",
     "fastapi",
+    "import-linter",
     "matplotlib",
-    "mcp>=1.28.0,<2.0.0", # tool_registry.py reads Tool.inputSchema (camelCase); 1.x only, 2.0 renamed it to input_schema
     "numpy",
     "photutils",
     "Pillow",
@@ -61,13 +61,21 @@ dependencies = [
     "setuptools",
     "tk",
     "tksheet",
+    "tomlkit", # format-preserving TOML read/write for astrometrics.config.toml
     "uvicorn",
     "websockets",
     "psutil",
     "pandas",
+    "prov", # W3C PROV-XML export/validation for ProvenanceStore.export_target_lineage_as_prov_xml
+    "lxml", # validates exported PROV-XML against the vendored W3C schema in tests
 ]
 
 [project.optional-dependencies]
+# The MCP SDK, needed only by the MCP servers in mcp_servers/. The libraries
+# and the backend import without it. build/linux/setup_venv.sh installs it.
+mcp = [
+    "mcp>=1.28.0,<2.0.0", # mcp_servers/common/tool_registry.py reads Tool.inputSchema (camelCase); 1.x only, 2.0 renamed it to input_schema
+]
 dev = [
     "flake8>=7.0.0",
     "ruff>=0.16.0",
@@ -107,21 +115,22 @@ astrometrics = "backend.main_backend:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["backend", "astrometricslib", "wayfindinglib", "datastore"]
+packages = ["backend", "astrometricslib", "wayfindinglib", "mcp_servers"]
 exclude = [
   "backend/tests",
   "astrometricslib/test",
   "wayfindinglib/test",
-  "datastore/test",
+  "mcp_servers/**/test",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "astrometricslib/test", "wayfindinglib/test", "datastore/test"]
+testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test", "build/migrations", "mcp_servers"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
     "anyio: mark test to run with anyio",
-    "trio: mark test as trio-only (skip if trio not installed)"
+    "trio: mark test as trio-only (skip if trio not installed)",
+    "golden: compare real M 13 frame measurements with pinned values (needs the Git LFS sample frames)"
 ]
 log_cli = true
 log_cli_level = "INFO"
@@ -158,6 +167,11 @@ select = [
     "TID", # flake8-tidy-imports: blocks importing astrometricslib's internal subpackages directly, so everyone goes through the one supported top-level `astrometricslib` import.
     "S",   # flake8-bandit: flags common security mistakes -- unsafe subprocess calls, hardcoded passwords, weak hashes like MD5 -- before they ship.
     "ANN", # flake8-annotations: requires type hints on functions, since a function with no type hints is invisible to the type checker (pyrefly).
+    "BLE", # flake8-blind-except: flags `except Exception`, which hides the cause of a failure. Catch the specific error, or handle it at a boundary.
+    "TRY", # tryceratops: flags exception handling that loses the traceback or raises long messages inline.
+    "LOG", # flake8-logging: flags wrong uses of the logging module, such as an invalid logger or a bad `extra` key.
+    "G",   # flake8-logging-format: flags f-strings and `%` in logging calls, which build the message even when it is filtered out.
+    "T20", # flake8-print: flags `print` in library code. Programs write output through logging.
 ]
 ignore = [
     "ambiguous-unicode-character-string", # astronomical notation (', degree/prime/double-prime, x) is intentional
@@ -165,6 +179,10 @@ ignore = [
     "ambiguous-unicode-character-comment", # same
     "incorrect-blank-line-before-class", # conflicts with one-blank-line-before-class
     "multi-line-summary-second-line", # conflicts with multi-line-summary-first-line
+    "raise-vanilla-args", # TRY003: long messages are fine; the error model sets their wording
+    "try-consider-else", # TRY300: style only
+    "raise-within-try", # TRY301: style only
+    "type-check-without-type-error", # TRY004: style only
     "any-type", # ANN401: dynamic payloads (INDI properties, notebook cell outputs, JSON) are legitimately Any
 ]
 
@@ -175,7 +193,7 @@ convention = "numpy"
 max-doc-length = 79
 
 [tool.ruff.lint.isort]
-known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
+known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
 
 # Enforces the astrometricslib public-API boundary documented in
 # astrometricslib/api/__init__.py: everything outside astrometricslib
@@ -189,11 +207,23 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 "astrometricslib.utilities".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
 "astrometricslib.pipelines".msg = "Internal. Use the facade on `Astrometrics` instead."
 "astrometricslib.drivers".msg = "Internal. Use the facade on `Astrometrics` instead."
+"astrometricslib.foundation".msg = "Internal. Import from the top-level `astrometricslib` namespace instead."
+"astrometricslib.visualization".msg = "Internal. Use `Astrometrics.visualization` instead."
+"wayfindinglib.drivers".msg = "Internal. Use the `Wayfinder` API instead."
+"wayfindinglib.tasks".msg = "Internal. Use the `Wayfinder` API instead."
+"wayfindinglib.models".msg = "Internal. Import the model from the top-level `wayfindinglib` namespace instead."
+"wayfindinglib.analytics".msg = "Internal. Use the `Wayfinder` API instead."
+"wayfindinglib.session_analysis".msg = "Internal. Use the `Wayfinder` API instead."
+"wayfindinglib.data_access".msg = "Internal. Use the `Wayfinder` API instead."
+"wayfindinglib.watchdog".msg = "Internal. The watchdog must not be imported by what it watches."
+"logging.basicConfig".msg = "Only a program's entry point configures logging. Call the shared logging setup instead."
 
 [tool.ruff.lint.per-file-ignores]
 "**/test_*.py" = ["assert", "hardcoded-temp-file"] # S101/S108: assert is the pytest idiom; /tmp/... strings here are mock config defaults, never actually written to
 "**/conftest.py" = ["assert"] # S101, same reasoning
-"backend/services/observatory/guiding_service.py" = ["suspicious-non-cryptographic-random-usage"] # S311: simulated guide-star telemetry jitter for the mock/simulator, not security-sensitive
+"**/scripts/**" = ["print"] # T201: a script is a program; its output is for the person who ran it
+"build/**" = ["print"] # T201: build tools are programs
+"backend/services/observatory/guiding_service.py" = ["suspicious-non-cryptographic-random-usage", "banned-api"] # S311: simulated guide-star telemetry jitter for the mock/simulator, not security-sensitive
 # S404/S603/S607: this app is a telescope-control/imaging tool that
 # legitimately shells out to external CLIs (Siril, astrometry.net,
 # ssh/rsync/scp to remote StellarMate boxes). Reviewed: every call site uses
@@ -201,15 +231,16 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # untrusted input into a shell command), which is the safe subprocess pattern.
 "astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"astrometricslib/drivers/plate_solve_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/mcp/mcp_diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
-"backend/mcp/tools/developer_tools.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "hardcoded-temp-file"] # S108: "/tmp" is an allowlist prefix for the sandbox boundary check, not a path being written to
-"backend/mcp/tools/diagnostics.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/services/infrastructure/remote_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
-"backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
+"astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/siril_stacking_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/drivers/astrometry_net_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/services/infrastructure/system_status_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path", "banned-api"]
+"backend/services/infrastructure/handoff_service.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"backend/services/infrastructure/phone_share.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "wayfindinglib/drivers/stellarmate_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/test/test_target_records.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/test/test_scripts.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/foundation/test/test_astropy_setup.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"] # runs this interpreter on a fixed script to import a library in a fresh process
 # These stand in for a Siril process without needing Siril installed, using
 # `true`/`sleep` off PATH like any other list-form subprocess call in this
 # codebase (never shell=True, never interpolated).
@@ -220,26 +251,196 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "datastore"]
 # constant, never a request body or user text field) or, for the Gaia ADQL
 # queries, numeric coordinates formatted as floats -- neither can carry a
 # string value that escapes the query.
-"datastore/butler.py" = ["hardcoded-sql-expression"]
+"astrometricslib/foundation/storage/butler.py" = ["hardcoded-sql-expression"]
 "astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
-"astrometricslib/drivers/logger_interface.py" = ["hardcoded-sql-expression"]
-"astrometricslib/pipelines/astrometry/star_identifier.py" = ["hardcoded-sql-expression"]
-"wayfindinglib/drivers/local_database.py" = ["hardcoded-sql-expression"]
+"astrometricslib/foundation/jobs/store.py" = ["hardcoded-sql-expression"]
+"wayfindinglib/drivers/control_record_store.py" = ["hardcoded-sql-expression"]
+"build/migrations/move_guiding_alignment_records.py" = ["hardcoded-sql-expression"]
+"astrometricslib/pipelines/astrometry/processing/star_identifier.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API
 "astrometricslib/__init__.py" = ["non-empty-init-module"] # Astrometrics facade class is intentionally defined here
 "wayfindinglib/__init__.py" = ["non-empty-init-module"] # Wayfinder facade class is intentionally defined here
-"astrometricslib/**" = ["banned-api"] # Layer 1 (api/) and lower layers reach into each other directly by design
+# Each library, its tests and its scripts/ may import that library's own
+# internals. wayfindinglib (scripts/ included) may use only astrometricslib's
+# public API; import-linter checks that, since a per-file ignore here cannot
+# exempt one library's names and keep the other's.
+"wayfindinglib/**" = ["banned-api"]
+"astrometricslib/**" = ["banned-api"]
 "build/codegen/generate_types.py" = ["banned-api"] # TS codegen introspects the full model surface, not just the public API
 "astrometricslib/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
-"astrometricslib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
-"wayfindinglib/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
 "backend/tests/conftest.py" = ["module-import-not-at-top-of-file"] # sys.modules mocking/config patching must precede import
-"backend/main_backend.py" = ["module-import-not-at-top-of-file"] # warnings.filterwarnings() must precede import
-"backend/mcp/__main__.py" = ["module-import-not-at-top-of-file"] # sys.path bootstrap must precede import
+"backend/main_backend.py" = ["module-import-not-at-top-of-file", "banned-api"] # warnings.filterwarnings() must precede import
 "wayfindinglib/drivers/indi_interface.py" = ["invalid-function-name"] # overrides PyIndi's C++ client interface (camelCase required)
 "wayfindinglib/drivers/indi/pyindi_compatibility.py" = ["invalid-function-name"] # stub mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/simulators/indi_simulator.py" = ["invalid-function-name"] # mocks the same PyIndi camelCase interface
 "wayfindinglib/drivers/indi/test/test_mount_controller.py" = ["invalid-function-name"] # fake telescope device mocks PyIndi's camelCase getNumber
 "wayfindinglib/drivers/test/test_indi_property_dispatch.py" = ["invalid-function-name"] # recording client overrides the same PyIndi camelCase callbacks
+"wayfindinglib/drivers/indi/test/test_enclosure_controller.py" = ["invalid-function-name"] # fake enclosure device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_switch_controller.py" = ["invalid-function-name"] # fake powerbox device/client mocks PyIndi's camelCase interface
+"wayfindinglib/drivers/indi/test/test_weather_controller.py" = ["invalid-function-name"] # fake powerbox device mocks PyIndi's camelCase getNumber
+
+# Layer rules from CLAUDE.md and ARCHITECTURE_PLAN.md, checked by
+# `lint-imports`. `ignore_imports` lists the violations that exist today.
+# Each phase of the plan removes entries; the list ends empty.
+
+# Existing violations of the error, logging, and import rules from ARCHITECTURE_PLAN.md
+# sections 7 and 9. Each phase of the plan empties part of this list. Do not add to it.
+".claude/hooks/guard_destructive.py" = ["print"]
+"astrometricslib/utilities/test/test_parallel_batch.py" = ["print"]
+"backend/services/infrastructure/indi_worker.py" = ["banned-api"]
+"backend/services/infrastructure/scripting_service.py" = ["print"]
+"backend/services/infrastructure/socket_manager.py" = ["blind-except"]
+"backend/services/observatory/execution_service.py" = ["banned-api"]
+"backend/tests/test_indi_worker.py" = ["banned-api"]
+"backend/tests/test_passive_alignment_and_guiding.py" = ["banned-api"]
+"backend/tests/test_pointing_and_guiding_analytics.py" = ["banned-api"]
+"documentation/notebooks/astrometrics/user_guide/01_working_with_targets.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/02_inspecting_fits_metadata.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/03_stacking_and_calibration.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/04_astrometry_and_plate_solving.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/05_photometry_and_lightcurves.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/06_spectroscopy_extraction.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/07_stellar_catalogs.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/08_visualization.ipynb" = ["print"]
+"documentation/notebooks/astrometrics/user_guide/09_end_to_end_pipeline_M13.ipynb" = ["print"]
+"documentation/notebooks/wayfinding/control/adding_remote_images.ipynb" = ["print"]
+"documentation/notebooks/wayfinding/control/telescope_slewing_and_tracking.ipynb" = ["print"]
+"documentation/notebooks/wayfinding/execution/observation_execution.ipynb" = ["print"]
+"documentation/notebooks/wayfinding/execution/scripts/observatory_session_recorder.py" = ["banned-api"]
+"documentation/notebooks/wayfinding/planning/mosaic_sequence_authoring.ipynb" = ["print"]
+"documentation/notebooks/wayfinding/planning/observation_planning.ipynb" = ["print"]
+"mcp_servers/gaps/__main__.py" = ["banned-api"]
+"mcp_servers/gaps/review.py" = ["print"]
+"mcp_servers/inventory/tool_inventory.py" = ["print"]
+
+[tool.importlinter]
+root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "astrometricslib never imports wayfindinglib or backend"
+type = "forbidden"
+source_modules = ["astrometricslib"]
+forbidden_modules = ["wayfindinglib", "backend"]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib never imports backend"
+type = "forbidden"
+source_modules = ["wayfindinglib"]
+forbidden_modules = ["backend"]
+
+[[tool.importlinter.contracts]]
+name = "backend services never import the container or routers"
+type = "forbidden"
+source_modules = ["backend.services"]
+forbidden_modules = ["backend.container", "backend.routers"]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib uses only the public API of astrometricslib"
+type = "forbidden"
+source_modules = ["wayfindinglib"]
+forbidden_modules = [
+    "astrometricslib.api",
+    "astrometricslib.drivers",
+    "astrometricslib.foundation",
+    "astrometricslib.models",
+    "astrometricslib.pipelines",
+    "astrometricslib.utilities",
+    "astrometricslib.visualization",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "a library script never imports another script"
+type = "independence"
+# Code that two scripts share belongs in the library. The script tests sit
+# in `scripts/test/`, which is not a package, so they fall outside this
+# check.
+modules = ["astrometricslib.scripts.*", "wayfindinglib.scripts.*"]
+
+[[tool.importlinter.contracts]]
+name = "the MCP servers use only the public API of astrometricslib and wayfindinglib"
+type = "forbidden"
+source_modules = ["mcp_servers"]
+forbidden_modules = [
+    "astrometricslib.api",
+    "astrometricslib.drivers",
+    "astrometricslib.foundation",
+    "astrometricslib.models",
+    "astrometricslib.pipelines",
+    "astrometricslib.utilities",
+    "astrometricslib.visualization",
+    "wayfindinglib.analytics",
+    "wayfindinglib.data_access",
+    "wayfindinglib.drivers",
+    "wayfindinglib.models",
+    "wayfindinglib.session_analysis",
+    "wayfindinglib.tasks",
+    "wayfindinglib.watchdog",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "the libraries never import the MCP servers"
+type = "forbidden"
+source_modules = ["astrometricslib", "wayfindinglib"]
+forbidden_modules = ["mcp_servers"]
+
+[[tool.importlinter.contracts]]
+name = "the library MCP servers, the gap server and the inventory never import the backend"
+type = "forbidden"
+source_modules = [
+    "mcp_servers.common",
+    "mcp_servers.astrometrics_core",
+    "mcp_servers.wayfinding_core",
+    "mcp_servers.devtools",
+    "mcp_servers.gaps",
+    "mcp_servers.inventory",
+]
+forbidden_modules = ["backend"]
+
+[[tool.importlinter.contracts]]
+name = "the backend never imports the MCP servers"
+type = "forbidden"
+source_modules = ["backend"]
+forbidden_modules = ["mcp_servers"]
+
+[[tool.importlinter.contracts]]
+name = "the gap server never imports the libraries"
+type = "forbidden"
+source_modules = ["mcp_servers.gaps"]
+forbidden_modules = ["astrometricslib", "wayfindinglib", "backend"]
+# `mcp_servers.common.tool_errors` names `ErrorInfo` for type checking only,
+# so the chain through the shared server loop loads no library at run time.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "the backend MCP server imports only the backend's guard functions"
+type = "forbidden"
+source_modules = ["mcp_servers.backend"]
+forbidden_modules = [
+    "backend.container",
+    "backend.routers",
+    "backend.main_backend",
+    "backend.services.analysis",
+    "backend.services.data",
+    "backend.services.observatory",
+    "backend.services.processing",
+    "backend.services.rpc_protocol",
+    "backend.services.infrastructure.api_doc_generator",
+    "backend.services.infrastructure.astrometrics_service",
+    "backend.services.infrastructure.base_service",
+    "backend.services.infrastructure.fallback_static_files",
+    "backend.services.infrastructure.handoff_service",
+    "backend.services.infrastructure.indi_worker",
+    "backend.services.infrastructure.maintenance_service",
+    "backend.services.infrastructure.notification_service",
+    "backend.services.infrastructure.scripting_service",
+    "backend.services.infrastructure.session_auth",
+    "backend.services.infrastructure.socket_manager",
+    "backend.services.infrastructure.sync_service",
+    "backend.services.infrastructure.system_status_service",
+    "backend.services.infrastructure.thread_management"
+]

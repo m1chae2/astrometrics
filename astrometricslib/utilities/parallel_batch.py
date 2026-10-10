@@ -6,17 +6,43 @@ never interleave console output, and BrokenProcessPool recovery. Has no
 knowledge of what any particular worker function actually does, so any
 future heavy per-item pipeline can reuse it directly rather than
 re-deriving this machinery.
+
+Worker processes are always started with the "spawn" method, never
+"fork". A forked child inherits whatever native/Rust extension state
+(thread pools, allocator locks, TLS runtimes) the parent process had
+already initialized -- e.g. from an earlier network call -- and that
+state does not reliably survive being forked into several worker
+processes at once. This was the root cause of a real crash: reprocessing
+three targets with the outer worker pool spawned via "fork" caused two
+workers to abort immediately with pyo3 panics ("PyObject pointer is
+null", "memory allocation ... failed") before doing any real work, and
+all three targets came back as an unlabelled "Unknown failure" with zero
+useful diagnostics. "spawn" re-imports everything fresh in each child,
+avoiding this whole class of crash, at the cost of slower worker
+startup. On top of that, if a worker still crashes the process outright
+(a segfault or native abort, not a catchable Python exception) while
+running with more than one concurrent worker, the pool is rebuilt with
+concurrency forced down to a single worker for the retry -- ruling out a
+concurrency-triggered crash before spending the run's other pool-restart
+attempts on it.
 """
 
 import contextlib
 import io
 import logging
+import multiprocessing
 import os
+import time
 from collections.abc import Callable
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from typing import Any
+
+import psutil
+
+from astrometricslib.foundation.jobs import JOB_LOG_PACKAGES
+from astrometricslib.foundation.logging import configure_logging, get_job_log_router, log_context
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +62,61 @@ class BatchRunSummary:
     results: dict[str, Any] = field(default_factory=dict)
 
 
-def _set_worker_process_niceness(niceness: int) -> None:
-    """Lower this worker process's OS scheduling priority.
+def _initialize_worker_process(niceness: int = 10, max_memory_mb: int = 20480) -> None:
+    """Initialize a worker process with priority and memory limits.
 
-    Used as a ``ProcessPoolExecutor`` initializer. Runs once per worker
-    process at pool startup, so the Linux scheduler favors
-    interactive/foreground processes under contention without capping
-    batch throughput when the machine is otherwise idle.
+    Runs once per worker process at pool startup, and sets up the worker's
+    logging, since the worker is a program of its own. Lowers scheduling
+    priority via `os.nice` and applies a maximum virtual memory ceiling
+    via POSIX `setrlimit(RLIMIT_AS)` where supported (Linux). Setting an
+    explicit address-space limit ensures that if an individual worker
+    encounters an explosive allocation or memory leak, Python raises a
+    catchable `MemoryError` inside the worker instead of triggering the
+    kernel Out-Of-Memory (OOM) killer and freezing the host operating
+    system.
+
+    The default used to be 3072 MB (3 GB), sized for several target workers
+    running at once. A real production run showed that was too tight even
+    for a single target: `RLIMIT_AS` bounds total *virtual* address space,
+    not just resident memory, and numpy/scipy/astropy plus an external
+    Siril process (which inherits this same limit) can reserve several
+    gigabytes of address space well before a single real stacking run is
+    memory-constrained in any way that should actually fail it -- that run
+    died silently (no Python exception, no traceback) purely from hitting
+    this ceiling while still loading calibration frames, before stacking
+    even started. Now that `resolve_worker_counts` only ever runs one
+    target's pipeline at a time (see its docstring), this ceiling no longer
+    needs to be divided across concurrent workers, so it can afford to be a
+    generous safety net against a genuine runaway leak rather than a
+    routine limit real workloads bump into.
+
+    Parameters
+    ----------
+    niceness : int, optional
+        OS niceness level (default 10). 0 leaves priority unchanged.
+    max_memory_mb : int, optional
+        Maximum virtual memory in megabytes allowed for this process
+        (default 20480 MB = 20 GB). Set to 0 or None to disable.
     """
     if niceness:
         os.nice(niceness)
+
+    if max_memory_mb and max_memory_mb > 0:
+        try:
+            import resource
+
+            if hasattr(resource, "RLIMIT_AS"):
+                bytes_limit = int(max_memory_mb * 1024 * 1024)
+                resource.setrlimit(resource.RLIMIT_AS, (bytes_limit, bytes_limit))
+        except (ImportError, OSError, ValueError) as limit_err:
+            logger.debug("Failed to set worker RLIMIT_AS memory limit: %s", limit_err)
+
+    # A worker is a program of its own: under "spawn" it inherits none of
+    # the parent's logging setup, so this initializer is its entry point.
+    # Its records go only to the job log router, which hands each item's
+    # records to that item's output buffer (see
+    # `_run_worker_with_captured_output`).
+    configure_logging("batch-worker", level=logging.INFO, log_dir="", console=False)
 
 
 def _run_worker_with_captured_output(
@@ -55,22 +126,16 @@ def _run_worker_with_captured_output(
 
     Executes inside a worker process. Buffering each item's output here,
     rather than writing straight to the terminal, is what lets the parent
-    print each item's output as one contiguous block instead of
+    log each item's output as one contiguous block instead of
     interleaving lines from concurrently-running items.
 
-    Log records are captured alongside stdout. Worker processes never run
-    `logging.basicConfig` -- the pool's only initializer sets niceness, and
-    under the "forkserver"/"spawn" start methods a worker does not inherit
-    the parent's handlers -- so without this every `logger.info`/`warning`
-    raised inside a worker was silently discarded, leaving batch runs with
-    only whatever the pipeline happened to `print`.
-
-    The handler is attached here rather than in the pool initializer
-    because `redirect_stdout` swaps `sys.stdout` per item: a handler bound
-    once at worker startup would hold the *original* stdout and write past
-    the capture, interleaving lines from concurrent items onto the
-    terminal. Binding it to this item's buffer keeps each item's logs in
-    the same contiguous block as its prints.
+    Log records are captured alongside stdout. The pool initializer sets up
+    logging in each worker process, which a worker does not inherit from
+    the parent, so that log records reach the job log router. Each item
+    registers its output buffer with the router and runs inside a log
+    context named after the item, so the router hands the item's records
+    to its own buffer. No handler is attached to a shared logger, and
+    no logger level is changed.
 
     Returns
     -------
@@ -79,30 +144,75 @@ def _run_worker_with_captured_output(
         stdout and log output produced while it ran.
     """
     output_buffer = io.StringIO()
-
-    # Matches the package logger that pipeline_tasks' job logging already
-    # targets, so both mechanisms observe the same records.
-    package_logger = logging.getLogger("astrometricslib")
     log_handler = logging.StreamHandler(output_buffer)
     log_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-    previous_level = package_logger.level
-    package_logger.addHandler(log_handler)
-    if not package_logger.isEnabledFor(logging.INFO):
-        # NOTSET here would defer to root, which defaults to WARNING and
-        # would drop the INFO-level pipeline diagnostics entirely.
-        package_logger.setLevel(logging.INFO)
-
+    router = get_job_log_router()
+    sink_key = router.register(f"batch-item:{item_id}", [log_handler], JOB_LOG_PACKAGES)
     try:
-        with contextlib.redirect_stdout(output_buffer):
+        with log_context(job_id=f"batch-item:{item_id}"), contextlib.redirect_stdout(output_buffer):
             result = worker_function(item_id, *worker_arguments)
     finally:
-        # Always detach: workers are reused across items, so a leaked
-        # handler would keep writing this item's buffer for every later
-        # item the same process handles.
-        package_logger.removeHandler(log_handler)
-        package_logger.setLevel(previous_level)
+        # Always unregister: workers are reused across items, so a leftover
+        # sink would keep writing this item's buffer for every later item
+        # the same process handles.
+        router.unregister(sink_key)
 
     return result, output_buffer.getvalue()
+
+
+def _dispatch_pending_batch_items(
+    unsubmitted_items: list[str],
+    active_futures: dict[Any, str],
+    executor: ProcessPoolExecutor,
+    worker_function: Callable[..., dict],
+    worker_arguments: tuple,
+    max_workers: int,
+    max_memory_percent_throttle: float,
+) -> None:
+    """Submit pending items respecting worker cap and memory throttle.
+
+    Parameters
+    ----------
+    unsubmitted_items : `list[str]`
+        Remaining items waiting to be submitted.
+    active_futures : `dict`
+        Mapping of active Future objects to their item ID.
+    executor : `ProcessPoolExecutor`
+        The process pool executor.
+    worker_function : `Callable`
+        Worker callable to execute.
+    worker_arguments : `tuple`
+        Arguments passed to worker callable.
+    max_workers : `int`
+        Maximum concurrent worker slots.
+    max_memory_percent_throttle : `float`
+        Threshold percentage above which submissions pause.
+    """
+    while unsubmitted_items and len(active_futures) < max_workers:
+        try:
+            current_mem_pct = psutil.virtual_memory().percent
+            if current_mem_pct > max_memory_percent_throttle:
+                logger.warning(
+                    "System memory at %.1f%% exceeds throttle threshold %.1f%%; "
+                    "pausing worker submission until active tasks complete.",
+                    current_mem_pct,
+                    max_memory_percent_throttle,
+                )
+                break
+        except (OSError, psutil.Error) as memory_check_err:
+            logger.debug(
+                "Could not query virtual memory for throttle check: %s",
+                memory_check_err,
+            )
+
+        next_item = unsubmitted_items.pop(0)
+        fut = executor.submit(
+            _run_worker_with_captured_output,
+            worker_function,
+            next_item,
+            worker_arguments,
+        )
+        active_futures[fut] = next_item
 
 
 def run_parallel_batch(
@@ -113,6 +223,9 @@ def run_parallel_batch(
     niceness: int = 10,
     max_pool_restarts: int = 2,
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
+    max_worker_memory_mb: int = 20480,
+    max_tasks_per_child: int = 5,
+    max_memory_percent_throttle: float = 85.0,
 ) -> BatchRunSummary:
     """Run worker_function once per item, in parallel, across a pool.
 
@@ -126,14 +239,24 @@ def run_parallel_batch(
 
     Handles four concerns generically, regardless of what worker_function
     actually does:
-      - Worker process niceness, so batch runs don't starve interactive
-        foreground work on the same machine.
+      - Worker process niceness and memory limits via
+        `_initialize_worker_process`, preventing rogue processes from
+        freezing or crashing the host OS.
+      - Worker process recycling via `max_tasks_per_child`, clearing
+        C-extension heap fragmentation periodically.
+      - Sliding-window dispatch with dynamic memory backpressure: maintains
+        at most `max_workers` concurrent tasks in flight and throttles
+        submission when system memory utilization exceeds the throttle cap.
       - Per-item stdout buffering, so concurrent items' console output
         never interleaves.
       - BrokenProcessPool recovery: if a worker process crashes outright
         (e.g. a segfault), the pool is rebuilt and the still-pending items
         are resubmitted, up to max_pool_restarts, so one crashed item
-        degrades the run instead of aborting it entirely.
+        degrades the run instead of aborting it entirely. If the crash
+        happened with more than one concurrent worker, the rebuilt pool's
+        concurrency is forced down to 1 for the remaining pending items,
+        so a crash triggered by running several workers at once (rather
+        than by the item's own data) does not just repeat on retry.
       - Progress reporting via on_item_complete, invoked once per item at
         whichever of the four terminal points it reaches (success, soft
         failure, worker exception, or pool-exhausted-after-restarts), so a
@@ -164,6 +287,15 @@ def run_parallel_batch(
         this engine, not the caller. Exceptions raised by the callback
         are caught and ignored so a bug in progress reporting cannot
         fail an otherwise-successful item.
+    max_worker_memory_mb : `int`, optional
+        Maximum virtual memory in MB allowed per worker process
+        (default 20480).
+    max_tasks_per_child : `int`, optional
+        Number of items processed before a worker process is recycled
+        (default 5).
+    max_memory_percent_throttle : `float`, optional
+        System memory percentage threshold (default 85.0%) above which new
+        task submissions pause until active tasks finish.
 
     Returns
     -------
@@ -176,8 +308,10 @@ def run_parallel_batch(
     summary = BatchRunSummary()
     pending_item_ids = list(item_ids)
     pool_restart_count = 0
+    current_max_workers = max_workers
     total_item_count = len(item_ids)
     completed_item_count = 0
+    spawn_context = multiprocessing.get_context("spawn")
 
     def report_item_complete(item_id: str, result: dict) -> None:
         nonlocal completed_item_count
@@ -186,8 +320,11 @@ def run_parallel_batch(
             return
         try:
             on_item_complete(item_id, result, completed_item_count, total_item_count)
-        except Exception as exc:
-            logger.debug("on_item_complete callback raised for item '%s': %s", item_id, exc)
+        except Exception:
+            # The callback is the caller's code and may raise anything. A
+            # broken progress report must not stop the batch, so the error
+            # is logged with its traceback and the batch goes on.
+            logger.exception("on_item_complete callback raised for item '%s'", item_id)
 
     while pending_item_ids:
         item_ids_for_this_pass = pending_item_ids
@@ -195,44 +332,109 @@ def run_parallel_batch(
         processed_item_ids = set()
 
         executor = ProcessPoolExecutor(
-            max_workers=max_workers,
-            initializer=_set_worker_process_niceness,
-            initargs=(niceness,),
+            max_workers=current_max_workers,
+            mp_context=spawn_context,
+            initializer=_initialize_worker_process,
+            initargs=(niceness, max_worker_memory_mb),
+            max_tasks_per_child=max_tasks_per_child,
         )
-        futures_by_item_id = {
-            executor.submit(
-                _run_worker_with_captured_output, worker_function, item_id, worker_arguments
-            ): item_id
-            for item_id in item_ids_for_this_pass
-        }
+
+        unsubmitted_items = list(item_ids_for_this_pass)
+        active_futures: dict[Any, str] = {}
+
+        # Initial queue fill up to current_max_workers
+        _dispatch_pending_batch_items(
+            unsubmitted_items,
+            active_futures,
+            executor,
+            worker_function,
+            worker_arguments,
+            current_max_workers,
+            max_memory_percent_throttle,
+        )
+
+        # If system memory is already over throttle threshold at start,
+        # ensure at least 1 task runs so batch does not stall.
+        if unsubmitted_items and not active_futures:
+            next_item = unsubmitted_items.pop(0)
+            fut = executor.submit(
+                _run_worker_with_captured_output,
+                worker_function,
+                next_item,
+                worker_arguments,
+            )
+            active_futures[fut] = next_item
 
         try:
-            for future in as_completed(futures_by_item_id):
-                item_id = futures_by_item_id[future]
-                try:
-                    result, captured_output = future.result()
-                except BrokenProcessPool:
-                    raise
-                except Exception as worker_error:
-                    failure_result = {"status": "failed", "error": str(worker_error)}
-                    summary.failed.append((item_id, str(worker_error)))
+            while active_futures:
+                done_futures, _ = wait(active_futures.keys(), return_when=FIRST_COMPLETED)
+                for future in done_futures:
+                    item_id = active_futures.pop(future)
+                    try:
+                        result, captured_output = future.result()
+                    except BrokenProcessPool:
+                        raise
+                    except MemoryError as mem_error:
+                        failure_result = {
+                            "status": "failed",
+                            "error": f"Task exceeded process memory limit: {mem_error or 'Out of memory'}",
+                        }
+                        summary.failed.append((item_id, failure_result["error"]))
+                        processed_item_ids.add(item_id)
+                        report_item_complete(item_id, failure_result)
+                        continue
+                    except Exception as worker_error:
+                        # A worker may fail in any way. The batch is a job
+                        # runner, so it logs the traceback, records the item
+                        # as failed, and goes on with the other items.
+                        logger.exception("Batch item '%s' failed", item_id)
+                        failure_result = {"status": "failed", "error": str(worker_error)}
+                        summary.failed.append((item_id, str(worker_error)))
+                        processed_item_ids.add(item_id)
+                        report_item_complete(item_id, failure_result)
+                        continue
+
                     processed_item_ids.add(item_id)
-                    report_item_complete(item_id, failure_result)
-                    continue
+                    if captured_output:
+                        # Pass the worker's output on as one block, so lines
+                        # from items that ran at the same time stay apart.
+                        logger.info("Output from %s:\n%s", item_id, captured_output.rstrip("\n"))
 
-                processed_item_ids.add(item_id)
-                if captured_output:
-                    print(captured_output, end="")
+                    summary.results[item_id] = result
+                    item_status = result.get("status")
+                    if item_status == "success":
+                        summary.succeeded.append(item_id)
+                    elif item_status == "skipped":
+                        summary.skipped.append((item_id, result.get("error") or "No work for this item"))
+                    else:
+                        summary.failed.append((item_id, result.get("error") or "Unknown failure"))
+                    report_item_complete(item_id, result)
 
-                summary.results[item_id] = result
-                item_status = result.get("status")
-                if item_status == "success":
-                    summary.succeeded.append(item_id)
-                elif item_status == "skipped":
-                    summary.skipped.append((item_id, result.get("error") or "No work for this item"))
-                else:
-                    summary.failed.append((item_id, result.get("error") or "Unknown failure"))
-                report_item_complete(item_id, result)
+                # Replenish in-flight slots
+                _dispatch_pending_batch_items(
+                    unsubmitted_items,
+                    active_futures,
+                    executor,
+                    worker_function,
+                    worker_arguments,
+                    current_max_workers,
+                    max_memory_percent_throttle,
+                )
+
+                # If unsubmitted items remain but throttling blocked all new
+                # submissions, wait briefly and launch at least one item
+                # to guarantee forward progress.
+                if unsubmitted_items and not active_futures:
+                    time.sleep(0.5)
+                    next_item = unsubmitted_items.pop(0)
+                    fut = executor.submit(
+                        _run_worker_with_captured_output,
+                        worker_function,
+                        next_item,
+                        worker_arguments,
+                    )
+                    active_futures[fut] = next_item
+
         except BrokenProcessPool as broken_pool_error:
             still_pending_item_ids = [
                 item_id for item_id in item_ids_for_this_pass if item_id not in processed_item_ids
@@ -248,6 +450,16 @@ def run_parallel_batch(
                     report_item_complete(item_id, crash_result)
             else:
                 pool_restart_count += 1
+                if current_max_workers > 1:
+                    logger.warning(
+                        "Worker pool crashed while running %d items concurrently (%s); "
+                        "retrying the %d still-pending item(s) one at a time to rule out "
+                        "a concurrency-triggered crash.",
+                        current_max_workers,
+                        broken_pool_error,
+                        len(still_pending_item_ids),
+                    )
+                    current_max_workers = 1
                 pending_item_ids = still_pending_item_ids
         finally:
             executor.shutdown(wait=False)

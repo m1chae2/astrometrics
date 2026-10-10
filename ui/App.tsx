@@ -1,11 +1,15 @@
 import React, { useState, useEffect, Suspense, Profiler, ProfilerOnRenderCallback } from 'react';
+import { callBackend } from './common/services/backendApi';
+import { emergencyParkMount } from './common/services/telescope/emergencyPark';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusHeader } from './statusHeader/StatusHeader';
-import { TargetProvider } from './common/context/TargetContext';
+import { TitleBar } from './titleBar/TitleBar';
+import { TargetProvider, DeferWhileHidden } from './common/context/TargetContext';
 import { PlanningProvider } from './observationManager/context/PlanningContext';
 import { TerminalProvider } from './statusHeader/context/TerminalContext';
 import { RemoteStatusProvider } from './common/context/RemoteStatusContext';
 import { AstrometricsProvider, useAstrometrics } from './common/context/AstrometricsContext';
+import { DISPLAY_DEFINITIONS, isDisplayEnabled } from './common/constants/displayFlags';
 import './App.css';
 
 // Single shared cache for all shared-resource queries (see ui/common/queries/),
@@ -21,12 +25,12 @@ const queryClient = new QueryClient({
 
 
 // Lazy load main display components with named export handling.
-const TargetDisplay = React.lazy(() =>
-  import('./targetDisplay/TargetDisplay').then((m) => ({ default: m.TargetDisplay }))
+const ImageViewerDisplay = React.lazy(() =>
+  import('./imageViewerDisplay/ImageViewerDisplay').then((m) => ({ default: m.ImageViewerDisplay }))
 );
-const AstronomyDisplay = React.lazy(() =>
-  import('./astronomyDisplay/AstronomyDisplay').then((m) => ({
-    default: m.AstronomyDisplay,
+const AstronomyManager = React.lazy(() =>
+  import('./astronomyManager/AstronomyManager').then((m) => ({
+    default: m.AstronomyManager,
   }))
 );
 const ImageProcessingDisplay = React.lazy(() =>
@@ -34,9 +38,9 @@ const ImageProcessingDisplay = React.lazy(() =>
     default: m.ImageProcessingDisplay,
   }))
 );
-const ObservatoryDisplay = React.lazy(() =>
-  import('./observatoryDisplay/ObservatoryDisplay').then((m) => ({
-    default: m.ObservatoryDisplay,
+const ObservatoryManager = React.lazy(() =>
+  import('./observatoryManager/ObservatoryManager').then((m) => ({
+    default: m.ObservatoryManager,
   }))
 );
 const ObservationManager = React.lazy(() =>
@@ -49,17 +53,40 @@ const PlanetariumDisplay = React.lazy(() =>
     default: m.PlanetariumDisplay,
   }))
 );
+const CommandConsole = React.lazy(() =>
+  import('./commandConsole/CommandConsole').then((m) => ({
+    default: m.CommandConsole,
+  }))
+);
+
+/**
+ * Slowest render time (ms) that goes unreported. 50 ms is about three frames:
+ * long enough to be felt as a stutter. The old limit of one frame (16 ms) printed
+ * a console warning for most ordinary renders, which buried real problems and
+ * looked like errors. Set `localStorage.profilerThresholdMs` (for example to
+ * 16) to see more while hunting for slow components.
+ */
+const DEFAULT_PROFILER_THRESHOLD_MS = 50;
+
+const profilerThresholdMs = (): number => {
+  try {
+    const stored = Number(window.localStorage.getItem('profilerThresholdMs'));
+    return stored > 0 ? stored : DEFAULT_PROFILER_THRESHOLD_MS;
+  } catch {
+    return DEFAULT_PROFILER_THRESHOLD_MS;
+  }
+};
 
 /**
  * Profiler callback — dev only. React strips onRender calls in production builds.
- * Logs any render that takes longer than one frame (>16ms) so slow components
- * are immediately visible in the DevTools console.
+ * Logs any render slower than `profilerThresholdMs()` so slow components
+ * are visible in the DevTools console.
  */
 const onRenderProfile: ProfilerOnRenderCallback = (
   id, phase, actualDuration, baseDuration
 ) => {
-  if (actualDuration > 16) {
-    console.warn(
+  if (actualDuration > profilerThresholdMs()) {
+    console.info(
       `[Profiler] %c${id}%c (${phase}) | actual: ${actualDuration.toFixed(1)}ms | base: ${baseDuration.toFixed(1)}ms`,
       'color: #f97316; font-weight: bold',
       'color: inherit'
@@ -74,13 +101,20 @@ const onRenderProfile: ProfilerOnRenderCallback = (
 // its data. Adding a future display here automatically gets this same
 // on-demand mounting for free; no other file needs to change.
 const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[] = [
-  { mode: 'Image Viewer', id: 'TargetDisplay', Component: TargetDisplay },
-  { mode: 'Astronomy Manager', id: 'AstronomyDisplay', Component: AstronomyDisplay },
+  { mode: 'Image Viewer', id: 'ImageViewerDisplay', Component: ImageViewerDisplay },
+  { mode: 'Astronomy Manager', id: 'AstronomyManager', Component: AstronomyManager },
   { mode: 'Planetarium', id: 'PlanetariumDisplay', Component: PlanetariumDisplay },
   { mode: 'Image Processing', id: 'ImageProcessingDisplay', Component: ImageProcessingDisplay },
-  { mode: 'Observatory Manager', id: 'ObservatoryDisplay', Component: ObservatoryDisplay },
+  { mode: 'Observatory Manager', id: 'ObservatoryManager', Component: ObservatoryManager },
   { mode: 'Observation Manager', id: 'ObservationManager', Component: ObservationManager },
+  { mode: 'Command Console', id: 'CommandConsole', Component: CommandConsole },
 ];
+
+const normalizeAppMode = (m: string): string => {
+  if (m === 'Astronomy Display') return 'Astronomy Manager';
+  if (m === 'Image Processing Display') return 'Image Processing';
+  return m;
+};
 
 /**
  * Internal layout wrapper that handles dynamic mode switching,
@@ -89,13 +123,26 @@ const MODE_PANELS: { mode: string; id: string; Component: React.ComponentType }[
  * Uses `visitedModes` to mount heavy components lazily on first visit,
  * keeping them mounted (but hidden) to preserve state during navigation.
  */
+// Whether this window is an auxiliary/secondary display (opened via "Open in
+// new window") rather than the main window. Read once at module scope since
+// it's fixed for the lifetime of a given window (its URL query string never
+// changes).
+const isAuxWindow = (() => {
+  try {
+    return Boolean(new URLSearchParams(window.location.search).get('windowId'));
+  } catch {
+    return false;
+  }
+})();
+
 const AppContent: React.FC = () => {
   const [mode, setMode] = useState<string>(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const urlMode = params.get('mode');
-      if (urlMode) return urlMode;
-      return window.localStorage.getItem('appMode') || 'Image Viewer';
+      if (urlMode) return normalizeAppMode(urlMode);
+      if (isAuxWindow) return 'Image Processing';
+      return normalizeAppMode(window.localStorage.getItem('appMode') || 'Image Viewer');
     } catch {
       return 'Image Viewer';
     }
@@ -103,10 +150,17 @@ const AppContent: React.FC = () => {
 
   const { config } = useAstrometrics();
 
-  // Tracks every mode the user has switched to during this session, so a
-  // panel is mounted the first time its mode becomes active and then stays
-  // mounted (hidden via CSS) rather than being mounted again from scratch.
-  const [visitedModes, setVisitedModes] = useState<Set<string>>(() => new Set([mode]));
+  // Tracks every mode that's been mounted (and thus stays mounted, hidden via
+  // CSS, rather than remounting from scratch when revisited). The main
+  // window force-mounts every mode immediately at boot, so the splash screen
+  // (gated on every mode reporting its data loaded — see
+  // ui/common/utils/appBootReadiness.ts) covers the whole app, not just the
+  // first view shown. Auxiliary windows keep the original on-demand
+  // behavior: they only ever show one mode, so mounting the rest would be
+  // pure waste.
+  const [visitedModes, setVisitedModes] = useState<Set<string>>(
+    () => (isAuxWindow ? new Set([mode]) : new Set(MODE_PANELS.map((p) => p.mode)))
+  );
   useEffect(() => {
     setVisitedModes((previouslyVisitedModes) => {
       if (previouslyVisitedModes.has(mode)) return previouslyVisitedModes;
@@ -118,21 +172,15 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     if (!config || !config['Frontend']) return;
+    if (isDisplayEnabled(config, mode)) return;
 
-    let modeAllowed = true;
-    if (mode === 'Astronomy Manager' && config['Frontend']['enable_astronomy'] !== 'true') modeAllowed = false;
-    if (mode === 'Planetarium' && config['Frontend']['enable_planetarium'] !== 'true') modeAllowed = false;
-    if (mode === 'Observatory Manager' && config['Frontend']['enable_observatory'] !== 'true') modeAllowed = false;
-    if (mode === 'Observation Manager' && config['Frontend']['enable_observation'] !== 'true') modeAllowed = false;
-
-    if (!modeAllowed) {
-      console.log(`[App] Mode '${mode}' is disabled in settings. Falling back to 'Image Viewer'.`);
-      setMode('Image Viewer');
-      try {
-        window.localStorage.setItem('appMode', 'Image Viewer');
-      } catch {
-        // Ignore localStorage access failures (e.g. in private browsing)
-      }
+    const fallbackMode = DISPLAY_DEFINITIONS.find((d) => isDisplayEnabled(config, d.mode))?.mode || 'Image Viewer';
+    console.log(`[App] Mode '${mode}' is disabled in settings. Falling back to '${fallbackMode}'.`);
+    setMode(fallbackMode);
+    try {
+      window.localStorage.setItem('appMode', fallbackMode);
+    } catch {
+      // Ignore localStorage access failures (e.g. in private browsing)
     }
   }, [mode, config]);
 
@@ -155,10 +203,24 @@ const AppContent: React.FC = () => {
             setMode(payload.mode);
             window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail: payload.mode }));
           }
+        } else if (action === 'handoff') {
+          // Sync domain state (e.g. active target selection) across clients without
+          // forcefully overriding individual window layouts or display modes.
+          if (payload.selected_target) {
+            window.dispatchEvent(new CustomEvent('astrometrics:targetSelected', { detail: payload.selected_target }));
+          }
         } else if (action === 'log') {
           window.dispatchEvent(new CustomEvent('astrometrics:log', { detail: payload }));
         } else if (action === 'refresh') {
           window.location.reload();
+        } else if (action === 'catalog:changed') {
+          // The backend rescanned the stellar catalog (see StellarService's
+          // dataset-version check) because a write happened somewhere --
+          // refetch now instead of waiting on these queries' own polling
+          // fallback (see useTargetDataAvailabilityQuery, useSpectralClassSummaryQuery).
+          queryClient.invalidateQueries({ queryKey: ['targetDataAvailability'] });
+          queryClient.invalidateQueries({ queryKey: ['spectralClassSummary'] });
+          queryClient.invalidateQueries({ queryKey: ['starsBySpectralClass'] });
         }
       };
 
@@ -168,19 +230,79 @@ const AppContent: React.FC = () => {
 
     /** Handles custom mode change events. */
     const onModeChange = (e: Event): void => {
-      const detail = (e as CustomEvent).detail;
+      const rawDetail = (e as CustomEvent).detail;
+      const detail = normalizeAppMode(rawDetail);
       setMode(detail);
+      try {
+        const isAuxWindow = Boolean(new URLSearchParams(window.location.search).get('windowId'));
+        if (!isAuxWindow) {
+          window.localStorage.setItem('appMode', detail);
+        }
+      } catch {
+        // Ignore localStorage access failures
+      }
+      callBackend(
+        'handoff:update_state',
+        { active_mode: detail, origin_device: 'desktop' },
+        { silent: true },
+      ).catch(() => {});
     };
     window.addEventListener('astrometrics:modeChange', onModeChange);
 
+    // Native OS Integration: Listen to mode switches from Ubuntu dock / Windows Jump List / Tray
+    let removeNavMode: (() => void) | undefined;
+    if (window.astrometrics?.app?.onNavigateMode) {
+      removeNavMode = window.astrometrics.app.onNavigateMode((navMode: string) => {
+        if (navMode) {
+          const detail = normalizeAppMode(navMode);
+          setMode(detail);
+          window.dispatchEvent(new CustomEvent('astrometrics:modeChange', { detail }));
+        }
+      });
+    }
+
+    // Native OS Integration: Listen to remote actions routed from other windows
+    let removeRemoteAction: (() => void) | undefined;
+    if (window.astrometrics?.app?.onRemoteAction) {
+      removeRemoteAction = window.astrometrics.app.onRemoteAction((data: any) => {
+        const { action, payload, intent } = data || {};
+        if (action) {
+          window.dispatchEvent(new CustomEvent(`astrometrics:${action}`, { detail: payload }));
+        }
+        if (intent) {
+          window.dispatchEvent(new CustomEvent('astrometrics:navigationIntent', { detail: intent }));
+        }
+      });
+    }
+
+    // Native OS Integration: Emergency park telescope command from tray
+    const onEmergencyPark = (): void => {
+      void emergencyParkMount();
+    };
+    window.addEventListener('emergency-park-mount', onEmergencyPark);
+
     return () => {
       removeSocketAction?.();
+      removeNavMode?.();
+      removeRemoteAction?.();
       window.removeEventListener('astrometrics:modeChange', onModeChange);
+      window.removeEventListener('emergency-park-mount', onEmergencyPark);
     };
   }, []);
 
+  // Update dynamic tray menu and report active mode to Electron main process
+  useEffect(() => {
+    if (window.astrometrics?.app?.updateTrayStatus) {
+      window.astrometrics.app.updateTrayStatus({ activeMode: mode });
+    }
+    if (window.astrometrics?.app?.reportWindowMode) {
+      window.astrometrics.app.reportWindowMode(mode);
+    }
+  }, [mode]);
+
   return (
     <div className="app">
+      <TitleBar />
       <TerminalProvider>
         <Profiler id="StatusHeader" onRender={onRenderProfile}>
           <StatusHeader />
@@ -195,9 +317,11 @@ const AppContent: React.FC = () => {
                   key={id}
                   className={mode === panelMode ? 'app__mode-panel--visible' : 'app__mode-panel--hidden'}
                 >
-                  <Profiler id={id} onRender={onRenderProfile}>
-                    <Component />
-                  </Profiler>
+                  <DeferWhileHidden active={mode === panelMode}>
+                    <Profiler id={id} onRender={onRenderProfile}>
+                      <Component />
+                    </Profiler>
+                  </DeferWhileHidden>
                 </div>
               )
             )}

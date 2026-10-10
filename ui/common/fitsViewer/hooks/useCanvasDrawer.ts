@@ -1,18 +1,33 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { ParsedFitsData } from './useFitsLoader';
+import { StretchParameters } from '../../types/backendTypes';
+
+/** Source of ids that tie each draw request to its reply, so a late reply for an old image is ignored. */
+let nextRenderRequestId = 1;
 
 /**
  * Hook to handle drawing the FITS data to the canvas.
+ *
+ * Drawing is done by the same worker that decoded the image (`workerRef`, from
+ * `useFitsLoader`), because the decoded pixels live there. This hook only asks
+ * it to draw the image it already holds.
+ *
+ * `displayRange` is the pair of pixel values drawn black and white when
+ * `stretch` is false. Leave it out to use the file's own darkest and brightest
+ * pixels. `stretchParameters` is the library's automatic stretch for the
+ * image, applied when `stretch` is true; without it the view is linear. Pass a constant, not a new array on every render, or the image is
+ * redrawn each time.
  */
 export const useCanvasDrawer = (
     canvasRef: React.RefObject<HTMLCanvasElement | null>,
+    workerRef: React.RefObject<Worker | null>,
     parsedData: ParsedFitsData | null,
     bitmap: ImageBitmap | null,
     setDrawnSize: (size: { w: number, h: number }) => void,
-    stretch: boolean = true
+    stretch: boolean = true,
+    displayRange?: readonly [number, number],
+    stretchParameters?: StretchParameters | null
 ) => {
-
-    const workerRef = useRef<Worker | null>(null);
 
     // Initial draw for Bitmaps (Processed Backend Images)
     useEffect(() => {
@@ -42,18 +57,12 @@ export const useCanvasDrawer = (
     }, [canvasRef, bitmap, parsedData, setDrawnSize]);
 
     // FITS Rendering Effect
-    const currentBufferRef = useRef<ArrayBufferLike | null>(null);
-
     useEffect(() => {
-        // Initialize worker if needed
-        if (!workerRef.current) {
-            workerRef.current = new Worker(new URL('../fitsWorker.ts', import.meta.url), { type: 'module' });
-        }
-
         const canvas = canvasRef.current;
-        if (!canvas || !parsedData) return;
+        const worker = workerRef.current;
+        if (!canvas || !worker || !parsedData) return;
 
-        const { w, h, channels, raw, roworder } = parsedData;
+        const { w, h, channels, imageId } = parsedData;
 
         // Logical Size calculation
         const maxDim = 3000;
@@ -62,8 +71,10 @@ export const useCanvasDrawer = (
         const logicalH = Math.max(1, Math.round(h * scale));
         const dpr = window.devicePixelRatio || 1;
 
-        const worker = workerRef.current;
+        const requestId = nextRenderRequestId++;
         const handleMessage = (ev: MessageEvent) => {
+            if (ev.data.requestId !== requestId) return;
+            worker.removeEventListener('message', handleMessage);
             const { bitmap, error } = ev.data;
             if (error) {
                 console.error("Worker error:", error);
@@ -79,49 +90,27 @@ export const useCanvasDrawer = (
                 canvas.style.filter = 'none'; // Ensure clean state
                 ctx.imageSmoothingEnabled = false;
                 ctx.drawImage(bitmap, 0, 0);
+                bitmap.close();
                 setDrawnSize({ w: logicalW, h: logicalH });
             }
         };
 
-        worker.onmessage = handleMessage;
-
-        // If buffer changed, send init (we clone once to let worker keep its own copy)
-        // or we could transfer it if we don't need it on main thread, but useFitsLoader keeps it.
-        if (currentBufferRef.current !== raw.buffer) {
-            currentBufferRef.current = raw.buffer;
-            worker.postMessage({
-                cmd: 'init',
-                pw: w,
-                ph: h,
-                channels: channels,
-                roworder: roworder,
-                rawBuffer: raw.buffer
-            });
-        }
-
+        worker.addEventListener('message', handleMessage);
         worker.postMessage({
             cmd: 'render',
+            requestId,
+            imageId,
             dstW: logicalW,
             dstH: logicalH,
             dpr,
             stretch,
+            displayRange,
+            stretchParameters,
             channels,
-            roworder
         });
 
         return () => {
-            worker.onmessage = null;
+            worker.removeEventListener('message', handleMessage);
         };
-    }, [canvasRef, parsedData, setDrawnSize, stretch]);
-
-    // Cleanup worker on unmount
-    useEffect(() => {
-        return () => {
-            if (workerRef.current) {
-                workerRef.current.terminate();
-                workerRef.current = null;
-            }
-        };
-    }, []);
-
+    }, [canvasRef, workerRef, parsedData, setDrawnSize, stretch, displayRange, stretchParameters]);
 };

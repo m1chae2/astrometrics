@@ -11,10 +11,12 @@ the shared star catalog.
 from typing import Any
 
 from astrometricslib.models.moving_object import CascadeStage
+from astrometricslib.models.moving_object_config import MovingObjectConfigLoader
 from astrometricslib.models.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
 )
+from astrometricslib.pipelines.asteroid_detection.run_gates import asteroid_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
@@ -58,22 +60,22 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         -------
         result : `Result`
             `candidates` is the surviving subset, already written onto
-            `request.target.asteroid_candidates` -- this pipeline's one
-            genuine output side effect, since its result has no catalog
-            counterpart to record through the catalog_access.
+            `request.target.asteroid_detection.candidates` -- this
+            pipeline's one genuine output side effect, since its result
+            has no catalog counterpart to record through the catalog_access.
         """
         from astrometricslib.pipelines.asteroid_detection.pipeline import (
             AsteroidDetectionPipeline,
         )
 
         target = request.target
-        pipeline = AsteroidDetectionPipeline()
+        pipeline = AsteroidDetectionPipeline(config=request.options.get("moving_object_config"))
         light_frames = [
             (frame.path, frame.timestamp)
             for frame in target.frames
             if frame.role == "LIGHT" and frame.timestamp is not None
         ]
-        all_candidates = pipeline.process(target.id, target.stacked_image, light_frames)
+        all_candidates = pipeline.process(target.id, target.stacking.stacked_image, light_frames)
         metrics = pipeline.last_run_metrics
         # Record only candidates that survived the discrimination
         # cascade (or were matched to a known body) -- `process()`
@@ -83,14 +85,14 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         # target's recorded record is unbounded: a single dense
         # field can produce tens of thousands of single-frame noise
         # chains, each carrying its own frame-detection payload.
-        target.asteroid_candidates = [
+        target.asteroid_detection.candidates = [
             candidate
             for candidate in all_candidates
             if candidate.cascade_stage
             in (CascadeStage.RATE_LINEARITY_CONFIRMED, CascadeStage.EPHEMERIS_MATCHED)
         ]
 
-        return Result(candidates=target.asteroid_candidates, payload={"metrics": metrics})
+        return Result(candidates=target.asteroid_detection.candidates, payload={"metrics": metrics})
 
     def validate_output(self, request: PipelineRequest, result: Result) -> AsteroidDetectionQualitySummary:
         """Build the quality summary and flag anything worth a look.
@@ -125,23 +127,28 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
             target_session_breakdown=asteroid_detection_session_breakdown,
             asteroid_detection_metrics=AsteroidDetectionPipelineQualityMetrics(**metrics),
         )
-        if metrics.get("frames_excluded_missing_pointing_metadata", 0) > 0:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{metrics['frames_excluded_missing_pointing_metadata']} frame(s) excluded for "
-                "missing RA/DEC/NAXIS pointing metadata"
-            )
         candidates_awaiting_recovery = sum(
             1
             for candidate in result.candidates
             if candidate.cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
         )
-        if candidates_awaiting_recovery > 0:
-            summary.flagged = True
-            summary.flag_reasons.append(
-                f"{candidates_awaiting_recovery} candidate(s) confirmed as movers but not "
-                "matched to a known body -- worth a manual look"
-            )
+        moving_object_config = request.options.get("moving_object_config") or (
+            MovingObjectConfigLoader.load_moving_object_config()
+        )
+        for gate in asteroid_run_gates(
+            metrics,
+            moving_object_config.min_frames_for_persistence,
+            candidates_awaiting_recovery,
+            moving_object_config.residual_rms_max_multiple,
+        ):
+            summary.record_gate(gate)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        record_camera_profile(summary, most_common_camera_name(light_frames))
         return summary
 
     def to_result_dict(
@@ -170,11 +177,11 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
 
 def run_asteroid_detection_analysis(
     target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument] -- unused; candidates record on the target record, not via the catalog_access
-    path,  # ruff: ignore[missing-type-function-argument] -- unused; asteroid detection reads target.frames itself
-    **kwargs,  # ruff: ignore[missing-type-kwargs] -- unused
+    frames: Any,  # unused; asteroid detection reads target.frames itself
+    filter_type: Any,  # unused; asteroid detection has no filter concept
+    catalog_access: Any,  # unused; candidates record on the target record, not via the catalog_access
+    path: Any,  # unused; asteroid detection reads target.frames itself
+    **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Search a target's light frames for moving objects.
 
@@ -186,8 +193,8 @@ def run_asteroid_detection_analysis(
     Parameters
     ----------
     target : `Target`
-        The target to search. Its `asteroid_candidates` and
-        `asteroid_detection_quality_summary` are set by this call.
+        The target to search. Its `asteroid_detection.candidates` and
+        `asteroid_detection.quality_summary` are set by this call.
     frames : `Any`
         Unused. Present so every pipeline runner shares one call signature.
     filter_type : `Any`
@@ -203,8 +210,17 @@ def run_asteroid_detection_analysis(
         Has ``"status"``, ``"targetId"``, ``"analysisMode"``, candidate
         counts at each stage of the discrimination cascade, and
         ``"candidates"`` (the surviving candidates, same list as
-        `target.asteroid_candidates`).
+        `target.asteroid_detection.candidates`).
     """
+    from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream
+
+    note_stacked_image_upstream(kwargs, target.id, target.stacking.stacked_image, "input_image")
+    astrometry_activity_id = (
+        target.quality.astrometry.provenance_activity_id if target.quality.astrometry else None
+    )
+    if astrometry_activity_id is not None:
+        kwargs.setdefault("informant_activity_ids", []).append(astrometry_activity_id)
+
     request = PipelineRequest(
         target=target,
         catalog_access=catalog_access,

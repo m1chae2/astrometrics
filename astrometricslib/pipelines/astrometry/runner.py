@@ -6,25 +6,34 @@ saves the identified stars into the shared star catalog.
 """
 
 import logging
-import os
 from typing import Any
 
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
+from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.models.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
+from astrometricslib.models.target import Target
+from astrometricslib.pipelines.astrometry.post_processing.run_gates import astrometry_run_gates
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
     merge_astrometry_stellar_object,
     record_pipeline_stars,
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+from astrometricslib.utilities.exceptions import DATA_ERRORS
+
+# The name the plate-solve check goes by in an astrometry run's gate record.
+PLATE_SOLVE_GATE_NAME = "plate_solve"
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +61,7 @@ def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
             # measured/computed value comparison.
             if resolved_ra_deg == 0.0 and resolved_dec_deg == 0.0:
                 is_zero = True
-        except Exception:
+        except InvalidArgumentError:
             is_zero = True
 
     if not (is_ra_empty or is_dec_empty or is_zero):
@@ -69,9 +78,11 @@ def _backfill_target_ra_dec_from_wcs(target: Any, context: Any) -> None:
         solved_coord = SkyCoord(ra=ra_deg * u.deg, dec=dec_deg * u.deg, frame="icrs")
         target.ra = solved_coord.ra.to_string(unit=u.hour, sep=" ", precision=2)
         target.dec = solved_coord.dec.to_string(unit=u.deg, sep=" ", precision=2)
-        logger.info(f"Updated Target {target.id} RA/Dec from plate solver: RA={target.ra}, DEC={target.dec}")
-    except Exception as wcs_error:
-        logger.warning(f"Failed to extract center coordinate from WCS for target {target.id}: {wcs_error}")
+        logger.info(
+            "Updated Target %s RA/Dec from plate solver: RA=%s, DEC=%s", target.id, target.ra, target.dec
+        )
+    except DATA_ERRORS as wcs_error:
+        logger.warning("Failed to extract center coordinate from WCS for target %s: %s", target.id, wcs_error)
 
 
 def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
@@ -79,23 +90,68 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
 
     So the next tool that opens this file (Siril, another astrometry
     run, a human in a FITS viewer) sees the solved pointing without
-    having to solve it again.
-    """
-    if context.wcs is None or not path or not os.path.exists(path):
-        return
-    try:
-        from astropy.io import fits
+    having to solve it again. The write keeps the SIP distortion terms
+    and replaces any sky-map keywords from an earlier solve. See
+    `write_wcs_to_fits_header` for how.
 
-        with fits.open(path, mode="update") as hdul:
-            wcs_header = context.wcs.to_header()
-            for card in wcs_header.cards:
-                if not card.keyword:
-                    continue
-                hdul[0].header[card.keyword] = (card.value, card.comment)
-            hdul.flush()
-        logger.info(f"Updated FITS file {path} header with solved WCS keywords.")
-    except Exception as wcs_error:
-        logger.warning(f"Failed to update FITS file header with WCS: {wcs_error}")
+    Parameters
+    ----------
+    path : `str` or `None`
+        The FITS file to update. `None` or a missing file does nothing.
+    context : `Any`
+        The finished pipeline context. Its `wcs` attribute is the solved
+        sky map, or `None` when the image was not solved.
+    """
+    if context.wcs is None or not path:
+        return
+    write_wcs_to_fits_header(path, context.wcs)
+
+
+def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:
+    """Read the pixel size on the sky from a solved coordinate system.
+
+    Parameters
+    ----------
+    wcs : `astropy.wcs.WCS` or `None`
+        The solved coordinates.
+
+    Returns
+    -------
+    scale : `float` or `None`
+        Arcseconds per pixel, or `None` when there is no usable solution.
+    """
+    if wcs is None:
+        return None
+    try:
+        from astropy.wcs.utils import proj_plane_pixel_scales
+
+        return float(sum(proj_plane_pixel_scales(wcs)) / 2.0 * 3600.0)
+    except ValueError, TypeError, AttributeError:
+        return None
+
+
+def _measure_star_fwhm_px(image: Any) -> float | None:
+    """Measure how wide the stars of an image are.
+
+    Parameters
+    ----------
+    image : `AstrometricsImage`
+        The analyzed image.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        The median star width in pixels, or `None` if it could not be measured.
+    """
+    from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_image_fwhm
+
+    path = getattr(image, "path", None)
+    if not path:
+        return None
+    try:
+        return measure_image_fwhm(path)
+    except (*FITS_READ_ERRORS, *DATA_ERRORS):
+        return None
 
 
 class AstrometryPipelineAdapter(AnalysisPipeline):
@@ -135,14 +191,14 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             Carries the `AnalysisContext`, the saved stars, and the
             counters `validate_output` needs.
         """
-        from astrometricslib.drivers.plate_solve_interface import (
+        from astrometricslib.drivers.astrometry_net_driver import (
             get_plate_solve_attempt_count,
             reset_plate_solve_statistics,
         )
         from astrometricslib.pipelines.astrometry.pipeline import (
             AstrometryPipeline,
         )
-        from astrometricslib.pipelines.astrometry.star_identifier import (
+        from astrometricslib.pipelines.astrometry.processing.star_identifier import (
             get_gaia_query_statistics,
             reset_gaia_query_statistics,
         )
@@ -158,9 +214,9 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
         reset_plate_solve_statistics()
         reset_gaia_query_statistics()
 
-        pipeline = AstrometryPipeline()
+        pipeline = AstrometryPipeline(drivers=request.options.get("drivers"))
         context = pipeline.process(
-            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec, **request.options
+            path, attempt_plate_solving=True, target_ra=target.ra, target_dec=target.dec
         )
 
         context.stellar_objects, star_id_breakdown = _drop_unresolved_stars(
@@ -186,6 +242,11 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             merge_function=merge_astrometry_stellar_object,
             already_dropped=True,
         )
+
+        # The stars solved and saved from the stacked image are the ones
+        # this target "has"; photometry later finds more, but only from
+        # per-frame detection, so they do not describe the stack.
+        target.number_of_stars = len(context.stellar_objects)
 
         return Result(
             context=context,
@@ -215,6 +276,12 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 sources_detected=result.context.sources_detected,
                 solve_attempted=result.context.solve_attempted,
                 astrometric_residual_rms_arcsec=result.context.astrometric_residual_rms_arcsec,
+                catalog_match_separation_rms_arcsec=result.context.catalog_match_separation_rms_arcsec,
+                plate_solve_fit_residual_rms_arcsec=result.context.plate_solve_fit_residual_rms_arcsec,
+                plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
+                astrometry_flags=list(result.context.astrometry_flags),
+                plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
+                star_fwhm_px=_measure_star_fwhm_px(result.context.image),
                 plate_solve_succeeded=result.context.wcs is not None,
                 simbad_matched_count=result.payload["simbad_matched_count"],
                 remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),
@@ -226,9 +293,31 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 unresolved_star_count=star_id_breakdown.unresolved,
             ),
         )
-        if not summary.astrometry_metrics.plate_solve_succeeded:
-            summary.flagged = True
-            summary.flag_reasons.append("plate solve failed")
+        if summary.astrometry_metrics.plate_solve_succeeded:
+            summary.record_gate(
+                passed_gate(PLATE_SOLVE_GATE_NAME, detail="the image was solved to sky coordinates")
+            )
+        else:
+            # An image with no solution has no sky coordinates, whether or
+            # not a solve was tried, so both cases flag the run. The attempt
+            # flag stays in the metrics for anyone who needs to tell them
+            # apart.
+            summary.record_gate(failed_gate(PLATE_SOLVE_GATE_NAME, "plate solve failed"))
+        for gate in astrometry_run_gates(summary.astrometry_metrics):
+            summary.record_gate(gate)
+
+        from astrometricslib.pipelines.shared.applied_camera_profile import (
+            camera_name_from_header,
+            most_common_camera_name,
+            record_camera_profile,
+        )
+
+        # The image's own header names its camera; the target's frames are the
+        # fallback for an image whose header does not.
+        camera_name = camera_name_from_header(result.context.image.header) or most_common_camera_name(
+            request.frames or request.target.frames
+        )
+        record_camera_profile(summary, camera_name)
         return summary
 
     def to_result_dict(
@@ -252,12 +341,12 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
 
 
 def run_astrometry_analysis(
-    target,  # ruff: ignore[missing-type-function-argument]
-    frames,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry always solves `path`
-    filter_type,  # ruff: ignore[missing-type-function-argument] -- unused; astrometry has no filter concept
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    target: Target,
+    frames: Any,  # unused; astrometry always solves `path`
+    filter_type: Any,  # unused; astrometry has no filter concept
+    catalog_access: Any,
     path: str | None,
-    **kwargs,  # ruff: ignore[missing-type-kwargs]
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Detect stars in one image and, if possible, solve its pointing.
 
@@ -281,6 +370,9 @@ def run_astrometry_analysis(
         the stars this run found.
     path : `str`
         The FITS image to analyze.
+    **kwargs
+        Run options. ``drivers`` (a `Drivers`) chooses the plate solver and
+        SIMBAD driver; any left out is the built-in one.
 
     Returns
     -------
@@ -288,6 +380,10 @@ def run_astrometry_analysis(
         Has ``"context"`` (the `AnalysisContext` the pipeline built),
         ``"stellar_objects"``, ``"wcs"``, and ``"image_stats"``.
     """
+    from astrometricslib.pipelines.shared.provenance_recording import note_stacked_image_upstream
+
+    note_stacked_image_upstream(kwargs, target.id, target.stacking.stacked_image, "input_image")
+
     request = PipelineRequest(
         target=target,
         catalog_access=catalog_access,

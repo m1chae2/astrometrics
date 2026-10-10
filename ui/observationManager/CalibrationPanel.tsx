@@ -4,48 +4,32 @@
  * Fetches data via the unified JSON-RPC layer using callBackend.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { useTerminalContext } from '../statusHeader/context/TerminalContext';
 import { IngestFramesModal } from '../common/components/IngestFramesModal';
-import { callBackend } from '../common/services/backendApi';
-import { CalibrationStats, CalibrationEntry } from '../common/types/backendTypes';
+import { CalibrationEntry } from '../common/types/backendTypes';
 import { useIngestionManager } from '../common/hooks/useIngestionManager';
+import { useCalibrationStats } from '../common/hooks/useCalibrationStats';
 import './observationManager.css';
+
+/** How often to re-poll calibration stats in the background, in milliseconds. */
+const CALIBRATION_POLL_INTERVAL_MS = 10000;
 
 export const CalibrationPanel: React.FC = () => {
     const { sendCommand } = useTerminalContext();
-    const [stats, setStats] = useState<CalibrationStats>({ darks: [], biases: [], flats: [] });
     const [selectedCamera, setSelectedCamera] = useState<string>("ZWO ASI 533MM Pro");
     const [isIngestModalOpen, setIsIngestModalOpen] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
 
     // Initialize ingestion state manager (lifted state)
     const ingestionState = useIngestionManager("Calibration");
 
-    /**
-     * Fetches calibration library statistics (darks, biases, flats) from the backend
-     * via the unified JSON-RPC callBackend interface.
-     */
-    const fetchStats = async () => {
-        try {
-            const data = await callBackend("calibration:get_stats", {});
-            setStats(data || { darks: [], biases: [], flats: [] });
-        } catch (error) {
-            console.error("Failed to fetch calibration stats:", error);
-        }
-    };
-
-    useEffect(() => {
-        fetchStats();
-        // Poll every 10 seconds? Or just manual?
-        // Let's poll gently or rely on sync updates.
-        const interval = setInterval(fetchStats, 10000);
-        return () => clearInterval(interval);
-    }, []);
+    const { stats } = useCalibrationStats(reloadKey, { pollIntervalMs: CALIBRATION_POLL_INTERVAL_MS });
 
     const handleIngestComplete = () => {
         setIsIngestModalOpen(false);
-        fetchStats();
+        setReloadKey(key => key + 1);
     };
 
     // Filter Stats
@@ -53,7 +37,7 @@ export const CalibrationPanel: React.FC = () => {
     const biases = stats?.biases || [];
     const flats = stats?.flats || [];
 
-    const filteredDarks = darks.filter(d => d.camera === selectedCamera).sort((a, b) => (a.exposure ?? 0) - (b.exposure ?? 0));
+    const filteredDarks = darks.filter(d => d.camera === selectedCamera).sort((a, b) => (a.exposure ?? 0) - (b.exposure ?? 0) || (a.offset ?? 0) - (b.offset ?? 0));
     const filteredBiases = biases.filter(b => b.camera === selectedCamera);
     const filteredFlats = flats.filter(f => f.camera === selectedCamera);
 
@@ -100,13 +84,15 @@ export const CalibrationPanel: React.FC = () => {
                             <thead>
                                 <tr>
                                     <th>Exposure</th>
+                                    <th className="data-table-cell-right">Offset</th>
                                     <th className="data-table-cell-right">Count</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filteredDarks.map(r => (
-                                    <tr key={r.exposure}>
+                                    <tr key={`${r.exposure}-${r.offset ?? ''}-${r.iso}`}>
                                         <td>{r.exposure}s</td>
+                                        <td className="data-table-cell-right">{r.offset ?? '—'}</td>
                                         <td className="data-table-cell-right">{r.count}</td>
                                     </tr>
                                 ))}

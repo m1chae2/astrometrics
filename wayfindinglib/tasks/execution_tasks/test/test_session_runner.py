@@ -9,11 +9,12 @@ capability records divergence and issues zero calls, an AUTHORITATIVE
 capability issues and records nothing, a DELEGATED capability does
 neither, AUTHORITATIVE issues exactly what a SHADOWED run would have
 recorded for the same input, and abort_session skips remaining pending
-entries -- the cases `Wayfinding_Library_Architecture.md` §2.4.11
+entries -- the cases `Wayfinding_Library_Architecture.md`
 calls out.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -52,9 +53,9 @@ def _unsafe_assessment() -> SafetyAssessment:
 
 
 def _entry(
-    entry_id="entry-1",  # ruff: ignore[missing-type-function-argument]
-    status=QueueEntryStatus.PENDING,  # ruff: ignore[missing-type-function-argument]
-    computed_start_time=_NOW,  # ruff: ignore[missing-type-function-argument]
+    entry_id: str = "entry-1",
+    status: QueueEntryStatus = QueueEntryStatus.PENDING,
+    computed_start_time: datetime = _NOW,
 ) -> QueuedObservationPackage:
     return QueuedObservationPackage(
         id=entry_id,
@@ -66,7 +67,7 @@ def _entry(
     )
 
 
-def _session(entries=None) -> ObservationSession:  # ruff: ignore[missing-type-function-argument]
+def _session(entries: list[QueuedObservationPackage] | None = None) -> ObservationSession:
     return ObservationSession(
         id="session-1",
         night_date=_NOW.date(),
@@ -88,7 +89,7 @@ def _policy(**capability_states: DelegationState) -> DelegationPolicy:
     )
 
 
-def _deps(**overrides) -> SessionRunnerDependencies:  # ruff: ignore[missing-type-kwargs]
+def _deps(**overrides: Any) -> SessionRunnerDependencies:
     defaults = {
         "delegation_policy": _policy(),
         "get_safety_assessment": _safe_assessment,
@@ -105,7 +106,7 @@ def _deps(**overrides) -> SessionRunnerDependencies:  # ruff: ignore[missing-typ
     return SessionRunnerDependencies(**defaults)
 
 
-def test_full_entry_progression_records_actual_times_and_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_full_entry_progression_records_actual_times_and_frames() -> None:
     """Verify a due entry advances RUNNING -> COMPLETED, recording actuals."""
     session = _session()
     checkpoints = []
@@ -121,7 +122,7 @@ def test_full_entry_progression_records_actual_times_and_frames():  # ruff: igno
     assert len(checkpoints) == 1
 
 
-def test_no_due_entry_leaves_queue_unchanged_but_checkpoints():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_due_entry_leaves_queue_unchanged_but_checkpoints() -> None:
     """Verify a session with no due entry is checkpointed, not advanced."""
     future_entry = _entry(computed_start_time=_NOW + timedelta(hours=1))
     session = _session(entries=[future_entry])
@@ -133,7 +134,7 @@ def test_no_due_entry_leaves_queue_unchanged_but_checkpoints():  # ruff: ignore[
     assert len(checkpoints) == 1
 
 
-def test_unsafe_verdict_suspends_session_and_advances_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unsafe_verdict_suspends_session_and_advances_nothing() -> None:
     """Verify an unsafe verdict suspends the session and issues no command."""
     session = _session()
     issue_calls = []
@@ -151,7 +152,7 @@ def test_unsafe_verdict_suspends_session_and_advances_nothing():  # ruff: ignore
     assert issue_calls == []
 
 
-def test_safe_verdict_resumes_a_suspended_session():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_verdict_resumes_a_suspended_session() -> None:
     """Verify a subsequent safe verdict resumes a suspended session."""
     session = _session()
     session.status = SessionStatus.SUSPENDED
@@ -162,7 +163,7 @@ def test_safe_verdict_resumes_a_suspended_session():  # ruff: ignore[missing-ret
     assert result.queue[0].status == QueueEntryStatus.COMPLETED
 
 
-def test_device_fault_blocks_entry_advancement():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_device_fault_blocks_entry_advancement() -> None:
     """Verify a required device in FAULT blocks the entry from advancing."""
     session = _session()
     faulted = DeviceState(
@@ -176,7 +177,7 @@ def test_device_fault_blocks_entry_advancement():  # ruff: ignore[missing-return
     assert "FAULT" in result.queue[0].status_detail
 
 
-def test_meridian_flip_failure_fails_entry_without_disposing_actions():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_meridian_flip_failure_fails_entry_without_disposing_actions() -> None:
     """Verify an unrecovered flip fails the entry and skips disposition."""
     from wayfindinglib.models.session.meridian_flip import MeridianFlipOutcome
 
@@ -205,7 +206,7 @@ def test_meridian_flip_failure_fails_entry_without_disposing_actions():  # ruff:
     assert issue_calls == []
 
 
-def test_shadowed_capability_records_divergence_and_issues_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_shadowed_capability_records_divergence_and_issues_nothing() -> None:
     """Verify SHADOWED produces a divergence record and issues zero calls."""
     session = _session()
     issue_calls = []
@@ -233,7 +234,7 @@ def test_shadowed_capability_records_divergence_and_issues_nothing():  # ruff: i
     assert record.within_tolerance is True
 
 
-def test_authoritative_capability_issues_and_records_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_authoritative_capability_issues_and_records_nothing() -> None:
     """Verify AUTHORITATIVE issues the action and records no divergence."""
     session = _session()
     issue_calls = []
@@ -257,7 +258,7 @@ def test_authoritative_capability_issues_and_records_nothing():  # ruff: ignore[
     assert result.divergence_records == []
 
 
-def test_delegated_capability_neither_issues_nor_records():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_delegated_capability_neither_issues_nor_records() -> None:
     """Verify a DELEGATED capability issues nothing and records nothing."""
     session = _session()
     issue_calls = []
@@ -278,12 +279,12 @@ def test_delegated_capability_neither_issues_nor_records():  # ruff: ignore[miss
     assert result.divergence_records == []
 
 
-def test_authoritative_issues_exactly_what_shadowed_would_have_recorded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_authoritative_issues_exactly_what_shadowed_would_have_recorded() -> None:
     """Verify AUTHORITATIVE issues the same intent a SHADOWED run recorded."""
     shadowed_intent_seen = []
     authoritative_intent_seen = []
 
-    def make_disposition(sink):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def make_disposition(sink: list[float]) -> ActionDisposition:
         return ActionDisposition(
             ObservatoryCapability.AUTOFOCUS,
             issue=lambda: None,
@@ -313,7 +314,7 @@ def test_authoritative_issues_exactly_what_shadowed_would_have_recorded():  # ru
     assert shadowed_record.intended_value == pytest.approx(issued[0])
 
 
-def test_abort_session_skips_pending_entries_and_closes():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_abort_session_skips_pending_entries_and_closes() -> None:
     """Verify abort_session transitions PENDING entries to SKIPPED, closes."""
     running_entry = _entry("entry-1", status=QueueEntryStatus.RUNNING)
     pending_entry = _entry("entry-2", status=QueueEntryStatus.PENDING)

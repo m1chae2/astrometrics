@@ -5,7 +5,10 @@ get_status) and drain_guiding_samples against a fake PHD2Client, so no real
 PHD2 connection is needed.
 """
 
+import threading
 import time
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 
@@ -15,10 +18,10 @@ from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 class FakeClient:
     """A fake PHD2Client yielding a fixed list of events once, then idling."""
 
-    def __init__(self, events):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, events: list[dict[str, Any]]) -> None:
         self._events = events
 
-    def events(self, stop_event=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+    def events(self, stop_event: threading.Event | None = None) -> Iterator[dict[str, Any]]:
         """Yield the fixed event list once, then idle until stopped.
 
         Yields
@@ -34,7 +37,7 @@ class FakeClient:
             time.sleep(0.01)
 
 
-def _wait_until(condition, timeout_seconds=2.0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _wait_until(condition: Callable[[], object], timeout_seconds: float = 2.0) -> bool:
     """Poll condition() until it's truthy or timeout_seconds elapses.
 
     Returns
@@ -50,7 +53,7 @@ def _wait_until(condition, timeout_seconds=2.0):  # ruff: ignore[missing-type-fu
     return False
 
 
-def test_poll_external_telemetry_starts_background_thread_and_accumulates_samples():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_poll_external_telemetry_starts_background_thread_and_accumulates_samples() -> None:
     """Verify poll_external_telemetry starts the thread and updates get_status.
 
     Confirms the background polling thread accumulates a guiding
@@ -80,7 +83,7 @@ def test_poll_external_telemetry_starts_background_thread_and_accumulates_sample
     service.stop()
 
 
-def test_drain_guiding_samples_returns_and_clears_accumulated_samples():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_drain_guiding_samples_returns_and_clears_accumulated_samples() -> None:
     """Verify drain_guiding_samples returns and clears samples.
 
     Confirms the returned list holds real GuidingSample objects
@@ -101,7 +104,7 @@ def test_drain_guiding_samples_returns_and_clears_accumulated_samples():  # ruff
     service.stop()
 
 
-def test_get_status_returns_empty_history_before_any_events():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_get_status_returns_empty_history_before_any_events() -> None:
     """Verify get_status is safe before poll_external_telemetry runs.
 
     Confirms calling get_status on a freshly constructed service

@@ -1,36 +1,31 @@
-"""Purpose: Observation Package Placement.
+"""Purpose: Place observation packages into one observing night.
 
-Description: Implements the seven-step placement algorithm of
-`Wayfinding_Library_Architecture.md` Table 4 /
-`Wayfinding_Library_Architecture.md` §2.3.2: resolve the night
-window, split by disposition, place fixed-time
-anchors, apply advisory priority boosts, greedily place soonest-available
-packages, diagnose every unplaced package against the full night, and
-assemble the resulting `ObservationSession`.
+Description: `schedule_session` does the work behind
+`ObservationPlanning.create_plan(kind="scheduled_session")` in seven
+steps: work out the night window, split the packages into fixed-time and
+"as soon as possible" ones, place the fixed-time ones, raise the priority
+of packages whose quality advisory asks for it, place the rest greedily
+in priority order, explain why each package that did not fit was left
+out, and assemble the `ObservationSession`.
 
-Two calling-convention details are not fully pinned by the sequence
-diagrams and are resolved here as documented implementation decisions:
+Two details are decided here:
 
-- `ObservationPackage` carries no `start_time_mode` -- only
-  `QueuedObservationPackage`, the *placed* instance, does. Disposition
-  must therefore be supplied per package at placement time, alongside
-  the package itself, matching how `add_to_queue` already takes
-  `start_time_mode` as a separate parameter
-  (`Wayfinding_Library_Sequences.md` §1.6). `PlacementRequest` below is
-  that pairing -- a plain, unrecorded parameter object, not a new
-  Foundation model, since nothing about it needs to survive past one
+- `ObservationPackage` carries no start-time mode; only the placed
+  `QueuedObservationPackage` does. The mode is therefore given with each
+  package at placement time, the same way `ObservationPlanning.edit_queue`
+  takes it. `PlacementRequest` below pairs them. It is a plain parameter
+  object, not a stored model, because nothing about it outlives one
   `place()` call.
-- `ObservationSession.camera_id` is required (Appendix B), but no
-  sequence diagram threads a camera into `plan_observation_session`.
-  Since the active camera plays no role in placement math -- only the
-  telescope's pointing envelope and the site's obstructions do -- it is
-  accepted as a plain identifier argument here, recorded for
-  "Reproducible Placement Context" without influencing the algorithm.
+- `ObservationSession.camera_id` is required, but the camera plays no role
+  in the placement sums (only the telescope's pointing limits and the
+  site's obstructions do), so it is accepted as a plain id and recorded on
+  the session.
 """
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from typing import Any
 
 from wayfindinglib.models.equipment_and_site.equipment import Telescope
 from wayfindinglib.models.equipment_and_site.site_profile import SiteProfile
@@ -61,11 +56,11 @@ class PlacementRequest:
     dec_deg: float = 0.0
 
 
-def _target_coordinates(astrometrics, target_id: str) -> tuple[float, float]:  # ruff: ignore[missing-type-function-argument]
-    """Resolve a target's RA/Dec in decimal degrees, live, never cached.
+def _target_coordinates(astrometrics: Any, target_id: str) -> tuple[float, float]:
+    """Read a target's RA/Dec in decimal degrees from the library, every time.
 
-    Per the "Live Target Resolution" invariant
-    (`Wayfinding_Library_Architecture.md` §2.3.4).
+    The position is never cached, so a target re-solved since the package
+    was written is placed where it really is.
 
     Returns
     -------
@@ -74,14 +69,14 @@ def _target_coordinates(astrometrics, target_id: str) -> tuple[float, float]:  #
 
     Raises
     ------
-    ValueError
+    NotFoundError
         Raised if `target_id` does not resolve to an existing target.
     """
-    from astrometricslib import parse_coordinate_string
+    from astrometricslib import NotFoundError, parse_coordinate_string
 
     target = astrometrics.targets.get(target_id)
     if not target:
-        raise ValueError(f"Target {target_id} not found")
+        raise NotFoundError(f"Target {target_id} not found", details={"target": target_id})
     return parse_coordinate_string(target.ra, is_ra=True), parse_coordinate_string(target.dec, is_ra=False)
 
 
@@ -93,8 +88,8 @@ def _apply_advisory_boost(
     """Compute the bounded priority boost for one opted-in package.
 
     Never a decrease: a package that has not opted in, or whose target
-    has no qualifying flag or outcome, receives a boost of zero
-    (`Wayfinding_Library_Architecture.md` §2.3.4, "Advisory, Not Authority").
+    has no qualifying flag or outcome, receives a boost of zero. The
+    advisory only advises; it never removes a package.
 
     Returns
     -------
@@ -462,25 +457,22 @@ def _build_queue_entry(
     )
 
 
-def plan_observation_session(
-    astrometrics,  # ruff: ignore[missing-type-function-argument]
+def schedule_session(
+    astrometrics: Any,
     requests: list[tuple[ObservationPackage, StartTimeMode, datetime | None]],
     site_profile: SiteProfile,
     telescope: Telescope,
     camera_id: str,
-    night_date,  # ruff: ignore[missing-type-function-argument]
+    night_date: date,
     quality_advisories: dict[str, TargetQualityAdvisory] | None = None,
     planning_config: PlanningConfig | None = None,
 ) -> ObservationSession:
     """Resolve the night window and place every requested package into it.
 
-    The end-to-end entry point matching `Wayfinding_Library_Sequences.md`
-    §1.5: resolves live target coordinates for each package, brackets
-    the night, places every package, and assembles the resulting
-    `ObservationSession`. Runs entirely against the arguments it is
-    handed -- no device is contacted, so this is callable with nothing
-    connected (`Wayfinding_Library_Architecture.md` §2.3.4, "Planning Is
-    Hardware-Free").
+    Reads each package's target position from the library, brackets the
+    night, places every package, and assembles the resulting
+    `ObservationSession`. It works only from the arguments it is handed:
+    no device is contacted, so it runs with nothing connected.
 
     Returns
     -------

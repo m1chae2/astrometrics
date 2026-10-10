@@ -6,7 +6,8 @@ once a star is found, saving it works the same way for all three:
 1. Throw away any star we could never name at all (`_drop_unresolved_stars`).
 2. Check whether it is actually a star we already know about, just with
    a position that shifted slightly since last time
-   (`_reconcile_position_only_star_ids`).
+   (`_reconcile_position_only_star_ids`), or just under a different
+   catalog's name for it (`_reconcile_identified_star_ids`).
 3. Merge it into the catalog rather than overwriting it, since a star can
    carry data from more than one target and more than one pipeline
    (`merge_astrometry_stellar_object` and its two siblings).
@@ -19,10 +20,19 @@ passes `already_dropped=True` here to skip repeating it.
 """
 
 import logging
+import math
 import re
-from typing import NamedTuple
+import sqlite3
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
+from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.pipelines.shared.catalog_star_identity import (
+    SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+    catalog_family,
+    name_preference_rank,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +115,13 @@ def _drop_unresolved_stars(
         resolved.append(stellar_object)
 
     logger.info(
-        f"[{target_id}] {pipeline_name} star identification: {catalog_matched} catalog-matched, "
-        f"{position_only} position-only (no catalog match), {unresolved} dropped (no sky position at all)"
+        "[%s] %s star identification: %s catalog-matched, %s position-only (no catalog match), %s "
+        "dropped (no sky position at all)",
+        target_id,
+        pipeline_name,
+        catalog_matched,
+        position_only,
+        unresolved,
     )
     return resolved, StarIdentificationBreakdown(catalog_matched, position_only, unresolved)
 
@@ -114,7 +129,7 @@ def _drop_unresolved_stars(
 def _reconcile_position_only_star_ids(
     stellar_objects: list,
     *,
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     target_id: str,
 ) -> list:
     """Reconcile and merge catalog IDs based on star positions.
@@ -158,7 +173,7 @@ def _reconcile_position_only_star_ids(
     from astropy import units as u
     from astropy.coordinates import SkyCoord
 
-    from astrometricslib.pipelines.astrometry.star_identifier import (
+    from astrometricslib.pipelines.astrometry.processing.star_identifier import (
         CATALOG_MATCH_RADIUS_ARCSEC,
     )
 
@@ -178,7 +193,7 @@ def _reconcile_position_only_star_ids(
 
     try:
         existing_position_only = catalog_access.list_position_only_stars(target_id=target_id)
-    except Exception as lookup_error:
+    except (AstrometricsError, sqlite3.Error) as lookup_error:
         # Reconciliation is an optimization over an already-correct (if
         # duplicative) storage path; a lookup failure must not block
         # a run's own stars from being saved.
@@ -224,8 +239,228 @@ def _reconcile_position_only_star_ids(
 
     if reused_count:
         logger.info(
-            f"[{target_id}] Reconciled {reused_count} position-only star id(s) onto existing "
-            f"catalog rows within {CATALOG_MATCH_RADIUS_ARCSEC:g} arcsec, instead of minting new ones."
+            "[%s] Reconciled %s position-only star id(s) onto existing catalog rows within %g "
+            "arcsec, instead of minting new ones.",
+            target_id,
+            reused_count,
+            CATALOG_MATCH_RADIUS_ARCSEC,
+        )
+    return stellar_objects
+
+
+def _move_catalog_row_to_new_id(
+    catalog_access: Any,
+    *,
+    old_id: str,
+    new_id: str,
+    new_name: str,
+) -> bool:
+    """Rename a saved star's row, keeping everything stored on it.
+
+    The row is written under its new id first and only then is the old
+    one deleted, so a failure half way leaves a duplicate row (which
+    `scripts/merge_duplicate_catalog_stars.py` can clean up) rather than
+    losing the star's spectra and light curve.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        Provides `get_by_ids`, `merge_and_record` and `delete_by_ids`.
+    old_id : `str`
+        The id the row is saved under now.
+    new_id : `str`
+        The id to save it under.
+    new_name : `str`
+        The name to save it with.
+
+    Returns
+    -------
+    moved : `bool`
+        `True` when the row now exists under `new_id`. `False` when it
+        could not be moved (no row under `old_id`, a row already under
+        `new_id`, or a storage error); nothing is changed then.
+    """
+    try:
+        if catalog_access.get_by_ids("stellar_catalog", [new_id]):
+            return False
+        saved_rows = catalog_access.get_by_ids("stellar_catalog", [old_id])
+        if not saved_rows:
+            return False
+        renamed_row = saved_rows[0]
+        renamed_row.id = new_id
+        renamed_row.name = new_name or new_id
+        catalog_access.merge_and_record(
+            "stellar_catalog", [renamed_row], lambda _existing_row, updated_row: updated_row
+        )
+    except (AstrometricsError, sqlite3.Error, ValueError) as storage_error:
+        logger.warning("Could not rename catalog row %s to %s: %s", old_id, new_id, storage_error)
+        return False
+
+    try:
+        catalog_access.delete_by_ids("stellar_catalog", [old_id])
+    except (AstrometricsError, sqlite3.Error) as storage_error:
+        logger.warning(
+            "Renamed catalog row %s to %s but could not delete the old row: %s", old_id, new_id, storage_error
+        )
+    return True
+
+
+def _reconcile_identified_star_ids(
+    stellar_objects: list,
+    *,
+    catalog_access: Any,
+    target_id: str,
+) -> list:
+    """Save a star under one name even when two catalogs name it differently.
+
+    A star identified against the Henry Draper catalog is ``HD 151086``;
+    identified against Gaia it is ``Gaia DR3 1328...``. Rows are keyed by
+    name, so if one run finds the first and a later run finds the second,
+    the same star would be saved twice, splitting its spectra and light
+    curve between two rows.
+
+    This checks each new star's position against the catalog before
+    saving. When exactly one saved row sits within
+    `SAME_STAR_POSITION_TOLERANCE_ARCSEC` and that row's name comes from a
+    different catalog, the two are one star and are saved as one row:
+
+    * If the saved row's name is at least as preferred (HD/BD/CD/CPD, then
+      Gaia DR3, then anything else; see `name_preference_rank`), the new
+      star takes the saved row's id and name.
+    * If the new star's name is more preferred, the saved row is renamed
+      to it, so the row that survives carries the better name and
+      everything already stored on it.
+
+    Two names from the same catalog are different stars however close
+    they are (a close double star has two Gaia ids), and a star with
+    more than one saved row nearby is ambiguous, so neither is touched.
+
+    Position-only ids are handled by `_reconcile_position_only_star_ids`
+    and are not looked at here.
+
+    Parameters
+    ----------
+    stellar_objects : `list`
+        Candidate stars about to be recorded, mutated in place (a matched
+        star's `id`/`name` are overwritten with those of the saved row).
+    catalog_access : `Any`
+        Provides `list_stars_in_region` to find saved rows near the
+        stars, and the read, write and delete calls used to rename a row.
+    target_id : `str`
+        The target these stars belong to, for the log line only. Unlike
+        the position-only step this is not limited to the target's own
+        stars: a star imaged for two targets is one star.
+
+    Returns
+    -------
+    stellar_objects : `list`
+        The same list, for chaining alongside the other reconcile step.
+    """
+    from astropy import units as u
+    from astropy.coordinates import SkyCoord, search_around_sky
+
+    named_stars = [
+        stellar_object
+        for stellar_object in stellar_objects
+        if stellar_object.id
+        and not stellar_object.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)
+        and not _UNRESOLVED_STAR_ID_PATTERN.match(stellar_object.id)
+        and stellar_object.right_ascension is not None
+        and stellar_object.declination is not None
+    ]
+    if not named_stars:
+        return stellar_objects
+
+    star_coordinates = SkyCoord(
+        ra=[star.right_ascension for star in named_stars] * u.deg,
+        dec=[star.declination for star in named_stars] * u.deg,
+    )
+    # One search covering every new star, so a run costs one lookup rather
+    # than one per star. The circle is centered on the average direction of
+    # the stars (averaging unit vectors, not right ascensions, so a field
+    # across 0/360 degrees is centered correctly).
+    average_x, average_y, average_z = star_coordinates.cartesian.xyz.value.mean(axis=1)
+    center_right_ascension = math.degrees(math.atan2(average_y, average_x)) % 360.0
+    center_declination = math.degrees(math.atan2(average_z, math.hypot(average_x, average_y)))
+    center = SkyCoord(ra=center_right_ascension * u.deg, dec=center_declination * u.deg)
+    search_radius_degrees = (
+        float(star_coordinates.separation(center).deg.max()) + SAME_STAR_POSITION_TOLERANCE_ARCSEC / 3600.0
+    )
+
+    try:
+        nearby_rows = catalog_access.list_stars_in_region(
+            center_right_ascension, center_declination, search_radius_degrees
+        )
+        nearby_rows = [row for row in nearby_rows if not row.id.startswith(_POSITION_ONLY_STAR_ID_PREFIX)]
+    except (AstrometricsError, sqlite3.Error) as lookup_error:
+        # Same reasoning as the position-only step: a failed lookup must
+        # not stop a run's own stars being saved.
+        logger.debug(
+            "[%s] Could not read existing catalog for name reconciliation: %s", target_id, lookup_error
+        )
+        return stellar_objects
+    if not nearby_rows:
+        return stellar_objects
+
+    row_coordinates = SkyCoord(
+        ra=[row.right_ascension for row in nearby_rows] * u.deg,
+        dec=[row.declination for row in nearby_rows] * u.deg,
+    )
+    star_indices, row_indices, _, _ = search_around_sky(
+        star_coordinates, row_coordinates, SAME_STAR_POSITION_TOLERANCE_ARCSEC * u.arcsec
+    )
+    rows_near_star: dict[int, list] = {}
+    for star_index, row_index in zip(star_indices, row_indices, strict=True):
+        rows_near_star.setdefault(int(star_index), []).append(nearby_rows[int(row_index)])
+
+    claimed_row_ids: set[str] = set()
+    reused_count = renamed_count = 0
+    for star_index, stellar_object in enumerate(named_stars):
+        rows_here = rows_near_star.get(star_index, [])
+        if not rows_here or any(row.id == stellar_object.id for row in rows_here):
+            # Nothing saved nearby, or the star's own row is already there.
+            continue
+        if len(rows_here) > 1:
+            logger.debug(
+                "[%s] %s has %d saved rows within %g arcsec; leaving it for the cleanup script.",
+                target_id,
+                stellar_object.id,
+                len(rows_here),
+                SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+            )
+            continue
+        saved_row = rows_here[0]
+        if catalog_family(saved_row.id) == catalog_family(stellar_object.id):
+            continue
+        if saved_row.id in claimed_row_ids:
+            # Two new stars must never collapse onto one row.
+            continue
+
+        saved_name = saved_row.name or saved_row.id
+        if name_preference_rank(stellar_object.id) < name_preference_rank(saved_row.id):
+            if not _move_catalog_row_to_new_id(
+                catalog_access,
+                old_id=saved_row.id,
+                new_id=stellar_object.id,
+                new_name=stellar_object.name,
+            ):
+                continue
+            renamed_count += 1
+        else:
+            stellar_object.id = saved_row.id
+            stellar_object.name = saved_name
+            reused_count += 1
+        claimed_row_ids.add(saved_row.id)
+
+    if reused_count or renamed_count:
+        logger.info(
+            "[%s] Matched %s star(s) to a saved row under another catalog's name within %g arcsec "
+            "(%s reused the saved name, %s renamed the saved row), instead of saving a second row.",
+            target_id,
+            reused_count + renamed_count,
+            SAME_STAR_POSITION_TOLERANCE_ARCSEC,
+            reused_count,
+            renamed_count,
         )
     return stellar_objects
 
@@ -233,9 +468,9 @@ def _reconcile_position_only_star_ids(
 def record_pipeline_stars(
     stellar_objects: list,
     *,
-    catalog_access,  # ruff: ignore[missing-type-function-argument]
+    catalog_access: Any,
     target_id: str,
-    merge_function,  # ruff: ignore[missing-type-function-argument]
+    merge_function: Callable[..., Any],
     pipeline_name: str | None = None,
     already_dropped: bool = False,
 ) -> tuple[list, StarIdentificationBreakdown | None]:
@@ -244,9 +479,11 @@ def record_pipeline_stars(
     This is the block astrometry, spectroscopy, and photometry all run
     right before returning: every star gets tagged with this target's id,
     a position-only star gets checked against the catalog in case it is
-    really one we already have (`_reconcile_position_only_star_ids`), and
-    the result is merged into `stellar_catalog` rather than overwritten,
-    since one star can carry data from more than one target.
+    really one we already have (`_reconcile_position_only_star_ids`), a
+    named star in case we already have it under another catalog's name
+    (`_reconcile_identified_star_ids`), and the result is merged into
+    `stellar_catalog` rather than overwritten, since one star can carry
+    data from more than one target.
 
     Astrometry calls `_drop_unresolved_stars` itself, earlier, because it
     needs the star-identification breakdown to build its quality summary
@@ -296,12 +533,15 @@ def record_pipeline_stars(
     stellar_objects = _reconcile_position_only_star_ids(
         stellar_objects, catalog_access=catalog_access, target_id=target_id
     )
+    stellar_objects = _reconcile_identified_star_ids(
+        stellar_objects, catalog_access=catalog_access, target_id=target_id
+    )
     catalog_access.merge_and_record("stellar_catalog", stellar_objects, merge_function)
 
     return stellar_objects, breakdown
 
 
-def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for astrometry updates to a star.
 
     Keeps any old target names but adds new ones. It also updates
@@ -321,39 +561,30 @@ def merge_astrometry_stellar_object(existing_stellar_object, updated_stellar_obj
     existing_stellar_object.right_ascension = updated_stellar_object.right_ascension
     existing_stellar_object.declination = updated_stellar_object.declination
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
+    existing_stellar_object.b_minus_v = updated_stellar_object.b_minus_v
     existing_stellar_object.spectral_type = updated_stellar_object.spectral_type
     existing_stellar_object.stellar_spectral_type = updated_stellar_object.stellar_spectral_type
+    # A run that did not reach SIMBAD (or matched through Gaia) has an empty
+    # type; it must not erase one an earlier run found.
+    if updated_stellar_object.simbad_object_types:
+        existing_stellar_object.simbad_object_types = updated_stellar_object.simbad_object_types
+    # Likewise for the Gaia DR3 source number: keep one an earlier run found.
+    if updated_stellar_object.gaia_dr3_source_id is not None:
+        existing_stellar_object.gaia_dr3_source_id = updated_stellar_object.gaia_dr3_source_id
     return existing_stellar_object
 
 
-def merge_spectra_history(existing_history, updated_history):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Combine two stars' spectral-observation histories into one timeline.
-
-    Each spectroscopy run contributes one new `SpectralObservation` (see
-    `SpectroscopyPipeline._apply_result_to_stellar_object`); folding it
-    in here -- keyed by timestamp -- is what turns those single-session
-    snapshots into an actual history instead of each run's entry
-    replacing the last. Re-processing the same session's frame again
-    lands on the same timestamp and overwrites that one entry in place
-    rather than appending a duplicate.
-
-    Returns
-    -------
-    merged_history : `list` of `SpectralObservation`
-        Every observation from both histories, one per distinct
-        timestamp (latest write wins), oldest first.
-    """
-    by_timestamp = {observation.timestamp: observation for observation in existing_history}
-    for observation in updated_history:
-        by_timestamp[observation.timestamp] = observation
-    return [by_timestamp[timestamp] for timestamp in sorted(by_timestamp)]
-
-
-def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for spectroscopy updates to a star.
 
     Adds new target names to the list and updates the light spectrum
     data and dispersion angle, but leaves everything else alone.
+
+    The star's `star_data` position is left as it was: it is a pixel
+    position in the normal (astrometry) image, while the spectroscopy
+    update's `star_data` is a position in the spectroscopy image, a
+    different pixel grid. The spectroscopy position travels in
+    `spectroscopy.star_position_px` instead.
 
     Returns
     -------
@@ -371,19 +602,16 @@ def merge_spectroscopy_stellar_object(existing_stellar_object, updated_stellar_o
     existing_stellar_object.spectral_type = updated_stellar_object.spectral_type
     existing_stellar_object.stellar_spectral_type = updated_stellar_object.stellar_spectral_type
     existing_stellar_object.magnitude = updated_stellar_object.magnitude
+    existing_stellar_object.b_minus_v = updated_stellar_object.b_minus_v
     existing_stellar_object.is_catalog_identified = updated_stellar_object.is_catalog_identified
-    existing_stellar_object.star_data = updated_stellar_object.star_data
     # Carries the trail geometry (rectangle, dispersion_angle, etc.)
     # along for free -- it lives on SpectroscopyResult now, so a full
     # replace here covers it without copying each field separately.
     existing_stellar_object.spectroscopy = updated_stellar_object.spectroscopy
-    existing_stellar_object.spectra_history = merge_spectra_history(
-        existing_stellar_object.spectra_history, updated_stellar_object.spectra_history
-    )
     return existing_stellar_object
 
 
-def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_object):  # ruff: ignore[missing-return-type-undocumented-public-function, missing-type-function-argument]
     """Merge rule for photometry updates to a star.
 
     Adds new target names, updates cross-session identity data,
@@ -410,6 +638,17 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
     ):
         updated_photometry.mean_flux = existing_photometry.mean_flux
         updated_photometry.coefficient_of_variation = existing_photometry.coefficient_of_variation
+        # The variability indices go with the CV: they describe the same
+        # earlier light curve.
+        for index_name in (
+            "instrumental_mag",
+            "rms_mag",
+            "excess_scatter",
+            "reduced_chi_square",
+            "stetson_j",
+            "variability_score",
+        ):
+            setattr(updated_photometry, index_name, getattr(existing_photometry, index_name))
     existing_stellar_object.photometry = updated_photometry
     # Cross-session matching (see _match_and_merge_across_sessions)
     # recomputes both fresh each run, so a full replace keeps a repeat

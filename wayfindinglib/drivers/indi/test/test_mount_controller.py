@@ -5,7 +5,7 @@ per-rig `Telescope`'s configured altitude envelope over the global
 `[Observatory.Constraints]` section when one is configured, falls back
 to the global section when none is, and respects a per-rig
 `altitude_limits_enabled=False` override -- per
-`Wayfinding_Library_Architecture.md` §2.5.2's "Documented Safety
+`Wayfinding_Library_Architecture.md`'s "Documented Safety
 Fallback" invariant. Uses a real, isolated `AppConfiguration` (not a
 mock) against a fake INDI telescope device, matching this codebase's
 established real-config testing discipline.
@@ -17,40 +17,48 @@ without needing to independently reimplement the Alt/Az transform in
 the test.
 """
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+from astrometricslib import AppConfiguration, ConflictError
 from wayfindinglib.drivers.indi.mount_controller import MountController
-from wayfindinglib.exceptions import AstrometryHardwareError
 
 
+@dataclass
 class _FakeNumberElement:
-    def __init__(self, value):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self.value = value
+    """One element of a fake INDI number vector."""
+
+    value: float
 
 
 class _FakeTelescope:
     """A fake INDI telescope device reporting a fixed GEOGRAPHIC_COORD."""
 
-    def __init__(self, latitude_deg: float, longitude_deg: float, elevation_m: float):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, latitude_deg: float, longitude_deg: float, elevation_m: float) -> None:
         self._geographic_coord = [
             _FakeNumberElement(latitude_deg),
             _FakeNumberElement(longitude_deg),
             _FakeNumberElement(elevation_m),
         ]
 
-    def getNumber(self, name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def getNumber(self, name: str) -> list[_FakeNumberElement] | None:
         if name == "GEOGRAPHIC_COORD":
             return self._geographic_coord
         return None
 
 
+@dataclass
 class _FakeClient:
-    def __init__(self, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self.config = config
+    """A fake INDI client that only holds the configuration."""
+
+    config: AppConfiguration
 
 
 @pytest.fixture
-def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def app_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AppConfiguration:
     """Build a real AppConfiguration backed by an isolated temp config file.
 
     Returns
@@ -58,9 +66,7 @@ def app_config(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-arg
     config : `AppConfiguration`
         A fresh, isolated configuration instance.
     """
-    from astrometricslib import AppConfiguration
-
-    config_path = tmp_path / "astrometrics.config"
+    config_path = tmp_path / "astrometrics.config.toml"
     monkeypatch.setattr(AppConfiguration, "_find_config_file", lambda self: config_path)
     return AppConfiguration()
 
@@ -78,7 +84,7 @@ def _north_pole_telescope() -> _FakeTelescope:
     return _FakeTelescope(latitude_deg=90.0, longitude_deg=0.0, elevation_m=0.0)
 
 
-def test_falls_back_to_global_constraint_when_no_rig_configured(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_falls_back_to_global_constraint_when_no_rig_configured(app_config: AppConfiguration) -> None:
     """Verify the global constraint governs when no per-rig telescope."""
     controller = MountController(_FakeClient(app_config))
     telescope = _north_pole_telescope()
@@ -87,7 +93,7 @@ def test_falls_back_to_global_constraint_when_no_rig_configured(app_config):  # 
     controller.validate_altitude_limits(telescope, ra=6.0, dec=30.0)
 
 
-def test_per_rig_envelope_overrides_global_constraint(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_per_rig_envelope_overrides_global_constraint(app_config: AppConfiguration) -> None:
     """Verify a configured per-rig Telescope envelope beats the global one."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
@@ -104,11 +110,11 @@ def test_per_rig_envelope_overrides_global_constraint(app_config):  # ruff: igno
 
     # dec=30 would pass the global 0-90 default, but fails the per-rig 50-90
     # envelope -- proving the per-rig value, not the global one, governed.
-    with pytest.raises(AstrometryHardwareError, match="outside safe operating"):
+    with pytest.raises(ConflictError, match="outside safe operating"):
         controller.validate_altitude_limits(telescope, ra=6.0, dec=30.0)
 
 
-def test_per_rig_limits_disabled_skips_validation_entirely(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_per_rig_limits_disabled_skips_validation_entirely(app_config: AppConfiguration) -> None:
     """Verify altitude_limits_enabled=False on the active rig skips checks."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
@@ -129,7 +135,7 @@ def test_per_rig_limits_disabled_skips_validation_entirely(app_config):  # ruff:
     controller.validate_altitude_limits(telescope, ra=6.0, dec=-45.0)
 
 
-def test_resolve_altitude_envelope_returns_global_fallback_tuple(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_resolve_altitude_envelope_returns_global_fallback_tuple(app_config: AppConfiguration) -> None:
     """Verify _resolve_altitude_envelope's return value in the fallback."""
     controller = MountController(_FakeClient(app_config))
     min_altitude, max_altitude, limits_enabled = controller._resolve_altitude_envelope()
@@ -138,7 +144,7 @@ def test_resolve_altitude_envelope_returns_global_fallback_tuple(app_config):  #
     assert limits_enabled is True
 
 
-def test_resolve_altitude_envelope_returns_per_rig_tuple(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_resolve_altitude_envelope_returns_per_rig_tuple(app_config: AppConfiguration) -> None:
     """Verify _resolve_altitude_envelope's return value when rig active."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
@@ -157,7 +163,7 @@ def test_resolve_altitude_envelope_returns_per_rig_tuple(app_config):  # ruff: i
     assert limits_enabled is True
 
 
-def test_hour_angle_limits_disabled_with_no_active_rig(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_hour_angle_limits_disabled_with_no_active_rig(app_config: AppConfiguration) -> None:
     """Verify hour-angle limiting has no global fallback, unlike altitude."""
     controller = MountController(_FakeClient(app_config))
     max_hour_angle_hours, limits_enabled = controller._resolve_hour_angle_envelope()
@@ -168,7 +174,7 @@ def test_hour_angle_limits_disabled_with_no_active_rig(app_config):  # ruff: ign
     controller.validate_hour_angle_limits(_north_pole_telescope(), ra=0.0)
 
 
-def test_resolve_hour_angle_envelope_returns_per_rig_tuple(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_resolve_hour_angle_envelope_returns_per_rig_tuple(app_config: AppConfiguration) -> None:
     """Verify _resolve_hour_angle_envelope's return value when rig active."""
     app_config.update_config({
         "Observatory.Telescope": {"models": "Rig A"},
@@ -186,7 +192,7 @@ def test_resolve_hour_angle_envelope_returns_per_rig_tuple(app_config):  # ruff:
     assert limits_enabled is True
 
 
-def test_validate_hour_angle_limits_rejects_ra_far_from_meridian(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_validate_hour_angle_limits_rejects_ra_far_from_meridian(app_config: AppConfiguration) -> None:
     """Verify a target far from the meridian is rejected when limits are on."""
     from astropy.time import Time
 
@@ -208,11 +214,11 @@ def test_validate_hour_angle_limits_rejects_ra_far_from_meridian(app_config):  #
     # regardless of exactly what LST is right now.
     far_ra = (local_sidereal_time - 8.0) % 24.0
 
-    with pytest.raises(AstrometryHardwareError, match="outside safe operating"):
+    with pytest.raises(ConflictError, match="outside safe operating"):
         controller.validate_hour_angle_limits(telescope, ra=far_ra)
 
 
-def test_validate_hour_angle_limits_accepts_ra_near_meridian(app_config):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_validate_hour_angle_limits_accepts_ra_near_meridian(app_config: AppConfiguration) -> None:
     """Verify a target near the meridian is accepted when limits are on."""
     from astropy.time import Time
 
@@ -233,3 +239,34 @@ def test_validate_hour_angle_limits_accepts_ra_near_meridian(app_config):  # ruf
     near_ra = local_sidereal_time % 24.0
 
     controller.validate_hour_angle_limits(telescope, ra=near_ra)
+
+
+def test_move_stop_does_not_send_switch_when_already_stopped(app_config: Any) -> None:
+    """Verify that stopping a direction already off sends no INDI switch."""
+    from unittest.mock import MagicMock
+
+    from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+    client_mock = MagicMock()
+    client_mock.config = app_config
+    controller = MountController(client_mock)
+
+    s1 = MagicMock()
+    s1.getName.return_value = "MOTION_NORTH"
+    s1.s = PyIndi.ISS_OFF
+
+    s2 = MagicMock()
+    s2.getName.return_value = "MOTION_SOUTH"
+    s2.s = PyIndi.ISS_OFF
+
+    switch_mock = [s1, s2]
+    telescope_mock = MagicMock()
+    telescope_mock.getSwitch.return_value = switch_mock
+
+    # Move with start=False (stopping motion in N)
+    controller.move(telescope_mock, "N", start=False)
+    client_mock.sendNewSwitch.assert_not_called()
+
+    # Move STOP
+    controller.move(telescope_mock, "STOP")
+    client_mock.sendNewSwitch.assert_not_called()

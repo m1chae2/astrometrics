@@ -36,7 +36,7 @@ def run_catalog_audit() -> None:
 
     print("Running Stellar Catalog Quality Auditing (Use Case 8.2)...")
     try:
-        audit_results = astrometrics.stars.get_audit()
+        audit_results = astrometrics.stars.query(detail="stats").stats
 
         print("\n==========================================")
         print("STELLAR CATALOG AUDIT REPORT")

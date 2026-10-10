@@ -1,0 +1,118 @@
+/**
+ * @fileoverview Styles for the CustomSelect component
+ * Implements GNOME Adwaita / Fluent dark styling, overlay scrollbars,
+ * and high-contrast focus rings.
+ */
+@import '../styles/theme.css';
+@import '../styles/scrollbars.css';
+
+.custom-select {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.custom-select__trigger {
+  width: 100%;
+  height: var(--control-btn-height);
+  padding: 0 12px;
+  padding-right: 36px;
+  box-sizing: border-box;
+  background-color: rgba(255, 255, 255, 0.04);
+  color: var(--white);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  font-family: var(--font-family-base);
+  font-size: var(--control-font-size, 14px);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.custom-select__trigger:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.custom-select--open .custom-select__trigger,
+.custom-select__trigger:focus {
+  border-color: var(--adwaita-blue-light, #3584e4);
+  box-shadow: 0 0 0 2px rgba(53, 132, 228, 0.3);
+}
+
+.custom-select__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.custom-select__arrow {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--text-light, #eee);
+  pointer-events: none;
+  transition: transform 0.2s ease;
+}
+
+.custom-select--open .custom-select__arrow {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.custom-select__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background-color: #1e2024;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 1000;
+  box-sizing: border-box;
+}
+
+.custom-select__option {
+  padding: 8px 12px;
+  border-radius: 5px;
+  color: var(--text-light, #eee);
+  font-family: var(--font-family-base);
+  font-size: var(--control-font-size, 14px);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.custom-select__option:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.custom-select__option--selected {
+  background-color: #244a70;
+  color: #fff;
+  font-weight: 500;
+}
+
+.custom-select__option--selected:hover {
+  background-color: #2b5984;
+}

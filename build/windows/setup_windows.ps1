@@ -26,7 +26,8 @@ if (-not (Test-Path ".venv")) {
 
 Write-Host "Upgrading pip and installing Python packages..." -ForegroundColor Yellow
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip
-& ".\.venv\Scripts\python.exe" -m pip install -e .
+# The mcp extra adds the MCP SDK, which only the MCP servers in mcp_servers\ need.
+& ".\.venv\Scripts\python.exe" -m pip install -e ".[mcp]"
 
 # 3. Node Dependencies
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {

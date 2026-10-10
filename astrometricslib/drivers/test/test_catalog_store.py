@@ -1,11 +1,12 @@
 """Tests for the local Gaia catalog cache database driver."""
 
 import sqlite3
+from pathlib import Path
 
 from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
 
 
-def test_coverage_of_a_missing_cache_is_empty_not_an_error(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_coverage_of_a_missing_cache_is_empty_not_an_error(tmp_path: Path) -> None:
     """A fresh install has no cache yet; that is a zero, not a failure."""
 
     class _Config:
@@ -25,7 +26,7 @@ def test_coverage_of_a_missing_cache_is_empty_not_an_error(tmp_path):  # ruff: i
     assert coverage["source_count"] == 0
 
 
-def test_coverage_counts_stored_sources_and_regions(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_coverage_counts_stored_sources_and_regions(tmp_path: Path) -> None:
     """Coverage reports what the cache actually holds."""
     catalogs = tmp_path / "catalogs"
     catalogs.mkdir()

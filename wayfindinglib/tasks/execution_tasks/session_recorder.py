@@ -1,29 +1,22 @@
 """Purpose: Builds an ObservationSession by Recording Observatory Telemetry.
 
-Description: `ObservationSessionRecorder`'s guiding/weather telemetry
-loop is carried forward unchanged from the deprecated
-`observationlib.session_recorder` (`Wayfinding_Library_Architecture.md`
-§2.4.7-§2.4.8) -- it listens to guiding telemetry via a
-`PHD2GuidingService` and takes periodic INDI status/weather snapshots;
-it never issues commands to PHD2 or the mount.
+Description: `ObservationSessionRecorder` runs a guiding and weather
+telemetry loop (`Wayfinding_Library_Architecture.md`). It
+listens to guiding telemetry through a `PHD2GuidingService` and takes
+periodic INDI status and weather snapshots. It never issues commands to
+PHD2 or the mount.
 
-What does change: the deprecated recorder constructed a bare
-`ObservationSession` from just an id. The new
-`wayfindinglib.models.session.observation_session.ObservationSession` requires
-`site_profile_id`/`telescope_id`/`camera_id` it has no way to invent,
-because those belong to Observation Planning
-(`Wayfinding_Library_Architecture.md` §2.2.3's session field-ownership
-invariant: the queue and its placement context are written only by
-Planning). `run()` therefore loads an existing, already-planned session
-by id and attaches telemetry to it, rather than creating one from
-scratch -- this follows directly from the field-ownership invariant,
-not from a change in what the recorder itself does.
+The recorder does not create sessions. A
+`wayfindinglib.models.session.observation_session.ObservationSession`
+needs `site_profile_id`, `telescope_id`, and `camera_id`, and the recorder
+cannot supply them. Those fields belong to Observation Planning
+(`Wayfinding_Library_Architecture.md`'s session field-ownership
+rule: only Planning writes the queue and its placement context).
+`run()` therefore loads an existing, already-planned session by id and
+attaches telemetry to it.
 
-`PHD2GuidingService.drain_guiding_samples()` yields the new
-`wayfindinglib.models.session.telemetry.GuidingSample` directly (the deprecated
-`wayfindinglib.observatory.GuidingSample` it originally yielded carried
-an identical field/alias shape, so repointing its import was a pure
-relocation rather than a data transformation).
+`PHD2GuidingService.drain_guiding_samples()` yields
+`wayfindinglib.models.session.telemetry.GuidingSample` objects directly.
 """
 
 import logging
@@ -31,6 +24,7 @@ import re
 import time
 from typing import Any
 
+from astrometricslib import NotFoundError
 from wayfindinglib.drivers.butler import DiskButler
 from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 from wayfindinglib.models.session.observation_session import ObservationSession, WeatherSample
@@ -75,13 +69,13 @@ class ObservationSessionRecorder:
         (default 300).
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         guiding_service: PHD2GuidingService,
         indi_driver: Any,
         butler: DiskButler | None = None,
         snapshot_interval_seconds: int = 300,
-    ):
+    ) -> None:
         """Initialize the recorder without starting the recording loop yet."""
         self._guiding_service = guiding_service
         self._indi_driver = indi_driver
@@ -137,14 +131,14 @@ class ObservationSessionRecorder:
 
         Raises
         ------
-        ValueError
+        NotFoundError
             If `session_id` does not resolve to an existing session --
             this recorder attaches telemetry to a session Planning
             already created, it does not create one.
         """
         session = self._butler.get("observation_session", {"session_id": session_id})
         if session is None:
-            raise ValueError(f"Session {session_id} not found")
+            raise NotFoundError(f"Session {session_id} not found")
 
         self._guiding_service.poll_external_telemetry()
 

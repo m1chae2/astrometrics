@@ -1,10 +1,23 @@
-import { callBackend, resolveImageSrc } from '../backendApi';
+import { callBackend, fetchImageFile, resolveImageSrc } from '../backendApi';
 import { reportError } from '../../utils/reportError';
+import { dataUrlToBlob } from '../../utils/dataUrl';
 
 /**
  * @fileoverview Service for managing, retrieving, and converting FITS files and target images.
  * Aligns with the Google TypeScript Style Guide.
  */
+
+/** MIME type given to a stretched FITS picture so the viewer parses it as FITS. */
+export const FITS_BLOB_TYPE = 'application/fits';
+
+/**
+ * Tells whether a path names the stretched FITS picture the stacking pipeline
+ * saves next to a stack (`<stack>_processed.fits`). That file is already
+ * stretched, so it is shown as it is and never stretched again.
+ */
+export function isProcessedFitsPath(path: string): boolean {
+    return /_processed\.fits?$/i.test(path);
+}
 
 /**
  * Fetches the processed image blob for a target object using its registered target details.
@@ -21,7 +34,7 @@ export async function fetchProcessedImage(
             return null;
         }
 
-        let imagePath = target.processedImage || target.stackedImage || target.stackedSpectralTarget || target.processed_image || target.stacked_image;
+        let imagePath = target.stacking?.processedImage || target.stacking?.stackedImage || target.spectralStacking?.stackedImage;
 
         if (!imagePath && target.frames) {
             const stackedFrame = target.frames.find(f =>
@@ -38,11 +51,32 @@ export async function fetchProcessedImage(
         }
 
         const ext = imagePath.split('.').pop()?.toLowerCase();
+        if (isProcessedFitsPath(imagePath)) {
+            const src = resolveImageSrc(imagePath);
+            if (!src) {
+                return null;
+            }
+            const response = await fetchImageFile(src, signal);
+            if (response.status === 404 || response.status === 204) {
+                return null;
+            }
+            if (!response.ok) {
+                throw new Error(
+                    `Failed to fetch processed FITS from static path ${src}: ${response.status} ${response.statusText}`
+                );
+            }
+            // Retyped because a static server may label FITS as an image type,
+            // which the viewer would try to decode as a picture.
+            return new Blob([await response.arrayBuffer()], { type: FITS_BLOB_TYPE });
+        }
         if (ext === 'fits' || ext === 'fit') {
             const result = await callBackend("images:convert_fits", { path: imagePath, stretch: true });
-            if (result && result.imageData) {
-                const res = await fetch(result.imageData, { signal });
-                return res.blob();
+            // Some backend paths return the snake_case name; the generated
+            // `RenderedImage` type only knows `imageData`.
+            const dataUrl = result?.imageData || (result as { image_data?: string } | null)?.image_data;
+            if (dataUrl) {
+                // Decoded directly: the Content Security Policy blocks fetch() on data: URLs.
+                return dataUrlToBlob(dataUrl);
             }
             return null;
         }
@@ -51,7 +85,7 @@ export async function fetchProcessedImage(
         if (!src) {
             return null;
         }
-        const response = await fetch(src, { method: 'GET', signal });
+        const response = await fetchImageFile(src, signal);
         if (response.status === 404 || response.status === 204) {
             return null;
         }
@@ -85,7 +119,7 @@ export async function fetchTargetFrame(
         index
     });
     const src = resolveImageSrc(path);
-    const response = await fetch(src, { method: 'GET', signal });
+    const response = await fetchImageFile(src, signal);
     if (!response.ok) {
         throw new Error(`Failed to fetch target frame blob from path ${src}: ${response.status} ${response.statusText}`);
     }
@@ -168,7 +202,7 @@ export async function deleteFiles(paths: string[], targetId?: string): Promise<{
  */
 export async function fetchLastImage(stretch: boolean = true): Promise<{ id: string; min: number; max: number; image_data: string; path: string } | null> {
     try {
-        const result = await callBackend("images:last", { stretch });
+        const result = await callBackend("images:last", { stretch }, { timeoutMs: 30000 });
         return result;
     } catch (err) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');

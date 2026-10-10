@@ -9,11 +9,14 @@ import logging
 import os
 from typing import Any
 
+from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
 from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
-from astrometricslib.utilities.config_loader import AppConfiguration
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +28,7 @@ class AstrometryPipeline:
     and identifies the objects.
     """
 
-    def __init__(self, app_config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, app_config: AppConfiguration | None = None, *, drivers: Drivers | None = None) -> None:
         """Set up the pipeline using the program's settings.
 
         Parameters
@@ -33,14 +36,18 @@ class AstrometryPipeline:
         app_config : `AppConfiguration`, optional
             The settings to use. If left blank, it will just
             use the default system settings.
+        drivers : `Drivers`, optional
+            The plate solver and SIMBAD driver to use. Any left out is the
+            built-in one.
         """
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             app_config = get_configuration()
 
         self.config = app_config
-        self.star_identifier = StarIdentifier(app_config)
+        self.drivers = drivers or Drivers()
+        self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
 
     def prepare_image(
         self,
@@ -48,6 +55,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Old name for the 'process' function (kept so old code still works).
 
@@ -62,13 +70,15 @@ class AstrometryPipeline:
             A hint for the horizontal coordinate (Right Ascension).
         target_dec : `float`, optional
             A hint for the vertical coordinate (Declination).
+        target_name : `str`, optional
+            The name of the target being imaged (see `process`).
 
         Returns
         -------
         analysis_context : `AnalysisContext`
             The results of running the pipeline on this image.
         """
-        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec)
+        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec, target_name)
 
     def process(
         self,
@@ -76,6 +86,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Run the whole pipeline on an image.
 
@@ -90,6 +101,11 @@ class AstrometryPipeline:
             A hint for where the telescope was pointing horizontally.
         target_dec : `float`, optional
             A hint for where the telescope was pointing vertically.
+        target_name : `str`, optional
+            The name of the target being imaged. When the field is not
+            solved, it names the star at the frame centre, and a planet or
+            the Moon is left without a star's name (see
+            `StarIdentifier._identify_stars_with_simbad`).
 
         Returns
         -------
@@ -103,7 +119,11 @@ class AstrometryPipeline:
         ra_hint, dec_hint = self._resolve_coordinate_hint(image, target_ra, target_dec)
 
         stellar_objects, wcs = self.star_identifier.process_image(
-            image, attempt_plate_solving=attempt_plate_solving, center_ra=ra_hint, center_dec=dec_hint
+            image,
+            attempt_plate_solving=attempt_plate_solving,
+            center_ra=ra_hint,
+            center_dec=dec_hint,
+            target_name=target_name,
         )
         wcs = self._fallback_to_header_wcs(image, wcs)
 
@@ -122,6 +142,12 @@ class AstrometryPipeline:
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
             astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),
+            catalog_match_separation_rms_arcsec=(
+                self.star_identifier.get_catalog_match_separation_rms_arcsec()
+            ),
+            plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
+            plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
+            astrometry_flags=list(self.star_identifier.astrometry_flags),
         )
 
     def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:
@@ -133,7 +159,7 @@ class AstrometryPipeline:
             The loaded image.
         """
         if isinstance(image_or_path, str):
-            logger.info(f"Loading image from path: {image_or_path}")
+            logger.info("Loading image from path: %s", image_or_path)
             return AstrometricsImage(image_or_path)
         return image_or_path
 
@@ -165,9 +191,9 @@ class AstrometryPipeline:
                     if float(target_ra) != 0.0 or float(target_dec) != 0.0:  # ruff: ignore[float-equality-comparison] -- 0.0 placeholder sentinel, not measured
                         ra_hint = float(target_ra)
                         dec_hint = float(target_dec)
-            except Exception as e:
+            except (InvalidArgumentError, ValueError, TypeError) as e:
                 logger.warning(
-                    f"Could not parse target coordinate strings '{target_ra}', '{target_dec}': {e}"
+                    "Could not parse target coordinate strings '%s', '%s': %s", target_ra, target_dec, e
                 )
 
         if ra_hint is None or dec_hint is None:
@@ -190,9 +216,9 @@ class AstrometryPipeline:
                         ra_hint = float(header_ra)
                         dec_hint = float(header_dec)
 
-                    logger.info(f"Found FITS header coordinate hints: {ra_hint}, {dec_hint}")
-                except Exception as e:
-                    logger.warning(f"Could not parse FITS header coordinates: {e}")
+                    logger.info("Found FITS header coordinate hints: %s, %s", ra_hint, dec_hint)
+                except DATA_ERRORS as e:
+                    logger.warning("Could not parse FITS header coordinates: %s", e)
 
         return ra_hint, dec_hint
 
@@ -266,8 +292,8 @@ class AstrometryPipeline:
                 x, y = wcs.world_to_pixel(target_coord)
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
-            except Exception as e:
-                logger.warning(f"WCS target conversion failed: {e}")
+            except DATA_ERRORS as e:
+                logger.warning("WCS target conversion failed: %s", e)
 
         if not extraction_center and (target_ra is not None and target_dec is not None) and wcs:
             try:
@@ -277,8 +303,8 @@ class AstrometryPipeline:
                 x, y = wcs.world_to_pixel(coord)
                 if _is_finite_pixel((x, y)):
                     extraction_center = (x, y)
-            except Exception as e:
-                logger.warning(f"WCS RA/Dec coordinate conversion failed: {e}")
+            except DATA_ERRORS as e:
+                logger.warning("WCS RA/Dec coordinate conversion failed: %s", e)
 
         return extraction_center
 
@@ -316,12 +342,43 @@ class AstrometryPipeline:
                     # gives weird or incorrect size data.
                     extraction_radius_px = int(max(15, min(200, derived_radius)))
                     logger.info(
-                        f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
-                        f"{extraction_radius_px} pixels"
+                        "Derived extended extraction radius from SIMBAD (%s arcmin): %s pixels",
+                        majaxis,
+                        extraction_radius_px,
                     )
-            except Exception as e:
-                logger.warning(f"Failed to derive extraction radius from WCS/SIMBAD: {e}")
+            except DATA_ERRORS as e:
+                logger.warning("Failed to derive extraction radius from WCS/SIMBAD: %s", e)
         return extraction_radius_px
+
+    def build_extended_source_hint(
+        self, image: AstrometricsImage, wcs: Any, target_ra: float | None, target_dec: float | None
+    ) -> ExtendedSourceHint | None:
+        """Build an image's extended-source hint from a supplied WCS.
+
+        `process` builds the hint itself when the image has a plate
+        solution. A spectroscopy stack has none, so its caller works one out
+        afterwards (from a solved stack of the same field, shifted to match)
+        and asks for the hint here.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The image whose target name is looked up.
+        wcs : `astropy.wcs.WCS`
+            A plate solution that gives this image's pixel positions.
+        target_ra : `float` or `None`
+            The target's right ascension in decimal degrees, used when the
+            catalog lookup gives no position.
+        target_dec : `float` or `None`
+            The target's declination in decimal degrees.
+
+        Returns
+        -------
+        extended_source_hint : `ExtendedSourceHint` or `None`
+            The hint, or `None` if the target isn't an extended source or
+            its region couldn't be resolved.
+        """
+        return self._build_extended_source_hint(self._resolve_object_name(image), wcs, target_ra, target_dec)
 
     def _build_extended_source_hint(
         self,
@@ -356,8 +413,9 @@ class AstrometryPipeline:
             return None
 
         logger.info(
-            f"Primary target '{object_name}' detected as an extended source ({otype}). "
-            "Resolving pixel coordinates..."
+            "Primary target '%s' detected as an extended source (%s). Resolving pixel coordinates...",
+            object_name,
+            otype,
         )
 
         # 3. Convert the object's real sky coordinates (from the
@@ -366,8 +424,9 @@ class AstrometryPipeline:
 
         if not extraction_center:
             logger.warning(
-                f"Failed to resolve coordinates for extended source target '{object_name}'; "
-                f"skipping extended-target enrichment."
+                "Failed to resolve coordinates for extended source target '%s'; skipping "
+                "extended-target enrichment.",
+                object_name,
             )
             return None
 
@@ -380,7 +439,7 @@ class AstrometryPipeline:
             extraction_center=extraction_center,
             extraction_radius_px=extraction_radius_px,
         )
-        logger.info(f"Recorded extended-source hint for '{object_name}'.")
+        logger.info("Recorded extended-source hint for '%s'.", object_name)
         return extended_source_hint
 
     def _seed_gaia_cache_from_wcs(self, image: AstrometricsImage, wcs: Any) -> None:
@@ -402,8 +461,8 @@ class AstrometryPipeline:
 
             ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
             self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
-        except Exception as e:
-            logger.warning(f"Automatic Gaia cache seeding skipped: {e}")
+        except (ConfigurationError, *DATA_ERRORS) as e:
+            logger.warning("Automatic Gaia cache seeding skipped: %s", e)
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.
@@ -451,10 +510,8 @@ class AstrometryPipeline:
             from astropy.coordinates import SkyCoord
             from astropy.wcs import FITSFixedWarning
 
-            from astrometricslib.drivers import simbad_interface
-
             warnings.simplefilter("ignore", FITSFixedWarning)
-            result = simbad_interface.query_object(
+            result = self.drivers.simbad_or_default().query_object(
                 object_name, votable_fields=("otype", "ra", "dec", "galdim_majaxis")
             )
             if result is not None and len(result) > 0:
@@ -474,7 +531,7 @@ class AstrometryPipeline:
                             pass
 
                 return otype in extended_otypes, coord, otype, majaxis
-        except Exception as e:
-            logger.warning(f"SIMBAD query failed for object '{object_name}': {e}")
+        except (ExternalServiceError, *DATA_ERRORS) as e:
+            logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
 
         return False, None, None, None

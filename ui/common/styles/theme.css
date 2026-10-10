@@ -1,8 +1,8 @@
 /* Common theme for Astrometrics UI */
 :root {
-  /* Fonts */
-  --font-family-base: 'Noto Sans', sans-serif;
-  --font-family-mono: 'Roboto Mono', monospace;
+  /* Fonts - Cross-platform adaptive system stack (Ubuntu on Linux, Segoe UI/Cascadia on Windows) */
+  --font-family-base: system-ui, 'Ubuntu Sans', 'Ubuntu', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-family-mono: 'Ubuntu Sans Mono', 'Ubuntu Mono', 'Cascadia Code', 'Segoe UI Mono', 'Consolas', monospace;
 
   /* Global Sizing */
   --control-font-size: 14px;
@@ -13,9 +13,10 @@
   --target-list-font-size: 16px;
   --section-label-size: 12px;
 
-  /* Scrollbars */
-  --scroll-thumb: rgba(25, 118, 210, 0.85);
-  --scroll-track: var(--grey-dark);
+  /* Scrollbars - Native GNOME Adwaita overlay scrollbars */
+  --scroll-thumb: rgba(255, 255, 255, 0.22);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.42);
+  --scroll-track: transparent;
   --scroll-width: 8px;
 
   /* Colors */
@@ -29,84 +30,96 @@
   --text-dimmest: #666;
   --text-darkest: #333;
 
-  --term-border: #333;
-  --term-bg-dark: #1e1e1e;
-  --term-bg-medium: #252526;
-  --term-bg-light: #2d2d2d;
-  --term-bg-lighter: #333;
-  --term-bg-lightest: #444;
-  --term-fg: #d4d4d4;
-  --term-fg-bright: #fff;
-  --term-fg-dim: #ccc;
-  --term-cyan: #4ec9b0;
-  --term-yellow: #dcdcaa;
-  --term-blue: #9cdcfe;
+  /* Ubuntu & Adwaita Dark Colors */
+  --ubuntu-orange: #e95420;
+  --ubuntu-orange-light: #ff7844;
+  --ubuntu-aubergine-dark: #300a24;
+  --ubuntu-aubergine: #4a154b;
+  --ubuntu-green: #26a269;
+  --ubuntu-cyan: #33c7de;
+  --adwaita-blue: #244a70;
+  --adwaita-blue-light: #3584e4;
+  --adwaita-blue-hover: #2b5984;
+
+  --term-border: #2e2e2e;
+  --term-bg-dark: #181818;
+  --term-bg-medium: #1e1e1e;
+  --term-bg-light: #252526;
+  --term-bg-lighter: #2d2d2d;
+  --term-bg-lightest: #383838;
+  --term-fg: #cccccc;
+  --term-fg-bright: #ffffff;
+  --term-fg-dim: #999999;
+  --term-cyan: #33c7de;
+  --term-yellow: #f6d32d;
+  --term-blue: #62a0ea;
 
   --cmd-bg-darkest: #141414;
   --cmd-bg-dark: #181818;
-  --cmd-bg-medium: #1a1a1a;
-  --cmd-bg-light: #222;
-  --cmd-bg-lighter: #333;
-  --cmd-bg-lightest: #555;
-  --cmd-fg-bright: #fff;
-  --cmd-fg: #eee;
-  --cmd-fg-dim: #ccc;
-  --cmd-fg-dimmer: #aaa;
-  --cmd-fg-dimmest: #888;
-  --cmd-border-blue: #3b82f6;
-  --cmd-fg-blue: #93c5fd;
-  --cmd-bg-brown: #472d00;
-  --cmd-fg-yellow: #ffcc00;
-  --cmd-fg-red: #ff8888;
+  --cmd-bg-medium: #1e1e1e;
+  --cmd-bg-light: #252526;
+  --cmd-bg-lighter: #2d2d2d;
+  --cmd-bg-lightest: #383838;
+  --cmd-fg-bright: #ffffff;
+  --cmd-fg: #cccccc;
+  --cmd-fg-dim: #999999;
+  --cmd-fg-dimmer: #777777;
+  --cmd-fg-dimmest: #555555;
+  --cmd-border-blue: #3584e4;
+  --cmd-fg-blue: #62a0ea;
+  --cmd-bg-brown: #382418;
+  --cmd-fg-yellow: #f6d32d;
+  --cmd-fg-red: #e95420;
 
   --astro-blue-light: #cfe8ff;
   --astro-blue-lighter: #dceefb;
   --astro-red-light: #ffb4b4;
 
-  --status-cyan: #4fc1ff;
+  --status-cyan: #33c7de;
   --status-cyan-bright: #00ffff;
-  --status-green: #4AF626;
+  --status-green: #26a269;
   --status-green-dim: #4ade80;
-  --status-yellow: #fbbf24;
-  --status-red: #f87171;
+  --status-yellow: #f6d32d;
+  --status-red: #e01b24;
   --status-red-bright: #ff0000;
 
-  --pill-blue: #007bff;
-  --pill-green: #28a745;
-  --pill-red: #dc3545;
+  --pill-blue: #3584e4;
+  --pill-green: #26a269;
+  --pill-red: #e01b24;
   --pill-grey: #6c757d;
 
-  --modal-bg: #1f1f1f;
-  --table-bg: #2d2d2d;
+  --modal-bg: #1e1e24;
+  --table-bg: #2d2d34;
 
-  --plot-blue: #4a9eff;
-  --plot-orange: #ffaa00;
-  --plot-green: #00ff00;
+  --plot-blue: #3584e4;
+  --plot-orange: #e95420;
+  --plot-green: #26a269;
+  --plot-red: #e01b24;
 
-  --list-green: #4CAF50;
-  --list-orange: #E65100;
+  --list-green: #26a269;
+  --list-orange: #e95420;
 
-  --toast-green: #1f8a3e;
-  --toast-red: #a83a3a;
+  --toast-green: #26a269;
+  --toast-red: #e01b24;
   --black: #000;
 
-  --accent-red: #ff4444;
+  --accent-red: #e01b24;
   --frame-padding: 6px;
-  --grey-darkest: #181818;
+  --grey-darkest: #1e1e20;
   /* RGB token for use with rgba(var(--grey-darkest-rgb), alpha) so overlays can
-    follow theme-controlled colors with adjustable alpha. Value: 24,24,24 */
-  --grey-darkest-rgb: 24, 24, 24;
-  --grey-dark: #222;
-  --grey-medium: #2C2C2C;
-  --grey-light: #444;
-  --grey-lighter: #505050;
-  --grey-lightest: #424242;
-  --primary-blue: #1976d2;
-  --accent-blue: #2196f3;
+    follow theme-controlled colors with adjustable alpha. Value: 30,30,32 */
+  --grey-darkest-rgb: 30, 30, 32;
+  --grey-dark: #242426;
+  --grey-medium: #2e2e32;
+  --grey-light: #44444a;
+  --grey-lighter: #54545c;
+  --grey-lightest: #64646e;
+  --primary-blue: #244a70;
+  --accent-blue: #3584e4;
   --white: #fff;
   --text-muted: #888;
-  --background-secondary: #2c2c2c;
-  --border-color: #444;
+  --background-secondary: #28282c;
+  --border-color: #44444a;
 
   /* Plot-specific aliases to keep component code simple and themeable */
   --plot-paper-bg: var(--grey-darkest);
@@ -116,15 +129,15 @@
   --plot-zeroline: var(--grey-lightest);
   --plot-accent: var(--accent-blue);
   --plot-selection: var(--accent-red);
-  /* Interactive Button Colors (Pending vs Active) */
-  --btn-blue-pending: #2196f3;
-  --btn-blue-active: #0d47a1;
-  --btn-green-pending: #4caf50;
+  /* Interactive Button Colors (Pending vs Active) - Red & Green kept purposeful */
+  --btn-blue-pending: #3584e4;
+  --btn-blue-active: #244a70;
+  --btn-green-pending: #4ade80;
   --btn-green-active: #1b5e20;
   --btn-red-pending: #ff5252;
   --btn-red-active: #b71c1c;
 
-  --success-green: #4caf50;
-  --warning-amber: #ffd86b;
-  --danger-red: #ff4444;
+  --success-green: #26a269;
+  --warning-amber: #f6d32d;
+  --danger-red: #e01b24;
 }

@@ -3,16 +3,16 @@
 Description: Verifies parse_guide_step_event correctly maps a real
 GuideStep event shape onto GuidingSample, ignores non-GuideStep events,
 and applies direction-sign handling for pulse_ra/pulse_dec; verifies
-to_legacy_history_entry's adapter shape.
+to_history_entry's adapter shape.
 """
 
 import pytest
 
-from wayfindinglib.drivers.phd2.phd2_events import parse_guide_step_event, to_legacy_history_entry
+from wayfindinglib.drivers.phd2.phd2_events import parse_guide_step_event, to_history_entry
 from wayfindinglib.models.session.telemetry import GuidingSample
 
 
-def test_parse_guide_step_event_maps_real_event_shape():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parse_guide_step_event_maps_real_event_shape() -> None:
     """Verify a realistic GuideStep event maps onto GuidingSample's fields."""
     event = {
         "Event": "GuideStep",
@@ -35,14 +35,14 @@ def test_parse_guide_step_event_maps_real_event_shape():  # ruff: ignore[missing
     assert guiding_sample.snr == pytest.approx(30.5)
 
 
-def test_parse_guide_step_event_ignores_other_event_types():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parse_guide_step_event_ignores_other_event_types() -> None:
     """Verifies non-GuideStep events return None."""
     assert parse_guide_step_event({"Event": "Settling"}) is None
     assert parse_guide_step_event({"Event": "Version", "PHDVersion": "2.6.11"}) is None
     assert parse_guide_step_event({}) is None
 
 
-def test_parse_guide_step_event_applies_direction_sign_to_pulses():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parse_guide_step_event_applies_direction_sign_to_pulses() -> None:
     """Verifies pulse_ra/pulse_dec flip sign for West/South directions."""
     east_north_event = {
         "Event": "GuideStep",
@@ -71,7 +71,7 @@ def test_parse_guide_step_event_applies_direction_sign_to_pulses():  # ruff: ign
     assert west_south_sample.pulse_dec == pytest.approx(-40.0)
 
 
-def test_parse_guide_step_event_falls_back_to_raw_distance_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_parse_guide_step_event_falls_back_to_raw_distance_fields() -> None:
     """Verify raw-distance fields are used when Guide variants are absent."""
     event = {
         "Event": "GuideStep",
@@ -84,10 +84,10 @@ def test_parse_guide_step_event_falls_back_to_raw_distance_fields():  # ruff: ig
     assert guiding_sample.ddec == pytest.approx(0.4)
 
 
-def test_to_legacy_history_entry_matches_expected_consumer_shape():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify the adapter produces the shape the legacy consumer expects."""
+def test_to_history_entry_matches_expected_consumer_shape() -> None:
+    """Verify the adapter produces the shape the status consumers expect."""
     guiding_sample = GuidingSample(time=1000.0, dra=0.3, ddec=0.1, pulse_ra=80.0, pulse_dec=-40.0, snr=25.0)
-    entry = to_legacy_history_entry(guiding_sample)
+    entry = to_history_entry(guiding_sample)
     assert entry == {
         "timestamp": 1000.0,
         "raDrift": 0.3,

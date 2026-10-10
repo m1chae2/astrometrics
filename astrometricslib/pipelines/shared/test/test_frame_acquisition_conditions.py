@@ -5,6 +5,8 @@ were previously discarded, leaving no way to tell "the mount misbehaved"
 from "the target was low" when a later analysis flagged a frame.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.io import fits
@@ -12,7 +14,7 @@ from astropy.io import fits
 from astrometricslib.pipelines.shared.frame_scanning import create_frame_record_from_fits
 
 
-def _write_frame(path, **header_cards):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function, missing-type-kwargs]
+def _write_frame(path, **header_cards) -> str:  # ruff: ignore[missing-type-function-argument, missing-type-kwargs]
     """Write a small FITS frame carrying the given header cards.
 
     Returns
@@ -28,14 +30,14 @@ def _write_frame(path, **header_cards):  # ruff: ignore[missing-type-function-ar
     return str(path)
 
 
-def test_captures_pier_side(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_captures_pier_side(tmp_path: Path) -> None:
     """Pier side is what separates a meridian flip from a tracking fault."""
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", PIERSIDE="WEST"))
 
     assert record.pier_side == "WEST"
 
 
-def test_captures_sky_position_and_airmass(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_captures_sky_position_and_airmass(tmp_path: Path) -> None:
     """Altitude and airmass explain seeing and background variation."""
     record = create_frame_record_from_fits(
         _write_frame(tmp_path / "a.fits", AIRMASS=1.21, OBJCTALT=55.9, OBJCTAZ=160.8)
@@ -46,7 +48,7 @@ def test_captures_sky_position_and_airmass(tmp_path):  # ruff: ignore[missing-ty
     assert record.azimuth_degrees == pytest.approx(160.8)
 
 
-def test_captures_pixel_scale_and_binning(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_captures_pixel_scale_and_binning(tmp_path: Path) -> None:
     """Pixel scale is what makes a FWHM in pixels comparable across setups."""
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", SECPIX1=1.915, XBINNING=2))
 
@@ -54,14 +56,14 @@ def test_captures_pixel_scale_and_binning(tmp_path):  # ruff: ignore[missing-typ
     assert record.binning == 2
 
 
-def test_falls_back_to_scale_when_secpix_absent(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_falls_back_to_scale_when_secpix_absent(tmp_path: Path) -> None:
     """Different writers spell the same quantity differently."""
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", SCALE=2.04))
 
     assert record.pixel_scale_arcsec == pytest.approx(2.04)
 
 
-def test_captures_cooled_camera_telemetry(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_captures_cooled_camera_telemetry(tmp_path: Path) -> None:
     """Sensor and focuser telemetry enable focus-drift analysis."""
     record = create_frame_record_from_fits(
         _write_frame(tmp_path / "a.fits", CCD_TEMP=5.6, FOCUSPOS=29936, FOCUSTEM=13.29)
@@ -72,7 +74,7 @@ def test_captures_cooled_camera_telemetry(tmp_path):  # ruff: ignore[missing-typ
     assert record.focuser_temperature_c == pytest.approx(13.29)
 
 
-def test_absent_keys_leave_fields_unset(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_absent_keys_leave_fields_unset(tmp_path: Path) -> None:
     """A DSLR writes no cooling telemetry; that is not an error."""
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits"))
 
@@ -81,7 +83,7 @@ def test_absent_keys_leave_fields_unset(tmp_path):  # ruff: ignore[missing-type-
     assert record.pier_side is None
 
 
-def test_non_numeric_header_value_does_not_raise(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_non_numeric_header_value_does_not_raise(tmp_path: Path) -> None:
     """A malformed value yields None rather than aborting the whole scan."""
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", AIRMASS="N/A"))
 
@@ -90,7 +92,7 @@ def test_non_numeric_header_value_does_not_raise(tmp_path):  # ruff: ignore[miss
     assert record.exposure == "30.0"
 
 
-def test_refresh_populates_an_already_indexed_frame(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_refresh_populates_an_already_indexed_frame(tmp_path: Path) -> None:
     """Fields added after a frame was indexed must still reach it.
 
     scan_target_directory only builds records for files it has not seen,
@@ -110,7 +112,7 @@ def test_refresh_populates_an_already_indexed_frame(tmp_path):  # ruff: ignore[m
     assert record.airmass == pytest.approx(1.4)
 
 
-def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_refresh_preserves_measured_values(tmp_path: Path) -> None:
     """A header refresh must not discard anything a pipeline measured.
 
     Registration facts and pixel measurements come from stacking and
@@ -120,18 +122,18 @@ def test_refresh_preserves_measured_values(tmp_path):  # ruff: ignore[missing-ty
     from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions
 
     record = create_frame_record_from_fits(_write_frame(tmp_path / "a.fits", PIERSIDE="WEST"))
-    record.background_level = 4456.0
-    record.registration_fwhm_x_px = 2.48
-    record.registration_dx_px = 6.32
+    record.measurements.background_level = 4456.0
+    record.measurements.registration_fwhm_x_px = 2.48
+    record.measurements.registration_dx_px = 6.32
 
     refresh_acquisition_conditions(record)
 
-    assert record.background_level == pytest.approx(4456.0)
-    assert record.registration_fwhm_x_px == pytest.approx(2.48)
-    assert record.registration_dx_px == pytest.approx(6.32)
+    assert record.measurements.background_level == pytest.approx(4456.0)
+    assert record.measurements.registration_fwhm_x_px == pytest.approx(2.48)
+    assert record.measurements.registration_dx_px == pytest.approx(6.32)
 
 
-def test_refresh_of_a_missing_file_reports_failure(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_refresh_of_a_missing_file_reports_failure(tmp_path: Path) -> None:
     """A deleted frame cannot be refreshed, and says so rather than raising."""
     from astrometricslib.models.target import FrameRecord
     from astrometricslib.pipelines.shared.frame_scanning import refresh_acquisition_conditions

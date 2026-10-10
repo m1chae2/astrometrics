@@ -2,12 +2,16 @@
 
 import gc
 import logging
+import weakref
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from astrometricslib.drivers import siril_interface
 
 
-def test_image_processing_instances_do_not_pin_after_deletion():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_image_processing_instances_do_not_pin_after_deletion() -> None:
     """Verify ImageProcessing instances are only weakly held.
 
     So they don't leak across many targets.
@@ -18,14 +22,19 @@ def test_image_processing_instances_do_not_pin_after_deletion():  # ruff: ignore
 
     driver = siril_interface.ImageProcessing(mock_config, mock_library)
     assert driver in siril_interface._active_image_processing_instances
+    # Watch this one instance, not the whole registry: another test's
+    # instance still alive elsewhere in the run must not fail this one.
+    weak_driver = weakref.ref(driver)
 
     del driver
     gc.collect()
 
-    assert len(siril_interface._active_image_processing_instances) == 0
+    assert weak_driver() is None
 
 
-def test_process_target_closes_logger_handler_on_completion(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_process_target_closes_logger_handler_on_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify process_target closes its FileHandler even on failure."""
     mock_config = MagicMock()
     mock_config.get_siril_executable.return_value = "siril"
@@ -33,6 +42,7 @@ def test_process_target_closes_logger_handler_on_completion(tmp_path, monkeypatc
     mock_config.get_stack_rejection_sigma.return_value = (3.0, 3.0)
     mock_config.get_stack_filter_wfwhm_percentile.return_value = None
     mock_config.get_stack_filter_round_percentile.return_value = None
+    mock_config.get_minimum_calibration_frames.return_value = 3
     mock_config.get_stack_weight.return_value = "wfwhm"
     mock_config.get_stack_generate_rejmap.return_value = True
     mock_library = MagicMock()

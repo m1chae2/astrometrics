@@ -14,6 +14,7 @@ export { type LightFrameRow } from './useStackingJob';
  */
 export interface UseImageProcessingResult {
     lightFrames: LightFrameRow[];
+    isLoadingFrames: boolean;
     logLines: string[];
     isProcessing: boolean;
     startProcessing: (imageFiles?: string[], logFile?: string) => Promise<void>;
@@ -52,6 +53,7 @@ export function useImageProcessing(
 
     return {
         lightFrames: stacking.lightFrames,
+        isLoadingFrames: stacking.isLoadingFrames,
         logLines: stacking.logLines,
         isProcessing: stacking.isProcessing,
         startProcessing: stacking.startProcessing,

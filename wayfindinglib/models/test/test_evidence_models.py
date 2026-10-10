@@ -13,7 +13,7 @@ from wayfindinglib.models.session.meridian_flip import MeridianFlipOutcome
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
 
 
-def test_divergence_record_signed_magnitude():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_divergence_record_signed_magnitude() -> None:
     """Verify divergence_magnitude is signed, intended-minus-observed."""
     record = DivergenceRecord(
         id="d1",
@@ -30,7 +30,7 @@ def test_divergence_record_signed_magnitude():  # ruff: ignore[missing-return-ty
     assert record.divergence_magnitude == pytest.approx(-20.0)
 
 
-def test_divergence_record_defaults_no_queue_entry():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_divergence_record_defaults_no_queue_entry() -> None:
     """Verify queued_observation_package_id defaults to None."""
     record = DivergenceRecord(
         id="d1",
@@ -47,7 +47,7 @@ def test_divergence_record_defaults_no_queue_entry():  # ruff: ignore[missing-re
     assert record.queued_observation_package_id is None
 
 
-def test_meridian_flip_outcome_defaults_unresumed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_meridian_flip_outcome_defaults_unresumed() -> None:
     """Verify a fresh MeridianFlipOutcome defaults to not resumed."""
     outcome = MeridianFlipOutcome(
         id="flip1", queued_observation_package_id="qp1", hour_angle_at_trigger_deg=1.0
@@ -57,7 +57,7 @@ def test_meridian_flip_outcome_defaults_unresumed():  # ruff: ignore[missing-ret
     assert outcome.failure_detail is None
 
 
-def test_safe_state_outcome_tracks_failed_step():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_state_outcome_tracks_failed_step() -> None:
     """Verify SafeStateOutcome records the first failed step distinctly."""
     outcome = SafeStateOutcome(
         trigger="unsafe_verdict",

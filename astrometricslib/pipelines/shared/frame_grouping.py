@@ -8,11 +8,14 @@ the one place that logic lives, so every pipeline answers the question
 the same way.
 """
 
+import logging
 import os
 from typing import Any
 
+from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord
-from astrometricslib.utilities.enums import FilterType
+
+logger = logging.getLogger(__name__)
 
 
 def select_frames_for_camera(target: Any, camera_name: str) -> list:
@@ -150,18 +153,22 @@ def frame_is_spectral(frame: Any) -> bool:
     Parameters
     ----------
     frame : `Any`
-        The frame record (or anything with a `.filter` attribute) to check.
+        The frame record (or anything with a `.filter` attribute or
+        `"filter"` key) to check.
 
     Returns
     -------
     is_spectral : `bool`
         True if the frame is a spectroscopy frame.
     """
-    frame_filter = getattr(frame, "filter", None)
+    if isinstance(frame, dict):
+        frame_filter = frame.get("filter")
+    else:
+        frame_filter = getattr(frame, "filter", None)
     return (
         frame_filter == FilterType.SPEC
         or getattr(frame_filter, "name", None) == "SPEC"
-        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200")
+        or str(frame_filter).upper() in ("SPEC", "STAR ANALYZER 200", "SPECTROSCOPY")
     )
 
 
@@ -195,9 +202,11 @@ def select_frames_for_processing(
             if (frame_configuration_key(frame) or "").endswith(requested_key_suffix)
         ]
         if not selected_frames:
-            print(
-                f"[{target.id}] No frames at {focal_length_mm:g}mm for camera '{camera_name}'. "
-                "Skipping all processing steps."
+            logger.warning(
+                "[%s] No frames at %gmm for camera '%s'. Skipping all processing steps.",
+                target.id,
+                focal_length_mm,
+                camera_name,
             )
             return None
         unassignable = frames_missing_focal_length(target, camera_name)
@@ -205,16 +214,18 @@ def select_frames_for_processing(
             # Never dropped silently: a frame with no FOCALLEN cannot be
             # grouped, and on this library that is 602 frames. See
             # scripts/backfill_focal_length.
-            print(
-                f"[{target.id}] {len(unassignable)} frame(s) excluded: no FOCALLEN recorded, "
-                "so their optic is unknown."
+            logger.warning(
+                "[%s] %s frame(s) excluded: no FOCALLEN recorded, so their optic is unknown.",
+                target.id,
+                len(unassignable),
             )
         camera_frames = selected_frames
 
     if not camera_frames:
-        print(
-            f"[{target.id}] No frames matching camera '{camera_name}' found for this target. "
-            "Skipping all processing steps."
+        logger.warning(
+            "[%s] No frames matching camera '%s' found for this target. Skipping all processing steps.",
+            target.id,
+            camera_name,
         )
         return None
 
@@ -234,7 +245,7 @@ def split_standard_and_spectral_frames(
     standard_frames, spectral_frames : `list` [`FrameRecord`]
         The non-SPEC and SPEC frames, respectively.
     """
-    print(f"[{target.id}] Stacking frames...")
+    logger.info("[%s] Stacking frames...", target.id)
     target_frames = [
         frame
         for frame in camera_frames
@@ -255,13 +266,13 @@ def split_standard_and_spectral_frames(
     return standard_frames, spectral_frames
 
 
-def add_frame(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def add_frame(
     target,  # ruff: ignore[missing-type-function-argument]
     path: str,
     role: str = "LIGHT",
     filter_type: str | None = None,
     camera: str | None = None,
-):
+) -> FrameRecord:
     """Add an image to a target, or update it if it's already there.
 
     This function reads the metadata from the image file and updates the

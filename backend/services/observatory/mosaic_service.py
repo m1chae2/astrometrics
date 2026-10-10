@@ -1,4 +1,10 @@
-"""Purpose: Coordinate math and target generation for mosaic imaging plans.
+"""Purpose: Serve the Mosaic Planner's preview and create requests.
+
+Description: The UI previews a mosaic grid, then creates it. Both ask
+`Wayfinder.planning`: `calculate_panels` works out the panel centers and
+`create_mosaic` adds one library target per panel. The create reply is one
+item per panel in the shape the app's sequencer queue takes, so the UI can
+queue the panels straight away.
 
 REQ: BKD-4.3
 """
@@ -8,123 +14,81 @@ from typing import Any
 
 
 class MosaicService:
-    """Calculate mosaic panel coordinates and generate their targets."""
+    """Preview mosaic grids and add their panel targets."""
 
-    def __init__(self, target_manager, wayfinder):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self.target_manager = target_manager
+    def __init__(self, wayfinder: Any) -> None:
+        """Keep the Wayfinder whose planning API does the work.
+
+        Parameters
+        ----------
+        wayfinder : `wayfindinglib.Wayfinder`
+            The shared Wayfinder.
+        """
         self.wayfinder = wayfinder
 
-    def preview_mosaic(self, center_ra: float, center_dec: float, grid: dict) -> list[dict[str, Any]]:
-        """RPC wrapper to map grid parameters to calculate_panels.
+    def preview_mosaic(self, center_ra: float, center_dec: float, grid: dict) -> list[Any]:
+        """Work out the panel centers of a grid around a point.
+
+        Parameters
+        ----------
+        center_ra : `float`
+            Right ascension of the grid center.
+        center_dec : `float`
+            Declination of the grid center.
+        grid : `dict`
+            ``rows``, ``cols`` and ``overlap`` (percent); each defaults
+            to 1, 1 and 0.
 
         Returns
         -------
-        panels : `list` [`dict`]
-            The RA/DEC coordinates of every panel in the mosaic grid.
-        """
-        rows = grid.get("rows", 1)
-        cols = grid.get("cols", 1)
-        overlap = grid.get("overlap", 0.0)
-        return self.calculate_panels(
-            center_ra=str(center_ra),
-            center_dec=str(center_dec),
-            rows=rows,
-            cols=cols,
-            overlap_percent=float(overlap),
-        )
-
-    def calculate_panels(
-        self, center_ra: str, center_dec: str, rows: int, cols: int, overlap_percent: float
-    ) -> list[dict[str, Any]]:
-        """Calculate the RA/DEC coordinates for a mosaic grid.
-
-        Delegates to the canonical wayfindinglib implementation rather than
-        maintaining an independent copy of the panel-offset math.
-
-        Returns
-        -------
-        panels : `list` [`dict`]
-            The RA/DEC coordinates of every panel in the mosaic grid.
+        panels : `list` [`MosaicPanel`]
+            One panel per grid cell.
         """
         return self.wayfinder.planning.calculate_panels(
-            center_ra=center_ra, center_dec=center_dec, rows=rows, cols=cols, overlap_percent=overlap_percent
+            center_ra=str(center_ra),
+            center_dec=str(center_dec),
+            rows=grid.get("rows", 1),
+            cols=grid.get("cols", 1),
+            overlap_percent=float(grid.get("overlap", 0.0)),
         )
 
-    def create_mosaic_targets(
-        self,
-        parent_target_id: str,
-        grid_config: dict[str, Any],
-        panels: list[dict[str, Any]],
-        image_config: dict[str, Any],
-        dither_config: dict[str, Any],
+    def create_mosaic(
+        self, parent_target_id: str, grid: dict, panels: list, image_config: dict, dither_config: dict
     ) -> list[dict[str, Any]]:
-        """Create panel targets and return PlanItems.
+        """Add one library target per panel and describe each for the queue.
+
+        Parameters
+        ----------
+        parent_target_id : `str`
+            The target the mosaic covers.
+        grid : `dict`
+            The grid the panels came from. Not used; the panels say it all.
+        panels : `list` [`dict`]
+            The panels, as `preview_mosaic` returned them.
+        image_config : `dict`
+            ``type``, ``count``, ``exposure``, ``filter`` and an optional
+            ``delay`` for every panel.
+        dither_config : `dict`
+            The dithering for every panel; kept only when ``enabled``.
 
         Returns
         -------
         plan_items : `list` [`dict`]
-            One plan item per panel, describing the imaging job
-            (type, count, exposure, filter, delay, coordinates, and
-            optional dither settings) to run against that panel.
-
-        Raises
-        ------
-        ValueError
-            If `parent_target_id` does not resolve to an existing
-            target via `target_manager.get_target`.
+            One sequencer item per panel, with the panel's center and name.
         """
-        from astrometricslib import Target
-
-        parent = self.target_manager.get_target(parent_target_id)
-        if not parent:
-            raise ValueError(f"Parent target {parent_target_id} not found")
-
-        plan_items = []
-
-        for p in panels:
-            panel_suffix = f"_P{p['row'] + 1}_{p['col'] + 1}"
-            new_name = (parent.common_name or parent.id) + panel_suffix
-            new_target = Target(
-                id=new_name,
-                commonName=new_name,
-                ra=p["ra_str"],
-                dec=p["dec_str"],
-            )
-            new_target.main_camera = parent.main_camera
-            new_target.main_scope = parent.main_scope
-            new_target.field_of_view = parent.field_of_view
-
-            self.target_manager.create_target(new_target)
-
-            plan_items.append({
+        plan = self.wayfinder.planning.create_mosaic(parent_target_id, panels, packages=False)
+        dither = dither_config if dither_config.get("enabled") else None
+        return [
+            {
                 "id": str(uuid.uuid4()),
                 "type": image_config["type"],
                 "count": image_config["count"],
                 "exposure": image_config["exposure"],
                 "filter": image_config["filter"],
                 "delay": image_config.get("delay", 0),
-                "coordinates": {"ra": p["ra_deg"], "dec": p["dec_deg"]},
-                "dither": dither_config if dither_config.get("enabled") else None,
-                "name": p["panel_id"],
-            })
-
-        return plan_items
-
-    def create_mosaic_targets_rpc(
-        self, parent_target_id: str, grid: dict, panels: list, image_config: dict, dither_config: dict
-    ) -> list[dict[str, Any]]:
-        """RPC wrapper for mosaic creation using standard param names.
-
-        Returns
-        -------
-        plan_items : `list` [`dict`]
-            One plan item per panel, as returned by
-            `create_mosaic_targets`.
-        """
-        return self.create_mosaic_targets(
-            parent_target_id=parent_target_id,
-            grid_config=grid,
-            panels=panels,
-            image_config=image_config,
-            dither_config=dither_config,
-        )
+                "coordinates": {"ra": panel.ra_deg, "dec": panel.dec_deg},
+                "dither": dither,
+                "name": panel.panel_id,
+            }
+            for panel in plan.panels
+        ]

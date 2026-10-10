@@ -1,27 +1,51 @@
-/* Global Scrollbar Theming */
+/* GNOME Adwaita Overlay Scrollbars */
 :root {
-  --scroll-thumb: rgba(25, 118, 210, 0.85);
-  --scroll-track: var(--grey-dark);
+  --scroll-thumb: rgba(255, 255, 255, 0.2);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.4);
+  --scroll-track: transparent;
   --scroll-width: 8px;
 }
 
-/* Apply scrollbar styles to ALL elements */
+/* Apply overlay scrollbar styles to all scrollable elements */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+  scrollbar-color: var(--scroll-thumb) transparent;
 }
 
-/* WebKit-based browsers */
+/* Completely disable horizontal scrollbars globally */
+*::-webkit-scrollbar:horizontal,
+::-webkit-scrollbar:horizontal {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+}
+
+/* WebKit / Chromium styling for vertical overlay scrollbar */
 *::-webkit-scrollbar {
   width: var(--scroll-width);
-  height: var(--scroll-width);
+  height: 0;
+  background-color: transparent;
+}
+
+*::-webkit-scrollbar:vertical {
+  width: var(--scroll-width);
+  background-color: transparent;
+}
+
+*::-webkit-scrollbar-track {
+  background-color: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb);
-  border-radius: 4px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background-color 0.25s ease;
 }
 
-*::-webkit-scrollbar-track {
-  background-color: var(--scroll-track);
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+  background-clip: content-box;
 }

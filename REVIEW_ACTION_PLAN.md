@@ -94,6 +94,39 @@ serve the two aims strongly enough to go before the science work:
 8. Tier 3 science items.
 9. Deferred items as time allows.
 
+### 1.4 Progress
+
+Each line names the check that now holds the item, per section 5.5. A line with no check is not
+done.
+
+| Item | State | Check |
+|---|---|---|
+| A15 | done | `.claude/hooks/session-start.sh` builds `.venv`; validated by a cloud-session run |
+| Generators | done | `astrometricslib/test/synthetic/test_synthetic_generators.py` |
+| Golden suite | done | `astrometricslib/test/golden/test_golden_m13.py` (skips without Git LFS frames) |
+| S1 | done | `pipelines/astrometry/test/test_runner_wcs_write_back.py`; the same bug was removed from `session_identification.py` and `spectroscopy/batch.py` |
+| S2 | done | `pipelines/photometry/test/pre_processing/test_frame_photometry.py` (sub-pixel, drift, centroid tests) |
+| S3 | done | `pipelines/photometry/test/test_between_session_variability.py` |
+| S4 | done | `drivers/test/test_siril_calibration_master_scripts.py`; gate `calibration_frame_count` |
+| S5 | done | `test_frame_photometry.py` and `test_variability_analyzer_timestamps.py`; `test_layer_boundaries.py` blocks `datetime.now` under `pipelines/` |
+| S6 | done | `pipelines/asteroid_detection/test/test_detection_ra_wrap.py` |
+| S7 | done | `pipelines/spectroscopy/utilities/test/test_calibration_tuner_sample_distances.py` |
+| S13 | done | `pipelines/stacking/test/test_exposure_group_linearity.py`; gate `exposure_group_linearity` |
+
+Found while doing tier 1, now tracked as follow-ups:
+
+- The global-shift centroid in `frame_photometry.py` counted noise as light and under-measured
+  drift by about half. Fixed with S2.
+- RA is still differenced without wrapping in `asteroid_detection/pipeline.py` (pointing
+  correction) and `astrometry/processing/star_identifier.py` (catalog bounding box).
+- `find_zero_order_position` returns `None` on every M 13 spectroscopy frame, because the target
+  is an extended cluster. The spectral frame check therefore cannot run on cluster targets.
+- The tuner's dip detector uses an absolute prominence in the spectrum's own units and can find
+  hundreds of dips on a noisy ADU-scale spectrum, after which the three-line search does not
+  finish.
+- `test_periodicity_search.py::test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search`
+  is a wall-clock test (30 s) that takes about 31 s on a 4-core container with unchanged code.
+
 ## 2. Decisions to make first
 
 Three of your instructions contradict the repository's own documents. Items D1 and D2 affect only the

@@ -56,6 +56,7 @@ dependencies = [
     "pytest",
     "pytest-cov",
     "pytest-mock",
+    "pytest-xdist", # optional parallel runs: PYTEST_WORKERS=auto ./build/linux/run_tests.sh
     "rawpy",
     "scipy",
     "setuptools",

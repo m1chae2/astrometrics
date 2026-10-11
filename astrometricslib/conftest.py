@@ -122,6 +122,10 @@ sys.modules["astroquery.simbad"] = mock_astroquery.simbad
 sys.modules["astroquery.astrometry_net"] = mock_astroquery.astrometry_net
 sys.modules["astroquery.imcce"] = mock_astroquery.imcce
 sys.modules["astroquery.gaia"] = mock_astroquery.gaia
+sys.modules["astroquery.vizier"] = mock_astroquery.vizier
+# VizieR answers a Gaia cone search with an empty list of tables, as it does
+# for a part of the sky with no catalog stars, so no test needs the network.
+mock_astroquery.vizier.Vizier.return_value.query_region.return_value = []
 # Code catches astroquery's own TimeoutError, so the stand-in must be a
 # real exception class rather than a mock attribute.
 mock_astroquery.exceptions.TimeoutError = type("TimeoutError", (Exception,), {})

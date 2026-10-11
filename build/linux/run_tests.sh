@@ -15,6 +15,11 @@
 #
 # Any additional arguments are forwarded to pytest, e.g.
 #   ./build/linux/run_tests.sh wayfindinglib -k visibility
+#
+# Parallel runs (needs pytest-xdist, which setup_venv.sh installs): set
+# PYTEST_WORKERS to a worker count, or to "auto" for one per core, e.g.
+#   PYTEST_WORKERS=8 ./build/linux/run_tests.sh astrometricslib
+# Unset, the tests run one at a time, as CI does.
 # =============================================================================
 
 set -euo pipefail
@@ -63,7 +68,11 @@ run_suite() {
 
   echo "=== $suite ==="
   # shellcheck disable=SC2086 -- targets intentionally word-splits into args.
-  $PYTEST ${coverage_args[@]+"${coverage_args[@]}"} $targets "$@"
+  local worker_args=()
+  if [ -n "${PYTEST_WORKERS:-}" ]; then
+    worker_args=(-n "$PYTEST_WORKERS")
+  fi
+  $PYTEST ${coverage_args[@]+"${coverage_args[@]}"} ${worker_args[@]+"${worker_args[@]}"} $targets "$@"
 }
 
 case "$SUITE" in

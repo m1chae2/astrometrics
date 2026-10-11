@@ -83,7 +83,10 @@ def test_the_position_error_follows_the_scatter_of_the_detections(noise_arcsec: 
     assert ra_offset_deg * 3600.0 * _COS_DECLINATION == pytest.approx(shift_ra_arcsec, abs=1.0)
     assert dec_offset_deg * 3600.0 == pytest.approx(shift_dec_arcsec, abs=1.0)
     assert position_error is not None
-    assert position_error == pytest.approx(noise_arcsec, rel=0.35)
+    assert position_error.ra_arcsec == pytest.approx(noise_arcsec, rel=0.35)
+    assert position_error.dec_arcsec == pytest.approx(noise_arcsec, rel=0.35)
+    # The two axes were given independent noise, so they are uncorrelated.
+    assert abs(position_error.correlation) < 0.3
 
 
 def test_the_position_error_is_none_when_no_correction_could_be_measured() -> None:
@@ -137,3 +140,30 @@ def test_the_pipeline_carries_exposure_time_and_an_assumed_error_onto_the_track(
     )
     assert pipeline.last_run_metrics["residual_chains_tested"] == 1
     assert pipeline.last_run_metrics["residual_assumed_error_detections"] == 4
+
+
+def test_the_estimate_recovers_a_correlation_between_the_axes() -> None:
+    """Noise with a correlation of 0.6 and unequal axes is read back.
+
+    The east-west noise is 1 arcsec and the north-south 3 arcsec, so the two
+    axis errors differ, and the correlation is the number the ADES column
+    ``rmsCorr`` carries.
+    """
+    reference = _spread_out_reference_stars(400, seed=7)
+    rng = np.random.default_rng(23)
+    covariance = np.array([[1.0, 0.6 * 1.0 * 3.0], [0.6 * 1.0 * 3.0, 9.0]])
+    noise = rng.multivariate_normal([0.0, 0.0], covariance, size=len(reference))
+    detections = [
+        (ra - (4.0 + n[0]) / 3600.0 / _COS_DECLINATION, dec - (-3.0 + n[1]) / 3600.0)
+        for (ra, dec), n in zip(reference, noise, strict=True)
+    ]
+    tree, reference_ra, reference_dec, cos_dec = _build_reference_star_tree(reference)
+
+    _, _, position_error = _estimate_bulk_pointing_correction_deg(
+        detections, tree, reference_ra, reference_dec, cos_dec
+    )
+
+    assert position_error is not None
+    assert position_error.ra_arcsec == pytest.approx(1.0, rel=0.15)
+    assert position_error.dec_arcsec == pytest.approx(3.0, rel=0.15)
+    assert position_error.correlation == pytest.approx(0.6, abs=0.1)

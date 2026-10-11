@@ -39,6 +39,18 @@ class FrameDetection(BaseModel):
     # measured (too few matched stars), in which case the straight-line
     # test falls back on an assumed value from the settings.
     astrometric_error_arcsec: float | None = Field(default=None, alias="astrometricErrorArcsec")
+    # The same error on each sky axis, in arcseconds.
+    # `astrometric_error_ra_arcsec` is measured along the east-west direction
+    # on the sky (right ascension times the cosine of the declination, which
+    # is what the Minor Planet Center's `rmsRA` means) and
+    # `astrometric_error_dec_arcsec` north-south. `astrometric_error_arcsec`
+    # is the root mean square of the two. Each includes the error of finding
+    # a faint dot's centre. The correlation between the two axes' residuals,
+    # from -1 to 1, is the Minor Planet Center's `rmsCorr`. All `None` when
+    # the error could not be measured.
+    astrometric_error_ra_arcsec: float | None = Field(default=None, alias="astrometricErrorRaArcsec")
+    astrometric_error_dec_arcsec: float | None = Field(default=None, alias="astrometricErrorDecArcsec")
+    astrometric_error_correlation: float | None = Field(default=None, alias="astrometricErrorCorrelation")
     # How long the shutter was open for this picture, in seconds (the
     # `EXPTIME` header). `timestamp` is the moment the exposure started, so
     # the middle of the exposure is `timestamp + exposure_seconds / 2`.
@@ -72,6 +84,11 @@ class MovingObjectTrack(BaseModel):
     # true when at least one picture had no measured error and the assumed
     # value from the settings was used for it.
     astrometric_error_arcsec: float | None = Field(default=None, alias="astrometricErrorArcsec")
+    # The same error for each sky axis (see `FrameDetection`), combined over
+    # the chain as a root mean square. Each right-ascension and declination
+    # residual RMS is judged against its own axis.
+    astrometric_error_ra_arcsec: float | None = Field(default=None, alias="astrometricErrorRaArcsec")
+    astrometric_error_dec_arcsec: float | None = Field(default=None, alias="astrometricErrorDecArcsec")
     residual_limit_arcsec: float | None = Field(default=None, alias="residualLimitArcsec")
     astrometric_error_assumed: bool | None = Field(default=None, alias="astrometricErrorAssumed")
     fit_start_timestamp: float = Field(alias="fitStartTimestamp")

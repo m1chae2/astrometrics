@@ -2132,6 +2132,9 @@ export interface FrameDetection {
   brightness?: number | null;
   pictureBrightnessLevel?: number | null;
   astrometricErrorArcsec?: number | null;
+  astrometricErrorRaArcsec?: number | null;
+  astrometricErrorDecArcsec?: number | null;
+  astrometricErrorCorrelation?: number | null;
   exposureSeconds?: number | null;
 }
 
@@ -2146,6 +2149,8 @@ export interface MovingObjectTrack {
   residualRmsRightAscensionArcsec?: number | null;
   residualRmsDeclinationArcsec?: number | null;
   astrometricErrorArcsec?: number | null;
+  astrometricErrorRaArcsec?: number | null;
+  astrometricErrorDecArcsec?: number | null;
   residualLimitArcsec?: number | null;
   astrometricErrorAssumed?: boolean | null;
   fitStartTimestamp: number;

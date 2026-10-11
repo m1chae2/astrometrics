@@ -144,6 +144,30 @@ def _tangent_plane_offset_arcsec(
     return right_ascension_offset_arcsec, declination_offset_arcsec
 
 
+def _combined_axis_error(axis_errors: list[float | None], scalar_errors: np.ndarray) -> float:
+    """Combine the position error of one sky axis over the pictures of a chain.
+
+    Parameters
+    ----------
+    axis_errors : `list` [`float` or `None`]
+        Each picture's error on this axis, in arcseconds, or `None` when the
+        picture did not measure one.
+    scalar_errors : `numpy.ndarray`
+        Each picture's one error (measured, or the assumed value from the
+        settings), used for a picture with no error on this axis.
+
+    Returns
+    -------
+    error : `float`
+        The square root of the mean of the squares, in arcseconds.
+    """
+    errors = np.array([
+        axis_error if axis_error is not None else scalar_error
+        for axis_error, scalar_error in zip(axis_errors, scalar_errors, strict=True)
+    ])
+    return float(np.sqrt(np.mean(errors**2)))
+
+
 def _fit_linear_rate_arcsec_per_hour(
     timestamps: np.ndarray, tangent_plane_offsets_arcsec: np.ndarray
 ) -> tuple[float, float, float]:
@@ -597,9 +621,21 @@ class MovingObjectDetector:
             for d in chain
         ])
         astrometric_error_arcsec = float(np.sqrt(np.mean(errors_arcsec**2)))
+        # The error of each sky axis, where the pictures measured them. A
+        # picture that did not has its one error used for both axes.
+        right_ascension_error_arcsec = _combined_axis_error(
+            [d.astrometric_error_ra_arcsec for d in chain], errors_arcsec
+        )
+        declination_error_arcsec = _combined_axis_error(
+            [d.astrometric_error_dec_arcsec for d in chain], errors_arcsec
+        )
         residual_limit_arcsec = self.config.residual_rms_max_multiple * astrometric_error_arcsec
-        worst_rms_arcsec = max(right_ascension_rms_arcsec, declination_rms_arcsec)
-        residual_ok = worst_rms_arcsec <= residual_limit_arcsec
+        # Each axis's residual is judged against its own error, so an axis
+        # that is measured more precisely is held to a tighter limit.
+        residual_ok = (
+            right_ascension_rms_arcsec <= self.config.residual_rms_max_multiple * right_ascension_error_arcsec
+            and declination_rms_arcsec <= self.config.residual_rms_max_multiple * declination_error_arcsec
+        )
 
         displacement_arcsec = total_rate_arcsec_per_hour * float(np.ptp(timestamps)) / _SECONDS_PER_HOUR
         moves_enough = (
@@ -629,8 +665,11 @@ class MovingObjectDetector:
             summary.chains_non_monotonic += 1
             return None, CascadeStage.REJECTED_NON_MONOTONIC
 
-        if astrometric_error_arcsec > 0.0:
-            ratio = worst_rms_arcsec / astrometric_error_arcsec
+        if right_ascension_error_arcsec > 0.0 and declination_error_arcsec > 0.0:
+            ratio = max(
+                right_ascension_rms_arcsec / right_ascension_error_arcsec,
+                declination_rms_arcsec / declination_error_arcsec,
+            )
             if summary.worst_accepted_ratio is None or ratio > summary.worst_accepted_ratio:
                 summary.worst_accepted_ratio = ratio
 
@@ -642,6 +681,8 @@ class MovingObjectDetector:
             residual_rms_right_ascension_arcsec=right_ascension_rms_arcsec,
             residual_rms_declination_arcsec=declination_rms_arcsec,
             astrometric_error_arcsec=astrometric_error_arcsec,
+            astrometric_error_ra_arcsec=right_ascension_error_arcsec,
+            astrometric_error_dec_arcsec=declination_error_arcsec,
             residual_limit_arcsec=residual_limit_arcsec,
             astrometric_error_assumed=assumed_error_detections > 0,
             fit_start_timestamp=float(np.min(timestamps)),

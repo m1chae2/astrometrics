@@ -11,6 +11,7 @@ import math
 import os
 import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -90,6 +91,50 @@ _POSITION_ERROR_MATCH_RADIUS_ARCSEC = 3.0 * _POINTING_CORRECTION_VOTE_BIN_ARCSEC
 _MAD_TO_SIGMA = 1.4826
 
 
+@dataclass(frozen=True)
+class PositionError:
+    """The error of one position in one picture, on each sky axis.
+
+    Attributes
+    ----------
+    ra_arcsec : `float`
+        The standard deviation of the star residuals along the east-west
+        direction on the sky (right ascension times the cosine of the
+        declination), in arcseconds.
+    dec_arcsec : `float`
+        The same along the north-south direction.
+    correlation : `float`
+        The correlation between the two axes' residuals, from -1 to 1. Zero
+        when it cannot be measured.
+    """
+
+    ra_arcsec: float
+    dec_arcsec: float
+    correlation: float = 0.0
+
+
+def _residual_correlation(residuals: np.ndarray) -> float:
+    """Measure the correlation between the two axes of a set of residuals.
+
+    Parameters
+    ----------
+    residuals : `numpy.ndarray`
+        An N by 2 array of east-west and north-south residuals.
+
+    Returns
+    -------
+    correlation : `float`
+        The Pearson correlation, from -1 to 1. Zero when either axis does not
+        vary or there are fewer than three residuals.
+    """
+    if residuals.shape[0] < 3:
+        return 0.0
+    spread = residuals.std(axis=0)
+    if not np.all(spread > 0.0):
+        return 0.0
+    return float(np.clip(np.corrcoef(residuals[:, 0], residuals[:, 1])[0, 1], -1.0, 1.0))
+
+
 def _reference_centre_ra_deg(reference_ra_deg: np.ndarray) -> float:
     """Find one central Right Ascension (RA) for a set of reference stars.
 
@@ -163,13 +208,13 @@ def _estimate_bulk_pointing_correction_deg(
         The offset to *add* to this frame's raw RA/Dec so its stars line
         up with the reference catalog. Both are `0.0` if no vote reached
         `_POINTING_CORRECTION_MIN_VOTES`.
-    position_error_arcsec : `float` or `None`
+    position_error : `PositionError` or `None`
         How far the frame's star positions still scatter from the reference
         stars after the shift, in arcseconds on the sky: the standard
-        deviation of the nearest-star residuals, on each axis, averaged
-        over the two axes. `None` when there was no correction, or fewer
-        than `_POINTING_CORRECTION_MIN_VOTES` detections had a reference
-        star within `_POSITION_ERROR_MATCH_RADIUS_ARCSEC`.
+        deviation of the nearest-star residuals on each axis, and the
+        correlation between the axes. `None` when there was no correction, or
+        fewer than `_POINTING_CORRECTION_MIN_VOTES` detections had a
+        reference star within `_POSITION_ERROR_MATCH_RADIUS_ARCSEC`.
     """
     if not detection_positions_deg or reference_ra_deg.size == 0:
         return 0.0, 0.0, None
@@ -250,7 +295,11 @@ def _estimate_bulk_pointing_correction_deg(
             _MAD_TO_SIGMA * float(np.median(np.abs(axis_residuals - np.median(axis_residuals))))
             for axis_residuals in residuals.T
         ]
-        position_error_arcsec = math.sqrt(sum(sigma**2 for sigma in per_axis_sigma_arcsec) / 2.0)
+        position_error_arcsec = PositionError(
+            ra_arcsec=per_axis_sigma_arcsec[0],
+            dec_arcsec=per_axis_sigma_arcsec[1],
+            correlation=_residual_correlation(residuals),
+        )
 
     return (
         ra_shift_arcsec / reference_cos_declination / 3600.0,
@@ -401,18 +450,31 @@ def _detect_sources_in_one_frame(
         fluxes.append(source.get("flux"))
 
     ra_offset_deg, dec_offset_deg = 0.0, 0.0
-    pointing_scatter_arcsec = None
+    position_error = None
     if reference_tree is not None:
-        ra_offset_deg, dec_offset_deg, pointing_scatter_arcsec = _estimate_bulk_pointing_correction_deg(
+        ra_offset_deg, dec_offset_deg, position_error = _estimate_bulk_pointing_correction_deg(
             raw_positions, reference_tree, reference_ra_deg, reference_dec_deg, reference_cos_declination
         )
     # One position's error: the measured scatter plus the error of finding a
     # faint dot's centre. Left as `None` when the scatter could not be
     # measured, so the straight-line test uses its assumed value instead.
     astrometric_error_arcsec = None
-    if pointing_scatter_arcsec is not None:
+    error_ra_arcsec = error_dec_arcsec = error_correlation = None
+    if position_error is not None:
         pixel_scale_arcsec = float(np.mean(proj_plane_pixel_scales(frame_wcs))) * 3600.0
-        astrometric_error_arcsec = math.hypot(pointing_scatter_arcsec, centroid_error_px * pixel_scale_arcsec)
+        centroid_error_arcsec = centroid_error_px * pixel_scale_arcsec
+        error_ra_arcsec = math.hypot(position_error.ra_arcsec, centroid_error_arcsec)
+        error_dec_arcsec = math.hypot(position_error.dec_arcsec, centroid_error_arcsec)
+        # The centroid error is the same on both axes and independent of the
+        # pointing scatter, so it dilutes the correlation by the share of the
+        # variance that is the scatter.
+        error_correlation = (
+            position_error.correlation
+            * position_error.ra_arcsec
+            * position_error.dec_arcsec
+            / (error_ra_arcsec * error_dec_arcsec)
+        )
+        astrometric_error_arcsec = math.sqrt((error_ra_arcsec**2 + error_dec_arcsec**2) / 2.0)
 
     detections = []
     for (raw_ra_deg, raw_dec_deg), (pixel_x, pixel_y), source_flux in zip(
@@ -429,6 +491,9 @@ def _detect_sources_in_one_frame(
                 brightness=float(source_flux) if source_flux is not None else None,
                 picture_brightness_level=picture_brightness_level,
                 astrometric_error_arcsec=astrometric_error_arcsec,
+                astrometric_error_ra_arcsec=error_ra_arcsec,
+                astrometric_error_dec_arcsec=error_dec_arcsec,
+                astrometric_error_correlation=error_correlation,
                 exposure_seconds=exposure_seconds,
             )
         )

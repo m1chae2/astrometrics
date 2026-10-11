@@ -262,3 +262,64 @@ def test_a_slow_mover_that_steps_back_by_more_than_the_error_is_rejected() -> No
     candidates = detector.detect_candidates("TestTarget", chain)
 
     assert candidates[0].cascade_stage == CascadeStage.REJECTED_NON_MONOTONIC
+
+
+def _chain_with_axis_errors(
+    right_ascension_offsets_arcsec: list[float],
+    declination_offsets_arcsec: list[float],
+    right_ascension_error_arcsec: float,
+    declination_error_arcsec: float,
+) -> list[FrameDetection]:
+    """Build the chain of `_chain` with a measured error on each sky axis.
+
+    Returns
+    -------
+    chain : `list` [`FrameDetection`]
+        Three detections. Their one error is the root mean square of the two
+        axis errors, as the pipeline records it.
+    """
+    combined = float(np.sqrt((right_ascension_error_arcsec**2 + declination_error_arcsec**2) / 2.0))
+    chain = _chain(right_ascension_offsets_arcsec, declination_offsets_arcsec, combined)
+    for detection in chain:
+        detection.astrometric_error_ra_arcsec = right_ascension_error_arcsec
+        detection.astrometric_error_dec_arcsec = declination_error_arcsec
+    return chain
+
+
+def test_each_axis_is_judged_against_its_own_error() -> None:
+    """A miss that the combined error would allow fails on the precise axis.
+
+    Right ascension is measured to 1 arcsec and declination to 10. A 5 arcsec
+    miss in right ascension is five times its error, so it is rejected. The
+    one combined error is 7.1 arcsec, and the old rule allowed up to 14.1
+    arcsec on either axis, so it let this chain through.
+    """
+    bend = 5.0 / np.sqrt(2.0 / 9.0)
+    right_ascension = _bent_offsets(150.0, bend)
+    declination = _bent_offsets(60.0, 0.0)
+    detector = MovingObjectDetector(MovingObjectConfig())
+
+    per_axis = detector.detect_candidates(
+        "TestTarget", _chain_with_axis_errors(right_ascension, declination, 1.0, 10.0)
+    )
+    combined_only = detector.detect_candidates("TestTarget", _chain(right_ascension, declination, 7.1))
+
+    assert per_axis[0].cascade_stage == CascadeStage.REJECTED_NONLINEAR_OR_OUT_OF_RANGE_RATE
+    assert combined_only[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+
+
+def test_the_noisier_axis_is_allowed_its_larger_miss() -> None:
+    """The same 5 arcsec miss on the 10 arcsec axis is within its limit."""
+    right_ascension = _bent_offsets(150.0, 0.0)
+    declination = _bent_offsets(60.0, 5.0 / np.sqrt(2.0 / 9.0))
+    detector = MovingObjectDetector(MovingObjectConfig())
+
+    candidates = detector.detect_candidates(
+        "TestTarget", _chain_with_axis_errors(right_ascension, declination, 1.0, 10.0)
+    )
+
+    assert candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+    track = candidates[0].track
+    assert track is not None
+    assert track.astrometric_error_ra_arcsec == pytest.approx(1.0)
+    assert track.astrometric_error_dec_arcsec == pytest.approx(10.0)

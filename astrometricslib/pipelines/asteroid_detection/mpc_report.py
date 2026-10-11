@@ -25,10 +25,19 @@ need no network. Two limits to know about:
 
 * The designation is written as given. It is not converted to the MPC's
   packed form, so the caller passes a ready-to-use packed or temporary one.
-* ADES (the newer XML and PSV format the MPC also accepts) is not provided.
+* The ADES file (`ades_psv_for_candidate`, below) follows the MPC's published
+  pipe-separated layout. It has not been checked with the MPC's own
+  validator, which is not available here, so run that before submitting.
+
+ADES (Astrometry Data Exchange Standard) is the format the MPC prefers
+because, unlike the 80-column line, it carries an uncertainty for every
+observation: the standard deviation in right ascension (``rmsRA``, in
+arcseconds on the sky, so already multiplied by the cosine of the declination)
+and in declination (``rmsDec``), and their correlation (``rmsCorr``).
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, FrameDetection
 
@@ -263,3 +272,179 @@ def mpc_lines_for_candidate(
     ]
     start_time_lines = sum(1 for detection in detections if detection.exposure_seconds is None)
     return lines, start_time_lines
+
+
+# ADES limits and constants. A tracklet identifier (`trkSub`) is at most 8
+# characters, and the pipe character separates the fields, so it cannot appear
+# in a value.
+_ADES_TRACKLET_WIDTH = 8
+_ADES_FIELDS = (
+    ("trkSub", 8),
+    ("mode", 4),
+    ("stn", 4),
+    ("obsTime", 24),
+    ("ra", 11),
+    ("dec", 11),
+    ("rmsRA", 7),
+    ("rmsDec", 7),
+    ("rmsCorr", 7),
+    ("astCat", 8),
+)
+
+
+class AdesReport(NamedTuple):
+    """An ADES report and what the writer had to assume to make it.
+
+    Attributes
+    ----------
+    text : `str`
+        The report: header blocks, a column line and one row per detection,
+        with a newline after each line.
+    start_time_rows : `int`
+        How many rows used the exposure start instead of the middle, because
+        that frame had no exposure time. Those times are early by half an
+        exposure.
+    assumed_error_rows : `int`
+        How many rows carry the assumed uncertainty because their frame
+        measured none. Those uncertainties are not measurements.
+    """
+
+    text: str
+    start_time_rows: int
+    assumed_error_rows: int
+
+
+def format_ades_time(unix_time: float) -> str:
+    """Write a time the way ADES wants it.
+
+    Parameters
+    ----------
+    unix_time : `float`
+        A Unix timestamp in UTC.
+
+    Returns
+    -------
+    text : `str`
+        ``YYYY-MM-DDThh:mm:ss.sssZ``, rounded to the millisecond.
+    """
+    moment = datetime.fromtimestamp(round(unix_time * 1000) / 1000, tz=UTC)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+def ades_psv_for_candidate(
+    candidate: AsteroidDetectionCandidate,
+    tracklet_id: str,
+    observatory_code: str,
+    submitter_name: str,
+    assumed_error_arcsec: float,
+    astrometric_catalog: str | None = None,
+    observers: list[str] | None = None,
+    measurers: list[str] | None = None,
+    telescope: dict[str, str] | None = None,
+) -> AdesReport:
+    """Write a candidate as an ADES file in the pipe-separated (PSV) layout.
+
+    One row is written for each detection, oldest first, with its time at the
+    middle of the exposure, its position in degrees, and its uncertainty from
+    the frame's measured error on each sky axis. A frame that measured no
+    error gets `assumed_error_arcsec` on both axes and no correlation, and is
+    counted in the result.
+
+    Parameters
+    ----------
+    candidate : `AsteroidDetectionCandidate`
+        The moving object to report.
+    tracklet_id : `str`
+        A name for this set of observations, 1 to 8 characters (the ADES
+        ``trkSub``).
+    observatory_code : `str`
+        The MPC observatory code (3 or 4 characters).
+    submitter_name : `str`
+        The name that goes in the submitter block.
+    assumed_error_arcsec : `float`
+        The uncertainty to write for a frame with none measured, in
+        arcseconds. Above zero.
+    astrometric_catalog : `str`, optional
+        The ADES code of the catalog the positions are tied to, such as
+        ``"Gaia3"`` for Gaia DR3. Leave it out when that is not known; the
+        column is then left empty rather than guessed.
+    observers, measurers : `list` [`str`], optional
+        The names for the observers and measurers blocks. Default to the
+        submitter.
+    telescope : `dict` [`str`, `str`], optional
+        The telescope block's fields, such as ``{"design": "Refractor",
+        "aperture": "0.075", "detector": "CCD"}``. Left out when not given.
+
+    Returns
+    -------
+    report : `AdesReport`
+        The text and the counts of what was assumed.
+
+    Raises
+    ------
+    ValueError
+        If the tracklet identifier, observatory code or any name is empty,
+        too long or holds a pipe or line break, or the assumed uncertainty is
+        not above zero.
+    """
+    tracklet_id = tracklet_id.strip()
+    if not tracklet_id or len(tracklet_id) > _ADES_TRACKLET_WIDTH:
+        raise ValueError(f"Tracklet id must be 1 to {_ADES_TRACKLET_WIDTH} characters, got {tracklet_id!r}.")
+    if len(observatory_code) not in (3, 4):
+        raise ValueError(f"Observatory code must be 3 or 4 characters, got {observatory_code!r}.")
+    if assumed_error_arcsec <= 0:
+        raise ValueError(f"The assumed uncertainty must be above zero, got {assumed_error_arcsec}.")
+    names = [submitter_name, *(observers or [submitter_name]), *(measurers or [submitter_name])]
+    for value in [
+        tracklet_id,
+        observatory_code,
+        astrometric_catalog or "",
+        *names,
+        *(telescope or {}).values(),
+    ]:
+        if "|" in value or "\n" in value or "\r" in value:
+            raise ValueError(f"A value cannot hold a pipe or a line break, got {value!r}.")
+    if not submitter_name.strip():
+        raise ValueError("The submitter name cannot be empty.")
+
+    lines = [
+        "# version=2017",
+        "# observatory",
+        f"! mpcCode {observatory_code}",
+        "# submitter",
+        f"! name {submitter_name}",
+    ]
+    lines += ["# observers", *(f"! name {name}" for name in (observers or [submitter_name]))]
+    lines += ["# measurers", *(f"! name {name}" for name in (measurers or [submitter_name]))]
+    if telescope:
+        lines += ["# telescope", *(f"! {key} {value}" for key, value in telescope.items())]
+    lines.append("|".join(name.ljust(width) for name, width in _ADES_FIELDS))
+
+    detections: list[FrameDetection] = sorted(candidate.frame_detections, key=lambda d: d.timestamp)
+    assumed_error_rows = 0
+    for detection in detections:
+        error_ra = detection.astrometric_error_ra_arcsec
+        error_dec = detection.astrometric_error_dec_arcsec
+        if error_ra is None or error_dec is None:
+            error_ra = error_dec = assumed_error_arcsec
+            correlation = 0.0
+            assumed_error_rows += 1
+        else:
+            correlation = detection.astrometric_error_correlation or 0.0
+        values = [
+            tracklet_id,
+            "CCD",
+            observatory_code,
+            format_ades_time(mid_exposure_unix(detection.timestamp, detection.exposure_seconds)),
+            f"{detection.right_ascension_deg % 360.0:.6f}",
+            f"{detection.declination_deg:.6f}",
+            f"{error_ra:.3f}",
+            f"{error_dec:.3f}",
+            f"{correlation:.3f}",
+            astrometric_catalog or "",
+        ]
+        lines.append(
+            "|".join(value.ljust(width) for value, (_, width) in zip(values, _ADES_FIELDS, strict=True))
+        )
+    start_time_rows = sum(1 for detection in detections if detection.exposure_seconds is None)
+    return AdesReport("\n".join(lines) + "\n", start_time_rows, assumed_error_rows)

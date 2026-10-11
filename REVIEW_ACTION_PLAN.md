@@ -157,7 +157,8 @@ done.
 | S22 | done | `pipelines/photometry/test/processing/test_variability_indices.py` (tail checked against `gammaincc` and a Monte Carlo; 1.0 percent of constant stars below 0.01); candidate rule needs a Benjamini-Hochberg q-value below 0.01 |
 | Solution refit to Gaia | done | `pipelines/astrometry/test/processing/test_wcs_refinement.py` (known solution recovered to 0.03 arcsec through 15 percent wrong detections); `test_plate_solve_fit_statistics.py::test_the_gaia_refit_gets_every_detection_not_only_the_identified_ones`; the `astrometric_residual` gate judges the RMS against Gaia. Real stacks: offsets 2.75, 0.59 and 0.10 arcsec became 0.01, 0.06 and 0.00 |
 | S23 | done | `pipelines/spectroscopy/test/pre_processing/test_intensity_variance.py::test_the_box_variance_follows_the_frames_each_pixel_kept` (known variance recovered to 1 percent; the model without the map reports under 70 percent); real stacks: variance too small by 21 to 32 percent (errors by 11 to 18 percent) on Alnath, Vega and Arcturus |
-| S24 to S27 | open | none yet |
+| S24 | done | `pipelines/asteroid_detection/test/test_residual_criterion.py::test_each_axis_is_judged_against_its_own_error`; `test_position_error_estimate.py::test_the_estimate_recovers_a_correlation_between_the_axes`; `test_mpc_report.py` (ADES rows, header, assumed-error count). The ADES file is not validated with the MPC's own tool |
+| S25 to S27 | open | none yet |
 
 Decisions taken during the work, for the owner to confirm:
 

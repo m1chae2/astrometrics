@@ -5,6 +5,7 @@ mapping that connects image pixels to real sky coordinates (WCS).
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from astropy.wcs import WCS
 
@@ -45,4 +46,8 @@ class AnalysisContext:
     catalog_match_separation_rms_arcsec: float | None = None
     plate_solve_fit_residual_rms_arcsec: float | None = None
     plate_solve_matched_star_count: int | None = None
+    # The astrometry pipeline's `WcsRefinement` (the Gaia refit of the plate
+    # solution), or `None`. Typed `Any` because this shared module does not
+    # import from one pipeline.
+    wcs_refinement: Any = None
     astrometry_flags: list[str] = field(default_factory=list)

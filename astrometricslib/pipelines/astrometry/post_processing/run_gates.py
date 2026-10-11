@@ -62,12 +62,18 @@ def _residual_and_basis(metrics: AstrometryPipelineQualityMetrics) -> tuple[floa
     Returns
     -------
     residual : `float` or `None`
-        The plate solver's fit residual in arcseconds when it reported one.
-        Otherwise the catalog match separation RMS, or `None` when neither
-        was measured.
+        The RMS distance to the Gaia stars in arcseconds when the refit of
+        the solution measured one (it does not depend on the solver).
+        Otherwise the plate solver's fit residual when it reported one, then
+        the catalog match separation RMS, or `None` when none was measured.
     basis : `str`
         A short phrase naming the number used, for the gate's detail.
     """
+    if metrics.gaia_fit_rms_arcsec is not None and metrics.gaia_fit_star_count:
+        return (
+            metrics.gaia_fit_rms_arcsec,
+            f"RMS against {metrics.gaia_fit_star_count} Gaia stars, independent of the plate solver",
+        )
     fit_residual = metrics.plate_solve_fit_residual_rms_arcsec
     if fit_residual is not None:
         matched = metrics.plate_solve_matched_star_count

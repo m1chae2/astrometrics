@@ -27,6 +27,7 @@ from astropy.coordinates import SkyCoord
 from astropy.nddata import block_reduce
 from astropy.time import Time
 from astropy.wcs import WCS, FITSFixedWarning
+from astropy.wcs.utils import proj_plane_pixel_scales
 from erfa import ErfaWarning
 
 from astrometricslib.drivers.driver_set import Drivers
@@ -40,6 +41,7 @@ from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality import assess_match_quality
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
+from astrometricslib.pipelines.astrometry.processing.wcs_refinement import WcsRefinement, refine_wcs_with_gaia
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_from_names
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
 from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
@@ -182,6 +184,8 @@ FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
 FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
 FLAG_GAIA_DEPTH_REDUCED = "gaia_depth_reduced"
+FLAG_WCS_REFINED = "wcs_refined_against_gaia"
+FLAG_WCS_REFINEMENT_SKIPPED = "wcs_refinement_skipped"
 
 # Gaia DR3 is downloaded from VizieR first and from the ESA Gaia archive
 # second (see `drivers/gaia_cone_driver.py` for why). VizieR answered a
@@ -838,6 +842,9 @@ class StarIdentifier:
         # Stable keys for conditions that limit the last run's results; see
         # the ``FLAG_*`` constants.
         self.astrometry_flags: list[str] = []
+        # What the Gaia refit of the plate solution found for the last image
+        # (see `_refine_wcs_against_gaia`), or `None` before one was tried.
+        self.wcs_refinement: WcsRefinement | None = None
 
     def _add_flag(self, flag: str) -> None:
         """Record a limiting condition once for the current image.
@@ -1153,6 +1160,7 @@ class StarIdentifier:
         self.plate_solve_fit_residual_rms_arcsec = None
         self.plate_solve_matched_star_count = None
         self.astrometry_flags = []
+        self.wcs_refinement = None
 
         # We limit how many stars we send to the plate solver because it
         # only needs the brightest ones to figure out where the image is
@@ -1163,6 +1171,11 @@ class StarIdentifier:
         # We take the stars from the beginning of the list because they
         # are already sorted from brightest to dimmest.
         solver_sources = unique_sources[:MAXIMUM_PLATE_SOLVE_SOURCES]
+        # Every detection, kept for the Gaia refit of the solution. The
+        # identification limit below keeps the brightest stars, which in a
+        # globular cluster such as M 13 are the unresolved core, where Gaia
+        # has no star to match.
+        all_detected_sources = unique_sources
 
         # An explicit argument wins over configuration, and an explicit
         # 0 means "no limit" so a caller can override a configured cap
@@ -1233,6 +1246,7 @@ class StarIdentifier:
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", FITSFixedWarning)
                         wcs = WCS(solved_header, naxis=2)
+                    wcs = self._refine_wcs_against_gaia(wcs, all_detected_sources, h, w)
                     self._identify_stars_with_simbad(wcs, center_ra, center_dec, w, h)
                 else:
                     logger.error("Could not solve field.")
@@ -1246,6 +1260,69 @@ class StarIdentifier:
                 self._identify_stars_with_simbad(None, center_ra, center_dec, w, h, target_name=target_name)
 
         return self.stellar_objects, wcs
+
+    def _refine_wcs_against_gaia(self, wcs: WCS, sources: list[dict], height: int, width: int) -> WCS:
+        """Refit the plate solution to the field's Gaia stars.
+
+        The solver fits only the few stars of its own index files, and can sit
+        more than a pixel from the truth with no check noticing (see
+        `wcs_refinement`). This downloads (or reads from the cache) the Gaia
+        DR3 stars of the field to `GAIA_DEFAULT_MAGNITUDE_LIMIT`, moves them
+        to the date of the image, and refits. The outcome is kept in
+        `wcs_refinement`, and one flag says whether the new solution was used.
+        A failed download leaves the solver's solution as it was.
+
+        Parameters
+        ----------
+        wcs : `astropy.wcs.WCS`
+            The solver's solution.
+        sources : `list` [`dict`]
+            The detected stars, each with a centroid in pixels.
+        height, width : `int`
+            The image's size in pixels.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS`
+            The refined solution, or `wcs` unchanged.
+        """
+        centroids = []
+        for source in sources:
+            x = source.get("x_centroid", source.get("xcentroid"))
+            y = source.get("y_centroid", source.get("ycentroid"))
+            if x is not None and y is not None:
+                centroids.append((float(x), float(y)))
+        try:
+            centre = wcs.pixel_to_world(width / 2.0, height / 2.0)
+            scales = proj_plane_pixel_scales(wcs)
+            radius_deg = min(1.0, float(np.hypot(scales[0] * width, scales[1] * height)) / 2.0 * 1.05)
+        except DATA_ERRORS:
+            logger.exception("Could not place the solved image on the sky; the Gaia refit is skipped.")
+            self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
+            return wcs
+        gaia_table, gaia_coords = self._query_gaia_region(
+            float(centre.ra.deg), float(centre.dec.deg), radius_deg, GAIA_DEFAULT_MAGNITUDE_LIMIT
+        )
+        if gaia_table is None or gaia_coords is None:
+            logger.warning("No Gaia stars for the refit of the solution; the solver's solution is kept.")
+            self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
+            return wcs
+        gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
+        refinement = refine_wcs_with_gaia(wcs, np.array(centroids), gaia_coords, (height, width))
+        self.wcs_refinement = refinement
+        if refinement.applied:
+            logger.info(
+                "Refit the solution to %s Gaia stars: RMS %.2f -> %.2f arcsec, moved up to %.2f arcsec.",
+                refinement.star_count,
+                refinement.rms_before_arcsec,
+                refinement.rms_after_arcsec,
+                refinement.shift_arcsec,
+            )
+            self._add_flag(FLAG_WCS_REFINED)
+            return refinement.wcs
+        logger.warning("The solver's solution was kept: %s.", refinement.reason)
+        self._add_flag(FLAG_WCS_REFINEMENT_SKIPPED)
+        return wcs
 
     def _query_simbad_region(
         self,
@@ -1274,8 +1351,6 @@ class StarIdentifier:
             radius_deg = radius_deg_override
         elif wcs and width and height:
             try:
-                from astropy.wcs.utils import proj_plane_pixel_scales
-
                 pixel_scales = proj_plane_pixel_scales(wcs)  # in degrees
                 fov_x = pixel_scales[0] * width
                 fov_y = pixel_scales[1] * height
@@ -2098,8 +2173,6 @@ class StarIdentifier:
         if radius_deg is None:
             radius_deg = 0.2
             try:
-                from astropy.wcs.utils import proj_plane_pixel_scales
-
                 pixel_scales = proj_plane_pixel_scales(wcs)
                 fov_x = pixel_scales[0] * width
                 fov_y = pixel_scales[1] * height

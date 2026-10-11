@@ -146,6 +146,7 @@ class AstrometryPipeline:
             ),
             plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
             plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
+            wcs_refinement=self.star_identifier.wcs_refinement,
             astrometry_flags=list(self.star_identifier.astrometry_flags),
         )
 

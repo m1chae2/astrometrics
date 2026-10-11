@@ -107,6 +107,41 @@ def _write_solved_wcs_to_fits_header(path: str | None, context: Any) -> None:
     write_wcs_to_fits_header(path, context.wcs)
 
 
+def _refinement_metrics(refinement: Any) -> dict[str, Any]:
+    """Read the quality-summary fields out of a Gaia refit result.
+
+    Parameters
+    ----------
+    refinement : `WcsRefinement` or `None`
+        What `StarIdentifier._refine_wcs_against_gaia` found, or `None` when
+        no refit was tried.
+
+    Returns
+    -------
+    fields : `dict`
+        Values for the ``gaia_fit_*`` and ``wcs_refinement_shift_arcsec``
+        fields of `AstrometryPipelineQualityMetrics`. All `None` without a
+        fit.
+    """
+    if refinement is None or not refinement.star_count:
+        return {
+            "gaia_fit_rms_arcsec": None,
+            "gaia_fit_rms_before_arcsec": None,
+            "gaia_fit_star_count": None,
+            "wcs_refinement_shift_arcsec": None,
+        }
+    return {
+        # The RMS under the solution that was kept: the refined one when it
+        # was applied, else the solver's own.
+        "gaia_fit_rms_arcsec": refinement.rms_after_arcsec
+        if refinement.applied
+        else refinement.rms_before_arcsec,
+        "gaia_fit_rms_before_arcsec": refinement.rms_before_arcsec,
+        "gaia_fit_star_count": refinement.star_count,
+        "wcs_refinement_shift_arcsec": refinement.shift_arcsec if refinement.applied else 0.0,
+    }
+
+
 def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:
     """Read the pixel size on the sky from a solved coordinate system.
 
@@ -278,6 +313,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 catalog_match_separation_rms_arcsec=result.context.catalog_match_separation_rms_arcsec,
                 plate_solve_fit_residual_rms_arcsec=result.context.plate_solve_fit_residual_rms_arcsec,
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,
+                **_refinement_metrics(result.context.wcs_refinement),
                 astrometry_flags=list(result.context.astrometry_flags),
                 plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
                 star_fwhm_px=_measure_star_fwhm_px(result.context.image),

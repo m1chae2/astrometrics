@@ -198,3 +198,54 @@ def test_the_statistics_reset_between_images(monkeypatch: pytest.MonkeyPatch) ->
 
     assert identifier.plate_solve_fit_residual_rms_arcsec is None
     assert identifier.plate_solve_matched_star_count is None
+
+
+def test_the_gaia_refit_gets_every_detection_not_only_the_identified_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The identification limit does not shorten the list the refit sees.
+
+    On M 13 the brightest 500 detections are the unresolved cluster core,
+    where Gaia has no star to match, so a refit given only those matched 4
+    stars. The refit needs the whole list.
+    """
+    seen: list[int] = []
+
+    def record(self: StarIdentifier, wcs: Any, sources: list[dict], height: int, width: int) -> Any:
+        """Note how many sources the refit was given.
+
+        Parameters
+        ----------
+        wcs : `astropy.wcs.WCS`
+            The solution, returned unchanged.
+        sources : `list` [`dict`]
+            The detections handed to the refit.
+        height, width : `int`
+            The image size.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS`
+            The solution given.
+        """
+        seen.append(len(sources))
+        return wcs
+
+    monkeypatch.setattr(StarIdentifier, "_refine_wcs_against_gaia", record)
+    monkeypatch.setattr(StarIdentifier, "_query_gaia_region", staticmethod(lambda *a, **k: (None, None)))
+    config = MagicMock()
+    config.get_maximum_identified_stars.return_value = 3
+    config.get_value.return_value = None
+    config.get_focal_length_mm.side_effect = ValueError("no focal length configured")
+    identifier = StarIdentifier(
+        config=config, drivers=Drivers(plate_solve=FakeSolver(make_wcs_header()), simbad=EmptySimbad())
+    )
+    sources = [{"x_centroid": 10.0 + 8 * i, "y_centroid": 10.0 + 8 * i, "flux": 100.0 - i} for i in range(10)]
+    identifier.detector = MagicMock()
+    identifier.detector.detect.return_value = sources
+    identifier.detector.deduplicate.return_value = sources
+
+    identifier.process_image(np.zeros((100, 100)), attempt_plate_solving=True)
+
+    assert len(identifier.stellar_objects) == 3
+    assert seen == [10]

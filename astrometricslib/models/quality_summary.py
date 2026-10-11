@@ -430,6 +430,20 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     # How many stars the plate solver matched to its reference stars when it
     # fitted the solution. `None` when the solver reported none.
     plate_solve_matched_star_count: int | None = Field(default=None, alias="plateSolveMatchedStarCount")
+    # The refit of the solution to the field's Gaia DR3 stars (see
+    # `pipelines.astrometry.processing.wcs_refinement`). `gaia_fit_rms_arcsec`
+    # is the RMS distance, in arcseconds, between `gaia_fit_star_count`
+    # detected stars and their Gaia positions (moved to the image's date) under
+    # the solution that was kept, so it does not depend on the plate solver.
+    # `wcs_refinement_shift_arcsec` is how far the refit moved the field (the
+    # largest move over a 5 by 5 grid of points), and
+    # `gaia_fit_rms_before_arcsec` the RMS of the same stars under the
+    # solver's own solution. All `None` when the refit was not tried or had
+    # too few stars.
+    gaia_fit_rms_arcsec: float | None = Field(default=None, alias="gaiaFitRmsArcsec")
+    gaia_fit_rms_before_arcsec: float | None = Field(default=None, alias="gaiaFitRmsBeforeArcsec")
+    gaia_fit_star_count: int | None = Field(default=None, alias="gaiaFitStarCount")
+    wcs_refinement_shift_arcsec: float | None = Field(default=None, alias="wcsRefinementShiftArcsec")
     # Short stable keys for conditions that limit how far the results can be
     # trusted: ``gaia_row_limit_reached`` (the Gaia search returned as many
     # rows as it may, so faint stars may be missing),

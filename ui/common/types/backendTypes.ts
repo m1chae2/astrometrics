@@ -1946,6 +1946,10 @@ export interface AstrometryPipelineQualityMetrics {
   catalogMatchSeparationRmsArcsec?: number | null;
   plateSolveFitResidualRmsArcsec?: number | null;
   plateSolveMatchedStarCount?: number | null;
+  gaiaFitRmsArcsec?: number | null;
+  gaiaFitRmsBeforeArcsec?: number | null;
+  gaiaFitStarCount?: number | null;
+  wcsRefinementShiftArcsec?: number | null;
   astrometryFlags?: string[];
   plateScaleArcsecPerPixel?: number | null;
   starFwhmPx?: number | null;

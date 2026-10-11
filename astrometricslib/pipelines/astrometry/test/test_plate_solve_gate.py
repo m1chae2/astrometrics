@@ -44,6 +44,7 @@ def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) 
         catalog_match_separation_rms_arcsec=None,
         plate_solve_fit_residual_rms_arcsec=None,
         plate_solve_matched_star_count=None,
+        wcs_refinement=None,
         astrometry_flags=[],
         wcs=wcs,
         image=SimpleNamespace(header={}),

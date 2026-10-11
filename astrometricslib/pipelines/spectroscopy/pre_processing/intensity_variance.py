@@ -47,7 +47,8 @@ Two limits of this model, which a reader should keep in mind:
 """
 
 import math
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -125,6 +126,33 @@ def median_variance_factor(sample_count: int) -> float:
     return MEDIAN_VARIANCE_PI_OVER_TWO / (sample_count + offset)
 
 
+def rejection_variance_scale(rejected_fraction: np.ndarray, frames: int) -> np.ndarray:
+    """Give how much noisier a stack pixel is when frames were rejected.
+
+    A stack pixel is the average of the frames the stacker kept. With `K`
+    frames kept out of `N`, its variance is `N / K` times that of a pixel
+    that kept them all. The rejection map holds the fraction of the pixel's
+    values thrown away, ``(N - K) / N``, so the factor is ``1 / (1 -
+    fraction)``. At least one frame is always kept, so the factor is at most
+    `frames`. A missing (not finite) fraction counts as no rejection.
+
+    Parameters
+    ----------
+    rejected_fraction : `numpy.ndarray`
+        The rejection map: for each pixel, the fraction of its values that
+        the stacker threw away, 0 to 1.
+    frames : `int`
+        How many frames were stacked. At least 1.
+
+    Returns
+    -------
+    scale : `numpy.ndarray`
+        The variance factor of each pixel, from 1 to `frames`.
+    """
+    kept_fraction = 1.0 - np.nan_to_num(np.asarray(rejected_fraction, dtype=float), nan=0.0)
+    return 1.0 / np.clip(kept_fraction, 1.0 / max(frames, 1), 1.0)
+
+
 @dataclass(frozen=True)
 class PixelNoiseModel:
     """How much a stored pixel value scatters from one exposure to the next.
@@ -163,6 +191,13 @@ class PixelNoiseModel:
         `True` when the frame is a stack but its header gives no frame count,
         so one frame was assumed. The variance is then too large by the true
         frame count.
+    rejection_map_used : `bool`
+        `True` when the model also has the stack's rejection map, so the
+        variance of a pixel where frames were rejected is raised by the
+        number of frames lost (see `rejection_variance_scale`).
+    variance_scale : `numpy.ndarray` or `None`
+        The image-sized map of that factor, or `None` without a rejection
+        map. Not part of the stored record, and not compared.
     """
 
     gain_e_per_adu: float = 1.0
@@ -172,6 +207,8 @@ class PixelNoiseModel:
     adu_per_stored_unit: float = 1.0
     frames_averaged: int = 1
     frames_are_assumed: bool = False
+    rejection_map_used: bool = False
+    variance_scale: np.ndarray | None = field(default=None, compare=False, repr=False)
 
     @property
     def poisson_coefficient(self) -> float:
@@ -198,7 +235,9 @@ class PixelNoiseModel:
             self.read_noise_e / self.gain_e_per_adu / self.adu_per_stored_unit
         ) ** 2 / self.frames_averaged
 
-    def box_variance(self, pixels: np.ndarray, weights: np.ndarray) -> float:
+    def box_variance(
+        self, pixels: np.ndarray, weights: np.ndarray, pixel_scale: np.ndarray | None = None
+    ) -> float:
         """Give the variance of a weighted sum of pixels, before the sky term.
 
         The Poisson term sums the raw pixel values without clipping them at
@@ -213,14 +252,21 @@ class PixelNoiseModel:
             stored units.
         weights : `numpy.ndarray`
             The fraction of each pixel inside the box, 0 to 1.
+        pixel_scale : `numpy.ndarray`, optional
+            The variance factor of each box pixel from the rejection map
+            (`rejection_variance_scale`). Left out, every pixel counts as
+            having kept all its frames.
 
         Returns
         -------
         variance : `float`
-            ``a * sum(w**2 * p)`` (not below zero) plus ``b * sum(w**2)``, in
-            stored units squared.
+            ``a * sum(w**2 * s * p)`` (not below zero) plus ``b * sum(w**2 *
+            s)``, in stored units squared, with ``s`` the pixel's factor (1
+            without a map).
         """
         squared_weights = np.asarray(weights, dtype=float) ** 2
+        if pixel_scale is not None:
+            squared_weights = squared_weights * np.asarray(pixel_scale, dtype=float)
         poisson = max(self.poisson_coefficient * float(np.sum(squared_weights * pixels)), 0.0)
         return poisson + self.read_variance * float(np.sum(squared_weights))
 
@@ -232,7 +278,8 @@ class PixelNoiseModel:
         record : `dict`
             ``gain_e_per_adu``, ``read_noise_e``, ``gain_is_assumed``,
             ``read_noise_is_assumed``, ``adu_per_stored_unit``,
-            ``frames_averaged`` and ``frames_are_assumed``.
+            ``frames_averaged``, ``frames_are_assumed`` and
+            ``rejection_map_used``.
         """
         return {
             "gain_e_per_adu": float(self.gain_e_per_adu),
@@ -242,10 +289,16 @@ class PixelNoiseModel:
             "adu_per_stored_unit": float(self.adu_per_stored_unit),
             "frames_averaged": int(self.frames_averaged),
             "frames_are_assumed": bool(self.frames_are_assumed),
+            "rejection_map_used": bool(self.rejection_map_used),
         }
 
 
-def build_pixel_noise_model(profile: CameraProfile | None, header: Any, data: np.ndarray) -> PixelNoiseModel:
+def build_pixel_noise_model(
+    profile: CameraProfile | None,
+    header: Any,
+    data: np.ndarray,
+    rejection_map: np.ndarray | None = None,
+) -> PixelNoiseModel:
     """Pick the noise model for one frame.
 
     The gain and read noise come from `resolve_detector_noise` (the camera
@@ -264,6 +317,10 @@ def build_pixel_noise_model(profile: CameraProfile | None, header: Any, data: np
     data : `numpy.ndarray`
         The frame's pixels. Only used to tell a normalised stack from a raw
         frame.
+    rejection_map : `numpy.ndarray`, optional
+        The stack's rejection map: for each pixel, the fraction of its values
+        the stacker threw away. Used only for a stack of the same shape as
+        `data`. Left out, every pixel is taken to have kept all its frames.
 
     Returns
     -------
@@ -283,6 +340,13 @@ def build_pixel_noise_model(profile: CameraProfile | None, header: Any, data: np
         if frames < 1:
             frames = 1
             frames_assumed = True
+    variance_scale = None
+    if (
+        rejection_map is not None
+        and is_normalised_stack_scale(data)
+        and np.shape(rejection_map) == np.shape(data)
+    ):
+        variance_scale = rejection_variance_scale(rejection_map, frames)
     return PixelNoiseModel(
         gain_e_per_adu=noise.gain_e_per_adu,
         read_noise_e=noise.read_noise_e,
@@ -291,7 +355,36 @@ def build_pixel_noise_model(profile: CameraProfile | None, header: Any, data: np
         adu_per_stored_unit=adu_per_unit,
         frames_averaged=frames,
         frames_are_assumed=frames_assumed,
+        rejection_map_used=variance_scale is not None,
+        variance_scale=variance_scale,
     )
+
+
+def find_rejection_map(image_path: str | None) -> str | None:
+    """Find the rejection map that belongs to a stacked image.
+
+    Stacking writes ``<stem>_RejMap.fits`` beside ``<stem>.fits``. A picture
+    made from the stack, ``<stem>_processed.fits``, shares the stack's pixels
+    and its map.
+
+    Parameters
+    ----------
+    image_path : `str` or `None`
+        The path of the image being read.
+
+    Returns
+    -------
+    map_path : `str` or `None`
+        The map's path, or `None` when there is no image path or no map.
+    """
+    if not image_path:
+        return None
+    stem = os.path.splitext(image_path)[0]
+    for candidate_stem in (stem, stem.removesuffix("_processed")):
+        candidate = f"{candidate_stem}_RejMap.fits"
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 
 def combine_neighbour_variances(lower_variance: float, upper_variance: float, upper_weight: float) -> float:

@@ -525,6 +525,7 @@ export interface SpectralNoiseModelRecord {
   aduPerStoredUnit?: number;
   framesAveraged?: number;
   framesAreAssumed?: boolean;
+  rejectionMapUsed?: boolean;
 }
 
 /**

@@ -183,6 +183,7 @@ def test_the_new_fields_round_trip_through_camel_case(pipeline_result: Spectrosc
         "aduPerStoredUnit",
         "framesAveraged",
         "framesAreAssumed",
+        "rejectionMapUsed",
     }
     reloaded = SpectroscopyResult.model_validate(dumped)
     assert reloaded.intensity_errors == pipeline_result.intensity_errors

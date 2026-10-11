@@ -766,6 +766,10 @@ class SpectralNoiseModelRecord(BaseModel):
     # True when the frame is a stack whose header gives no frame count, so one
     # frame was assumed and the errors are too large by the real count.
     frames_are_assumed: bool = Field(default=False, alias="framesAreAssumed")
+    # True when the stack's rejection map was read, so the variance of a pixel
+    # where frames were rejected is raised by the frames lost. False for a
+    # record saved before this was recorded, or a stack with no map.
+    rejection_map_used: bool = Field(default=False, alias="rejectionMapUsed")
 
 
 class SpectroscopyResult(BaseModel):

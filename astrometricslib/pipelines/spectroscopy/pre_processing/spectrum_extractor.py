@@ -1104,10 +1104,17 @@ class SpectrumExtractor:
             box_pixels = cleaned_with_margin[box_indices - margin_start]
         box_total = float(np.sum(box_weights * box_pixels))
         # The box's own variance does not depend on the sky estimate: the raw
-        # pixels already hold source and sky together.
-        variance = (
-            self.noise_model.box_variance(box_pixels, box_weights) if self.noise_model is not None else np.nan
-        )
+        # pixels already hold source and sky together. Pixels where the
+        # stacker rejected frames are noisier, and the model's rejection map
+        # (when it has one) says by how much.
+        variance = np.nan
+        if self.noise_model is not None:
+            pixel_scale = None
+            scale_image = self.noise_model.variance_scale
+            if scale_image is not None and scale_image.shape == data.shape:
+                scale_line = scale_image[:, line_index] if is_horizontal else scale_image[line_index, :]
+                pixel_scale = scale_line[box_indices]
+            variance = self.noise_model.box_variance(box_pixels, box_weights, pixel_scale)
         if not self.subtract_sky_background:
             return box_total, variance
 

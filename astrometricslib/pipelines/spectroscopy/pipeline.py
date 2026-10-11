@@ -11,6 +11,7 @@ import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_data
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
@@ -66,6 +67,7 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_scale impor
 from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance import (
     PixelNoiseModel,
     build_pixel_noise_model,
+    find_rejection_map,
     propagate_calibration_errors,
     summarize_spectrum_noise,
 )
@@ -866,7 +868,18 @@ class SpectroscopyPipeline:
         """
         if self._noise_model_cache is not None and self._noise_model_cache[0] is image:
             return self._noise_model_cache[1]
-        model = build_pixel_noise_model(self.camera_profile, getattr(image, "header", None), image.data)
+        rejection_map = None
+        map_path = find_rejection_map(getattr(image, "path", None))
+        if map_path is not None:
+            try:
+                rejection_map = read_data(map_path)
+            except FITS_READ_ERRORS:
+                logger.warning(
+                    "Could not read the rejection map %s; every pixel is taken to keep all frames.", map_path
+                )
+        model = build_pixel_noise_model(
+            self.camera_profile, getattr(image, "header", None), image.data, rejection_map
+        )
         self._noise_model_cache = (image, model)
         return model
 

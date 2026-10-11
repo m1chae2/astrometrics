@@ -11,6 +11,8 @@ multiplicative correction, the stack scale, and the signal-to-noise numbers
 built from the errors.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -27,8 +29,10 @@ from astrometricslib.pipelines.spectroscopy.pre_processing.intensity_variance im
     PixelNoiseModel,
     build_pixel_noise_model,
     combine_neighbour_variances,
+    find_rejection_map,
     median_variance_factor,
     propagate_calibration_errors,
+    rejection_variance_scale,
     resolution_element_signal_to_noise,
     scale_errors,
     summarize_spectrum_noise,
@@ -635,3 +639,89 @@ def test_the_variance_estimate_agrees_with_the_post_hoc_estimate_on_noise() -> N
     assert right is not None and wrong is not None
     assert right / post_hoc == pytest.approx(1.0, abs=0.2)
     assert wrong / post_hoc == pytest.approx(3.0, rel=0.25)
+
+
+def test_the_rejection_scale_is_the_inverse_of_the_kept_fraction() -> None:
+    """Half the frames lost doubles the variance; one frame is always kept."""
+    scale = rejection_variance_scale(np.array([0.0, 0.5, 0.9, 1.0, np.nan]), frames=10)
+
+    assert scale == pytest.approx([1.0, 2.0, 10.0, 10.0, 1.0])
+
+
+def test_the_box_variance_follows_the_frames_each_pixel_kept() -> None:
+    """Reported variance matches the scatter of stacks that lost frames.
+
+    Each trial is a 9-pixel cross-section of a stack of 20 frames. Odd pixels
+    kept 20 frames and even pixels only 8 (the stacker rejected 12), each the
+    mean of Poisson counts of 400 ADU per frame, with gain 1 and no read
+    noise. The variance of the box sum is known exactly, and the model with
+    the rejection map must reproduce it, while the model without it
+    under-reports.
+    """
+    frames, kept = 20, np.array([8, 20, 8, 20, 8, 20, 8, 20, 8])
+    rate, weights = 400.0, np.ones(9)
+    generator = np.random.default_rng(77)
+    stored = generator.poisson(rate * kept, size=(20000, 9)) / kept
+    empirical = float(np.var(stored @ weights))
+    expected = float(np.sum(weights**2 * rate / kept))
+    assert empirical == pytest.approx(expected, rel=0.03)
+
+    model = PixelNoiseModel(frames_averaged=frames)
+    scale = rejection_variance_scale(1.0 - kept / frames, frames)
+    pixels = np.full(9, rate)
+
+    with_map = model.box_variance(pixels, weights, scale)
+    without_map = model.box_variance(pixels, weights)
+
+    assert with_map == pytest.approx(expected, rel=0.01)
+    assert without_map < 0.7 * expected
+
+
+def test_a_rejection_map_gives_the_model_a_variance_scale_only_for_a_matching_stack() -> None:
+    """The map is used for a normalised stack of its shape, else ignored."""
+    stack = np.full((6, 6), 0.4)
+    rejected = np.zeros((6, 6))
+    rejected[:, 2] = 0.5
+
+    used = build_pixel_noise_model(None, {"STACKCNT": 10}, stack, rejected)
+    wrong_shape = build_pixel_noise_model(None, {"STACKCNT": 10}, stack, np.zeros((3, 3)))
+    raw_frame = build_pixel_noise_model(None, {}, np.full((6, 6), 1000.0), rejected)
+
+    assert used.rejection_map_used
+    assert used.variance_scale is not None and used.variance_scale[0, 2] == pytest.approx(2.0)
+    assert used.variance_scale[0, 0] == pytest.approx(1.0)
+    assert not wrong_shape.rejection_map_used
+    assert not raw_frame.rejection_map_used
+    assert used.as_record()["rejection_map_used"] is True
+
+
+def test_the_extractor_reports_more_variance_where_frames_were_rejected() -> None:
+    """A box on pixels that kept half their frames reads twice the variance."""
+    image = np.full((40, 60), 0.2)
+    plain = SpectrumExtractor(
+        radius=4, subtract_sky_background=False, noise_model=PixelNoiseModel(adu_per_stored_unit=65535.0)
+    )
+    scaled_model = PixelNoiseModel(
+        adu_per_stored_unit=65535.0, rejection_map_used=True, variance_scale=np.full(image.shape, 2.0)
+    )
+    scaled = SpectrumExtractor(radius=4, subtract_sky_background=False, noise_model=scaled_model)
+
+    _, plain_variance = plain._measure_aperture(image, 30, 20.0, 4.0, True)
+    _, scaled_variance = scaled._measure_aperture(image, 30, 20.0, 4.0, True)
+
+    assert scaled_variance == pytest.approx(2.0 * plain_variance, rel=1e-6)
+
+
+def test_a_rejection_map_is_found_beside_the_stack_and_its_processed_picture(tmp_path: Path) -> None:
+    """The map is `<stem>_RejMap.fits`, also for `<stem>_processed.fits`."""
+    stack = tmp_path / "M_13_L_Stacked.fits"
+    stack.write_bytes(b"")
+    assert find_rejection_map(str(stack)) is None
+    assert find_rejection_map(None) is None
+
+    (tmp_path / "M_13_L_Stacked_RejMap.fits").write_bytes(b"")
+
+    assert find_rejection_map(str(stack)) == str(tmp_path / "M_13_L_Stacked_RejMap.fits")
+    assert find_rejection_map(str(tmp_path / "M_13_L_Stacked_processed.fits")) == str(
+        tmp_path / "M_13_L_Stacked_RejMap.fits"
+    )

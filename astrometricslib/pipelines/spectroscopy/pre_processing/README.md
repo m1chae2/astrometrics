@@ -366,6 +366,28 @@ carries the `gain_assumed` and `read_noise_assumed` flags. A Siril stack saved
 as fractions of full scale is converted to ADU (65535 per unit) and its
 variance is divided by the number of stacked frames (`STACKCNT`).
 
+**Pixels where the stacker threw frames away.** `STACKCNT` counts the frames
+submitted, but the stacker rejects some values at some pixels (cosmic rays,
+satellite trails, bad pixels), so a pixel may be the mean of fewer frames. The
+stack's rejection map (`<stem>_RejMap.fits`, beside the stack; also used for
+`<stem>_processed.fits`) holds for each pixel the fraction of its values that
+were thrown away. A pixel that kept `K` of `N` frames has `N / K` times the
+variance, which is `1 / (1 - fraction)` (`rejection_variance_scale`), and
+never more than `N`. The box term of the variance multiplies each pixel's
+Poisson and read variance by that factor
+(`PixelNoiseModel.box_variance(..., pixel_scale)`). The sky term is not
+changed, because it uses the scatter measured in the sky bands, which already
+shows the local noise. `find_rejection_map` finds the map and the pipeline
+loads it (`SpectroscopyPipeline._noise_model_for`); without a map the factor is
+1, and the stored record says `rejection_map_used`. Measured on 19 real
+spectral stacks on 2026-10-11, the average factor over the brightest pixels
+(the star and its trail) is 1.02 to 1.28 for most targets. It is 1.27 for
+Alnath, 1.28 for Vega and 1.48 for Arcturus, where the reported variance was
+too small by 21 to 32 percent (the errors by 11 to 18 percent).
+`test_the_box_variance_follows_the_frames_each_pixel_kept` simulates stacks that
+lost frames and recovers the known variance to 1 percent, where the model without
+the map reports under 70 percent of it.
+
 **Carrying the error through pre-processing.** Each later step multiplies a
 sample by a factor, so each multiplies its error by the size of that factor
 (its variance by the factor squared):

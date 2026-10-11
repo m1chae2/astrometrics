@@ -95,6 +95,15 @@ SESSION_CONTENT_GATE_NAME = "session_content"
 SESSION_PLATE_SOLVE_GATE_NAME = "session_plate_solve"
 PHOTOMETRY_WORK_GATE_NAME = "photometry_work"
 COMPARISON_ENSEMBLE_GATE_NAME = "comparison_ensemble"
+
+# The comparison stars' own light curves may scatter at most this many times
+# what their errors predict. Photon, read and sky noise leave out flat-field
+# residuals and centroid error, so some excess is normal: the ratio was 1.27
+# on M 13 and 1.66 on M 81 (2026-10-11). On NGC 2403 it was 18 (0.0655 mag
+# against 0.0036), on a night when the comparison stars' brightness fell by
+# 30 percent and recovered: patchy cloud that no ratio to the ensemble can
+# remove. 5 sits between those cases. A design value, set on three fields.
+MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED = 5.0
 REGISTRATION_DRIFT_GATE_NAME = "registration_drift"
 SCATTER_POPULATION_GATE_NAME = "scatter_population"
 VARIABILITY_DISCRIMINATION_GATE_NAME = "variability_discrimination"
@@ -557,9 +566,11 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
     """Report the comparison set of each session, and whether it held still.
 
     The gate fails when a session's comparison set has fewer than
-    `MINIMUM_COMPARISON_STARS` stars, or when the number of comparison stars
+    `MINIMUM_COMPARISON_STARS` stars, when the number of comparison stars
     differs from one frame of a session to another (a set that should be
-    fixed for the session is not). Otherwise it passes. Its detail gives the
+    fixed for the session is not), or when the comparison stars' own light
+    curves scatter more than `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` times
+    what their errors predict. Otherwise it passes. Its detail gives the
     size of each set, says that each set is fixed across its session, and
     gives the scatter of the comparison stars' own normalized light curves
     with the scatter their errors predict, in magnitudes.
@@ -607,6 +618,24 @@ def _comparison_ensemble_gate(comparison_sets: Sequence[ComparisonSetResult]) ->
     expected = [
         record.expected_error_mag for record in comparison_sets if record.expected_error_mag is not None
     ]
+    ratios = [
+        record.scatter_mag / record.expected_error_mag
+        for record in comparison_sets
+        if record.scatter_mag is not None and record.expected_error_mag
+    ]
+    if ratios and max(ratios) > MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED:
+        return failed_gate(
+            COMPARISON_ENSEMBLE_GATE_NAME,
+            f"the comparison stars scatter {max(ratios):.1f} times what their errors predict "
+            f"({max(scatters):.4f} mag against {max(expected):.4f} mag in the worst session). Something "
+            "that changes across the field is not removed by dividing by the ensemble (patchy cloud, "
+            "tracking loss or a changing focus), so the light curves cannot be trusted at the level of "
+            "their error bars",
+            float(max(ratios)),
+            MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED,
+            f"at most {MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED:g} times the scatter the errors predict "
+            "(design value)",
+        )
     detail = (
         f"comparison set sizes {', '.join(str(size) for size in sizes)}; each set is the same in every "
         "frame of its session"

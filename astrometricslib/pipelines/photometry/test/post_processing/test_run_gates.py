@@ -268,6 +268,41 @@ def test_ensemble_gate_reports_the_set_size_that_it_is_fixed_and_the_scatter() -
     assert "2 star(s) turned away" in gate.detail
 
 
+def test_ensemble_gate_goes_red_when_the_comparison_stars_scatter_far_above_their_errors() -> None:
+    """NGC 2403: 0.0655 mag of scatter where the errors predict 0.0036.
+
+    On that night the comparison stars' brightness fell by 30 percent and
+    recovered, and no ratio to the ensemble could remove it. The gate had
+    passed. The M 13 (1.3 times) and M 81 (1.7 times) cases still pass.
+    """
+    cloudy = comparison_set(20, scatter_mag=0.0655, expected_error_mag=0.0036)
+
+    failed = good_run(comparison_sets=[comparison_set(12), cloudy])[rg.COMPARISON_ENSEMBLE_GATE_NAME]
+    m13 = good_run(comparison_sets=[comparison_set(20, scatter_mag=0.0142, expected_error_mag=0.0112)])[
+        rg.COMPARISON_ENSEMBLE_GATE_NAME
+    ]
+    m81 = good_run(comparison_sets=[comparison_set(20, scatter_mag=0.0073, expected_error_mag=0.0044)])[
+        rg.COMPARISON_ENSEMBLE_GATE_NAME
+    ]
+
+    assert failed.status is GateStatus.FAILED
+    assert failed.measured_value == pytest.approx(0.0655 / 0.0036)
+    assert failed.limit == pytest.approx(rg.MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED)
+    assert "18.2 times what their errors predict" in failed.detail
+    assert "patchy cloud" in failed.detail
+    assert m13.status is GateStatus.PASSED
+    assert m81.status is GateStatus.PASSED
+
+
+def test_ensemble_gate_passes_when_the_scatter_cannot_be_compared() -> None:
+    """With no predicted error there is no ratio; the gate passes as before."""
+    gate = good_run(comparison_sets=[comparison_set(12, expected_error_mag=None)])[
+        rg.COMPARISON_ENSEMBLE_GATE_NAME
+    ]
+
+    assert gate.status is GateStatus.PASSED
+
+
 def test_drift_gate_goes_red_on_lost_tracking() -> None:
     """A 60 px drift fails; no recorded drift is not a pass."""
     failed = good_run(registration_drifts_px=[2.0, 60.0])[rg.REGISTRATION_DRIFT_GATE_NAME]

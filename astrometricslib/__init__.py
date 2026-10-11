@@ -76,7 +76,6 @@ from astrometricslib.foundation.paths import (
     is_path_inside,
     resolve_mounted_path,
     scratch_directory,
-    siril_work_directory,
 )
 from astrometricslib.foundation.storage import (
     AbstractButler,
@@ -289,6 +288,20 @@ class Astrometrics:
         The source of interstellar reddening values. If not given, Gaia DR3
         is queried through astroquery.
 
+    Attributes
+    ----------
+    targets : `TargetCatalog`
+        Observation targets, folder rescanning, and frame records.
+    stars : `StellarCatalog`
+        Identified stars, catalog queries, and plate solving.
+    processing : `ProcessingPipelines`
+        Frame calibration, stacking, and scientific analysis stages.
+    visualization : `Visualization`
+        Rendering FITS images to PNGs/data URLs and diagnostic plots.
+    jobs : `Jobs`
+        Read-only tracking of running and completed processing jobs
+        and lineage.
+
     Notes
     -----
     The drivers are for one process. Processing several targets at once
@@ -489,7 +502,6 @@ __all__ = [
     "safe_json_dumps",
     "scratch_directory",
     "select_library_frames",
-    "siril_work_directory",
     "to_epoch_seconds",
     "to_error_info",
     "warm_earth_orientation_data",

@@ -200,6 +200,18 @@ class Wayfinder:
             The science library handle every part of the Wayfinder uses, so
             all of them see the same target catalog. A new one is built over
             the configuration when omitted.
+
+        Attributes
+        ----------
+        control : `ObservatoryControl`
+            Direct hardware commanding across mount, imaging, guiding,
+            remote, history, safety, and equipment.
+        planning : `ObservationPlanning`
+            Target visibility, sky catalogs, mosaic calculation, and queue
+            sequence planning.
+        execution : `ObservationExecution`
+            Session queue advancement, meridian flip automation, and fault
+            recovery.
         """
         from astrometricslib import Astrometrics, get_configuration
         from wayfindinglib.api.control import ObservatoryControl

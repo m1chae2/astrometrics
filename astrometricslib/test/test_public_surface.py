@@ -184,6 +184,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "resolve_camera_profile",
     "resolve_mounted_path",
     "safe_json_dumps",
+    "scratch_directory",
     "select_library_frames",
     "to_error_info",
     "warm_earth_orientation_data",
@@ -207,6 +208,11 @@ KEPT_FOR_OUTSIDE_CALLERS = {
     # The backend container builds the Siril driver and hands it to its
     # stacking service.
     "ImageProcessing": "the backend",
+    # Both write temporary files on disk instead of in RAM, in the folder this
+    # function names (`foundation/paths.py`). The Siril work folder,
+    # `siril_work_directory`, is used only inside the library and stays off the
+    # root.
+    "scratch_directory": "wayfindinglib (the StellarMate driver) and the backend (the scripting service)",
 }
 
 

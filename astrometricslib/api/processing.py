@@ -814,6 +814,14 @@ class ProcessingPipelines:
         `process_target` for one target, and `run_spectroscopy_by_session`.
         `process_target` for several targets runs in worker processes, which
         cannot receive them, so it refuses to start when any were given.
+
+    Attributes
+    ----------
+    calibration : `CalibrationCatalog`
+        Tracking, querying, and refreshing dark, bias, and flat
+        calibration frames.
+    diagnostics : `QualityDiagnostics`
+        Measuring raw frame metrics, quarantine previews, and stack quality.
     """
 
     def __init__(

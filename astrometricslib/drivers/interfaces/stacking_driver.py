@@ -25,7 +25,7 @@ class StackSettings:
 
     Each value is `None` to use the engine's configured default.
 
-    Attributes
+    Parameters
     ----------
     rejection_sigma : `tuple` [`float`, `float`] or `None`
         The ``(low, high)`` limits, in standard deviations, past which a
@@ -68,7 +68,7 @@ class StackSettings:
 class StackRunResult:
     """What one engine run produced.
 
-    Attributes
+    Parameters
     ----------
     stacked_path : `str` or `None`
         Where the stacked image was written, or `None` if the run failed.

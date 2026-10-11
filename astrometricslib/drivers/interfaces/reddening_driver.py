@@ -18,7 +18,7 @@ from dataclasses import dataclass
 class ReddeningEstimate:
     """One catalog value of the colour excess for one star.
 
-    Attributes
+    Parameters
     ----------
     ebv : `float`
         The colour excess E(B-V), in magnitudes. Zero or more.

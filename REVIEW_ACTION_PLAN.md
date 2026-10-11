@@ -54,6 +54,18 @@ BJD_TDB times) come first because S10, S18, and the period searches depend on th
 **Tier 3: honesty of reported confidence.** S14, S16, S17, S18, S19, S20, S21. Do these after
 tiers 1 and 2; S18 only after S8.
 
+**Tier 4: standards a journal referee would ask for.** From the 2026-10-11 gap review (section
+1.5). The cheap items come first because each reuses numbers the pipeline already computes.
+
+| Item | What is missing | Size | Depends on |
+|---|---|---|---|
+| S22 | a false-alarm probability for each variability flag | small | S8 |
+| S23 | spectroscopy noise that follows the pixels each stack kept | small | — |
+| S24 | per-frame covariance of position error, and an ADES report | medium | — |
+| S25 | apertures scaled to each frame's star width, with an aperture correction | medium | — |
+| S26 | colour-matched comparison stars, or an airmass-times-colour term | medium | S10 |
+| S27 | injection-recovery grids: transit depth by magnitude, mover rate by star density | medium | S8 |
+
 ### 1.2 Architecture, filtered by the two aims
 
 Do first, because they block the science work or are small:
@@ -138,6 +150,11 @@ done.
 | Dereddening and line indices | done | `test/processing/test_dereddened_classification.py` (reddened G0V reads K2V, dereddened G0V); line-index type is a rough second opinion (50% within 2 subtypes, leave-one-out) |
 | Gaia XP comparison | done | `test/post_processing/test_compare_to_gaia_xp.py` (5%/1000 Å tilt recovered to 0.1); checkpoint 3 metrics; gate `gaia_xp_agreement` |
 | Measured line spread | done | `test/pre_processing/test_measured_line_spread.py` (injected sigma within 5%); checkpoint 1 `chromatic_defocus_ratio`; `scripts/spectral_focus_sweep.py`, `scripts/compare_instrument_responses.py` |
+| S12 / S13 real-data corrections | done | `drivers/test/test_calibration_matching.py::test_a_library_saved_before_temperatures_does_not_pool_them`; `pipelines/stacking/test/test_exposure_groups.py::test_a_different_sky_does_not_pass_for_a_gain` (see 1.5) |
+| Truncated calibration frames | done | `drivers/test/test_calibration_matching.py::test_a_truncated_frame_is_not_added_to_the_library` |
+| Gaia from VizieR first | done | `pipelines/astrometry/test/processing/test_gaia_service_fallback.py` |
+| Old star records load | done | `models/test/test_spectral_match_fields.py::test_a_star_saved_before_the_new_verdicts_still_loads` |
+| S22 to S27 | open | none yet |
 
 Decisions taken during the work, for the owner to confirm:
 
@@ -167,6 +184,46 @@ Decisions taken during the work, for the owner to confirm:
   re-derive it once a Vega stack and an observatory site are available.
 - `SpectroscopyPipeline(use_measured_line_spread=True)` stays off until the focus sweep has
   been run on a real bright star; M 13 (a cluster) cannot settle chromatic defocus.
+
+### 1.5 Real-data validation and the gap review, 2026-10-10 and 2026-10-11
+
+The first three tiers were built and tested on synthetic data and on five M 13 frames. Running
+them on the library (ASI 533MM stacks of M 13, M 81 and NGC 2403, and the astrometry stage) found
+problems that no synthetic test had:
+
+- **S13 measured the sky, not the stars.** The gain equalled the two nights' sky-per-second ratio
+  to three decimals (M 81 1.297 against 1.298), because the middle of a deep-sky image is sky.
+  Independent star photometry gave 1.40. The gain is now measured on sky-subtracted pixels well
+  above the sky. On NGC 2403 it agrees with star photometry (1.137 against 1.127); on M 81 the
+  60 s group is now left out as nonlinear (1.139 in the middle, 1.203 at the bright end). Why M 81's
+  bright stars read high is open.
+- **S12 did not reach an old library.** `calibration_frames.json` was saved before temperatures were
+  part of the key, and the selector then used darks of every temperature without a flag. A dark
+  with no temperature in its key is now placed by its own header.
+- **S16 broke 68 stored stars.** Old records had no `isPoorMatch`, so loading them stopped every
+  pipeline that records stars for their targets. The field is now optional.
+- **Gaia lookups failed on 22 of 23 targets.** The ESA archive was timing out on the G < 18 query.
+  VizieR answers the same query in 10 s and is now asked first.
+- **A truncated bias frame** (13 of 48 MB) was in the index. Frames shorter than their header
+  says are now refused.
+- **A metric had the wrong name.** `astrometric_residual_rms_arcsec` held the catalog match
+  separation, and the gate report labelled it the plate-solve residual.
+
+Measured and holding: S1 (SIP terms present, up to 1.8 arcsec at a corner), S11 (rejected pixels
+2.1, 4.0 and 5.0 percent down to 1.6, 1.7 and 1.8 percent), and the astrometric solutions
+themselves (median scatter about 0.24 arcsec against Gaia, one eighth of a pixel).
+
+Decisions of 2026-10-11:
+
+- **No search for fast movers.** The detector keeps its 300 arcsec per hour (5 arcsec per minute)
+  cap. Faster objects would be mostly satellites, and Starlink alone puts thousands of them in
+  the sky. A trail fit or shift-and-add search is out of scope, and the asteroid README should
+  say why.
+- **No absolute flux calibration.** Spectra stay in relative flux (a response curve from Vega and
+  an airmass correction). Classification does not need physical units. The review's claim that
+  dispersion is linear was wrong: the pipeline already uses the grating equation and fits the
+  grating distance.
+- **Tier 4 goes ahead**, cheap items first (S22, S23, S24), then S25 to S27.
 
 Found while doing tier 1, now tracked as follow-ups:
 
@@ -597,6 +654,104 @@ the 100 brightest). A reader of the document believes rigor the code does not ha
 test (section 5.5) checks the function exists.
 
 **Prevent.** Claim-to-code links, checked in CI.
+
+### S22. Variability flags have no false-alarm probability
+
+**Issue.** `calibrate_thresholds` in `pipelines/photometry/processing/variability_indices.py` puts
+cut-offs at the field median plus 2.326 times the scaled MAD (a normal-theory 99th percentile of
+the field's own spread). No flag has a p-value. The period searches already have one (block
+permutations, with a family-wise correction), so the two halves of the pipeline disagree about
+what "significant" means. A referee will ask for a false-alarm probability, and a count of flags
+without a false-discovery rate does not say how many are real.
+
+**Confirm.** Grep `p_value` and `false_alarm` in `variability_indices.py`. None.
+
+**Success.** Each star gets a chi-square p-value from its S8 errors (the tail of the chi-square
+distribution at its degrees of freedom), and the run reports the Benjamini-Hochberg false
+discovery rate at the chosen level. A candidate needs the existing score above 1 and a
+false-discovery-corrected p below 0.01. A test on constant synthetic fields confirms that no more
+than 1 percent of stars pass.
+
+**Prevent.** The synthetic-field test in CI. The `variability_discrimination` gate reports the
+number of stars that pass at the corrected level.
+
+### S23. Spectroscopy noise ignores which pixels survived rejection
+
+**Issue.** `build_pixel_noise_model` in `pipelines/spectroscopy/pre_processing/intensity_variance.py`
+divides by one global frame count (`STACKCNT`). A pixel where rejection removed several frames
+has fewer frames behind it and more noise than the model says. Siril writes the rejection map
+(`_RejMap.fits`), but no code in spectroscopy or photometry reads it. (Photometry measures single
+frames, so it is not affected.)
+
+**Confirm.** Compare `intensity_errors` of a spectrum on a stack with many rejected pixels along
+the trail with the scatter of the same pixels in the stack's input frames.
+
+**Success.** The noise model reads the rejection map and uses, per pixel, the number of frames
+that were kept. A synthetic stack with a known rejected count shows reported error over scatter
+within 10 percent along the trail.
+
+**Prevent.** The synthetic test in CI, and the `intensity_variance` checkpoint metric records the
+fraction of trail pixels with fewer frames than the stack count.
+
+### S24. Position errors have no covariance, and there is no ADES report
+
+**Issue.** `pipelines/asteroid_detection` reduces each frame's position error to one number and
+fits RA and Dec separately. Frame WCS is the stack WCS moved to the mount pointing, with no solve
+per frame. `mpc_report.py` writes the 80-column format only, with no uncertainty. The Minor
+Planet Center expects a position uncertainty for each observation.
+
+**Success.** Each observation carries sigma in RA and Dec and their correlation, taken from the
+residuals of the matched stars after the plate fit. An ADES (the MPC's XML or PSV format) writer
+is added beside the 80-column one, with the uncertainties. A test round-trips an observation.
+
+### S25. Apertures do not follow the seeing
+
+**Issue.** `measure_aperture_photometry` uses a 4.0 pixel radius with a 7 to 12 pixel sky ring on
+every frame. In differential photometry a fixed aperture loses about the same fraction of every
+star's light in one frame, so the ratio to the comparison stars cancels most of it. What is left
+is the part that depends on position in the field (a PSF that changes across the frame), blended
+stars, and sky error on faint stars. It grows when seeing worsens over a night, and no aperture
+correction is measured.
+
+**Confirm.** Injection test with Gaussian stars of 3.0 and then 5.0 pixel FWHM across one series.
+The ratio of a faint star to the ensemble changes by more than 0.5 percent.
+
+**Success.** The radius follows each frame's measured star width (radius equal to a stated
+multiple of the FWHM, with limits), and an aperture correction from the curve of growth of bright
+isolated stars is applied and recorded. The injection test recovers flux to 0.5 percent across the
+FWHM range.
+
+**Prevent.** The injection test in CI. The `registration_drift` gate also records the per-frame
+FWHM and the aperture used.
+
+### S26. Comparison stars are not matched to the target's colour
+
+**Issue.** `select_comparison_set` picks stars by brightness only. Blue stars lose more light than
+red ones as airmass rises, so a target whose colour differs from the ensemble's will show a
+spurious airmass slope. The optional `ensemble_airmass_correction` removes the median slope of the
+comparison stars and uses no colour (its own docstring says it cannot tell a colour term from
+variability). It is off in production.
+
+**Success.** Gaia BP-RP is stored for each star (it is already in the Gaia download and absent
+from the cache). The comparison set is chosen within a stated colour range of the target, or a
+slope against airmass times colour is fitted on the comparison stars and removed. An injection
+test with a colour-dependent extinction term recovers a known dip to 10 percent.
+
+**Prevent.** The injection test in CI.
+
+### S27. No completeness or false-discovery curves
+
+**Issue.** The injection tests are pass or fail at one point. `validate_asteroid_detection.py`
+has a grid of signal-to-noise by rate, but the star density is fixed, there is no purity figure,
+and it was not re-run after the direction check was added. Photometry has no grid at all.
+
+**Success.** A script writes, for photometry, the recovery fraction of injected dips and
+sinusoids against depth and magnitude with the false-alarm rate on constant stars, and for
+asteroids the recovery against rate and star density with purity. Each is written to a file that
+the README quotes with its date.
+
+**Prevent.** The script runs in the empirical validation workflow, and the README states which
+numbers are measured and which are designed.
 
 ## 4. Architecture items
 

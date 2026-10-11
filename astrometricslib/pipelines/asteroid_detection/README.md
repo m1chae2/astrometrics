@@ -65,6 +65,7 @@ Limits of the writer:
 ## Limits of this pipeline
 
 - **No cross-night linking.** A mover seen on two or more nights is reported as separate candidates, one per night. Linking them needs an orbit-style fit over days, which this package does not do.
+- **No search for fast movers, by decision.** The rate limit is 300 arcsec per hour (5 arcsec per minute, `rate_max_arcsec_per_hour`), and the detector keeps stars that are round (`roundness_range` of -0.6 to 0.6). A faster object draws a streak in one exposure and is dropped. Streaks that fast are mostly satellites, and Starlink alone puts thousands in the sky, so a trail fit or a shift-and-add search would find mostly satellites. The injection tests only reach 150 arcsec per hour, with round sources, and do not test trailed ones. The decision was made on 2026-10-11 (see `REVIEW_ACTION_PLAN.md`, section 1.5).
 - **Short sequences only.** The chaining radius is capped at 5 arcminutes, so a fast mover (300 arcsec per hour) is followed across gaps of up to about one hour. Raise `chain_match_radius_max_arcsec` for longer gaps within a night, at the cost of more false links.
 - **Slow movers need a long baseline.** The displacement condition means an object must travel about three times the position error between its first and last picture. With the assumed 10 arcsec error, that is 30 arcsec.
 - **A reversal smaller than the position error passes.** A star that flips by less than the combined error of two dots is not caught by the direction check.

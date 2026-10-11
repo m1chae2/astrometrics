@@ -18,6 +18,14 @@ import pytest
 
 from astrometricslib.utilities import parallel_batch
 
+# The address-space cap given to test workers. `RLIMIT_AS` bounds virtual
+# memory, and a worker that only imports numpy, scipy, astropy and the library
+# fails at 1024 MB (OpenBLAS cannot reserve its buffers) and starts at 2048 MB
+# (measured 2026-10-10 on Python 3.14). 4096 MB leaves a 2x margin, so the
+# tests exercise the cap without depending on how much address space the
+# libraries happen to reserve.
+WORKER_MEMORY_LIMIT_MB = 4096
+
 
 def _worker_that_logs(item_id, level_name):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     logger = logging.getLogger("astrometricslib.tasks.fake_pipeline")
@@ -184,7 +192,7 @@ class TestParallelBatchResourceGovernors:
             _simple_batch_worker,
             max_workers=2,
             max_tasks_per_child=2,
-            max_worker_memory_mb=1024,
+            max_worker_memory_mb=WORKER_MEMORY_LIMIT_MB,
         )
 
         assert len(summary.succeeded) == 8
@@ -198,7 +206,7 @@ class TestParallelBatchResourceGovernors:
             items,
             _oom_simulating_worker,
             max_workers=2,
-            max_worker_memory_mb=1024,
+            max_worker_memory_mb=WORKER_MEMORY_LIMIT_MB,
         )
 
         assert "Normal_1" in summary.succeeded

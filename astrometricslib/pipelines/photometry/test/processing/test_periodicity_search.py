@@ -209,7 +209,13 @@ def test_a_wide_span_with_fine_cadence_does_not_stall_the_period_search() -> Non
     box_search(times, flux)
     elapsed_seconds = time_module.monotonic() - started_at
 
-    assert elapsed_seconds < 30.0
+    # Measured 2026-10-10 on a 12-core machine: 36 s (150 shuffles at 0.08 s
+    # for Lomb-Scargle and 0.16 s for the box search). The incident needed
+    # about 7 minutes per evaluation, so the same search would have run for
+    # roughly 17 hours. 120 s keeps the test about 500 times below the
+    # incident and leaves a 3x margin for slower machines; the earlier 30 s
+    # limit sat just under the real cost and failed on this machine.
+    assert elapsed_seconds < 120.0
 
 
 LONG_BASELINE_PERIOD_DAYS = 0.21

@@ -589,6 +589,33 @@ def _dark_paths_at_exposure(exposure_slots: dict[str, Any], exposure: Any) -> li
     return collected
 
 
+def is_truncated_fits(hdu_list: Any, image_file: str) -> bool:
+    """Say whether a FITS file ends before the data its header promises.
+
+    The header gives the image's size, so the data must end a known number of
+    bytes into the file. A file copied only in part is shorter than that. Its
+    header still reads normally, so without this check the frame would join a
+    master frame and could ruin it. On 2026-10-10 the library held one such
+    bias frame (13 of 48 MB).
+
+    Parameters
+    ----------
+    hdu_list : `astropy.io.fits.HDUList`
+        The opened file.
+    image_file : `str`
+        The file's path, whose size is compared with the promised data end.
+
+    Returns
+    -------
+    truncated : `bool`
+        `True` when the file is shorter than its first image's data end.
+    """
+    file_info = hdu_list.fileinfo(0)
+    if file_info is None:
+        return False
+    return int(file_info["datLoc"]) + int(file_info["datSpan"]) > os.path.getsize(image_file)
+
+
 def _read_dark_temperature(path: str) -> float | None:
     """Read the sensor temperature a dark frame was taken at.
 
@@ -930,6 +957,12 @@ class CalibrationLibrary(BaseModel):
 
         try:
             with fits.open(image_file, memmap=False) as hdu_list:
+                if is_truncated_fits(hdu_list, image_file):
+                    logger.warning(
+                        "Not adding dark frame %s: the file is shorter than its header says.",
+                        image_file,
+                    )
+                    return
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
@@ -966,6 +999,12 @@ class CalibrationLibrary(BaseModel):
 
         try:
             with fits.open(image_file, memmap=False) as hdu_list:
+                if is_truncated_fits(hdu_list, image_file):
+                    logger.warning(
+                        "Not adding bias frame %s: the file is shorter than its header says.",
+                        image_file,
+                    )
+                    return
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
                 iso_speed = calibration_setting_key(
@@ -1003,6 +1042,12 @@ class CalibrationLibrary(BaseModel):
 
         try:
             with fits.open(image_file, memmap=False) as hdu_list:
+                if is_truncated_fits(hdu_list, image_file):
+                    logger.warning(
+                        "Not adding flat frame %s: the file is shorter than its header says.",
+                        image_file,
+                    )
+                    return
                 header_info = hdu_list[0].header
                 camera = self._get_camera_name(header_info)
 

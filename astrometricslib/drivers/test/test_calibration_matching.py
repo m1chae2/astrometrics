@@ -655,3 +655,41 @@ def test_staging_a_binned_light_applies_no_unbinned_dark_and_records_a_blocking_
     assert len(blocking) == 3
     assert all("2x2" in flag and "1x1" in flag for flag in blocking)
     assert processor.last_run_diagnostics["calibration_mismatch_flags"] == []
+
+
+def test_a_truncated_frame_is_not_added_to_the_library(tmp_path: Path) -> None:
+    """A file shorter than its header promises never joins a master frame.
+
+    The real case (2026-10-10) was a Nikon bias frame with 13 of 48 MB. Its
+    header read normally, so it had been filed and would have been stacked.
+    """
+    library = make_library(tmp_path)
+    whole = write_frame(tmp_path / "whole.fits", temperature_c=-10.0)
+    cut = tmp_path / "cut.fits"
+    data = Path(whole).read_bytes()
+    cut.write_bytes(data[: len(data) // 2])
+
+    library.add_dark_frame(whole)
+    library.add_dark_frame(str(cut))
+    library.add_bias_frame(whole)
+    library.add_bias_frame(str(cut))
+    library.add_flat_frame(whole)
+    library.add_flat_frame(str(cut))
+
+    def filed(tree: object) -> list[str]:
+        """Collect every file path in a nested library entry.
+
+        Returns
+        -------
+        paths : `list` [`str`]
+            Each path found, in the order met.
+        """
+        if isinstance(tree, dict):
+            return [path for value in tree.values() for path in filed(value)]
+        if isinstance(tree, list):
+            return [path for value in tree for path in filed(value)]
+        return [str(tree)]
+
+    for frames in (library.dark_frames, library.bias_frames, library.flat_frames):
+        assert str(cut) not in filed(frames)
+        assert whole in filed(frames)

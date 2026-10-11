@@ -119,9 +119,11 @@ def test_the_shipped_asi533_profile_carries_its_detector_noise_terms() -> None:
     asi533 = profiles["ZWO ASI533MM Pro"]
     assert asi533.gain_e_per_adu is not None
     assert asi533.read_noise_e is not None
-    assert asi533.gain_e_per_adu.value == pytest.approx(3.6)
+    # In stored 16-bit ADU. The old 3.6 e-/ADU was in 14-bit ADU and made the
+    # error bars about 2 times too small.
+    assert asi533.gain_e_per_adu.value == pytest.approx(0.783)
     assert asi533.read_noise_e.value == pytest.approx(3.8)
-    assert asi533.gain_e_per_adu.provenance.kind.value == "datasheet"
+    assert asi533.gain_e_per_adu.provenance.kind.value == "measured"
     assert profiles["Nikon D5300"].gain_e_per_adu is None
 
 

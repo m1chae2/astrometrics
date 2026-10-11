@@ -61,19 +61,19 @@ def _lock_file(fh: TextIO, blocking: bool) -> None:
     BlockingIOError
         Raised if the lock is held elsewhere and `blocking` is `False`.
     """
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        # Windows has no flock. msvcrt locks one byte at the file's start.
+        while True:
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError as e:
+                if not blocking:
+                    raise BlockingIOError(str(e)) from e
+                time.sleep(0.05)
+    else:
         fcntl.flock(fh, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return
-    # Windows has no flock. msvcrt locks one byte at the file's start.
-    while True:
-        try:
-            fh.seek(0)
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-            return
-        except OSError as e:
-            if not blocking:
-                raise BlockingIOError(str(e)) from e
-            time.sleep(0.05)
 
 
 def _unlock_file(fh: TextIO) -> None:
@@ -84,12 +84,12 @@ def _unlock_file(fh: TextIO) -> None:
     fh : `io.TextIOWrapper`
         Open file that was locked.
     """
-    if sys.platform != "win32":
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError):
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
         fcntl.flock(fh, fcntl.LOCK_UN)
-        return
-    with contextlib.suppress(OSError):
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 @contextlib.contextmanager

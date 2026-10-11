@@ -71,17 +71,34 @@ def test_a_ratio_metric_combines_two_stored_numbers_and_tolerates_gaps() -> None
 
 
 def test_a_metric_with_no_limit_reports_only_its_spread() -> None:
-    """The astrometric residual has no limit yet, so nothing can fire."""
+    """The plate-solve fit residual has no limit here, so nothing can fire."""
     targets = [
-        {"quality": {"astrometry": {"astrometryMetrics": {"astrometricResidualRmsArcsec": value}}}}
+        {"quality": {"astrometry": {"astrometryMetrics": {"plateSolveFitResidualRmsArcsec": value}}}}
         for value in (1.0, 2.0, 9.0)
     ]
 
-    summary = report.summarize(metric_named("plate-solve residual RMS (arcsec)"), targets)
+    summary = report.summarize(metric_named("plate-solve fit residual RMS (arcsec)"), targets)
 
     assert summary.beyond_limit == 0
     assert summary.metric.limit is None
     assert summary.maximum == pytest.approx(9.0)
+
+
+def test_the_catalog_separation_is_read_under_either_of_its_names() -> None:
+    """Older summaries hold the separation as astrometricResidualRmsArcsec.
+
+    The report once labelled that older key "plate-solve residual RMS"; it is
+    the catalog match separation, and is now reported as such.
+    """
+    targets = [
+        {"quality": {"astrometry": {"astrometryMetrics": {"astrometricResidualRmsArcsec": 2.0}}}},
+        {"quality": {"astrometry": {"astrometryMetrics": {"catalogMatchSeparationRmsArcsec": 4.0}}}},
+    ]
+
+    summary = report.summarize(metric_named("catalog match separation RMS (arcsec)"), targets)
+
+    assert summary.count == 2
+    assert summary.maximum == pytest.approx(4.0)
 
 
 def test_a_library_with_no_values_gives_an_empty_summary() -> None:

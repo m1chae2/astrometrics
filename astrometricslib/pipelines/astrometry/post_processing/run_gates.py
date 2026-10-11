@@ -73,10 +73,10 @@ def _residual_and_basis(metrics: AstrometryPipelineQualityMetrics) -> tuple[floa
         matched = metrics.plate_solve_matched_star_count
         stars = f" over {matched} matched stars" if matched is not None else ""
         return fit_residual, f"plate-solve fit residual RMS{stars}"
-    separation = metrics.catalog_match_separation_rms_arcsec
-    if separation is None:
-        separation = metrics.astrometric_residual_rms_arcsec
-    return separation, "catalog match separation RMS, because the plate solver reported no fit residual"
+    return (
+        metrics.catalog_match_separation_rms_arcsec,
+        "catalog match separation RMS, because the plate solver reported no fit residual",
+    )
 
 
 def astrometry_run_gates(metrics: AstrometryPipelineQualityMetrics) -> list[GateResult]:

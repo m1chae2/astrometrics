@@ -10,7 +10,7 @@ processed), and specific classes for each pipeline's unique metrics
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from astrometricslib.models.gaia_xp_comparison import GaiaXpRunSummary
 from astrometricslib.models.gate_result import GateResult, GateStatus
@@ -370,19 +370,52 @@ class AstrometryPipelineQualityMetrics(StarIdentificationMetrics):
     sources_detected: int = Field(alias="sourcesDetected")
     solve_attempted: bool = Field(alias="solveAttempted")
     plate_solve_succeeded: bool = Field(alias="plateSolveSucceeded")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_the_older_separation_name(cls, data: object) -> object:
+        """Read a saved catalog match separation stored under its older name.
+
+        The separation was once stored as ``astrometricResidualRmsArcsec``,
+        a name that read as the plate-solve fit residual (and was labelled
+        that way in `scripts/report_gate_limits.py`). It is now only
+        ``catalogMatchSeparationRmsArcsec``. A summary whose new key is
+        missing or empty keeps the older key's value under the new name.
+
+        Parameters
+        ----------
+        data : `object`
+            The raw input to the model.
+
+        Returns
+        -------
+        data : `object`
+            The same input, with the older key moved to the new name.
+        """
+        if not isinstance(data, dict):
+            return data
+        older_keys = ("astrometricResidualRmsArcsec", "astrometric_residual_rms_arcsec")
+        if not any(key in data for key in older_keys):
+            return data
+        older_value = next((data[key] for key in older_keys if key in data), None)
+        data = {name: value for name, value in data.items() if name not in older_keys}
+        new_keys = ("catalogMatchSeparationRmsArcsec", "catalog_match_separation_rms_arcsec")
+        if all(data.get(key) is None for key in new_keys):
+            data = {name: value for name, value in data.items() if name not in new_keys}
+            data["catalogMatchSeparationRmsArcsec"] = older_value
+        return data
+
     # SIMBAD and Gaia are online databases of stars and their real
     # positions, used to double-check what's in the picture.
     simbad_matched_count: int = Field(alias="simbadMatchedCount")
     # The root mean square (RMS) of the distance, in arcseconds, between each
     # detected star and the nearest SIMBAD or Gaia star within the match
-    # radius. This is the catalog match separation, not the plate-solve fit
-    # residual: it ignores any star farther than the radius and includes
-    # wrong matches. The field keeps its older name for saved summaries and
-    # always holds the same value as `catalog_match_separation_rms_arcsec`.
-    astrometric_residual_rms_arcsec: float | None = Field(default=None, alias="astrometricResidualRmsArcsec")
-    # The same catalog match separation RMS, under a name that says what it
-    # is. The residual gate uses it only when the plate solver gave no fit
-    # residual of its own. `None` when no star was matched to a catalog.
+    # radius. This is not the plate-solve fit residual: it ignores any star
+    # farther than the radius and includes wrong matches. The residual gate
+    # uses it only when the plate solver gave no fit residual of its own.
+    # `None` when no star was matched to a catalog. Summaries saved before
+    # 2026-10-10 hold it as ``astrometricResidualRmsArcsec`` (see
+    # `_read_the_older_separation_name`).
     catalog_match_separation_rms_arcsec: float | None = Field(
         default=None, alias="catalogMatchSeparationRmsArcsec"
     )

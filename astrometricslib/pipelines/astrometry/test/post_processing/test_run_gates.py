@@ -33,7 +33,7 @@ def make_metrics(**changes: object) -> AstrometryPipelineQualityMetrics:
         "remote_catalog_queries_failed": 0,
         "remote_catalog_circuit_breaker_tripped": False,
         "catalog_matched_star_count": 150,
-        "astrometric_residual_rms_arcsec": 1.0,
+        "catalog_match_separation_rms_arcsec": 1.0,
         "plate_scale_arcsec_per_pixel": 1.9,
         "star_fwhm_px": 3.0,
     }
@@ -111,7 +111,7 @@ def test_a_breaker_that_was_already_open_means_no_lookup_was_made_not_a_failure(
 
 def test_the_residual_gate_goes_red_when_the_fit_misses_by_more_than_half_a_star() -> None:
     """A 5 arcsec residual with 1.9 arcsec pixels and 3 pixel stars is 88%."""
-    gate = gates_for(astrometric_residual_rms_arcsec=5.0)[rg.RESIDUAL_GATE_NAME]
+    gate = gates_for(catalog_match_separation_rms_arcsec=5.0)[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
     assert gate.measured_value == pytest.approx(5.0 / (1.9 * 3.0))
@@ -129,7 +129,7 @@ def test_the_residual_gate_passes_a_good_fit_with_the_ratio_on_record() -> None:
 @pytest.mark.parametrize(
     "missing",
     [
-        {"astrometric_residual_rms_arcsec": None},
+        {"catalog_match_separation_rms_arcsec": None},
         {"plate_scale_arcsec_per_pixel": None},
         {"star_fwhm_px": None},
     ],
@@ -161,7 +161,6 @@ def test_the_residual_gate_judges_the_plate_solve_fit_when_the_solver_gave_one()
         plate_solve_fit_residual_rms_arcsec=0.5,
         plate_solve_matched_star_count=42,
         catalog_match_separation_rms_arcsec=8.0,
-        astrometric_residual_rms_arcsec=8.0,
     )[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.PASSED
@@ -176,7 +175,6 @@ def test_the_residual_gate_fails_a_bad_fit_even_when_the_catalog_separation_is_s
     gate = gates_for(
         plate_solve_fit_residual_rms_arcsec=5.0,
         catalog_match_separation_rms_arcsec=1.0,
-        astrometric_residual_rms_arcsec=1.0,
     )[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.FAILED
@@ -212,7 +210,6 @@ def test_the_residual_gate_is_not_checked_with_neither_a_fit_nor_a_catalog_separ
     gate = gates_for(
         plate_solve_fit_residual_rms_arcsec=None,
         catalog_match_separation_rms_arcsec=None,
-        astrometric_residual_rms_arcsec=None,
     )[rg.RESIDUAL_GATE_NAME]
 
     assert gate.status is GateStatus.NOT_CHECKED

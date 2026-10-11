@@ -4,7 +4,7 @@
 catalog entry it was matched to, and already notices when two or more
 catalog entries were too close together to tell apart -- but today both
 signals evaporate: the separation is only ever summed into one batch-wide
-RMS (`AstrometryPipelineQualityMetrics.astrometric_residual_rms_arcsec`),
+RMS (`AstrometryPipelineQualityMetrics.catalog_match_separation_rms_arcsec`),
 and an ambiguous match is resolved silently with no record left behind.
 `CatalogMatchQuality` keeps both, per star, alongside `StellarObject`.
 """
@@ -26,7 +26,7 @@ class CatalogMatchQuality(BaseModel):
     matched_via: str | None = Field(default=None, alias="matchedVia")
     # This star's own catalog-match separation, in arcseconds -- the
     # same per-match distance that today is only ever summed into the
-    # batch-wide astrometric_residual_rms_arcsec.
+    # batch-wide catalog_match_separation_rms_arcsec.
     separation_arcsec: float | None = Field(default=None, alias="separationArcsec")
     # True when two or more catalog entries sat within
     # UNRESOLVED_COMPANION_RADIUS_ARCSEC of this star and the brightest

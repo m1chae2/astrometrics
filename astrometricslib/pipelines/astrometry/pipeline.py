@@ -141,7 +141,6 @@ class AstrometryPipeline:
             extended_source_hint=extended_source_hint,
             sources_detected=self.star_identifier.sources_detected,
             solve_attempted=self.star_identifier.solve_attempted,
-            astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),
             catalog_match_separation_rms_arcsec=(
                 self.star_identifier.get_catalog_match_separation_rms_arcsec()
             ),

@@ -1,6 +1,6 @@
 """Tests for the two headline quality metrics.
 
-Verifies that `astrometric_residual_rms_arcsec` and
+Verifies that `catalog_match_separation_rms_arcsec` and
 `light_curve_scatter_rms_mag` are correctly calculated and assigned.
 These metrics are essential for reporting the quality of the
 astrometry solve and the photometry light curves.
@@ -113,14 +113,14 @@ def test_residual_rms_is_the_quadratic_mean() -> None:
     """RMS, not a plain average: large misses must dominate."""
     identifier = _identifier_with_separations([3.0, 4.0])
 
-    assert identifier.get_astrometric_residual_rms_arcsec() == pytest.approx(math.sqrt(12.5), rel=1e-3)
+    assert identifier.get_catalog_match_separation_rms_arcsec() == pytest.approx(math.sqrt(12.5), rel=1e-3)
 
 
 def test_a_tight_solution_reports_a_small_residual() -> None:
     """Sub-arcsecond separations mean a good WCS."""
     identifier = _identifier_with_separations([0.2, 0.25, 0.3, 0.18])
 
-    residual = identifier.get_astrometric_residual_rms_arcsec()
+    residual = identifier.get_catalog_match_separation_rms_arcsec()
 
     assert residual is not None
     assert residual < 0.5
@@ -128,4 +128,4 @@ def test_a_tight_solution_reports_a_small_residual() -> None:
 
 def test_no_catalog_matches_yields_no_residual() -> None:
     """A solve with nothing matched cannot report a residual."""
-    assert _identifier_with_separations([]).get_astrometric_residual_rms_arcsec() is None
+    assert _identifier_with_separations([]).get_catalog_match_separation_rms_arcsec() is None

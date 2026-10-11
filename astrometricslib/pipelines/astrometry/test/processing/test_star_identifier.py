@@ -281,9 +281,11 @@ def test_query_gaia_region_pins_dr3_table_name(tmp_path: Path, monkeypatch: pyte
             Returns
             -------
             table : `astropy.table.Table`
-                A table with no rows.
+                A table with no rows and every column the query asks for,
+                as the archive returns for an empty circle.
             """
-            return Table({"ra": [], "dec": []})
+            names = ("source_id", "ra", "dec", "phot_g_mean_mag", "designation", "pmra", "pmdec")
+            return Table({name: [] for name in names})
 
     def _fake_launch_job_async(query: str, **_keywords: object) -> _FakeJob:
         """Record the ADQL text and return a finished empty job.

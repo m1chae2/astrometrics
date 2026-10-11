@@ -42,7 +42,6 @@ class AnalysisContext:
     extended_source_hint: ExtendedSourceHint | None = None
     sources_detected: int = 0
     solve_attempted: bool = False
-    astrometric_residual_rms_arcsec: float | None = None
     catalog_match_separation_rms_arcsec: float | None = None
     plate_solve_fit_residual_rms_arcsec: float | None = None
     plate_solve_matched_star_count: int | None = None

@@ -41,7 +41,6 @@ def _validate(monkeypatch: pytest.MonkeyPatch, wcs: Any, **context_fields: Any) 
         stellar_objects=[],
         sources_detected=5,
         solve_attempted=True,
-        astrometric_residual_rms_arcsec=None,
         catalog_match_separation_rms_arcsec=None,
         plate_solve_fit_residual_rms_arcsec=None,
         plate_solve_matched_star_count=None,
@@ -115,7 +114,6 @@ def test_the_summary_records_the_fit_residual_beside_the_catalog_separation(
         plate_solve_fit_residual_rms_arcsec=0.6,
         plate_solve_matched_star_count=37,
         catalog_match_separation_rms_arcsec=4.2,
-        astrometric_residual_rms_arcsec=4.2,
     )
 
     metrics = summary.astrometry_metrics
@@ -131,9 +129,7 @@ def test_the_summary_gate_falls_back_to_the_catalog_separation_and_says_so(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With no driver fit residual, the gate names the proxy it judged."""
-    summary = _validate_with_measured_scale(
-        monkeypatch, catalog_match_separation_rms_arcsec=1.2, astrometric_residual_rms_arcsec=1.2
-    )
+    summary = _validate_with_measured_scale(monkeypatch, catalog_match_separation_rms_arcsec=1.2)
 
     gate = summary.gate("astrometric_residual")
     assert summary.astrometry_metrics.plate_solve_fit_residual_rms_arcsec is None

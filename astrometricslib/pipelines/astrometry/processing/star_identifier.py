@@ -181,6 +181,22 @@ FLAG_GAIA_ROW_LIMIT_REACHED = "gaia_row_limit_reached"
 FLAG_GAIA_PROPER_MOTION_UNKNOWN = "gaia_proper_motion_unknown"
 FLAG_GAIA_EPOCH_UNKNOWN = "gaia_epoch_unknown"
 FLAG_SCALE_HINT_BINNING_MISMATCH = "scale_hint_binning_mismatch"
+FLAG_GAIA_DEPTH_REDUCED = "gaia_depth_reduced"
+
+# Gaia DR3 is downloaded from VizieR first and from the ESA Gaia archive
+# second (see `drivers/gaia_cone_driver.py` for why). VizieR answered a
+# 14,000-star field in 10 s on 2026-10-10, so 45 s leaves room for a slow
+# day; the ESA archive keeps its earlier 60 s deadline. If both fail at the
+# requested depth, VizieR is asked again up to GAIA_DEPTH_STEPS_DOWN times,
+# each GAIA_DEPTH_STEP_MAGNITUDES brighter: a shallower answer still names
+# the brighter stars, and the depth reached is recorded, so the cache never
+# claims stars it was not given. On the same day the ESA archive timed out at
+# G < 18 but answered G < 17 in 6 s. These are design choices, not limits
+# validated over many nights.
+GAIA_VIZIER_TIMEOUT_SECONDS = 45
+GAIA_ESA_TIMEOUT_SECONDS = 60
+GAIA_DEPTH_STEP_MAGNITUDES = 1.0
+GAIA_DEPTH_STEPS_DOWN = 2
 
 _gaia_failure_state_lock = threading.Lock()
 _gaia_consecutive_failures = 0
@@ -226,6 +242,109 @@ def _record_gaia_success() -> None:
     with _gaia_failure_state_lock:
         _gaia_queries_attempted += 1
         _gaia_consecutive_failures = 0
+
+
+def _fetch_gaia_cone(
+    ra_center: float,
+    dec_center: float,
+    radius_deg: float,
+    max_magnitude: float,
+    row_limit: int,
+    purpose: str,
+) -> Any | None:
+    """Download Gaia DR3 stars in a circle, trying each service in turn.
+
+    The order is VizieR, then the ESA Gaia archive, both at `max_magnitude`;
+    then VizieR again at up to `GAIA_DEPTH_STEPS_DOWN` brighter limits. The
+    first answer wins. The whole attempt counts as one success or one failure
+    for the circuit breaker.
+
+    Parameters
+    ----------
+    ra_center, dec_center, radius_deg : `float`
+        The search circle, in degrees.
+    max_magnitude : `float`
+        The faintest G magnitude asked for.
+    row_limit : `int`
+        The most rows to return, brightest first.
+    purpose : `str`
+        What the stars are for, used in log messages.
+
+    Returns
+    -------
+    table : `astropy.table.Table` or `None`
+        The stars (see `drivers.gaia_cone_driver.GAIA_CONE_COLUMNS`), or
+        `None` when every attempt failed. ``meta["magnitude_limit"]`` is the
+        depth actually fetched, ``meta["depth_reduced"]`` is True when that is
+        brighter than `max_magnitude`, ``meta["gaia_service"]`` names the
+        service that answered, and ``meta["row_limit_reached"]`` is True when
+        the table holds `row_limit` rows.
+    """
+    from astrometricslib.drivers.gaia_cone_driver import query_gaia_cone_esa, query_gaia_cone_vizier
+
+    attempts: list[tuple[str, float, Callable[[], Any], int]] = []
+    for step in range(GAIA_DEPTH_STEPS_DOWN + 1):
+        magnitude = max_magnitude - step * GAIA_DEPTH_STEP_MAGNITUDES
+
+        def vizier(magnitude: float = magnitude) -> Any:
+            """Ask VizieR at this depth.
+
+            Returns
+            -------
+            table : `astropy.table.Table`
+                The stars VizieR returned.
+            """
+            return query_gaia_cone_vizier(
+                ra_center, dec_center, radius_deg, magnitude, row_limit, GAIA_VIZIER_TIMEOUT_SECONDS
+            )
+
+        attempts.append(("VizieR", magnitude, vizier, GAIA_VIZIER_TIMEOUT_SECONDS + 5))
+        if step == 0:
+
+            def esa(magnitude: float = magnitude) -> Any:
+                """Ask the ESA Gaia archive at this depth.
+
+                Returns
+                -------
+                table : `astropy.table.Table`
+                    The stars the archive returned.
+                """
+                return query_gaia_cone_esa(ra_center, dec_center, radius_deg, magnitude, row_limit)
+
+            attempts.append(("ESA Gaia archive", magnitude, esa, GAIA_ESA_TIMEOUT_SECONDS))
+
+    for service, magnitude, query, deadline in attempts:
+        try:
+            table = _run_with_daemon_thread_timeout(query, timeout_seconds=deadline)
+        except ExternalServiceError:
+            logger.warning(
+                "Gaia %s from %s timed out after %ss (G < %.1f, field %.4f, %.4f).",
+                purpose,
+                service,
+                deadline,
+                magnitude,
+                ra_center,
+                dec_center,
+            )
+            continue
+        except ONLINE_QUERY_ERRORS as error:
+            logger.warning("Gaia %s from %s failed (G < %.1f): %s", purpose, service, magnitude, error)
+            continue
+        _record_gaia_success()
+        table.meta["magnitude_limit"] = magnitude
+        table.meta["depth_reduced"] = magnitude < max_magnitude
+        table.meta["gaia_service"] = service
+        table.meta["row_limit_reached"] = len(table) >= row_limit
+        if magnitude < max_magnitude:
+            logger.warning(
+                "Gaia %s reached only G < %.1f of the G < %.1f asked for; fainter stars stay unnamed.",
+                purpose,
+                magnitude,
+                max_magnitude,
+            )
+        return table
+    _record_gaia_failure(f"{purpose} failed on every service")
+    return None
 
 
 def get_gaia_query_statistics() -> dict[str, int | bool]:
@@ -793,18 +912,6 @@ class StarIdentifier:
             return None
         return round(math.sqrt(sum(value**2 for value in separations) / len(separations)), 4)
 
-    def get_astrometric_residual_rms_arcsec(self) -> float | None:
-        """Return the catalog match separation RMS under its older name.
-
-        Returns
-        -------
-        separation_rms_arcsec : `float` or `None`
-            The same value as `get_catalog_match_separation_rms_arcsec`. It is
-            the catalog proxy, not the plate-solve fit residual (see
-            `plate_solve_fit_residual_rms_arcsec` for that).
-        """
-        return self.get_catalog_match_separation_rms_arcsec()
-
     def detect_stars(self, data: np.ndarray, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
         """Find all the dots of light in the image and remove duplicates.
 
@@ -1265,8 +1372,8 @@ class StarIdentifier:
         `catalog_store.is_gaia_region_complete`). If not, it downloads stars
         brighter than the `max_magnitude` limit, saves them, and records
         the region's centre, radius and magnitude limit so a later search can
-        reuse them. The bulk query sets no row limit, so the record always
-        says the download was not cut short.
+        reuse them. The record holds the depth actually fetched and whether
+        the download reached `GAIA_ROW_LIMIT` rows.
 
         Parameters
         ----------
@@ -1283,7 +1390,6 @@ class StarIdentifier:
             How many stars we downloaded or found in the cache.
         """
         from astropy.table import Table
-        from astroquery.gaia import Gaia
 
         from astrometricslib.drivers import catalog_store
         from astrometricslib.foundation.config import get_configuration
@@ -1321,39 +1427,9 @@ class StarIdentifier:
             dec_center,
             radius_deg,
         )
-        query = (
-            "SELECT source_id, ra, dec, phot_g_mean_mag, designation, pmra, pmdec "
-            "FROM gaiadr3.gaia_source "
-            f"WHERE phot_g_mean_mag < {max_magnitude} "
-            f"AND CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra_center}, {dec_center}, {radius_deg}))=1"
+        result_table: Table | None = _fetch_gaia_cone(
+            ra_center, dec_center, radius_deg, max_magnitude, GAIA_ROW_LIMIT, "cache seed"
         )
-
-        def _run_query() -> Table:
-            """Run the bulk seed query and wait for its table.
-
-            Returns
-            -------
-            result_table : `astropy.table.Table`
-                The rows the Gaia server returned.
-            """
-            job = Gaia.launch_job_async(query, dump_to_file=False)
-            return job.get_results()
-
-        try:
-            result_table: Table = _run_with_daemon_thread_timeout(_run_query, timeout_seconds=45)
-        except ExternalServiceError:
-            logger.warning(
-                "Gaia bulk seed query timed out after 45s for field (%.4f, %.4f).", ra_center, dec_center
-            )
-            _record_gaia_failure("bulk seed timed out after 45s")
-            return 0
-        except ONLINE_QUERY_ERRORS as e:
-            logger.warning("Gaia bulk seed query failed: %s", e)
-            _record_gaia_failure(f"bulk seed failed: {e}")
-            return 0
-
-        _record_gaia_success()
-
         if result_table is None or len(result_table) == 0:
             return 0
 
@@ -1372,8 +1448,15 @@ class StarIdentifier:
             ]
             catalog_store.insert_gaia_sources(config, to_insert)
             catalog_store.mark_region_cached(config, region_key, ra_center, dec_center, radius_deg)
+            # The depth actually fetched, which is brighter than asked when
+            # every service failed at the full depth.
             catalog_store.record_gaia_region(
-                config, ra_center, dec_center, radius_deg, max_magnitude, row_limit_hit=False
+                config,
+                ra_center,
+                dec_center,
+                radius_deg,
+                result_table.meta["magnitude_limit"],
+                row_limit_hit=bool(result_table.meta["row_limit_reached"]),
             )
             logger.info(
                 "Successfully cached %s Gaia DR3 sources for field (%.4f, %.4f).",
@@ -1452,7 +1535,14 @@ class StarIdentifier:
         result_table.meta["proper_motion_known"] = StarIdentifier._table_has_proper_motion(result_table)
 
         StarIdentifier._cache_gaia_results(
-            config, result_table, region=(ra_center, dec_center, radius_deg, max_magnitude)
+            config,
+            result_table,
+            region=(
+                ra_center,
+                dec_center,
+                radius_deg,
+                result_table.meta.get("magnitude_limit", max_magnitude),
+            ),
         )
 
         gaia_coords = StarIdentifier._gaia_coords_from_table(result_table)
@@ -1592,13 +1682,14 @@ class StarIdentifier:
         max_magnitude: float = GAIA_DEFAULT_MAGNITUDE_LIMIT,
         row_limit: int = GAIA_ROW_LIMIT,
     ) -> Any | None:
-        """Download Gaia DR3 sources for a region from the remote TAP server.
+        """Download Gaia DR3 sources for a region from VizieR or ESA.
 
         The query asks for stars brighter than `max_magnitude` inside the
         circle and returns the brightest first, so if the result is cut at
         `row_limit` rows, the faintest stars are the ones lost. Each row has
         the position (epoch 2016.0), the G magnitude, the designation and the
-        proper motion.
+        proper motion. See `_fetch_gaia_cone` for the order of services and
+        the brighter limits tried when every service fails.
 
         Parameters
         ----------
@@ -1612,66 +1703,27 @@ class StarIdentifier:
         Returns
         -------
         result_table : `astropy.table.Table` or `None`
-            The downloaded sources, or `None` if the query timed out
-            or failed. When the table holds exactly `row_limit` rows,
-            ``result_table.meta["row_limit_reached"]`` is True.
+            The downloaded sources, or `None` if every attempt timed out
+            or failed. ``meta`` holds the keys `_fetch_gaia_cone` sets,
+            including ``row_limit_reached`` and the depth actually fetched.
         """
-        from astroquery.gaia import Gaia
-
-        # If cache miss, auto-download from remote TAP server
         logger.info(
-            "Querying Gaia DR3 bulk region at %.4f, %.4f with %.3f degree radius (G < %.1f)...",
+            "Querying Gaia DR3 region at %.4f, %.4f with %.3f degree radius (G < %.1f)...",
             ra_center,
             dec_center,
             radius_deg,
             max_magnitude,
         )
-        # The table is pinned explicitly (gaiadr3.gaia_source) rather than
-        # left to astroquery's default, the ESA archive server's own current
-        # release. It must always match the release hardcoded in the bulk-seed
-        # ADQL query, the local SQLite cache schema, and every "Gaia DR3 ..."
-        # id string this file generates. Bump deliberately, together with
-        # those, when moving to a newer Gaia release.
-        query = (
-            f"SELECT TOP {int(row_limit)} source_id, ra, dec, phot_g_mean_mag, designation, pmra, pmdec "
-            "FROM gaiadr3.gaia_source "
-            f"WHERE phot_g_mean_mag < {max_magnitude} "
-            "AND CONTAINS(POINT('ICRS', ra, dec), "
-            f"CIRCLE('ICRS', {ra_center}, {dec_center}, {radius_deg}))=1 "
-            "ORDER BY phot_g_mean_mag ASC"
+        result_table = _fetch_gaia_cone(
+            ra_center, dec_center, radius_deg, max_magnitude, row_limit, "cone search"
         )
-
-        # Gaia's TAP client (unlike Simbad) exposes no configurable
-        # timeout, so a stalled connection blocks indefinitely -- wrap the
-        # call in a hard deadline via a worker thread rather than let a
-        # bad connection hang the whole analysis run. The thread is
-        # abandoned, not killed, if it exceeds the deadline.
-        def _run_gaia_query():  # ruff: ignore[missing-return-type-private-function]
-            job = Gaia.launch_job_async(query, dump_to_file=False)
-            return job.get_results()
-
-        try:
-            result_table = _run_with_daemon_thread_timeout(_run_gaia_query, timeout_seconds=60)
-        except ExternalServiceError:
-            logger.exception("Gaia query timed out after 60s.")
-            _record_gaia_failure("cone search timed out after 60s")
-            return None
-        except ONLINE_QUERY_ERRORS as e:
-            logger.exception("Gaia query failed")
-            _record_gaia_failure(f"cone search failed: {e}")
-            return None
-
-        # The service answered. An empty region is a legitimate answer, so
-        # this counts as success and clears any accumulated failures.
-        _record_gaia_success()
-        if result_table is not None and len(result_table) >= row_limit:
+        if result_table is not None and result_table.meta["row_limit_reached"]:
             logger.warning(
                 "The Gaia search returned its limit of %s rows (G < %.1f), so faint stars in the "
                 "field may be missing.",
                 row_limit,
-                max_magnitude,
+                result_table.meta["magnitude_limit"],
             )
-            result_table.meta["row_limit_reached"] = True
         return result_table
 
     @staticmethod
@@ -2064,6 +2116,8 @@ class StarIdentifier:
         if gaia_table is not None and gaia_coords is not None:
             if gaia_table.meta.get("row_limit_reached"):
                 self._add_flag(FLAG_GAIA_ROW_LIMIT_REACHED)
+            if gaia_table.meta.get("depth_reduced"):
+                self._add_flag(FLAG_GAIA_DEPTH_REDUCED)
             gaia_coords = self._move_gaia_coords_to_observation_epoch(gaia_table, gaia_coords)
 
         still_unmatched: list[StellarObject] = []

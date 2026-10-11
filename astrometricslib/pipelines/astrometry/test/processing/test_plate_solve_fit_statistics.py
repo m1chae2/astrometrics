@@ -183,10 +183,6 @@ def test_the_catalog_separation_is_a_separate_number(monkeypatch: pytest.MonkeyP
     identifier.catalog_match_separations_arcsec = [3.0, 4.0]
 
     assert identifier.get_catalog_match_separation_rms_arcsec() == pytest.approx(np.sqrt(12.5), rel=1e-3)
-    assert (
-        identifier.get_astrometric_residual_rms_arcsec()
-        == identifier.get_catalog_match_separation_rms_arcsec()
-    )
     assert identifier.plate_solve_fit_residual_rms_arcsec == pytest.approx(0.8)
 
 

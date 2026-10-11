@@ -118,6 +118,32 @@ def _quality(pipeline: str, metrics_key: str, key: str) -> Callable[[Document], 
     return lambda target: dig(target, "quality", pipeline, metrics_key, key)
 
 
+def _first_quality(pipeline: str, metrics_key: str, *keys: str) -> Callable[[Document], float | None]:
+    """Build a reader for a stored metric that has had more than one name.
+
+    Returns
+    -------
+    reader : `Callable`
+        Reads the first of ``keys`` that the target has a value for.
+    """
+
+    def read(target: Document) -> float | None:
+        """Read the first named metric that has a value.
+
+        Returns
+        -------
+        value : `float` or `None`
+            The value, or `None` when no key has one.
+        """
+        for key in keys:
+            value = dig(target, "quality", pipeline, metrics_key, key)
+            if value is not None:
+                return value
+        return None
+
+    return read
+
+
 METRICS: tuple[Metric, ...] = (
     Metric(
         "stacking",
@@ -157,8 +183,20 @@ METRICS: tuple[Metric, ...] = (
     ),
     Metric(
         "astrometry",
-        "plate-solve residual RMS (arcsec)",
-        _quality("astrometry", "astrometryMetrics", "astrometricResidualRmsArcsec"),
+        "plate-solve fit residual RMS (arcsec)",
+        _quality("astrometry", "astrometryMetrics", "plateSolveFitResidualRmsArcsec"),
+    ),
+    Metric(
+        "astrometry",
+        "catalog match separation RMS (arcsec)",
+        # Summaries saved before 2026-10-10 hold this under the older name,
+        # which this report once mislabelled as the plate-solve residual.
+        _first_quality(
+            "astrometry",
+            "astrometryMetrics",
+            "catalogMatchSeparationRmsArcsec",
+            "astrometricResidualRmsArcsec",
+        ),
     ),
     Metric("astrometry", "sources detected", _quality("astrometry", "astrometryMetrics", "sourcesDetected")),
     Metric(

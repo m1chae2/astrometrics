@@ -256,7 +256,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/foundation/jobs/store.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/control_record_store.py" = ["hardcoded-sql-expression"]
 "build/migrations/move_guiding_alignment_records.py" = ["hardcoded-sql-expression"]
-"astrometricslib/pipelines/astrometry/processing/star_identifier.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API

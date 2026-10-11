@@ -1939,7 +1939,6 @@ export interface AstrometryPipelineQualityMetrics {
   solveAttempted: boolean;
   plateSolveSucceeded: boolean;
   simbadMatchedCount: number;
-  astrometricResidualRmsArcsec?: number | null;
   catalogMatchSeparationRmsArcsec?: number | null;
   plateSolveFitResidualRmsArcsec?: number | null;
   plateSolveMatchedStarCount?: number | null;

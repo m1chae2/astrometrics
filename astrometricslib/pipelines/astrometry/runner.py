@@ -275,7 +275,6 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             astrometry_metrics=AstrometryPipelineQualityMetrics(
                 sources_detected=result.context.sources_detected,
                 solve_attempted=result.context.solve_attempted,
-                astrometric_residual_rms_arcsec=result.context.astrometric_residual_rms_arcsec,
                 catalog_match_separation_rms_arcsec=result.context.catalog_match_separation_rms_arcsec,
                 plate_solve_fit_residual_rms_arcsec=result.context.plate_solve_fit_residual_rms_arcsec,
                 plate_solve_matched_star_count=result.context.plate_solve_matched_star_count,

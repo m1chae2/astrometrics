@@ -86,5 +86,5 @@ Weighted stacking (`stack_weight = wfwhm`) needs a Siril new enough to accept th
 To start the Astrometrics Desktop App, run:
 
 ```bash
-./run_astrometrics.sh
+./astrometrics.sh
 ```

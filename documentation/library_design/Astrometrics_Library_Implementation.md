@@ -35,7 +35,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 
 ### Stacking
 *Located in:* `astrometricslib/pipelines/stacking/`
-- **Dispatch and orchestration:** `astrometricslib/pipelines/tasks.py` (runs Siril stacking as a tracked job with a hard timeout, picks which analysis pipeline runs by name, and runs a target's full stack-solve-photometry-spectroscopy sequence) and `astrometricslib/api/batch.py` (runs many targets through that sequence in parallel)
+- **Dispatch and orchestration:** `astrometricslib/pipelines/tasks.py` (runs Siril stacking as a tracked job with a hard timeout, picks which analysis pipeline runs by name, and runs a target's full stack-solve-photometry-spectroscopy sequence) and `astrometricslib/pipelines/target_batch.py` (runs many targets through that sequence in parallel)
 - **Sub-exposure quality evaluation:** `frame_homogeneity.py` and `background_homogeneity.py`
 - **Pixel rejection and integration:** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`, and `stage.py`
 - **Frame-count-adaptive filtering:** `stack_quality.py`
@@ -43,20 +43,20 @@ Table columns are the five pipelines plus a column for code shared across all of
 ### Astrometry
 *Located in:* `astrometricslib/pipelines/astrometry/`
 - **Plate solving:** `astrometricslib/drivers/astrometry_net_driver.py`
-- **Star detection and centroiding:** `star_identifier.py` and `source_detection.py`
+- **Star detection and centroiding:** `processing/star_identifier.py` and `pre_processing/source_detection.py`
 - **Coordinate transformations (WCS) and pipeline orchestration:** `pipeline.py`
 - **Local Gaia catalog cache:** `astrometricslib/drivers/catalog_store.py`
 
 ### Photometry
 *Located in:* `astrometricslib/pipelines/photometry/`
-- **Aperture photometry and light curve generation:** `variability_analyzer.py`
+- **Aperture photometry and light curve generation:** `processing/variability_analyzer.py`
 
 ### Spectroscopy
 *Located in:* `astrometricslib/pipelines/spectroscopy/`
-- **Spectrum extraction:** `spectrum_extractor.py` and `_extractor_c.c`
-- **Wavelength calibration:** `spectrum_calibrator.py` and `calibration_tuner.py`
-- **Flux calibration:** `quantum_efficiency_correction.py` and `optics_physics.py`
-- **Star alignment and registration:** `registration_quality.py`
+- **Spectrum extraction:** `pre_processing/spectrum_extractor.py` and `pre_processing/_extractor_c.c`
+- **Wavelength calibration:** `processing/spectrum_calibrator.py` and `utilities/calibration_tuner.py`
+- **Flux calibration:** `processing/quantum_efficiency_correction.py` and `pre_processing/optics_physics.py`
+- **Star alignment and registration:** `processing/registration_quality.py`
 - **Per-frame and per-session batch processing:** `frame_analysis.py` and `batch.py`
 
 ### Asteroid Detection (Moving Objects)

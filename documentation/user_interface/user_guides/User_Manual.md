@@ -165,7 +165,7 @@ The **Observatory Manager** gives direct manual control over the telescope mount
 - **Tracking Mode**: Toggle tracking `ON` or `OFF`. Select rate (`Sidereal`, `Lunar`, `Solar`).
 - **Park / Unpark**: Click **PARK** to stow the mount in its home position; click **UNPARK** to enable slewing.
 
-#### Mount Alignment & Iterative Solve History (`AlignmentStatus.tsx`)
+#### Mount Alignment & Iterative Solve History
 - Inspect the **Alignment Status** log table to track iterative plate solving cycles.
 - View status indicators (`solving` ⟳, `aligned` ✓, `warning` ⚠, `failed` ✗) along with coordinate deltas in arcseconds.
 
@@ -225,6 +225,6 @@ The **Planetarium** renders a 3D celestial sphere view of the sky above the obse
 | UI Display | Primary Functional Capabilities |
 |---|---|
 | `PlanetariumDisplay` | 3D WebGL Sky Map, Constellation overlays, FOV rectangle projection, object context slews. |
-| `ObservatoryManager` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking (`AlignmentStatus.tsx`), focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
+| `ObservatoryManager` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking, focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
 | `ImageProcessingDisplay` & `ImageViewerDisplay` | FITS image inspection, header search, star FWHM/HFR measurement, Master Dark/Flat/Bias calibration, star alignment, Winsorized Sigma Clipping stacking. |
 | `AstronomyManager` | 1D stellar profile extraction, neon/argon arc lamp wavelength calibration, continuum baseline fitting, Balmer line identification, Equivalent Width, and BLS exoplanet transit light curve fitting. |

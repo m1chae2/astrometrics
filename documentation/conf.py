@@ -36,6 +36,8 @@ extensions = [
     "sphinxcontrib.mermaid",
     "ui_autodoc",
     "tutorial_indexer",
+    "audit_pipelines",
+    "generate_pipeline_review_docs",
 ]
 
 

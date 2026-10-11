@@ -24,6 +24,7 @@ from astrometricslib.pipelines.photometry.batch import (
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
     identify_long_term_variable_candidates,
 )
+from astrometricslib.pipelines.photometry.runner import _format_variable_candidates
 
 # 0.3 mag fainter: 10 ** (-0.4 * 0.3) = 0.7586, written to three places.
 _FAINT_RATIO = 0.759
@@ -362,3 +363,25 @@ def test_cross_session_matching_keeps_levels_and_feeds_the_long_term_search() ->
     assert _second_to_first_median_ratio(flagged[0].photometry) == pytest.approx(_FAINT_RATIO, abs=0.01)
     assert [s.session_id for s in flagged[0].photometry.session_summaries] == [session_a.id, session_b.id]
     assert [s.comparison_star_count for s in flagged[0].photometry.session_summaries] == [100, 90]
+
+
+def test_a_merged_star_has_a_mean_and_a_scatter_so_it_can_be_a_candidate() -> None:
+    """A merged light curve carries its own mean flux and scatter.
+
+    The merge left both empty, and the first star flagged by its change
+    between sessions then stopped the M 13 photometry run (2026-10-11): a
+    variable candidate needs both numbers.
+    """
+    star = _merged_star("S1", 1.0, _FAINT_RATIO, seed=21)
+
+    assert star.photometry.mean_flux is not None
+    assert star.photometry.coefficient_of_variation is not None
+    values = np.array(star.photometry.fluxes_detrended)
+    assert star.photometry.mean_flux == pytest.approx(float(np.mean(values)))
+    assert star.photometry.coefficient_of_variation == pytest.approx(float(np.std(values) / np.mean(values)))
+    # The two sessions differ by 0.3 mag, which dominates the merged scatter.
+    assert star.photometry.coefficient_of_variation > 0.1
+
+    candidates = _format_variable_candidates([star])
+
+    assert candidates[0].coefficient_of_variation == pytest.approx(star.photometry.coefficient_of_variation)

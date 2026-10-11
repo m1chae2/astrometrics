@@ -338,6 +338,11 @@ def variability_score(
     return score if j_index > thresholds.stetson_j else min(score, 1.0)
 
 
+# The smallest false alarm probability reported: the smallest positive normal
+# double. A real tail smaller than this is reported as this.
+MINIMUM_PROBABILITY = float(np.finfo(float).tiny)
+
+
 def field_error_scale(chi_squares: Sequence[float]) -> float:
     """Find how much the field's error bars must be stretched to be honest.
 
@@ -382,13 +387,17 @@ def false_alarm_probability(reduced_chi_square_value: float, points: int, scale:
     Returns
     -------
     probability : `float`
-        The false alarm probability, from 0 to 1. 1.0 for a light curve with
-        fewer than two points.
+        The false alarm probability, from `MINIMUM_PROBABILITY` to 1. 1.0 for
+        a light curve with fewer than two points.
     """
     degrees_of_freedom = points - 1
     if degrees_of_freedom < 1:
         return 1.0
-    return float(chi2.sf(reduced_chi_square_value * degrees_of_freedom / scale, degrees_of_freedom))
+    tail = float(chi2.sf(reduced_chi_square_value * degrees_of_freedom / scale, degrees_of_freedom))
+    # Below `MINIMUM_PROBABILITY` the tail underflows to exactly 0, which would
+    # read as "cannot happen". On M 13 (2026-10-11), 4 of 16 accepted stars
+    # did. The probability is reported as no smaller than this instead.
+    return max(tail, MINIMUM_PROBABILITY)
 
 
 def benjamini_hochberg(probabilities: Sequence[float]) -> np.ndarray:

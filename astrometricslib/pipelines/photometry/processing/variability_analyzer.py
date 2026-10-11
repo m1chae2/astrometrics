@@ -93,6 +93,7 @@ from astrometricslib.pipelines.photometry.processing.comparison_ensemble import 
     set_result,
 )
 from astrometricslib.pipelines.photometry.processing.variability_indices import (
+    MINIMUM_POINTS_FOR_INDICES,
     FieldAssessment,
     NoiseModel,
     VariabilityThresholds,
@@ -128,6 +129,35 @@ MINIMUM_FRAMES_FOR_OUTLIER_REJECTION = 5
 MINIMUM_RUN_LENGTH_KEPT_AS_REAL_CHANGE = 2
 
 
+def flux_mean_and_coefficient_of_variation(photometry: Any) -> tuple[float, float] | None:
+    """Measure the mean brightness and the scatter of a star's light curve.
+
+    The values are the detrended flux when there is one, else the normalized
+    flux, keeping only positive values. The coefficient of variation (CV) is
+    the standard deviation over the mean.
+
+    Parameters
+    ----------
+    photometry : `PhotometryResult`
+        The star's light curve.
+
+    Returns
+    -------
+    statistics : `tuple` [`float`, `float`] or `None`
+        The mean and the CV, or `None` when fewer than 3 positive values
+        remain or the mean is not positive.
+    """
+    raw_fluxes = photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized
+    fluxes = np.array(raw_fluxes)
+    fluxes = fluxes[fluxes > 0]
+    if len(fluxes) < 3:
+        return None
+    mean_flux, std_flux = np.mean(fluxes), np.std(fluxes)
+    if mean_flux <= 0:
+        return None
+    return float(mean_flux), float(std_flux / mean_flux)
+
+
 def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]) -> list[float]:
     """Calculate how much each star's brightness jumps around.
 
@@ -141,21 +171,10 @@ def _compute_star_coefficients_of_variation(stellar_objects: list[StellarObject]
     """
     cv_list = []
     for star in stellar_objects:
-        raw_fluxes = (
-            star.photometry.fluxes_detrended
-            if star.photometry.fluxes_detrended
-            else star.photometry.fluxes_normalized
-        )
-        fluxes = np.array(raw_fluxes)
-        fluxes = fluxes[fluxes > 0]
-
-        if len(fluxes) >= 3:
-            mean_flux, std_flux = np.mean(fluxes), np.std(fluxes)
-            if mean_flux > 0:
-                cv = float(std_flux / mean_flux)
-                star.photometry.mean_flux = float(mean_flux)
-                star.photometry.coefficient_of_variation = cv
-                cv_list.append(cv)
+        statistics = flux_mean_and_coefficient_of_variation(star.photometry)
+        if statistics is not None:
+            star.photometry.mean_flux, star.photometry.coefficient_of_variation = statistics
+            cv_list.append(statistics[1])
 
     # `star.magnitude` is deliberately left alone. The "mag" the star finder
     # keeps in `star_data` is an instrument magnitude (-2.5 log10 of the
@@ -377,11 +396,16 @@ def flag_variable_stars(
     # already has its own 0.02 floor, so no separate flat threshold is
     # applied here; a flat 0.10 would cap the cutoff at 10% and defeat the
     # point of raising it in noisy fields.)
+    # A light curve with fewer points than the indices need says nothing
+    # about variability. On M 13 (2026-10-11) a 4-frame session flagged five
+    # stars this way.
     variable_candidates = [
         star
         for star in stellar_objects
         if star.photometry.coefficient_of_variation is not None
         and star.photometry.coefficient_of_variation > cutoff_stats.cutoff
+        and len(star.photometry.fluxes_detrended or star.photometry.fluxes_normalized)
+        >= MINIMUM_POINTS_FOR_INDICES
     ]
     return variable_candidates, assessment
 

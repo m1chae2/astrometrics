@@ -347,6 +347,9 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         A new `PhotometryResult` combining both segments, sorted by timestamp.
     """
     from astrometricslib.models.stellar_source import PhotometryResult
+    from astrometricslib.pipelines.photometry.processing.variability_analyzer import (
+        flux_mean_and_coefficient_of_variation,
+    )
 
     combined_timestamps = canonical.timestamps + new.timestamps
     combined_fluxes = canonical.fluxes + new.fluxes
@@ -406,7 +409,7 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
     else:
         merged_basis = TIME_BASIS_BJD_TDB_GEOCENTRIC
 
-    return PhotometryResult(
+    merged = PhotometryResult(
         timestamps=_reordered(combined_timestamps),
         fluxes=_reordered(combined_fluxes),
         fluxes_normalized=_reordered(combined_fluxes_normalized),
@@ -433,6 +436,14 @@ def _merge_light_curves(canonical: Any, new: Any) -> Any:
         transit_candidate=None,
         session_summaries=list(canonical.session_summaries) + list(new.session_summaries),
     )
+    # The merged curve has its own mean and scatter, measured the same way as
+    # a session's. Left empty, the first star flagged by its change between
+    # sessions stopped the run, because a variable candidate needs both. The
+    # CV of a merged curve includes the change between sessions.
+    statistics = flux_mean_and_coefficient_of_variation(merged)
+    if statistics is not None:
+        merged.mean_flux, merged.coefficient_of_variation = statistics
+    return merged
 
 
 def _match_and_merge_across_sessions(

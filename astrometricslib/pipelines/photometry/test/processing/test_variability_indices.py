@@ -374,3 +374,30 @@ def test_a_field_of_constant_stars_flags_nobody_at_the_false_discovery_level() -
 
     assert len(assessment.candidates) <= 3
     assert all(star.photometry.false_discovery_q_value is not None for star in stars)
+
+
+def test_a_tail_that_underflows_is_reported_as_the_smallest_probability_not_zero() -> None:
+    """A huge chi-square gives the floor, never exactly 0.
+
+    On M 13 (2026-10-11), four of sixteen accepted stars had a tail below
+    1e-308, which printed as 0.
+    """
+    probability = vi.false_alarm_probability(1000.0, points=40)
+
+    assert probability == vi.MINIMUM_PROBABILITY
+    assert probability > 0.0
+    assert vi.benjamini_hochberg([probability, 0.5])[0] < 1e-300
+
+
+def test_a_four_point_light_curve_is_never_flagged_by_the_cv_fallback() -> None:
+    """The fallback needs as many points as the indices do."""
+    from astrometricslib.pipelines.photometry.processing.variability_analyzer import flag_variable_stars
+
+    generator = np.random.default_rng(5)
+    stars = [make_star(f"s{i}", list(1.0 + generator.normal(0.0, 0.01, 4)), None) for i in range(30)]
+    stars[0].photometry.fluxes_normalized = [1.0, 2.0, 0.5, 1.5]
+    stars[0].photometry.fluxes_detrended = [1.0, 2.0, 0.5, 1.5]
+
+    candidates, _ = flag_variable_stars(stars, 7.4)
+
+    assert candidates == []

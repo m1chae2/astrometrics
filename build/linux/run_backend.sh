@@ -267,6 +267,14 @@ stop_backend() {
     fuser -k 5000/tcp 2>/dev/null || true
   fi
   echo "Stopped."
+
+  # With the backend stopped the databases are quiet, so this is a good time
+  # for a backup. It runs in the background and can never make `stop` fail or
+  # wait: output goes to backup.log and any error is ignored.
+  if [ -x "$ROOT_DIR/.venv/bin/python" ] && [ -f "$ROOT_DIR/astrometricslib/scripts/backup_library_databases.py" ]; then
+    { PYTHONPATH="$ROOT_DIR" nohup "$ROOT_DIR/.venv/bin/python" -m astrometricslib.scripts.backup_library_databases \
+        >> "$LOG_DIR/backup.log" 2>&1 < /dev/null & } 2>/dev/null || true
+  fi
 }
 
 status_backend() {

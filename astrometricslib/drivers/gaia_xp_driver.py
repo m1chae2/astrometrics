@@ -7,8 +7,9 @@ archive client.
 Downloading a spectrum takes seconds and a spectroscopy run asks for the same
 star once per frame, so every answer is kept on disk. The cache follows the
 same location rule as the Gaia star catalog cache (`drivers/catalog_store.py`):
-it lives in the ``catalogs`` folder of the library's data folder, here in the
-sub-folder ``gaia_xp``. There is one compressed NumPy file (``.npz``) per
+it lives in the ``catalogs`` folder of the cache folder
+(``~/.cache/astrometrics``), in the sub-folder ``gaia_xp``. Deleting it only
+costs a new download. There is one compressed NumPy file (``.npz``) per
 Gaia source id. Each file holds the wavelengths, the flux, the flux error, the
 source id and the date the spectrum was downloaded. A Gaia DR3 spectrum never
 changes, so a cached file is never refreshed. A source that the archive says
@@ -38,11 +39,12 @@ import numpy as np
 
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
+from astrometricslib.foundation.paths import catalog_cache_directory
 from astrometricslib.utilities.exceptions import ONLINE_QUERY_ERRORS
 
 logger = logging.getLogger(__name__)
 
-# The sub-folder of the library's ``catalogs`` folder that holds the cache.
+# The sub-folder of the cache's ``catalogs`` folder that holds the cache.
 CACHE_FOLDER_NAME = "gaia_xp"
 
 # How long to wait for one download, in seconds. astroquery's Gaia client has
@@ -78,15 +80,16 @@ def gaia_xp_cache_path(config: AppConfiguration) -> Path:
     Parameters
     ----------
     config : `AppConfiguration`
-        The application settings, used to find the library's data folder.
+        The application settings. Unused: the cache is in the shared catalog
+        cache folder, not in the library.
 
     Returns
     -------
     path : `pathlib.Path`
-        The cache folder. It may not exist yet, which only means nothing has
-        been cached.
+        The cache folder. It can be deleted and downloaded again. It may
+        not exist yet, which only means nothing has been cached.
     """
-    return config.get_library_path() / "catalogs" / CACHE_FOLDER_NAME
+    return Path(catalog_cache_directory()) / CACHE_FOLDER_NAME
 
 
 class AstroqueryGaiaXpDriver(GaiaXpDriver):

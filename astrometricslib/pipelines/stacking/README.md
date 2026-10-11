@@ -102,7 +102,7 @@ The folders follow the layout in `pipelines/README.md`.
 
 The pipeline writes its output (stacks, group stacks, rejection maps, registration files, previews and processed pictures) to `<stacks_path>/lights/<target>/`. The `stacks_path` entry in the `[Image Library]` section of the configuration sets that folder. Without it, the output goes beside the raw frames, in the frames path. The setting lets the large raw frames stay on one disk while the output goes to another. The backend's image server looks for a file in the frames folder first and then in the stacks folder, so the viewer asks for one URL either way. `scripts/move_stacks_to_stacks_path.py` moves the files that already exist and updates the paths in the database.
 
-The raw frames can sit on a network drive. The pipeline does not copy them first. Siril reads each frame once through a symlink and writes its working files to `~/.cache/siril` on the local disk. Set `frames_mount_point` in the same section to the folder where that drive mounts. While nothing is mounted there, downloads and file sorting stop with an error instead of writing frames to the local disk. The pipeline never rewrites a raw frame.
+The raw frames can sit on a network drive. The pipeline does not copy them first. Siril reads each frame once through a symlink and writes its working files to `~/.cache/astrometrics/siril` on the local disk. Set `frames_mount_point` in the same section to the folder where that drive mounts. While nothing is mounted there, downloads and file sorting stop with an error instead of writing frames to the local disk. The pipeline never rewrites a raw frame.
 
 ## A note on scope
 

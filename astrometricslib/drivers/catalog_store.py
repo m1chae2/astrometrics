@@ -31,6 +31,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from astrometricslib.foundation.paths import catalog_cache_directory
 from astrometricslib.foundation.storage.local_database import connect_db
 
 logger = logging.getLogger(__name__)
@@ -55,15 +56,17 @@ def get_catalog_cache_path(config: Any) -> Path:
     Parameters
     ----------
     config : `AppConfiguration`
-        The application settings, used to find the library's data folder.
+        The application settings. Unused: the cache is in the shared catalog
+        cache folder, not in the library.
 
     Returns
     -------
     path : `pathlib.Path`
-        The full path to the cache database file. The file may not exist
+        The full path to the cache database file, which can be deleted and
+        downloaded again. The file may not exist
         yet -- that just means nothing has been cached.
     """
-    return config.get_library_path() / "catalogs" / _CATALOG_DB_FILENAME
+    return Path(catalog_cache_directory()) / _CATALOG_DB_FILENAME
 
 
 # A recorded region covers a request if the request circle lies inside it.

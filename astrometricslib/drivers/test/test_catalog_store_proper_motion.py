@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from astrometricslib.drivers import catalog_store
+from astrometricslib.foundation.paths import catalog_cache_directory
 
 
 class _Config:
@@ -43,10 +44,9 @@ def _write_old_cache(library_path: Path) -> None:
     Parameters
     ----------
     library_path : `pathlib.Path`
-        The folder in which to create ``catalogs/catalog_cache.db``.
+        The library folder (not used for the cache file)..
     """
-    catalogs = library_path / "catalogs"
-    catalogs.mkdir()
+    catalogs = Path(catalog_cache_directory())
     connection = sqlite3.connect(catalogs / "catalog_cache.db")
     connection.execute(
         "CREATE TABLE gaia_sources "
@@ -98,7 +98,6 @@ def test_the_default_query_still_returns_five_values_per_star(tmp_path: Path) ->
 
 def test_proper_motion_round_trips_through_the_cache(tmp_path: Path) -> None:
     """A stored proper motion is returned; a five-value row stores `None`."""
-    (tmp_path / "catalogs").mkdir()
     config = _Config(tmp_path)
 
     catalog_store.insert_gaia_sources(

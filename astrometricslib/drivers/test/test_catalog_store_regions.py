@@ -28,7 +28,6 @@ class _Config:
             The folder that holds the ``catalogs`` directory.
         """
         self.library_path = library_path
-        (library_path / "catalogs").mkdir(exist_ok=True)
 
     def get_library_path(self) -> Path:
         """Return the library folder.

@@ -415,7 +415,6 @@ class TestGaiaCircuitBreaker:
         same pass that saw 67 remote failures. Gating those behind the
         breaker would throw away working data.
         """
-        import os
         import sqlite3
 
         import astroquery.gaia as gaia_module
@@ -428,8 +427,9 @@ class TestGaiaCircuitBreaker:
         config.update_config({"Image Library": {"path": str(tmp_path)}})
         monkeypatch.setattr(config_loader_module, "get_configuration", lambda: config)
 
-        cache_dir = tmp_path / "catalogs"
-        os.makedirs(cache_dir, exist_ok=True)
+        from astrometricslib.foundation.paths import catalog_cache_directory
+
+        cache_dir = Path(catalog_cache_directory())
         connection = sqlite3.connect(cache_dir / "catalog_cache.db")
         cursor = connection.cursor()
         cursor.execute(

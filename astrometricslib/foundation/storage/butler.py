@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.paths import locks_directory
 from astrometricslib.foundation.storage.local_database import connect_db, safe_json_dumps
 from astrometricslib.foundation.storage.process_locks import file_lock
 
@@ -593,7 +594,7 @@ class Butler(AbstractButler):
         if not objects:
             return
         spec = self._spec(dataset_type)
-        lock_path = os.path.join(str(self.config.get_library_path()), "locks", f"{dataset_type}_merge.lock")
+        lock_path = os.path.join(locks_directory(), f"{dataset_type}_merge.lock")
         with file_lock(lock_path):
             ids = [getattr(record, spec.id_field) for record in objects]
             existing_rows = self.get_by_ids(dataset_type, ids)
@@ -622,7 +623,7 @@ class Butler(AbstractButler):
         if not ids:
             return
         spec = self._spec(dataset_type)
-        lock_path = os.path.join(str(self.config.get_library_path()), "locks", f"{dataset_type}_merge.lock")
+        lock_path = os.path.join(locks_directory(), f"{dataset_type}_merge.lock")
         with file_lock(lock_path):
             conn = connect_db(self._db_path())
             try:

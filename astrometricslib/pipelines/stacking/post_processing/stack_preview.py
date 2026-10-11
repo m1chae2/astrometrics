@@ -97,7 +97,7 @@ GRAXPERT_TIMEOUT_SECONDS = 300
 # larger stack or a slower card, and still stops a hung process.
 COSMIC_CLARITY_TIMEOUT_SECONDS = 300
 
-# The scratch folder lives on the local disk (~/.cache/siril), not in the
+# The scratch folder lives on the local disk (~/.cache/astrometrics/siril), not
 # system temp folder: that is often held in RAM, and a Flatpak Siril is
 # sandboxed and cannot see /tmp. This is the same place the Siril driver does
 # its own work (see `ImageProcessing.workdir`).

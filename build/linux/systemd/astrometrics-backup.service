@@ -1,0 +1,12 @@
+# Template, installed by build/linux/install_backup_timer.sh.
+# Backs up the library databases to Google Drive, then checks the Drive upload.
+[Unit]
+Description=Astrometrics database backup and Drive integrity check
+After=network-online.target rclone-drive.service
+Wants=network-online.target rclone-drive.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/Repos/astrometrics/.venv/bin/python -m astrometricslib.scripts.backup_library_databases
+ExecStart=%h/Repos/astrometrics/.venv/bin/python -m astrometricslib.scripts.check_drive_integrity
+WorkingDirectory=%h/Repos/astrometrics

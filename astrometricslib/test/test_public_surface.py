@@ -175,6 +175,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "get_log_context",
     "has_catalog_magnitude",
     "is_path_inside",
+    "locks_directory",
     "log_context",
     "new_request_id",
     "observing_night_id",
@@ -213,6 +214,9 @@ KEPT_FOR_OUTSIDE_CALLERS = {
     # `siril_work_directory`, is used only inside the library and stays off the
     # root.
     "scratch_directory": "wayfindinglib (the StellarMate driver) and the backend (the scripting service)",
+    # The lock-file folder under the cache, which wayfindinglib's INDI
+    # hardware lock shares with the library's own locks.
+    "locks_directory": "wayfindinglib (the INDI hardware lock)",
 }
 
 

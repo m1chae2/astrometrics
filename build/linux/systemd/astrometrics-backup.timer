@@ -1,0 +1,12 @@
+# Template, installed by build/linux/install_backup_timer.sh.
+# The laptop is often off, so there is no catch-up run (Persistent=false).
+[Unit]
+Description=Run the Astrometrics database backup every 4 hours
+
+[Timer]
+OnStartupSec=10min
+OnUnitActiveSec=4h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

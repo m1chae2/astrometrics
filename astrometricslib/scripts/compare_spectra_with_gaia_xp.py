@@ -18,7 +18,7 @@ what the owner needs to measure the response error on real data:
 The script reads the response-corrected spectrum the pipeline stored. A star
 without one (the camera had no stored instrument response when it was
 processed) is listed as not compared. Gaia XP spectra are downloaded once and
-cached in the library's data folder (``catalogs/gaia_xp``), so a second run
+cached in ``~/.cache/astrometrics/catalogs/gaia_xp``, so a second run
 needs no network.
 
 Run it with::

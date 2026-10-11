@@ -232,6 +232,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 # untrusted input into a shell command), which is the safe subprocess pattern.
 "astrometricslib/drivers/siril_interface.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import", "start-process-with-partial-path"]
 "astrometricslib/scripts/spectral_registration_quality_analysis.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/scripts/backup_library_databases.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/scripts/restore_library_databases.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
+"astrometricslib/scripts/check_drive_integrity.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/pipelines/stacking/post_processing/stack_preview.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/siril_stacking_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]
 "astrometricslib/drivers/astrometry_net_driver.py" = ["subprocess-without-shell-equals-true", "suspicious-subprocess-import"]

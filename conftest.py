@@ -36,6 +36,14 @@ matplotlib.use("Agg")
 _test_tmp_dir = tempfile.TemporaryDirectory()
 TEST_TEMP_DIR = Path(_test_tmp_dir.name)
 
+# Point the cache and data folders (locks, catalog caches, Siril work files,
+# the default library) into the temporary folder, so no test writes to the
+# real ~/.cache or ~/.local/share.
+os.environ["XDG_CACHE_HOME"] = str(TEST_TEMP_DIR / "xdg_cache")
+os.environ["XDG_DATA_HOME"] = str(TEST_TEMP_DIR / "xdg_data")
+(TEST_TEMP_DIR / "xdg_cache").mkdir(parents=True, exist_ok=True)
+(TEST_TEMP_DIR / "xdg_data").mkdir(parents=True, exist_ok=True)
+
 # 4. Create isolated library, frames, wayfinding, and logs directories
 test_library_path = TEST_TEMP_DIR / "library"
 test_frames_path = test_library_path / "frames"
@@ -325,3 +333,14 @@ def setup_root_test_environment() -> collections.abc.Generator[None]:
     except OSError:
         time.sleep(0.5)
         _test_tmp_dir.cleanup()
+
+
+@pytest.fixture(autouse=True)
+def isolated_cache_folder(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test its own cache folder, so nothing leaks across tests.
+
+    The folder sits outside the test's own ``tmp_path``, because some tests
+    check exactly which files they wrote there.
+    """
+    cache_folder = tmp_path_factory.mktemp("xdg_cache")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_folder))

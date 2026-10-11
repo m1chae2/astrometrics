@@ -9,7 +9,6 @@ is everything that knows what a target or a stellar object actually is.
 import json
 import logging
 import os
-import shutil
 import sqlite3
 import time
 from typing import TYPE_CHECKING, Any
@@ -21,6 +20,7 @@ __all__ = [
     "backup_catalog_database",
     "load_targets",
     "save_target",
+    "snapshot_sqlite_database",
 ]
 
 if TYPE_CHECKING:
@@ -134,8 +134,61 @@ def save_target(app_config: AppConfiguration | None = None, target: Target | Non
     return db_path
 
 
+def snapshot_sqlite_database(source_path: str, destination_path: str) -> bool:
+    """Copy a SQLite database safely, even while another program writes to it.
+
+    The copy uses SQLite's online backup, which reads a consistent view of the
+    database (including changes still waiting in the write-ahead log). A plain
+    file copy could catch the file half-written. After copying, the new file
+    is checked with ``PRAGMA integrity_check``. A copy that fails the check is
+    deleted.
+
+    Parameters
+    ----------
+    source_path : `str`
+        The database to copy.
+    destination_path : `str`
+        Where to write the copy. Any file already there is replaced.
+
+    Returns
+    -------
+    ok : `bool`
+        `True` if the copy was made and passed the integrity check. `False`
+        if anything failed (the error is logged and no copy is left behind).
+    """
+    if os.path.exists(destination_path):
+        os.remove(destination_path)
+    source_connection = None
+    destination_connection = None
+    try:
+        source_connection = sqlite3.connect(source_path)
+        destination_connection = sqlite3.connect(destination_path)
+        source_connection.backup(destination_connection)
+        integrity_rows = destination_connection.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error:
+        logger.exception("Could not snapshot %s", source_path)
+        integrity_rows = None
+    finally:
+        if destination_connection is not None:
+            destination_connection.close()
+        if source_connection is not None:
+            source_connection.close()
+
+    if integrity_rows is not None and [row[0] for row in integrity_rows] == ["ok"]:
+        return True
+    if integrity_rows is not None:
+        logger.error("Snapshot of %s failed its integrity check: %s", source_path, integrity_rows[:5])
+    for leftover_path in (destination_path, destination_path + "-wal", destination_path + "-shm"):
+        if os.path.exists(leftover_path):
+            os.remove(leftover_path)
+    return False
+
+
 def backup_catalog_database(app_config: AppConfiguration) -> str | None:
     """Copy the catalog database aside before a script writes to it.
+
+    Uses `snapshot_sqlite_database`, so the copy is consistent and has
+    passed an integrity check.
 
     Parameters
     ----------
@@ -146,15 +199,19 @@ def backup_catalog_database(app_config: AppConfiguration) -> str | None:
     -------
     backup_path : `str` or `None`
         Where the copy was written, or `None` if the source database
-        doesn't exist yet (nothing to back up) or the copy failed.
+        doesn't exist yet (nothing to back up), the copy failed, or the copy
+        did not pass the integrity check.
     """
     db_path = os.path.join(str(app_config.get_library_path()), "astrometrics.db")
     if not os.path.exists(db_path):
         return None
     backup_path = f"{db_path}.{time.strftime('%Y%m%d_%H%M%S')}.bak"
     try:
-        shutil.copy2(db_path, backup_path)
+        copied_ok = snapshot_sqlite_database(db_path, backup_path)
     except OSError:
         logger.exception("Could not back up %s before writing", db_path)
+        return None
+    if not copied_ok:
+        logger.error("Backup of %s was not usable and was deleted", db_path)
         return None
     return backup_path

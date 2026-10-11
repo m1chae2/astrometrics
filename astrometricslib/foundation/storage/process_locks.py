@@ -26,6 +26,7 @@ from collections.abc import Generator
 from typing import TextIO
 
 from astrometricslib.foundation.errors import ConflictError
+from astrometricslib.foundation.paths import locks_directory
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,8 @@ def acquire_resource_slot(
     """Acquire one of a limited number of OS-level slots for a resource.
 
     Round-robins over max_slots lock files (one per resource) under
-    library/locks/, attempting a non-blocking file_lock() on each
+    the locks folder (see `locks_directory`), attempting a non-blocking
+    file_lock() on each
     in turn, and sleeps briefly between full sweeps if every slot is
     currently held elsewhere. Unlike an in-process
     multiprocessing.Semaphore, this is respected by any process on the
@@ -156,7 +158,8 @@ def acquire_resource_slot(
     Parameters
     ----------
     app_config
-        Application configuration object.
+        Unused. Kept so existing callers keep working; the lock files live
+        in `locks_directory`, not in the library.
     resource_name : `str`
         Name of the shared resource being limited (e.g. "siril", "gpu").
     max_slots : `int`
@@ -176,12 +179,7 @@ def acquire_resource_slot(
     None
         The caller's code runs while holding one of the resource slots.
     """
-    if app_config is None:
-        from astrometricslib.foundation.config import get_configuration
-
-        app_config = get_configuration()
-
-    locks_directory = os.path.join(str(app_config.get_library_path()), "locks")
+    lock_folder = locks_directory()
     max_slots = max(1, max_slots)
 
     if resource_name in _held_resource_names.get():
@@ -194,7 +192,7 @@ def acquire_resource_slot(
 
     while True:
         for slot_index in range(max_slots):
-            lock_path = os.path.join(locks_directory, f"{resource_name}_slot_{slot_index}.lock")
+            lock_path = os.path.join(lock_folder, f"{resource_name}_slot_{slot_index}.lock")
             try:
                 with file_lock(lock_path):
                     held_token = _held_resource_names.set((*_held_resource_names.get(), resource_name))

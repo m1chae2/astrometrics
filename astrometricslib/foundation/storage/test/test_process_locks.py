@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from astrometricslib.foundation.storage.process_locks import acquire_resource_slot
 
 WAIT_SECONDS = 20.0
@@ -82,8 +84,11 @@ def test_the_slot_is_free_again_after_a_job_ends(tmp_path: Path) -> None:
     assert run_in_threads([jobs_one_after_another]) == [True]
 
 
-def test_a_different_resource_still_takes_its_own_slot(tmp_path: Path) -> None:
+def test_a_different_resource_still_takes_its_own_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Holding the job slot does not stand in for another resource's slot."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     configuration = make_configuration(tmp_path)
     other_resource_was_locked = []
 
@@ -91,7 +96,9 @@ def test_a_different_resource_still_takes_its_own_slot(tmp_path: Path) -> None:
         """Hold the job slot, then take the gpu slot inside it."""
         with acquire_resource_slot(configuration, "job", 1):
             with acquire_resource_slot(configuration, "gpu", 1):
-                other_resource_was_locked.append((tmp_path / "locks" / "gpu_slot_0.lock").exists())
+                other_resource_was_locked.append(
+                    (tmp_path / "astrometrics" / "locks" / "gpu_slot_0.lock").exists()
+                )
 
     assert run_in_threads([job]) == [True]
     assert other_resource_was_locked == [True]

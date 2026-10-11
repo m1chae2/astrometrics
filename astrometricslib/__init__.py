@@ -74,6 +74,7 @@ from astrometricslib.foundation.jobs import (
 from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
 from astrometricslib.foundation.paths import (
     is_path_inside,
+    locks_directory,
     resolve_mounted_path,
     scratch_directory,
 )
@@ -486,6 +487,7 @@ __all__ = [
     "get_log_context",
     "has_catalog_magnitude",
     "is_path_inside",
+    "locks_directory",
     "log_context",
     "new_request_id",
     "observing_night_id",

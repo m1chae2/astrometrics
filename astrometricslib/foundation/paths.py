@@ -45,7 +45,8 @@ def scratch_directory() -> str:
 def siril_work_directory() -> str:
     """Give the folder where Siril keeps its working files, creating it.
 
-    This is ``~/.cache/siril`` on the local disk. Siril runs in a Flatpak
+    This is ``~/.cache/astrometrics/siril`` on the local disk, inside the
+    one folder that holds everything disposable. Siril runs in a Flatpak
     sandbox with access to the home folder, so it can use this path. The
     system temporary folder is not used because the sandbox cannot see it.
 
@@ -54,9 +55,83 @@ def siril_work_directory() -> str:
     work_path : `str`
         The absolute path of the folder, which exists when this returns.
     """
-    work_path = os.path.join(_cache_root(), "siril")
+    work_path = os.path.join(scratch_directory(), "siril")
     os.makedirs(work_path, exist_ok=True)
     return work_path
+
+
+def data_directory() -> str:
+    """Give the folder for this program's durable local state, creating it.
+
+    This is ``~/.local/share/astrometrics``. Unlike the cache folder, nothing
+    here may be deleted to free space.
+
+    Returns
+    -------
+    data_path : `str`
+        ``$XDG_DATA_HOME/astrometrics`` if ``XDG_DATA_HOME`` is set,
+        otherwise ``~/.local/share/astrometrics``. The folder exists when
+        this returns.
+    """
+    data_root = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    data_path = os.path.join(data_root, "astrometrics")
+    os.makedirs(data_path, exist_ok=True)
+    return data_path
+
+
+def locks_directory() -> str:
+    """Give the folder for lock files, creating it.
+
+    Lock files stop two programs from using one device or resource at the
+    same time. They hold no data and are safe to delete when nothing runs.
+    They live in the cache folder on the local disk, so every program on
+    this computer finds the same locks whichever library it uses.
+
+    Returns
+    -------
+    locks_path : `str`
+        ``<scratch folder>/locks``, which exists when this returns.
+    """
+    locks_path = os.path.join(scratch_directory(), "locks")
+    os.makedirs(locks_path, exist_ok=True)
+    return locks_path
+
+
+def catalog_cache_directory() -> str:
+    """Give the folder for downloaded catalog data that can be fetched again.
+
+    Returns
+    -------
+    catalog_path : `str`
+        ``<scratch folder>/catalogs``, which exists when this returns.
+    """
+    catalog_path = os.path.join(scratch_directory(), "catalogs")
+    os.makedirs(catalog_path, exist_ok=True)
+    return catalog_path
+
+
+# The folder on the backup remote, below the remote's name, that holds one
+# subfolder per database snapshot.
+REMOTE_BACKUP_FOLDER = "Library/_backup"
+
+
+def remote_snapshot_path(remote: str, snapshot_name: str = "") -> str:
+    """Build the rclone path of a database snapshot folder on the backup.
+
+    Parameters
+    ----------
+    remote : `str`
+        Remote name including the colon, for example ``drive:``.
+    snapshot_name : `str`, optional
+        Snapshot folder name. Empty gives the folder that holds all snapshots.
+
+    Returns
+    -------
+    remote_path : `str`
+        The rclone path.
+    """
+    suffix = f"/{snapshot_name}" if snapshot_name else ""
+    return f"{remote}{REMOTE_BACKUP_FOLDER}{suffix}"
 
 
 def mount_path_variants(path: str) -> set[str]:

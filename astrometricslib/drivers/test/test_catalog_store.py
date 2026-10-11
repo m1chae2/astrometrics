@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
+from astrometricslib.foundation.paths import catalog_cache_directory
 
 
 def test_coverage_of_a_missing_cache_is_empty_not_an_error(tmp_path: Path) -> None:
@@ -28,8 +29,7 @@ def test_coverage_of_a_missing_cache_is_empty_not_an_error(tmp_path: Path) -> No
 
 def test_coverage_counts_stored_sources_and_regions(tmp_path: Path) -> None:
     """Coverage reports what the cache actually holds."""
-    catalogs = tmp_path / "catalogs"
-    catalogs.mkdir()
+    catalogs = Path(catalog_cache_directory())
     connection = sqlite3.connect(catalogs / "catalog_cache.db")
     connection.execute("CREATE TABLE gaia_sources (source_id TEXT PRIMARY KEY, ra REAL, dec REAL)")
     connection.execute("CREATE TABLE cached_regions (region_key TEXT PRIMARY KEY, ra REAL)")

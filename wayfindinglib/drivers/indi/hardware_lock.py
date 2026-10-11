@@ -8,7 +8,7 @@ import os
 from contextlib import AbstractContextManager
 from typing import TextIO
 
-from astrometricslib import AppConfiguration, file_lock
+from astrometricslib import AppConfiguration, file_lock, locks_directory
 
 
 class HardwareLock:
@@ -33,9 +33,7 @@ class HardwareLock:
             Absolute path to the device's lock file, creating the
             containing ``locks`` directory if needed.
         """
-        lock_dir = os.path.join(str(self._config.get_library_path()), "locks")
-        os.makedirs(lock_dir, exist_ok=True)
-        return os.path.join(lock_dir, f"{device_name}.lock")
+        return os.path.join(locks_directory(), f"{device_name}.lock")
 
     def acquire(self, device_name: str, blocking: bool = False) -> AbstractContextManager[TextIO]:
         """Context manager helper to acquire a file lock for a device.

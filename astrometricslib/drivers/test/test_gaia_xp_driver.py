@@ -236,13 +236,17 @@ def test_an_unreadable_cache_file_is_downloaded_again(tmp_path: Path, archive: S
     assert archive.calls == [SOURCE_ID]
 
 
-def test_the_cache_sits_in_the_catalogs_folder_next_to_the_gaia_star_cache(tmp_path: Path) -> None:
+def test_the_cache_sits_in_the_catalogs_folder_next_to_the_gaia_star_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The XP cache follows the Gaia catalog cache's location rule."""
-    config = SimpleNamespace(get_library_path=lambda: tmp_path)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    config = SimpleNamespace(get_library_path=lambda: tmp_path / "library")
+    catalogs_folder = tmp_path / "astrometrics" / "catalogs"
 
-    assert gaia_xp_cache_path(config) == tmp_path / "catalogs" / "gaia_xp"
+    assert gaia_xp_cache_path(config) == catalogs_folder / "gaia_xp"
     assert gaia_xp_cache_path(config).parent == get_catalog_cache_path(config).parent
-    assert AstroqueryGaiaXpDriver(config).cache_directory == tmp_path / "catalogs" / "gaia_xp"
+    assert AstroqueryGaiaXpDriver(config).cache_directory == catalogs_folder / "gaia_xp"
 
 
 def test_the_driver_set_builds_the_built_in_driver_only_when_none_was_chosen(tmp_path: Path) -> None:

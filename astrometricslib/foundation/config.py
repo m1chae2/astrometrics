@@ -16,7 +16,7 @@ from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
-from astrometricslib.foundation.paths import resolve_mounted_path
+from astrometricslib.foundation.paths import data_directory, resolve_mounted_path
 
 _instance = None
 
@@ -1176,10 +1176,7 @@ class AppConfiguration:
                 return (self.get_project_root() / path).absolute()
             return path.absolute()
         except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-            check_path = self.get_project_root() / "astrometricslib" / "library"
-            if check_path.exists():
-                return check_path.absolute()
-            return (self.get_project_root() / "library").absolute()
+            return Path(data_directory()).absolute()
 
     def get_frames_path(self) -> Path:
         """Return the absolute path to the frames directory.

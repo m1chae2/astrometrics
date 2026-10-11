@@ -37,6 +37,7 @@ from astrometricslib.drivers.siril_output_parsing import (
 )
 from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError
 from astrometricslib.foundation.jobs.runner import capture_job_logs
+from astrometricslib.foundation.paths import scratch_directory, siril_work_directory
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
@@ -57,7 +58,7 @@ _active_image_processing_instances: weakref.WeakSet = weakref.WeakSet()
 # and they don't share memory.
 # Note: Only Siril itself is locked; other preparation steps still run
 # in parallel to save time.
-SIRIL_PROCESS_LOCK_PATH = os.path.join(tempfile.gettempdir(), "astrometricslib-siril.lock")
+SIRIL_PROCESS_LOCK_PATH = os.path.join(scratch_directory(), "astrometricslib-siril.lock")
 
 # The two ways to find the stars that line spectroscopy frames up with one
 # another, keyed by the name `process_target` takes in
@@ -956,9 +957,8 @@ class ImageProcessing:
         else:
             self.calibration_library = calibration_library
         self.siril_executable = self.config.get_siril_executable()
-        # Work directory should ideally be in config or a safe temp
-        # location in workspace
-        self.workdir = os.path.join(os.path.expanduser("~"), "Siril", "Work")
+        # On the local disk, not in the RAM-backed system temp folder.
+        self.workdir = siril_work_directory()
         self.subprocesses = []
         self.gui_launched = False
         self.job_repository = job_repository

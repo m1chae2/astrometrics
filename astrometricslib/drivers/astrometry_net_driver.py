@@ -37,6 +37,7 @@ from astroquery.exceptions import TimeoutError as AstroqueryTimeoutError
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
+from astrometricslib.foundation.paths import scratch_directory
 
 logger = logging.getLogger(__name__)
 
@@ -392,7 +393,7 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
         config_lines.append(f"cpulimit {cpulimit}")
 
         # Isolated execution environment
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(dir=scratch_directory()) as tmp_dir:
             tmp_cfg_path = os.path.join(tmp_dir, "astrometry.cfg")
             with open(tmp_cfg_path, "w") as tmp_cfg:
                 tmp_cfg.write("\n".join(config_lines))
@@ -589,7 +590,9 @@ class AstrometryNetPlateSolveDriver(PlateSolveDriver):
                 if needs_flattening:
                     import numpy as np
 
-                    temporary_directory = tempfile.mkdtemp(prefix="plate_solve_mono_")
+                    temporary_directory = tempfile.mkdtemp(
+                        prefix="plate_solve_mono_", dir=scratch_directory()
+                    )
                     upload_path = os.path.join(temporary_directory, "mono_for_solve.fits")
                     flattened = np.mean(image_data, axis=0).astype("float32")
                     fits.PrimaryHDU(data=flattened, header=hdul[0].header).writeto(

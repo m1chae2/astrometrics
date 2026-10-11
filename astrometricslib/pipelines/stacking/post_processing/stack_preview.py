@@ -58,6 +58,7 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.siril_interface import siril_process_lock
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import NotFoundError, StorageError
+from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.shared.image_scaling import AUTOSTRETCH_SHADOWS_CLIP_SIGMA
 from astrometricslib.pipelines.shared.stack_preview_path import (
     PREVIEW_JPEG_QUALITY,
@@ -96,10 +97,11 @@ GRAXPERT_TIMEOUT_SECONDS = 300
 # larger stack or a slower card, and still stops a hung process.
 COSMIC_CLARITY_TIMEOUT_SECONDS = 300
 
-# The scratch folder lives under the home folder, not the system temp folder:
-# a Flatpak Siril is sandboxed and cannot see /tmp. This is the same place
-# the Siril driver does its own work (see `ImageProcessing.workdir`).
-_SCRATCH_ROOT = os.path.join(os.path.expanduser("~"), "Siril", "Work")
+# The scratch folder lives on the local disk (~/.cache/siril), not in the
+# system temp folder: that is often held in RAM, and a Flatpak Siril is
+# sandboxed and cannot see /tmp. This is the same place the Siril driver does
+# its own work (see `ImageProcessing.workdir`).
+_SCRATCH_ROOT = siril_work_directory()
 
 # The share of an image's pixels that must be finite numbers for a cleanup
 # step's result to be used. GraXpert can return not-a-number pixels for a

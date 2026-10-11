@@ -20,7 +20,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from astrometricslib import InvalidArgumentError, NotFoundError
+from astrometricslib import InvalidArgumentError, NotFoundError, scratch_directory
 from backend.services.infrastructure.agent_code_policy import AGENT_VISIBLE_NAMES, check_agent_code
 
 logger = logging.getLogger(__name__)
@@ -619,7 +619,9 @@ class ScriptingService:
                         mgr = Gcf.get_fig_manager(fignum)
                         if mgr:
                             self.active_figure_managers[fignum] = mgr
-                        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+                        with tempfile.NamedTemporaryFile(
+                            suffix=".png", delete=False, dir=scratch_directory()
+                        ) as tmp_file:
                             fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
                             plots.append(tmp_file.name)
                             interactive_plots.append({

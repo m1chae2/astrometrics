@@ -72,7 +72,12 @@ from astrometricslib.foundation.jobs import (
     run_as_background_job,
 )
 from astrometricslib.foundation.logging import configure_logging, get_log_context, log_context, new_request_id
-from astrometricslib.foundation.paths import is_path_inside, resolve_mounted_path
+from astrometricslib.foundation.paths import (
+    is_path_inside,
+    resolve_mounted_path,
+    scratch_directory,
+    siril_work_directory,
+)
 from astrometricslib.foundation.storage import (
     AbstractButler,
     Butler,
@@ -482,7 +487,9 @@ __all__ = [
     "resolve_target",
     "run_as_background_job",
     "safe_json_dumps",
+    "scratch_directory",
     "select_library_frames",
+    "siril_work_directory",
     "to_epoch_seconds",
     "to_error_info",
     "warm_earth_orientation_data",

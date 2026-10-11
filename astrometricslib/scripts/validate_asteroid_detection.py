@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
+from astrometricslib.foundation.paths import scratch_directory
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate, CascadeStage
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline
@@ -278,7 +279,7 @@ def run_trial(mover: Mover | None, seed: int, config: MovingObjectConfig | None 
     trial : `Trial`
         The number of tracks confirmed and whether the mover was among them.
     """
-    with tempfile.TemporaryDirectory() as directory:
+    with tempfile.TemporaryDirectory(dir=scratch_directory()) as directory:
         frames, stack = write_synthetic_field(Path(directory), mover, seed)
         pipeline = AsteroidDetectionPipeline(config or MovingObjectConfig())
         candidates = pipeline.process("synthetic", stack, frames)

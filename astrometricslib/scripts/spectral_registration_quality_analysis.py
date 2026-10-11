@@ -43,6 +43,7 @@ from astropy.stats import sigma_clipped_stats
 from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.siril_output_parsing import parse_seq_file, parse_zero_order_star
+from astrometricslib.foundation.paths import siril_work_directory
 
 SWEEP_SIGMA = (3.0, 3.0)
 SWEEP_FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
@@ -332,7 +333,7 @@ def run_analysis() -> None:
     print(f"Matching SPEC frames: {len(spec_frames)}")
 
     safe_id = target.id.replace(" ", "_")
-    work_dir = os.path.join(os.path.expanduser("~"), "Siril", "Work", f"{safe_id}_spectral_registration_qc")
+    work_dir = os.path.join(siril_work_directory(), f"{safe_id}_spectral_registration_qc")
     lights_dir = os.path.join(work_dir, "lights")
     process_dir = os.path.join(work_dir, "process")
     for folder in (lights_dir, process_dir):

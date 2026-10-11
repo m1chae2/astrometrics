@@ -30,6 +30,7 @@ from astrometricslib import FITS_READ_ERRORS, AstrometricsError
 os.environ["HEADLESS"] = "1"
 
 from astrometricslib import Astrometrics, configure_logging
+from astrometricslib.foundation.paths import siril_work_directory as siril_work_directory_path
 from astrometricslib.pipelines.shared.camera_passes import assign_targets_to_cameras, camera_pass_order
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -395,7 +396,7 @@ def run_full_processing(argv: list[str] | None = None) -> None:
     # a run that crashed or was cancelled.
     from astrometricslib.drivers.siril_interface import purge_stale_work_directories
 
-    siril_work_directory = os.path.join(os.path.expanduser("~"), "Siril", "Work")
+    siril_work_directory = siril_work_directory_path()
     purged_count, reclaimed_bytes = purge_stale_work_directories(siril_work_directory)
     if purged_count:
         print(

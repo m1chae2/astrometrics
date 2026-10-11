@@ -42,6 +42,7 @@ from skimage.registration import phase_cross_correlation
 
 from astrometricslib.drivers.fits_access import read_data
 from astrometricslib.foundation.config import get_configuration
+from astrometricslib.foundation.paths import siril_work_directory
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import run_preview_script
 from astrometricslib.pipelines.stacking.processing.exposure_groups import estimate_saturation_mask_level
 from astrometricslib.pipelines.stacking.processing.group_alignment import (
@@ -457,7 +458,7 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("--targets", nargs="+", required=True, metavar="NAME", help="Target folder names.")
     parser.add_argument(
         "--work-dir",
-        default=os.path.join(os.path.expanduser("~"), "Siril", "Work", "group_step_comparison"),
+        default=os.path.join(siril_work_directory(), "group_step_comparison"),
         help="Scratch folder for Siril. Must be under the home folder.",
     )
     options = parser.parse_args(arguments)

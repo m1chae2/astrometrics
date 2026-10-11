@@ -1,12 +1,62 @@
-"""Purpose: Handle the two ways Linux spells the path of a mounted drive.
+"""Purpose: Name the folders for working files, and handle mounted-drive paths.
 
-Description: Desktop Linux mounts a drive under ``/media/<user>/`` on some
-systems and ``/run/media/<user>/`` on others. A configuration file written on
-one system and read on the other names a path that does not exist. The
-functions here treat the two spellings as the same place.
+Description: Two groups of paths live here.
+
+* Where temporary working files go. On many Linux systems ``/tmp`` is kept in
+  RAM, so large scratch files there use up memory. These functions point to
+  folders under ``~/.cache`` on the local disk instead.
+* The two ways Linux spells the path of a mounted drive. Desktop Linux mounts
+  a drive under ``/media/<user>/`` on some systems and ``/run/media/<user>/``
+  on others. A configuration file written on one system and read on the other
+  names a path that does not exist. The functions here treat the two spellings
+  as the same place.
 """
 
 import os
+
+
+def _cache_root() -> str:
+    """Give the folder under which this program keeps its working files.
+
+    Returns
+    -------
+    cache_root : `str`
+        ``$XDG_CACHE_HOME`` if it is set, otherwise ``~/.cache``.
+    """
+    return os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+
+
+def scratch_directory() -> str:
+    """Give the folder for Python's temporary working files, creating it.
+
+    This is ``~/.cache/astrometrics`` on the local disk. It is used instead of
+    the system temporary folder, which is often held in RAM.
+
+    Returns
+    -------
+    scratch_path : `str`
+        The absolute path of the folder, which exists when this returns.
+    """
+    scratch_path = os.path.join(_cache_root(), "astrometrics")
+    os.makedirs(scratch_path, exist_ok=True)
+    return scratch_path
+
+
+def siril_work_directory() -> str:
+    """Give the folder where Siril keeps its working files, creating it.
+
+    This is ``~/.cache/siril`` on the local disk. Siril runs in a Flatpak
+    sandbox with access to the home folder, so it can use this path. The
+    system temporary folder is not used because the sandbox cannot see it.
+
+    Returns
+    -------
+    work_path : `str`
+        The absolute path of the folder, which exists when this returns.
+    """
+    work_path = os.path.join(_cache_root(), "siril")
+    os.makedirs(work_path, exist_ok=True)
+    return work_path
 
 
 def mount_path_variants(path: str) -> set[str]:

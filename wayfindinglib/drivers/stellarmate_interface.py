@@ -23,7 +23,12 @@ import threading
 import time
 from typing import Any
 
-from astrometricslib import ConfigurationError, ExternalServiceError, require_mounted_storage
+from astrometricslib import (
+    ConfigurationError,
+    ExternalServiceError,
+    require_mounted_storage,
+    scratch_directory,
+)
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 
 logger = logging.getLogger(__name__)
@@ -426,7 +431,9 @@ class StellarMateInterface(RemoteTransferDriver):
         if selected_files:
             import tempfile
 
-            files_from_fd = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+            files_from_fd = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, dir=scratch_directory()
+            )
             for fname in selected_files:
                 files_from_fd.write(fname + "\n")
             files_from_fd.close()

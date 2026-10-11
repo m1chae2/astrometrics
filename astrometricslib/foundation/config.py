@@ -398,6 +398,12 @@ class AppConfiguration:
                 "skip_unchanged_stacks_enabled": "true",
                 "auto_open_gui": "false",
             },
+            "Processing": {
+                # Off: the user wants nothing to download until they allow it.
+                "prefetch_frames": "false",
+                # Matches the rclone mount's --transfers 4. Not tuned.
+                "prefetch_workers": "4",
+            },
             # Blank: no gradient removal. Stack previews are then stretched
             # without it. See get_graxpert_executable.
             "Processing.GraXpert": {"graxpert_executable": ""},
@@ -795,6 +801,40 @@ class AppConfiguration:
         """
         val = self.get_value("Processing.Siril", "skip_unchanged_stacks_enabled", fallback="true")
         return str(val).lower() == "true"
+
+    def get_prefetch_frames(self) -> bool:
+        """Return whether frames are read into the mount's cache before Siril.
+
+        Off by default, because it downloads files (see
+        `pipelines/stacking/pre_processing/frame_prefetch.py`). A missing
+        setting means off.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the pre-fetch step should run.
+        """
+        val = self.get_value("Processing", "prefetch_frames", fallback="false")
+        return str(val).lower() == "true"
+
+    def get_prefetch_workers(self) -> int:
+        """Return how many files the pre-fetch step reads at once.
+
+        The default, 4, matches the rclone mount's ``--transfers 4``. It has
+        not been tuned.
+
+        Returns
+        -------
+        worker_count : `int`
+            Number of parallel readers. An entry that is not a whole number
+            above zero gives the default, 4.
+        """
+        raw = self.get_value("Processing", "prefetch_workers", fallback="4")
+        try:
+            worker_count = int(raw)
+        except TypeError, ValueError:
+            return 4
+        return worker_count if worker_count > 0 else 4
 
     def get_keep_previous_stack_enabled(self) -> bool:
         """Return whether a restack keeps the stack it replaces.

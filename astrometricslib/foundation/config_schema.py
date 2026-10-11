@@ -101,6 +101,12 @@ class ProcessingConfig(BaseModel):
     skip_unchanged_stacks_enabled : `bool`
         Whether stacking skips a stack whose frames, calibration frames and
         settings are the same as when it was last made, by default `True`.
+    prefetch_frames : `bool`
+        Whether stacking first reads every frame it will use into the
+        network mount's cache, by default `False`.
+    prefetch_workers : `int`
+        Number of files the pre-fetch step reads at once, by default 4
+        (matches the mount's ``--transfers 4``; not tuned).
     """
 
     siril_executable: str | None = None
@@ -119,6 +125,8 @@ class ProcessingConfig(BaseModel):
     keep_previous_stack_enabled: bool = True
     trim_noisy_stack_edges_enabled: bool = True
     skip_unchanged_stacks_enabled: bool = True
+    prefetch_frames: bool = False
+    prefetch_workers: int = 4
 
 
 class ParallelismConfig(BaseModel):

@@ -126,6 +126,8 @@ export interface FrameRecord {
   sensorTemperatureC?: number | null;
   focuserPosition?: number | null;
   focuserTemperatureC?: number | null;
+  fileSize?: number | null;
+  fileModifiedNs?: number | null;
   measurements?: FrameMeasurements;
 }
 

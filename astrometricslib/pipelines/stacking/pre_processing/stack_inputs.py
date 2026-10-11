@@ -131,6 +131,8 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_cosmic_clarity_denoise_enabled",
     "get_cosmic_clarity_denoise_strength",
     "get_preview_star_tone_enabled",
+    "get_prefetch_frames",
+    "get_prefetch_workers",
 )
 
 

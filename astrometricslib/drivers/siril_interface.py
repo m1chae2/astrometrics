@@ -1853,6 +1853,41 @@ class ImageProcessing:
                 job_logger.exception("Pipe read error")
             return None
 
+    def _prefetch_staged_frames(self, target_folder: str, job_logger: logging.Logger) -> None:
+        """Read the staged frames into the mount cache, if allowed.
+
+        Does nothing unless ``prefetch_frames`` is on. The staged lights,
+        darks, biases and flats are symlinks to the real files, so each link
+        is resolved first. The summary goes in the job log.
+
+        Parameters
+        ----------
+        target_folder : `str`
+            Work folder that `build_directories` filled with symlinks.
+        job_logger : `logging.Logger`
+            Logger for the job; receives the summary line.
+        """
+        # "is True" so a test double config (whose getters return truthy
+        # mock objects) never triggers a download.
+        if self.config.get_prefetch_frames() is not True:
+            return
+        from astrometricslib.pipelines.stacking.pre_processing.frame_prefetch import prefetch_frames
+
+        real_paths: list[str] = []
+        for sub_folder in ("lights", "darks", "biases", "flats"):
+            folder = os.path.join(target_folder, sub_folder)
+            if os.path.isdir(folder):
+                real_paths.extend(os.path.realpath(entry.path) for entry in os.scandir(folder))
+        summary = prefetch_frames(real_paths, self.config.get_prefetch_workers())
+        job_logger.info(
+            "Pre-fetch: read %d files (%.1f MB) in %.1f s; %d failed, %d missing.",
+            summary.file_count,
+            summary.byte_count / 1e6,
+            summary.elapsed_seconds,
+            summary.failure_count,
+            summary.skipped_missing_count,
+        )
+
     def process_target(
         self,
         id: str,
@@ -2097,6 +2132,8 @@ class ImageProcessing:
                 "filter_wfwhm_effective": filter_wfwhm,
                 "filter_wfwhm_loosened": filter_wfwhm_loosened,
             })
+
+            self._prefetch_staged_frames(target_folder, job_logger)
 
             siril_debug_log = os.path.join(target_folder, "siril_debug.log")
 

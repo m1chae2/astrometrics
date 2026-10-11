@@ -364,6 +364,54 @@ def is_stacked_output(file_name: str, header: Any = None) -> bool:
         return False
 
 
+def _stamp_file_state(frame: Any, file_state: os.stat_result | None) -> None:
+    """Record the file's size and modification time on a frame record.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The record to stamp.
+    file_state : `os.stat_result` or `None`
+        The file's `os.stat` result. Nothing is stamped when this is `None`.
+    """
+    if file_state is not None:
+        frame.file_size = file_state.st_size
+        frame.file_modified_ns = file_state.st_mtime_ns
+
+
+def _stat_or_none(file_path: str) -> os.stat_result | None:
+    """Read a file's size and times.
+
+    Returns
+    -------
+    file_state : `os.stat_result` or `None`
+        The `os.stat` result, or `None` if the file cannot be read.
+    """
+    try:
+        return os.stat(file_path)
+    except OSError:
+        return None
+
+
+def _is_unchanged(frame: Any, file_state: os.stat_result | None) -> bool:
+    """Tell whether a file still has the size and time stored on its record.
+
+    Returns
+    -------
+    unchanged : `bool`
+        `True` only if the record has both stored values and both match
+        `file_state`. A record without them (saved by older code) is never
+        unchanged, so it is read once and stamped.
+    """
+    if file_state is None:
+        return False
+    stored_size = getattr(frame, "file_size", None)
+    stored_modified_ns = getattr(frame, "file_modified_ns", None)
+    if stored_size is None or stored_modified_ns is None:
+        return False
+    return stored_size == file_state.st_size and stored_modified_ns == file_state.st_mtime_ns
+
+
 def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:
     """Look through folders to find new images for a specific target.
 
@@ -379,7 +427,8 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
         The main folder where all images are kept.
     refresh_headers : `bool`, optional
         If True, it will also re-read the settings of images already known
-        about.
+        about. A known image whose size and modification time still match
+        its record is not opened; the stored values are kept.
     """
     variants = [
         target.id,
@@ -410,6 +459,8 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
     if not found_directory:
         return
 
+    known_paths = {frame.path for frame in target.frames}
+    new_paths: set[str] = set()
     for root, directories, files in os.walk(found_directory):
         # Frames the stacking pipeline set aside for clouds or trailed stars
         # live in an `_excluded` folder; walking into it would add them
@@ -421,15 +472,35 @@ def scan_target_directory(target: Target, frames_root_path: str, refresh_headers
                     continue
                 file_path = os.path.join(root, file)
                 # Check if already tracked
-                if not any(frame.path == file_path for frame in target.frames):
+                if file_path not in known_paths:
+                    file_state = _stat_or_none(file_path)
                     if is_stacked_output(file, _read_header_or_none(file_path)):
                         continue
                     frame_record = create_frame_record_from_fits(file_path)
+                    _stamp_file_state(frame_record, file_state)
                     target.frames.append(frame_record)
+                    known_paths.add(file_path)
+                    new_paths.add(file_path)
 
+    frames_reused = 0
+    frames_read = len(new_paths)
     if refresh_headers:
         for frame in target.frames:
-            refresh_acquisition_conditions(frame)
+            if frame.path in new_paths:
+                continue
+            file_state = _stat_or_none(frame.path)
+            if _is_unchanged(frame, file_state):
+                frames_reused += 1
+                continue
+            frames_read += 1
+            if refresh_acquisition_conditions(frame):
+                _stamp_file_state(frame, file_state)
+    logger.info(
+        "Re-indexed %s: %d frames reused without opening the file, %d read.",
+        target.id,
+        frames_reused,
+        frames_read,
+    )
 
     target.recalculate_total_exposure()
 

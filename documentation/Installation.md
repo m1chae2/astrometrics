@@ -62,7 +62,7 @@ Next, run the setup script to create the Python environment and install the appl
 
 After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config.toml`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
 
-- `frames_path` (under `[Image Library]`): The path to the folder where images are saved. Set this to your own folder.
+- `frames_path` (under `[Image Library]`): The path to the folder where raw and calibration frames are saved. Set this to your own folder. See "Storage layout" below.
 - `api_key` (under `[Processing.Astrometry.Online Solver]`): An astrometry.net API key. Set this if you did not install the local solver.
 - `siril_executable` (under `[Processing.Siril]`): The command used to run Siril. It ships as `siril-cli`, which is correct for an apt install. If you installed Siril from Flathub, change it to `flatpak run --command=siril-cli org.siril.Siril`.
 - `stack_weight` (under `[Processing.Siril]`): Ships blank, which is correct for an apt install. If you installed Siril from Flathub, you can set it to `wfwhm` to turn on weighted stacking.
@@ -80,6 +80,35 @@ Weighted stacking (`stack_weight = wfwhm`) needs a Siril new enough to accept th
 :::{note}
 `--with-local-solver` installs index files sized for the camera and telescope in the configuration template. A different camera or telescope sees a different amount of sky and needs index files sized to match. These are listed by field-of-view size at [data.astrometry.net](https://data.astrometry.net), or run `apt-cache search astrometry-data`.
 :::
+
+### Storage layout
+
+Astrometrics keeps files in three tiers. Each tier has a different job, so each lives in a different place. The paths below are examples. Every one can be changed in the `[Image Library]` section of the configuration.
+
+| Tier | What it holds | Example location | Setting |
+|------|---------------|------------------|---------|
+| Durable files | Raw and calibration frames | `~/drive/Library` | `frames_path`, `frames_mount_point` |
+| Durable files | Stacks, previews, processed pictures | `~/drive/Library/stacks` | `stacks_path` |
+| Local state | The databases (`astrometrics.db`, `astrometrics_log.db`), `calibration_frames.json`, the configuration | `~/.local/share/astrometrics` | `path` |
+| Disposable files | Scratch files, Siril work folders, Gaia caches, locks, backup staging, integrity manifests | `~/.cache/astrometrics` | none |
+
+The durable files can sit on cloud storage. One setup is a Google Drive folder mounted at `~/drive` with `rclone mount` (run as a systemd user service, with `--vfs-cache-mode full`). The mount does the uploading in the background.
+
+The databases stay on the local disk. SQLite needs real file locking, and a network mount does not provide it reliably. A database on the mount can be corrupted.
+
+#### Backups
+
+`astrometricslib/scripts/backup_library_databases.py` copies the databases to `Library/_backup/<timestamp>/` on the drive. It keeps the 7 most recent snapshots and one per month. A systemd user timer runs it 10 minutes after login and every 4 hours. `./build/linux/install_backup_timer.sh` installs the timer. `./build/linux/run_backend.sh stop` also starts a backup.
+
+#### Integrity checks
+
+`astrometricslib/scripts/check_drive_integrity.py` records an MD5 checksum for every file in the drive's `Library` folder. It warns when a raw frame has disappeared or changed since the last run. The timer runs it with the backup.
+
+#### Scripts you run yourself
+
+- `python -m astrometricslib.scripts.restore_library_databases` restores the databases from a drive snapshot.
+- `./build/linux/clean_caches.sh` deletes disposable files. By default it keeps the backup staging, integrity manifests, locks, Siril calibration master cache and Gaia catalogs. Flags change this.
+- `./build/linux/rclone_pending_uploads.sh` shows the files still waiting to upload to the drive.
 
 ## 5. Launching the application
 

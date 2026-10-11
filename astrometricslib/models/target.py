@@ -126,6 +126,13 @@ class FrameRecord(BaseModel):
     focuser_position: int | None = Field(default=None, alias="focuserPosition")
     focuser_temperature_c: float | None = Field(default=None, alias="focuserTemperatureC")
 
+    # The file's size in bytes and last-change time in nanoseconds, from
+    # `os.stat`, when the header was last read. Re-indexing compares them
+    # with the file now and skips reading a file that has not changed.
+    # Records saved before these existed have None and are read once.
+    file_size: int | None = Field(default=None, alias="fileSize")
+    file_modified_ns: int | None = Field(default=None, alias="fileModifiedNs")
+
     # Everything our own code calculated from this frame's pixels
     # (background level, registration facts), as opposed to the fields
     # above, which are recorded straight from the camera at capture time.

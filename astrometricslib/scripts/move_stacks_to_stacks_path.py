@@ -28,10 +28,10 @@ memory and would write them back.
 Check first, then apply::
 
     python -m astrometricslib.scripts.move_stacks_to_stacks_path \
-        --to /home/me/Astrometrics/stacks --dry-run
+        --to /home/me/drive/Library/stacks --dry-run
 
     python -m astrometricslib.scripts.move_stacks_to_stacks_path \
-        --to /home/me/Astrometrics/stacks --apply
+        --to /home/me/drive/Library/stacks --apply
 
 Afterwards, set ``stacks_path`` in the ``[Image Library]`` section of the
 configuration to the same folder, so new stacks go there too.

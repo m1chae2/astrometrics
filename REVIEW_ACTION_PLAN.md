@@ -154,7 +154,8 @@ done.
 | Truncated calibration frames | done | `drivers/test/test_calibration_matching.py::test_a_truncated_frame_is_not_added_to_the_library` |
 | Gaia from VizieR first | done | `pipelines/astrometry/test/processing/test_gaia_service_fallback.py` |
 | Old star records load | done | `models/test/test_spectral_match_fields.py::test_a_star_saved_before_the_new_verdicts_still_loads` |
-| S22 to S27 | open | none yet |
+| S22 | done | `pipelines/photometry/test/processing/test_variability_indices.py` (tail checked against `gammaincc` and a Monte Carlo; 1.0 percent of constant stars below 0.01); candidate rule needs a Benjamini-Hochberg q-value below 0.01 |
+| S23 to S27 | open | none yet |
 
 Decisions taken during the work, for the owner to confirm:
 

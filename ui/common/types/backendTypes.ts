@@ -913,6 +913,8 @@ export interface PhotometryResult {
   reducedChiSquare?: number | null;
   stetsonJ?: number | null;
   variabilityScore?: number | null;
+  falseAlarmProbability?: number | null;
+  falseDiscoveryQValue?: number | null;
 }
 
 /**
@@ -1376,6 +1378,8 @@ export interface VariableCandidate {
   reducedChiSquare?: number | null;
   stetsonJ?: number | null;
   variabilityScore?: number | null;
+  falseAlarmProbability?: number | null;
+  falseDiscoveryQValue?: number | null;
   /** How confident the code is that this star is truly variable. */
   score?: number;
 }

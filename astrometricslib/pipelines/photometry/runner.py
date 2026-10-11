@@ -68,6 +68,8 @@ def _format_variable_candidates(stars: list[StellarObject]) -> list[VariableCand
             reducedChiSquare=star.photometry.reduced_chi_square,
             stetsonJ=star.photometry.stetson_j,
             variabilityScore=star.photometry.variability_score,
+            falseAlarmProbability=star.photometry.false_alarm_probability,
+            falseDiscoveryQValue=star.photometry.false_discovery_q_value,
             ra=float(star.right_ascension) if star.right_ascension else 0.0,
             dec=float(star.declination) if star.declination else 0.0,
         )

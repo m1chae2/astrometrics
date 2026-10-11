@@ -22,13 +22,15 @@ the flagged set. This module adds three things.
      products and a smooth change adds up. No unit. A constant star is
      near 0.
 
-3. The candidate rule (`assess_variability`): a star is a candidate when
-   its reduced chi-square, its Stetson J and its excess scatter all exceed
-   a threshold. The thresholds on chi-square and J are calibrated from the
-   field. The one on excess scatter is fixed. The chi-square and J use the
-   propagated error of each point, raised to the noise-model level when the
-   propagated errors are smaller than the scatter the field's constant stars
-   show (see `scaled_errors`).
+3. The candidate rule (`assess_variability`): a star is a candidate when its
+   reduced chi-square, its Stetson J and its excess scatter all exceed a
+   threshold and its false discovery q-value (`benjamini_hochberg`, from the
+   chi-square false alarm probability, `false_alarm_probability`) is below
+   `FALSE_DISCOVERY_LEVEL`. The thresholds on chi-square and J are
+   calibrated from the field. The one on excess scatter is fixed. The
+   chi-square and J use the propagated error of each point, raised to the
+   noise-model level when the propagated errors are smaller than the scatter
+   the field's constant stars show (see `scaled_errors`).
 
 Limits: the noise model assumes that most stars in each brightness bin are
 constant. A field with fewer than `MINIMUM_STARS_FOR_NOISE_MODEL` stars with
@@ -44,7 +46,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.stats import median_abs_deviation
+from scipy.stats import chi2, median_abs_deviation
 
 from astrometricslib.models.stellar_source import StellarObject
 
@@ -78,6 +80,13 @@ CALIBRATION_SIGMAS = 2.326
 # Converts a median absolute deviation to a standard deviation for a
 # normal distribution.
 _MAD_TO_SIGMA = 1.4826
+
+# A candidate must also have a false discovery q-value (see
+# `benjamini_hochberg`) below this level: about 1 in 100 of the stars the
+# rule accepts may be false when the errors are right and the noise is
+# independent. A design value; it is the level journals usually ask for and
+# has been measured only on the synthetic fields (see the README).
+FALSE_DISCOVERY_LEVEL = 0.01
 
 
 @dataclass(frozen=True)
@@ -329,6 +338,91 @@ def variability_score(
     return score if j_index > thresholds.stetson_j else min(score, 1.0)
 
 
+def field_error_scale(chi_squares: Sequence[float]) -> float:
+    """Find how much the field's error bars must be stretched to be honest.
+
+    Most stars in a field are constant, so their reduced chi-squares sit at
+    the level of the errors' scale: 1 when the errors are right, above 1 when
+    the errors are too small (an assumed gain, say). The median of the field
+    is therefore a robust estimate of that scale. It is never taken below 1,
+    so a field with errors that are too large is not made more significant
+    than its own errors say.
+
+    Parameters
+    ----------
+    chi_squares : `Sequence` [`float`]
+        The reduced chi-square of every star in the field.
+
+    Returns
+    -------
+    scale : `float`
+        The median reduced chi-square of the field, at least 1.
+    """
+    return max(1.0, float(np.median(np.asarray(chi_squares, dtype=float))))
+
+
+def false_alarm_probability(reduced_chi_square_value: float, points: int, scale: float = 1.0) -> float:
+    """Find the chance that a constant star scatters this much by noise alone.
+
+    The chi-square of a constant star with independent Gaussian errors follows
+    the chi-square distribution with ``points - 1`` degrees of freedom. The
+    answer is its upper tail beyond the star's own chi-square, which is the
+    reduced value times the degrees of freedom, divided by the field's error
+    scale (`field_error_scale`).
+
+    Parameters
+    ----------
+    reduced_chi_square_value : `float`
+        The star's reduced chi-square.
+    points : `int`
+        How many points the light curve has.
+    scale : `float`, optional
+        The field's error scale.
+
+    Returns
+    -------
+    probability : `float`
+        The false alarm probability, from 0 to 1. 1.0 for a light curve with
+        fewer than two points.
+    """
+    degrees_of_freedom = points - 1
+    if degrees_of_freedom < 1:
+        return 1.0
+    return float(chi2.sf(reduced_chi_square_value * degrees_of_freedom / scale, degrees_of_freedom))
+
+
+def benjamini_hochberg(probabilities: Sequence[float]) -> np.ndarray:
+    """Turn a field's false alarm probabilities into false discovery q-values.
+
+    Testing many stars at once makes some look significant by chance: at a
+    probability of 0.01, one star in a hundred constant ones would pass. The
+    Benjamini and Hochberg (1995) step-up rule fixes this. The q-value of a
+    star is the smallest false discovery rate at which it is still accepted.
+    The q-values are the sorted probabilities times the number of stars
+    divided by their rank, made non-decreasing from the largest down.
+
+    Parameters
+    ----------
+    probabilities : `Sequence` [`float`]
+        The false alarm probability of every star in the field.
+
+    Returns
+    -------
+    q_values : `numpy.ndarray`
+        The q-value of each star, in the order given, at most 1.
+    """
+    values = np.asarray(probabilities, dtype=float)
+    if values.size == 0:
+        return values
+    order = np.argsort(values)
+    ranks = np.arange(1, values.size + 1)
+    adjusted = values[order] * values.size / ranks
+    adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
+    q_values = np.empty_like(values)
+    q_values[order] = np.minimum(adjusted, 1.0)
+    return q_values
+
+
 @dataclass(frozen=True)
 class LightCurveSeries:
     """The values and errors of one star that the indices are computed from.
@@ -549,17 +643,27 @@ def assess_variability(stars: Sequence[StellarObject]) -> FieldAssessment:
     thresholds = calibrate_thresholds(
         [value[1] for value in indices.values()], [value[2] for value in indices.values()]
     )
+    error_scale = field_error_scale([value[1] for value in indices.values()])
+    probabilities = {
+        index: false_alarm_probability(value[1], series_by_index[index].values.size, error_scale)
+        for index, value in indices.items()
+    }
+    q_values = dict(
+        zip(probabilities, benjamini_hochberg(list(probabilities.values())).tolist(), strict=True)
+    )
     candidates: list[StellarObject] = []
     for index, (excess, chi_square, j_index) in indices.items():
         photometry = stars[index].photometry
         series = series_by_index[index]
         score = variability_score(chi_square, j_index, excess, thresholds)
+        photometry.false_alarm_probability = probabilities[index]
+        photometry.false_discovery_q_value = q_values[index]
         photometry.instrumental_mag = series.instrumental_magnitude
         photometry.rms_mag = series.rms_mag
         photometry.excess_scatter = excess
         photometry.reduced_chi_square = chi_square
         photometry.stetson_j = j_index
         photometry.variability_score = score
-        if score > 1.0:
+        if score > 1.0 and q_values[index] < FALSE_DISCOVERY_LEVEL:
             candidates.append(stars[index])
     return FieldAssessment(model, thresholds, candidates)

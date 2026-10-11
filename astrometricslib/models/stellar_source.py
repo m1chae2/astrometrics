@@ -582,6 +582,19 @@ class PhotometryResult(BaseModel):
     # The smallest of the three indices divided by its threshold. Above 1
     # exactly when the star passes all three, so it ranks candidates.
     variability_score: float | None = Field(default=None, alias="variabilityScore")
+    # The chance that a constant star would scatter at least this much by
+    # noise alone: the upper tail of the chi-square distribution at the
+    # light curve's points minus one degrees of freedom, after the field's
+    # errors are rescaled so that its typical star has a reduced chi-square
+    # of 1 (see `false_alarm_probability` in the variability indices).
+    # Assumes the noise is independent from point to point, so slow
+    # systematics make it too small. `None` as for the indices above.
+    false_alarm_probability: float | None = Field(default=None, alias="falseAlarmProbability")
+    # The smallest false discovery rate at which this star would still be
+    # accepted when all the field's stars are tested together
+    # (Benjamini and Hochberg 1995). A star whose q-value is 0.01 is
+    # accepted when about 1 in 100 of the accepted stars may be false.
+    false_discovery_q_value: float | None = Field(default=None, alias="falseDiscoveryQValue")
 
 
 class StellarSessionMatch(BaseModel):
@@ -1356,6 +1369,8 @@ class VariableCandidate(BaseModel):
     reduced_chi_square: float | None = Field(default=None, alias="reducedChiSquare")
     stetson_j: float | None = Field(default=None, alias="stetsonJ")
     variability_score: float | None = Field(default=None, alias="variabilityScore")
+    false_alarm_probability: float | None = Field(default=None, alias="falseAlarmProbability")
+    false_discovery_q_value: float | None = Field(default=None, alias="falseDiscoveryQValue")
 
     @computed_field(alias="score")
     @property

@@ -647,6 +647,8 @@ def merge_photometry_stellar_object(existing_stellar_object, updated_stellar_obj
             "reduced_chi_square",
             "stetson_j",
             "variability_score",
+            "false_alarm_probability",
+            "false_discovery_q_value",
         ):
             setattr(updated_photometry, index_name, getattr(existing_photometry, index_name))
     existing_stellar_object.photometry = updated_photometry

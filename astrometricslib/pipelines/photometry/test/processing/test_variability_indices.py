@@ -309,3 +309,68 @@ def test_a_star_without_errors_is_judged_against_the_noise_model() -> None:
     assessment = vi.assess_variability(stars)
 
     assert [star.id for star in assessment.candidates] == ["S0"]
+
+
+def test_the_false_alarm_probability_is_the_chi_square_tail() -> None:
+    """A chi-square of 30 on 29 degrees of freedom is a 0.414 chance."""
+    # 0.4140 was checked two other ways: the regularized incomplete gamma
+    # function gammaincc(29 / 2, 30 / 2), and a Monte Carlo of two million
+    # sums of 29 squared normals (0.41403).
+    probability = vi.false_alarm_probability(30.0 / 29.0, points=30)
+
+    assert probability == pytest.approx(0.4140, abs=0.0005)
+    # A reduced chi-square of 3 is 87; gammaincc(29 / 2, 87 / 2) gives
+    # 1.0466e-07.
+    assert vi.false_alarm_probability(3.0, points=30) == pytest.approx(1.0466e-7, rel=0.001)
+    assert vi.false_alarm_probability(1.0, points=1) == pytest.approx(1.0)
+
+
+def test_the_error_scale_stretches_a_field_with_small_errors_and_never_shrinks_one() -> None:
+    """A field of stars near 4 stretches errors; one near 0.3 never shrinks."""
+    assert vi.field_error_scale([3.5, 4.0, 4.4, 40.0]) == pytest.approx(4.2)
+    assert vi.field_error_scale([0.2, 0.3, 0.4]) == pytest.approx(1.0)
+    # The same star is less significant in the field with the larger scale.
+    assert vi.false_alarm_probability(2.0, 40, scale=4.0) > vi.false_alarm_probability(2.0, 40, scale=1.0)
+
+
+def test_benjamini_hochberg_matches_a_worked_example() -> None:
+    """Five probabilities and their step-up q-values, worked by hand.
+
+    Sorted 0.001, 0.008, 0.039, 0.041, 0.6 with five stars: times 5 over rank
+    gives 0.005, 0.02, 0.065, 0.05125, 0.6. Taking the running minimum from
+    the largest down gives 0.005, 0.02, 0.05125, 0.05125, 0.6.
+    """
+    q_values = vi.benjamini_hochberg([0.039, 0.001, 0.6, 0.041, 0.008])
+
+    assert q_values == pytest.approx([0.05125, 0.005, 0.6, 0.05125, 0.02])
+    assert vi.benjamini_hochberg([]).size == 0
+
+
+def test_constant_stars_with_correct_errors_give_uniform_probabilities() -> None:
+    """With independent Gaussian noise, about 1 percent fall below 0.01."""
+    generator = np.random.default_rng(41)
+    sigma = 0.01
+    probabilities = [
+        vi.false_alarm_probability(
+            vi.reduced_chi_square(1.0 + generator.normal(0.0, sigma, 40), np.full(40, sigma)), points=40
+        )
+        for _ in range(4000)
+    ]
+
+    assert np.mean(np.asarray(probabilities) < 0.01) == pytest.approx(0.01, abs=0.006)
+    assert np.mean(np.asarray(probabilities) < 0.5) == pytest.approx(0.5, abs=0.03)
+
+
+def test_a_field_of_constant_stars_flags_nobody_at_the_false_discovery_level() -> None:
+    """Among 300 constant stars, the corrected rule accepts almost none."""
+    generator = np.random.default_rng(42)
+    sigma = 0.01
+    stars = [
+        make_star(f"c{i}", list(1.0 + generator.normal(0.0, sigma, 40)), [sigma] * 40, flux=1000.0 + i)
+        for i in range(300)
+    ]
+
+    assessment = vi.assess_variability(stars)
+
+    assert len(assessment.candidates) <= 3
+    assert all(star.photometry.false_discovery_q_value is not None for star in stars)

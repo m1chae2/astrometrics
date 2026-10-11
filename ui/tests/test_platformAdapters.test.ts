@@ -129,7 +129,7 @@ describe('Electron Platform Adapters', () => {
       const options = platform.getWindowOptions();
       expect(options.titleBarStyle).toBe('hidden');
       expect(options.titleBarOverlay).toEqual({
-        color: '#181818',
+        color: '#242426',
         symbolColor: '#e0e0e0',
         height: 48
       });

@@ -229,3 +229,5 @@ library/targets/TEST_TARGET.json
 # build/mcp/generate_client_configs.py.
 .gemini/settings.json
 .import_linter_cache/
+
+.venv-win/

@@ -7,9 +7,10 @@ permission slips for those resources.
 
 The locks live in real files on disk and are enforced by the operating
 system, which matters: a lock kept only in memory would be invisible to
-a second program. Because these use POSIX advisory locks, the batch
-script and the backend service can both ask for "the Siril slot" and
-the operating system will make one of them wait.
+a second program. Because these use the operating system's file locks
+(POSIX advisory locks, or `msvcrt` on Windows), the batch script and the
+backend service can both ask for "the Siril slot" and the operating system
+will make one of them wait.
 
 This module is about coordinating programs, not about storing data --
 the storage side lives in `astrometricslib.foundation.storage.local_database`.
@@ -17,9 +18,9 @@ the storage side lives in `astrometricslib.foundation.storage.local_database`.
 
 import contextlib
 import contextvars
-import fcntl
 import logging
 import os
+import sys
 import time
 from collections.abc import Generator
 from typing import TextIO
@@ -27,6 +28,11 @@ from typing import TextIO
 from astrometricslib.foundation.errors import ConflictError
 
 logger = logging.getLogger(__name__)
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 
 class DeviceInUseError(ConflictError):
@@ -40,9 +46,55 @@ _held_resource_names: contextvars.ContextVar[tuple[str, ...]] = contextvars.Cont
 )
 
 
+def _lock_file(fh: TextIO, blocking: bool) -> None:
+    """Take an exclusive lock on an open file.
+
+    Parameters
+    ----------
+    fh : `io.TextIOWrapper`
+        Open file to lock.
+    blocking : `bool`
+        If `True`, wait for the lock; otherwise fail at once.
+
+    Raises
+    ------
+    BlockingIOError
+        Raised if the lock is held elsewhere and `blocking` is `False`.
+    """
+    if sys.platform != "win32":
+        fcntl.flock(fh, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return
+    # Windows has no flock. msvcrt locks one byte at the file's start.
+    while True:
+        try:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            return
+        except OSError as e:
+            if not blocking:
+                raise BlockingIOError(str(e)) from e
+            time.sleep(0.05)
+
+
+def _unlock_file(fh: TextIO) -> None:
+    """Release the lock taken by `_lock_file`.
+
+    Parameters
+    ----------
+    fh : `io.TextIOWrapper`
+        Open file that was locked.
+    """
+    if sys.platform != "win32":
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        return
+    with contextlib.suppress(OSError):
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+
+
 @contextlib.contextmanager
 def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
-    """Acquire a POSIX advisory process-safe file lock via native fcntl.
+    """Acquire a process-safe file lock (`fcntl` or `msvcrt`).
 
     Parameters
     ----------
@@ -70,10 +122,7 @@ def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     fh = open(lock_path, "w")
     try:
-        if blocking:
-            fcntl.flock(fh, fcntl.LOCK_EX)
-        else:
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_file(fh, blocking)
         yield fh
     except BlockingIOError as e:
         raise DeviceInUseError(
@@ -81,7 +130,7 @@ def file_lock(lock_path: str, blocking: bool = False) -> Generator[TextIO]:
             details={"lock_path": lock_path},
         ) from e
     finally:
-        fcntl.flock(fh, fcntl.LOCK_UN)
+        _unlock_file(fh)
         fh.close()
 
 

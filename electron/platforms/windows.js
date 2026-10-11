@@ -190,7 +190,9 @@ export class WindowsPlatform extends BasePlatform {
     return {
       titleBarStyle: 'hidden',
       titleBarOverlay: {
-        color: '#181818',
+        // Same colour as the status header (--grey-dark in ui/common/styles/theme.css),
+        // so the caption buttons do not show as a darker block at the right end.
+        color: '#242426',
         symbolColor: '#e0e0e0',
         height: 48
       }

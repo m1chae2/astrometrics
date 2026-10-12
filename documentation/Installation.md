@@ -102,7 +102,7 @@ The databases stay on the local disk. SQLite needs real file locking, and a netw
 
 `astrometricslib/scripts/upload_library.py` makes the Drive copy match the local library with `rclone sync`:
 
-- A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/` on Drive. It is not lost.
+- A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/` on Drive. It is not lost. Recycle folders older than 90 days are removed after each good upload (`--keep-deleted-days` changes this); Google Drive then keeps them in its own trash for 30 more days.
 - A file renamed or moved locally (for example a frame quarantined into `_excluded`) is moved on Drive, not uploaded again.
 - One run deletes at most 100 files (`--max-delete`). It refuses to run when the local library is missing, empty, or holds fewer than half the files of the last good run.
 - The `_backup` folder, hidden files and half-written temporary files are never touched.

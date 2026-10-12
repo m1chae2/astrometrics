@@ -7,6 +7,8 @@ backup. This script makes the Drive copy match the local one with
 
 * A file deleted or replaced locally is not lost on Drive. It moves into
   ``drive:Library_deleted/<YYYYmmdd_HHMMSS>/`` instead (``--backup-dir``).
+  After each good run, recycle folders older than ``--keep-deleted-days``
+  (default 90) are removed, so the recycle area does not grow forever.
 * A file renamed or moved locally, for example a frame the stacking step
   quarantines into ``_excluded``, is moved on Drive too, not uploaded again
   (``--track-renames``, which matches files by their MD5 checksum).
@@ -40,10 +42,11 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from astrometricslib.foundation.config import get_configuration
@@ -78,6 +81,15 @@ EXCLUDE_PATTERNS = (
 )
 
 STATE_FILE_NAME = "upload_state.json"
+
+# How long a deleted or replaced file stays in the recycle folder on Drive.
+# Long enough to notice a mistake (or damage synced up from the laptop) and
+# take the old version back. A choice, not measured.
+DEFAULT_KEEP_DELETED_DAYS = 90
+
+# Recycle folders are named after the run that filled them. Only folders with
+# exactly this name pattern are ever removed.
+RECYCLE_FOLDER_PATTERN = re.compile(r"^(\d{8}_\d{6})/?$")
 
 
 def count_library_files(library_path: Path) -> int:
@@ -204,6 +216,94 @@ def build_sync_command(
     return command
 
 
+def recycle_folders_to_remove(folder_names: list[str], now: datetime, keep_days: int) -> list[str]:
+    """Choose the recycle folders that are older than the keeping period.
+
+    Parameters
+    ----------
+    folder_names : `list` [`str`]
+        Folder names listed in the recycle area (a trailing ``/`` is allowed).
+    now : `datetime.datetime`
+        The current time.
+    keep_days : `int`
+        How many days a recycle folder is kept.
+
+    Returns
+    -------
+    to_remove : `list` [`str`]
+        Names (without ``/``) of folders whose run time is older than
+        ``keep_days``. Names that do not match the run-name pattern are never
+        chosen.
+    """
+    cutoff = now - timedelta(days=keep_days)
+    to_remove = []
+    for raw_name in folder_names:
+        match = RECYCLE_FOLDER_PATTERN.match(raw_name.strip())
+        if match is None:
+            continue
+        try:
+            run_time = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S")
+        except ValueError:
+            continue
+        if run_time < cutoff:
+            to_remove.append(match.group(1))
+    return to_remove
+
+
+def prune_recycle_folders(
+    rclone_executable: str, deleted_remote: str, keep_days: int, now: datetime, dry_run: bool
+) -> bool:
+    """Remove recycle folders older than the keeping period.
+
+    A folder removed from Google Drive goes to Drive's own trash first, which
+    Google empties after 30 days.
+
+    Parameters
+    ----------
+    rclone_executable : `str`
+        The rclone program.
+    deleted_remote : `str`
+        The recycle area, for example ``drive:Library_deleted``.
+    keep_days : `int`
+        How many days a recycle folder is kept.
+    now : `datetime.datetime`
+        The current time.
+    dry_run : `bool`
+        If `True`, only report which folders would be removed.
+
+    Returns
+    -------
+    succeeded : `bool`
+        `False` if listing or removing a folder failed.
+    """
+    listing = subprocess.run(
+        [rclone_executable, "lsf", "--dirs-only", deleted_remote + "/"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        if "directory not found" in listing.stderr:
+            return True
+        logger.warning("Could not list the recycle folders: %s", listing.stderr.strip())
+        return False
+    succeeded = True
+    for name in recycle_folders_to_remove(listing.stdout.splitlines(), now, keep_days):
+        target = f"{deleted_remote}/{name}"
+        if dry_run:
+            logger.info("Would remove the old recycle folder %s", target)
+            continue
+        purge = subprocess.run(
+            [rclone_executable, "purge", target], capture_output=True, text=True, check=False
+        )
+        if purge.returncode == 0:
+            logger.info("Removed the old recycle folder %s", target)
+        else:
+            logger.warning("Could not remove %s: %s", target, purge.stderr.strip())
+            succeeded = False
+    return succeeded
+
+
 def read_state(state_path: Path) -> dict:
     """Read what the last good run recorded.
 
@@ -265,6 +365,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--accept-file-count", action="store_true", help="run even if the library shrank by more than half"
+    )
+    parser.add_argument(
+        "--keep-deleted-days",
+        type=int,
+        default=DEFAULT_KEEP_DELETED_DAYS,
+        help="days a recycle folder is kept (default: %(default)s)",
     )
     parser.add_argument("--rclone", default="rclone", help="the rclone program (default: %(default)s)")
     parser.add_argument("--state-directory", type=Path, default=None, help=argparse.SUPPRESS)
@@ -331,6 +437,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not arguments.dry_run:
             state_path.write_text(json.dumps({"file_count": file_count, "finished": run_name}))
+        # Only after a good sync, so a failing run never also removes old
+        # versions. A pruning problem is logged but does not fail the upload.
+        if not prune_recycle_folders(
+            arguments.rclone,
+            arguments.deleted_remote,
+            arguments.keep_deleted_days,
+            datetime.now(),
+            arguments.dry_run,
+        ):
+            logger.warning("Old recycle folders were not all removed; the next run tries again.")
         logger.info("Upload finished.")
         return 0
 

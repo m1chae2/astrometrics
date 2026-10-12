@@ -9,6 +9,7 @@ is not installed. Nothing touches the real library or Google Drive.
 
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -174,3 +175,42 @@ def test_too_many_deletions_stop_the_run(tmp_path: Path) -> None:
     for name in names[:4]:
         (library / name).unlink()
     assert run_upload(library, destination, state_directory, "--max-delete", "1", "--accept-file-count") == 1
+
+
+def test_only_old_recycle_folders_with_run_names_are_chosen() -> None:
+    """Folders older than the keeping period are chosen; others never are."""
+    now = datetime(2026, 10, 11, 12, 0, 0)
+    names = [
+        "20260601_000000/",  # 132 days old: removed
+        "20260714_120000/",  # 89 days old: kept
+        "20261011_110000/",  # today: kept
+        "notes/",  # not a run name: never removed
+        "20261399_000000/",  # not a real date: never removed
+    ]
+    assert upload.recycle_folders_to_remove(names, now, 90) == ["20260601_000000"]
+
+
+@needs_rclone
+def test_a_good_run_removes_old_recycle_folders(tmp_path: Path) -> None:
+    """After a good sync, recycle folders past the keeping time are removed."""
+    library = make_library(tmp_path, ["lights/A/f1.fits"])
+    destination = tmp_path / "drive"
+    old_folder = destination / "Library_deleted/20200101_000000/lights/A"
+    recent_folder = destination / f"Library_deleted/{datetime.now():%Y%m%d_%H%M%S}/lights/A"
+    other_folder = destination / "Library_deleted/keep_me"
+    for folder in (old_folder, recent_folder, other_folder):
+        folder.mkdir(parents=True)
+        (folder / "x.fits").write_text("x")
+
+    assert run_upload(library, destination, tmp_path / "state", "--dry-run") == 0
+    assert old_folder.exists()
+
+    assert run_upload(library, destination, tmp_path / "state") == 0
+    assert not (destination / "Library_deleted/20200101_000000").exists()
+    assert recent_folder.exists()
+    assert other_folder.exists()
+
+
+def test_a_missing_recycle_area_is_not_an_error(tmp_path: Path) -> None:
+    """Before anything was ever deleted there is no recycle area yet."""
+    assert upload.prune_recycle_folders("rclone", str(tmp_path / "none"), 90, datetime.now(), False)

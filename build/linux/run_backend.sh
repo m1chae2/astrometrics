@@ -270,10 +270,20 @@ stop_backend() {
 
   # With the backend stopped the databases are quiet, so this is a good time
   # for a backup. It runs in the background and can never make `stop` fail or
-  # wait: output goes to backup.log and any error is ignored.
+  # wait: output goes to backup.log and any error is ignored. The log lives in
+  # ~/.local/state/astrometrics, not .run_logs, because `start` empties
+  # .run_logs. Over 5 MB it is renamed to backup.log.1 (one old copy kept).
   if [ -x "$ROOT_DIR/.venv/bin/python" ] && [ -f "$ROOT_DIR/astrometricslib/scripts/backup_library_databases.py" ]; then
-    { PYTHONPATH="$ROOT_DIR" nohup "$ROOT_DIR/.venv/bin/python" -m astrometricslib.scripts.backup_library_databases \
-        >> "$LOG_DIR/backup.log" 2>&1 < /dev/null & } 2>/dev/null || true
+    {
+      BACKUP_LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/astrometrics"
+      mkdir -p "$BACKUP_LOG_DIR"
+      BACKUP_LOG="$BACKUP_LOG_DIR/backup.log"
+      if [ -f "$BACKUP_LOG" ] && [ "$(stat -c %s "$BACKUP_LOG")" -gt 5242880 ]; then
+        mv -f "$BACKUP_LOG" "$BACKUP_LOG.1"
+      fi
+      PYTHONPATH="$ROOT_DIR" nohup "$ROOT_DIR/.venv/bin/python" -m astrometricslib.scripts.backup_library_databases \
+        >> "$BACKUP_LOG" 2>&1 < /dev/null &
+    } 2>/dev/null || true
   fi
 }
 

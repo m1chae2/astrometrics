@@ -211,6 +211,7 @@ def test_a_good_run_removes_old_recycle_folders(tmp_path: Path) -> None:
     assert other_folder.exists()
 
 
+@needs_rclone
 def test_a_missing_recycle_area_is_not_an_error(tmp_path: Path) -> None:
     """Before anything was ever deleted there is no recycle area yet."""
     assert upload.prune_recycle_folders("rclone", str(tmp_path / "none"), 90, datetime.now(), False)

@@ -22,7 +22,8 @@ set -euo pipefail
 #   ./run_backend.sh help|--help|-h    - print this help text
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-LOG_DIR="$ROOT_DIR/.run_logs"
+# Console output goes to the user's log folder, not the project folder.
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/astrometrics/logs/run"
 PID_DIR="$ROOT_DIR/.run_pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
@@ -133,7 +134,7 @@ launch_backend() {
   # crash can still be diagnosed after the next restart. Only the newest 10
   # are kept.
   if [ -s "$LOG_FILE" ]; then
-    ARCHIVE_DIR="$ROOT_DIR/.run_logs_archive"
+    ARCHIVE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/astrometrics/logs/run_archive"
     mkdir -p "$ARCHIVE_DIR"
     cp "$LOG_FILE" "$ARCHIVE_DIR/backend_$(date +%Y%m%d_%H%M%S).log" || true
     { ls -1t "$ARCHIVE_DIR"/backend_*.log 2>/dev/null | tail -n +11 | xargs -r rm -f; } || true
@@ -271,8 +272,8 @@ stop_backend() {
   # With the backend stopped the databases are quiet, so this is a good time
   # for a backup. It runs in the background and can never make `stop` fail or
   # wait: output goes to backup.log and any error is ignored. The log lives in
-  # ~/.local/state/astrometrics, not .run_logs, because `start` empties
-  # .run_logs. Over 5 MB it is renamed to backup.log.1 (one old copy kept).
+  # ~/.local/state/astrometrics, not the run log folder, because `start`
+  # empties that folder. Over 5 MB it is renamed to backup.log.1 (one old copy kept).
   if [ -x "$ROOT_DIR/.venv/bin/python" ] && [ -f "$ROOT_DIR/astrometricslib/scripts/backup_library_databases.py" ]; then
     {
       BACKUP_LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/astrometrics"

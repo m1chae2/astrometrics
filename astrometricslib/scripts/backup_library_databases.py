@@ -1,7 +1,8 @@
 r"""Back up the library databases and settings to Google Drive with rclone.
 
-The script makes a safe copy of ``astrometrics.db`` and ``astrometrics_log.db``
-(SQLite's online backup, then an integrity check), adds
+The script makes a safe copy of ``astrometrics.db``, ``astrometrics_log.db``
+and the observatory database ``wayfinding.db`` (SQLite's online backup, then
+an integrity check), adds
 ``calibration_frames.json`` and the configuration file, and uploads the folder
 to ``drive:Library/_backup/<YYYYmmdd_HHMMSS>/``. It works whether or not the
 backend is running.
@@ -30,19 +31,20 @@ from datetime import datetime
 from pathlib import Path
 
 from astrometricslib.drivers.local_database import snapshot_sqlite_database
-from astrometricslib.foundation.paths import remote_snapshot_path, scratch_directory
+from astrometricslib.foundation.paths import data_directory, remote_snapshot_path, scratch_directory
 
 logger = logging.getLogger(__name__)
 
 DATABASE_FILE_NAMES = ("astrometrics.db", "astrometrics_log.db")
 CALIBRATION_FILE_NAME = "calibration_frames.json"
+WAYFINDING_DATABASE_RELATIVE_PATH = Path("wayfinding") / "wayfinding.db"
 STATE_FILE_NAME = "state.json"
 SNAPSHOT_NAME_PATTERN = re.compile(r"^\d{8}_\d{6}$")
 NEWEST_SNAPSHOTS_TO_KEEP = 7
 
 
 def compute_source_fingerprint(
-    library_path: Path, config_file_path: Path | None
+    library_path: Path, config_file_path: Path | None, extra_database_paths: tuple[Path, ...] = ()
 ) -> dict[str, list[int] | None]:
     """Describe the files being backed up by their size and modification time.
 
@@ -56,6 +58,8 @@ def compute_source_fingerprint(
         Folder holding the databases and ``calibration_frames.json``.
     config_file_path : `pathlib.Path` or `None`
         The configuration file, if there is one.
+    extra_database_paths : `tuple` [`pathlib.Path`, ...], optional
+        Other SQLite databases to back up, such as the observatory database.
 
     Returns
     -------
@@ -67,6 +71,9 @@ def compute_source_fingerprint(
     for database_name in DATABASE_FILE_NAMES:
         watched_paths.append(library_path / database_name)
         watched_paths.append(library_path / f"{database_name}-wal")
+    for database_path in extra_database_paths:
+        watched_paths.append(database_path)
+        watched_paths.append(database_path.with_name(f"{database_path.name}-wal"))
     watched_paths.append(library_path / CALIBRATION_FILE_NAME)
     if config_file_path is not None:
         watched_paths.append(config_file_path)
@@ -81,7 +88,12 @@ def compute_source_fingerprint(
     return fingerprint
 
 
-def stage_snapshot(library_path: Path, config_file_path: Path | None, staging_folder: Path) -> bool:
+def stage_snapshot(
+    library_path: Path,
+    config_file_path: Path | None,
+    staging_folder: Path,
+    extra_database_paths: tuple[Path, ...] = (),
+) -> bool:
     """Write the safe copies and plain file copies into a staging folder.
 
     Parameters
@@ -92,6 +104,9 @@ def stage_snapshot(library_path: Path, config_file_path: Path | None, staging_fo
         The configuration file, if there is one.
     staging_folder : `pathlib.Path`
         Folder to fill. It is created.
+    extra_database_paths : `tuple` [`pathlib.Path`, ...], optional
+        Other SQLite databases to back up. Each is copied under its own
+        file name.
 
     Returns
     -------
@@ -101,12 +116,12 @@ def stage_snapshot(library_path: Path, config_file_path: Path | None, staging_fo
     """
     staging_folder.mkdir(parents=True, exist_ok=True)
     all_ok = True
-    for database_name in DATABASE_FILE_NAMES:
-        source_path = library_path / database_name
+    source_paths = [library_path / name for name in DATABASE_FILE_NAMES] + list(extra_database_paths)
+    for source_path in source_paths:
         if not source_path.exists():
             logger.warning("%s does not exist; skipping it", source_path)
             continue
-        if not snapshot_sqlite_database(str(source_path), str(staging_folder / database_name)):
+        if not snapshot_sqlite_database(str(source_path), str(staging_folder / source_path.name)):
             logger.error("Snapshot of %s failed", source_path)
             all_ok = False
     for plain_file in (library_path / CALIBRATION_FILE_NAME, config_file_path):
@@ -278,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         configuration = get_configuration()
         library_path = library_path or Path(str(configuration.get_library_path()))
         config_file_path = config_file_path or configuration.config_file_path
+    # The observatory database, at wayfindinglib's default location.
+    extra_database_paths = (Path(data_directory()) / WAYFINDING_DATABASE_RELATIVE_PATH,)
     staging_root = arguments.staging_root or Path(scratch_directory()) / "backup"
     state_path = staging_root / STATE_FILE_NAME
     dry_run = arguments.dry_run
@@ -304,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             exit_code = 1
 
-    fingerprint = compute_source_fingerprint(library_path, config_file_path)
+    fingerprint = compute_source_fingerprint(library_path, config_file_path, extra_database_paths)
     if not arguments.force and read_state(state_path).get("fingerprint") == fingerprint:
         logger.info("Backup unchanged since the last upload; nothing to do")
         return exit_code
@@ -315,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[dry-run] would snapshot {library_path} into {staging_folder}")
         print(f"[dry-run] would upload to {remote_snapshot_path(arguments.remote, snapshot_name)}/")
     else:
-        if not stage_snapshot(library_path, config_file_path, staging_folder):
+        if not stage_snapshot(library_path, config_file_path, staging_folder, extra_database_paths):
             logger.error("A database snapshot failed; not uploading %s", staging_folder)
             shutil.rmtree(staging_folder, ignore_errors=True)
             return 1

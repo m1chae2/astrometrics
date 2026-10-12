@@ -7,6 +7,7 @@ import pytest
 
 from astrometricslib.foundation.paths import (
     catalog_cache_directory,
+    config_directory,
     data_directory,
     locks_directory,
     scratch_directory,
@@ -64,3 +65,34 @@ def test_data_directory_default_is_local_share(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(os, "makedirs", lambda *args, **kwargs: None)
     expected = os.path.join(os.path.expanduser("~"), ".local", "share", "astrometrics")
     assert data_directory() == expected
+
+
+def test_config_directory_uses_xdg_config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The settings folder is `<config>/astrometrics` and is not made."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config_path = config_directory()
+    assert config_path == os.path.join(str(tmp_path), "astrometrics")
+    assert not os.path.exists(config_path)
+
+
+def test_settings_file_is_found_in_the_config_folder_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file in ``~/.config/astrometrics`` wins over one in the project."""
+    from astrometricslib.foundation.config import CONFIG_FILE_NAME, find_config_file
+
+    monkeypatch.delenv("ASTROMETRICS_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("ASTROMETRICS_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    settings_file = tmp_path / "astrometrics" / CONFIG_FILE_NAME
+    package_dir = tmp_path / "project" / "astrometricslib"
+    # Nothing exists yet: the first save goes to the settings folder.
+    assert find_config_file(package_dir) == settings_file
+    legacy_file = package_dir / CONFIG_FILE_NAME
+    package_dir.mkdir(parents=True)
+    legacy_file.write_text("", encoding="utf-8")
+    # An older install's file inside the project is still used.
+    assert find_config_file(package_dir) == legacy_file
+    settings_file.parent.mkdir(parents=True)
+    settings_file.write_text("", encoding="utf-8")
+    assert find_config_file(package_dir) == settings_file

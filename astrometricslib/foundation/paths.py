@@ -79,6 +79,23 @@ def data_directory() -> str:
     return data_path
 
 
+def config_directory() -> str:
+    """Give the folder for this program's settings file, without creating it.
+
+    This is ``~/.config/astrometrics``. It holds
+    ``astrometrics.config.toml``. The folder is not created here, so that
+    only saving the settings creates it.
+
+    Returns
+    -------
+    config_path : `str`
+        ``$XDG_CONFIG_HOME/astrometrics`` if ``XDG_CONFIG_HOME`` is set,
+        otherwise ``~/.config/astrometrics``.
+    """
+    config_root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(config_root, "astrometrics")
+
+
 def state_directory() -> str:
     """Give the folder for this program's run logs and state, creating it.
 

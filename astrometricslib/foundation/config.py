@@ -16,7 +16,12 @@ from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
-from astrometricslib.foundation.paths import data_directory, resolve_mounted_path, state_directory
+from astrometricslib.foundation.paths import (
+    config_directory,
+    data_directory,
+    resolve_mounted_path,
+    state_directory,
+)
 
 _instance = None
 
@@ -26,6 +31,9 @@ _UNSET = object()
 # check is one `stat` call, so this keeps even a tight loop of settings reads
 # cheap, while an edit still reaches a running process within a second.
 CONFIG_RECHECK_SECONDS = 1.0
+
+# The settings file's name, in ~/.config/astrometrics.
+CONFIG_FILE_NAME = "astrometrics.config.toml"
 
 reload_logger = logging.getLogger(__name__)
 
@@ -279,6 +287,44 @@ def get_configuration() -> AppConfiguration:
     return _instance
 
 
+def find_config_file(package_dir: Path) -> Path:
+    """Find the settings file, ``astrometrics.config.toml``.
+
+    The places are tried in this order:
+
+    1. The path in ``ASTROMETRICS_CONFIG_PATH`` (or ``ASTROMETRICS_CONFIG``),
+       whether or not the file exists yet.
+    2. The user's settings folder, ``~/.config/astrometrics``.
+    3. The project folder, where older installs kept it: the
+       ``astrometricslib`` folder, then ``backend``.
+
+    Parameters
+    ----------
+    package_dir : `Path`
+        The ``astrometricslib`` package folder.
+
+    Returns
+    -------
+    config_path : `Path`
+        The first file found. When none exists, the path in the settings
+        folder, so the first save creates the file there.
+    """
+    env_path = os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
+    if env_path:
+        # Used even if it does not exist yet, so a save creates it there.
+        return Path(env_path)
+
+    candidates = [
+        Path(config_directory()) / CONFIG_FILE_NAME,
+        package_dir / CONFIG_FILE_NAME,
+        package_dir.parent / "backend" / CONFIG_FILE_NAME,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
 class AppConfiguration:
     """Load and save the configuration of the app.
 
@@ -293,40 +339,14 @@ class AppConfiguration:
         self.load_configuration()
 
     def _find_config_file(self) -> Path:
-        """Locates the high-level interface.
-
-        config file in expected locations.
+        """Find the settings file; see `find_config_file`.
 
         Returns
         -------
         config_path : `Path`
             The resolved configuration file path, existing or not.
         """
-        import os
-
-        env_path = os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
-        if env_path:
-            p = Path(env_path)
-            if p.is_file():
-                return p
-            # If specified but doesn't exist yet, it is still defaulted to so
-            # it gets created there on save
-            return p
-
-        candidates = [
-            self.base_dir.parent
-            / "astrometrics.config.toml",  # astrometricslib/astrometrics.config.toml (primary user location)
-            self.base_dir.parent.parent
-            / "backend"
-            / "astrometrics.config.toml",  # Backend root folder (Repo/backend/astrometrics.config.toml)
-        ]
-
-        for p in candidates:
-            if p.is_file():
-                return p
-
-        # Default to primary astrometrics folder if not found
-        return candidates[0]
+        return find_config_file(self.base_dir.parent)
 
     def watch_for_changes(self) -> None:
         """Pick up edits to the config file without a restart.
@@ -349,6 +369,7 @@ class AppConfiguration:
             # Guard against writing to repository production config
             # during testing.
             return
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as configfile:
             self.app_config.write(configfile)
         self.app_config.note_file_written()
@@ -357,7 +378,9 @@ class AppConfiguration:
         """Populate the config with sensible defaults if it's empty."""
         defaults = {
             "Image Library": {
-                "path": "./library",
+                # Empty means the user's data folder,
+                # ~/.local/share/astrometrics.
+                "path": "",
             },
             "Observatory.Telescope": {
                 "hostname": "localhost",
@@ -1205,6 +1228,8 @@ class AppConfiguration:
         """
         try:
             path_str = self.app_config.get("Image Library", "path")
+            if not path_str:
+                return Path(data_directory()).absolute()
             path = Path(path_str)
             if not path.is_absolute():
                 # If path starts with ./, resolve relative to project root.
@@ -1323,6 +1348,20 @@ class AppConfiguration:
             Absolute path to the logs database file.
         """
         return str(self.get_library_file_path("astrometrics_log.db"))
+
+    def get_data_path(self) -> Path:
+        """Return the user's data folder, for files that must be kept.
+
+        This is ``$XDG_DATA_HOME/astrometrics``, or
+        ``~/.local/share/astrometrics`` if ``XDG_DATA_HOME`` is unset. The
+        databases live here unless the configuration names another place.
+
+        Returns
+        -------
+        data_path : `Path`
+            Absolute path to the folder, created if it did not exist.
+        """
+        return Path(data_directory()).absolute()
 
     def get_logs_path(self) -> Path:
         """Return the absolute path to the logs directory.

@@ -12,6 +12,7 @@ import inspect
 import io
 import json
 import logging
+import os
 import rlcompleter
 import sys
 import tempfile
@@ -769,19 +770,24 @@ class ScriptingService:
         raise NotFoundError(f"Recipe {recipe_id!r} not found.")
 
     def _get_user_scripts_dir(self) -> Path:
-        """Return directory path for user scripts ~/.astrometrics/scripts.
+        """Return the folder for the user's saved scripts.
+
+        It is ``scripts`` inside the user's data folder,
+        ``~/.local/share/astrometrics/scripts`` (or under ``$XDG_DATA_HOME``
+        when that is set).
 
         Returns
         -------
         dir_path : `Path`
             Path object pointing to user scripts directory.
         """
-        user_dir = Path.home() / ".astrometrics" / "scripts"
+        data_root = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+        user_dir = Path(data_root) / "astrometrics" / "scripts"
         user_dir.mkdir(parents=True, exist_ok=True)
         return user_dir
 
     def list_user_scripts(self) -> list[dict[str, Any]]:
-        """List scripts saved by the user in ~/.astrometrics/scripts.
+        """List scripts saved by the user in their scripts folder.
 
         Returns
         -------
@@ -801,7 +807,7 @@ class ScriptingService:
         return scripts
 
     def read_user_script(self, filename: str) -> dict[str, Any]:
-        """Read a user script from ~/.astrometrics/scripts.
+        """Read a user script from ~/.local/share/astrometrics/scripts.
 
         Parameters
         ----------
@@ -831,7 +837,7 @@ class ScriptingService:
         }
 
     def save_user_script(self, filename: str, content: str) -> dict[str, Any]:
-        """Save user script to ~/.astrometrics/scripts.
+        """Save user script to ~/.local/share/astrometrics/scripts.
 
         Parameters
         ----------

@@ -25,7 +25,8 @@ set -euo pipefail
 #   ./run_astrometrics.sh [port]              - Defaults to foreground
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-LOG_DIR="$ROOT_DIR/.run_logs"
+# Console output goes to the user's log folder, not the project folder.
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/astrometrics/logs/run"
 PID_DIR="$ROOT_DIR/.run_pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 

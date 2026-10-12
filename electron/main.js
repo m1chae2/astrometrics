@@ -310,7 +310,7 @@ async function openMainWindowWhenBackendIsWarm() {
       message: 'The Astrometrics backend is not running.',
       detail:
         'Nothing answered on http://127.0.0.1:5000. Start it with ' +
-        'build/linux/run_backend.sh start (check .run_logs/backend.log if it stops), then retry.',
+        'build/linux/run_backend.sh start (check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.',
       buttons: ['Retry', 'Quit'],
       defaultId: 0,
       cancelId: 1,

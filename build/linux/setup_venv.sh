@@ -92,9 +92,14 @@ log "Repository root: $ROOT_DIR"
 # astrometrics.config.toml holds machine-specific paths and an API key, so
 # it is gitignored; without this a fresh clone (and CI) would start with no
 # configuration at all.
-CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config.toml"
+# The file lives in the user's settings folder, ~/.config/astrometrics. An
+# older install may still have one inside the project; that one is used
+# as is and no new file is seeded.
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/astrometrics/astrometrics.config.toml"
+LEGACY_CONFIG_FILE="$ROOT_DIR/astrometricslib/astrometrics.config.toml"
 CONFIG_TEMPLATE="$ROOT_DIR/astrometricslib/astrometrics.config.example.toml"
-if [ ! -f "$CONFIG_FILE" ] && [ -f "$CONFIG_TEMPLATE" ]; then
+if [ ! -f "$CONFIG_FILE" ] && [ ! -f "$LEGACY_CONFIG_FILE" ] && [ -f "$CONFIG_TEMPLATE" ]; then
+  mkdir -p "$(dirname "$CONFIG_FILE")"
   log "No astrometrics.config.toml found; seeding one from astrometrics.config.example.toml"
   cp "$CONFIG_TEMPLATE" "$CONFIG_FILE"
   log "Edit $CONFIG_FILE to set frames_path and, if using the online solver, api_key"

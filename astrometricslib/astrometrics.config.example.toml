@@ -1,9 +1,9 @@
 # Astrometrics configuration template.
 #
-# build/linux/setup_venv.sh copies this file to astrometrics.config.toml on
-# first run if no configuration exists yet. astrometrics.config.toml itself
-# is excluded from version control because it holds machine-specific paths
-# and an astrometry.net API key; edit the copy, not this template.
+# build/linux/setup_venv.sh copies this file to
+# ~/.config/astrometrics/astrometrics.config.toml on first run if no
+# configuration exists yet. That copy holds machine-specific paths and an
+# astrometry.net API key; edit the copy, not this template.
 #
 # Every value below is a working default for the standard install
 # (build/linux/install_ubuntu_deps.sh with no options), except the two
@@ -21,9 +21,12 @@
 # mean and how to add a camera of your own.
 
 ["Image Library"]
-# EDIT ME: absolute path to your own library. Captured frames always
-# live in a "frames" subfolder underneath this path.
-path = "./library"
+# Folder for the databases. Leave it empty to use the user's data folder,
+# ~/.local/share/astrometrics. Captured frames go in a "frames" subfolder
+# of it unless frames_path says otherwise.
+path = ""
+# EDIT ME: absolute path to the folder holding your raw frames.
+# frames_path = "/home/you/Astrometrics/Library"
 # OPTIONAL: where stacks, group stacks, rejection maps, previews and processed
 # pictures are written, under <stacks_path>/lights/<target>/. Leave it out to
 # keep them beside the raw frames. Set it to put the large raw frames on one

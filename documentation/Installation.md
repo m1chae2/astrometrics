@@ -60,7 +60,7 @@ Next, run the setup script to create the Python environment and install the appl
 
 ## 4. Configuration
 
-After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config.toml`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
+After installation, the setup script creates a configuration file at `~/.config/astrometrics/astrometrics.config.toml`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
 
 - `frames_path` (under `[Image Library]`): The path to the folder where raw and calibration frames are saved, on the local disk. Set this to your own folder. See "Storage layout" below.
 - `api_key` (under `[Processing.Astrometry.Online Solver]`): An astrometry.net API key. Set this if you did not install the local solver.
@@ -83,13 +83,15 @@ Weighted stacking (`stack_weight = wfwhm`) needs a Siril new enough to accept th
 
 ### Storage layout
 
-Astrometrics keeps files in three tiers. Each tier has a different job, so each lives in a different place. The paths below are examples. Every one can be changed in the `[Image Library]` section of the configuration.
+Astrometrics keeps each kind of file in its own place. The library folders follow your settings. The other folders follow the Linux standard for program files (the XDG Base Directory layout), so a backup tool can skip the disposable ones and a cache can be wiped in one step.
 
 | Tier | What it holds | Example location | Setting |
 |------|---------------|------------------|---------|
 | Working library | Raw and calibration frames, stacks, previews, processed pictures | `~/Astrometrics/Library` (local disk) | `frames_path`, `stacks_path` |
 | Backup copy | The same library, kept in step automatically | `drive:Library` on Google Drive | none |
-| Local state | The databases (`astrometrics.db`, `astrometrics_log.db`), `calibration_frames.json`, the configuration | `~/.local/share/astrometrics` | `path` |
+| Settings | `astrometrics.config.toml` (the Electron app keeps its own browser profile in the same folder) | `~/.config/astrometrics` | none |
+| Local data | The databases (`astrometrics.db`, `astrometrics_log.db`), `calibration_frames.json`, the star catalog, the observatory database and Ekos logs (`wayfinding/`), the capability-gap database, your saved scripts (`scripts/`) | `~/.local/share/astrometrics` | `path` (leave empty) |
+| Logs | App and Siril logs (`logs/`), backend and Electron console output (`logs/run/`, earlier runs in `logs/run_archive/`), the stop-time backup log | `~/.local/state/astrometrics` | none |
 | Disposable files | Scratch files, Siril work folders, Gaia caches, locks, backup staging, integrity manifests | `~/.cache/astrometrics` | none |
 
 The working library is on the local disk, so frames and stacks open at disk speed and work offline. Google Drive holds the backup copy. `frames_mount_point` stays empty for a library on the local disk; set it only when the library is on a drive that can be missing, such as a USB disk.
@@ -111,7 +113,7 @@ The databases stay on the local disk. SQLite needs real file locking, and a netw
 
 #### Backups
 
-`astrometricslib/scripts/backup_library_databases.py` copies the databases to `Library/_backup/<timestamp>/` on the drive. It keeps the 7 most recent snapshots and one per month. A systemd user timer runs it 10 minutes after login and every 4 hours. `./build/linux/run_backend.sh stop` also starts a backup. `./build/linux/install_backup_timer.sh` installs this timer, the library upload timer and the watcher.
+`astrometricslib/scripts/backup_library_databases.py` copies the databases (including the observatory database), `calibration_frames.json` and the configuration to `Library/_backup/<timestamp>/` on the drive. It keeps the 7 most recent snapshots and one per month. A systemd user timer runs it 10 minutes after login and every 4 hours. `./build/linux/run_backend.sh stop` also starts a backup. `./build/linux/install_backup_timer.sh` installs this timer, the library upload timer and the watcher.
 
 #### Integrity checks
 

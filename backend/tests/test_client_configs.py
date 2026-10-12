@@ -150,3 +150,11 @@ def test_gemini_settings_exclude_the_built_in_shell_file_and_web_tools() -> None
     tools = generator.build_gemini_settings()["tools"]
     assert {"run_shell_command", "write_file", "replace", "read_file", "web_fetch"} <= set(tools["exclude"])
     assert tools["shell"]["enableInteractiveShell"] is False
+
+
+def test_gemini_settings_load_the_context_file_from_the_agent_folder() -> None:
+    """Gemini is pointed at ``.agent`` so it finds ``.agent/GEMINI.md``."""
+    context = generator.build_gemini_settings()["context"]
+    assert context["includeDirectories"] == [str(generator.PROJECT_ROOT / ".agent")]
+    assert context["loadMemoryFromIncludeDirectories"] is True
+    assert (generator.PROJECT_ROOT / ".agent" / "GEMINI.md").is_file()

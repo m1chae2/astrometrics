@@ -77,7 +77,8 @@ def _wayfinding_library_path(app_config: Any) -> Path:
     The folder comes from the ``path`` option of the
     ``[Wayfinding Library]`` configuration section. A relative path is
     taken relative to the project root. Without that option the folder
-    is ``wayfindinglib/library`` under the project root.
+    is ``wayfinding`` inside the user's data folder
+    (``~/.local/share/astrometrics/wayfinding``).
 
     Parameters
     ----------
@@ -94,7 +95,7 @@ def _wayfinding_library_path(app_config: Any) -> Path:
         if not path.is_absolute():
             path = (app_config.get_project_root() / path).absolute()
     except configparser.NoSectionError, configparser.NoOptionError, KeyError:
-        path = app_config.get_project_root() / "wayfindinglib" / "library"
+        path = app_config.get_data_path() / "wayfinding"
     path.mkdir(parents=True, exist_ok=True)
     return path.absolute()
 

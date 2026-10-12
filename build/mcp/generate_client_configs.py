@@ -13,6 +13,10 @@ This script holds the list once and writes:
   no file access and no code runner.
 * ``.gemini/settings.json``: the Gemini CLI settings, with the same tools
   listed in ``includeTools``. Paths are absolute, so the file is not tracked.
+  It also adds the ``.agent`` folder to ``context.includeDirectories`` and
+  turns on ``context.loadMemoryFromIncludeDirectories``, so Gemini loads
+  ``.agent/GEMINI.md`` (it only looks for ``GEMINI.md`` in the working
+  folder and its parents on its own).
 * ``mcp_servers.example.json`` and ``mcp_servers.json``: the same server list
   for other clients.
 * ``ui/mcp/src/profileRules.ts``: the profile rules from
@@ -318,7 +322,8 @@ def build_gemini_settings(root: Path = PROJECT_ROOT) -> dict[str, Any]:
         An ``mcpServers`` table whose entries list only the investigator
         tools in ``includeTools`` and are not trusted, and ``tools.exclude``
         naming the built-in shell, file and web tools. The interactive
-        shell is also switched off.
+        shell is also switched off. A ``context`` table points Gemini at the
+        ``.agent`` folder so it loads ``.agent/GEMINI.md``.
     """
     servers = {}
     for spec in SERVERS:
@@ -333,6 +338,10 @@ def build_gemini_settings(root: Path = PROJECT_ROOT) -> dict[str, Any]:
         "tools": {
             "exclude": list(GEMINI_EXCLUDED_BUILT_IN_TOOLS),
             "shell": {"enableInteractiveShell": False},
+        },
+        "context": {
+            "includeDirectories": [str(root / ".agent")],
+            "loadMemoryFromIncludeDirectories": True,
         },
     }
 

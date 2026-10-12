@@ -34,7 +34,7 @@ This script starts both the backend and frontend for Astrometrics.
 The backend runs in the background, and the frontend (Electron + Vite) runs in the foreground.
 
 To stop the application, press Ctrl+C.
-To check logs, see: .run_logs/
+To check logs, see: ~/.local/state/astrometrics/logs/run/
 
 EOF
       exit 0

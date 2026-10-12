@@ -66,6 +66,7 @@ from astrometricslib.pipelines.photometry.pre_processing.detector_noise import (
 )
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     CentroidShiftSummary,
+    FrameAlignment,
     FrameRejection,
     ObservationTimeError,
     _measure_aperture_flux,
@@ -715,6 +716,10 @@ class VariabilityAnalyzer:
         # `centroid_shift_summary()` summarizes it for the
         # `registration_drift` gate.
         self.centroid_offsets_by_frame: dict[datetime, list[float]] = {}
+        # For each frame, keyed by timestamp: the shift, rotation and scale
+        # change that lined it up with the reference frame (see
+        # `fit_frame_alignment`). Filled during `process()`.
+        self.alignment_by_frame: dict[datetime, FrameAlignment] = {}
         # Star measurements made in the frames after the reference frame, one
         # per star per frame. The denominator of the fallback fraction.
         self.centroid_measurement_count = 0
@@ -1037,15 +1042,26 @@ class VariabilityAnalyzer:
                     self.frames_without_usable_date_obs.append(ExcludedFrame(path=path, reason=data.reason))
                     continue
 
-                timestamp, fluxes_dict, delta_x, delta_y, _bg, airmass, star_positions, exposure_seconds = (
-                    data
-                )
+                (
+                    timestamp,
+                    fluxes_dict,
+                    delta_x,
+                    delta_y,
+                    _bg,
+                    airmass,
+                    star_positions,
+                    exposure_seconds,
+                    frame_alignment,
+                ) = data
                 for star_id, star_position in star_positions.items():
                     if not star_position.is_refined:
                         previous_count = self.centroid_fallback_counts.get(star_id, 0)
                         self.centroid_fallback_counts[star_id] = previous_count + 1
-                offsets, _ = centroid_offsets_px(star_positions, reference_positions, delta_x, delta_y)
+                offsets, _ = centroid_offsets_px(
+                    star_positions, reference_positions, delta_x, delta_y, alignment=frame_alignment
+                )
                 self.centroid_offsets_by_frame[timestamp] = offsets
+                self.alignment_by_frame[timestamp] = frame_alignment
                 self.centroid_measurement_count += sum(
                     1 for star_id in star_positions if star_id in reference_positions
                 )
@@ -1088,6 +1104,7 @@ class VariabilityAnalyzer:
             sum(self.centroid_fallback_counts.values()),
             anchor_rule=self.alignment_anchor_rule,
             anchor_count=self.alignment_anchor_count,
+            alignments_by_frame=self.alignment_by_frame,
         )
 
     def _record_barycentric_times(

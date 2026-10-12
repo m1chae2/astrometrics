@@ -7,8 +7,8 @@ This step turns a raw picture into one brightness measurement per star, and chec
 For each picture in an observing session, the code:
 
 1. Reads the picture's exposure time, airmass, and capture time from its header. Exposure time is how long the camera's shutter was open. Airmass is a measure of how much atmosphere the light passed through, which is lowest when a star is straight overhead and highest near the horizon. The capture time comes from the `DATE-OBS` card (see "Capture times" below).
-2. Finds out how far this picture has drifted compared to the first picture in the session, using up to 50 bright stars as reference points (the alignment anchors, see "Alignment anchors" below). Telescopes drift a little between pictures even while tracking a target, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
-3. For every star being tracked, starts at the star's position in the first picture plus the picture's overall drift. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the overall drift (see "Aperture placement" below).
+2. Finds out how this picture sits against the first picture in the session: how far it shifted, and how much it rotated and changed scale. It uses up to 50 bright stars as reference points (the alignment anchors, see "Alignment anchors" and "Frame alignment" below). Telescopes drift a little between pictures even while tracking a target, and a field can turn slightly during a night, so this step lines every picture up with the first one. Only pixels well above the sky noise count as star light in this step, so noise in the sky does not pull the measured drift toward zero.
+3. For every star being tracked, starts at the star's position in the first picture moved by the picture's alignment. It then re-centers the star on its own brightness-weighted centroid (the average of the pixel positions, weighted by how bright each pixel is) in a small box. This corrects for the star's own small offset from the aligned position (see "Aperture placement" below).
 4. Measures the amount of light inside a small circle centered on that position, and subtracts the background sky brightness measured in a ring just outside the circle. This gives the star's raw brightness in that one picture. The same step computes the brightness's 1-sigma uncertainty (see "Flux uncertainties" below).
 5. Divides that raw brightness and its uncertainty by the exposure time, so a short exposure and a long exposure of the same star can be compared fairly. Both are in ADU per second (ADU is analog-to-digital unit, one step of the stored pixel value).
 
@@ -16,7 +16,7 @@ Every star ends up with a brightness value, its uncertainty, a timestamp, and a 
 
 ## Alignment anchors
 
-The anchors are the stars whose shifts give each picture's overall drift (the median of their shifts). `select_alignment_anchors` in `frame_photometry.py` chooses them once per session, from the stars found in the first picture:
+The anchors are the stars whose positions give each picture's alignment (see "Frame alignment"). `select_alignment_anchors` in `frame_photometry.py` chooses them once per session, from the stars found in the first picture:
 
 1. Drop every detection with a saturated pixel within 3 pixels of its center.
 2. Rank the rest by total brightness, brightest first.
@@ -34,20 +34,32 @@ The circle (the aperture) and the background ring sit at the star's exact positi
 
 The re-centering box is 11 pixels wide, about 2.5 times the width of the typical star the default circle (radius 4 pixels) is sized for. The code subtracts the local sky level (the median of a 31 by 31 pixel cutout) and sets negative pixels to zero before it averages the positions. It repeats this three times, each time centering the box on the previous result.
 
-The code refuses the re-centered position and keeps the shifted position from the first picture when any of these hold:
+The code refuses the re-centered position and keeps the aligned position (the star's position in the first picture, moved by the picture's alignment) when any of these hold:
 
 - The box contains a saturated pixel. A saturated core is flat, so its centroid is not reliable.
 - The box has no light above the sky level, or it reaches past the edge of the picture.
-- The centroid is more than 1.5 pixels from the shifted position. A move that large means the box found a neighbor or noise instead of the star.
+- The centroid is more than 1.5 pixels from the aligned position. A move that large means the box found a neighbor or noise instead of the star.
 
 Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason` (`None` means the centroid was accepted). `VariabilityAnalyzer.centroid_fallback_counts` totals the refusals per star over the session. A star near the 1.5 pixel limit in many pictures is measured with a circle that may be off-center by up to that amount.
 
+### Frame alignment
+
+`calculate_frame_alignment` fits three things to each picture: a shift, a rotation and a change of scale about the middle of the picture (`FrameAlignment`). It works in two steps:
+
+1. Each anchor is found in a wide box (`locate_star_centroid`) and the median shift is taken. The wide box is easily pulled off by a neighbor or a galaxy, with errors of several pixels on some stars in M 81, but the median ignores them.
+2. Each anchor is re-centered in the small box (`refine_star_centroid`), starting where the alignment so far says it is. A shift, a rotation and a scale change are then fitted to those accurate positions by least squares, leaving out anchors more than three scaled median absolute deviations from the fit. The small box refuses a wrong star by itself, because it will not move more than 1.5 pixels from where the alignment so far puts the star. When that leaves fewer than 10 anchors (a rotation not yet fitted can put the far ones out of reach), the step is tried again with 4 pixels (`ALIGNMENT_ANCHOR_REACH_PX`). A wide reach is only the second try, because it lets blends in: on M 81 it moved the corner displacement from 0.9 to 1.3 to 1.6 pixels, where an independent fit on 800 bright stars gave about 0.6. The step is repeated three times, because a better alignment puts more anchors inside the box.
+
+Only the shift is used when fewer than 10 anchors are found, or when they sit within 7 percent of the corner distance of one another (a cluster core cannot tell a rotation from a shift). The 7 percent, the 4 pixels and the three repeats are design estimates.
+
+The reason for fitting a rotation is NGC 2403. On 2026-10-11 its field turned by 0.05 degrees over the night, which moved the corners 1.9 pixels. A shift alone left the far stars outside the 1.5 pixel reach of the centroid box, and 12 percent of the measurements fell back to a position that was off the star. With the rotation fitted, 4 percent fell back. M 13 gave 0.2 pixels at the corner and M 81 gave 0.9, mostly the same shift of scale in every picture (a difference between the two ways of measuring a position, not a motion of the field).
+
 ### Per-star centroid offsets
 
-The overall drift moves every star by the same amount. If the field also rotates or changes scale, each star is displaced by a different amount, and its own centroid ends up away from the shifted position. `centroid_offsets_px` measures that distance, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per picture (`centroid_offsets_by_frame`) and `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session:
+`centroid_offsets_px` measures how far each star's own centroid sits from where the alignment says it should be, in pixels, for every star whose centroid was accepted. `VariabilityAnalyzer` keeps the offsets per picture (`centroid_offsets_by_frame`) and the alignment of each picture (`alignment_by_frame`). `centroid_shift_summary()` reduces them to a `CentroidShiftSummary` for the session:
 
-- **Median and 95th-percentile offset.** A pure translation gives offsets near zero (below 0.1 pixel on noisy synthetic pictures). A rotation gives offsets that grow with distance from the rotation center: a rotation of 0.05 degrees per picture moves a star 197 pixels from the center by 1.2 pixels after seven pictures. A 95th percentile well above the median points to rotation or scale change.
-- **Fallback fraction.** The share of star measurements, over all pictures, that kept the shifted position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
+- **Corner displacement.** For each picture, how far the fitted rotation and scale change move a corner of the picture (`FrameAlignment.corner_displacement_px`). The summary keeps the 95th percentile over the pictures, the worst picture and how many pictures had a rotation fitted. This is the number the `registration_drift` gate judges.
+- **Median and 95th-percentile offset.** What is left after the alignment: centroid noise, which is larger for faint and crowded stars, and any distortion the fit does not describe. On 2026-10-11 the 95th percentile was 1.0 to 1.3 pixels on M 13, M 81 and NGC 2403, with a median of 0.3 to 0.5, and it did not change with the rotation. The gate reports these but does not judge them.
+- **Fallback fraction.** The share of star measurements, over all pictures, that kept the aligned position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
 - **Worst picture.** The picture with the largest 95th-percentile offset, and that value.
 
 The `registration_drift` gate reads the summary (see the photometry README). The summary is not copied into the quality metrics. It appears only in the gate's detail.

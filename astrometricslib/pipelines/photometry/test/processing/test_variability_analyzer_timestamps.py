@@ -17,6 +17,7 @@ from astropy.io import fits
 
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     ANCHOR_RULE_SIGNAL_TO_NOISE,
+    FrameAlignment,
     StarPosition,
 )
 from astrometricslib.pipelines.photometry.processing.variability_analyzer import VariabilityAnalyzer
@@ -136,7 +137,7 @@ def _fake_worker(
         for index, (star_id, x, y) in enumerate(reference_stars)
     }
     timestamp = datetime(2026, 5, 24, 5, minute, 0)
-    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions, 30.0)
+    return path, (timestamp, fluxes, 0.0, 0.0, 0.0, 1.0, positions, 30.0, FrameAlignment(0.0, 0.0))
 
 
 def test_stars_whose_centroid_is_refused_are_counted_per_star(

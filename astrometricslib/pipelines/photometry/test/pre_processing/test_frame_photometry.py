@@ -35,9 +35,9 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     FrameRejection,
     ObservationTimeError,
     StarPosition,
-    _calculate_frame_offset,
     _measure_aperture_flux,
     _process_single_frame_worker,
+    calculate_frame_alignment,
     locate_star_centroid,
     parse_observation_time,
     read_observation_time,
@@ -132,7 +132,7 @@ def _measure_sequence(
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, star_fluxes, _, _, _, _, star_positions, _ = result
+        _, star_fluxes, _, _, _, _, star_positions, _, _ = result
         fluxes[index] = [star_fluxes[f"star{i}"][0] for i in range(len(stars))]
         positions.append([star_positions[f"star{i}"] for i in range(len(stars))])
     return fluxes, positions
@@ -256,7 +256,7 @@ def test_locate_star_centroid_returns_none_with_no_signal() -> None:
     assert locate_star_centroid(data, expected_x=100.0, expected_y=100.0) is None
 
 
-def test_calculate_frame_offset_recovers_uniform_shift() -> None:
+def test_calculate_frame_alignment_recovers_uniform_shift() -> None:
     """Verifies the median offset matches a known shift across many stars.
 
     Uses a known uniform frame-to-frame shift applied to every star.
@@ -278,12 +278,13 @@ def test_calculate_frame_offset_recovers_uniform_shift() -> None:
         y_center = round(reference_y + true_shift_y)
         data[y_center - 2 : y_center + 3, x_center - 2 : x_center + 3] += 4000.0
 
-    delta_x, delta_y = _calculate_frame_offset(data, reference_positions)
+    alignment = calculate_frame_alignment(data, reference_positions)
+    delta_x, delta_y = alignment.shift_x, alignment.shift_y
     assert abs(delta_x - true_shift_x) < 0.5
     assert abs(delta_y - true_shift_y) < 0.5
 
 
-def test_calculate_frame_offset_returns_zero_when_too_few_stars_located() -> None:
+def test_calculate_frame_alignment_is_zero_when_too_few_stars_located() -> None:
     """Verifies the offset defaults to (0, 0) when too few stars are located.
 
     Fewer than 5 reference stars re-located (e.g. all fell on empty
@@ -291,7 +292,9 @@ def test_calculate_frame_offset_returns_zero_when_too_few_stars_located() -> Non
     """
     data = np.full((100, 100), 500.0)
     reference_positions = [(20.0, 20.0, 0.0), (40.0, 40.0, 0.0)]
-    assert _calculate_frame_offset(data, reference_positions) == (0.0, 0.0)
+    alignment = calculate_frame_alignment(data, reference_positions)
+    assert (alignment.shift_x, alignment.shift_y) == (0.0, 0.0)
+    assert not alignment.includes_similarity
 
 
 # --- S2: the aperture follows the star, not the pixel grid -------------------
@@ -520,7 +523,7 @@ def test_noisy_global_shift_is_not_pulled_toward_zero(tmp_path: Path) -> None:
     ))
 
     assert isinstance(result, tuple)
-    _, _, shift_x, shift_y, _, _, _, _ = result
+    _, _, shift_x, shift_y, _, _, _, _, _ = result
     assert shift_x == pytest.approx(2.7, abs=0.15)
     assert shift_y == pytest.approx(-1.8, abs=0.15)
 
@@ -718,8 +721,10 @@ def test_sparse_field_anchors_recover_an_injected_shift_where_the_old_rule_fails
 
     anchors = select_alignment_anchors(reference, detections, saturation_threshold_adu=SATURATION_ADU)
     old_band = [(row["x_centroid"], row["y_centroid"], row["flux"]) for row in detections[50:100]]
-    old_shift = _calculate_frame_offset(shifted, old_band)
-    new_shift = _calculate_frame_offset(shifted, list(anchors.stars))
+    old_alignment = calculate_frame_alignment(shifted, old_band)
+    new_alignment = calculate_frame_alignment(shifted, list(anchors.stars))
+    old_shift = (old_alignment.shift_x, old_alignment.shift_y)
+    new_shift = (new_alignment.shift_x, new_alignment.shift_y)
 
     assert len(detections) > 50, "the test needs noise peaks for the old rule to pick up"
     assert anchors.rule == ANCHOR_RULE_SIGNAL_TO_NOISE

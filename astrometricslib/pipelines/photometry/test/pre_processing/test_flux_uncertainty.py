@@ -226,7 +226,7 @@ def test_the_worker_reports_flux_and_error_in_adu_per_second(tmp_path: Path) -> 
     assert isinstance(result, tuple)
     flux, _is_saturated, error = result[1]["star0"]
     assert result[0] == datetime(2026, 5, 24, 4, 58, 30, 570000)
-    assert result[-1] == pytest.approx(30.0)
+    assert result[7] == pytest.approx(30.0)
     # The worker centres on the star's own centroid, so allow a small
     # difference from the aperture placed at the true position.
     assert flux == pytest.approx(direct.net_flux_adu / 30.0, rel=0.01)

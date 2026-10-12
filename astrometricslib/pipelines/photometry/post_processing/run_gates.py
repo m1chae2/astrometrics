@@ -69,15 +69,20 @@ MINIMUM_STARS_FOR_SCATTER_POPULATION = 10
 # RR Lyrae and Miras are larger.
 MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
 
-# The largest 95th-percentile per-star centroid offset, in pixels, the
-# `registration_drift` gate accepts. The offset is the distance between a
-# star's own centroid and its reference position moved by the frame's global
-# shift. A translation alone leaves it near zero; field rotation or a scale
-# change makes it grow toward the edge of the field. The limit is two thirds
-# of `MAX_CENTROID_SHIFT_PX` (1.5 px), where a centroid is refused, so a
-# session over it is close to losing its per-star centroids. A designed
-# limit, not a measured false-alarm rate.
-MAXIMUM_STAR_OFFSET_P95_PX = 1.0
+# The largest 95th-percentile (over the frames) displacement of a frame's
+# corner, in pixels, that the `registration_drift` gate accepts. Each frame
+# is lined up with the first by a shift, a rotation and a scale change (see
+# `fit_frame_alignment`). The corner displacement is how far the rotation
+# and scale alone move a corner of the field. A translation leaves it at
+# zero. The apertures follow the stars, so a rotation does not by itself
+# spoil the photometry. Past this limit, though, a star lands on pixels
+# whose flat-field error differs by a different amount in every frame, which
+# adds scatter no comparison star can remove. 1 pixel is two thirds of
+# `MAX_CENTROID_SHIFT_PX` (1.5 px), where a centroid is refused. Measured on
+# 2026-10-11: M 13 0.05 px (rotation) and 0.2 px (scale) over a night, M 81
+# 0.5 px, NGC 2403 1.8 px (a real rotation of 0.05 degrees over the night).
+# A designed limit, not a measured false-alarm rate.
+MAXIMUM_CORNER_DISPLACEMENT_PX = 1.0
 
 # The largest share of star measurements that may keep the shifted reference
 # position because the star's own centroid was refused. Above one in five,
@@ -448,12 +453,18 @@ def _centroid_distribution_text(summaries: Sequence[CentroidShiftSummary]) -> st
     -------
     text : `str`
         The median and 95th-percentile offset, the fallback share, the worst
-        frame, and the anchor rule of the session with the largest
-        95th-percentile offset. With more than one session, the text says
+        frame, and the anchor rule of the session with the largest corner
+        displacement (or, without one, the largest 95th-percentile offset).
+        The corner displacement itself is quoted for the session that has
+        the largest. With more than one session, the text says
         so and names the largest fallback share of any session.
     """
     worst = max(
-        summaries, key=lambda summary: summary.p95_offset_px if summary.p95_offset_px is not None else -1.0
+        summaries,
+        key=lambda summary: (
+            summary.corner_displacement_p95_px if summary.corner_displacement_p95_px is not None else -1.0,
+            summary.p95_offset_px if summary.p95_offset_px is not None else -1.0,
+        ),
     )
     parts = []
     if worst.p95_offset_px is None or worst.median_offset_px is None:
@@ -465,8 +476,15 @@ def _centroid_distribution_text(summaries: Sequence[CentroidShiftSummary]) -> st
         )
     parts.append(
         f"{100.0 * max(summary.fallback_fraction for summary in summaries):.1f}% of star measurements "
-        "kept the shifted position"
+        "kept the aligned position"
     )
+    corner_summaries = [summary for summary in summaries if summary.corner_displacement_p95_px is not None]
+    if corner_summaries:
+        corner = max(corner_summaries, key=lambda summary: summary.corner_displacement_p95_px or 0.0)
+        parts.append(
+            f"rotation and scale change move a corner {corner.corner_displacement_p95_px:.2f} px "
+            f"(95th percentile over {corner.fitted_frame_count} frames)"
+        )
     if worst.worst_frame is not None and worst.worst_frame_p95_offset_px is not None:
         parts.append(
             f"worst frame {worst.worst_frame:%Y-%m-%d %H:%M:%S} (95th percentile "
@@ -483,14 +501,23 @@ def _registration_drift_gate(
 ) -> GateResult:
     """Build the ``registration_drift`` gate.
 
-    The gate looks at two things. The first is the largest frame-to-frame
+    The gate looks at three things. The first is the largest frame-to-frame
     shift of the whole field, which shows lost tracking. The second is how
-    far each star's own centroid sat from the shifted reference position,
-    which shows rotation, scale change, or a poor shift. It fails when the
-    global shift exceeds `UNSTABLE_TRACKING_DRIFT_PX`, when the 95th
-    percentile of the per-star offsets exceeds `MAXIMUM_STAR_OFFSET_P95_PX`,
-    or when more than `MAXIMUM_CENTROID_FALLBACK_FRACTION` of the star
-    measurements fell back. It is not checked when neither was recorded.
+    far the fitted rotation and scale change move a corner of the field,
+    which shows a field that turned or changed scale during the session. The
+    third is the share of star measurements whose own centroid was refused,
+    which shows an alignment that does not fit the stars. The per-star
+    centroid offsets are reported in the detail but not judged: they are
+    dominated by centroid noise on faint and crowded stars, which does not
+    mean the frames are misaligned (on 2026-10-11, M 13 and M 81 failed on
+    them with no rotation, while NGC 2403, which did rotate, was the only one
+    where the rotation mattered).
+
+    The gate fails when the global shift exceeds `UNSTABLE_TRACKING_DRIFT_PX`,
+    when the 95th percentile of the corner displacement over the frames
+    exceeds `MAXIMUM_CORNER_DISPLACEMENT_PX`, or when more than
+    `MAXIMUM_CENTROID_FALLBACK_FRACTION` of the star measurements fell back.
+    It is not checked when none of these was recorded.
 
     Parameters
     ----------
@@ -506,9 +533,9 @@ def _registration_drift_gate(
     """
     source = (
         f"global alignment offset of at most {UNSTABLE_TRACKING_DRIFT_PX:g} px (half of the centroid search "
-        f"box), 95th-percentile per-star centroid offset of at most {MAXIMUM_STAR_OFFSET_P95_PX:g} px, "
-        f"and at most {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}% of star measurements falling back "
-        "(designed limits)"
+        f"box), 95th-percentile corner displacement from rotation and scale change of at most "
+        f"{MAXIMUM_CORNER_DISPLACEMENT_PX:g} px, and at most {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}% "
+        "of star measurements falling back (designed limits)"
     )
     recorded_drifts = [drift for drift in registration_drifts_px if drift is not None]
     if not recorded_drifts and not summaries:
@@ -517,8 +544,12 @@ def _registration_drift_gate(
         )
 
     worst_drift = max(recorded_drifts) if recorded_drifts else None
-    p95_values = [summary.p95_offset_px for summary in summaries if summary.p95_offset_px is not None]
-    worst_p95 = max(p95_values) if p95_values else None
+    corner_values = [
+        summary.corner_displacement_p95_px
+        for summary in summaries
+        if summary.corner_displacement_p95_px is not None
+    ]
+    worst_corner = max(corner_values) if corner_values else None
     worst_fallback = max((summary.fallback_fraction for summary in summaries), default=None)
 
     problems: list[str] = []
@@ -528,23 +559,24 @@ def _registration_drift_gate(
             f"frame alignment drifted up to {worst_drift:.0f} px, so tracking was probably lost "
             "and apparent brightness changes may be alignment, not the star"
         )
-    if worst_p95 is not None and worst_p95 > MAXIMUM_STAR_OFFSET_P95_PX:
+    if worst_corner is not None and worst_corner > MAXIMUM_CORNER_DISPLACEMENT_PX:
         problems.append(
-            f"the 95th percentile of the per-star centroid offsets is {worst_p95:.2f} px "
-            f"(limit {MAXIMUM_STAR_OFFSET_P95_PX:g} px), so the field rotated or changed scale "
-            "and a single shift does not line up the stars"
+            f"the field rotated or changed scale during the session: a corner moves {worst_corner:.2f} px "
+            f"(limit {MAXIMUM_CORNER_DISPLACEMENT_PX:g} px). The frames were lined up with that rotation, "
+            "so the apertures follow the stars, but a star lands on different pixels in each frame and the "
+            "flat-field error adds scatter"
         )
         if not problems[:-1]:
-            measured, limit = worst_p95, MAXIMUM_STAR_OFFSET_P95_PX
+            measured, limit = worst_corner, MAXIMUM_CORNER_DISPLACEMENT_PX
     if worst_fallback is not None and worst_fallback > MAXIMUM_CENTROID_FALLBACK_FRACTION:
         problems.append(
-            f"{100.0 * worst_fallback:.1f}% of star measurements kept the shifted position because the "
+            f"{100.0 * worst_fallback:.1f}% of star measurements kept the aligned position because the "
             f"star's own centroid was refused (limit {100 * MAXIMUM_CENTROID_FALLBACK_FRACTION:.0f}%)"
         )
         if not problems[:-1]:
             measured, limit = worst_fallback, MAXIMUM_CENTROID_FALLBACK_FRACTION
     if measured is None:
-        measured = worst_p95
+        measured = worst_corner if worst_corner is not None else worst_fallback
 
     distribution = _centroid_distribution_text(summaries) if summaries else ""
     drift_text = f"global alignment drift up to {worst_drift:.1f} px" if worst_drift is not None else ""
@@ -553,10 +585,16 @@ def _registration_drift_gate(
         return failed_gate(
             REGISTRATION_DRIFT_GATE_NAME, "; ".join(problems) + suffix, measured, limit, source
         )
+    if worst_drift is not None:
+        passed_limit = UNSTABLE_TRACKING_DRIFT_PX
+    elif worst_corner is not None:
+        passed_limit = MAXIMUM_CORNER_DISPLACEMENT_PX
+    else:
+        passed_limit = MAXIMUM_CENTROID_FALLBACK_FRACTION
     return passed_gate(
         REGISTRATION_DRIFT_GATE_NAME,
         measured,
-        limit if worst_drift is not None else MAXIMUM_STAR_OFFSET_P95_PX,
+        passed_limit,
         source,
         "; ".join(part for part in (drift_text, distribution) if part),
     )

@@ -90,7 +90,7 @@ def _measure_offsets(
     measurement_count : `int`
         Star measurements made.
     fallback_count : `int`
-        Measurements that kept the shifted position.
+        Measurements that kept the aligned position.
     """
     reference = [(f"star{index}", star.x, star.y) for index, star in enumerate(stars)]
     reference_positions = {star_id: (x, y) for star_id, x, y in reference}
@@ -114,7 +114,7 @@ def _measure_offsets(
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, _, shift_x, shift_y, _, _, positions, _ = result
+        _, _, shift_x, shift_y, _, _, positions, _, _ = result
         offsets, fallbacks = centroid_offsets_px(positions, reference_positions, shift_x, shift_y)
         offsets_by_frame[timestamp] = offsets
         measurement_count += len(positions)
@@ -248,15 +248,16 @@ def _sequence_summary(
     return summary
 
 
-def test_the_gate_fails_on_a_rotating_field_and_quotes_the_distribution(
+def test_the_gate_reports_the_offsets_of_a_shift_only_alignment_without_judging_them(
     tmp_path: Path,
 ) -> None:
-    """Verifies the drift gate fails when the field rotates 0.05 deg per frame.
+    """Verifies the offsets are quoted, not judged, when no rotation is fitted.
 
-    Over 7 frames the 95th percentile of the per-star offsets passes
-    `MAXIMUM_STAR_OFFSET_P95_PX` (1 px). The gate fails. Its measured value
-    is that percentile, and its detail quotes the median, the percentile and
-    the worst frame.
+    Six anchors are fewer than `MINIMUM_ANCHORS_FOR_SIMILARITY`, so the
+    frames are lined up by a shift alone and a rotation of 0.05 degrees per
+    frame leaves per-star offsets above 1 px. The gate does not fail on them
+    (they cannot be told from centroid noise). Its detail quotes the median,
+    the percentile and the worst frame.
     """
     summary = _sequence_summary(tmp_path, ROTATION_DEG_PER_FRAME, (0.0, 0.0))
 
@@ -264,10 +265,10 @@ def test_the_gate_fails_on_a_rotating_field_and_quotes_the_distribution(
 
     assert summary.p95_offset_px is not None
     assert summary.median_offset_px is not None
+    assert summary.p95_offset_px > 1.0
+    assert summary.corner_displacement_p95_px is None
     assert gate.name == rg.REGISTRATION_DRIFT_GATE_NAME
-    assert gate.status is GateStatus.FAILED
-    assert gate.measured_value == pytest.approx(summary.p95_offset_px)
-    assert gate.limit == pytest.approx(rg.MAXIMUM_STAR_OFFSET_P95_PX)
+    assert gate.status is GateStatus.PASSED
     assert f"median {summary.median_offset_px:.2f} px" in gate.detail
     assert f"95th percentile {summary.p95_offset_px:.2f} px" in gate.detail
     assert "worst frame 2026-05-24 04:07:00" in gate.detail
@@ -281,7 +282,7 @@ def test_the_gate_passes_a_drifting_field_with_no_rotation(tmp_path: Path) -> No
 
     assert gate.status is GateStatus.PASSED
     assert "95th percentile 0.0" in gate.detail
-    assert "0.0% of star measurements kept the shifted position" in gate.detail
+    assert "0.0% of star measurements kept the aligned position" in gate.detail
 
 
 def test_centroid_offsets_count_fallbacks_and_skip_unknown_stars() -> None:

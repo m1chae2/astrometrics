@@ -965,10 +965,10 @@
         "why": "add the five-frame photometry sequence pins"
       },
       "frame_022_shift_x_px": {
-        "value": -1.33495053,
+        "value": -1.25239079,
         "tolerance": 0.05,
         "tolerance_type": "absolute",
-        "why": "add the five-frame photometry sequence pins"
+        "why": "the frame shift is now the shift of the middle of the frame from a fitted shift, rotation and scale, not the median shift of the anchors (frame 022 of M 13 moved by 0.08 px)"
       },
       "frame_022_shift_y_px": {
         "value": 0.121033266,

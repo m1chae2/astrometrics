@@ -27,6 +27,7 @@ servers do, so it does not connect to the telescope or call any tool.
 import argparse
 import importlib
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -44,8 +45,24 @@ from mcp_servers.inventory.tool_dispositions import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "scratch" / "mcp_tool_inventory"
-"""Where the draft files go unless ``--output-dir`` says otherwise."""
+
+def default_output_dir() -> Path:
+    """Return the default folder for the draft files.
+
+    The folder is ``$XDG_CACHE_HOME/astrometrics/mcp_tool_inventory``, or
+    ``~/.cache/astrometrics/mcp_tool_inventory`` when ``XDG_CACHE_HOME`` is
+    not set. It is worked out on each call, so a test can change the
+    environment first. The folder is created only when files are written.
+
+    Returns
+    -------
+    output_dir : `pathlib.Path`
+        The default output folder.
+    """
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    base = Path(cache_home) if cache_home else Path.home() / ".cache"
+    return base / "astrometrics" / "mcp_tool_inventory"
+
 
 MANIFEST_FILE_NAME = "tool_manifest_draft.json"
 REVIEW_FILE_NAME = "tool_manifest_review.md"
@@ -969,7 +986,10 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description="Draft a class for every MCP tool the project serves.")
     parser.add_argument(
-        "--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Folder for the output files."
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Folder for the output files (default: the user cache folder, see default_output_dir).",
     )
     parser.add_argument(
         "--write-runtime-manifests",
@@ -977,6 +997,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Also write the tool_manifest.json that each MCP server reads.",
     )
     arguments = parser.parse_args(argv)
+    if arguments.output_dir is None:
+        arguments.output_dir = default_output_dir()
 
     manifest_path = arguments.output_dir / MANIFEST_FILE_NAME
     existing_manifest = (

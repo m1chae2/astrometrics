@@ -6,7 +6,7 @@ Run it from the project root with `.venv/bin/python -m mcp_servers.inventory`. T
 
 1. It loads the tool list from each server. It reads the first three servers' registries the way the servers do. It reads the front end server's list from its TypeScript source.
 2. It guesses a class for each tool from the tool's name and description.
-3. It writes `tool_manifest_draft.json` and `tool_manifest_review.md` to `scratch/mcp_tool_inventory/`. Use `--output-dir` to choose another folder. With `--write-runtime-manifests` it also writes the `tool_manifest.json` that each server reads to decide which tools to offer: `mcp_servers/astrometrics_core/`, `mcp_servers/wayfinding_core/`, `mcp_servers/backend/` and `ui/mcp/`.
+3. It writes `tool_manifest_draft.json` and `tool_manifest_review.md` to `${XDG_CACHE_HOME:-~/.cache}/astrometrics/mcp_tool_inventory/`. The folder is created when the files are written. Use `--output-dir` to choose another folder. With `--write-runtime-manifests` it also writes the `tool_manifest.json` that each server reads to decide which tools to offer: `mcp_servers/astrometrics_core/`, `mcp_servers/wayfinding_core/`, `mcp_servers/backend/` and `ui/mcp/`.
 4. It lists permission rules in `.claude/settings.json` and `.claude/settings.local.json` that name a tool no server offers.
 
 The classes are:

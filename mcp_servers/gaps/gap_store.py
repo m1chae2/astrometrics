@@ -6,9 +6,11 @@ looking for a workaround. A person then reads the report and decides
 whether to build a new tool.
 
 This module keeps the reports in a small SQLite database of their own,
-``logs/capability_gaps.db``. It is not the catalog or any other app
-database. Only the standard library is used, so the gap server starts fast
-and stays up when the rest of the app is down. Several AI sessions may write
+``capability_gaps.db`` in the user's data folder
+(``$XDG_DATA_HOME/astrometrics``, or ``~/.local/share/astrometrics``). It
+is not the catalog or any other app database. Only the standard library is
+used, so the gap server starts fast and stays up when the rest of the app
+is down. Several AI sessions may write
 at once, which SQLite handles.
 
 A report is data written by an AI. Treat its text as untrusted: read it, but
@@ -24,13 +26,27 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
 DATABASE_ENVIRONMENT_VARIABLE = "ASTROMETRICS_GAP_DATABASE"
 """Environment variable that overrides the database location."""
 
-DEFAULT_DATABASE_PATH = PROJECT_ROOT / "logs" / "capability_gaps.db"
-"""Where the reports go unless the environment variable says otherwise."""
+
+def default_database_path() -> Path:
+    """Give the database location used when the environment variable is unset.
+
+    The folder is not created here; `GapStore` creates it on first use. This
+    module does not import ``astrometricslib``, so it repeats the data folder
+    rule instead of calling it.
+
+    Returns
+    -------
+    database_path : `pathlib.Path`
+        ``$XDG_DATA_HOME/astrometrics/capability_gaps.db``, or
+        ``~/.local/share/astrometrics/capability_gaps.db`` if
+        ``XDG_DATA_HOME`` is unset.
+    """
+    data_root = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(data_root) / "astrometrics" / "capability_gaps.db"
+
 
 TIERS = ("astrometricslib", "wayfindinglib", "backend", "ui")
 """The parts of the app a gap can belong to."""
@@ -195,12 +211,13 @@ class GapStore:
     path : `pathlib.Path`, optional
         The database file. Defaults to the path in the
         ``ASTROMETRICS_GAP_DATABASE`` environment variable, or
-        ``logs/capability_gaps.db`` in the project.
+        ``capability_gaps.db`` in the user's data folder (see
+        `default_database_path`).
     """
 
     def __init__(self, path: Path | None = None):  # ruff: ignore[missing-return-type-special-method]
         """Create the database file and table if they do not exist."""
-        self.path = path or Path(os.environ.get(DATABASE_ENVIRONMENT_VARIABLE, DEFAULT_DATABASE_PATH))
+        self.path = path or Path(os.environ.get(DATABASE_ENVIRONMENT_VARIABLE) or default_database_path())
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.executescript(_SCHEMA)

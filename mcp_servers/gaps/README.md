@@ -7,7 +7,7 @@ The server is its own program: run it with `python -m mcp_servers.gaps`. It impo
 - `report_capability_gap` saves a report: the goal, the tools tried and what they returned, why they fell short, and optionally the tool that would help. This is the only thing the AI may write. A report that repeats an open one is counted against it.
 - `list_capability_gaps` lets the AI check whether a gap is already reported.
 
-The reports go into a small database of their own, `logs/capability_gaps.db`. Set `ASTROMETRICS_GAP_DATABASE` to use another file. The AI cannot change a report's status. You read and resolve reports with the review command:
+The reports go into a small database of their own, `capability_gaps.db` in your data folder (`${XDG_DATA_HOME:-~/.local/share}/astrometrics`). Set `ASTROMETRICS_GAP_DATABASE` to use another file. The AI cannot change a report's status. You read and resolve reports with the review command:
 
 ```bash
 .venv/bin/python -m mcp_servers.gaps.review list

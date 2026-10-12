@@ -1,0 +1,21 @@
+{
+  "description": "Sweep of SKY_BAND_GAP_PX / SKY_BAND_WIDTH_PX in spectrum_extractor.py on one real frame. 'removed_percent_of_total_flux' is how much of the summed spectrum the sky subtraction took out. It keeps shrinking as the bands move away from the star because the closest bands catch the star's own faint wings, not just sky.",
+  "frame": "Vega_SPEC_Stacked_ZWO_ASI_533MM_Pro_405mm.fits (ASI533MM Pro, 405 mm, vertical dispersion, traced extraction, extraction_radius 10, detected angle 2.03 deg)",
+  "frame_note": "The stacked frame was already background-flattened upstream: image median is exactly 0.0.",
+  "trail_sigma_px": {"median": 1.67, "p10": 1.32, "p90": 3.96},
+  "raw_line_depths": {"Na D": 0.050, "H-beta": 0.149, "H-gamma": 0.271},
+  "sweep": [
+    {"gap_px": 2, "width_px": 4, "removed_percent_of_total_flux": 2.05},
+    {"gap_px": 3, "width_px": 6, "removed_percent_of_total_flux": 1.26},
+    {"gap_px": 3, "width_px": 10, "removed_percent_of_total_flux": 0.87},
+    {"gap_px": 5, "width_px": 6, "removed_percent_of_total_flux": 0.87},
+    {"gap_px": 6, "width_px": 10, "removed_percent_of_total_flux": 0.57},
+    {"gap_px": 8, "width_px": 10, "removed_percent_of_total_flux": 0.46},
+    {"gap_px": 10, "width_px": 10, "removed_percent_of_total_flux": 0.39},
+    {"gap_px": 12, "width_px": 10, "removed_percent_of_total_flux": 0.34},
+    {"gap_px": 16, "width_px": 10, "removed_percent_of_total_flux": 0.27},
+    {"gap_px": 20, "width_px": 10, "removed_percent_of_total_flux": 0.23},
+    {"gap_px": 30, "width_px": 10, "removed_percent_of_total_flux": 0.17}
+  ],
+  "line_depths_with_subtraction_gap6_width10": {"Na D": 0.050, "H-beta": 0.149, "H-gamma": 0.272}
+}

@@ -36,7 +36,8 @@ must be re-validated first.
 
 What it does and does not do for classification, measured on 11 stored
 stars with a catalog type (2026-09-19, see
-logs/atmospheric_mask_validation_20260919.json): at the classifier's usual
+documentation/evidence/atmospheric_mask_validation_20260919.json): at the
+classifier's usual
 8000 A upper limit no star gets worse, and a few get slightly better (mean
 distance from the true type 11.3 -> 11.0 spectral-type steps; the number of
 true types in the top three, the letter matches and the good matches did
@@ -76,7 +77,8 @@ import numpy as np
 # known how high in the sky either one was, so revisit this list if a
 # spectrum shows dips there.
 #
-# See logs/atmospheric_mask_validation_20260919.json for the raw numbers.
+# See documentation/evidence/atmospheric_mask_validation_20260919.json for
+# the raw numbers.
 ATMOSPHERIC_BANDS_ANGSTROM: tuple[tuple[str, float, float], ...] = (
     ("oxygen B band", 6860.0, 6940.0),
     ("oxygen A band", 7490.0, 7720.0),

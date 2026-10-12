@@ -13,7 +13,7 @@ very different amounts of light in the same pixel, and the clipping then
 discards the best frames' values as if they were outliers. On the Vega
 session (140 frames, 0.5-5 s) this made a faint star's spectrum about 8
 times noisier than a plain sum of the same frames (measured 2026-09-20,
-see logs/stack_exposure_groups_20260920.json).
+see documentation/evidence/stack_exposure_groups_20260920.json).
 
 The fix here has three parts:
 

@@ -57,7 +57,8 @@ _DATA_DIR = Path(__file__).parent.parent / "data"
 # measured (for example with the fixed-box extraction method, or when too
 # few width fits worked). It was measured on the Vega master stack
 # (ASI533MM Pro, 405 mm, 200 lines/mm grating, 2026-09-19; see
-# logs/spectral_resolution_estimate_vega_20260919.json). One pixel covers
+# documentation/evidence/spectral_resolution_estimate_vega_20260919.json).
+# One pixel covers
 # 11.0-11.4 A. Vega's zero-order star is 4.4 pixels wide (FWHM), about
 # 48 A, and the spectrum's own trail is 3.2-3.9 pixels wide across the
 # middle of the spectrum, or 35-43 A, so 45 A sits inside both. As a
@@ -101,7 +102,8 @@ MINIMUM_FITTED_TRAIL_WIDTH_SAMPLES = 50
 # too few, so the fallback was used). Random failures are the easy case,
 # though: real faint-star failures are not random, and this has not been
 # tested on a set of faint stars (2026-09-19, scratch check on the Vega
-# stack; see logs/spectral_resolution_estimate_vega_20260919.json).
+# stack; see
+# documentation/evidence/spectral_resolution_estimate_vega_20260919.json).
 MINIMUM_FITTED_TRAIL_WIDTH_FRACTION = 0.5
 
 

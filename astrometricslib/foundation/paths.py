@@ -79,6 +79,26 @@ def data_directory() -> str:
     return data_path
 
 
+def state_directory() -> str:
+    """Give the folder for this program's run logs and state, creating it.
+
+    This is ``~/.local/state/astrometrics``. It holds records of what the
+    program did, such as log files. They are worth keeping for a while but
+    can be rebuilt by running the program again.
+
+    Returns
+    -------
+    state_path : `str`
+        ``$XDG_STATE_HOME/astrometrics`` if ``XDG_STATE_HOME`` is set,
+        otherwise ``~/.local/state/astrometrics``. The folder exists when
+        this returns.
+    """
+    state_root = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    state_path = os.path.join(state_root, "astrometrics")
+    os.makedirs(state_path, exist_ok=True)
+    return state_path
+
+
 def locks_directory() -> str:
     """Give the folder for lock files, creating it.
 

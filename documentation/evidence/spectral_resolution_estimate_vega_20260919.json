@@ -1,0 +1,110 @@
+{
+  "description": "Estimate of the instrument's resolution element (the blur every spectrum has), from the Vega master stack. Used to set DEFAULT_RESOLUTION_ELEMENT_ANGSTROM in spectral_feature_detector.py.",
+  "frame": "Vega_SPEC_Stacked_ZWO_ASI_533MM_Pro_405mm.fits (140 frames stacked; vertical dispersion; traced extraction; sky subtraction on)",
+  "instrument": {
+    "pixel_um": 3.76,
+    "grating_lines_per_mm": 200,
+    "grating_distance_mm_fitted": 16.54
+  },
+  "dispersion_angstrom_per_pixel": {
+    "small_angle_formula": 11.37,
+    "instrument_model_range": [
+      10.96,
+      11.24
+    ],
+    "measured_sample_spacing_median": 11.04
+  },
+  "psf_estimates": {
+    "zero_order_star_fwhm_px": {
+      "x": 4.39,
+      "y": 4.45,
+      "blur_angstrom": [
+        48,
+        49
+      ],
+      "caveat": "peak pixel is the frame maximum; may be saturated, which would overestimate"
+    },
+    "trail_cross_section_fwhm_px_by_band": {
+      "4200-4600": 2.57,
+      "4600-5000": 3.81,
+      "5000-5500": 3.86,
+      "5500-6000": 3.41,
+      "6000-6600": 3.15,
+      "6600-7200": 3.32,
+      "7200-8000": 4.61,
+      "3800-4200": 6.6
+    },
+    "trail_blur_angstrom_middle_bands": [
+      35,
+      43
+    ],
+    "assumption": "blur along the spectrum equals the cross-dispersion width"
+  },
+  "template_blur_that_matches_vega_depths_angstrom": {
+    "H-alpha": 60,
+    "H-beta": 60,
+    "H-gamma": "45-50",
+    "H-delta": 30
+  },
+  "observed_vega_depth_percent": {
+    "H-alpha": 5.1,
+    "H-beta": 8.7,
+    "H-gamma": 12.8,
+    "H-delta": 23.3
+  },
+  "expected_A0V_depth_percent": {
+    "30.0": {
+      "H-alpha": 14.3,
+      "H-beta": 19.4,
+      "H-gamma": 20.0,
+      "H-delta": 21.7
+    },
+    "45.0": {
+      "H-alpha": 10.4,
+      "H-beta": 14.3,
+      "H-gamma": 13.4,
+      "H-delta": 14.2
+    }
+  },
+  "reference_template_statistics": {
+    "30": {
+      "pairs_with_dip_at_least_1_percent": 210,
+      "median_depth_percent": 7.6
+    },
+    "45": {
+      "pairs_with_dip_at_least_1_percent": 189,
+      "median_depth_percent": 5.7
+    },
+    "total_pairs": 272
+  },
+  "chosen_angstrom": 45.0,
+  "estimator_check": {
+    "description": "Check of spectral_resolution.estimate_resolution_element_angstrom on the same Vega stack.",
+    "samples": 563,
+    "fitted_fraction": 1.0,
+    "median_trail_sigma_px": 1.666,
+    "median_trail_fwhm_px": 3.92,
+    "derived_resolution_angstrom": 43.3,
+    "derived_from_part_of_trail_angstrom": {
+      "blue_half_below_6000": 41.1,
+      "red_half": 51.7,
+      "middle_4600_7200": 37.8
+    },
+    "random_fit_failure_test_angstrom": {
+      "30_percent_failed": 43.8,
+      "50_percent_failed": 43.5,
+      "60_percent_failed": null,
+      "80_percent_failed": null
+    },
+    "classification_rms_vega_A0V": {
+      "30": 0.0843,
+      "45": 0.0774,
+      "43.3_measured": 0.0781
+    },
+    "instrument_response_shape_change_vs_stored_percent": {
+      "rederived_at_30": 0.37,
+      "rederived_at_45": 0.39,
+      "rederived_at_43.3": 0.38
+    }
+  }
+}

@@ -36,19 +36,23 @@ matplotlib.use("Agg")
 _test_tmp_dir = tempfile.TemporaryDirectory()
 TEST_TEMP_DIR = Path(_test_tmp_dir.name)
 
-# Point the cache and data folders (locks, catalog caches, Siril work files,
-# the default library) into the temporary folder, so no test writes to the
-# real ~/.cache or ~/.local/share.
+# Point the cache, data and state folders (locks, catalog caches, Siril
+# work files, the default library) into the temporary folder, so no test
+# writes to the real ~/.cache, ~/.local/share or ~/.local/state.
 os.environ["XDG_CACHE_HOME"] = str(TEST_TEMP_DIR / "xdg_cache")
 os.environ["XDG_DATA_HOME"] = str(TEST_TEMP_DIR / "xdg_data")
+os.environ["XDG_STATE_HOME"] = str(TEST_TEMP_DIR / "xdg_state")
 (TEST_TEMP_DIR / "xdg_cache").mkdir(parents=True, exist_ok=True)
 (TEST_TEMP_DIR / "xdg_data").mkdir(parents=True, exist_ok=True)
+(TEST_TEMP_DIR / "xdg_state").mkdir(parents=True, exist_ok=True)
 
 # 4. Create isolated library, frames, wayfinding, and logs directories
 test_library_path = TEST_TEMP_DIR / "library"
 test_frames_path = test_library_path / "frames"
 test_wayfinding_path = TEST_TEMP_DIR / "wayfinding_library"
-test_logs_path = TEST_TEMP_DIR / "logs"
+# Equal to what AppConfiguration.get_logs_path() returns:
+# <state folder>/astrometrics/logs.
+test_logs_path = TEST_TEMP_DIR / "xdg_state" / "astrometrics" / "logs"
 test_targets_path = test_library_path / "targets"
 test_calibration_path = test_library_path / "calibration"
 

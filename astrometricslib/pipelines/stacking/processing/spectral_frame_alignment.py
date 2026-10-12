@@ -4,7 +4,8 @@ Siril's own frame-to-frame registration works by matching point-like stars
 between frames. That assumption breaks down for a slitless spectrograph
 image: every star is smeared into a trail rather than a compact dot, and a
 field with only one or two bright stars (a close visual double, for
-instance -- see `logs/stack_exposure_groups_20260920.json`'s Albireo entry)
+instance -- see
+`documentation/evidence/stack_exposure_groups_20260920.json`'s Albireo entry)
 does not give Siril's star finder enough real point sources to match
 reliably. Measured on that real Albireo session, both of Siril's own
 detection settings left most of the frames in some exposure groups

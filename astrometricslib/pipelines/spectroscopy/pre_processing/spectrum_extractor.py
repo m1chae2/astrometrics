@@ -38,7 +38,8 @@ light is under our star's box as well, so subtracting it is right. On the
 M 13 stack it was large: for stars of magnitude 8.5-9, 50-90% of the raw
 spectrum was this background, growing toward the red, and K stars looked
 like M stars until it was removed (see
-logs/k_star_sky_investigation_20260919.json). The Vega frame, by contrast,
+documentation/evidence/k_star_sky_investigation_20260919.json). The Vega
+frame, by contrast,
 is a bright star in a sparse field, and only 0.6% of its spectrum was sky.
 Check a fainter star in a busier field before trusting a change to this
 stage.
@@ -187,14 +188,16 @@ _MINIMUM_FIT_SIGMA_PX = 0.5
 # "wings"), which stretches past the reading box. If a band touches the
 # wings, we would subtract some of the star's real light and call it sky.
 # gap = 6 px: swept on a real frame (Vega, ASI533MM Pro + 405 mm, 2026-09-19,
-# see logs/sky_band_sweep_vega_20260919.json). Moving the bands out from a
+# see documentation/evidence/sky_band_sweep_vega_20260919.json). Moving the
+# bands out from a
 # 2 px gap to a 6 px gap dropped the amount "removed" from 2.05% to 0.57% of
 # the total flux, which is the wings leaving the band. Past 6 px the drop is
 # slower (0.46% at 8 px, 0.17% at 30 px), so the extra distance gains little
 # but risks reaching a neighbouring star's spectrum. That sweep is a
 # one-frame result on a sparse field. The same 6 px gap was later used on the
 # crowded M 13 stack, where it gave K0V for a K0 star and correct-side types
-# for most of the others (see logs/k_star_sky_investigation_20260919.json),
+# for most of the others (see
+# documentation/evidence/k_star_sky_investigation_20260919.json),
 # but no sweep of the gap was run there.
 SKY_BAND_GAP_PX = 6
 

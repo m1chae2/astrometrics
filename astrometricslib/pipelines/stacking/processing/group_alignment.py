@@ -35,7 +35,8 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 # Structure wider than this many pixels (background gradients, nebulosity) is
 # removed before the offset is measured, so stars decide it. Stars in these
 # stacks have a FWHM of about 3 px (2.8-3.8 px, see
-# `logs/stack_exposure_groups_20260920.json`); 8 px is a little under three
+# `documentation/evidence/stack_exposure_groups_20260920.json`); 8 px is a
+# little under three
 # FWHM, wide enough to leave a star's profile alone.
 ALIGNMENT_HIGH_PASS_SIGMA_PIXELS = 8.0
 

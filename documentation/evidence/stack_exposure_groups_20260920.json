@@ -1,0 +1,440 @@
+{
+  "purpose": "Validation of per-exposure-group stacking and registration fallback on real spectral sessions",
+  "date": "2026-09-20",
+  "method": "run_siril_stack on the frames of each target; group stacks combined in counts per second; extraction of the star nearest the frame centre, seeded at the position the original stack gave so both stacks measure the same source",
+  "registration": {
+    "Vega": {
+      "groups": 5,
+      "standard_detection_registered_fraction": 1.0,
+      "frames": 140,
+      "previous_relaxed_only_registered": 94
+    },
+    "Alcor": {
+      "frames_registered": 133,
+      "frames_failed": 5,
+      "note": "two groups fell below 90% with standard detection and were retried with relaxed"
+    },
+    "Alnath": {
+      "frames_registered": 56,
+      "frames_failed": 7,
+      "note": "standard detection registered no frames in the 0.1 s group; relaxed fallback used; one group stayed at 77%"
+    }
+  },
+  "spectrum_comparison_same_star_position": {
+    "Vega": {
+      "old": {
+        "relative_noise": 0.0039,
+        "blue_over_red": 2.5,
+        "trail_width_px": 2.17
+      },
+      "new": {
+        "relative_noise": 0.0037,
+        "blue_over_red": 1.22,
+        "trail_width_px": 2.56
+      }
+    },
+    "Alcor": {
+      "old": {
+        "relative_noise": 0.0055,
+        "blue_over_red": 2.03,
+        "trail_width_px": 2.5
+      },
+      "new": {
+        "relative_noise": 0.0033,
+        "blue_over_red": 2.1,
+        "trail_width_px": 2.61
+      }
+    },
+    "Alnath": {
+      "old": {
+        "relative_noise": 1.25
+      },
+      "new": {
+        "relative_noise": 0.82
+      },
+      "note": "neither is a usable spectrum"
+    }
+  },
+  "relative_noise_definition": "1.4826 * MAD of neighbouring-point differences / sqrt(2), divided by the median, 4200-7000 A; includes real spectral structure, so only compare like with like",
+  "instrument_response_check": {
+    "reproduction": "re-deriving from the old Vega spectrum reproduces the current response file to the second decimal",
+    "response_normalised_at_5500A": {
+      "wavelengths_A": [
+        4500,
+        5000,
+        5500,
+        6000,
+        6500,
+        7000,
+        7500,
+        8000
+      ],
+      "current_file": [
+        0.8,
+        0.93,
+        1.0,
+        0.97,
+        0.86,
+        0.73,
+        0.66,
+        0.75
+      ],
+      "from_new_vega_stack": [
+        0.5,
+        0.75,
+        1.0,
+        1.15,
+        1.18,
+        1.11,
+        1.05,
+        1.1
+      ]
+    },
+    "status": "REVERTED 2026-09-21 to the response derived 2026-09-19 (git); the response derived from the rebuilt Vega stack failed the Alcor check"
+  },
+  "known_issues": [
+    "In the new Vega stack the zero order is a flat, patchy plateau (long groups saturate and are masked), so the source detector does not list it; the derive script's 'brightest detection' rule then picks a bright edge star",
+    "Alnath's star position does not yield a usable spectrum in either stack"
+  ],
+  "standards_recheck_20260921": {
+    "method": "saved spectra of Vega and Alcor from the old and the rebuilt stacks, each classified with the old and the new instrument response (trail width taken as a constant per spectrum)",
+    "known_types": {
+      "Vega": "A0V",
+      "Alcor": "A5V"
+    },
+    "results_(stack, response)->type": {
+      "Vega": {
+        "old,old": "A2V",
+        "old,new": "O5V (poor)",
+        "new,old": "F8V",
+        "new,new": "B9V"
+      },
+      "Alcor": {
+        "old,old": "A7V",
+        "old,new": "O5V",
+        "new,old": "A5V",
+        "new,new": "O5V"
+      }
+    },
+    "spectrum_ratio_new_over_old_stack_normalised_5500A_at_4500_5000_5500_6000_6500_7000_7500": {
+      "Vega": [
+        0.62,
+        0.86,
+        1.0,
+        1.18,
+        1.44,
+        1.54,
+        1.58
+      ],
+      "Alcor": [
+        1.02,
+        1.0,
+        1.0,
+        0.97,
+        0.96,
+        0.96,
+        0.96
+      ]
+    },
+    "sessions": {
+      "Vega": {
+        "date": "2026-05-24",
+        "airmass": 1.32
+      },
+      "Alcor": {
+        "date": "2026-05-02",
+        "airmass": 1.09
+      }
+    },
+    "conclusion": "The response derived from the rebuilt Vega stack misclassifies Alcor (O5V) while the old response gives Alcor A5V on Alcor's rebuilt stack. Vega and Alcor disagree about the instrument's colour, and the cause is not yet known (different nights, or a colour bias in the rebuilt Vega stack such as saturation masking). The new response is NOT validated."
+  },
+  "per_group_vega_check_20260921": {
+    "finding": "Vega's spectral colour depends on exposure length within one session: the longer groups are redder. The trail saturates in the 2-5 s groups, and the combine step's saturation level (0.95) does not catch it.",
+    "spectrum_normalised_at_5500A_at_4500_5000_5500_6000_6500_7000_7500": {
+      "0.5s": [
+        1.55,
+        1.32,
+        1.0,
+        0.74,
+        0.56,
+        0.39,
+        0.27
+      ],
+      "1s": [
+        1.35,
+        1.31,
+        1.0,
+        0.72,
+        0.54,
+        0.37,
+        0.25
+      ],
+      "2s": [
+        1.02,
+        1.17,
+        1.0,
+        0.84,
+        0.65,
+        0.44,
+        0.3
+      ],
+      "3s": [
+        0.96,
+        1.13,
+        1.0,
+        0.86,
+        0.76,
+        0.54,
+        0.36
+      ],
+      "5s": [
+        0.88,
+        1.08,
+        1.0,
+        0.9,
+        0.81,
+        0.66,
+        0.47
+      ]
+    },
+    "group_peak_values": {
+      "zero_order_peak": {
+        "0.5s": 1.0,
+        "1s": 1.0,
+        "2s": 1.0,
+        "3s": 0.807,
+        "5s": 0.813
+      },
+      "note": "the 3 s and 5 s group stacks plateau near 0.81-0.83, not 1.0, so their saturated pixels sit below the 0.95 mask level"
+    },
+    "trail_rate_per_second_relative_to_1s_group": {
+      "bright_rows_y2050_2100": [
+        1.11,
+        1.0,
+        1.04,
+        0.59,
+        0.36
+      ],
+      "mid_rows_y2150_2200": [
+        1.04,
+        1.0,
+        1.07,
+        0.83,
+        0.77
+      ],
+      "faint_rows_y2250_2300": [
+        1.15,
+        1.0,
+        1.08,
+        0.91,
+        0.84
+      ]
+    },
+    "other_findings": [
+      "the 0.5 s group stack is 92% zeros (clipped) and the 1 s group 29%",
+      "the 3 s and 5 s group stacks read 10-25% low per second even where nothing saturates, which points at the additive+scaling normalisation or mild nonlinearity; not yet separated"
+    ],
+    "implication": "The unsaturated short exposures give the trustworthy colour, and they match the old Vega stack, which was dominated by 60 short frames. The rebuilt stack's t^2 weighting favours the saturated groups, so it is too red. The old response is therefore closer to right than the new one."
+  },
+  "saturation_and_gain_fix_20260921": {
+    "change": "combine_exposure_group_images now (1) measures each group's saturation ceiling from its own pixels (estimate_saturation_mask_level) and (2) puts the groups on one brightness scale (estimate_group_gains) before averaging",
+    "group_scale_finding": "per-second brightness against the 2 s group was 0.84-0.88 (1 s), 0.71-0.74 (3 s), 0.65-0.71 (5 s), nearly independent of pixel brightness, so each group stack has its own gain (Siril normalization)",
+    "saturation_finding": "group ceilings: about 1.0 for 0.5, 1 and 2 s and 0.81-0.82 for 3 and 5 s; pixels within 3% of the ceiling: 274, 101, 576, 571, 828",
+    "vega_colour_normalised_at_5500A_at_4500_5000_5500_6000_6500_7000_7500": {
+      "group_1s": [
+        1.35,
+        1.31,
+        1.0,
+        0.72,
+        0.54,
+        0.37,
+        0.25
+      ],
+      "group_5s": [
+        0.88,
+        1.08,
+        1.0,
+        0.9,
+        0.81,
+        0.66,
+        0.47
+      ],
+      "old_app_stack": [
+        1.5,
+        1.31,
+        1.0,
+        0.74,
+        0.56,
+        0.39,
+        0.26
+      ],
+      "previous_rebuild": [
+        0.93,
+        1.12,
+        1.0,
+        0.88,
+        0.81,
+        0.61,
+        0.42
+      ],
+      "fixed_rebuild": [
+        1.31,
+        1.28,
+        1.0,
+        0.67,
+        0.46,
+        0.35,
+        0.24
+      ]
+    },
+    "response_from_fixed_vega_normalised_at_5500A_at_4500_to_8000_step_500": {
+      "old_file": [
+        0.8,
+        0.93,
+        1.0,
+        0.97,
+        0.86,
+        0.73,
+        0.66,
+        0.75
+      ],
+      "from_fixed_vega": [
+        0.71,
+        0.96,
+        1.0,
+        0.89,
+        0.75,
+        0.65,
+        0.61,
+        0.64
+      ]
+    },
+    "classification_with_fixed_stacks_(response)": {
+      "Vega_truth_A0V": {
+        "old_response": "A5V (poor)",
+        "from_fixed_vega": "A2V (good)"
+      },
+      "Alcor_truth_A5V": {
+        "old_response": "A5V (good)",
+        "from_fixed_vega": "A2V (good)"
+      }
+    },
+    "status": "fix validated on Vega colour; the response file was NOT changed (still the 2026-09-19 file). The response from the fixed Vega stack is within about 15% of it and neither response is clearly better on the two standards.",
+    "not_yet_done": [
+      "the 0.5 s and 1 s group stacks are still clipped at zero (92% and 29% zeros)",
+      "the constants 25 / 50 / 3% / 0.9 and the 1% gain fraction are validated on Vega only",
+      "other stacks in the library are not rebuilt"
+    ]
+  },
+  "library_rebuild_20260921": {
+    "what": "spectral master stacks of Vega, Alcor and Alnath rebuilt in place with stage.stack_frames (fixed combine step) and saved to the catalog record",
+    "backups": "~/astrometrics_stack_backups_20260921/<target>/ holds each previous stack, RejMap, Registration.seq and recorded_state.json (previous stacked path and quality summary)",
+    "files": {
+      "Vega": "Vega_SPEC_Stacked_ZWO_ASI_533MM_Pro_405mm.fits (the older untagged Vega_SPEC_Stacked.fits from 2026-08-24 was not touched)",
+      "Alcor": "Alcor_SPEC_Stacked.fits",
+      "Alnath": "Alnath_SPEC_Stacked.fits"
+    },
+    "image_stats_old_vs_new": {
+      "Vega": {
+        "max": [
+          1.0,
+          3.936
+        ],
+        "zero_fraction": [
+          0.924,
+          0.0
+        ]
+      },
+      "Alcor": {
+        "max": [
+          0.572,
+          1.726
+        ],
+        "zero_fraction": [
+          0.0,
+          0.0
+        ]
+      },
+      "Alnath": {
+        "max": [
+          0.838,
+          1.404
+        ],
+        "zero_fraction": [
+          0.208,
+          0.349
+        ]
+      }
+    },
+    "registration_concerns_frames_old_vs_new": {
+      "Alcor": [
+        56,
+        9
+      ],
+      "Alnath": [
+        42,
+        9
+      ]
+    },
+    "notes": [
+      "pixel values above 1 are expected: a pixel saturated in every group takes the shortest exposure, scaled to counts per second and back up by the mean exposure",
+      "Alnath is still not a usable spectrum; its short-exposure group stacks are clipped at zero (zero fraction rose to 0.349)",
+      "catalog star records and their spectra for these targets were extracted from the OLD stacks and were not recomputed",
+      "astrometry and spectroscopy were not re-run on the new stacks"
+    ]
+  },
+  "phase0_pooling_vs_grouping_20260921": {
+    "method": "Independent half-stacks (alternate frames) of the pooled set and of each exposure group, built with the app's Siril recipe on the same session. Random noise of a stack = sigma(h1 - h2)/2 in the central 1200 px after integer alignment and symmetric sub-pixel shifts; stars masked. S/N figure = star flux scale / noise. 'Optimal' = quadrature sum of the group figures. Earlier sky-aperture and 5x5-median high-pass noise metrics FAILED the M 13 null control (fixed structure and calibration-master noise are common to all stacks) and were discarded.",
+    "pooled_over_optimal_snr": {
+      "null_M13_30s_split_in_two_halves_r1": 1.06,
+      "NGC2244_L_300_vs_600_r2": 0.98,
+      "NGC2903_L_300_vs_600_r2": 1.006,
+      "NGC2403_L_60_vs_300_r5": 1.03,
+      "NGC1893_L_60_vs_300_r5": 0.99,
+      "M31_D5300_10_vs_30_r3_bias_workaround": 1.08
+    },
+    "reading": "Pooling different exposure lengths costs no measurable noise up to 5x (ASI533) or 3x (D5300); splitting one set in two costs a few percent because Siril clips harder on fewer frames (sigma 2.29 at 23 frames vs 2.54 at 45). Grouping is justified by per-exposure darks, background handling and saturation, not by noise. No exposure-ratio threshold is needed once each group gets its own dark. Not measured: D5300 at 1.5x and 6x (the NGC 7023 6x run died).",
+    "star_fwhm_px_range": [
+      2.8,
+      3.84
+    ],
+    "group_stack_offsets_px_rows_cols": {
+      "NGC2244_g300_to_g600": [
+        2.5,
+        -6.4
+      ],
+      "NGC2903": [
+        5.05,
+        -6.15
+      ],
+      "NGC2403_g60_to_g300": [
+        0.55,
+        6.95
+      ],
+      "NGC1893": [
+        0.0,
+        -0.1
+      ]
+    },
+    "alignment_correlation_after_shift": {
+      "real_pairs": [
+        0.55,
+        0.96
+      ],
+      "unrelated_fields": [
+        0.03,
+        0.09
+      ]
+    }
+  },
+  "calibration_defects_20260921": {
+    "bias_subtracted_twice": "The D5300 dark masters already hold the bias level (598 ADU) and the driver also passed -bias to calibrate; Siril subtracts both (synthetic test: dark+bias differs from dark-only by exactly 598). A 30 s light (median 672) went below zero and the stack was blank. 15 of 59 library stacks were 98-100% zero pixels. Siril's own warning 'many negative pixels (99%)' was logged 40 times in one run and never reached the quality summary. Fixed: bias applied to lights only when there is no dark master.",
+    "dark_from_first_frame": "The dark exposure was taken from the FIRST frame and applied to all frames: 600 s dark on 300 s frames (NGC 2244, NGC 2903), 300 s dark on 60 s frames (NGC 2403), no dark at all (NGC 1893). Fixed: dark by the batch's most common exposure, and mixed sessions are stacked per exposure length.",
+    "background_filter_dropped_a_group": "NGC 2403: the all-frames background-split check (backgrounds 480 vs 2256 counts, gap ratio 8.0) excluded all fourteen 60 s frames. Fixed: the check runs within each exposure length."
+  },
+  "saturation_estimator_validation_20260921": {
+    "blob_minimum_px": "isolated pixels at the ceiling: 188-481 per D5300 frame; saturated star cores 9 to >1700 px; minimum 4",
+    "moffat_wing_estimate": "peak(t2)/peak(t1) vs t2/t1 for the same field: NGC2403 6.57 vs 5, NGC2244 2.62 vs 2, NGC2903 1.82 vs 2, M31 D5300 2.01 vs 2 and 1.89 vs 1.5, Vega 3.33 vs 2, 1.56 vs 1.5, 1.72 vs 1.67 (estimates <= 63x the room above sky, within 66%); M42 D5300 5.74 vs 2 and 5370 vs 4, NGC7023 D5300 0.80 vs 4 and 2.33 vs 1.5 (estimates > 100x, off by 80% to >100x). Gaussian extrapolation gave peaks up to 1e11 ADU and was replaced by a Moffat profile (beta 3).",
+    "note": "Every deep-imaging set in the library saturates its brightest stars, so the per-exposure saturated flag is almost always True there."
+  }
+}

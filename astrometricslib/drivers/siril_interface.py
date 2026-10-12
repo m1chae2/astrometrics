@@ -70,7 +70,7 @@ SIRIL_PROCESS_LOCK_PATH = os.path.join(scratch_directory(), "astrometricslib-sir
 # every other stack uses). On the Vega spectroscopy session (140 frames,
 # 0.5-5 s, 2026-05-24) it found 19 stars in the reference frame, matched 16
 # of them in every frame, and registered all 140 frames (the 2026-08-25
-# stack, logs/stack_Vega.log).
+# stack, documentation/evidence/stack_Vega.log).
 #
 # "relaxed" accepts less round and smaller stars, to find more of them in
 # crowded fields. It was made the only setting on 2026-09-19. On the same
@@ -912,8 +912,10 @@ def light_calibration_flags(num_darks: int, num_flats: int, num_biases: int) -> 
     camera's bias level. Siril subtracts a bias master as well when both are
     given, which removes the bias twice: on the Nikon D5300 (bias 598, a 30 s
     light of about 672) that left every pixel below zero and the stack was
-    blank (see `logs/stack_exposure_groups_20260920.json`). So a bias master is
-    applied to the lights only when there is no dark master. Flats are
+    blank (see
+    `documentation/evidence/stack_exposure_groups_20260920.json`). So a bias
+    master is applied to the lights only when there is no dark master.
+    Flats are
     calibrated with the bias master in their own command and are not affected.
 
     Parameters

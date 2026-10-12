@@ -16,7 +16,7 @@ from astrometricslib.foundation.camera_names import normalize_camera_name
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.observatory_setups import ObservatorySetups, load_observatory_setups
 from astrometricslib.foundation.observatory_site import ObservatorySite, load_observatory_site
-from astrometricslib.foundation.paths import data_directory, resolve_mounted_path
+from astrometricslib.foundation.paths import data_directory, resolve_mounted_path, state_directory
 
 _instance = None
 
@@ -1327,15 +1327,18 @@ class AppConfiguration:
     def get_logs_path(self) -> Path:
         """Return the absolute path to the logs directory.
 
+        The logs live in the user's state folder, not in the project folder:
+        ``$XDG_STATE_HOME/astrometrics/logs``, or
+        ``~/.local/state/astrometrics/logs`` if ``XDG_STATE_HOME`` is unset.
+
         Returns
         -------
         logs_path : `Path`
             Absolute path to the logs directory, created if it did
             not already exist.
         """
-        path = self.get_project_root() / "logs"
-        if not path.exists():
-            path.mkdir(parents=True, exist_ok=True)
+        path = Path(state_directory()) / "logs"
+        path.mkdir(parents=True, exist_ok=True)
         return path
 
     def get_frames_file_path(self, filename: str) -> Path:

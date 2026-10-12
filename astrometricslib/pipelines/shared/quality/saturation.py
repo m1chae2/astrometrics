@@ -18,7 +18,8 @@ import numpy as np
 # groups, because Siril's normalization rescales each stack), and the 5 s
 # group's ceiling lies below 0.95, so its saturated trail was used as if it
 # were a measurement. That made the combined spectrum too red (measured
-# 2026-09-21, see logs/stack_exposure_groups_20260920.json). So each group's
+# 2026-09-21, see
+# documentation/evidence/stack_exposure_groups_20260920.json). So each group's
 # ceiling is measured from its own pixels: the median of its brightest
 # SATURATION_CEILING_SAMPLE_PIXELS pixels. Saturated pixels pile up there, so
 # it is a ceiling only if at least SATURATION_PLATEAU_MINIMUM_PIXELS pixels lie

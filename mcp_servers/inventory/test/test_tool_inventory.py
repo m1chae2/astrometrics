@@ -324,3 +324,11 @@ def test_ui_manifest_covers_every_declared_ui_tool() -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert set(manifest["tools"]) == declared
     assert {entry["tool_class"] for entry in manifest["tools"].values()} == {"develop"}
+
+
+def test_default_output_dir_follows_xdg_cache_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no ``--output-dir``, files go under the cache folder."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert tool_inventory.default_output_dir() == tmp_path / "astrometrics" / "mcp_tool_inventory"
+    assert main([]) == 0
+    assert (tmp_path / "astrometrics" / "mcp_tool_inventory" / tool_inventory.MANIFEST_FILE_NAME).is_file()

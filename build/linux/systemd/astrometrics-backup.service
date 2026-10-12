@@ -2,8 +2,8 @@
 # Backs up the library databases to Google Drive, then checks the Drive upload.
 [Unit]
 Description=Astrometrics database backup and Drive integrity check
-After=network-online.target rclone-drive.service
-Wants=network-online.target rclone-drive.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot

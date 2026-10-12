@@ -1,0 +1,17 @@
+# Template, installed by build/linux/install_backup_timer.sh.
+# Copies changes in the local image library up to Google Drive (rclone sync
+# with a recycle folder; see astrometricslib/scripts/upload_library.py).
+# Started by astrometrics-library-watch.service after the library changes,
+# and every 4 hours by astrometrics-library-upload.timer as a safety net.
+[Unit]
+Description=Upload the local Astrometrics library to Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Repos/astrometrics
+ExecStart=%h/Repos/astrometrics/.venv/bin/python -m astrometricslib.scripts.upload_library
+# Stay out of the way of stacking and the desktop.
+Nice=10
+IOSchedulingClass=idle

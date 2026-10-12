@@ -62,7 +62,7 @@ Next, run the setup script to create the Python environment and install the appl
 
 After installation, the setup script creates a configuration file at `astrometricslib/astrometrics.config.toml`. Its values suit the default install, but four of them depend on choices only you can make. Check each one before proceeding:
 
-- `frames_path` (under `[Image Library]`): The path to the folder where raw and calibration frames are saved. Set this to your own folder. See "Storage layout" below.
+- `frames_path` (under `[Image Library]`): The path to the folder where raw and calibration frames are saved, on the local disk. Set this to your own folder. See "Storage layout" below.
 - `api_key` (under `[Processing.Astrometry.Online Solver]`): An astrometry.net API key. Set this if you did not install the local solver.
 - `siril_executable` (under `[Processing.Siril]`): The command used to run Siril. It ships as `siril-cli`, which is correct for an apt install. If you installed Siril from Flathub, change it to `flatpak run --command=siril-cli org.siril.Siril`.
 - `stack_weight` (under `[Processing.Siril]`): Ships blank, which is correct for an apt install. If you installed Siril from Flathub, you can set it to `wfwhm` to turn on weighted stacking.
@@ -87,18 +87,31 @@ Astrometrics keeps files in three tiers. Each tier has a different job, so each 
 
 | Tier | What it holds | Example location | Setting |
 |------|---------------|------------------|---------|
-| Durable files | Raw and calibration frames | `~/drive/Library` | `frames_path`, `frames_mount_point` |
-| Durable files | Stacks, previews, processed pictures | `~/drive/Library/stacks` | `stacks_path` |
+| Working library | Raw and calibration frames, stacks, previews, processed pictures | `~/Astrometrics/Library` (local disk) | `frames_path`, `stacks_path` |
+| Backup copy | The same library, kept in step automatically | `drive:Library` on Google Drive | none |
 | Local state | The databases (`astrometrics.db`, `astrometrics_log.db`), `calibration_frames.json`, the configuration | `~/.local/share/astrometrics` | `path` |
 | Disposable files | Scratch files, Siril work folders, Gaia caches, locks, backup staging, integrity manifests | `~/.cache/astrometrics` | none |
 
-The durable files can sit on cloud storage. One setup is a Google Drive folder mounted at `~/drive` with `rclone mount` (run as a systemd user service, with `--vfs-cache-mode full`). The mount does the uploading in the background.
+The working library is on the local disk, so frames and stacks open at disk speed and work offline. Google Drive holds the backup copy. `frames_mount_point` stays empty for a library on the local disk; set it only when the library is on a drive that can be missing, such as a USB disk.
 
-The databases stay on the local disk. SQLite needs real file locking, and a network mount does not provide it reliably. A database on the mount can be corrupted.
+The rest of the Google Drive can be mounted at `~/drive` with `rclone mount` (a systemd user service with `--vfs-cache-mode full`) for everyday browsing. Exclude the `Library` folder from that mount (`--exclude "/Library/**"`), so the only editable copy of the library is the local one.
+
+The databases stay on the local disk. SQLite needs real file locking, and a network mount does not provide it reliably. A database on a mount can be corrupted.
+
+#### Library uploads
+
+`astrometricslib/scripts/upload_library.py` makes the Drive copy match the local library with `rclone sync`:
+
+- A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/` on Drive. It is not lost.
+- A file renamed or moved locally (for example a frame quarantined into `_excluded`) is moved on Drive, not uploaded again.
+- One run deletes at most 100 files (`--max-delete`). It refuses to run when the local library is missing, empty, or holds fewer than half the files of the last good run.
+- The `_backup` folder, hidden files and half-written temporary files are never touched.
+
+`./build/linux/watch_library_uploads.sh`, run as the user service `astrometrics-library-watch.service`, starts an upload when the library changes. It waits until there have been no changes for 5 minutes, or at most 30 minutes during a long ingest. It needs `inotify-tools` (`sudo apt install inotify-tools`). A timer also runs the upload 5 minutes after login and every 4 hours, to catch anything the watcher missed. A failed upload shows a desktop notification.
 
 #### Backups
 
-`astrometricslib/scripts/backup_library_databases.py` copies the databases to `Library/_backup/<timestamp>/` on the drive. It keeps the 7 most recent snapshots and one per month. A systemd user timer runs it 10 minutes after login and every 4 hours. `./build/linux/install_backup_timer.sh` installs the timer. `./build/linux/run_backend.sh stop` also starts a backup.
+`astrometricslib/scripts/backup_library_databases.py` copies the databases to `Library/_backup/<timestamp>/` on the drive. It keeps the 7 most recent snapshots and one per month. A systemd user timer runs it 10 minutes after login and every 4 hours. `./build/linux/run_backend.sh stop` also starts a backup. `./build/linux/install_backup_timer.sh` installs this timer, the library upload timer and the watcher.
 
 #### Integrity checks
 
@@ -108,7 +121,8 @@ The databases stay on the local disk. SQLite needs real file locking, and a netw
 
 - `python -m astrometricslib.scripts.restore_library_databases` restores the databases from a drive snapshot.
 - `./build/linux/clean_caches.sh` deletes disposable files. By default it keeps the backup staging, integrity manifests, locks, Siril calibration master cache and Gaia catalogs. Flags change this.
-- `./build/linux/rclone_pending_uploads.sh` shows the files still waiting to upload to the drive.
+- `python -m astrometricslib.scripts.upload_library --dry-run` shows what the next library upload would change, without changing anything.
+- `./build/linux/rclone_pending_uploads.sh` shows the files still waiting to upload through the `~/drive` mount.
 
 ## 5. Launching the application
 

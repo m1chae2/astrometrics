@@ -126,7 +126,7 @@ The repository has four kinds of code. Each layer may call only the layer below 
    import `backend`. The two libraries form two layers of their own:
    - wayfindinglib builds on astrometricslib and uses only astrometricslib's public API;
    - astrometricslib never imports wayfindinglib.
-   
+
    astrometricslib therefore also holds the infrastructure both libraries share: the error classes,
    logging setup, the job framework, the configuration loader (section 7), and generic storage and
    process locks (section 6.2, item 11). No other shared package exists.
@@ -148,7 +148,7 @@ The repository has four kinds of code. Each layer may call only the layer below 
      - the static image and FITS file routes;
      - the Matplotlib figure routes;
      - the startup routes `/api/ready`, `/api/session-token`, and `/api/pairing-info`.
-   
+
    Nothing outside that interface is reachable from the UI. Handoff and the emergency park
    command become RPC methods. CLAUDE.md records the same list.
 
@@ -525,7 +525,7 @@ batch results use it to list failed items.
    - the job runner;
    - a loop over independent items, where one failed item must not stop the rest. Such a loop
      records the failure as an `ErrorInfo` in its result and logs it once with the traceback.
-   
+
    Anywhere else, catch the specific exception, or don't catch at all.
 4. **A missing item is not always an error.** `get` returns `None` when the item does not exist.
    Every other method that needs an existing item raises `NotFoundError`. The decision on naming targets makes this
@@ -584,7 +584,7 @@ statuses only for problems below the RPC layer: 400 for a request that is not va
    - *Diagnostic logs* are Python `logging` messages for developers.
    - *Operational records* are data the app shows and analyzes: job records, job log lines,
      alignment attempts, guiding samples, session telemetry.
-   
+
    `LoggerInterface` holds both kinds today. Job records and job log lines move to a
    job store in `astrometricslib/foundation/jobs.py`, next to the job framework. Alignment, guiding, and telemetry records move to wayfindinglib, behind
    `DiskButler` (section 6.2, item 9). AI interactions and the knowledge table
@@ -605,7 +605,7 @@ statuses only for problems below the RPC layer: 400 for a request that is not va
    - the context filter from item 5;
    - the job router from item 6;
    - quieter levels for noisy third-party loggers (`httpx`, `uvicorn`, `astropy`, `matplotlib`).
-   
+
    This replaces the setup code in `main_backend.py`, the three MCP `__main__.py` files, and the
    scripts.
 5. **Context on every record.** A `contextvars` log context carries `request_id`, `job_id`,
@@ -625,7 +625,7 @@ statuses only for problems below the RPC layer: 400 for a request that is not va
    - `WARNING`: a degraded result, a retry, or a fallback.
    - `ERROR`: an operation failed, logged once by the boundary that handled it (rule 6 in
      section 7.3).
-   
+
    Messages use `%`-style arguments rather than f-strings, so a message that is filtered out costs
    nothing to build.
 

@@ -109,6 +109,52 @@ def test_a_nebula_much_larger_than_a_star_is_barely_dimmed() -> None:
     assert toned[100, 100] == pytest.approx(nebula[100, 100], abs=0.02)
 
 
+def test_estimate_noise_ignores_smooth_structure() -> None:
+    """The noise is the pixel-to-pixel scatter, not a gradient or a galaxy."""
+    rng = np.random.default_rng(11)
+    gradient = np.linspace(0.1, 0.5, SIZE)[None, :] * np.ones((SIZE, 1))
+    image = gradient + rng.normal(0.0, 0.05, (SIZE, SIZE))
+
+    assert star_tone.estimate_noise(image) == pytest.approx(0.05, rel=0.1)
+
+
+def test_a_noisy_sky_is_not_taken_for_stars() -> None:
+    """With noise as large as the old start limit, the sky level must not move.
+
+    Before the limit followed the noise, about 90 percent of the sky counted
+    as star light and the sky level was halved.
+    """
+    rng = np.random.default_rng(12)
+    sky = np.clip(BACKGROUND + rng.normal(0.0, 0.057, (SIZE, SIZE)), 0.0, 1.0)
+
+    dimmed = star_tone.dim_stars(sky)
+
+    assert np.median(dimmed) == pytest.approx(np.median(sky), abs=0.005)
+
+
+def test_a_bright_star_on_a_noisy_sky_is_still_dimmed() -> None:
+    """The noise limit does not switch the dimming off."""
+    rng = np.random.default_rng(13)
+    sky = BACKGROUND + rng.normal(0.0, 0.057, (SIZE, SIZE))
+    image = np.clip(sky + gaussian_star(100, 100, 0.4), 0.0, 1.0)
+
+    dimmed = star_tone.dim_stars(image)
+
+    assert dimmed[100, 100] < image[100, 100] - 0.05
+
+
+def test_the_limit_stays_at_its_set_value_when_the_noise_is_small() -> None:
+    """A quiet picture keeps the limits that were chosen by eye."""
+    image = (
+        BACKGROUND + gaussian_star(100, 100, 0.8) + np.random.default_rng(14).normal(0.0, 0.002, (SIZE, SIZE))
+    )
+
+    assert (
+        star_tone.NOISE_WIDTHS_ABOVE_THE_BACKGROUND * star_tone.estimate_noise(image)
+        < star_tone.STAR_DIMMING_STARTS_AT
+    )
+
+
 def test_tone_stars_keeps_the_shape_and_range_of_a_colour_image() -> None:
     """A channels-first colour image keeps its shape and stays below white."""
     plane = BACKGROUND + gaussian_star(100, 100, 0.8)

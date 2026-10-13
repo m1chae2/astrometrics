@@ -62,6 +62,22 @@ STAR_DIMMING_POWER = 1.8
 STAR_DIMMING_STARTS_AT = 0.05
 STAR_DIMMING_FULL_AT = 0.12
 
+# The star light that counts is also kept above this many sky-noise widths.
+# The background under the stars is the local minimum, which lies 2 to 3 noise
+# widths below the sky, so sky noise alone reaches 5.5 widths above it (the
+# 99.99th percentile of sky pixels on M 51, M 106, M 81 and M 101). On every
+# stack measured, the noise is about 0.055 in stretched units, above the 0.05
+# start limit, so about 90 percent of the sky was counted as star light: the
+# toning halved the sky level and smeared the arms of M 81. Six widths clears
+# the noise. Where the noise is small, the 0.05 and 0.12 limits above apply
+# unchanged. The factor is a design choice from those measurements.
+NOISE_WIDTHS_ABOVE_THE_BACKGROUND = 6.0
+
+# The noise is measured on the picture minus a blurred copy of it, so the
+# large-scale structure of a galaxy or nebula does not count as noise. The
+# blur width, in pixels, is larger than a star and smaller than the structure.
+_NOISE_BLUR_PIXELS = 3.0
+
 # The background under the stars is found with a grey-scale opening (erode,
 # then dilate) over a square of this many pixels on a side. The opening
 # removes bright features smaller than the square and keeps larger ones. Stars
@@ -99,6 +115,25 @@ def soft_highlights(image: np.ndarray, knee: float = HIGHLIGHT_KNEE) -> np.ndarr
     return np.where(image <= knee, image, knee + (1.0 - knee) * np.tanh((image - knee) / (1.0 - knee)))
 
 
+def estimate_noise(image: np.ndarray) -> float:
+    """Measure the pixel-to-pixel noise of a stretched picture.
+
+    Parameters
+    ----------
+    image : `numpy.ndarray`
+        A 2-D stretched picture.
+
+    Returns
+    -------
+    noise : `float`
+        The standard deviation the noise would have if it were Gaussian,
+        found from the median absolute deviation of the picture minus a
+        blurred copy. Smooth structure and the few stars barely change it.
+    """
+    detail = image - ndimage.gaussian_filter(image, _NOISE_BLUR_PIXELS)
+    return float(1.4826 * np.median(np.abs(detail - np.median(detail))))
+
+
 def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarray:
     """Dim the stars in a stretched picture, faint ones most.
 
@@ -116,7 +151,10 @@ def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarra
         `STAR_DIMMING_FULL_AT` above the background is scaled by the fraction
         of the available room it fills, raised to `power`. Light less than
         `STAR_DIMMING_STARTS_AT` above it is unchanged, and light between the
-        two is a smooth mix of both.
+        two is a smooth mix of both. Both limits move up together, keeping
+        their distance, so that the start is at least
+        `NOISE_WIDTHS_ABOVE_THE_BACKGROUND` noise widths: sky noise is never
+        taken for a star.
     """
     background = ndimage.gaussian_filter(
         ndimage.grey_opening(image, size=(_BACKGROUND_BOX_PIXELS, _BACKGROUND_BOX_PIXELS)),
@@ -124,9 +162,9 @@ def dim_stars(image: np.ndarray, power: float = STAR_DIMMING_POWER) -> np.ndarra
     )
     star_light = np.clip(image - background, 0.0, None)
     room = np.clip(1.0 - background, _MINIMUM_ROOM, None)
-    ramp = np.clip(
-        (star_light - STAR_DIMMING_STARTS_AT) / (STAR_DIMMING_FULL_AT - STAR_DIMMING_STARTS_AT), 0.0, 1.0
-    )
+    starts_at = max(STAR_DIMMING_STARTS_AT, NOISE_WIDTHS_ABOVE_THE_BACKGROUND * estimate_noise(image))
+    full_at = starts_at + (STAR_DIMMING_FULL_AT - STAR_DIMMING_STARTS_AT)
+    ramp = np.clip((star_light - starts_at) / (full_at - starts_at), 0.0, 1.0)
     weight = ramp * ramp * (3.0 - 2.0 * ramp)
     dimmed = room * (star_light / room) ** power
     return background + (1.0 - weight) * star_light + weight * dimmed

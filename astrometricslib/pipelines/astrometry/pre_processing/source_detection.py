@@ -8,12 +8,14 @@ in a picture -- for their own reasons, with no catalog matching involved
 """
 
 import logging
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
 from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
 from photutils.detection import DAOStarFinder
+from scipy.ndimage import zoom
 
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.utilities.exceptions import DATA_ERRORS
@@ -133,6 +135,75 @@ def measure_star_radius_px(data: np.ndarray, x_centroid: float, y_centroid: floa
     return round(float(distance[is_star_pixel].max()), 1)
 
 
+@lru_cache(maxsize=32)
+def _zoom_weight_matrix(mesh_length: int, box_size: int) -> np.ndarray:
+    """Return the matrix that does one axis of photutils' mesh enlargement.
+
+    ``scipy.ndimage.zoom`` is linear in its input, so zooming an identity
+    matrix gives a matrix ``W`` with ``zoom(column) == W @ column`` for any
+    column of that length. It uses the same settings photutils does (cubic
+    spline, ``grid_mode=True``, ``reflect`` edges).
+
+    Parameters
+    ----------
+    mesh_length : `int`
+        Number of background boxes along the axis.
+    box_size : `int`
+        Side of one background box in pixels (the zoom factor).
+
+    Returns
+    -------
+    weights : `numpy.ndarray`
+        Array of shape ``(mesh_length * box_size, mesh_length)``.
+    """
+    return zoom(np.eye(mesh_length), (box_size, 1), order=3, mode="reflect", grid_mode=True)
+
+
+def background_map_from_mesh(mesh: np.ndarray, box_size: int, shape: tuple[int, int]) -> np.ndarray | None:
+    """Enlarge the coarse background grid to the picture size, quickly.
+
+    Gives the same numbers as ``Background2D(...).background``, which calls
+    ``scipy.ndimage.zoom`` on the whole picture-sized grid (about a third of
+    the detection time). Because zoom is linear, two small matrix products
+    do the same job: ``(Wy @ mesh) @ Wx.T``. The result is cropped to the
+    picture and clipped to the mesh minimum and maximum, as photutils does.
+    This also avoids photutils' interpolator path, which photutils 3.0
+    deprecated.
+
+    Parameters
+    ----------
+    mesh : `numpy.ndarray`
+        The coarse background grid (``Background2D.background_mesh``).
+    box_size : `int`
+        Side of one background box in pixels.
+    shape : `tuple` [`int`, `int`]
+        Shape of the picture.
+
+    Returns
+    -------
+    background : `numpy.ndarray` or `None`
+        The picture-sized background, or `None` when the inputs are not the
+        plain case (non-finite or non-float mesh, or a grid too small for
+        the picture). The caller then uses photutils' own map.
+    """
+    mesh = np.asarray(mesh)
+    if (
+        mesh.ndim != 2
+        or mesh.dtype != np.float64
+        or not np.all(np.isfinite(mesh))
+        or mesh.shape[0] * box_size < shape[0]
+        or mesh.shape[1] * box_size < shape[1]
+    ):
+        return None
+    if np.ptp(mesh) == 0:
+        return np.full(shape, np.min(mesh), dtype=np.float64)
+    weights_y = _zoom_weight_matrix(mesh.shape[0], box_size)
+    weights_x = _zoom_weight_matrix(mesh.shape[1], box_size)
+    result = (weights_y @ mesh) @ weights_x.T
+    result = result[: shape[0], : shape[1]]
+    return np.clip(result, mesh.min(), mesh.max())
+
+
 class SourceDetector:
     """Finds bright dots (stars) in an image using the DAOStarFinder math."""
 
@@ -152,7 +223,9 @@ class SourceDetector:
         self.fwhm = fwhm
         self.threshold_sigma = threshold_sigma
 
-    def detect(self, data: np.ndarray, mask: np.ndarray | None = None) -> list[dict[str, Any]]:
+    def detect(
+        self, data: np.ndarray, mask: np.ndarray | None = None, with_radius: bool = True
+    ) -> list[dict[str, Any]]:
         """Find the stars in the given picture.
 
         Parameters
@@ -162,13 +235,18 @@ class SourceDetector:
             it is squashed into black and white (2D) first.
         mask : `numpy.ndarray`, optional
             An optional list of bad pixels that should be ignored.
+        with_radius : `bool`, optional
+            If True (the default), measure each star's ``radius_px``. Pass
+            False when the caller never reads it (the FWHM measurement),
+            which skips one pixel-walk per star.
 
         Returns
         -------
         sources : `list` [`dict`]
             A list of the stars found, sorted from brightest to dimmest.
             Each star has coordinates (xcentroid, ycentroid) and a
-            brightness value (flux).
+            brightness value (flux), plus ``radius_px`` when
+            ``with_radius`` is True.
         """
         # Ensure data is 2D for DAOStarFinder
         data = collapse_to_2d(data)
@@ -196,7 +274,9 @@ class SourceDetector:
                     sigma_clip=SigmaClip(sigma=3.0),
                     bkg_estimator=MedianBackground(),
                 )
-                background_map = bkg.background
+                background_map = background_map_from_mesh(bkg.background_mesh, box_size, data.shape)
+                if background_map is None:
+                    background_map = bkg.background
                 std = bkg.background_rms_median
                 logger.debug("Source detection: 2D background (box=%spx), median_rms=%.2f", box_size, std)
             except DATA_ERRORS as e:
@@ -242,6 +322,8 @@ class SourceDetector:
         sources.reverse()
 
         detected = [dict(zip(sources.colnames, row, strict=False)) for row in sources]
+        if not with_radius:
+            return detected
         for source in detected:
             source["radius_px"] = measure_star_radius_px(
                 data,

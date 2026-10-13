@@ -184,7 +184,7 @@ def measure_fwhm_from_data(
     fwhm : `float` or `None`
         The median FWHM in pixels, or None if it couldn't be calculated.
     """
-    sources = SourceDetector().detect(data)
+    sources = SourceDetector().detect(data, with_radius=False)
     if not sources:
         return None
 

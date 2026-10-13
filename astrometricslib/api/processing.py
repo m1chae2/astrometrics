@@ -52,6 +52,7 @@ from astrometricslib.pipelines.shared.calibration_ingest import (
     build_ingest_report,
     flatten_frame_index,
 )
+from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
 from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
@@ -1145,6 +1146,12 @@ class ProcessingPipelines:
 
         For one target, the chosen ``stages`` run in this process, always
         in the order astrometry, photometry, spectroscopy, asteroids.
+        Photometry measures only the frames of one camera and one optic,
+        chosen the way the batch run chooses them: the camera the batch
+        would give the target to (the first camera in the config's setups
+        that has frames of it, the primary camera first) and the primary
+        optic (``[Observatory.Telescope] focal_length_mm``). Pass
+        ``camera_id`` or ``focal_length_mm`` to choose differently.
         Spectroscopy is skipped (with a ``{"status": "skipped", ...}``
         entry, not an error) when the target has no spectral data, and
         otherwise receives photometry's result. Each stage's own options
@@ -1160,7 +1167,8 @@ class ProcessingPipelines:
         Arguments used by each form (any other argument is refused):
 
         - one target: ``stages``, ``astrometry``, ``photometry``,
-          ``spectroscopy``, ``asteroids``.
+          ``spectroscopy``, ``asteroids``, and optionally ``camera_id`` and
+          ``focal_length_mm``.
         - several targets: ``camera_id`` (needed), ``focal_length_mm``,
           ``on_item_complete``.
 
@@ -1186,9 +1194,12 @@ class ProcessingPipelines:
             Options for the asteroid search: ``moving_object_config`` (a
             `MovingObjectConfig`).
         camera_id : `str`, optional
-            For several targets, only frames from this camera are processed.
+            Only frames from this camera are processed (the full name, or
+            part of it). Needed for several targets. For one target, it
+            defaults to the camera the batch would use.
         focal_length_mm : `float`, optional
-            For several targets, only frames at this focal length.
+            Only frames at this focal length are processed. For one target,
+            it defaults to the config's primary focal length.
         on_item_complete : `Callable`, optional
             For several targets, called as ``(target_id, result,
             completed_count, total_count)`` after each target finishes.
@@ -1249,10 +1260,8 @@ class ProcessingPipelines:
 
         reject_unused_arguments(
             "one target",
-            {"one target": ()},
+            {"one target": ("camera_id", "focal_length_mm")},
             {
-                "camera_id": camera_id is not None,
-                "focal_length_mm": focal_length_mm is not None,
                 "on_item_complete": on_item_complete is not None,
             },
         )
@@ -1273,6 +1282,9 @@ class ProcessingPipelines:
                     f"Choose from: {', '.join(sorted(tasks.STAGE_OPTIONS[stage]))}."
                 )
         resolved = self._resolve(target)
+        frame_selection = None
+        if "photometry" in chosen_stages or "spectroscopy" in chosen_stages:
+            frame_selection = resolve_processing_frames(resolved, self._config, camera_id, focal_length_mm)
         return tasks.run_target_stages(
             resolved,
             chosen_stages,
@@ -1280,6 +1292,7 @@ class ProcessingPipelines:
             self._storage,
             register_job,
             drivers=self._drivers,
+            frame_selection=frame_selection,
         )
 
     def run_spectroscopy_by_session(

@@ -32,6 +32,7 @@ Where the drivers reach:
 
 - `processing.stack` uses the stacking driver.
 - `processing.process_target` for one target gives the plate solver and SIMBAD driver to the astrometry and spectroscopy stages. The photometry stage still builds the built-in ones.
+- `processing.process_target` for one target measures only the frames of one camera and one optic, chosen the way the batch run chooses them (the camera the batch would give the target to, and the config's primary focal length). `camera_id` and `focal_length_mm` choose differently. Spectroscopy runs when that selection has spectral frames or the target has a spectral stack.
 - `processing.run_spectroscopy_by_session` and `stars.plate_solve` use the plate solver and SIMBAD driver.
 - `processing.process_target` for a list of targets, or for every target, runs each target in its own worker process. A worker cannot receive a driver object. The call raises `InvalidArgumentError` when any driver was given, instead of quietly using the built-in ones.
 

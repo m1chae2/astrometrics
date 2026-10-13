@@ -48,6 +48,7 @@ from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.asteroid_detection.runner import run_asteroid_detection_analysis
 from astrometricslib.pipelines.astrometry.runner import run_astrometry_analysis
 from astrometricslib.pipelines.photometry.runner import run_photometry_analysis
+from astrometricslib.pipelines.shared.camera_passes import ProcessingFrameSelection
 from astrometricslib.pipelines.shared.frame_grouping import (
     frame_is_spectral,
     select_frames_for_processing,
@@ -358,6 +359,7 @@ def run_target_stages(
     catalog_access: Any,
     register_job: bool,
     drivers: Drivers | None = None,
+    frame_selection: ProcessingFrameSelection | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
@@ -382,6 +384,12 @@ def run_target_stages(
         The plate solver and SIMBAD driver for the stages that identify
         stars (astrometry and spectroscopy). Any left out is the built-in
         one.
+    frame_selection : `ProcessingFrameSelection`, optional
+        The camera's and optic's frames to work on (see
+        `resolve_processing_frames`). Photometry measures these frames,
+        unless its options name ``frames``. Spectroscopy runs only when
+        the selection holds spectral frames or the target already has a
+        spectral stack. Without it, every frame of the target is used.
 
     Returns
     -------
@@ -396,9 +404,16 @@ def run_target_stages(
         options = dict(stage_options.get(stage) or {})
         if drivers is not None and stage in ("astrometry", "spectroscopy"):
             options["drivers"] = drivers
+        if stage == "photometry" and frame_selection is not None:
+            options.setdefault("frames", frame_selection.frames)
         if stage == "spectroscopy":
-            has_spectral_input = bool(target.spectral_stacking.stacked_image) or any(
-                frame_is_spectral(frame) for frame in target.frames or []
+            spectral_candidates = (
+                frame_selection.spectral_frames if frame_selection is not None else target.frames or []
+            )
+            has_spectral_input = (
+                bool(options.get("path"))
+                or bool(target.spectral_stacking.stacked_image)
+                or any(frame_is_spectral(frame) for frame in spectral_candidates)
             )
             if not has_spectral_input:
                 result.results[stage] = {"status": "skipped", "reason": "target has no spectral data"}

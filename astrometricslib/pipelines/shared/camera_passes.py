@@ -10,11 +10,20 @@ The cameras and their order come from the setups in the config file (see
 a script.
 """
 
+import logging
+from dataclasses import dataclass
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import camera_identity, record_name_for_camera
 from astrometricslib.foundation.observatory_setups import ObservatorySetups
-from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
+from astrometricslib.models.target import FrameRecord
+from astrometricslib.pipelines.shared.frame_grouping import (
+    select_frames_for_camera,
+    select_frames_for_processing,
+    split_standard_and_spectral_frames,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def camera_pass_order(
@@ -81,3 +90,99 @@ def assign_targets_to_cameras(targets: list[Any], camera_names: list[str]) -> di
                 assignments[camera_name].append(target.id)
                 break
     return assignments
+
+
+@dataclass(frozen=True)
+class ProcessingFrameSelection:
+    """The frames one processing run works on, and how they were chosen.
+
+    Attributes
+    ----------
+    camera_name : `str` or `None`
+        The camera the frames came from. `None` when no camera could be
+        chosen, or when no camera filter was applied.
+    focal_length_mm : `float` or `None`
+        The optic the frames came from, in millimeters. `None` when no
+        focal length filter was applied.
+    frames : `list` [`FrameRecord`]
+        Every selected frame, imaging and spectral. Empty when nothing
+        matched.
+    standard_frames : `list` [`FrameRecord`]
+        The selected imaging (non-spectral) frames, without stacked or
+        starless products.
+    spectral_frames : `list` [`FrameRecord`]
+        The selected spectral frames.
+    """
+
+    camera_name: str | None
+    focal_length_mm: float | None
+    frames: list[FrameRecord]
+    standard_frames: list[FrameRecord]
+    spectral_frames: list[FrameRecord]
+
+
+def resolve_processing_frames(
+    target: Any,
+    config: Any,
+    camera_name: str | None = None,
+    focal_length_mm: float | None = None,
+) -> ProcessingFrameSelection:
+    """Choose the frames a single-target run works on, the way the batch does.
+
+    The batch script gives each target to the first camera (in
+    `camera_pass_order`) that has frames of it, and keeps only the frames
+    at the primary optic. This function makes the same choices for one
+    target, so a single-target run measures the same frames. Any choice the
+    caller makes is used instead.
+
+    Without observatory setups in the config there is no camera order, so no
+    camera filter is applied and a warning is logged. Without a primary
+    focal length, no focal length filter is applied.
+
+    Parameters
+    ----------
+    target : `Any`
+        The target whose frames to choose from.
+    config : `AppConfiguration`
+        The config that gives the setups, primary camera and primary optic.
+    camera_name : `str`, optional
+        Use this camera (the full name, or part of it). By default, the
+        camera the batch would give the target to.
+    focal_length_mm : `float`, optional
+        Use this optic. By default, the config's primary focal length.
+
+    Returns
+    -------
+    selection : `ProcessingFrameSelection`
+        The camera, the optic and the frames. The frame lists are empty when
+        nothing matches.
+    """
+    if not camera_name:
+        camera_names = camera_pass_order(
+            config.get_observatory_setups(), config.get_primary_camera_name(), config
+        )
+        if not camera_names:
+            logger.warning(
+                "[%s] The config lists no [Observatory.Setups], so frames of every camera are used.",
+                target.id,
+            )
+            camera_name = ""
+        else:
+            assignments = assign_targets_to_cameras([target], camera_names)
+            camera_name = next((name for name in camera_names if assignments[name]), None)
+            if camera_name is None:
+                logger.warning(
+                    "[%s] No frames from any configured camera (%s); nothing to process.",
+                    target.id,
+                    ", ".join(camera_names),
+                )
+                return ProcessingFrameSelection(None, focal_length_mm, [], [], [])
+    if focal_length_mm is None:
+        focal_length_mm = config.get_primary_focal_length_mm()
+
+    # An empty camera name matches every frame (substring match).
+    frames = select_frames_for_processing(target, camera_name, focal_length_mm) or []
+    standard_frames, spectral_frames = split_standard_and_spectral_frames(target, frames)
+    return ProcessingFrameSelection(
+        camera_name or None, focal_length_mm, frames, standard_frames, spectral_frames
+    )

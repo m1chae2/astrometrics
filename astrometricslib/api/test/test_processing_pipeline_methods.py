@@ -16,6 +16,7 @@ import pytest
 from astrometricslib.api.processing import ProcessingPipelines
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
+from astrometricslib.foundation.observatory_setups import ObservatorySetups, OpticConfig, SetupConfig
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines import tasks
 
@@ -142,8 +143,8 @@ def test_an_option_a_stage_does_not_know_is_refused(
 
     with pytest.raises(InvalidArgumentError, match="Unknown astrometry option"):
         pipelines.process_target(target, stages=["astrometry"], astrometry={"limit": 5}, register_job=False)
-    with pytest.raises(InvalidArgumentError, match="does not use: camera_id"):
-        pipelines.process_target(target, camera_id="ASI294", register_job=False)
+    with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
+        pipelines.process_target(target, on_item_complete=lambda *_: None, register_job=False)
     assert recorder.calls == []
 
 
@@ -220,3 +221,159 @@ def test_stack_summary_reports_a_target_with_no_stack() -> None:
     target = Target(id="Nothing_Yet", name="Nothing Yet")
     with pytest.raises(NotFoundError, match="has no saved summary"):
         ProcessingPipelines(AppConfiguration(), MagicMock()).stack_summary(target)
+
+
+_ASI = "ZWO ASI 533MM Pro"
+_NIKON = "Nikon DSLR DSC D5300"
+
+
+class _SetupsConfig(AppConfiguration):
+    """A config with the ASI533 and the D5300 on a 405 mm primary optic."""
+
+    def get_observatory_setups(self) -> ObservatorySetups:
+        """Give two cameras on one optic.
+
+        Returns
+        -------
+        setups : `ObservatorySetups`
+            The ASI533 and the D5300, both on the 405 mm optic.
+        """
+        return ObservatorySetups(
+            optics=(OpticConfig(name="Apertura", focal_length_mm=405.0),),
+            setups=(
+                SetupConfig(name="ASI", camera_name=_ASI, optic_name="Apertura"),
+                SetupConfig(name="Nikon", camera_name="Nikon D5300", optic_name="Apertura"),
+            ),
+        )
+
+    def get_primary_camera_name(self) -> str:
+        """Give the primary camera.
+
+        Returns
+        -------
+        camera_name : `str`
+            The ASI533.
+        """
+        return _ASI
+
+    def get_primary_focal_length_mm(self) -> float:
+        """Give the primary optic.
+
+        Returns
+        -------
+        focal_length_mm : `float`
+            405.
+        """
+        return 405.0
+
+
+def _mixed_target() -> Target:
+    """Build a target with Nikon frames at two optics and ASI frames.
+
+    Returns
+    -------
+    target : `Target`
+        The target. Its frames are named for their camera, optic and kind.
+    """
+    frames = [
+        FrameRecord(path="/nikon405.fits", camera=_NIKON, filter="Luminance", focalLengthMm=405.0),
+        FrameRecord(path="/nikon300.fits", camera=_NIKON, filter="Luminance", focalLengthMm=300.0),
+        FrameRecord(path="/asi405.fits", camera=_ASI, filter="Luminance", focalLengthMm=405.0),
+        FrameRecord(path="/asi_spec.fits", camera=_ASI, filter="SPEC", focalLengthMm=405.0),
+    ]
+    return Target(id="MixedOpticsTarget", frames=frames)
+
+
+@pytest.fixture
+def setups_pipelines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[ProcessingPipelines, _RecordingPipelineMatch]:
+    """Build pipelines with a recorded dispatch and two configured cameras.
+
+    Returns
+    -------
+    pipelines : `ProcessingPipelines`
+        The pipelines.
+    recorder : `_RecordingPipelineMatch`
+        The stub recording every dispatched call.
+    """
+    recorder = _RecordingPipelineMatch()
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", recorder)
+    return ProcessingPipelines(_SetupsConfig(), MagicMock()), recorder
+
+
+def _photometry_paths(recorder: _RecordingPipelineMatch) -> list[str]:
+    """List the paths of the frames the photometry stage was given.
+
+    Returns
+    -------
+    paths : `list` [`str`]
+        The frame paths, in order.
+    """
+    call = next(call for call in recorder.calls if call["pipeline_type"] == "photometry")
+    return [frame.path for frame in call["frames"]]
+
+
+def test_one_target_photometry_defaults_to_the_batch_camera_and_primary_optic(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify photometry gets the batch's camera and the primary optic."""
+    pipelines, recorder = setups_pipelines
+
+    pipelines.process_target(_mixed_target(), stages=["photometry"], register_job=False)
+
+    assert _photometry_paths(recorder) == ["/asi405.fits", "/asi_spec.fits"]
+
+
+def test_one_target_photometry_uses_the_camera_and_optic_asked_for(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify ``camera_id`` and ``focal_length_mm`` replace the defaults."""
+    pipelines, recorder = setups_pipelines
+
+    pipelines.process_target(
+        _mixed_target(), stages=["photometry"], camera_id="Nikon", focal_length_mm=300.0, register_job=False
+    )
+
+    assert _photometry_paths(recorder) == ["/nikon300.fits"]
+
+
+def test_one_target_photometry_option_frames_still_win(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify frames in the photometry options beat the selection."""
+    pipelines, recorder = setups_pipelines
+    own_frame = FrameRecord(path="/own.fits", filter="Luminance")
+
+    pipelines.process_target(
+        _mixed_target(), stages=["photometry"], photometry={"frames": [own_frame]}, register_job=False
+    )
+
+    assert _photometry_paths(recorder) == ["/own.fits"]
+
+
+def test_one_target_spectroscopy_needs_spectral_frames_in_the_selection(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify spectroscopy runs for ASI533 spectra, not for the D5300."""
+    pipelines, recorder = setups_pipelines
+    target = _mixed_target()
+
+    ran = pipelines.process_target(target, stages=["spectroscopy"], register_job=False)
+    assert ran.results["spectroscopy"]["pipeline_type"] == "spectroscopy"
+
+    skipped = pipelines.process_target(target, stages=["spectroscopy"], camera_id="Nikon", register_job=False)
+    assert skipped.results["spectroscopy"]["status"] == "skipped"
+    assert len(recorder.calls) == 1
+
+
+def test_one_target_still_refuses_the_batch_only_callback(
+    setups_pipelines: tuple[ProcessingPipelines, _RecordingPipelineMatch],
+) -> None:
+    """Verify ``on_item_complete`` is refused for one target."""
+    pipelines, recorder = setups_pipelines
+
+    with pytest.raises(InvalidArgumentError, match="does not use: on_item_complete"):
+        pipelines.process_target(_mixed_target(), on_item_complete=lambda *_: None, register_job=False)
+    pipelines.process_target(_mixed_target(), stages=["astrometry"], camera_id="ZWO", register_job=False)
+    assert len(recorder.calls) == 1

@@ -27,6 +27,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     build_stretch_script,
     denoise_with_cosmic_clarity,
     flatten_background,
+    is_colour_image,
     run_preview_script,
     write_stack_preview,
 )
@@ -71,6 +72,7 @@ def _configure(
     cosmic_clarity: str | None = None,
     strength: float = 1.0,
     star_tone: bool = False,
+    remove_green: bool = True,
 ) -> None:
     """Give the module the commands for Siril, GraXpert and Cosmic Clarity.
 
@@ -87,6 +89,7 @@ def _configure(
             get_cosmic_clarity_denoise_path=lambda: cosmic_clarity,
             get_cosmic_clarity_denoise_strength=lambda: strength,
             get_preview_star_tone_enabled=lambda: star_tone,
+            get_preview_remove_green_noise_enabled=lambda: remove_green,
         ),
     )
 
@@ -375,7 +378,8 @@ def test_the_log_lists_every_step_that_ran(
     assert "Star toning finished; the preview uses its result." in messages
     summary = next(message for message in messages if message.startswith("Preview steps:"))
     assert summary == (
-        "Preview steps: GraXpert done; Siril stretch done; Cosmic Clarity done; Star toning done."
+        "Preview steps: GraXpert done; Remove Green Noise not used; Siril stretch done; "
+        "Cosmic Clarity done; Star toning done."
     )
 
 
@@ -950,3 +954,91 @@ def test_the_steps_are_reported_without_any_override(
     assert write_stack_preview(str(stack), steps_log=steps) is not None
 
     assert steps[0] == "GraXpert not configured"
+
+
+def _write_colour_stack(path: Path) -> None:
+    """Write a small three-plane FITS image where the stack should be."""
+    image = np.random.default_rng(1).normal(0.01, 0.002, (3, 32, 32)).astype(np.float32)
+    fits.writeto(path, image, overwrite=True)
+
+
+def test_green_removal_is_added_before_the_stretch_only_when_asked() -> None:
+    """Verify `rmgreen` sits between load and stretch, and is not a default."""
+    plain = build_preview_script("a.fits", "a_preview", 0.2)
+    with_green = build_preview_script("a.fits", "a_preview", 0.2, remove_green=True)
+    stretch_only = build_stretch_script("a.fits", "stretched", 0.2, remove_green=True)
+
+    assert "rmgreen" not in plain
+    assert with_green[1:4] == ['load "a.fits"', "rmgreen", "autostretch -2.8 0.200"]
+    assert stretch_only[1:4] == ['load "a.fits"', "rmgreen", "autostretch -2.8 0.200"]
+    assert "rmgreen" not in build_stretch_script("a.fits", "stretched", 0.2)
+
+
+def test_only_a_three_plane_fits_counts_as_a_colour_image(tmp_path: Path) -> None:
+    """Verify colour is told apart from single-channel and unreadable files."""
+    colour, mono, broken = tmp_path / "c.fits", tmp_path / "m.fits", tmp_path / "b.fits"
+    _write_colour_stack(colour)
+    fits.writeto(mono, np.zeros((32, 32), dtype=np.float32))
+    broken.write_bytes(b"not a fits file")
+
+    assert is_colour_image(str(colour)) is True
+    assert is_colour_image(str(mono)) is False
+    assert is_colour_image(str(broken)) is False
+    assert is_colour_image(str(tmp_path / "missing.fits")) is False
+
+
+def test_a_colour_stack_gets_green_removal_in_its_siril_script(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a colour stack's preview removes green before the stretch."""
+    _write_colour_stack(stack)
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    commands = programs.siril_calls[0][1]
+    assert commands.index("rmgreen") < next(i for i, c in enumerate(commands) if c.startswith("autostretch"))
+
+
+def test_a_single_channel_stack_is_never_given_green_removal(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a mono stack gets no `rmgreen`, which would fail on it."""
+    fits.writeto(stack, np.full((32, 32), 0.01, dtype=np.float32), overwrite=True)
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert "rmgreen" not in programs.siril_calls[0][1]
+
+
+def test_green_removal_can_be_switched_off(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the setting stops a colour stack getting `rmgreen`."""
+    _write_colour_stack(stack)
+    _configure(monkeypatch, "siril-cli", None, remove_green=False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert "rmgreen" not in programs.siril_calls[0][1]
+
+
+def test_the_stretch_before_the_denoise_also_gets_green_removal(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the stretch used before Cosmic Clarity removes green too."""
+    _write_colour_stack(stack)
+    _configure(monkeypatch, "siril-cli", None, cosmic_clarity="clarity")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert "rmgreen" in programs.siril_calls[0][1]

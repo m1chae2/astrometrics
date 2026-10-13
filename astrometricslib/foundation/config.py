@@ -416,6 +416,7 @@ class AppConfiguration:
                 "background_homogeneity_check_enabled": "true",
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
+                "preview_remove_green_noise_enabled": "true",
                 "keep_previous_stack_enabled": "true",
                 "trim_noisy_stack_edges_enabled": "true",
                 "skip_unchanged_stacks_enabled": "true",
@@ -890,6 +891,24 @@ class AppConfiguration:
             `True` if the star toning step should run.
         """
         val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_remove_green_noise_enabled(self) -> bool:
+        """Return whether the stack preview removes excess green.
+
+        A colour camera's sensor has twice as many green pixels as red or
+        blue, and a night sky's glow is often green too, so a colour stack
+        tends to look green. When on, the preview of a colour stack runs
+        Siril's ``rmgreen`` (Remove Green Noise) before the stretch. A
+        single-channel stack is never touched. The stack itself is never
+        changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the green removal step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_remove_green_noise_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_maximum_identified_stars(self) -> int | None:

@@ -338,6 +338,13 @@ quarantine_bad_frames_enabled = "true"
 # like equally bright white dots. The stack file itself is never changed. Set
 # "false" for the plain stretched picture.
 preview_star_tone_enabled = "true"
+# "true" (the default): the stack preview of a colour stack, such as one from
+# the Nikon DSLR, first runs Siril's Remove Green Noise. A colour sensor has
+# twice as many green pixels as red or blue and the night sky glows green, so
+# these stacks look green. Single-channel stacks (the ZWO camera) are never
+# touched, and the stack file itself is never changed. Set "false" to leave
+# the colour balance alone.
+preview_remove_green_noise_enabled = "true"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be
 # compared. Only one previous version is kept; the next restack replaces it.

@@ -2,25 +2,32 @@
 
 A stacked FITS file holds linear data: pixel values proportional to the
 light collected. Most of the sky is far too dark in that form to see
-anything. Up to four steps turn it into a picture.
+anything. Up to five steps turn it into a picture.
 
 1. GraXpert, if it is configured, removes the sky's brightness gradient.
    Its AI model learns what the smooth background looks like and subtracts
    it, so uneven sky glow or vignetting does not wash out the faint parts.
-2. Siril's Autostretch command brightens the faint parts the way its own
+2. Siril's Remove Green Noise (``rmgreen``) lowers the green in a colour
+   stack, such as one from the Nikon DSLR. A colour sensor has twice as many
+   green pixels as red or blue, and the sky's glow is often green, so these
+   stacks look green. It runs on the linear data, just before the stretch. A
+   single-channel stack, such as one from the ZWO camera, has no colour to
+   balance and is left alone. The setting
+   ``preview_remove_green_noise_enabled`` turns it off.
+3. Siril's Autostretch command brightens the faint parts the way its own
    display does. It sets the black point from the image's own background
    noise, then bends the brightness curve so the typical background lands on
    a chosen grey level. The level comes from the stack itself (see
    `sky_level`): faint targets get a lighter sky so their faint structure
    stays visible, and bright targets get a darker one.
-3. Cosmic Clarity, if it is configured, removes noise with an AI model. It
+4. Cosmic Clarity, if it is configured, removes noise with an AI model. It
    runs after the stretch, on the stretched picture. Run before the stretch,
    it lowers the noise level that Autostretch measures, so the stretch turns
    the contrast back up and the remaining noise looks as strong as before,
    with extra blotchy structure. Measured on the M 13 stack, the visible
    grain fell by only 22 percent that way, against 73 percent when the
    denoise ran after the stretch.
-4. Star toning (see `star_tone`) dims the stars in proportion to their
+5. Star toning (see `star_tone`) dims the stars in proportion to their
    brightness and compresses the brightest values below pure white. The
    stretch makes nearly every star a small white dot of about the same
    brightness. The toning brings back some of their real range. It acts on
@@ -52,6 +59,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+from astropy.io import fits
 
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.drivers.image import AstrometricsImage
@@ -152,7 +160,38 @@ def _autostretch_command(sky_level: float) -> str:
     return f"autostretch {AUTOSTRETCH_SHADOWS_CLIP_SIGMA} {sky_level:.3f}"
 
 
-def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: float) -> list[str]:
+# Siril's Remove Green Noise command. With no options it uses the "average
+# neutral" method, which limits each pixel's green to the average of its red
+# and blue, and it keeps the pixel's lightness.
+_REMOVE_GREEN_COMMAND = "rmgreen"
+
+
+def is_colour_image(path: str) -> bool:
+    """Say whether a FITS file holds a three-channel colour image.
+
+    Only the header is read.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the FITS file.
+
+    Returns
+    -------
+    is_colour : `bool`
+        `True` if the image has three colour planes. `False` for a
+        single-channel image or a file that cannot be read.
+    """
+    try:
+        header = fits.getheader(path, memmap=False)
+    except OSError, ValueError:
+        return False
+    return header.get("NAXIS", 0) == 3 and header.get("NAXIS3", 0) == 3
+
+
+def build_preview_script(
+    stacked_file_name: str, preview_stem: str, sky_level: float, remove_green: bool = False
+) -> list[str]:
     """Write the Siril commands that stretch one stack and save it.
 
     The picture is saved twice: as FITS (``processed.fits``, numbers between
@@ -170,6 +209,9 @@ def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: f
     sky_level : `float`
         The brightness, between 0 and 1, the sky should land on (see
         `sky_level.choose_sky_level`).
+    remove_green : `bool`, optional
+        Whether to remove excess green before the stretch. Only for a
+        colour image. Default `False`.
 
     Returns
     -------
@@ -179,6 +221,7 @@ def build_preview_script(stacked_file_name: str, preview_stem: str, sky_level: f
     return [
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{stacked_file_name}"',
+        *([_REMOVE_GREEN_COMMAND] if remove_green else []),
         _autostretch_command(sky_level),
         f'save "{_PROCESSED_STEM}"',
         _JPEG_ORIENTATION_COMMAND,
@@ -226,7 +269,9 @@ def build_bright_object_script(
     return commands
 
 
-def build_stretch_script(source_file_name: str, stretched_stem: str, sky_level: float) -> list[str]:
+def build_stretch_script(
+    source_file_name: str, stretched_stem: str, sky_level: float, remove_green: bool = False
+) -> list[str]:
     """Write the Siril commands that stretch an image and save it as FITS.
 
     The saved file holds the stretched picture as numbers between 0 and 1.
@@ -243,6 +288,9 @@ def build_stretch_script(source_file_name: str, stretched_stem: str, sky_level: 
         the ``.fits`` extension (Siril adds it).
     sky_level : `float`
         The brightness, between 0 and 1, the sky should land on.
+    remove_green : `bool`, optional
+        Whether to remove excess green before the stretch. Only for a
+        colour image. Default `False`.
 
     Returns
     -------
@@ -252,6 +300,7 @@ def build_stretch_script(source_file_name: str, stretched_stem: str, sky_level: 
     return [
         f"requires {_MINIMUM_SIRIL_VERSION}",
         f'load "{source_file_name}"',
+        *([_REMOVE_GREEN_COMMAND] if remove_green else []),
         _autostretch_command(sky_level),
         f'save "{stretched_stem}"',
         "close",
@@ -576,7 +625,8 @@ def _picture_script(
     """Run the cleanup steps on the scratch copy and choose the final script.
 
     The steps run in this order: GraXpert on the linear copy, then Siril's
-    stretch, then Cosmic Clarity and the star toning on the stretched copy.
+    green removal (colour stacks only) and stretch, then Cosmic Clarity and
+    the star toning on the stretched copy.
     Each of those runs only if configured, and each starts from the result of
     the step before it. With neither Cosmic Clarity nor the star toning, one
     Siril script stretches and saves the picture.
@@ -634,6 +684,10 @@ def _picture_script(
         name = flattened_name
     else:
         steps.append("GraXpert not configured")
+    remove_green = configuration.get_preview_remove_green_noise_enabled() and is_colour_image(
+        os.path.join(scratch, name)
+    )
+    steps.append("Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used")
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
@@ -656,9 +710,9 @@ def _picture_script(
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
             steps_log.extend(steps)
-        return build_preview_script(name, "preview", choice.sky_level)
+        return build_preview_script(name, "preview", choice.sky_level, remove_green)
     stretched = run_preview_script(
-        scratch, build_stretch_script(name, "stretched", choice.sky_level), siril_executable
+        scratch, build_stretch_script(name, "stretched", choice.sky_level, remove_green), siril_executable
     )
     if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
         steps.append("Siril stretch failed")

@@ -205,6 +205,16 @@ def test_star_toning_of_the_preview_can_be_turned_off(config_in_tmp_path: AppCon
     assert config.get_preview_star_tone_enabled() is False
 
 
+def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """The preview removes green from colour stacks unless switched off."""
+    config = config_in_tmp_path
+    assert config.get_preview_remove_green_noise_enabled() is True
+    config.app_config.set("Processing.Siril", "preview_remove_green_noise_enabled", "false")
+    assert config.get_preview_remove_green_noise_enabled() is False
+
+
 def test_keeping_the_previous_stack_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """A restack keeps the stack it replaces unless told not to."""
     config = config_in_tmp_path

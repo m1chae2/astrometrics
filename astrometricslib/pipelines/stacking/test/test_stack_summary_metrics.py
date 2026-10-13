@@ -126,14 +126,18 @@ def test_a_normal_imaging_stack_is_not_flagged(tmp_path: Path) -> None:
     assert not summary.stacking_metrics.zero_fraction_flagged
 
 
-def test_a_spectral_stack_with_a_dark_sky_is_not_flagged_for_zeros(tmp_path: Path) -> None:
-    """A spectral stack's sky is legitimately zero; only imaging is flagged."""
-    summary = make_summary(is_spectral=True)
+def test_a_mostly_zero_spectral_stack_is_flagged_but_a_nearly_clean_one_is_not(tmp_path: Path) -> None:
+    """A spectral stack is flagged from 5% zero pixels.
 
-    _measure_calibration_health(summary, write_stack(tmp_path / "spec.fits", 0.93), True, {})
+    Library data: clean spectra read at most 0.4%, the bad ones 32% or more.
+    """
+    flagged = make_summary(is_spectral=True)
+    _measure_calibration_health(flagged, write_stack(tmp_path / "spec_bad.fits", 0.35), True, {})
+    assert flagged.stacking_metrics.zero_fraction_flagged
 
-    assert summary.stacking_metrics.zero_pixel_fraction > 0.9
-    assert not summary.stacking_metrics.zero_fraction_flagged
+    clean = make_summary(is_spectral=True)
+    _measure_calibration_health(clean, write_stack(tmp_path / "spec_ok.fits", 0.004), True, {})
+    assert not clean.stacking_metrics.zero_fraction_flagged
 
 
 def test_the_negative_pixel_warning_from_siril_is_recorded_and_flagged(tmp_path: Path) -> None:

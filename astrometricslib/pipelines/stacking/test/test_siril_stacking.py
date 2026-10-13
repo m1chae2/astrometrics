@@ -673,3 +673,70 @@ def test_a_stack_of_one_length_still_describes_its_single_group(tmp_path: Path) 
     assert entries[0]["frames_stacked"] == 6
     assert "recommended_exposure_seconds" in diagnostics
     assert not (tmp_path / "groups").exists()
+
+
+def test_a_one_length_stack_measures_its_raw_clipping_and_is_labelled_by_its_main_exposure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A stray long frame neither renames nor hides a clipped group.
+
+    Arcturus case: clipped 0.5 s frames plus one 5 s frame read as one
+    clipped 0.5 s group.
+    """
+    frames = [_raw_frame(tmp_path, "5.0", "stray", mean=100.0)]
+    frames += [_raw_frame(tmp_path, "0.5", f"s{i}", mean=0.0) for i in range(6)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 7}])
+
+    with caplog.at_level(logging.WARNING):
+        _, diagnostics = run_siril_stack(driver, frames, "Arcturus", "Arcturus_SPEC.fits", None, True)
+
+    (entry,) = diagnostics["exposure_group_summaries"]
+    assert entry["exposure_seconds"] == pytest.approx(0.5)
+    assert entry["clipped_at_zero"] is True
+    (measured,) = diagnostics["exposure_group_frame_zero_fractions"]
+    # The stray 5 s frame is not sampled, so it cannot dilute the share.
+    assert measured["frame_zero_fraction"] > 0.4
+    assert diagnostics["clipped_exposure_groups"] == [measured]
+    assert "The 0.5 s frames" in caplog.text
+    assert "no other exposure group" in caplog.text
+
+
+def test_a_clean_one_length_stack_records_its_zero_fraction_without_a_clipped_flag(tmp_path: Path) -> None:
+    """Clean frames give an entry, no clipped group and a False flag."""
+    frames = [_raw_frame(tmp_path, "30.0", f"c{i}", mean=500.0) for i in range(6)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 6}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "M 13", "M_13_Stacked.fits", None, False)
+
+    assert diagnostics["exposure_group_summaries"][0]["clipped_at_zero"] is False
+    assert diagnostics["clipped_exposure_groups"] == []
+    assert diagnostics["exposure_group_frame_zero_fractions"][0]["frame_zero_fraction"] == pytest.approx(0.0)
+
+
+def test_a_failed_clipping_measurement_never_costs_the_one_length_stack(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unreadable frames leave the stack and give no zero fractions."""
+    frames = [_frame("30.0", f"missing_{i}") for i in range(6)]  # no files on disk
+    driver = FakeSirilDriver(tmp_path, [{"registered": 6}])
+
+    with caplog.at_level(logging.WARNING):
+        path, diagnostics = run_siril_stack(driver, frames, "M 13", "M_13_Stacked.fits", None, False)
+
+    assert path == str(tmp_path / "M_13_Stacked.fits")
+    assert "Could not measure the clipping" in caplog.text
+    assert "exposure_group_frame_zero_fractions" not in diagnostics
+    assert diagnostics["exposure_group_summaries"][0]["clipped_at_zero"] is False
+
+
+def test_the_multi_group_path_lists_every_groups_zero_fraction(tmp_path: Path) -> None:
+    """Clean and clipped groups both get a measured entry."""
+    frames = [_raw_frame(tmp_path, "0.5", f"s{i}", mean=0.0) for i in range(5)]
+    frames += [_raw_frame(tmp_path, "5.0", f"l{i}", mean=100.0) for i in range(5)]
+    driver = FakeSirilDriver(tmp_path, [{"registered": 5}, {"registered": 5}])
+
+    _, diagnostics = run_siril_stack(driver, frames, "Vega", "Vega_SPEC.fits", None, True)
+
+    measured = diagnostics["exposure_group_frame_zero_fractions"]
+    assert [entry["exposure_seconds"] for entry in measured] == [0.5, 5.0]
+    assert measured[0]["frame_zero_fraction"] > 0.4 > measured[1]["frame_zero_fraction"]

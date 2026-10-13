@@ -104,14 +104,48 @@ def is_rejected_fraction_significant(
 # 100% zero (the dark master already holds the bias and Siril subtracted the
 # bias again, measured 2026-09-21), while no other imaging stack had more than
 # 39% zero pixels (Vega L, a bright star on a dark sky; the rest had 6% or
-# fewer). 50% falls between the two groups. It is not applied to
-# spectral stacks, whose sky is legitimately at or below zero (Vega's is 93%).
+# fewer). 50% falls between the two groups. Spectral stacks have their own,
+# much lower limit (below): the 93% once quoted here for Vega's spectral stack
+# was a symptom (raw frames clipped at zero), not a normal sky.
 DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD = 0.5
+
+# The same test for spectral stacks. The stored zero pixel share of every
+# spectral stack in the library under stacks/ (17 stacks, read 2026-10-12):
+#   0% (13 stacks): Alcor, Navi, M 57, M 27, Albireo, Vega, Mirach, Mars,
+#       Mirfak, Alhena, Aldebaran, Schedar, M 13
+#   0.28%: Deneb;  0.4%: Arcturus (its raw frames are clipped, see below)
+#   32%: Sirius  (the matched dark removed the sky; a known bad stack)
+#   35%: Alnath  (every exposure group clipped at zero in the camera)
+# Clean stacks stay at or under 0.4%; the two known-bad stacks start at 32%.
+# 5% sits in that gap, more than ten times above the cleanest group's worst
+# and six times below the lowest bad one. Vega and Albireo read 0% although
+# their short raw frames are clipped, because the long groups fill in their
+# faint pixels, so this limit does NOT detect clipped raw frames: the
+# `raw_frame_clipping` gate does. Validated only on the ASI533MM Pro and the
+# Nikon D5300 stacks of this library.
+SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD = 0.05
 
 # Siril prints "many negative pixels (N%)" after subtracting the dark. In the
 # blank D5300 runs N was 99 and 100; the ASI533 runs never printed it. 50% is
 # a stack that is mostly over-subtracted.
 DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT = 50
+
+
+def zero_fraction_threshold(is_spectral: bool) -> float:
+    """Choose the zero pixel limit that applies to a stack.
+
+    Parameters
+    ----------
+    is_spectral : `bool`
+        Whether the stack is spectral.
+
+    Returns
+    -------
+    threshold : `float`
+        `SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD` for a spectral stack,
+        `DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD` for an image.
+    """
+    return SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD if is_spectral else DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD
 
 
 def is_zero_fraction_significant(

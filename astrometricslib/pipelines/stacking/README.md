@@ -35,7 +35,8 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
    | `stack_sharpness` | The stack is more than 1.2 times wider than its input frames predict | The stack is spectral or a single frame, or a width could not be measured |
    | `spectral_registration` | A frame's zero-order star moved or faded | The stack is not spectral, or the check did not run |
    | `saturated_pixel_fraction` | 0.1% or more of the stack's pixels are saturated | The saturation could not be measured |
-   | `zero_pixel_fraction` | Half or more of an image stack's pixels are exactly zero | The stack is spectral, or the file could not be read |
+   | `zero_pixel_fraction` | Half or more of an image stack's pixels are exactly zero, or 5% or more of a spectral stack's (the cleanest library spectra read 0.4% or less; the bad ones, Sirius and Alnath, 32% and 35%) | The file could not be read |
+   | `raw_frame_clipping` | The raw frames of any exposure group have more than 20% of their pixels at exactly zero (a camera offset below the read noise cuts the faint sky off). A stack where only some groups are clipped fails too; its message says the longer groups replace the faint pixels. A stack where every group is clipped cannot replace them. One-length stacks are measured as well | The raw frames could not be read |
    | `negative_pixels` | Siril warns that 50% or more of a frame went negative | Never: no warning is the measurement |
 
    Two limits are known. `gain_homogeneity` cannot see a missing gain, because a frame with no recorded gain is given the default `800`. `negative_pixels` trusts that Siril's log was read, so an unreadable log would pass.

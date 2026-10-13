@@ -404,6 +404,123 @@ def _mean_exposure(exposures: list[float | None]) -> float:
     return float(np.mean(readable)) if readable else 0.0
 
 
+def _frames_of_representative_exposure(frames: list[Any]) -> list[Any]:
+    """Pick the frames that share the most common exposure length.
+
+    Exposure lengths are compared to three significant figures, the same way
+    `split_frames_by_exposure` compares them. When two lengths are equally
+    common, the one nearest the median exposure of all the frames wins (the
+    shorter one if both are equally near).
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records (or dictionaries of them).
+
+    Returns
+    -------
+    members : `list`
+        The frames of the winning length, in their original order. Empty
+        when no frame has a readable exposure length.
+    """
+    readable = [
+        (float(f"{exposure:.3g}"), frame)
+        for frame in frames
+        if (exposure := frame_exposure_seconds(frame)) is not None
+    ]
+    if not readable:
+        return []
+    counts: dict[float, int] = defaultdict(int)
+    for key, _ in readable:
+        counts[key] += 1
+    most_frames = max(counts.values())
+    median_exposure = float(np.median([key for key, _ in readable]))
+    winner = min(
+        (key for key, count in counts.items() if count == most_frames),
+        key=lambda key: (abs(key - median_exposure), key),
+    )
+    return [frame for key, frame in readable if key == winner]
+
+
+def representative_exposure_seconds(frames: list[Any]) -> float:
+    """Name the exposure length that best describes a set of frames.
+
+    A group that `split_frames_by_exposure` could not split can still hold a
+    few frames of another length: a lone 5 s frame is added to a group of 59
+    frames of 0.5 s because a group needs at least
+    `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` frames. Reading the first frame would
+    then name the group after that stray frame, so the most common length is
+    used instead (see `_frames_of_representative_exposure` for ties).
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records (or dictionaries of them).
+
+    Returns
+    -------
+    exposure_seconds : `float`
+        The mean exposure of the frames of the most common length, in
+        seconds, or 0.0 when no frame has a readable exposure length.
+    """
+    members = _frames_of_representative_exposure(frames)
+    return _mean_exposure([frame_exposure_seconds(frame) for frame in members])
+
+
+def representative_exposure_frames(frames: list[Any]) -> list[Any]:
+    """Return the frames that have the representative exposure length.
+
+    Used to measure raw-frame clipping on the frames that make up the group,
+    not on a stray frame of another length that was added to it.
+
+    Parameters
+    ----------
+    frames : `list`
+        Frame records (or dictionaries of them).
+
+    Returns
+    -------
+    members : `list`
+        The frames of the most common length, or all the frames when none
+        has a readable exposure length.
+    """
+    return _frames_of_representative_exposure(frames) or list(frames)
+
+
+def describe_group_clipping(
+    exposures: list[float], zero_fractions: list[float]
+) -> tuple[list[dict[str, float]], list[dict[str, float]]]:
+    """Turn measured raw-frame zero fractions into diagnostics entries.
+
+    Parameters
+    ----------
+    exposures : `list` [`float`]
+        The exposure length of each group, in seconds.
+    zero_fractions : `list` [`float`]
+        The sampled zero fraction of each group's raw frames (see
+        `measure_group_frames`).
+
+    Returns
+    -------
+    measured : `list` [`dict`]
+        One ``{"exposure_seconds", "frame_zero_fraction"}`` entry per group.
+    clipped : `list` [`dict`]
+        The entries above `CLIPPED_FRAME_ZERO_FRACTION`.
+    """
+    measured = [
+        {"exposure_seconds": float(exposure), "frame_zero_fraction": round(float(zero_fraction), 3)}
+        for exposure, zero_fraction in zip(exposures, zero_fractions, strict=True)
+    ]
+    # Judged on the unrounded value, the same as the clipped flag of the
+    # group's summary entry.
+    clipped = [
+        entry
+        for entry, zero_fraction in zip(measured, zero_fractions, strict=True)
+        if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
+    ]
+    return measured, clipped
+
+
 def stack_data_fraction(image: np.ndarray) -> float:
     """Measure how much of a stacked image holds data.
 

@@ -26,6 +26,7 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     SATURATION_MASK_FRACTION_OF_CEILING,
     ExposureGroup,
     combine_exposure_group_images,
+    describe_group_clipping,
     estimate_background_noise,
     estimate_group_gains,
     estimate_saturation_mask_level,
@@ -35,6 +36,8 @@ from astrometricslib.pipelines.stacking.processing.exposure_groups import (
     measure_group_frames,
     merge_registration_sequences,
     merge_rejection_maps,
+    representative_exposure_frames,
+    representative_exposure_seconds,
     saturated_pixel_mask,
     split_frames_by_exposure,
     split_groups_by_night,
@@ -795,3 +798,44 @@ def test_the_saturated_mask_needs_an_image() -> None:
     """With no images there is nothing to mark."""
     with pytest.raises(InvalidArgumentError, match="At least one image"):
         saturated_pixel_mask([])
+
+
+def test_a_lone_longer_frame_does_not_rename_the_group() -> None:
+    """Arcturus: 59 frames at 0.5 s and one at 5 s read as 0.5 s, not 5 s."""
+    frames = _frames("5.0", *(["0.5"] * 59))
+
+    assert len(split_frames_by_exposure(frames)) == 1
+    assert frame_exposure_seconds(frames[0]) == pytest.approx(5.0)  # what the old label read
+    assert representative_exposure_seconds(frames) == pytest.approx(0.5)
+    assert len(representative_exposure_frames(frames)) == 59
+
+
+def test_a_tie_between_exposure_lengths_goes_to_the_one_nearest_the_median() -> None:
+    """A tie between lengths goes to the one nearest the median.
+
+    On a draw the shorter length wins.
+    """
+    assert representative_exposure_seconds(
+        _frames("1.0", "1.0", "2.0", "2.0", "3.0", "3.0")
+    ) == pytest.approx(2.0)
+    assert representative_exposure_seconds(_frames("2.0", "10.0")) == pytest.approx(2.0)
+
+
+def test_the_representative_exposure_ignores_unreadable_frames() -> None:
+    """Frames without a readable exposure are skipped.
+
+    With none readable the answer is 0 and all frames are returned.
+    """
+    frames = _frames(None, "abc", "30.0", "30.0")
+    assert representative_exposure_seconds(frames) == pytest.approx(30.0)
+    unreadable = _frames(None, "abc")
+    assert representative_exposure_seconds(unreadable) == pytest.approx(0.0)
+    assert representative_exposure_frames(unreadable) == unreadable
+
+
+def test_describe_group_clipping_lists_every_group_and_the_clipped_ones() -> None:
+    """Every group gets an entry; only those above the limit are clipped."""
+    measured, clipped = describe_group_clipping([0.5, 5.0], [0.7123, CLIPPED_FRAME_ZERO_FRACTION])
+
+    assert [entry["frame_zero_fraction"] for entry in measured] == [0.712, CLIPPED_FRAME_ZERO_FRACTION]
+    assert clipped == [{"exposure_seconds": 0.5, "frame_zero_fraction": 0.712}]

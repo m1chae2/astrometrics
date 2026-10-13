@@ -54,6 +54,7 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "spectral_registration": ALL_THREE,
         "saturated_pixel_fraction": ALL_THREE,
         "zero_pixel_fraction": ALL_THREE,
+        "raw_frame_clipping": ALL_THREE,
         # No Siril warning is the measurement, so it is never "not checked".
         "negative_pixels": frozenset({PASSED, FAILED}),
     },

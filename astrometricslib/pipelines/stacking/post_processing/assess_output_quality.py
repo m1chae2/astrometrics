@@ -21,7 +21,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     DEFAULT_FWHM_DEGRADATION_RATIO,
     DEFAULT_NEGATIVE_PIXEL_FLAG_PERCENT,
     DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD,
-    DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
+    zero_fraction_threshold,
 )
 
 REJECTED_GATE_NAME = "rejected_pixel_fraction"
@@ -180,40 +180,35 @@ def output_quality_gates(
             )
         )
 
-    zero_source = "validated on the Nikon D5300 blank stacks; images only"
-    if metrics.is_spectral:
-        gates.append(
-            unchecked_gate(
-                ZERO_FRACTION_GATE_NAME,
-                "a spectral stack's sky is legitimately at or below zero",
-                zero_source,
-            )
-        )
-    elif metrics.zero_pixel_fraction is None:
+    zero_source = (
+        "validated on the Nikon D5300 blank stacks (images, 50%) and the 17 spectral stacks of the "
+        "library, 2026-10-12 (spectra, 5%)"
+    )
+    zero_limit = zero_fraction_threshold(metrics.is_spectral)
+    if metrics.zero_pixel_fraction is None:
         gates.append(
             unchecked_gate(
                 ZERO_FRACTION_GATE_NAME, "the stack file could not be read to count zero pixels", zero_source
             )
         )
     elif metrics.zero_fraction_flagged:
+        cause = (
+            "calibration removed more than the sky or the raw frames are clipped at zero"
+            if metrics.is_spectral
+            else "calibration removed more than the sky (blank stack)"
+        )
         gates.append(
             failed_gate(
                 ZERO_FRACTION_GATE_NAME,
-                f"{metrics.zero_pixel_fraction:.0%} of the stack's pixels are exactly zero: "
-                "calibration removed more than the sky (blank stack)",
+                f"{metrics.zero_pixel_fraction:.0%} of the stack's pixels are exactly zero: {cause}",
                 metrics.zero_pixel_fraction,
-                DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
+                zero_limit,
                 zero_source,
             )
         )
     else:
         gates.append(
-            passed_gate(
-                ZERO_FRACTION_GATE_NAME,
-                metrics.zero_pixel_fraction,
-                DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
-                zero_source,
-            )
+            passed_gate(ZERO_FRACTION_GATE_NAME, metrics.zero_pixel_fraction, zero_limit, zero_source)
         )
 
     negative_source = "Siril's own 'many negative pixels' warning"

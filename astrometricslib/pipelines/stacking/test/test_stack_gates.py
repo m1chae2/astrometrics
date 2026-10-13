@@ -19,11 +19,18 @@ from astrometricslib.models.quality_summary import ExcludedFrame, StackingPipeli
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
 from astrometricslib.pipelines.stacking.post_processing import assess_output_quality as aoq
+from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
+    RAW_FRAME_CLIPPING_GATE_NAME,
+    raw_frame_clipping_gate,
+)
 from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
+    DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD,
+    SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD,
     is_negative_pixel_percent_significant,
     is_rejected_fraction_significant,
     is_stacked_fwhm_degraded,
     is_zero_fraction_significant,
+    zero_fraction_threshold,
 )
 from astrometricslib.pipelines.stacking.pre_processing import flat_calibration
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
@@ -37,6 +44,7 @@ from astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity import 
     find_dominant_gain_subset,
     gain_homogeneity_gate,
 )
+from astrometricslib.pipelines.stacking.processing.exposure_groups import CLIPPED_FRAME_ZERO_FRACTION
 from astrometricslib.pipelines.stacking.test.test_flat_calibration import write_flat
 
 
@@ -364,7 +372,7 @@ def test_saturation_gate_goes_red_and_green() -> None:
 
 
 def test_zero_fraction_gate_goes_red_on_a_blank_stack_and_skips_spectra() -> None:
-    """A 99% zero image fails; a spectrum with 93% zero is not judged."""
+    """A 99% zero image fails and a 6% zero image passes."""
     image = make_metrics()
     image.zero_pixel_fraction = 0.99
     image.zero_fraction_flagged = is_zero_fraction_significant(0.99)
@@ -374,9 +382,113 @@ def test_zero_fraction_gate_goes_red_on_a_blank_stack_and_skips_spectra() -> Non
     image.zero_fraction_flagged = is_zero_fraction_significant(0.06)
     assert output_gates(image)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.PASSED
 
+
+def test_spectral_zero_fraction_gate_uses_its_own_limit() -> None:
+    """Spectra are judged at 5% zero pixels, not the 50% of images.
+
+    Library data: clean spectra read at most 0.4%, Sirius 32%, Alnath 35%.
+    """
+    for clean_fraction in (0.0, 0.0028, 0.004):
+        spectrum = make_metrics(is_spectral=True)
+        spectrum.zero_pixel_fraction = clean_fraction
+        spectrum.zero_fraction_flagged = is_zero_fraction_significant(
+            clean_fraction, zero_fraction_threshold(True)
+        )
+        assert output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.PASSED
+
+    for bad_fraction in (0.3235, 0.3503):
+        spectrum = make_metrics(is_spectral=True)
+        spectrum.zero_pixel_fraction = bad_fraction
+        spectrum.zero_fraction_flagged = is_zero_fraction_significant(
+            bad_fraction, zero_fraction_threshold(True)
+        )
+        gate = output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME]
+        assert gate.status is GateStatus.FAILED
+        assert gate.limit == SPECTRAL_ZERO_FRACTION_FLAG_THRESHOLD
+
+    # An image stack keeps the 50% limit: 35% zero is not a blank image.
+    assert zero_fraction_threshold(False) == pytest.approx(DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD)
+    assert DEFAULT_ZERO_FRACTION_FLAG_THRESHOLD == pytest.approx(0.5)
+    assert not is_zero_fraction_significant(0.35, zero_fraction_threshold(False))
+
+
+def test_spectral_zero_fraction_gate_is_not_checked_when_unmeasured() -> None:
+    """A spectral stack whose file could not be read is not a pass."""
     spectrum = make_metrics(is_spectral=True)
-    spectrum.zero_pixel_fraction = 0.93
     assert output_gates(spectrum)[aoq.ZERO_FRACTION_GATE_NAME].status is GateStatus.NOT_CHECKED
+
+
+def _zero_fraction_entries(*pairs: tuple[float, float]) -> dict:
+    """Build diagnostics holding measured raw-frame zero fractions.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        Diagnostics with one entry per (exposure, zero fraction) pair.
+    """
+    return {
+        "exposure_group_frame_zero_fractions": [
+            {"exposure_seconds": exposure, "frame_zero_fraction": fraction} for exposure, fraction in pairs
+        ]
+    }
+
+
+def test_raw_frame_clipping_gate_passes_when_no_group_is_clipped() -> None:
+    """Clean groups pass, with the largest zero share as the value."""
+    gate = raw_frame_clipping_gate(_zero_fraction_entries((2.0, 0.01), (5.0, 0.0)))
+    assert gate.status is GateStatus.PASSED
+    assert gate.measured_value == pytest.approx(0.01)
+    assert gate.limit == CLIPPED_FRAME_ZERO_FRACTION
+
+
+def test_raw_frame_clipping_gate_fails_softly_when_longer_groups_can_replace_the_pixels() -> None:
+    """Some groups clipped: fails, and says the longer groups fill in."""
+    gate = raw_frame_clipping_gate(_zero_fraction_entries((0.5, 0.71), (5.0, 0.0)))
+    assert gate.status is GateStatus.FAILED
+    assert gate.measured_value == pytest.approx(0.71)
+    assert "longer groups replace the faint pixels" in gate.detail
+    assert "0.5 s exposure group" in gate.detail
+    assert "5 s exposure group" not in gate.detail.replace("0.5 s", "")
+
+
+def test_raw_frame_clipping_gate_fails_hard_when_every_group_is_clipped() -> None:
+    """The Alnath case: nothing can replace the faint pixels."""
+    gate = raw_frame_clipping_gate(_zero_fraction_entries((0.1, 0.92), (0.25, 0.85), (1.02, 0.34)))
+    assert gate.name == RAW_FRAME_CLIPPING_GATE_NAME
+    assert gate.status is GateStatus.FAILED
+    assert "nothing can replace the faint pixels" in gate.detail
+    assert gate.measured_value == pytest.approx(0.92)
+
+
+def test_raw_frame_clipping_gate_is_not_checked_without_a_measurement() -> None:
+    """No measured list (or an empty one) is not a pass."""
+    assert raw_frame_clipping_gate({}).name == RAW_FRAME_CLIPPING_GATE_NAME
+    assert raw_frame_clipping_gate({}).status is GateStatus.NOT_CHECKED
+    assert (
+        raw_frame_clipping_gate({"exposure_group_frame_zero_fractions": []}).status is GateStatus.NOT_CHECKED
+    )
+
+
+def test_a_summary_with_clipped_raw_frames_is_flagged_by_the_gate() -> None:
+    """The stage records the failed gate and its sentence as a flag reason."""
+    from astrometricslib.pipelines.stacking import stage
+
+    frames = [make_frame(index, "100", 100.0) for index in range(10)]
+    summary = stage._build_stack_quality_summary(
+        target=type("TargetStub", (), {"id": "Alnath", "frames": frames})(),
+        is_spectral=True,
+        frames_submitted=10,
+        target_frames=frames,
+        excluded_frames=[],
+        diagnostics=_zero_fraction_entries((0.1, 0.92)),
+        background_split=None,
+        stacked_path=None,
+        gate_results=[],
+    )
+
+    assert summary.gate(RAW_FRAME_CLIPPING_GATE_NAME).status is GateStatus.FAILED
+    assert summary.flagged
+    assert any("clipped at zero" in reason for reason in summary.flag_reasons)
 
 
 def test_negative_pixel_gate_goes_red_on_siril_warning() -> None:
@@ -433,5 +545,6 @@ def test_the_real_builder_records_every_stacking_gate() -> None:
         aoq.SATURATION_GATE_NAME,
         aoq.ZERO_FRACTION_GATE_NAME,
         aoq.NEGATIVE_PIXELS_GATE_NAME,
+        RAW_FRAME_CLIPPING_GATE_NAME,
     }
     assert summary.flagged is False

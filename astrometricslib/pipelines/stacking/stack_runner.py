@@ -394,16 +394,31 @@ def _keep_only(kept_path: str, all_paths: list[str], output_file: str) -> None:
 def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stacked_path: str) -> None:
     """Add the group entry and recommended exposure of a one-length stack.
 
-    Measuring saturation reads a few raw frames; a failure there must never
-    cost the stack, so problems are logged and the entry is left without a
-    saturation reading.
+    A set of frames that `split_frames_by_exposure` left as one group is
+    almost always one exposure length, but it can also hold a few frames of
+    another length that were too few to form a group of their own. The group
+    is named after the most common length (`representative_exposure_seconds`).
+
+    Two measurements read raw frames: saturation, and the share of pixels at
+    exactly zero (a frame clipped at zero cannot show the faint sky, see
+    `CLIPPED_FRAME_ZERO_FRACTION`). The zero share reads
+    `FRAMES_SAMPLED_PER_GROUP` frames of the representative length, so it
+    costs the same as one group of a multi-length stack. A failure in either
+    measurement must never cost the stack, so problems are logged and the
+    entry is left without that reading (and the stack's raw-clipping gate is
+    then "not checked").
 
     Parameters
     ----------
     frames : `list`
-        The frames that were stacked (all of one exposure length).
+        The frames that were stacked (one exposure length, give or take a
+        few strays).
     diagnostics : `dict`
-        The run's diagnostics, added to in place.
+        The run's diagnostics, added to in place. Gets
+        ``"exposure_group_summaries"``, ``"recommended_exposure_seconds"``,
+        and, when the zero share was measured,
+        ``"exposure_group_frame_zero_fractions"`` and
+        ``"clipped_exposure_groups"``.
     stacked_path : `str`
         The stack, recorded as the group's path.
     """
@@ -412,16 +427,56 @@ def _describe_single_group(frames: list[Any], diagnostics: dict[str, Any], stack
         measure_group_saturation,
         recommended_exposure_for_groups,
     )
-    from astrometricslib.pipelines.stacking.processing.exposure_groups import frame_exposure_seconds
+    from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+        CLIPPING_FLOOR_SIGMAS,
+        ExposureGroup,
+        describe_group_clipping,
+        measure_group_frames,
+        representative_exposure_frames,
+        representative_exposure_seconds,
+    )
 
-    exposure = next((value for value in map(frame_exposure_seconds, frames) if value is not None), 0.0)
+    exposure = representative_exposure_seconds(frames)
     try:
         saturation = measure_group_saturation(frames)
     except (*FITS_READ_ERRORS, *DATA_ERRORS) as measurement_error:  # a measurement must not cost the stack
         logger.warning("Could not measure saturation for '%s': %s", stacked_path, measurement_error)
         saturation = []
+
+    clipped_at_zero = False
+    try:
+        _, zero_fractions = measure_group_frames([
+            ExposureGroup(exposure, representative_exposure_frames(frames))
+        ])
+    except (*FITS_READ_ERRORS, *DATA_ERRORS) as measurement_error:  # a measurement must not cost the stack
+        logger.warning(
+            "Could not measure the clipping of the raw frames of '%s': %s", stacked_path, measurement_error
+        )
+    else:
+        measured, clipped = describe_group_clipping([exposure], zero_fractions)
+        diagnostics["exposure_group_frame_zero_fractions"] = measured
+        diagnostics["clipped_exposure_groups"] = clipped
+        clipped_at_zero = bool(clipped)
+        for entry in clipped:
+            # There is no other exposure group to take the faint pixels from.
+            logger.warning(
+                "The %g s frames of '%s' are clipped at zero (%.0f%% of pixels), and the stack has no "
+                "other exposure group to take its faint pixels from (a pixel less than %g frame noises "
+                "above zero reads too high). Longer exposures or a higher camera offset avoid this.",
+                entry["exposure_seconds"],
+                stacked_path,
+                100 * entry["frame_zero_fraction"],
+                CLIPPING_FLOOR_SIGMAS,
+            )
     diagnostics["exposure_group_summaries"] = [
-        build_group_summary(exposure, frames, diagnostics, saturation, stack_path=stacked_path)
+        build_group_summary(
+            exposure,
+            frames,
+            diagnostics,
+            saturation,
+            stack_path=stacked_path,
+            clipped_at_zero=clipped_at_zero,
+        )
     ]
     diagnostics["recommended_exposure_seconds"] = recommended_exposure_for_groups([exposure], [saturation])
 
@@ -458,7 +513,9 @@ def _stack_exposure_groups(
         ``"exposure_group_summaries"`` list (one entry per exposure length,
         including any left out), a
         ``"recommended_exposure_seconds"``, and a ``"clipped_exposure_groups"``
-        list of the groups whose raw frames are clipped at zero.
+        list of the groups whose raw frames are clipped at zero, and an
+        ``"exposure_group_frame_zero_fractions"`` list with every group's
+        measured zero fraction (empty when the frames could not be read).
     """
     import numpy as np
 
@@ -475,6 +532,7 @@ def _stack_exposure_groups(
         CLIPPED_FRAME_ZERO_FRACTION,
         CLIPPING_FLOOR_SIGMAS,
         combine_exposure_group_images,
+        describe_group_clipping,
         measure_exposure_group_gains,
         measure_group_frames,
         merge_registration_sequences,
@@ -557,6 +615,7 @@ def _stack_exposure_groups(
                     target_id,
                 )
 
+    zero_fractions_measured = True
     try:
         frame_noises, frame_zero_fractions = measure_group_frames(kept_groups)
     except OSError as read_error:
@@ -568,11 +627,12 @@ def _stack_exposure_groups(
         )
         frame_noises = [1.0] * len(kept_groups)
         frame_zero_fractions = [0.0] * len(kept_groups)
-    clipped_groups = [
-        {"exposure_seconds": group.exposure_seconds, "frame_zero_fraction": round(float(zero_fraction), 3)}
-        for group, zero_fraction in zip(kept_groups, frame_zero_fractions, strict=True)
-        if zero_fraction > CLIPPED_FRAME_ZERO_FRACTION
-    ]
+        zero_fractions_measured = False
+    measured_zero_fractions, clipped_groups = describe_group_clipping(exposures, frame_zero_fractions)
+    if not zero_fractions_measured:
+        # The zeros above are stand-ins, not measurements: the raw-clipping
+        # gate must read "not checked", not "passed".
+        measured_zero_fractions = []
     for entry in clipped_groups:
         logger.warning(
             "The %g s frames of '%s' are clipped at zero (%.0f%% of pixels): where a pixel is less than "
@@ -772,6 +832,7 @@ def _stack_exposure_groups(
 
     merged_diagnostics = _merge_diagnostics([results[index] for index in used])
     merged_diagnostics["clipped_exposure_groups"] = clipped_groups
+    merged_diagnostics["exposure_group_frame_zero_fractions"] = measured_zero_fractions
     merged_diagnostics["exposure_group_summaries"] = summaries
     if stacked_fwhm is not None:
         merged_diagnostics["stacked_fwhm_px"] = stacked_fwhm

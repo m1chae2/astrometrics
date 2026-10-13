@@ -30,6 +30,7 @@ from astrometricslib.pipelines.stacking.post_processing.exposure_saturation impo
     recommend_stack_exposure_seconds,
 )
 from astrometricslib.pipelines.stacking.processing.exposure_groups import (
+    CLIPPED_FRAME_ZERO_FRACTION,
     FRAMES_SAMPLED_PER_GROUP,
     GroupGainMeasurement,
 )
@@ -43,6 +44,7 @@ GROUPS_FOLDER_NAME = "groups"
 # The name of the gate that checks that each group's brightness is one scale
 # factor of the reference group's (see `exposure_group_linearity_gate`).
 EXPOSURE_GROUP_LINEARITY_GATE_NAME = "exposure_group_linearity"
+RAW_FRAME_CLIPPING_GATE_NAME = "raw_frame_clipping"
 
 
 def _attribute(frame: Any, name: str) -> Any:
@@ -224,6 +226,74 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
         EXPOSURE_GROUP_LINEARITY_GATE_NAME,
         measured_value=max(float(group["gain_disagreement"]) for group in compared),
         limit=tolerance,
+        limit_source=limit_source,
+    )
+
+
+def raw_frame_clipping_gate(diagnostics: dict[str, Any]) -> GateResult:
+    """Judge whether the raw frames of the stack are clipped at zero.
+
+    A frame taken at a camera offset below its read noise cannot show the
+    negative side of the noise, so a share of its pixels read exactly zero and
+    the faint sky above them reads too high (see `CLIPPED_FRAME_ZERO_FRACTION`
+    for the measurements). The share is measured on a few raw frames of every
+    exposure group (see `measure_group_frames`). A stack of several exposure
+    groups takes the faint pixels of a clipped group from the groups that are
+    not clipped; a stack with no such group cannot.
+
+    The gate framework has only passed, failed and not checked, so a stack
+    where some but not all groups are clipped fails too. Its sentence says
+    that the longer groups replace the faint pixels, so a reader can tell it
+    from the case with nothing to replace them.
+
+    Parameters
+    ----------
+    diagnostics : `dict`
+        The stacking run's diagnostics. The measured zero shares are read from
+        ``"exposure_group_frame_zero_fractions"``: a list of
+        ``{"exposure_seconds", "frame_zero_fraction"}`` entries, one per
+        stacked group.
+
+    Returns
+    -------
+    result : `GateResult`
+        Not checked when no zero share was measured. Passed when no group is
+        above `CLIPPED_FRAME_ZERO_FRACTION`. Failed otherwise. The measured
+        value is the largest zero share of any group.
+    """
+    limit_source = (
+        "share of raw pixels at exactly zero; 0.2 sits between the clipped 1 s and the clean 2 s "
+        "groups of the Vega session (ASI533MM Pro, offset 0)"
+    )
+    measured = diagnostics.get("exposure_group_frame_zero_fractions") or []
+    if not measured:
+        return unchecked_gate(
+            RAW_FRAME_CLIPPING_GATE_NAME,
+            "the raw frames could not be read to count their zero pixels",
+            limit_source,
+        )
+    largest = max(float(entry["frame_zero_fraction"]) for entry in measured)
+    clipped = [
+        entry for entry in measured if float(entry["frame_zero_fraction"]) > CLIPPED_FRAME_ZERO_FRACTION
+    ]
+    if not clipped:
+        return passed_gate(RAW_FRAME_CLIPPING_GATE_NAME, largest, CLIPPED_FRAME_ZERO_FRACTION, limit_source)
+    exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped)
+    if len(clipped) == len(measured):
+        detail = (
+            f"raw frames clipped at zero in the {exposures} exposure group(s), up to {largest:.0%} of "
+            "pixels: every group is clipped, so nothing can replace the faint pixels, which read too high"
+        )
+    else:
+        detail = (
+            f"raw frames clipped at zero in the {exposures} exposure group(s), up to {largest:.0%} of "
+            "pixels: the longer groups replace the faint pixels of the clipped ones"
+        )
+    return failed_gate(
+        RAW_FRAME_CLIPPING_GATE_NAME,
+        detail,
+        measured_value=largest,
+        limit=CLIPPED_FRAME_ZERO_FRACTION,
         limit_source=limit_source,
     )
 

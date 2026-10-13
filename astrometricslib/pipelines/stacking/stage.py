@@ -1242,6 +1242,7 @@ def _measure_calibration_health(
     from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
         is_negative_pixel_percent_significant,
         is_zero_fraction_significant,
+        zero_fraction_threshold,
     )
 
     metrics = summary.stacking_metrics
@@ -1257,8 +1258,8 @@ def _measure_calibration_health(
         metrics.zero_pixel_fraction = max(
             float(np.count_nonzero(plane == 0) / plane.size) for plane in planes
         )
-        metrics.zero_fraction_flagged = (not is_spectral) and is_zero_fraction_significant(
-            metrics.zero_pixel_fraction
+        metrics.zero_fraction_flagged = is_zero_fraction_significant(
+            metrics.zero_pixel_fraction, zero_fraction_threshold(is_spectral)
         )
     negative_percent = diagnostics.get("negative_pixel_max_percent")
     if negative_percent is not None:
@@ -1360,6 +1361,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         exposure_group_linearity_gate,
+        raw_frame_clipping_gate,
     )
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
 
@@ -1367,13 +1369,15 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         diagnostics.get("exposure_group_summaries", []),
         get_configuration().get_exposure_group_gain_tolerance(),
     )
-    for gate_result in [*(gate_results or []), *calibration_gates(diagnostics), linearity_gate]:
+    # The raw-clipping gate carries the sentence that used to be appended to
+    # the flag reasons here; `record_gate` adds it for a failed gate.
+    for gate_result in [
+        *(gate_results or []),
+        *calibration_gates(diagnostics),
+        linearity_gate,
+        raw_frame_clipping_gate(diagnostics),
+    ]:
         summary.record_gate(gate_result)
-    clipped_groups = diagnostics.get("clipped_exposure_groups", [])
-    if clipped_groups:
-        exposures = ", ".join(f"{entry['exposure_seconds']:g} s" for entry in clipped_groups)
-        summary.flag_reasons.append(f"raw frames clipped at zero in the {exposures} exposure group(s)")
-        summary.flagged = True
 
     from astrometricslib.pipelines.shared.applied_camera_profile import (
         most_common_camera_name,

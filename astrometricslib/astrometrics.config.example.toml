@@ -345,6 +345,13 @@ preview_star_tone_enabled = "true"
 # touched, and the stack file itself is never changed. Set "false" to leave
 # the colour balance alone.
 preview_remove_green_noise_enabled = "true"
+# "true" (the default): the stack preview of a colour stack first balances its
+# colours from its own stars: each channel's sky level is subtracted, and red
+# and blue are scaled so the median star comes out neutral. Without it, stars
+# look green and galaxies nearly colourless. Single-channel stacks are never
+# touched, and the stack file itself is never changed. Set "false" to leave
+# the colours as the camera recorded them.
+preview_colour_calibration_enabled = "true"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be
 # compared. Only one previous version is kept; the next restack replaces it.

@@ -73,6 +73,7 @@ def _configure(
     strength: float = 1.0,
     star_tone: bool = False,
     remove_green: bool = True,
+    colour_calibration: bool = False,
 ) -> None:
     """Give the module the commands for Siril, GraXpert and Cosmic Clarity.
 
@@ -90,6 +91,7 @@ def _configure(
             get_cosmic_clarity_denoise_strength=lambda: strength,
             get_preview_star_tone_enabled=lambda: star_tone,
             get_preview_remove_green_noise_enabled=lambda: remove_green,
+            get_preview_colour_calibration_enabled=lambda: colour_calibration,
         ),
     )
 
@@ -378,7 +380,8 @@ def test_the_log_lists_every_step_that_ran(
     assert "Star toning finished; the preview uses its result." in messages
     summary = next(message for message in messages if message.startswith("Preview steps:"))
     assert summary == (
-        "Preview steps: GraXpert done; Remove Green Noise not used; Siril stretch done; "
+        "Preview steps: GraXpert done; Colour calibration not used; Remove Green Noise not used; "
+        "Siril stretch done; "
         "Cosmic Clarity done; Star toning done."
     )
 
@@ -1042,3 +1045,76 @@ def test_the_stretch_before_the_denoise_also_gets_green_removal(
     write_stack_preview(str(stack))
 
     assert "rmgreen" in programs.siril_calls[0][1]
+
+
+def _write_colour_stack_with_stars(path: Path, star_count: int = 120) -> None:
+    """Write a colour FITS with enough stars for the colour calibration."""
+    rng = np.random.default_rng(7)
+    size = 300
+    y, x = np.mgrid[0:size, 0:size]
+    image = np.zeros((3, size, size))
+    for _ in range(star_count):
+        cx, cy = rng.uniform(20, size - 20, 2)
+        shape = 10 ** rng.uniform(-2.3, -1.0) * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * 1.4**2))
+        image += shape * np.array([0.6, 1.0, 0.7])[:, None, None]
+    image += np.array([0.004, 0.008, 0.005])[:, None, None] + rng.normal(0, 0.0004, image.shape)
+    fits.writeto(path, image.astype(np.float32), overwrite=True)
+
+
+def test_the_linked_stretch_is_asked_for_only_when_wanted() -> None:
+    """Verify the shared stretch adds `-linked`, and nothing else does."""
+    separate = build_preview_script("a.fits", "a_preview", 0.2)
+    shared = build_preview_script("a.fits", "a_preview", 0.2, linked=True)
+
+    assert "autostretch -2.8 0.200" in separate
+    assert "autostretch -linked -2.8 0.200" in shared
+    assert "autostretch -linked -2.8 0.200" in build_stretch_script("a.fits", "s", 0.2, linked=True)
+
+
+def test_a_calibrated_colour_stack_is_stretched_with_one_shared_stretch(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify calibrated colours get one stretch for all channels."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    commands = programs.siril_calls[0][1]
+    assert 'load "colour.fits"' in commands
+    assert any(command.startswith("autostretch -linked") for command in commands)
+
+
+def test_without_colour_calibration_the_channels_are_stretched_apart(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the old per-channel stretch stays when calibration is off."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=False)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    commands = programs.siril_calls[0][1]
+    assert 'load "stack.fits"' in commands
+    assert not any("-linked" in command for command in commands)
+
+
+def test_a_failed_colour_calibration_keeps_the_picture_and_the_separate_stretch(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify too few stars leaves the stack alone and the stretch apart."""
+    _write_colour_stack_with_stars(stack, star_count=3)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    picture = write_stack_preview(str(stack))
+
+    assert picture is not None
+    commands = programs.siril_calls[0][1]
+    assert 'load "stack.fits"' in commands
+    assert not any("-linked" in command for command in commands)

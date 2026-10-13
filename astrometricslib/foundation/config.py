@@ -417,6 +417,7 @@ class AppConfiguration:
                 "quarantine_bad_frames_enabled": "true",
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
+                "preview_colour_calibration_enabled": "true",
                 "keep_previous_stack_enabled": "true",
                 "trim_noisy_stack_edges_enabled": "true",
                 "skip_unchanged_stacks_enabled": "true",
@@ -891,6 +892,23 @@ class AppConfiguration:
             `True` if the star toning step should run.
         """
         val = self.get_value("Processing.Siril", "preview_star_tone_enabled", fallback="true")
+        return str(val).lower() == "true"
+
+    def get_preview_colour_calibration_enabled(self) -> bool:
+        """Return whether the stack preview balances a colour stack's colours.
+
+        When on, the preview of a colour stack subtracts each channel's sky
+        level and scales red and blue so that the median star is neutral
+        (see `pipelines/stacking/post_processing/colour_calibration.py`).
+        A single-channel stack is never touched, and the stack itself is
+        never changed.
+
+        Returns
+        -------
+        enabled : `bool`
+            `True` if the colour calibration step should run.
+        """
+        val = self.get_value("Processing.Siril", "preview_colour_calibration_enabled", fallback="true")
         return str(val).lower() == "true"
 
     def get_preview_remove_green_noise_enabled(self) -> bool:

@@ -31,6 +31,9 @@ from scipy.spatial import cKDTree
 from skimage.registration import phase_cross_correlation
 
 from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.pipelines.stacking.processing.star_pattern_candidates import (
+    candidate_similarity_transforms,
+)
 
 # Structure wider than this many pixels (background gradients, nebulosity) is
 # removed before the offset is measured, so stars decide it. Stars in these
@@ -233,6 +236,35 @@ REFINEMENT_MAX_SCALE_DEVIATION = 0.005
 # their partners (root mean square). The three real pairs left 0.05 to 0.06 px.
 REFINEMENT_MAX_RESIDUAL_PIXELS = 0.5
 
+# Star-pattern matching (`find_alignment_from_star_patterns`) finds the move
+# with no first guess, so it also finds moves that correlation cannot. Measured
+# on the real group stacks of 2026-10-13, where correlation had failed
+# (0.01 to 0.26): M 106 (turn -0.40 degrees), NGC 7023 (+0.16), M 51 300 s
+# (-6.28), NGC 2024 (-179.59) and NGC 6992 (+179.53) -- the last two are the
+# 180 degree flip of a German equatorial mount at the meridian. Scales were
+# 0.9996 to 1.0014. So any rotation is allowed, but the scale limit
+# (`REFINEMENT_MAX_SCALE_DEVIATION`, 0.005, about 3.5 times the largest scale
+# seen) and the residual limit (`REFINEMENT_MAX_RESIDUAL_PIXELS`) still apply.
+# This many rounds of pair-and-fit follow the best guess, each pairing the
+# stars again with the improved fit (a guess from three stars is off by a few
+# pixels at the frame edge; one round usually fixes it).
+PATTERN_REFIT_PASSES = 3
+
+# The leftover allowed after a star-pattern match is looser than
+# `REFINEMENT_MAX_RESIDUAL_PIXELS`. The refinement starts from a correlation
+# shift, which only exists when the stacks are alike. A pattern match is
+# checked by many stars instead, so a loose leftover does not make it doubtful:
+# a chance match of 30 or more stars within 3 px is not credible among 400
+# stars on 24 million pixels, and the fit error is the leftover divided by the
+# square root of the pair count. Leftovers measured on the 2026-10-13 pairs:
+# 0.13 px (NGC 7023, 249 pairs), 0.31 (NGC 2024, 350; NGC 6992, 193), 0.44
+# (M 106, 249) and 1.20 (M 51 300 s, 223). M 106's leftover is smooth lens
+# distortion (a quadratic fit leaves 0.05 px, so edge stars are about 1 px
+# off); M 51 300 s's is random scatter of the star centres (the four halves of
+# the frame agree to under 0.1 px), a soft stack, not a poor fit. 1.5 px is
+# just over the largest seen. It stays far under the 3 px pairing radius.
+PATTERN_MAX_RESIDUAL_PIXELS = 1.5
+
 
 @dataclass
 class AlignmentResult:
@@ -266,6 +298,11 @@ class AlignmentResult:
     residual_pixels : `float` or `None`
         How far the matched stars still lie from their partners after the
         move (root mean square), when the refinement ran.
+    is_star_pattern : `bool`
+        `True` when the move was found by matching patterns of stars with no
+        first guess (see `find_alignment_from_star_patterns`). Such a move is
+        trusted without the correlation test, since it was checked against
+        every star and left them close to their partners.
 
     Notes
     -----
@@ -281,6 +318,7 @@ class AlignmentResult:
     scale: float = 1.0
     star_pairs: int = 0
     residual_pixels: float | None = None
+    is_star_pattern: bool = False
 
     @property
     def has_rotation_or_scale(self) -> bool:
@@ -300,10 +338,10 @@ class AlignmentResult:
         Returns
         -------
         trusted : `bool`
-            `True` for a star-based offset, otherwise `True` at or above
-            `MINIMUM_ALIGNMENT_CORRELATION`.
+            `True` for a star-based offset or a star-pattern match, otherwise
+            `True` at or above `MINIMUM_ALIGNMENT_CORRELATION`.
         """
-        return self.is_star_based or self.correlation >= MINIMUM_ALIGNMENT_CORRELATION
+        return self.is_star_based or self.is_star_pattern or self.correlation >= MINIMUM_ALIGNMENT_CORRELATION
 
 
 def _to_plane(image: np.ndarray) -> np.ndarray:
@@ -605,27 +643,23 @@ def detect_star_centroids(plane: np.ndarray, count: int = REFINEMENT_STAR_COUNT)
     return np.array(centroids).reshape(-1, 2)
 
 
-def _match_stars(
-    reference_stars: np.ndarray,
-    image_stars: np.ndarray,
-    shift_rows_pixels: float,
-    shift_columns_pixels: float,
+def _pair_nearest(
+    reference_stars: np.ndarray, image_stars: np.ndarray, predicted: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Pair each star of the image with the nearest star of the reference.
+    """Pair image stars with reference stars near their predicted places.
 
-    The image's stars are first moved by the given shift. A pair is kept when
-    the two lie within `REFINEMENT_MATCH_RADIUS_PIXELS`, and each reference
+    A pair is kept when the predicted place lies within
+    `REFINEMENT_MATCH_RADIUS_PIXELS` of a reference star, and each reference
     star is used once (by the closest of the image stars that claim it).
 
     Returns
     -------
     reference_points, image_points : `numpy.ndarray`
         The matched (row, column) positions, one row per pair, the image's
-        positions as they were before the shift.
+        positions as they were before the move.
     """
     if len(reference_stars) == 0 or len(image_stars) == 0:
         return np.empty((0, 2)), np.empty((0, 2))
-    predicted = image_stars + np.array([shift_rows_pixels, shift_columns_pixels])
     distances, nearest = cKDTree(reference_stars).query(
         predicted, distance_upper_bound=REFINEMENT_MATCH_RADIUS_PIXELS
     )
@@ -638,6 +672,29 @@ def _match_stars(
     reference_indices = np.array(list(claimed.keys()), dtype=int)
     image_indices = np.array([claimed[index][1] for index in reference_indices], dtype=int)
     return reference_stars[reference_indices], image_stars[image_indices]
+
+
+def _match_stars(
+    reference_stars: np.ndarray,
+    image_stars: np.ndarray,
+    shift_rows_pixels: float,
+    shift_columns_pixels: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Pair each star of the image with the nearest star of the reference.
+
+    The image's stars are first moved by the given shift, then paired as in
+    `_pair_nearest`.
+
+    Returns
+    -------
+    reference_points, image_points : `numpy.ndarray`
+        The matched (row, column) positions, one row per pair, the image's
+        positions as they were before the shift.
+    """
+    if len(reference_stars) == 0 or len(image_stars) == 0:
+        return np.empty((0, 2)), np.empty((0, 2))
+    predicted = image_stars + np.array([shift_rows_pixels, shift_columns_pixels])
+    return _pair_nearest(reference_stars, image_stars, predicted)
 
 
 def _fit_similarity(
@@ -683,6 +740,7 @@ def refine_alignment_with_stars(
     image: np.ndarray,
     initial: AlignmentResult,
     reference_stars: np.ndarray | None = None,
+    image_stars: np.ndarray | None = None,
 ) -> AlignmentResult:
     """Improve a shift by fitting the stars' shift, rotation and scale.
 
@@ -706,6 +764,8 @@ def refine_alignment_with_stars(
     reference_stars : `numpy.ndarray`, optional
         The reference's star centres from `detect_star_centroids`, when the
         caller has them already (one reference serves many images).
+    image_stars : `numpy.ndarray`, optional
+        The image's star centres, when the caller has them already.
 
     Returns
     -------
@@ -715,7 +775,8 @@ def refine_alignment_with_stars(
     """
     if reference_stars is None:
         reference_stars = detect_star_centroids(_to_plane(reference))
-    image_stars = detect_star_centroids(_to_plane(image))
+    if image_stars is None:
+        image_stars = detect_star_centroids(_to_plane(image))
     reference_points, image_points = _match_stars(
         reference_stars, image_stars, initial.shift_rows_pixels, initial.shift_columns_pixels
     )
@@ -757,6 +818,117 @@ def refine_alignment_with_stars(
         star_pairs=int(kept.sum()),
         residual_pixels=fitted_residual,
     )
+
+
+def find_alignment_from_star_patterns(
+    reference: np.ndarray,
+    image: np.ndarray,
+    reference_stars: np.ndarray | None = None,
+    image_stars: np.ndarray | None = None,
+) -> AlignmentResult | None:
+    """Find the shift, rotation and scale of a stack with no first guess.
+
+    Triangles of stars are matched between the two star lists (see
+    `star_pattern_candidates.candidate_similarity_transforms`). The guess that
+    lines up the most stars is refined by pairing the stars again and fitting
+    a similarity transform (see `_fit_similarity`). The result is returned only
+    when it is believable: at least `REFINEMENT_MINIMUM_PAIRS` pairs, a scale
+    within `REFINEMENT_MAX_SCALE_DEVIATION` of one, and a leftover under
+    `PATTERN_MAX_RESIDUAL_PIXELS`. Any rotation is accepted, including the
+    half turn of a mount flip.
+
+    Parameters
+    ----------
+    reference : `numpy.ndarray`
+        The stack to line up with, 2-D or colour (channels first).
+    image : `numpy.ndarray`
+        The stack to move, the same shape as `reference`.
+    reference_stars, image_stars : `numpy.ndarray`, optional
+        The star centres from `detect_star_centroids`, when the caller has
+        them already.
+
+    Returns
+    -------
+    result : `AlignmentResult` or `None`
+        The move, with `is_star_pattern` set, its correlation `0.0` (never
+        measured), and the shifts given for the image centre; `None` when no
+        believable move was found.
+    """
+    if reference_stars is None:
+        reference_stars = detect_star_centroids(_to_plane(reference))
+    if image_stars is None:
+        image_stars = detect_star_centroids(_to_plane(image))
+    if min(len(reference_stars), len(image_stars)) < REFINEMENT_MINIMUM_PAIRS:
+        return None
+    candidates = candidate_similarity_transforms(reference_stars, image_stars)
+    if len(candidates) == 0:
+        return None
+    image_complex = image_stars[:, 1] + 1j * image_stars[:, 0]
+    reference_tree = cKDTree(reference_stars)
+    best_count = 0
+    best: tuple[complex, complex] | None = None
+    for a, b in candidates:
+        predicted = a * image_complex + b
+        distances, _ = reference_tree.query(
+            np.column_stack([predicted.imag, predicted.real]),
+            distance_upper_bound=REFINEMENT_MATCH_RADIUS_PIXELS,
+        )
+        count = int(np.isfinite(distances).sum())
+        if count > best_count:
+            best_count, best = count, (complex(a), complex(b))
+    if best is None or best_count < REFINEMENT_MINIMUM_PAIRS:
+        return None
+    a, b = best
+    kept = np.zeros(0, dtype=bool)
+    reference_points = image_points = np.empty((0, 2))
+    for _ in range(PATTERN_REFIT_PASSES):
+        predicted = a * image_complex + b
+        reference_points, image_points = _pair_nearest(
+            reference_stars, image_stars, np.column_stack([predicted.imag, predicted.real])
+        )
+        fit = _fit_similarity(reference_points, image_points) if len(reference_points) else None
+        if fit is None:
+            return None
+        a, b, kept = fit
+    if abs(abs(a) - 1.0) > REFINEMENT_MAX_SCALE_DEVIATION:
+        return None
+    pair_image = image_points[kept, 1] + 1j * image_points[kept, 0]
+    pair_reference = reference_points[kept, 1] + 1j * reference_points[kept, 0]
+    residual = float(np.sqrt(np.mean(np.abs(pair_reference - (a * pair_image + b)) ** 2)))
+    if residual > PATTERN_MAX_RESIDUAL_PIXELS:
+        return None
+    plane_shape = np.shape(image)[-2:]
+    centre = (plane_shape[1] - 1) / 2.0 + 1j * (plane_shape[0] - 1) / 2.0
+    centre_shift = a * centre + b - centre
+    return AlignmentResult(
+        shift_rows_pixels=float(centre_shift.imag),
+        shift_columns_pixels=float(centre_shift.real),
+        correlation=0.0,
+        rotation_degrees=float(np.degrees(np.angle(a))),
+        scale=float(abs(a)),
+        star_pairs=int(kept.sum()),
+        residual_pixels=residual,
+        is_star_pattern=True,
+    )
+
+
+def _stars_pair_up_with_shift(
+    reference_stars: np.ndarray, image_stars: np.ndarray, result: AlignmentResult
+) -> bool:
+    """Say whether the stars of two stacks pair up under a measured shift.
+
+    Returns
+    -------
+    pair_up : `bool`
+        `True` when at least `REFINEMENT_MINIMUM_PAIRS` stars land within
+        `REFINEMENT_MATCH_RADIUS_PIXELS` of a partner after the shift. When
+        this is `False` for a shift that correlation trusted, the shift is
+        wrong or the stacks are turned, and the stars should decide instead.
+    """
+    reference_points, _ = _match_stars(
+        reference_stars, image_stars, result.shift_rows_pixels, result.shift_columns_pixels
+    )
+    return len(reference_points) >= REFINEMENT_MINIMUM_PAIRS
 
 
 def measure_alignment(
@@ -955,8 +1127,11 @@ def align_images_to_reference(
         Passed to `measure_alignment` for every pair; see there.
     refine_with_stars : `bool`, optional
         When `True`, each trusted shift is refined by fitting the stars'
-        shift, rotation and scale (see `refine_alignment_with_stars`). Meant
-        for imaging stacks; spectral stacks keep the plain shift.
+        shift, rotation and scale (see `refine_alignment_with_stars`). An
+        image whose shift is untrusted, or too far off for the stars to pair
+        up, is lined up from patterns of stars instead (see
+        `find_alignment_from_star_patterns`). Meant for imaging stacks;
+        spectral stacks keep the plain shift.
 
     Returns
     -------
@@ -996,12 +1171,38 @@ def align_images_to_reference(
             covered_masks.append(None)
             results.append(AlignmentResult(shift_rows_pixels=0.0, shift_columns_pixels=0.0, correlation=0.0))
             continue
-        if refine_with_stars and result.trusted:
+        if refine_with_stars:
             if reference_stars is None:
                 reference_stars = detect_star_centroids(_to_plane(images[reference_index]))
-            result = refine_alignment_with_stars(
-                images[reference_index], image, result, reference_stars=reference_stars
-            )
+            image_stars = detect_star_centroids(_to_plane(image))
+            if result.trusted:
+                result = refine_alignment_with_stars(
+                    images[reference_index],
+                    image,
+                    result,
+                    reference_stars=reference_stars,
+                    image_stars=image_stars,
+                )
+            if not result.trusted or (
+                not result.star_pairs and not _stars_pair_up_with_shift(reference_stars, image_stars, result)
+            ):
+                # Correlation failed, or its shift is too far off for the
+                # stars to pair up (a flip of the mount, a night-to-night
+                # turn): find the move from patterns of stars instead. A
+                # trusted shift under which the stars do pair up is kept even
+                # when the refinement above declined to improve it, so
+                # stacks that already line up give the same result as before.
+                # If the pattern search fails too, `result` stays as it was
+                # and the group is left out when it is untrusted.
+                pattern_result = find_alignment_from_star_patterns(
+                    images[reference_index],
+                    image,
+                    reference_stars=reference_stars,
+                    image_stars=image_stars,
+                )
+                if pattern_result is not None:
+                    pattern_result.correlation = result.correlation
+                    result = pattern_result
         results.append(result)
         if not result.trusted:
             aligned.append(None)

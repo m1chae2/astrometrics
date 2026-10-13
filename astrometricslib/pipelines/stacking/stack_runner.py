@@ -498,10 +498,13 @@ def _stack_exposure_groups(
     lined up with the group that carries the most weight, and combined (see
     `combine_exposure_group_images`). A group that cannot be stacked or lined
     up is left out and named in the diagnostics. So is a group whose
-    brightness is not one scale factor of the reference group's: its
-    mid-range and bright-end brightness ratios differ by more than
-    `AppConfiguration.get_exposure_group_gain_tolerance`. Its entry in
-    ``"exposure_group_summaries"`` records both ratios and the reason.
+    brightness is not one scale factor of the reference group's: the flux
+    ratios of its faint and bright stars (or, for a field with too few stars,
+    its mid-range and bright-end pixel ratios) differ by more than
+    `AppConfiguration.get_exposure_group_gain_tolerance`. So is a group whose
+    sky is more than `SKY_RATIO_LIMIT` times brighter than the reference's.
+    Its entry in ``"exposure_group_summaries"`` records the ratios and the
+    reason.
 
     Returns
     -------
@@ -519,6 +522,7 @@ def _stack_exposure_groups(
     """
     import numpy as np
 
+    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
     from astrometricslib.drivers.fits_access import read_data, read_header, write_image
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
@@ -532,7 +536,9 @@ def _stack_exposure_groups(
         CLIPPED_FRAME_ZERO_FRACTION,
         CLIPPING_FLOOR_SIGMAS,
         combine_exposure_group_images,
+        describe_bright_sky_group,
         describe_group_clipping,
+        describe_nonlinear_group,
         measure_exposure_group_gains,
         measure_group_frames,
         merge_registration_sequences,
@@ -614,6 +620,10 @@ def _stack_exposure_groups(
                     group.exposure_seconds,
                     target_id,
                 )
+
+    # The camera's clip ceiling sets the saturation level of a group stack
+    # that shows no plateau (a 14-bit Nikon never reaches 0.95 of full scale).
+    clip_ceiling_adu = resolve_camera_profile(camera_name).clip_ceiling_adu.value if camera_name else None
 
     zero_fractions_measured = True
     try:
@@ -698,11 +708,12 @@ def _stack_exposure_groups(
     gain_measurements: dict[int, Any] = {}
     if len(used) > 1:
         # A group whose brightness is not one scale factor of the reference
-        # (its bright-end ratio disagrees with its mid-range ratio) is
+        # (its bright stars' flux ratio disagrees with its faint stars') is
         # nonlinear or clipped at the bright end. Rescaling it would change
         # its faint stars by the wrong amount, so it is left out and the
         # others are combined, the same fallback as for a group that cannot
-        # be lined up.
+        # be lined up. So is a group whose sky is far brighter than the
+        # reference's (see `SKY_RATIO_LIMIT`).
         reference_in_used, measurements = measure_exposure_group_gains(
             [aligned_images[index] for index in used],
             [exposures[index] for index in used],
@@ -711,18 +722,19 @@ def _stack_exposure_groups(
             frame_zero_fractions=[frame_zero_fractions[index] for index in used],
             covered_masks=[covered_masks[index] for index in used],
             tolerance=get_configuration().get_exposure_group_gain_tolerance(),
+            clip_ceiling_adu=clip_ceiling_adu,
+            use_star_fluxes=not is_spectral,
         )
         for position, measurement in zip(used, measurements, strict=True):
             gain_measurements[position] = measurement
         for position, measurement in zip(used, measurements, strict=True):
-            if not measurement.nonlinear:
+            if not (measurement.nonlinear or measurement.sky_too_bright):
                 continue
             reference_exposure = exposures[used[reference_in_used]]
             reason = (
-                f"was left out: its brightness ratio to the {reference_exposure:g} s group is "
-                f"{measurement.gain:.3f} on mid-range pixels but {measurement.bright_end_ratio:.3f} on "
-                f"the brightest pixels ({measurement.disagreement:.1%} apart), so its bright end is "
-                "nonlinear or clipped and one scale factor does not describe it"
+                describe_nonlinear_group(measurement, reference_exposure)
+                if measurement.nonlinear
+                else describe_bright_sky_group(measurement, reference_exposure)
             )
             left_out_reasons[position] = reason
             logger.warning("The %g s exposure group of '%s' %s.", exposures[position], target_id, reason)
@@ -734,11 +746,15 @@ def _stack_exposure_groups(
         frame_noises=[frame_noises[index] for index in used],
         frame_zero_fractions=[frame_zero_fractions[index] for index in used],
         covered_masks=[covered_masks[index] for index in used],
+        clip_ceiling_adu=clip_ceiling_adu,
+        use_star_fluxes=not is_spectral,
     )
 
     stacked_fwhm = None
     if not is_spectral:
-        stacked_fwhm = _measure_combined_fwhm(combined, [aligned_images[index] for index in used])
+        stacked_fwhm = _measure_combined_fwhm(
+            combined, [aligned_images[index] for index in used], clip_ceiling_adu
+        )
 
     directory = os.path.dirname(results[0][1])
     final_path = os.path.join(directory, output_file)
@@ -842,7 +858,9 @@ def _stack_exposure_groups(
     return final_path, merged_diagnostics
 
 
-def _measure_combined_fwhm(combined: Any, used_images: list[Any]) -> float | None:
+def _measure_combined_fwhm(
+    combined: Any, used_images: list[Any], clip_ceiling_adu: float | None = None
+) -> float | None:
     """Measure the star width of a combined stack, away from patched cores.
 
     Where a group's stack is saturated, the combined image takes another
@@ -858,6 +876,8 @@ def _measure_combined_fwhm(combined: Any, used_images: list[Any]) -> float | Non
         The combined image.
     used_images : `list` [`numpy.ndarray`]
         The group stacks that went into it, as they were given to the combine.
+    clip_ceiling_adu : `float`, optional
+        The camera's clip ceiling, as given to the combine.
 
     Returns
     -------
@@ -873,7 +893,9 @@ def _measure_combined_fwhm(combined: Any, used_images: list[Any]) -> float | Non
 
     try:
         plane = collapse_to_2d(np.asarray(combined, dtype=float))
-        fwhm = measure_fwhm_from_data(plane, excluded_mask=saturated_pixel_mask(used_images))
+        fwhm = measure_fwhm_from_data(
+            plane, excluded_mask=saturated_pixel_mask(used_images, clip_ceiling_adu=clip_ceiling_adu)
+        )
     except DATA_ERRORS as measurement_error:
         logger.warning("Could not measure the star width of the combined stack: %s", measurement_error)
         return None

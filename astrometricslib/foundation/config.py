@@ -724,13 +724,15 @@ class AppConfiguration:
         than this.
 
         When a stack is made from several exposure lengths, each group is put
-        on the brightness scale of a reference group. The scale is measured
-        twice: on mid-range pixels (the value used) and on the brightest
-        pixels (a check). The two agree when the camera is linear. When the
-        bright end of a group is compressed (near full well) or clipped, they
-        differ. If the difference, as a fraction of the mid-range value, is
-        larger than this setting, the group is left out of the combined image
-        and the stack is flagged with the "exposure_group_linearity" gate.
+        on the brightness scale of a reference group. The scale is the median
+        flux ratio of isolated stars (the median pixel ratio when the field
+        has too few stars). The ratio is also taken over the faintest and over
+        the brightest quarter of the stars (a check). All three agree when the
+        camera is linear. When the bright end of a group is compressed (near
+        full well) or clipped, they differ. If either quarter's ratio is
+        farther from the scale than this setting, as a fraction of the scale,
+        the group is left out of the combined image and the stack is flagged
+        with the "exposure_group_linearity" gate.
 
         Returns
         -------

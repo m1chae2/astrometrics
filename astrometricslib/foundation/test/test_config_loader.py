@@ -215,6 +215,18 @@ def test_green_removal_of_the_preview_is_on_by_default_and_can_be_turned_off(
     assert config.get_preview_remove_green_noise_enabled() is False
 
 
+def test_the_colour_calibration_method_is_pcc_unless_told_otherwise(
+    config_in_tmp_path: AppConfiguration,
+) -> None:
+    """PCC is the default method, "stars" can be chosen, and typos give PCC."""
+    config = config_in_tmp_path
+    assert config.get_preview_colour_calibration_method() == "pcc"
+    config.app_config.set("Processing.Siril", "preview_colour_calibration_method", "Stars")
+    assert config.get_preview_colour_calibration_method() == "stars"
+    config.app_config.set("Processing.Siril", "preview_colour_calibration_method", "magic")
+    assert config.get_preview_colour_calibration_method() == "pcc"
+
+
 def test_keeping_the_previous_stack_is_on_by_default(config_in_tmp_path: AppConfiguration) -> None:
     """A restack keeps the stack it replaces unless told not to."""
     config = config_in_tmp_path

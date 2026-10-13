@@ -22,11 +22,13 @@ from astrometricslib.pipelines.stacking.post_processing.sky_level import SkyLeve
 from astrometricslib.pipelines.stacking.post_processing.stack_preview import (
     PreviewSettings,
     build_bright_object_script,
+    build_pcc_script,
     build_picture_script,
     build_preview_script,
     build_stretch_script,
     denoise_with_cosmic_clarity,
     flatten_background,
+    has_plate_solution,
     is_colour_image,
     run_preview_script,
     write_stack_preview,
@@ -74,6 +76,7 @@ def _configure(
     star_tone: bool = False,
     remove_green: bool = True,
     colour_calibration: bool = False,
+    colour_method: str = "stars",
 ) -> None:
     """Give the module the commands for Siril, GraXpert and Cosmic Clarity.
 
@@ -92,6 +95,7 @@ def _configure(
             get_preview_star_tone_enabled=lambda: star_tone,
             get_preview_remove_green_noise_enabled=lambda: remove_green,
             get_preview_colour_calibration_enabled=lambda: colour_calibration,
+            get_preview_colour_calibration_method=lambda: colour_method,
         ),
     )
 
@@ -100,12 +104,17 @@ class _Programs:
     """Stand-ins for Siril and GraXpert that record what they were asked."""
 
     def __init__(
-        self, flatten_result: bool = True, siril_result: bool = True, denoise_result: bool = True
+        self,
+        flatten_result: bool = True,
+        siril_result: bool = True,
+        denoise_result: bool = True,
+        pcc_result: bool = True,
     ) -> None:
         """Choose how each program will behave."""
         self.flatten_result = flatten_result
         self.siril_result = siril_result
         self.denoise_result = denoise_result
+        self.pcc_result = pcc_result
         self.flatten_calls: list[tuple[str, str, str]] = []
         self.denoise_calls: list[tuple[str, str, str, float]] = []
         self.siril_calls: list[tuple[str, list[str]]] = []
@@ -164,6 +173,11 @@ class _Programs:
             Whether this stand-in was told to succeed.
         """
         self.siril_calls.append((directory, commands))
+        if "pcc -catalog=gaia" in commands:
+            if self.pcc_result:
+                image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
+                fits.writeto(Path(directory) / "colour.fits", image)
+            return self.pcc_result
         if self.siril_result:
             if 'save "stretched"' in commands:
                 (Path(directory) / "stretched.fits").write_bytes(b"stretched")
@@ -1118,3 +1132,99 @@ def test_a_failed_colour_calibration_keeps_the_picture_and_the_separate_stretch(
     commands = programs.siril_calls[0][1]
     assert 'load "stack.fits"' in commands
     assert not any("-linked" in command for command in commands)
+
+
+def test_the_pcc_script_solves_the_field_only_when_it_has_no_solution() -> None:
+    """Verify `platesolve` comes before `pcc`, and only when asked for."""
+    unsolved = build_pcc_script("a.fits", "colour", solve=True)
+    solved = build_pcc_script("a.fits", "colour", solve=False)
+
+    assert unsolved[1:5] == [
+        'load "a.fits"',
+        "platesolve -catalog=gaia",
+        "pcc -catalog=gaia",
+        'save "colour"',
+    ]
+    assert solved[1:4] == ['load "a.fits"', "pcc -catalog=gaia", 'save "colour"']
+
+
+def test_a_header_with_a_projection_and_a_reference_position_counts_as_solved(tmp_path: Path) -> None:
+    """Verify the plate solution check reads the header only."""
+    solved, unsolved, broken = tmp_path / "s.fits", tmp_path / "u.fits", tmp_path / "b.fits"
+    header = fits.Header()
+    header["CTYPE1"], header["CRVAL1"] = "RA---TAN", 202.4
+    fits.writeto(solved, np.zeros((4, 4), dtype=np.float32), header)
+    fits.writeto(unsolved, np.zeros((4, 4), dtype=np.float32))
+    broken.write_bytes(b"not fits")
+
+    assert has_plate_solution(str(solved)) is True
+    assert has_plate_solution(str(unsolved)) is False
+    assert has_plate_solution(str(broken)) is False
+
+
+def test_pcc_runs_first_and_its_result_feeds_a_shared_stretch(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify Siril PCC calibrates, then the stretch shares channels."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack)) is not None
+
+    pcc_commands = programs.siril_calls[0][1]
+    assert "platesolve -catalog=gaia" in pcc_commands
+    final_commands = programs.siril_calls[-1][1]
+    assert 'load "colour.fits"' in final_commands
+    assert any(command.startswith("autostretch -linked") for command in final_commands)
+
+
+def test_pcc_does_not_solve_a_field_that_is_already_solved(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a stack with a plate solution goes straight to `pcc`."""
+    _write_colour_stack_with_stars(stack)
+    with fits.open(stack, mode="update") as opened:
+        opened[0].header["CTYPE1"], opened[0].header["CRVAL1"] = "RA---TAN", 202.4
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert "platesolve -catalog=gaia" not in programs.siril_calls[0][1]
+    assert "pcc -catalog=gaia" in programs.siril_calls[0][1]
+
+
+def test_a_failed_pcc_falls_back_to_the_stars_in_the_stack(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify no network or no catalogue still gives a calibrated picture."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="pcc")
+    programs = _Programs(pcc_result=False)
+    programs.install(monkeypatch)
+
+    with caplog.at_level("INFO", logger=stack_preview.logger.name):
+        assert write_stack_preview(str(stack)) is not None
+
+    final_commands = programs.siril_calls[-1][1]
+    assert 'load "colour.fits"' in final_commands
+    assert any(command.startswith("autostretch -linked") for command in final_commands)
+    summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
+    assert "Colour calibration (from the stars) done" in summary
+
+
+def test_the_stars_method_never_starts_pcc(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the offline method makes no Siril call for the calibration."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="stars")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert not any("pcc -catalog=gaia" in commands for _, commands in programs.siril_calls)

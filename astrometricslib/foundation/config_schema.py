@@ -98,6 +98,11 @@ class ProcessingConfig(BaseModel):
     preview_star_tone_enabled : `bool`
         Whether the stack preview dims stars in proportion to their
         brightness and softens the brightest values, by default `True`.
+    preview_colour_calibration_method : `str`
+        How the preview calibrates the colours of a colour stack: ``"pcc"``
+        for Siril's photometric colour calibration, with the star-based
+        method as the fallback, or ``"stars"`` for the star-based method
+        only. By default ``"pcc"``.
     preview_colour_calibration_enabled : `bool`
         Whether the stack preview of a colour stack first balances its
         colours from its own stars, by default `True`.
@@ -130,6 +135,7 @@ class ProcessingConfig(BaseModel):
     preview_star_tone_enabled: bool = True
     preview_remove_green_noise_enabled: bool = True
     preview_colour_calibration_enabled: bool = True
+    preview_colour_calibration_method: str = "pcc"
     keep_previous_stack_enabled: bool = True
     trim_noisy_stack_edges_enabled: bool = True
     skip_unchanged_stacks_enabled: bool = True

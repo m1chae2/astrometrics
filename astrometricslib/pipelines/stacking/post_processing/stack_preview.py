@@ -200,6 +200,70 @@ def is_colour_image(path: str) -> bool:
     return header.get("NAXIS", 0) == 3 and header.get("NAXIS3", 0) == 3
 
 
+# Siril's photometric colour calibration needs the 1.4 release for the
+# ``-catalog=gaia`` option used here.
+_PCC_MINIMUM_SIRIL_VERSION = "1.4.0"
+
+
+def has_plate_solution(path: str) -> bool:
+    """Say whether a FITS file already carries a plate solution.
+
+    Only the header is read.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the FITS file.
+
+    Returns
+    -------
+    solved : `bool`
+        `True` if the header holds world-coordinate keywords (a projection
+        type and a reference sky position). `False` otherwise, or if the file
+        cannot be read.
+    """
+    try:
+        header = fits.getheader(path, memmap=False)
+    except OSError, ValueError:
+        return False
+    return "CTYPE1" in header and "CRVAL1" in header
+
+
+def build_pcc_script(source_file_name: str, output_stem: str, solve: bool) -> list[str]:
+    """Write the Siril commands that calibrate an image's colours with PCC.
+
+    Siril's photometric colour calibration matches the stars of a plate-solved
+    image to the Gaia catalogue and scales the channels, after removing each
+    channel's background.
+
+    Parameters
+    ----------
+    source_file_name : `str`
+        File name of the linear colour image, relative to the folder Siril is
+        started in.
+    output_stem : `str`
+        File name for the calibrated copy, relative to that folder and without
+        the ``.fits`` extension (Siril adds it).
+    solve : `bool`
+        Whether Siril must first solve the field. It needs the pointing,
+        focal length and pixel size in the file's header. Pass `False` for an
+        image that already holds a plate solution.
+
+    Returns
+    -------
+    commands : `list` [`str`]
+        The script, one command per entry.
+    """
+    return [
+        f"requires {_PCC_MINIMUM_SIRIL_VERSION}",
+        f'load "{source_file_name}"',
+        *(["platesolve -catalog=gaia"] if solve else []),
+        "pcc -catalog=gaia",
+        f'save "{output_stem}"',
+        "close",
+    ]
+
+
 def build_preview_script(
     stacked_file_name: str,
     preview_stem: str,
@@ -711,11 +775,38 @@ def _picture_script(
         steps.append("GraXpert not configured")
     colour = is_colour_image(os.path.join(scratch, name))
     if colour and configuration.get_preview_colour_calibration_enabled():
-        calibrated_name = _next_source(
-            "Colour calibration", name, "colour.fits", scratch, calibrate_colours_in_file
-        )
+        calibrated_name, method = name, ""
+        if configuration.get_preview_colour_calibration_method() == "pcc":
+            solve = not has_plate_solution(os.path.join(scratch, name))
+
+            def calibrate_with_pcc(input_path: str, output_path: str) -> bool:
+                """Run Siril PCC, first solving the field if it is unsolved.
+
+                Returns
+                -------
+                succeeded : `bool`
+                    Whether Siril exited without an error.
+                """
+                commands = build_pcc_script(
+                    os.path.basename(input_path), os.path.splitext(os.path.basename(output_path))[0], solve
+                )
+                return run_preview_script(scratch, commands, siril_executable)
+
+            calibrated_name = _next_source(
+                "Siril PCC", name, "colour.fits", scratch, calibrate_with_pcc, check_result=True
+            )
+            method = "Siril PCC"
+        if calibrated_name == name:
+            # PCC was not asked for, or failed (no network, no catalogue, no
+            # solution): measure the stars in the stack itself.
+            calibrated_name = _next_source(
+                "Colour calibration from the stars", name, "colour.fits", scratch, calibrate_colours_in_file
+            )
+            method = "from the stars"
         steps.append(
-            "Colour calibration " + ("done" if calibrated_name != name else "skipped after a failure")
+            f"Colour calibration ({method}) done"
+            if calibrated_name != name
+            else "Colour calibration skipped after a failure"
         )
         # A balanced picture needs a stretch shared by all channels: stretched
         # one by one, the channels would be set back to equal sky and scale.

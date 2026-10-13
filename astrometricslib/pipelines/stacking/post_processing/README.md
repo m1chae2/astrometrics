@@ -26,6 +26,8 @@ For exact thresholds, read the code.
 
 ## Colour calibration compared with Siril's
 
+The preview uses Siril's PCC by default and falls back to the star-based method when PCC cannot run. The comparison below is why PCC was chosen as the default: it was the user's choice, made after seeing the pictures, not the most accurate method. SPCC is more accurate in principle, because it uses the camera's own sensitivity curves, but it takes about 45 seconds and the pictures differed little. The difference between PCC and SPCC pictures comes mostly from the white reference each assumes, and SPCC can be set to a warmer white reference.
+
 `colour_calibration.py` balances the colours of a colour stack from its own stars. Siril has two calibrations of its own, both run here through `siril-cli` on the same gradient-flattened data (Siril 1.4.4):
 
 - `pcc` (photometric colour calibration) matches the stars to the Gaia DR3 catalogue.

@@ -122,6 +122,7 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_keep_previous_stack_enabled",
     "get_skip_unchanged_stacks_enabled",
     "get_max_concurrent_jobs",
+    "get_photometry_workers",
     "get_minimum_calibration_frames",
     "get_primary_camera_name",
     "get_primary_focal_length_mm",
@@ -133,6 +134,7 @@ SETTINGS_THAT_DO_NOT_CHANGE_A_STACK = (
     "get_preview_star_tone_enabled",
     "get_preview_remove_green_noise_enabled",
     "get_preview_colour_calibration_enabled",
+    "get_preview_colour_calibration_method",
     "get_prefetch_frames",
     "get_prefetch_workers",
 )

@@ -418,6 +418,7 @@ class AppConfiguration:
                 "preview_star_tone_enabled": "true",
                 "preview_remove_green_noise_enabled": "true",
                 "preview_colour_calibration_enabled": "true",
+                "preview_colour_calibration_method": "pcc",
                 "keep_previous_stack_enabled": "true",
                 "trim_noisy_stack_edges_enabled": "true",
                 "skip_unchanged_stacks_enabled": "true",
@@ -910,6 +911,22 @@ class AppConfiguration:
         """
         val = self.get_value("Processing.Siril", "preview_colour_calibration_enabled", fallback="true")
         return str(val).lower() == "true"
+
+    def get_preview_colour_calibration_method(self) -> str:
+        """Return how the preview calibrates the colours of a colour stack.
+
+        ``"pcc"`` runs Siril's photometric colour calibration, which solves
+        the field, matches the stars to the Gaia catalogue over the network
+        and falls back to the star-based method if that fails. ``"stars"``
+        uses only the star-based method, which needs no network.
+
+        Returns
+        -------
+        method : `str`
+            ``"pcc"`` or ``"stars"``. Any other value gives ``"pcc"``.
+        """
+        val = str(self.get_value("Processing.Siril", "preview_colour_calibration_method", fallback="pcc"))
+        return val.strip().lower() if val.strip().lower() in ("pcc", "stars") else "pcc"
 
     def get_preview_remove_green_noise_enabled(self) -> bool:
         """Return whether the stack preview removes excess green.

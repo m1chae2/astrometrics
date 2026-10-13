@@ -352,6 +352,13 @@ preview_remove_green_noise_enabled = "true"
 # touched, and the stack file itself is never changed. Set "false" to leave
 # the colours as the camera recorded them.
 preview_colour_calibration_enabled = "true"
+# How the colours are calibrated. "pcc" (the default) runs Siril's
+# photometric colour calibration: Siril solves the field, matches the stars to
+# the Gaia catalogue over the network, and scales the channels. It takes about
+# 10 to 30 seconds per stack. If Siril or the catalogue lookup fails, the
+# preview falls back to "stars", which measures the stars in the stack itself,
+# needs no network, and takes a few seconds. Set "stars" to use only that.
+preview_colour_calibration_method = "pcc"
 # "true" (the default): before a restack replaces a stack, move the old stack
 # and its pictures into a folder named "_previous" beside it, so the two can be
 # compared. Only one previous version is kept; the next restack replaces it.

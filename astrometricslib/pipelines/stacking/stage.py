@@ -826,6 +826,35 @@ def _camera_names_match(first: str, second: str) -> bool:
     return camera_identity(first) == camera_identity(second)
 
 
+def _frames_in_combined_groups(target_frames: list[Any], diagnostics: dict) -> list[Any]:
+    """Pick the frames that went into the final stack.
+
+    A stack of several exposure groups can leave a group out (it failed to
+    stack, could not be lined up, or was nonlinear). The stacking run lists
+    the paths of the frames of the groups it combined in
+    ``"combined_frame_paths"``. A stack of one group has no such list, and all
+    its frames count.
+
+    Parameters
+    ----------
+    target_frames : `list`
+        The frames given to the stage.
+    diagnostics : `dict`
+        What the stacking run reported.
+
+    Returns
+    -------
+    frames : `list`
+        `target_frames` in their order, limited to the combined groups when
+        the run reported them, otherwise all of them.
+    """
+    combined_paths = diagnostics.get("combined_frame_paths")
+    if combined_paths is None:
+        return target_frames
+    combined = set(combined_paths)
+    return [frame for frame in target_frames if frame.path in combined]
+
+
 def _base_stack_quality_summary(
     target: Target,
     is_spectral: bool,
@@ -852,9 +881,11 @@ def _base_stack_quality_summary(
         derive_target_sessions,
     )
 
-    frames_stacked = len(target_frames) - len(diagnostics.get("corrupt_frames_skipped", []))
+    # Only the frames of the groups that were combined count as stacked.
+    combined_frames = _frames_in_combined_groups(target_frames, diagnostics)
+    frames_stacked = len(combined_frames) - len(diagnostics.get("corrupt_frames_skipped", []))
 
-    target_sessions = derive_target_sessions(target.id, target_frames)
+    target_sessions = derive_target_sessions(target.id, combined_frames)
     excluded_paths = {excluded_frame.path for excluded_frame in excluded_frames}
     target_session_breakdown = build_target_session_breakdown(target_sessions, excluded_paths)
 
@@ -1349,7 +1380,10 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         if not is_spectral and summary.quality_processing_applied:
             _update_frame_registration_results(summary, stacked_path, target_frames, diagnostics)
             _measure_fwhm_degradation(
-                summary, stacked_path, target_frames, stacked_fwhm=diagnostics.get("stacked_fwhm_px")
+                summary,
+                stacked_path,
+                _frames_in_combined_groups(target_frames, diagnostics),
+                stacked_fwhm=diagnostics.get("stacked_fwhm_px"),
             )
 
         if is_spectral and summary.quality_processing_applied:
@@ -1361,6 +1395,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
         exposure_group_linearity_gate,
+        exposure_groups_combined_gate,
         raw_frame_clipping_gate,
     )
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import calibration_gates
@@ -1375,6 +1410,7 @@ def _build_stack_quality_summary(  # ruff: ignore[missing-return-type-private-fu
         *(gate_results or []),
         *calibration_gates(diagnostics),
         linearity_gate,
+        exposure_groups_combined_gate(diagnostics.get("exposure_group_summaries", [])),
         raw_frame_clipping_gate(diagnostics),
     ]:
         summary.record_gate(gate_result)

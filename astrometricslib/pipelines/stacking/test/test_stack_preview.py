@@ -109,12 +109,14 @@ class _Programs:
         siril_result: bool = True,
         denoise_result: bool = True,
         pcc_result: bool = True,
+        starnet_result: bool = True,
     ) -> None:
         """Choose how each program will behave."""
         self.flatten_result = flatten_result
         self.siril_result = siril_result
         self.denoise_result = denoise_result
         self.pcc_result = pcc_result
+        self.starnet_result = starnet_result
         self.flatten_calls: list[tuple[str, str, str]] = []
         self.denoise_calls: list[tuple[str, str, str, float]] = []
         self.siril_calls: list[tuple[str, list[str]]] = []
@@ -173,6 +175,23 @@ class _Programs:
             Whether this stand-in was told to succeed.
         """
         self.siril_calls.append((directory, commands))
+        if "starnet -stretch" in commands:
+            if self.starnet_result:
+                rng = np.random.default_rng(1)
+                fits.writeto(
+                    Path(directory) / "starless_colour.fit",
+                    rng.normal(0.01, 0.001, (3, 16, 16)).astype(np.float32),
+                )
+                fits.writeto(
+                    Path(directory) / "starmask_colour.fit",
+                    np.abs(rng.normal(0.0, 0.01, (3, 16, 16))).astype(np.float32),
+                )
+            return self.starnet_result
+        if 'save "starless_stretched"' in commands:
+            fits.writeto(
+                Path(directory) / "starless_stretched.fits", np.full((3, 16, 16), 0.2, dtype=np.float32)
+            )
+            return True
         if "pcc -catalog=gaia" in commands:
             if self.pcc_result:
                 image = np.random.default_rng(0).normal(0.01, 0.001, (3, 16, 16)).astype(np.float32)
@@ -1228,3 +1247,69 @@ def test_the_stars_method_never_starts_pcc(
     write_stack_preview(str(stack))
 
     assert not any("pcc -catalog=gaia" in commands for _, commands in programs.siril_calls)
+
+
+def test_starnet_splits_the_image_then_stretches_the_pieces_apart(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify StarNet splits the image and the picture is the blend."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=True, colour_method="stars")
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    assert write_stack_preview(str(stack), settings=PreviewSettings(starnet=True)) is not None
+
+    commands = [call[1] for call in programs.siril_calls]
+    assert any("starnet -stretch" in c for c in commands)
+    stretch_of_starless = next(c for c in commands if 'save "starless_stretched"' in c)
+    assert 'load "starless.fits"' in stretch_of_starless
+    assert any(x.startswith("autostretch -linked") for x in stretch_of_starless)
+    # The final script saves the blend, and nothing stretches it again.
+    assert 'load "stretched.fits"' in commands[-1]
+    assert not any(x.startswith("autostretch") for x in commands[-1])
+
+
+def test_the_star_toning_is_not_used_with_starnet(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the stars are not dimmed twice."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, star_tone=True)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack), settings=PreviewSettings(starnet=True))
+
+    assert programs.tone_calls == []
+
+
+def test_a_failed_starnet_falls_back_to_the_normal_stretch(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify a StarNet that cannot run still gives a picture."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None, colour_calibration=False)
+    programs = _Programs(starnet_result=False)
+    programs.install(monkeypatch)
+
+    with caplog.at_level("INFO", logger=stack_preview.logger.name):
+        assert write_stack_preview(str(stack), settings=PreviewSettings(starnet=True)) is not None
+
+    assert any(x.startswith("autostretch") for x in programs.siril_calls[-1][1])
+    summary = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Preview steps:"))
+    assert "StarNet failed: the normal stretch is used" in summary
+
+
+def test_starnet_is_not_used_unless_asked_for(
+    stack: Path, scratch_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify the default preview never starts StarNet."""
+    _write_colour_stack_with_stars(stack)
+    _configure(monkeypatch, "siril-cli", None)
+    programs = _Programs()
+    programs.install(monkeypatch)
+
+    write_stack_preview(str(stack))
+
+    assert not any("starnet -stretch" in call[1] for call in programs.siril_calls)

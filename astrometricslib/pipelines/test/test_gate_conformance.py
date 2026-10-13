@@ -49,6 +49,8 @@ GATE_REGISTRY: dict[str, dict[str, frozenset[str]]] = {
         "calibration_frame_count": ALL_THREE,
         # Not checked for a single-exposure stack.
         "exposure_group_linearity": ALL_THREE,
+        # Not checked when the stack has fewer than two exposure groups.
+        "exposure_groups_combined": ALL_THREE,
         "rejected_pixel_fraction": ALL_THREE,
         "stack_sharpness": ALL_THREE,
         "spectral_registration": ALL_THREE,

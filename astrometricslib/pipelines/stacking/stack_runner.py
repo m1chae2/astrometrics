@@ -890,7 +890,8 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
     -------
     merged : `dict`
         The first group's diagnostics with the per-frame lists joined, the
-        durations added, and an ``"exposure_groups"`` entry per group.
+        durations added, the ``"combined_frame_paths"`` of the groups given,
+        and an ``"exposure_groups"`` entry per group.
     """
     merged = dict(results[0][2])
     for key in (
@@ -917,6 +918,14 @@ def _merge_diagnostics(results: list[tuple[Any, str, dict[str, Any]]]) -> dict[s
         merged["negative_pixel_max_percent"] = max(d["negative_pixel_max_percent"] for d in warned)
         merged["negative_pixel_frames"] = sum(int(d.get("negative_pixel_frames") or 0) for d in warned)
     merged["registered_fraction"] = _registered_fraction(merged)
+    # The frames that really went into the combined stack, so the quality
+    # summary counts and samples only these and not the groups left out.
+    merged["combined_frame_paths"] = [
+        str(path)
+        for group, _, _ in results
+        for frame in group.frames
+        if (path := frame.get("path") if isinstance(frame, dict) else getattr(frame, "path", None))
+    ]
     merged["exposure_groups"] = [
         {
             "exposure_seconds": group.exposure_seconds,

@@ -45,6 +45,9 @@ GROUPS_FOLDER_NAME = "groups"
 # factor of the reference group's (see `exposure_group_linearity_gate`).
 EXPOSURE_GROUP_LINEARITY_GATE_NAME = "exposure_group_linearity"
 RAW_FRAME_CLIPPING_GATE_NAME = "raw_frame_clipping"
+# The name of the gate that fails when a whole exposure group is missing from
+# the combined stack (see `exposure_groups_combined_gate`).
+EXPOSURE_GROUPS_COMBINED_GATE_NAME = "exposure_groups_combined"
 
 
 def _attribute(frame: Any, name: str) -> Any:
@@ -128,7 +131,8 @@ def build_group_summary(
     alignment_shift_pixels : `list` [`float`], optional
         The (rows, columns) shift that lined the group up with the reference.
     left_out_reason : `str`, optional
-        Why the group is not in the combined image.
+        Why the group is not in the combined image. A group with a reason
+        reports ``frames_stacked`` as 0.
     gain_measurement : `GroupGainMeasurement`, optional
         The brightness scale measured for the group (mid-range gain and
         bright-end ratio). Leave it out for a group that was never compared
@@ -160,7 +164,9 @@ def build_group_summary(
     return {
         "exposure_seconds": float(exposure_seconds),
         "frames_submitted": len(frames),
-        "frames_stacked": int(diagnostics.get("images_stacked") or 0),
+        # Counts frames in the combined stack, so a group that was left out
+        # holds none, even if its own stack was built.
+        "frames_stacked": 0 if left_out_reason else int(diagnostics.get("images_stacked") or 0),
         "dark_applied": bool(calibration.get("dark", False)),
         "saturated": group_is_saturated(saturation),
         "clipped_at_zero": bool(clipped_at_zero),
@@ -226,6 +232,54 @@ def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float
         EXPOSURE_GROUP_LINEARITY_GATE_NAME,
         measured_value=max(float(group["gain_disagreement"]) for group in compared),
         limit=tolerance,
+        limit_source=limit_source,
+    )
+
+
+def exposure_groups_combined_gate(groups: list[dict[str, Any]]) -> GateResult:
+    """Judge whether every exposure group went into the combined stack.
+
+    A stack of several exposure lengths is built one length at a time. A
+    length can fail to stack, fail to line up, or be nonlinear, and is then
+    left out. The combined stack is still written, from the groups that
+    remain, so without this gate a reader sees a full-looking stack that holds
+    only part of the data. Any dropped group that had frames fails the gate.
+
+    Parameters
+    ----------
+    groups : `list` [`dict`]
+        The entries from `build_group_summary`, one per exposure group.
+
+    Returns
+    -------
+    result : `GateResult`
+        Failed when any group with frames is missing from the combined stack;
+        the sentence names each group, why, and how many frames were lost,
+        and the measured value is the share of submitted frames lost. Passed
+        when several groups were all combined. Not checked when the stack has
+        fewer than two groups.
+    """
+    limit_source = "any dropped exposure group fails (design choice: no group should vanish silently)"
+    if len(groups) < 2:
+        return unchecked_gate(
+            EXPOSURE_GROUPS_COMBINED_GATE_NAME,
+            "the stack has one exposure group or none, so there was nothing to combine",
+            limit_source,
+        )
+    submitted = sum(int(group.get("frames_submitted") or 0) for group in groups)
+    dropped = [group for group in groups if group.get("left_out_reason") and group.get("frames_submitted")]
+    if not dropped:
+        return passed_gate(EXPOSURE_GROUPS_COMBINED_GATE_NAME, 0.0, 0.0, limit_source)
+    lost = sum(int(group["frames_submitted"]) for group in dropped)
+    names = "; ".join(
+        f"{group['exposure_seconds']:g} s ({group['frames_submitted']} frames: {group['left_out_reason']})"
+        for group in dropped
+    )
+    return failed_gate(
+        EXPOSURE_GROUPS_COMBINED_GATE_NAME,
+        f"the combined stack holds {submitted - lost} of {submitted} frames; left out: {names}",
+        measured_value=lost / submitted,
+        limit=0.0,
         limit_source=limit_source,
     )
 

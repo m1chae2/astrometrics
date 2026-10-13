@@ -84,6 +84,15 @@ from astrometricslib.pipelines.stacking.post_processing.bright_object import (
 from astrometricslib.pipelines.stacking.post_processing.colour_calibration import calibrate_colours_in_file
 from astrometricslib.pipelines.stacking.post_processing.sky_level import choose_sky_level_for_file
 from astrometricslib.pipelines.stacking.post_processing.star_tone import tone_stars_in_file
+from astrometricslib.pipelines.stacking.post_processing.starnet_stretch import (
+    DEFAULT_STAR_STRENGTH,
+    DEFAULT_STAR_STRETCH,
+    STARLESS_NAME,
+    STARS_NAME,
+    blend_files,
+    build_starnet_script,
+    collect_starnet_outputs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -697,11 +706,98 @@ class PreviewSettings:
         Cosmic Clarity's denoise strength for this run.
     star_toning : `bool` or `None`
         Turn the star toning on or off for this run.
+    starnet : `bool`
+        Stretch the stars and the rest of the picture on their own, using
+        StarNet through Siril (see `starnet_stretch`). Off by default. It is
+        slow, and a failed run falls back to the normal preview. The star
+        toning is not used with it.
+    star_strength : `float` or `None`
+        With StarNet, how much of the stars layer is blended, from 0 to 1.
+        `None` uses `DEFAULT_STAR_STRENGTH`.
+    star_stretch : `float` or `None`
+        With StarNet, the arcsinh strength of the stars' own stretch. `None`
+        uses `DEFAULT_STAR_STRETCH`.
     """
 
     denoise: bool | None = None
     denoise_strength: float | None = None
     star_toning: bool | None = None
+    starnet: bool = False
+    star_strength: float | None = None
+    star_stretch: float | None = None
+
+
+def _stretch_with_starnet(
+    scratch: str,
+    name: str,
+    siril_executable: str,
+    remove_green: bool,
+    linked: bool,
+    settings: PreviewSettings,
+) -> str | None:
+    """Stretch the stars and the rest of the image on their own with StarNet.
+
+    StarNet splits the linear image into a starless image and a stars-only
+    image. The starless image gets the usual stretch, the stars get an
+    arcsinh stretch of their own, and the two are blended (see
+    `starnet_stretch`). The result is saved as ``stretched.fits``.
+
+    Parameters
+    ----------
+    scratch : `str`
+        The scratch folder.
+    name : `str`
+        The linear image in the scratch folder to split.
+    siril_executable : `str`
+        The command that starts Siril.
+    remove_green : `bool`
+        Whether the stretch of the starless image removes excess green first.
+    linked : `bool`
+        Whether the colour channels share one stretch.
+    settings : `PreviewSettings`
+        Supplies the strength and the stretch of the stars layer.
+
+    Returns
+    -------
+    file_name : `str` or `None`
+        ``"stretched.fits"`` if StarNet and the blend worked, otherwise
+        `None`. The reason is logged.
+    """
+    strength = DEFAULT_STAR_STRENGTH if settings.star_strength is None else settings.star_strength
+    stretch = DEFAULT_STAR_STRETCH if settings.star_stretch is None else settings.star_stretch
+    try:
+        ran = run_preview_script(scratch, build_starnet_script(name), siril_executable)
+    except (OSError, subprocess.SubprocessError) as error:
+        logger.warning("StarNet could not run (%s); the preview uses the normal stretch.", error)
+        return None
+    if not ran or not collect_starnet_outputs(scratch):
+        logger.warning(
+            "StarNet did not give a starless and a stars image; the preview uses the normal stretch."
+        )
+        return None
+    level = choose_sky_level_for_file(os.path.join(scratch, STARLESS_NAME)).sky_level
+    logger.info("StarNet: the starless image is stretched to sky level %.2f.", level)
+    try:
+        stretched = run_preview_script(
+            scratch,
+            build_stretch_script(STARLESS_NAME, "starless_stretched", level, remove_green, linked),
+            siril_executable,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        logger.warning("The starless stretch could not run (%s); the preview uses the normal stretch.", error)
+        return None
+    if not stretched or not blend_files(
+        os.path.join(scratch, "starless_stretched.fits"),
+        os.path.join(scratch, STARS_NAME),
+        os.path.join(scratch, "stretched.fits"),
+        stretch,
+        strength,
+    ):
+        logger.warning(
+            "StarNet's stretched pieces could not be blended; the preview uses the normal stretch."
+        )
+        return None
+    return "stretched.fits"
 
 
 def _picture_script(
@@ -816,6 +912,14 @@ def _picture_script(
         steps.append("Colour calibration not used")
     remove_green = configuration.get_preview_remove_green_noise_enabled() and colour
     steps.append("Remove Green Noise in the Siril stretch" if remove_green else "Remove Green Noise not used")
+    stretched_by_starnet = False
+    if settings.starnet:
+        starnet_name = _stretch_with_starnet(scratch, name, siril_executable, remove_green, linked, settings)
+        if starnet_name is not None:
+            name, stretched_by_starnet = starnet_name, True
+            steps.append("StarNet done: starless and stars stretched on their own")
+        else:
+            steps.append("StarNet failed: the normal stretch is used")
     choice = choose_sky_level_for_file(os.path.join(scratch, name))
     logger.info("Preview sky level %.2f: %s.", choice.sky_level, choice.reason)
     denoise_executable = configuration.get_cosmic_clarity_denoise_executable()
@@ -833,25 +937,30 @@ def _picture_script(
     tone_stars = configuration.get_preview_star_tone_enabled()
     if settings.star_toning is not None:
         tone_stars = settings.star_toning
-    if not denoise_executable and not tone_stars:
+    if stretched_by_starnet:
+        # The stars were stretched apart already, so the formula that dims
+        # stars would act twice.
+        tone_stars = False
+    if not stretched_by_starnet and not denoise_executable and not tone_stars:
         steps.extend(["Siril stretch done in the final script", denoise_note, "Star toning off"])
         logger.info("Preview steps: %s.", "; ".join(steps))
         if steps_log is not None:
             steps_log.extend(steps)
         return build_preview_script(name, "preview", choice.sky_level, remove_green, linked)
-    stretched = run_preview_script(
-        scratch,
-        build_stretch_script(name, "stretched", choice.sky_level, remove_green, linked),
-        siril_executable,
-    )
-    if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
-        steps.append("Siril stretch failed")
-        logger.info("Preview steps: %s.", "; ".join(steps))
-        if steps_log is not None:
-            steps_log.extend(steps)
-        return None
-    name = "stretched.fits"
-    steps.append("Siril stretch done")
+    if not stretched_by_starnet:
+        stretched = run_preview_script(
+            scratch,
+            build_stretch_script(name, "stretched", choice.sky_level, remove_green, linked),
+            siril_executable,
+        )
+        if not stretched or not os.path.isfile(os.path.join(scratch, "stretched.fits")):
+            steps.append("Siril stretch failed")
+            logger.info("Preview steps: %s.", "; ".join(steps))
+            if steps_log is not None:
+                steps_log.extend(steps)
+            return None
+        name = "stretched.fits"
+        steps.append("Siril stretch done")
     if denoise_executable:
         strength = (
             settings.denoise_strength

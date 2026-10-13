@@ -539,6 +539,7 @@ def test_the_real_builder_records_every_stacking_gate() -> None:
         "calibration_metadata",
         "calibration_frame_count",
         "exposure_group_linearity",
+        "exposure_groups_combined",
         aoq.REJECTED_GATE_NAME,
         aoq.SHARPNESS_GATE_NAME,
         aoq.SPECTRAL_REGISTRATION_GATE_NAME,

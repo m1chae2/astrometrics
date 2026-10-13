@@ -512,3 +512,36 @@ def test_the_real_m13_lights_flag_only_the_frame_with_the_faint_trail() -> None:
     assert trailed["line_trail_angle_deg"] == pytest.approx(57.2, abs=1.0)
     assert report["batch"]["flagged_count"] == 1
     assert all(f["line_trail_px"] == 0 for f in report["frames"] if not f["path"].endswith("020.fits"))
+
+
+def test_a_bayer_header_marks_the_measurement_as_a_colour_camera(tmp_path: Path) -> None:
+    """``BAYERPAT`` sets ``colour_camera``; a blank or missing one does not."""
+    header = fits.Header()
+    header["BAYERPAT"] = "RGGB"
+    fits.PrimaryHDU(_frame(seed=1), header=header).writeto(tmp_path / "colour.fits")
+    header["BAYERPAT"] = "  "
+    fits.PrimaryHDU(_frame(seed=1), header=header).writeto(tmp_path / "blank.fits")
+    fits.PrimaryHDU(_frame(seed=1)).writeto(tmp_path / "mono.fits")
+
+    colour, blank, mono = (
+        raw_frame_check.measure_raw_frame(str(tmp_path / name))
+        for name in ("colour.fits", "blank.fits", "mono.fits")
+    )
+
+    assert colour["colour_camera"] is True
+    assert blank["colour_camera"] is False
+    assert mono["colour_camera"] is False
+
+
+def test_the_colour_flag_leaves_every_measured_value_unchanged(tmp_path: Path) -> None:
+    """Colour and mono files of the same pixels measure the same."""
+    header = fits.Header()
+    header["BAYERPAT"] = "RGGB"
+    fits.PrimaryHDU(_frame(seed=2), header=header).writeto(tmp_path / "colour.fits")
+    fits.PrimaryHDU(_frame(seed=2)).writeto(tmp_path / "mono.fits")
+
+    colour = raw_frame_check.measure_raw_frame(str(tmp_path / "colour.fits"))
+    mono = raw_frame_check.measure_raw_frame(str(tmp_path / "mono.fits"))
+
+    for key in ("star_count", "fwhm_px", "roundness", "sky_median_adu", "longest_trail_px", "line_trail_px"):
+        assert colour[key] == mono[key]

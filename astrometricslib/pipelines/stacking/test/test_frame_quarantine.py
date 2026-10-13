@@ -131,6 +131,56 @@ def test_judge_batch_needs_enough_frames() -> None:
     assert judge_batch(measurements) == []
 
 
+def colour_session(roundness_values: list[float], colour_camera: bool) -> list[dict[str, Any]]:
+    """Build a batch of twelve frames with the given roundness values.
+
+    Parameters
+    ----------
+    roundness_values : `list` [`float`]
+        Roundness of the frames at the end of the batch; the rest are 0.90.
+    colour_camera : `bool`
+        Whether the measurements say a colour camera took them.
+
+    Returns
+    -------
+    measurements : `list` [`dict`]
+        The batch, each entry with a ``colour_camera`` key.
+    """
+    measurements = clean_batch()
+    for measurement in measurements:
+        measurement["roundness"] = 0.90
+        measurement["colour_camera"] = colour_camera
+    for offset, roundness in enumerate(roundness_values):
+        measurements[-1 - offset]["roundness"] = roundness
+    return measurements
+
+
+def test_judge_batch_gives_a_colour_camera_a_wider_roundness_allowance() -> None:
+    """A frame 0.18 under the median moves for mono, not for colour."""
+    mono = judge_batch(colour_session([0.72], colour_camera=False))
+    colour = judge_batch(colour_session([0.72], colour_camera=True))
+
+    assert [d.kind for d in mono] == ["trailed"]
+    assert colour == []
+
+
+def test_judge_batch_still_catches_clearly_trailed_colour_frames() -> None:
+    """Frames 0.35 under the median move for a colour camera too."""
+    decisions = judge_batch(colour_session([0.55, 0.50], colour_camera=True))
+
+    assert len(decisions) == 2
+    assert {d.kind for d in decisions} == {"trailed"}
+
+
+def test_judge_batch_treats_a_measurement_without_the_colour_key_as_mono() -> None:
+    """Older measurements, with no ``colour_camera`` key, use the 0.15 drop."""
+    measurements = colour_session([0.72], colour_camera=True)
+    for measurement in measurements:
+        del measurement["colour_camera"]
+
+    assert [d.kind for d in judge_batch(measurements)] == ["trailed"]
+
+
 def test_judge_batch_scales_the_roundness_limit_to_the_session() -> None:
     """In a session of 0.90-round stars, only frames 0.15 lower move."""
     measurements = [make_measurement(f"f{index}.fits", roundness=0.90) for index in range(12)]

@@ -14,7 +14,7 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
 
    **The quarantine step.** It compares each frame with the other frames of its own session (frames of one camera, filter and exposure length less than four hours apart) and moves a frame when:
     - it has fewer stars than half the session's median star count (cloud, or heavy trailing); or
-    - its stars are much less round than the session's: roundness (a star's narrow width divided by its wide width, 1.0 for a circle) is below 0.80 and at least 0.15 below the session median.
+    - its stars are much less round than the session's: roundness (a star's narrow width divided by its wide width, 1.0 for a circle) is below 0.80 and at least 0.15 below the session median (0.20 for a colour camera).
 
    A satellite or aircraft trail does not trigger it, because the stacker's pixel rejection removes those. A session of fewer than eight frames is left alone, because its median cannot be trusted. If the step would move more than a quarter of a session, it moves none and logs why, because the session itself is then the problem. The measurements come from `shared/quality/raw_frame_check.py`.
 
@@ -30,7 +30,7 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
    | `flat_level`, `flat_noise` | The flats are too faint, too bright or too noisy, or cannot be read | The stack used no flats; the noise could not be estimated |
    | `calibration_metadata` | A calibration frame was applied although its gain, offset or temperature does not match the lights, or a kind of calibration frame was left out because its binning does not match | No calibration frame was applied and none was left out |
    | `calibration_frame_count` | A master bias, dark or flat was built from fewer frames than `minimum_calibration_frames` (default 3) | No calibration frame was applied |
-   | `exposure_group_linearity` | A group's brightness is not one scale factor of the reference group's: its mid-range and bright-end ratios differ by more than `exposure_group_gain_tolerance` (default 0.05). The pipeline leaves that group out of the combined image | The stack has one exposure length, or no group could be compared with the reference |
+   | `exposure_group_linearity` | A group's brightness is not one scale factor of the reference group's: measured on the same isolated, unclipped stars in both groups, its faint-star or bright-star flux ratio differs from the median ratio by more than `exposure_group_gain_tolerance` (default 0.05). Spectral stacks, and imaging stacks with too few clean stars, compare mid-range and bright-end pixels instead. The pipeline leaves that group out of the combined image | The stack has one exposure length, or no group could be compared with the reference |
    | `exposure_groups_combined` | An exposure group that had frames is missing from the combined stack, because it failed to stack, could not be lined up or was nonlinear. The message names each group, why, and how many frames it holds; the stack's `frames_stacked`, session breakdown and sharpness sample then count only the groups that were combined | The stack has fewer than two exposure groups |
    | `rejected_pixel_fraction` | The stacker threw out 15% or more of the pixels | The stacker did not report a count |
    | `stack_sharpness` | The stack is more than 1.2 times wider than its input frames predict | The stack is spectral or a single frame, or a width could not be measured |

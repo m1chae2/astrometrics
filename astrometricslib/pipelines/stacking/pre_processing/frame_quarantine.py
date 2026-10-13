@@ -138,6 +138,35 @@ only mildly elongated. On the 2026-10-02 target (median 0.98) the cut-off
 stays at the fixed 0.80.
 """
 
+COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN = 0.20
+"""The drop below the median for a colour (Bayer) camera, instead of 0.15.
+
+A colour sensor puts one red, green or blue filter over each pixel. At
+405 mm the Nikon D5300 sees stars only 2 to 2.5 pixels wide, so each star
+is sampled coarsely and its measured roundness scatters widely, even when
+the star is round. On 667 frames of eight Nikon targets (checked again on
+2026-10-13) the session median was 0.73 to 0.97, against 0.97 to 0.99 on
+the mono ZWO ASI 533MM Pro the 0.15 was chosen on. The 37 frames moved on
+2026-10-12 included 14 whose roundness sat 0.15 to 0.20 below their
+session median, with nothing visibly wrong in their thumbnails.
+
+With 0.20 all 13 clearly bad frames are still caught: the dawn run of
+NGC 6888 (frames 159 to 168, no stars left), NGC 6888 008, M 106 035 and
+018 (a satellite) and NGC 2024 004. They sit 0.20 to 0.45 below their
+session median. 0.25 would miss two of them, so 0.20 is the largest
+allowance that keeps them all. No frame that was kept before is caught
+now, and the mono controls (M 13, M 57, NGC 7331, M 81) decide exactly as
+before. The camera is recognised by its ``BAYERPAT`` header keyword.
+
+Measuring on 2 by 2 summed pixels instead was tried and rejected. Summing
+at full resolution (which removes the filter pattern and keeps the pixel
+scale) changed the roundness by a median of 0.004 (at most 0.07) on 1,070
+frames, so the filter pattern is not what skews the measurement. True 2 by
+2 binning gave higher medians only because its centroid window is twice as
+wide, and it caught 24 more frames in the eight targets, mostly good ones in
+crowded fields (IC 1396 044: 0.96 on the mosaic, 0.46 binned).
+"""
+
 SESSION_GAP_SECONDS = 4 * 3600
 """A gap this long between frames starts a new session.
 
@@ -273,7 +302,9 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
     ----------
     measurements : `Sequence` [`dict`]
         One entry per frame from `raw_frame_check.measure_raw_frame`:
-        ``path``, ``star_count``, ``roundness`` and ``sky_median_adu``.
+        ``path``, ``star_count``, ``roundness`` and ``sky_median_adu``, and
+        optionally ``colour_camera`` (a colour camera gets the wider
+        `COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN`).
 
     Returns
     -------
@@ -288,8 +319,13 @@ def judge_batch(measurements: Sequence[dict[str, Any]]) -> list[QuarantineDecisi
     roundness_values = [m["roundness"] for m in measurements if m["roundness"] is not None]
     roundness_limit = TRAILED_ROUNDNESS_LIMIT
     if roundness_values:
+        drop_below_median = (
+            COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN
+            if any(m.get("colour_camera") for m in measurements)
+            else ROUNDNESS_DROP_BELOW_MEDIAN
+        )
         roundness_limit = min(
-            TRAILED_ROUNDNESS_LIMIT, statistics.median(roundness_values) - ROUNDNESS_DROP_BELOW_MEDIAN
+            TRAILED_ROUNDNESS_LIMIT, statistics.median(roundness_values) - drop_below_median
         )
 
     decisions: list[QuarantineDecision] = []

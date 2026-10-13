@@ -565,11 +565,14 @@ def measure_raw_frame(
         ``saturated_pixels``, ``saturation_threshold_adu`` and
         ``saturation_threshold_source`` (the level used and where it came
         from), ``camera`` (the header's ``INSTRUME`` text, or `None`),
+        ``colour_camera`` (`True` if the header has a ``BAYERPAT`` pattern,
+        the test `fits_access.frame_uses_color_filter_array` makes),
         ``width_px``, and the private ``_stars`` array used for matching.
     """
     with open_primary_hdu(path) as hdu:
         image = np.asarray(hdu.data, dtype=float)
         camera = hdu.header.get("INSTRUME")
+        bayer_pattern = hdu.header.get("BAYERPAT")
     camera = str(camera) if camera else None
     stars, blob_count, longest_blob, straight_trail = _detect_stars(image, trail_min_diagonal_fraction)
     threshold_adu, threshold_source = resolve_saturation_threshold(camera)
@@ -582,6 +585,7 @@ def measure_raw_frame(
     return {
         "path": path,
         "camera": camera,
+        "colour_camera": bool(bayer_pattern is not None and str(bayer_pattern).strip()),
         "star_count": blob_count,
         "fwhm_px": fwhm,
         "roundness": roundness,

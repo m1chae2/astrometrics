@@ -62,7 +62,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-from astropy.io import fits
 
 from astrometricslib.drivers.fits_access import read_data, read_header, write_image
 from astrometricslib.drivers.image import AstrometricsImage
@@ -194,7 +193,7 @@ def is_colour_image(path: str) -> bool:
         single-channel image or a file that cannot be read.
     """
     try:
-        header = fits.getheader(path, memmap=False)
+        header = read_header(path)
     except OSError, ValueError:
         return False
     return header.get("NAXIS", 0) == 3 and header.get("NAXIS3", 0) == 3
@@ -223,7 +222,7 @@ def has_plate_solution(path: str) -> bool:
         cannot be read.
     """
     try:
-        header = fits.getheader(path, memmap=False)
+        header = read_header(path)
     except OSError, ValueError:
         return False
     return "CTYPE1" in header and "CRVAL1" in header

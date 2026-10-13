@@ -1037,6 +1037,9 @@ class ProcessingPipelines:
         denoise: bool | None = None,
         denoise_strength: float | None = None,
         star_toning: bool | None = None,
+        starnet: bool = False,
+        star_strength: float | None = None,
+        star_stretch: float | None = None,
         keep_previous: bool = True,
         register_job: bool = True,
     ) -> PreviewRemakeResult:
@@ -1065,6 +1068,18 @@ class ProcessingPipelines:
             Cosmic Clarity's denoise strength for this run, from 0 to 1.
         star_toning : `bool`, optional
             Turn the star toning on or off for this run.
+        starnet : `bool`, optional
+            Stretch the stars and the rest of the picture on their own,
+            using StarNet through Siril. It adds about 35 to 55 seconds to
+            the remake and is off by default. The star toning is not used
+            with it, and a failed StarNet run gives the normal picture.
+        star_strength : `float`, optional
+            With ``starnet``, how much of the stars layer is blended, from 0
+            to 1. Left out, 0.8.
+        star_stretch : `float`, optional
+            With ``starnet``, the arcsinh strength of the stars' own stretch,
+            from 1 to 100000. Larger values lift fainter stars. Left out,
+            1000.
         keep_previous : `bool`, optional
             Copy the current pictures aside first. On by default.
         register_job : `bool`, optional
@@ -1079,7 +1094,8 @@ class ProcessingPipelines:
         Raises
         ------
         InvalidArgumentError
-            If ``kind`` or ``denoise_strength`` is out of range.
+            If ``kind``, ``denoise_strength``, ``star_strength`` or
+            ``star_stretch`` is out of range.
         """
         from astrometricslib.pipelines.stacking.post_processing.preview_remake import remake_stack_preview
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
@@ -1087,9 +1103,18 @@ class ProcessingPipelines:
         check_choice("kind", kind, STACK_KINDS)
         if denoise_strength is not None and not 0.0 <= denoise_strength <= 1.0:
             raise InvalidArgumentError("denoise_strength must be between 0 and 1.")
+        if star_strength is not None and not 0.0 <= star_strength <= 1.0:
+            raise InvalidArgumentError("star_strength must be between 0 and 1.")
+        if star_stretch is not None and not 1.0 <= star_stretch <= 100000.0:
+            raise InvalidArgumentError("star_stretch must be between 1 and 100000.")
         resolved = self._resolve(target)
         settings = PreviewSettings(
-            denoise=denoise, denoise_strength=denoise_strength, star_toning=star_toning
+            denoise=denoise,
+            denoise_strength=denoise_strength,
+            star_toning=star_toning,
+            starnet=starnet,
+            star_strength=star_strength,
+            star_stretch=star_stretch,
         )
         with (
             self.acquire_stacking_slot(),

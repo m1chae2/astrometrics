@@ -18,8 +18,10 @@ instead:
 4. The two are blended with a screen blend and the stars layer is scaled by a
    strength, so stars can be turned down without touching the nebula.
 
-StarNet is slow (1 to 2.5 minutes for a 6000 by 4000 colour stack on a GPU)
-and can leave artifacts, so this is an option and not the default. A failed
+StarNet adds about 35 to 55 seconds to a preview on this machine's GPU
+(measured on M 81, M 51 and NGC 6992), and a trained model can leave
+artifacts or fail on a dense field such as the core of M 13, so this is an
+option and not the default. A failed
 run changes nothing: the preview is made the normal way instead.
 
 All of this works on the preview's scratch copy. The stack is never changed.

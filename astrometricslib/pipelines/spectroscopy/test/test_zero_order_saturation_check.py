@@ -19,7 +19,7 @@ from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 class MockAstrometricsImage(AstrometricsImage):
     """A mock AstrometricsImage for testing, allowing direct array input."""
 
-    def __init__(self, data: np.ndarray, header=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, data: np.ndarray, header=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize MockAstrometricsImage with given data and header."""
         self._data = data
         self._header = header or {}
@@ -53,7 +53,7 @@ def _build_pipeline(extraction_radius: int = 5) -> SpectroscopyPipeline:
     return SpectroscopyPipeline(config=config)
 
 
-def test_zero_order_saturation_fraction_zero_when_unsaturated():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_zero_order_saturation_fraction_zero_when_unsaturated() -> None:
     """Verify an unsaturated zero-order aperture reports zero saturation."""
     data = np.full((1000, 1000), 500.0)
     image = MockAstrometricsImage(data=data)
@@ -64,7 +64,7 @@ def test_zero_order_saturation_fraction_zero_when_unsaturated():  # ruff: ignore
     assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(0.0)
 
 
-def test_zero_order_saturation_fraction_reflects_saturated_aperture():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_zero_order_saturation_fraction_reflects_saturated_aperture() -> None:
     """Verify a fully-saturated zero-order aperture reports a fraction of 1."""
     data = np.full((1000, 1000), 500.0)
     star_x, star_y, radius = 500, 500, 5
@@ -75,3 +75,45 @@ def test_zero_order_saturation_fraction_reflects_saturated_aperture():  # ruff: 
     result = pipeline._process_single_star(image, (float(star_x), float(star_y)), auto_detect_angle=False)
 
     assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(1.0)
+
+
+def test_zero_order_saturation_fraction_uses_plateau_on_normalised_stack() -> None:
+    """Verify a 0-1 stack with a plateau at its star reports saturation."""
+    data = np.full((1000, 1000), 0.02)
+    star_x, star_y, radius = 500, 500, 5
+    data[star_y - radius : star_y + radius + 1, star_x - radius : star_x + radius + 1] = 0.8
+    image = MockAstrometricsImage(data=data)
+    pipeline = _build_pipeline(extraction_radius=radius)
+
+    result = pipeline._process_single_star(image, (float(star_x), float(star_y)), auto_detect_angle=False)
+
+    assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(1.0)
+
+
+def test_zero_order_saturation_fraction_zero_for_unsaturated_normalised_stack() -> None:
+    """Verify a lone 1.0 peak in a 0-1 stack is not called saturated."""
+    data = np.random.default_rng(3).uniform(0.01, 0.03, (1000, 1000))
+    data[500, 500] = 1.0
+    image = MockAstrometricsImage(data=data)
+    pipeline = _build_pipeline(extraction_radius=5)
+
+    result = pipeline._process_single_star(image, (500.0, 500.0), auto_detect_angle=False)
+
+    assert result["zero_order_saturated_pixel_fraction"] == pytest.approx(0.0, abs=0.01)
+
+
+def test_a_trail_with_no_usable_samples_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify a star with no usable spectrum samples raises `ProcessingError`.
+
+    It used to return ``{"error": ...}`` in place of a result.
+    """
+    from astrometricslib.foundation.errors import ProcessingError
+    from astrometricslib.pipelines.spectroscopy import pipeline as pipeline_module
+
+    monkeypatch.setattr(
+        pipeline_module, "keep_usable_samples", lambda wavelengths, *_args: np.zeros(len(wavelengths), bool)
+    )
+    image = MockAstrometricsImage(data=np.full((1000, 1000), 500.0))
+
+    with pytest.raises(ProcessingError, match="camera's range"):
+        _build_pipeline()._process_single_star(image, (500.0, 500.0), auto_detect_angle=False)

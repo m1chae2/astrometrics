@@ -58,7 +58,9 @@ def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argumen
                                         break
                                 break
                         break
-        except Exception as exc:
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
+            # OSError: the file cannot be read. ValueError: it is not JSON.
+            # AttributeError and TypeError: the JSON is not a notebook.
             logger.debug("Failed to parse title/summary from '%s': %s", nb_path, exc)
 
         parent_name = nb_path.parent.name

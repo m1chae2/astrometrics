@@ -34,7 +34,7 @@ def _click_at(fig, inaxes, xdata: float, ydata: float) -> None:  # ruff: ignore[
     fig.canvas.callbacks.process("button_press_event", event)
 
 
-def test_click_near_a_star_selects_it_and_calls_on_select():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_click_near_a_star_selects_it_and_calls_on_select() -> None:
     """A click within a star's radius highlights it and reports its index."""
     fig, ax = plt.subplots()
     config = VisualizationConfig()
@@ -51,7 +51,7 @@ def test_click_near_a_star_selects_it_and_calls_on_select():  # ruff: ignore[mis
     plt.close(fig)
 
 
-def test_click_far_from_any_star_does_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_click_far_from_any_star_does_nothing() -> None:
     """A click outside every star's radius selects nothing."""
     fig, ax = plt.subplots()
     config = VisualizationConfig()
@@ -66,7 +66,7 @@ def test_click_far_from_any_star_does_nothing():  # ruff: ignore[missing-return-
     plt.close(fig)
 
 
-def test_click_outside_the_star_field_axis_is_ignored():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_click_outside_the_star_field_axis_is_ignored() -> None:
     """A click reported against a different axis (a side panel) is ignored."""
     fig, (ax, other_ax) = plt.subplots(1, 2)
     config = VisualizationConfig()
@@ -79,7 +79,7 @@ def test_click_outside_the_star_field_axis_is_ignored():  # ruff: ignore[missing
     plt.close(fig)
 
 
-def test_a_star_missing_pixel_coordinates_is_skipped_not_crashed():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_star_missing_pixel_coordinates_is_skipped_not_crashed() -> None:
     """A star with no centroid data can't be clicked, but nothing crashes."""
     fig, ax = plt.subplots()
     config = VisualizationConfig()

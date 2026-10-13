@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { validateRightAscension, validateDeclination } from '../utils/coordinateValidation';
+import { useToast } from '../hooks/useToast';
 import '../styles/addTargetModal.css';
 
 interface AddTargetModalProps {
@@ -17,7 +18,7 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
     const [ra, setRa] = useState('');
     const [dec, setDec] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const toast = useToast();
 
     if (!isOpen) return null;
 
@@ -27,7 +28,7 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
         e.preventDefault();
 
         if (!name.trim()) {
-            setError('Target Name is required');
+            toast.show('Target Name is required', 'error');
             return;
         }
 
@@ -35,12 +36,11 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
         // (RA 0-24h, Dec -90 to +90) and in a form the backend can parse.
         const coordinateError = validateRightAscension(ra) ?? validateDeclination(dec);
         if (coordinateError) {
-            setError(coordinateError);
+            toast.show(coordinateError, 'error');
             return;
         }
 
         setIsSubmitting(true);
-        setError(null);
         try {
             await onAdd(name.trim(), ra.trim(), dec.trim());
             setName('');
@@ -49,7 +49,7 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
             onClose();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to add target';
-            setError(message);
+            toast.show(message, 'error');
         } finally {
             setIsSubmitting(false);
         }
@@ -99,7 +99,6 @@ export const AddTargetModal: React.FC<AddTargetModalProps> = ({ isOpen, onClose,
                             />
                         </div>
                     </div>
-                    {error && <div className="modal-error">{error}</div>}
                     <div className="modal-actions">
                         <button type="button" className="btn btn--cancel" onClick={onClose} disabled={isSubmitting}>
                             Cancel

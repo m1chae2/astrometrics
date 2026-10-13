@@ -1,0 +1,21 @@
+/* Top panel of the shared target list: catalog / camera tabs, the option
+   list for the active tab, and a sort row. */
+
+.target-list-filter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Only a handful of options, so the list takes its own height instead of
+   filling the panel. The cap fits the six catalog options (about 32px each)
+   without a scrollbar. A longer camera list scrolls past it. */
+.target-list-filter-panel__options {
+    max-height: 208px;
+}
+
+.target-list-filter-panel__summary {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}

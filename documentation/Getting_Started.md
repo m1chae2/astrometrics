@@ -24,7 +24,7 @@ Astrometrics works with a wide variety of cameras and mounts using INDI. To capt
 To open the desktop application, run the following command in your terminal:
 
 ```bash
-./run_astrometrics.sh
+./astrometrics.sh
 ```
 
 ## 4. Core Concepts

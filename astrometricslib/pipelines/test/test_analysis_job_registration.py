@@ -13,19 +13,22 @@ the science itself, so the tests stay fast and only fail for one reason.
 """
 
 import logging
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 
+from astrometricslib.foundation import config as config_loader
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import tasks
-from astrometricslib.utilities import config_loader
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 PACKAGE_LOGGER_NAME = "astrometricslib"
 
 
 @pytest.fixture
-def isolated_job_logging(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def isolated_job_logging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[str]:
     """Point the job database and job log files at a throwaway folder.
 
     Two separate redirections are needed. The logs *database* follows the
@@ -60,9 +63,9 @@ def _read_jobs(logs_database_path: str, target_id: str) -> list:
     jobs : `list`
         The stored `ProcessingJob` records, newest first.
     """
-    from astrometricslib.drivers.logger_interface import LoggerInterface
+    from astrometricslib.foundation.jobs.store import JobStore
 
-    return LoggerInterface(logs_database_path).get_jobs_by_target(target_id)
+    return JobStore(logs_database_path).get_jobs_by_target(target_id)
 
 
 def _package_logger_handler_count() -> int:
@@ -76,7 +79,9 @@ def _package_logger_handler_count() -> int:
     return len(logging.getLogger(PACKAGE_LOGGER_NAME).handlers)
 
 
-def test_a_successful_run_records_a_completed_job(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_successful_run_records_a_completed_job(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a job row is written and ends up marked completed."""
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
     target = Target(id="JobSuccessTarget")
@@ -91,7 +96,9 @@ def test_a_successful_run_records_a_completed_job(isolated_job_logging, monkeypa
     assert jobs[0].progress_current == 100
 
 
-def test_a_failing_run_records_a_failed_job_and_still_raises(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_failing_run_records_a_failed_job_and_still_raises(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify a pipeline error is recorded but never swallowed.
 
     The caller must still see the exception -- job bookkeeping is not
@@ -113,7 +120,9 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(isolated_job_loggin
     assert jobs[0].progress_current == 0
 
 
-def test_register_job_false_records_nothing(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_register_job_false_records_nothing(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the opt-out really opts out.
 
     The backend's analysis orchestrator relies on this: it already
@@ -129,7 +138,9 @@ def test_register_job_false_records_nothing(isolated_job_logging, monkeypatch): 
     assert _read_jobs(isolated_job_logging, "NoJobTarget") == []
 
 
-def test_log_handlers_are_detached_after_a_successful_run(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_log_handlers_are_detached_after_a_successful_run(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the shared package logger is left exactly as it was found.
 
     Every run attaches its own handler instances to the shared
@@ -144,7 +155,9 @@ def test_log_handlers_are_detached_after_a_successful_run(isolated_job_logging, 
     assert _package_logger_handler_count() == handlers_before
 
 
-def test_log_handlers_are_detached_even_when_the_run_fails(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_log_handlers_are_detached_even_when_the_run_fails(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify cleanup happens on the error path too, not just on success."""
 
     def _explode(*args: object, **kwargs: object) -> object:
@@ -163,59 +176,50 @@ def test_log_handlers_are_detached_even_when_the_run_fails(isolated_job_logging,
     assert _package_logger_handler_count() == handlers_before
 
 
-def test_the_per_job_logger_is_left_clean(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify the throwaway per-job logger does not keep our handlers.
+def test_no_job_logger_or_sink_is_left_behind(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify an analysis run leaves no per-job logger and no registered sink.
 
-    Each run makes a logger named ``job_<uuid>`` and hangs a file handler
-    on it. Python keeps every logger it has ever been asked for, so if the
-    handler is never removed and closed, each run leaves behind one more
-    logger holding one more open file. Over a long batch run that is a
-    real file-handle leak.
-
-    Only the handlers this library attaches are checked. pytest adds its
-    own capture handler to these loggers as part of running the test, and
-    that one is not ours to remove.
+    Python keeps every logger it has ever been asked for, so a logger made
+    per job, holding a file handler, would leak one open file per run. The
+    job runner makes no such logger; it registers the job's log sinks with
+    the job log router and removes and closes them when the job ends.
     """
-    from astrometricslib.drivers.logger_interface import DbLogHandler
+    from astrometricslib.foundation.logging import get_job_log_router
 
-    our_handler_types = (logging.FileHandler, DbLogHandler)
-    captured_job_ids: list[str] = []
+    router = get_job_log_router()
+    sinks_during_run: list[int] = []
 
     def _capture(*args: object, **kwargs: object) -> object:
-        captured_job_ids.extend(
-            name.removeprefix("job_") for name in logging.root.manager.loggerDict if name.startswith("job_")
-        )
+        sinks_during_run.append(len(router._sinks))
         return {"status": "ok"}
 
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _capture)
+    sinks_before = len(router._sinks)
 
     tasks.analyze_target(Target(id="JobLoggerCleanupTarget"), pipeline_type="astrometry", path="unused.fits")
 
-    assert captured_job_ids, "no per-job logger was created, so this test proves nothing"
-    leftover = {
-        job_id: [
-            handler
-            for handler in logging.getLogger(f"job_{job_id}").handlers
-            if isinstance(handler, our_handler_types)
-        ]
-        for job_id in captured_job_ids
-    }
-    assert not any(leftover.values()), f"job loggers kept our handlers: {leftover}"
+    assert sinks_during_run == [sinks_before + 1]
+    assert len(router._sinks) == sinks_before
+    assert not [name for name in logging.root.manager.loggerDict if name.startswith("job_")]
 
 
-def test_a_broken_logs_database_does_not_stop_the_analysis(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_broken_logs_database_does_not_stop_the_analysis(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify bookkeeping failures are logged and swallowed, not raised.
 
     Recording a job is a convenience for the user interface. If the logs
     database cannot be opened, the science work should still run and
     still return its result.
     """
-    import astrometricslib.drivers.logger_interface as logger_interface_module
+    from astrometricslib.foundation.jobs import runner
 
     def _unopenable(*args: object, **kwargs: object) -> object:
         raise OSError("logs database unavailable")
 
-    monkeypatch.setattr(logger_interface_module, "LoggerInterface", _unopenable)
+    monkeypatch.setattr(runner, "JobStore", _unopenable)
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", lambda *args, **kwargs: {"status": "ok"})
 
     result = tasks.analyze_target(
@@ -225,7 +229,9 @@ def test_a_broken_logs_database_does_not_stop_the_analysis(isolated_job_logging,
     assert result == {"status": "ok"}
 
 
-def test_a_missing_image_path_fails_the_job_before_running_anything(isolated_job_logging, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_missing_image_path_fails_the_job_before_running_anything(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify the pre-flight path check marks the job failed, not just raises.
 
     A target with no frames and no stacked image cannot be analyzed. The
@@ -239,7 +245,7 @@ def test_a_missing_image_path_fails_the_job_before_running_anything(isolated_job
         lambda *args, **kwargs: called.append(1) or {"status": "ok"},
     )
 
-    with pytest.raises(ValueError, match="No frames or stacked image available"):
+    with pytest.raises(ConflictError, match="No frames or stacked image available"):
         tasks.analyze_target(Target(id="NoImageTarget"), pipeline_type="astrometry")
 
     assert called == []

@@ -4,6 +4,8 @@ Selecting a subset of targets allows us to skip ones that are already
 finished, reducing a multi-hour job into a much shorter one.
 """
 
+from pathlib import Path
+
 import pytest
 
 from astrometricslib.scripts.run_all_target_processing import (
@@ -16,12 +18,12 @@ from astrometricslib.scripts.run_all_target_processing import (
 class _Target:
     """A target stand-in exposing only its id."""
 
-    def __init__(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, target_id) -> None:  # ruff: ignore[missing-type-function-argument]
         self.id = target_id
 
 
 @pytest.fixture
-def catalog():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def catalog() -> list[_Target]:
     """Return a small stand-in catalog.
 
     Returns
@@ -32,7 +34,7 @@ def catalog():  # ruff: ignore[missing-return-type-undocumented-public-function]
     return [_Target("M 31"), _Target("NGC 7023"), _Target("Sun"), _Target("M 27")]
 
 
-def test_requested_targets_are_selected(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_requested_targets_are_selected(catalog: list[_Target]) -> None:
     """The subset actually narrows the run."""
     selected, unmatched = _resolve_requested_targets(catalog, ["M 31", "Sun"])
 
@@ -40,7 +42,7 @@ def test_requested_targets_are_selected(catalog):  # ruff: ignore[missing-type-f
     assert unmatched == []
 
 
-def test_selection_is_case_and_whitespace_insensitive(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_selection_is_case_and_whitespace_insensitive(catalog: list[_Target]) -> None:
     """Ids are typed by hand, so matching must tolerate that."""
     selected, unmatched = _resolve_requested_targets(catalog, ["  m 31 ", "ngc 7023"])
 
@@ -48,7 +50,7 @@ def test_selection_is_case_and_whitespace_insensitive(catalog):  # ruff: ignore[
     assert unmatched == []
 
 
-def test_a_mistyped_id_is_reported(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_a_mistyped_id_is_reported(catalog: list[_Target]) -> None:
     """A typo must not quietly shrink the run into a clean-looking pass."""
     selected, unmatched = _resolve_requested_targets(catalog, ["M 31", "NGC 9999"])
 
@@ -56,14 +58,14 @@ def test_a_mistyped_id_is_reported(catalog):  # ruff: ignore[missing-type-functi
     assert unmatched == ["NGC 9999"]
 
 
-def test_selection_preserves_catalog_order(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_selection_preserves_catalog_order(catalog: list[_Target]) -> None:
     """Processing order should not depend on argument order."""
     selected, _ = _resolve_requested_targets(catalog, ["M 27", "M 31"])
 
     assert [target.id for target in selected] == ["M 31", "M 27"]
 
 
-def test_requesting_nothing_matches_nothing(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_requesting_nothing_matches_nothing(catalog: list[_Target]) -> None:
     """An empty request is not silently treated as "everything"."""
     selected, unmatched = _resolve_requested_targets(catalog, [])
 
@@ -71,7 +73,7 @@ def test_requesting_nothing_matches_nothing(catalog):  # ruff: ignore[missing-ty
     assert unmatched == []
 
 
-def test_blank_entries_are_ignored(catalog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_blank_entries_are_ignored(catalog: list[_Target]) -> None:
     """A stray blank line must not count as an unmatched id."""
     selected, unmatched = _resolve_requested_targets(catalog, ["M 31", "   "])
 
@@ -79,7 +81,7 @@ def test_blank_entries_are_ignored(catalog):  # ruff: ignore[missing-type-functi
     assert unmatched == []
 
 
-def test_ids_are_read_from_a_file(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_ids_are_read_from_a_file(tmp_path: Path) -> None:
     """A reprocess list is easier to keep in a file than on a command line."""
     listing = tmp_path / "reprocess.txt"
     listing.write_text("# targets the fixes unblock\nSun\n\nM 27\n  M 31  \n")
@@ -87,14 +89,14 @@ def test_ids_are_read_from_a_file(tmp_path):  # ruff: ignore[missing-type-functi
     assert _read_target_ids_from_file(str(listing)) == ["Sun", "M 27", "M 31"]
 
 
-def test_target_flag_is_repeatable():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_target_flag_is_repeatable() -> None:
     """Several targets must be selectable in one invocation."""
     arguments = _build_argument_parser().parse_args(["--target", "M 31", "--target", "Sun"])
 
     assert arguments.target_ids == ["M 31", "Sun"]
 
 
-def test_no_arguments_means_the_whole_catalog():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_arguments_means_the_whole_catalog() -> None:
     """The default must stay a full run, so existing usage is unchanged."""
     arguments = _build_argument_parser().parse_args([])
 
@@ -103,7 +105,7 @@ def test_no_arguments_means_the_whole_catalog():  # ruff: ignore[missing-return-
     assert arguments.skip_reindex is False
 
 
-def test_dry_run_and_skip_reindex_are_available():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_dry_run_and_skip_reindex_are_available() -> None:
     """Both exist so a subset can be previewed and re-run cheaply."""
     arguments = _build_argument_parser().parse_args(["--dry-run", "--skip-reindex"])
 

@@ -19,7 +19,7 @@ class PhotometryOverlay:
         Color and styling configuration.
     """
 
-    def __init__(self, axis, fig, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, axis, fig, config) -> None:  # ruff: ignore[missing-type-function-argument]
         self.ax = axis
         self.fig = fig
         self.config = config
@@ -27,14 +27,14 @@ class PhotometryOverlay:
         self.active_timestamps = None
         self.active_light_curve = None
 
-    def render_light_curve(  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def render_light_curve(
         self,
         index: int,
         star_name: str,
         timestamps: np.ndarray | list | None,
         normalized_flux: np.ndarray | list | None,
         is_variable_candidate: bool = False,
-    ):
+    ) -> None:
         """Draw 1D time-series differential light curve."""
         self.ax.clear()
         self.active_star_name = star_name

@@ -5,17 +5,18 @@ tight spectral bounding box, and vertical profile extraction.
 """
 
 import numpy as np
+import pytest
 
 from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
-from astrometricslib.pipelines.spectroscopy.spectrum_extractor import SpectrumExtractor
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor import SpectrumExtractor
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 
 
 class MockAstrometricsImage(AstrometricsImage):
     """Mock AstrometricsImage that accepts a direct array input."""
 
-    def __init__(self, data: np.ndarray, header=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, data: np.ndarray, header=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Initialize MockAstrometricsImage with given data and header."""
         self._data = data
         self._header = header or {}
@@ -32,7 +33,7 @@ class MockAstrometricsImage(AstrometricsImage):
         return self._header
 
 
-def test_extract_with_flare_mask_subpixel_centroid():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_extract_with_flare_mask_subpixel_centroid() -> None:
     """Verify extract_with_flare_mask computes sub-pixel centroids.
 
     Checks center-of-mass accuracy on a simulated 2D subgrid around a
@@ -62,7 +63,7 @@ def test_extract_with_flare_mask_subpixel_centroid():  # ruff: ignore[missing-re
     assert len(profile) == 20  # max_offset - flare_offset = 30 - 10 = 20
 
 
-def test_pipeline_integration_asi533_vertical():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_pipeline_integration_asi533_vertical() -> None:
     """Verify the pipeline extraction with a ZWO ASI533MM Pro camera.
 
     Confirms extract_with_flare_mask is used when the pipeline is
@@ -109,14 +110,19 @@ def test_pipeline_integration_asi533_vertical():  # ruff: ignore[missing-return-
     # Assertions
     assert "wavelengths" in res
     assert "intensities" in res
-    assert len(res["wavelengths"]) == 370  # 750 - 380 = 370
-    assert len(res["intensities"]) == 370
+    # 750 - 380 = 370 samples were asked for, but the last ones fall past
+    # the camera's 1000 nm limit, so they are dropped, not kept as zeros.
+    assert len(res["wavelengths"]) == len(res["intensities"])
+    assert max(res["wavelengths"]) <= 1000.0
+    assert res["requested_wavelength_range_nm"][1] > 1000.0
+    assert res["valid_fraction"] == pytest.approx(len(res["wavelengths"]) / 370)
+    assert 0.0 < res["valid_fraction"] < 1.0
 
     # Wavelengths should start at ~599.6 nm for 380.0 pixel offset
     assert 599.0 <= res["wavelengths"][0] <= 600.0
 
 
-def test_pipeline_integration_asi533_horizontal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_pipeline_integration_asi533_horizontal() -> None:
     """Verify the pipeline extraction with a ZWO ASI533MM Pro camera.
 
     Confirms extract_with_flare_mask is used when the pipeline is
@@ -163,8 +169,36 @@ def test_pipeline_integration_asi533_horizontal():  # ruff: ignore[missing-retur
     # Assertions
     assert "wavelengths" in res
     assert "intensities" in res
-    assert len(res["wavelengths"]) == 370  # 750 - 380 = 370
-    assert len(res["intensities"]) == 370
+    # 750 - 380 = 370 samples were asked for, but the last ones fall past
+    # the camera's 1000 nm limit, so they are dropped, not kept as zeros.
+    assert len(res["wavelengths"]) == len(res["intensities"])
+    assert max(res["wavelengths"]) <= 1000.0
+    assert res["requested_wavelength_range_nm"][1] > 1000.0
+    assert res["valid_fraction"] == pytest.approx(len(res["wavelengths"]) / 370)
+    assert 0.0 < res["valid_fraction"] < 1.0
 
     # Wavelengths should start at ~599.6 nm for 380.0 pixel offset
     assert 599.0 <= res["wavelengths"][0] <= 600.0
+
+
+def test_extract_line_marks_samples_off_the_image_as_not_measured() -> None:
+    """Verify a line running off the picture gives NaN there, not zero."""
+    image = MockAstrometricsImage(data=np.full((100, 100), 50.0))
+    extractor = SpectrumExtractor(radius=2)
+
+    profile = extractor.extract_line(image, (50.0, 80.0), np.array([0.0, 1.0]), 40)
+
+    assert np.isfinite(profile[:20]).all()  # rows 80-99 are on the image
+    assert np.isnan(profile[20:]).all()  # rows 100-119 are off it
+
+
+def test_keep_usable_samples_drops_off_image_and_out_of_range_samples() -> None:
+    """Verify NaN and out-of-range samples are dropped."""
+    from astrometricslib.pipelines.spectroscopy.pipeline import keep_usable_samples
+
+    wavelengths = np.array([290.0, 400.0, 500.0, 600.0, 1010.0])
+    intensities = np.array([1.0, 2.0, np.nan, 4.0, 5.0])
+
+    usable = keep_usable_samples(wavelengths, intensities, 300.0, 1000.0)
+
+    assert usable.tolist() == [False, True, False, True, False]

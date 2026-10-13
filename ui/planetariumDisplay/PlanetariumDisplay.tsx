@@ -14,28 +14,40 @@ import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout'
 import { RadioListManager } from '../common/radioList/RadioListManager';
 import { CelestialSkyMap } from './components/CelestialSkyMap';
 import { PlanetariumInfoCard } from './components/PlanetariumInfoCard';
+import { AlignmentPointCard } from './components/AlignmentPointCard';
 import { PlanetariumToolbar } from './components/PlanetariumToolbar';
 import { PlanetariumContextMenu } from './components/PlanetariumContextMenu';
 import { PlanetariumDateTimeModal } from './components/PlanetariumDateTimeModal';
-import { usePlanetariumSources } from './hooks/usePlanetariumSources';
-import { useOnlineCatalogSources } from './hooks/useOnlineCatalogSources';
 import { useConstellationLines } from './hooks/useConstellationLines';
-import { usePlanetariumTargets } from './hooks/usePlanetariumTargets';
 import { useObserverLocation } from './hooks/useObserverLocation';
 import { useOverlayToggles } from './hooks/useOverlayToggles';
 import { useEquipmentConfiguration } from './hooks/useEquipmentConfiguration';
+import { useAlignmentSessionData } from './hooks/useAlignmentSessionData';
+import { useTrackingRiskMap } from './hooks/useTrackingRiskMap';
+import { useSourceMerging } from './hooks/useSourceMerging';
 import { EquipmentConfigPanel } from './components/EquipmentConfigPanel';
-import { PlanetariumSource, PlanetariumTarget } from '../common/types/planetariumTypes';
-import { useSpectrumData } from '../astronomyDisplay/hooks/useSpectrumData';
-import { SpectrumViewer } from '../astronomyDisplay/components/SpectrumViewer';
-import { PhotometryViewer } from '../astronomyDisplay/components/PhotometryViewer';
+import { PlanetariumSource } from '../common/types/planetariumTypes';
 import { callBackend } from '../common/services/backendApi';
 import { useTargetContext } from '../common/context/TargetContext';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { useRemoteStatusContext } from '../common/context/RemoteStatusContext';
 import { useTelescopeStatus } from '../common/hooks/useTelescopeStatus';
 import { safeParse } from './utils/coordinateUtils';
+import { DeepCatalogPrompt } from './components/DeepCatalogPrompt';
+import { useNavigationTarget, NavigationIntent } from '../common/utils/displayCoordinator';
+import { useTargetBrowserItems } from '../astronomyManager/hooks/useTargetBrowserItems';
+import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../astronomyManager/hooks/useSpectralClassBrowserItems';
+import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
+import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsBySpectralClassList';
+import { spectralClassLetter } from '../astronomyManager/utils/starDisplayFormat';
+import { useReportModeReady } from '../common/utils/appBootReadiness';
+import '../common/styles/segmentedToggle.css';
 import './styles/planetariumDisplay.css';
+
+// Field of view, in degrees, the sky map zooms to when a star is picked from
+// the star list or handed over from the Astronomy Manager. Wide enough to
+// show the star's neighbours, tight enough that the star is easy to find.
+const STAR_PICK_FOV_DEG = 1.0;
 
 /**
  * Root panel component for the Planetarium Display.
@@ -56,23 +68,36 @@ export const PlanetariumDisplay: React.FC = () => {
   // click, so CelestialSkyMap can tell the two apart: a list pick slews the
   // camera to the target, a canvas click just selects it in place.
   const [slewRequestId, setSlewRequestId] = useState<number>(0);
+  // Whether the pending slew should also turn tracking on. Set in the same
+  // update that bumps slewRequestId, so the map sees the two together.
+  const [trackOnSlew, setTrackOnSlew] = useState<boolean>(false);
 
-  // Get telescope connection status
-  const { telescopeConnection } = useTelescopeStatus();
+  // Get telescope connection and telemetry
+  const { telescopeConnection, telemetry } = useTelescopeStatus();
 
   // All overlay and plot visibility toggles
   const {
     showStars, setShowStars,
     showFOVOutline, setShowFOVOutline,
-    showFITSOverlays, setShowFITSOverlays,
     showEnvironment, setShowEnvironment,
     showGrid, setShowGrid,
     showCatalog, setShowCatalog,
     showConstellations, setShowConstellations,
     showTelescope, setShowTelescope,
-    showSpectraPlot, setShowSpectraPlot,
-    showPhotometryPlot, setShowPhotometryPlot,
   } = useOverlayToggles();
+
+  // Mount tracking risk heatmap toggle state
+  const [showTrackingRisk, setShowTrackingRisk] = useState<boolean>(false);
+
+  // Historical session review and cumulative tracking data
+  const {
+    availableSessions,
+    selectedSessionId,
+    setSelectedSessionId,
+    activeAlignmentTargets,
+    activePolarAlignment,
+  } = useAlignmentSessionData(telemetry);
+  const { trackingRisk } = useTrackingRiskMap(showTrackingRisk);
 
   const [viewerCenter, setViewerCenter] = useState<{ ra: number; dec: number } | null>(null);
   const [currentFOV, setCurrentFOV] = useState<number>(90.0);
@@ -80,14 +105,17 @@ export const PlanetariumDisplay: React.FC = () => {
   // Date and Time controls
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [isTimeModalOpen, setIsTimeModalOpen] = useState<boolean>(false);
-  // When true, currentDate ticks forward with the system clock every second
+  // When true, the sky follows the system clock. Nothing ticks in React state
+  // for this: a tick re-rendered this whole display (and restarted the sky
+  // map's render loop) every second. The sky map reads the clock itself.
   const [isLiveTime, setIsLiveTime] = useState<boolean>(true);
 
-  useEffect(() => {
-    if (!isLiveTime) return;
-    const interval = setInterval(() => setCurrentDate(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, [isLiveTime]);
+  // The date the time dialog starts from: now (when it opens) in live mode.
+  const dialogDate = useMemo(
+    () => (isLiveTime ? new Date() : currentDate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshed each time the dialog opens
+    [isLiveTime, currentDate, isTimeModalOpen],
+  );
 
   const handleDateChange = useCallback((date: Date) => {
     setIsLiveTime(false);
@@ -103,70 +131,16 @@ export const PlanetariumDisplay: React.FC = () => {
   const raValue = useMemo(() => safeParse(viewerCenter?.ra), [viewerCenter?.ra]);
   const decValue = useMemo(() => safeParse(viewerCenter?.dec), [viewerCenter?.dec]);
 
-  // Extend query radius 1.5× beyond FOV to preload sources at pan edges; minimum 0.5°
-  const queryRadius = useMemo(() => Math.max(currentFOV * 1.5, 0.5), [currentFOV]);
-
-  const { sources: localSources } = usePlanetariumSources(raValue, decValue, queryRadius);
-
-  // Whole-sky bright-star query: served from the locally bundled Hipparcos
-  // extract ('hipparcos') rather than a live query. GAIA DR3 is unsuitable
-  // for this layer — its detectors saturate on very bright stars, so it's
-  // missing nearly every naked-eye-famous star.
-  //
-  // This driver's backend query is a fast in-memory numpy filter over a
-  // bundled extract (no network round trip) and its maximum_query_radius_degrees
-  // is 180 — a true whole sky. So rather than rescoping to the viewport on
-  // every pan (which meant re-querying, and a brief empty gap, every time you
-  // panned into a not-yet-queried region, including areas hidden behind the
-  // ground/horizon overlay that later rotate into view), we query the entire
-  // sky once with a fixed center/radius. The backend's brightest-5000 cap
-  // still applies, so the overlay is always handed the 5000 brightest stars
-  // in the sky, not 83k.
-  const brightStarDrivers = useMemo(() => ['hipparcos'], []);
-  const { onlineSources: brightStarSources } = useOnlineCatalogSources(
-    0, 0, 180,
-    brightStarDrivers,
-    true,
-  );
-
-  // Deep-zoom star query: GAIA DR3 supplies stars fainter than Hipparcos's
-  // ~magnitude-12 completeness limit (see MAX_ZOOM_LIMITING_MAGNITUDE),
-  // scoped to the current viewport rather than the whole sky since GAIA's
-  // per-region density is far higher than Hipparcos's. Gated on showStars
-  // so toggling the background field off also stops these network queries.
-  const deepStarDrivers = useMemo(() => ['gaia'], []);
-  const { onlineSources: deepStarSources } = useOnlineCatalogSources(
-    raValue, decValue, queryRadius,
-    deepStarDrivers,
-    showStars,
-  );
-
   // Bundled constellation stick-figure lines: fetched once (no ra/dec/radius —
   // the whole dataset is static and small) rather than re-queried on pan/zoom.
   const { lines: constellationLines } = useConstellationLines(showConstellations);
 
-  const sources = useMemo(() => {
-    const localIds = new Set(localSources.map(source => source.id));
-    const combinedOnline = [
-      ...brightStarSources,
-      ...deepStarSources.filter(source => !localIds.has(source.id)),
-    ];
-    const seenOnlineIds = new Set<string>();
-    const dedupedOnline = combinedOnline.filter(source => {
-      if (localIds.has(source.id) || seenOnlineIds.has(source.id)) return false;
-      seenOnlineIds.add(source.id);
-      return true;
-    });
-    return [...localSources, ...dedupedOnline];
-  }, [localSources, brightStarSources, deepStarSources]);
+  const { stars, targets, deepCatalogStatus, libraryTargets } = useSourceMerging(
+    raValue, decValue, currentFOV, showStars,
+  );
 
   const { location } = useObserverLocation();
-  const { targets: libraryTargets } = usePlanetariumTargets();
   const { configuration: equipmentConfig, availableCameras, setActiveCamera } = useEquipmentConfiguration();
-
-  // Split sources into stars and targets
-  const stars = useMemo(() => sources.filter(source => source.type === 'star'), [sources]);
-  const targets = useMemo(() => sources.filter(source => source.type === 'target') as PlanetariumTarget[], [sources]);
 
   const {
     selectedTarget: selectedTargetId,
@@ -185,7 +159,6 @@ export const PlanetariumDisplay: React.FC = () => {
     setSelectedTargetId,
     remoteTargets,
     false,
-    true,
     true
   );
 
@@ -193,16 +166,65 @@ export const PlanetariumDisplay: React.FC = () => {
     return libraryTargets.find(target => target.id === selectedTargetId) || null;
   }, [libraryTargets, selectedTargetId]);
 
-  // Sync details from Backend for selectedSource visibility status
+  // Same target/spectral-class split navigation as the Astronomy Manager:
+  // browse by target and drill into its stars, or browse by catalog
+  // spectral classification with stars ranked by self-determined match
+  // quality. `scopedTarget`/`scopedSpectralClass` is which primary-list
+  // entry is expanded in the secondary star list -- independent of
+  // `selectedTargetId`, which is whatever object (a target or one of its
+  // stars) is actually centered/selected on the sky map right now.
+  const [navigationMode, setNavigationMode] = useState<'target' | 'spectralClass'>('target');
+  const [scopedTarget, setScopedTarget] = useState<string>('');
+  const [scopedSpectralClass, setScopedSpectralClass] = useState<string>(ALL_SPECTRAL_CLASSES_VALUE);
+
+  const targetBrowser = useTargetBrowserItems();
+  const spectralClassBrowser = useSpectralClassBrowserItems();
+  // The sky map's own catalog sources (useSourceMerging) don't expose a
+  // loading flag; the target/star browser sidebar's does and fetches on the
+  // same mount, so it's a reasonable proxy for "this view has real data."
+  useReportModeReady('Planetarium', !targetBrowser.isLoading);
+
+  // Auto-select the first target once the list loads, unless one is
+  // already scoped (including via a deep link elsewhere in this file).
   useEffect(() => {
-    if (!selectedSource) return;
+    if (!scopedTarget && targetBrowser.items.length > 0) {
+      setScopedTarget(targetBrowser.items[0].id);
+    }
+  }, [scopedTarget, targetBrowser.items]);
+
+  const activeSpectralClass =
+    navigationMode === 'spectralClass' && scopedSpectralClass !== ALL_SPECTRAL_CLASSES_VALUE
+      ? scopedSpectralClass
+      : undefined;
+
+  const starsInScopedTarget = useSpectrumList(
+    navigationMode === 'target' ? (scopedTarget || undefined) : undefined,
+    reloadKey,
+    pendingTarget,
+    selectedTargetId,
+    setPendingTarget
+  );
+  const starsInSpectralClass = useStarsBySpectralClassList(activeSpectralClass);
+  const scopedStarList = activeSpectralClass ? starsInSpectralClass : starsInScopedTarget;
+
+  // Sync details from Backend for selectedSource visibility status
+  const targetTimeIso = isLiveTime ? undefined : currentDate.toISOString();
+
+  useEffect(() => {
+    if (!selectedSource || selectedSource.type === 'alignment') return;
     let active = true;
+    const controller = new AbortController();
+
     const fetchDetails = async () => {
       try {
-        const details = await callBackend('planetarium:get_visibility', {
-          objects: [{ id: selectedSource.id, type: selectedSource.type || 'star' }],
-          time: currentDate.toISOString()
-        });
+        const details = await callBackend(
+          'planetarium:get_visibility',
+          {
+            objects: [{ id: selectedSource.id, type: selectedSource.type || 'star' }],
+            time: targetTimeIso || new Date().toISOString()
+          },
+          { signal: controller.signal }
+        );
         if (active && details && details.length > 0) {
           setSelectedSource(prev => {
             if (!prev || prev.id !== selectedSource.id) return prev;
@@ -210,45 +232,33 @@ export const PlanetariumDisplay: React.FC = () => {
               ...prev,
               ra: prev.ra,
               dec: prev.dec,
-              altitude: details[0].altitude,
-              azimuth: details[0].azimuth,
-              hourAngle: details[0].hour_angle,
-              flipRequired: details[0].flip_required,
-              timeToFlipSeconds: details[0].time_to_flip_seconds,
-              riseTime: details[0].rise_time,
-              setTime: details[0].set_time,
-              transitTime: details[0].transit_time,
+              altitude: details[0].altitude_deg,
+              azimuth: details[0].azimuth_deg,
+              hourAngle: details[0].meridian?.hour_angle_hours,
+              flipRequired: details[0].meridian?.flip_required,
+              timeToFlipSeconds: details[0].meridian?.time_to_flip_seconds,
+              riseTime: details[0].rise_utc,
+              setTime: details[0].set_utc,
+              transitTime: details[0].transit_utc,
               aboveHorizon: details[0].above_horizon
             };
           });
         }
-      } catch (error) {
-        console.error("Failed to fetch detailed visibility status", error);
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          console.error("Failed to fetch detailed visibility status", error);
+        }
       }
     };
+
     fetchDetails();
     const interval = setInterval(fetchDetails, 10000);
     return () => {
       active = false;
+      controller.abort();
       clearInterval(interval);
     };
-  }, [selectedSource?.id, currentDate]);
-
-  // Load physical spectra/photometry data for the selected star
-  const { astronomyData, loading: plotLoading, error: plotError } = useSpectrumData(
-    selectedSource?.id || ''
-  );
-
-  const availableTimestamps = useMemo(() => {
-    const times = new Set<string>();
-    if (astronomyData?.photometry?.timestamps) {
-      astronomyData.photometry.timestamps.forEach(t => times.add(t));
-    }
-    if (astronomyData?.spectraHistory) {
-      astronomyData.spectraHistory.forEach(s => times.add(s.timestamp));
-    }
-    return new Set(Array.from(times).sort((a, b) => new Date(a).getTime() - new Date(b).getTime()));
-  }, [astronomyData]);
+  }, [selectedSource?.id, targetTimeIso]);
 
   /**
    * Resolves the selected object ID to a PlanetariumSource and updates viewport center.
@@ -264,6 +274,7 @@ export const PlanetariumDisplay: React.FC = () => {
   const handleSelectObject = useCallback((id: string) => {
     setSelectedTargetId(id);
     setPendingTarget(id);
+    setTrackOnSlew(false);
     setSlewRequestId(prev => prev + 1);
 
     // First try libraryTargets (local catalog targets)
@@ -321,23 +332,98 @@ export const PlanetariumDisplay: React.FC = () => {
   }, [libraryTargets, targetList.targets, targetList.stars, setSelectedTargetId, setPendingTarget]);
 
   /**
-   * Handles source selection from the canvas, resetting plot visibility toggles.
+   * Centers the sky map on and selects a star handed off from Astronomy
+   * Manager's "Locate in Planetarium" action.
+   *
+   * Unlike handleSelectObject, this doesn't look the star up in
+   * libraryTargets/targetList -- those lists are paginated/query-scoped and
+   * may not contain the handed-off star, so the RA/Dec and flags carried in
+   * the hand-off itself are used directly instead.
+   *
+   * Also zooms the map to `STAR_PICK_FOV_DEG` and turns tracking on.
+   *
+   * @param {PlanetariumSource} source - The star to center on and select.
+   * @returns {void}
+   */
+  const applyLocateStar = useCallback((source: PlanetariumSource) => {
+    setViewerCenter({ ra: source.ra, dec: source.dec });
+    setSelectedSource(source);
+    setSelectedTargetId(source.id);
+    setPendingTarget(source.id);
+    setCurrentFOV(STAR_PICK_FOV_DEG);
+    setTrackOnSlew(true);
+    setSlewRequestId(prev => prev + 1);
+  }, [setSelectedTargetId, setPendingTarget]);
+
+  /**
+   * Selects a target from the target-browser primary list: scopes the
+   * secondary star list to it, and centers/selects it on the map exactly
+   * like picking it did before this list existed.
+   *
+   * @param {string} id - The target's id.
+   * @returns {void}
+   */
+  const handleSelectScopedTarget = useCallback((id: string) => {
+    setScopedTarget(id);
+    handleSelectObject(id);
+  }, [handleSelectObject]);
+
+  /**
+   * Selects a star from either secondary star list (a target's stars, or
+   * a spectral class's stars). Both lists' items already carry their own
+   * ra/dec, so the star is centered/selected directly via applyLocateStar
+   * instead of handleSelectObject's lookup chain, which only searches
+   * libraryTargets and the viewport-scoped targetList -- neither of which
+   * is guaranteed to contain a star found this way.
+   *
+   * @param {string} id - The star's id, as `scopedStarList.items` uses it.
+   * @returns {void}
+   */
+  const handleSelectScopedStar = useCallback((id: string) => {
+    const item = scopedStarList.items.find((listItem) => listItem.value === id);
+    if (!item || typeof item.ra !== 'number' || typeof item.dec !== 'number') return;
+    applyLocateStar({
+      id: item.value,
+      ra: item.ra,
+      dec: item.dec,
+      name: item.label,
+      hasSpectra: !!item.hasSpectra,
+      hasPhotometry: !!item.hasPhotometry,
+      type: 'star',
+    });
+  }, [scopedStarList.items, applyLocateStar]);
+
+  // Consumes a star handed off from Astronomy Manager's "Locate in
+  // Planetarium" action, routed through the shared displayCoordinator
+  // navigation-intent bus so the same handoff works whether this panel is
+  // already mounted or is switched to as part of the hand-off.
+  useNavigationTarget('Planetarium', undefined, useCallback((intent: NavigationIntent) => {
+    if (intent.action === 'locateStar' && intent.payload) {
+      applyLocateStar(intent.payload as PlanetariumSource);
+    }
+  }, [applyLocateStar]));
+
+  /**
+   * Handles source selection from the canvas.
    *
    * @param {PlanetariumSource | null} source - The selected source, or null to deselect.
    * @returns {void}
    */
   const handleSelectSource = useCallback((source: PlanetariumSource | null) => {
     setSelectedSource(source);
-    setShowSpectraPlot(false);
-    setShowPhotometryPlot(false);
     if (source) {
       setSelectedTargetId(source.id);
       setPendingTarget(source.id);
+      if (source.type === 'alignment' && source.alignmentAttempt?.timestamp) {
+        setIsLiveTime(false);
+        // source.alignmentAttempt.timestamp is in unix epoch seconds
+        setCurrentDate(new Date(source.alignmentAttempt.timestamp * 1000));
+      }
     } else {
       setSelectedTargetId('');
       setPendingTarget('');
     }
-  }, [setShowSpectraPlot, setShowPhotometryPlot, setSelectedTargetId, setPendingTarget]);
+  }, [setSelectedTargetId, setPendingTarget, setIsLiveTime, setCurrentDate]);
 
   /**
    * Throttled callback invoked by CelestialSkyMap when the viewport center moves.
@@ -367,21 +453,102 @@ export const PlanetariumDisplay: React.FC = () => {
     }
   }, [currentFOV]);
 
+  // Restricts the map's rendered star field to the chosen spectral class,
+  // the same class letter used to select the class's browsing list -- a
+  // star the map already fetched for this viewport but that isn't
+  // catalogued in that class is hidden rather than refetched.
+  const visibleStars = useMemo(() => {
+    if (!activeSpectralClass) return stars;
+    return stars.filter((star) => spectralClassLetter(star.spectralType) === activeSpectralClass);
+  }, [stars, activeSpectralClass]);
+
   const leftPanel = (
-    <RadioListManager
-      className="planetarium-display__left"
-      title="Targets"
-      items={targetList.items}
-      selectedId={selectedTargetId}
-      pendingId={pendingTarget}
-      onSelect={handleSelectObject}
-      filterOptions={targetList.filterOptions}
-      selectedFilterOption={targetList.selectedFilterOption}
-      onFilterOptionChange={targetList.setFilterOption}
-      filterText={targetList.filterText}
-      onFilterTextChange={targetList.setFilterText}
-      highlightedIds={targetList.highlightedIds}
-    />
+    <div className="astronomy-display__browser">
+      <div className="astronomy-display__mode-toggle">
+        <button
+          type="button"
+          className={`segmented-btn ${navigationMode === 'target' ? 'active' : ''}`}
+          onClick={() => setNavigationMode('target')}
+        >
+          By target
+        </button>
+        <button
+          type="button"
+          className={`segmented-btn ${navigationMode === 'spectralClass' ? 'active' : ''}`}
+          onClick={() => setNavigationMode('spectralClass')}
+        >
+          By spectral class
+        </button>
+      </div>
+
+      {navigationMode === 'target' ? (
+        <RadioListManager
+          title="Targets"
+          className="astronomy-display__primary-list"
+          items={targetBrowser.items}
+          selectedId={scopedTarget}
+          pendingId={scopedTarget}
+          onSelect={handleSelectScopedTarget}
+          filterText={targetBrowser.filterText}
+          onFilterOptionChange={() => {}}
+          onFilterTextChange={targetBrowser.setFilterText}
+          filterPlaceholder="Search targets..."
+          highlightedIds={targetList.highlightedIds}
+          isLoading={targetBrowser.isLoading}
+          loadingMessage="Loading targets…"
+          emptyMessage="No targets found."
+        />
+      ) : (
+        <RadioListManager
+          title="Spectral classes"
+          className="astronomy-display__primary-list"
+          items={spectralClassBrowser.items}
+          selectedId={scopedSpectralClass}
+          pendingId={scopedSpectralClass}
+          onSelect={setScopedSpectralClass}
+          filterText={spectralClassBrowser.filterText}
+          onFilterOptionChange={() => {}}
+          onFilterTextChange={spectralClassBrowser.setFilterText}
+          filterPlaceholder="Search classes..."
+          isLoading={spectralClassBrowser.isLoading}
+          loadingMessage="Scanning the catalog for spectral classes…"
+          emptyMessage="No spectral classes found."
+        />
+      )}
+
+      <RadioListManager
+        title={
+          activeSpectralClass
+            ? `Class ${activeSpectralClass} stars`
+            : navigationMode === 'spectralClass'
+            ? 'All stars'
+            : scopedTarget
+            ? `Stars in ${scopedTarget}`
+            : 'Select a target'
+        }
+        className="astronomy-display__star-list"
+        items={scopedStarList.items}
+        selectedId={selectedTargetId}
+        pendingId={pendingTarget}
+        onSelect={handleSelectScopedStar}
+        onFilterOptionChange={() => {}}
+        filterText={scopedStarList.filterText}
+        onFilterTextChange={scopedStarList.setFilterText}
+        legend={
+          <>
+            <span><span className="selectable-list__badge selectable-list__badge--spectra">S</span> spectrum</span>
+            <span><span className="selectable-list__badge selectable-list__badge--photometry">P</span> photometry</span>
+          </>
+        }
+        isLoading={scopedStarList.isLoading}
+        loadingMessage="Loading stars…"
+        emptyMessage="No stars found for this selection."
+        page={activeSpectralClass ? undefined : starsInScopedTarget.page}
+        onPageChange={activeSpectralClass ? undefined : starsInScopedTarget.setPage}
+        hasMore={activeSpectralClass ? false : starsInScopedTarget.hasMore}
+        totalPages={activeSpectralClass ? undefined : starsInScopedTarget.totalPages}
+      />
+    </div>
   );
 
   const centerPanel = (
@@ -391,8 +558,6 @@ export const PlanetariumDisplay: React.FC = () => {
         onToggleStars={setShowStars}
         showFOV={showFOVOutline}
         onToggleFOV={setShowFOVOutline}
-        showFITS={showFITSOverlays}
-        onToggleFITS={setShowFITSOverlays}
         showEnvironment={showEnvironment}
         onToggleEnvironment={setShowEnvironment}
         showGrid={showGrid}
@@ -403,24 +568,34 @@ export const PlanetariumDisplay: React.FC = () => {
         onToggleConstellations={setShowConstellations}
         showTelescope={showTelescope}
         onToggleTelescope={setShowTelescope}
+        showTrackingRisk={showTrackingRisk}
+        onToggleTrackingRisk={setShowTrackingRisk}
+        availableSessions={availableSessions}
+        selectedSessionId={selectedSessionId}
+        onSelectSession={setSelectedSessionId}
         currentFOV={currentFOV}
         onOpenTimeModal={() => setIsTimeModalOpen(true)}
       />
 
       <CelestialSkyMap
         center={selectedSource ? { ra: selectedSource.ra, dec: selectedSource.dec } : (selectedTarget ? { ra: selectedTarget.ra, dec: selectedTarget.dec } : null)}
-        sources={stars}
+        sources={visibleStars}
         targets={targets}
         location={location}
         showStars={showStars}
         showFOV={showFOVOutline}
-        showFITS={showFITSOverlays}
         showEnvironment={showEnvironment}
         showGrid={showGrid}
         showCatalog={showCatalog}
         showConstellations={showConstellations}
         constellationLines={constellationLines}
         showTelescope={showTelescope}
+        showTrackingRisk={showTrackingRisk}
+        alignmentTargets={activeAlignmentTargets}
+        trackingRisk={trackingRisk}
+        polarAlignment={activePolarAlignment}
+        selectedSessionId={selectedSessionId}
+        simulationDate={isLiveTime ? undefined : currentDate}
         fov={currentFOV}
         onFOVChange={setCurrentFOV}
         onSelectSource={handleSelectSource}
@@ -430,6 +605,7 @@ export const PlanetariumDisplay: React.FC = () => {
         }}
         selectedTargetId={selectedTargetId}
         slewRequestId={slewRequestId}
+        trackOnSlew={trackOnSlew}
         onCenterChange={handleCenterChange}
         sensorFovWidthDeg={equipmentConfig?.fovWidthDeg}
         sensorFovHeightDeg={equipmentConfig?.fovHeightDeg}
@@ -441,72 +617,31 @@ export const PlanetariumDisplay: React.FC = () => {
         onSelectCamera={setActiveCamera}
       />
 
+      <DeepCatalogPrompt status={deepCatalogStatus} />
+
       <PlanetariumDateTimeModal
         isOpen={isTimeModalOpen}
         onClose={() => setIsTimeModalOpen(false)}
-        currentDate={currentDate}
+        currentDate={dialogDate}
         onDateChange={handleDateChange}
         onResetToNow={handleResetToNow}
       />
 
-      {selectedSource && (
+      {/* Selected Source Details Card (Star/Target vs Alignment Point) */}
+      {selectedSource && selectedSource.type === 'alignment' && (
+        <AlignmentPointCard
+          source={selectedSource}
+          observerLocation={location}
+          onClose={() => handleSelectSource(null)}
+        />
+      )}
+
+      {selectedSource && selectedSource.type !== 'alignment' && (
         <PlanetariumInfoCard
           source={selectedSource}
           observerLocation={location}
           onClose={() => handleSelectSource(null)}
-          showSpectraPlot={showSpectraPlot}
-          onShowSpectraPlotChange={setShowSpectraPlot}
-          showPhotometryPlot={showPhotometryPlot}
-          onShowPhotometryPlotChange={setShowPhotometryPlot}
-          astronomyData={astronomyData}
-          plotLoading={plotLoading}
-          plotError={plotError}
         />
-      )}
-
-      {/* Floating Scientific Plot Panel (Spectroscopy / Photometry) */}
-      {(showSpectraPlot || showPhotometryPlot) && selectedSource && (
-        <div className="planetarium-plot-panel">
-          <div className="planetarium-plot-panel__header">
-            <h4>{selectedSource.name} Scientific Data</h4>
-            <div className="planetarium-plot-panel__controls">
-              <button
-                className="planetarium-plot-panel__close"
-                onClick={() => {
-                  setShowSpectraPlot(false);
-                  setShowPhotometryPlot(false);
-                }}
-              >
-                &times;
-              </button>
-            </div>
-          </div>
-          <div className="planetarium-plot-panel__body">
-            {showSpectraPlot && (
-              <div className="planetarium-plot-section">
-                <h5>Spectroscopy Calibration Curve</h5>
-                <SpectrumViewer
-                  astronomyData={astronomyData}
-                  loading={plotLoading}
-                  error={plotError}
-                  active={!!selectedSource}
-                  selectedTimestamps={availableTimestamps}
-                />
-              </div>
-            )}
-            {showPhotometryPlot && (
-              <div className="planetarium-plot-section">
-                <h5>Photometry Time-Series Curves</h5>
-                <PhotometryViewer
-                  astronomyData={astronomyData}
-                  loading={plotLoading}
-                  error={plotError}
-                  selectedTimestamps={availableTimestamps}
-                />
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {contextSource && contextPos && (

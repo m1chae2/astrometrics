@@ -1,102 +1,118 @@
-"""Purpose: Unit tests for mosaic panel set generation.
+"""Purpose: Unit tests for mosaic panels and mosaic creation.
 
-Description: Verifies generate_mosaic_packages produces one correctly
-coordinated package per panel, each with a distinct panel sub-target,
-using a fake Astrometrics high-level interface rather than the real
-science library.
+Description: Verifies `calculate_panels` spreads panels symmetrically
+around the center using the equipment's field of view, and that
+`create_mosaic` adds one distinct panel target per panel and, when asked,
+one package each. A small in-memory stand-in replaces the science
+library's target catalog.
 """
 
+import pytest
+
+from astrometricslib import InvalidArgumentError, Target
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentConfiguration, Telescope
-from wayfindinglib.models.planning.mosaic import MosaicGridConfig
 from wayfindinglib.models.planning.observation_package import ExposureRequest, FrameType
-from wayfindinglib.tasks.planning_tasks.mosaic_tasks import generate_mosaic_packages
+from wayfindinglib.tasks.planning_tasks.mosaic_tasks import calculate_panels, create_mosaic
 
 
-class _FakeTarget:
-    def __init__(self, target_id, ra="09:55:33", dec="+69:03:55"):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
-        self.id = target_id
-        self.ra = ra
-        self.dec = dec
+class _FakeTargetCatalog:
+    """Keeps added targets in a dictionary and remembers a save."""
 
+    def __init__(self) -> None:
+        """Start with no targets and nothing saved."""
+        self.targets: dict[str, Target] = {}
+        self.saved = False
 
-class _FakeTargetRegistry:
-    def __init__(self, astrometrics: _FakeAstrometrics):  # ruff: ignore[missing-return-type-special-method]
-        self._astrometrics = astrometrics
+    def add(self, target: Target) -> None:
+        """Keep one target.
 
-    def get(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        return self._astrometrics._targets.get(target_id)
+        Parameters
+        ----------
+        target : `Target`
+            The target to keep.
+        """
+        self.targets[target.id] = target
 
-    def create(self, target_id):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        target = _FakeTarget(target_id)
-        self._astrometrics._targets[target_id] = target
-        return target
-
-    def add(self, target):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        self._astrometrics._targets[target.id] = target
-
-    def save(self):  # ruff: ignore[missing-return-type-private-function]
-        self._astrometrics.saved = True
+    def save(self) -> None:
+        """Remember that the catalog was saved."""
+        self.saved = True
 
 
 class _FakeAstrometrics:
-    def __init__(self, parent: _FakeTarget):  # ruff: ignore[missing-return-type-special-method]
-        self._targets = {parent.id: parent}
-        self.saved = False
-        self.targets = _FakeTargetRegistry(self)
+    """Holds only the target catalog stand-in."""
+
+    def __init__(self) -> None:
+        """Build the target catalog stand-in."""
+        self.targets = _FakeTargetCatalog()
 
 
-def _equipment():  # ruff: ignore[missing-return-type-private-function]
+def _equipment() -> EquipmentConfiguration:
+    """Build a small refractor and camera pair.
+
+    Returns
+    -------
+    equipment : `EquipmentConfiguration`
+        A 450 mm telescope with a square sensor.
+    """
     telescope = Telescope(id="t1", name="Test Scope", focal_length_mm=450.0, focal_ratio=6.0)
     camera = Camera(id="c1", name="Test Cam", pixel_size_um=3.76, sensor_width_px=3008, sensor_height_px=3008)
     return EquipmentConfiguration(telescope=telescope, camera=camera)
 
 
-def test_generates_one_package_per_panel_with_distinct_targets():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a 2x2 grid produces four packages with distinct targets."""
-    parent = _FakeTarget("NGC 7000")
-    astrometrics = _FakeAstrometrics(parent)
-    grid_config = MosaicGridConfig(rows=2, cols=2, overlap_percent=10.0)
+def _parent() -> Target:
+    """Build the parent target the mosaic covers.
+
+    Returns
+    -------
+    target : `Target`
+        NGC 7000 with a camera and telescope recorded.
+    """
+    parent = Target(id="NGC 7000", commonName="North America", ra="20h 58m 47s", dec="+44° 19′ 48″")
+    parent.main_camera = "ASI2600"
+    parent.main_scope = "Apertura 75Q"
+    return parent
+
+
+def test_panels_straddle_the_center_using_the_equipment_field_of_view() -> None:
+    """A 1x2 grid puts one panel each side of the center, one field apart."""
+    equipment = _equipment()
+    panels = calculate_panels(None, "180", "0", 1, 2, 0.0, equipment)
+    assert [panel.panel_id for panel in panels] == ["P1_1", "P1_2"]
+    separation = panels[1].ra_deg - panels[0].ra_deg
+    assert separation == pytest.approx(equipment.fov_width_deg, rel=1e-6)
+    assert (panels[0].ra_deg + panels[1].ra_deg) / 2 == pytest.approx(180.0)
+
+
+def test_a_bad_grid_is_refused() -> None:
+    """Zero rows or a 100 percent overlap cannot make a grid."""
+    with pytest.raises(InvalidArgumentError):
+        calculate_panels(None, "180", "0", 0, 2, 0.0, _equipment())
+    with pytest.raises(InvalidArgumentError):
+        calculate_panels(None, "180", "0", 1, 2, 100.0, _equipment())
+
+
+def test_create_mosaic_adds_one_target_and_package_per_panel() -> None:
+    """A 2x2 grid gives four distinct panel targets and four packages."""
+    astrometrics = _FakeAstrometrics()
+    panels = calculate_panels(None, "20h 58m 47s", "+44 19 48", 2, 2, 10.0, _equipment())
     exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=10)]
 
-    packages = generate_mosaic_packages(
-        astrometrics, "NGC 7000", grid_config, exposure_requests, _equipment()
-    )
+    plan = create_mosaic(astrometrics, _parent(), panels, exposure_requests, None, packages=True)
 
-    assert len(packages) == 4
-    target_ids = {p.target_id for p in packages}
-    assert len(target_ids) == 4  # every panel got a distinct sub-target
-    assert astrometrics.saved is True
-    for package in packages:
-        assert package.exposure_requests == exposure_requests
-
-
-def test_panel_coordinates_spread_around_parent_center():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify panels offset from the parent center in a symmetric pattern."""
-    parent = _FakeTarget("NGC 7000")
-    astrometrics = _FakeAstrometrics(parent)
-    grid_config = MosaicGridConfig(rows=1, cols=2, overlap_percent=0.0)
-    exposure_requests = [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)]
-
-    packages = generate_mosaic_packages(
-        astrometrics, "NGC 7000", grid_config, exposure_requests, _equipment()
-    )
-
-    assert len(packages) == 2
-    ra_values = sorted(astrometrics.targets.get(p.target_id).ra for p in packages)
-    # Two distinct panel RAs should be assigned, straddling the parent center.
-    assert ra_values[0] != ra_values[1]
+    assert len(set(plan.target_ids)) == 4
+    assert plan.target_ids[0] == "NGC 7000_P1_1"
+    assert astrometrics.targets.saved is True
+    assert [package.target_id for package in plan.packages] == plan.target_ids
+    assert all(package.exposure_requests == exposure_requests for package in plan.packages)
+    panel_target = astrometrics.targets.targets["NGC 7000_P1_1"]
+    assert panel_target.main_camera == "ASI2600"
+    assert panel_target.ra == panels[0].ra_str
 
 
-def test_raises_for_unknown_parent_target():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify a ValueError is raised when the parent does not resolve."""
-    import pytest
-
-    astrometrics = _FakeAstrometrics(_FakeTarget("known"))
-    with pytest.raises(ValueError):
-        generate_mosaic_packages(
-            astrometrics,
-            "does-not-exist",
-            MosaicGridConfig(rows=1, cols=1),
-            [ExposureRequest(frame_type=FrameType.LIGHT, exposure_sec=300.0, count=1)],
-            _equipment(),
-        )
+def test_create_mosaic_can_skip_the_packages() -> None:
+    """With packages=False only the panel targets are made."""
+    astrometrics = _FakeAstrometrics()
+    panels = calculate_panels(None, "180", "0", 1, 2, 0.0, _equipment())
+    plan = create_mosaic(astrometrics, _parent(), panels, None, None, packages=False)
+    assert plan.packages == []
+    assert len(plan.target_ids) == 2

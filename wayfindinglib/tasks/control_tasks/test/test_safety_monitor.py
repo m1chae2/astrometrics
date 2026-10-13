@@ -5,10 +5,11 @@ rule set, that `permits_observing()` is false for each, that the worst
 verdict across rules wins and names its rule, and that reopening does
 not occur until the settling period has elapsed after the last
 non-safe reading -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from wayfindinglib.models.policy.safety import SafetyRule, SafetyRuleSet, SafetyVerdict
 from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
@@ -16,7 +17,7 @@ from wayfindinglib.tasks.control_tasks.safety_monitor import SafetyMonitor
 _NOW = datetime(2026, 8, 5, 4, 0, 0, tzinfo=UTC)
 
 
-def _rule_set(**overrides) -> SafetyRuleSet:  # ruff: ignore[missing-type-kwargs]
+def _rule_set(**overrides: Any) -> SafetyRuleSet:
     defaults = {
         "id": "rs-1",
         "rules": [
@@ -42,7 +43,7 @@ def _rule_set(**overrides) -> SafetyRuleSet:  # ruff: ignore[missing-type-kwargs
     return SafetyRuleSet(**defaults)
 
 
-def test_absent_reading_yields_unknown_and_blocks_observing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_absent_reading_yields_unknown_and_blocks_observing() -> None:
     """Verify a measurement with no reading yields UNKNOWN."""
     monitor = SafetyMonitor()
     assessment = monitor.evaluate(_rule_set(), {}, _NOW)
@@ -50,7 +51,7 @@ def test_absent_reading_yields_unknown_and_blocks_observing():  # ruff: ignore[m
     assert assessment.permits_observing() is False
 
 
-def test_stale_reading_yields_unknown_and_blocks_observing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stale_reading_yields_unknown_and_blocks_observing() -> None:
     """Verify a reading older than its staleness bound yields UNKNOWN."""
     monitor = SafetyMonitor()
     readings = {
@@ -63,7 +64,7 @@ def test_stale_reading_yields_unknown_and_blocks_observing():  # ruff: ignore[mi
     assert assessment.permits_observing() is False
 
 
-def test_unconfigured_rule_set_yields_unknown_and_blocks_observing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unconfigured_rule_set_yields_unknown_and_blocks_observing() -> None:
     """Verify a None rule set yields UNKNOWN, not a permissive default."""
     monitor = SafetyMonitor()
     assessment = monitor.evaluate(None, {"wind_speed_kph": (5.0, _NOW)}, _NOW)
@@ -71,7 +72,7 @@ def test_unconfigured_rule_set_yields_unknown_and_blocks_observing():  # ruff: i
     assert assessment.permits_observing() is False
 
 
-def test_worst_verdict_across_rules_wins_and_names_its_rule():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_worst_verdict_across_rules_wins_and_names_its_rule() -> None:
     """Verify the most severe among fully-read rules determines the verdict."""
     monitor = SafetyMonitor()
     readings = {
@@ -84,7 +85,7 @@ def test_worst_verdict_across_rules_wins_and_names_its_rule():  # ruff: ignore[m
     assert assessment.permits_observing() is False
 
 
-def test_safe_readings_yield_safe_and_permit_observing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_safe_readings_yield_safe_and_permit_observing() -> None:
     """Verify all-safe readings yield SAFE and permit observing."""
     monitor = SafetyMonitor()
     readings = {
@@ -96,7 +97,7 @@ def test_safe_readings_yield_safe_and_permit_observing():  # ruff: ignore[missin
     assert assessment.permits_observing() is True
 
 
-def test_unsafe_verdict_takes_effect_immediately():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unsafe_verdict_takes_effect_immediately() -> None:
     """Verify a single unsafe reading immediately produces UNSAFE, no delay."""
     monitor = SafetyMonitor()
     safe_readings = {"cloud_cover_pct": (10.0, _NOW), "wind_speed_kph": (5.0, _NOW)}
@@ -107,7 +108,7 @@ def test_unsafe_verdict_takes_effect_immediately():  # ruff: ignore[missing-retu
     assert assessment.verdict == SafetyVerdict.UNSAFE
 
 
-def test_reopening_withheld_until_settling_period_elapses():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reopening_withheld_until_settling_period_elapses() -> None:
     """Verify a safe reading right after an unsafe one is not immediate."""
     rule_set = _rule_set(settling_period_sec=900)
     monitor = SafetyMonitor()
@@ -142,7 +143,7 @@ def test_reopening_withheld_until_settling_period_elapses():  # ruff: ignore[mis
     assert cleared.permits_observing() is True
 
 
-def test_settling_period_resets_on_a_new_non_safe_reading():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_settling_period_resets_on_a_new_non_safe_reading() -> None:
     """Verify a fresh non-safe reading during settling restarts the clock."""
     rule_set = _rule_set(settling_period_sec=900)
     monitor = SafetyMonitor()

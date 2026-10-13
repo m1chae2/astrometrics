@@ -4,7 +4,7 @@ This file only contains the logic for reading the header data.
 The actual file reading happens elsewhere.
 """
 
-from astrometricslib.utilities.enums import FilterType
+from astrometricslib.foundation.enums import FilterType
 
 
 def get_filter_type(header: dict) -> FilterType:

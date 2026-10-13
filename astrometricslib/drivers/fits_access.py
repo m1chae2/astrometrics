@@ -9,7 +9,7 @@ does not have to worry about this structural difference.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import numpy as np
@@ -17,9 +17,25 @@ from astropy.io import fits
 
 logger = logging.getLogger(__name__)
 
+#: The errors that reading a FITS file can raise because of the file or its
+#: contents. ``OSError`` covers a missing, unreadable, or cut-off file.
+#: ``ValueError``, ``TypeError``, ``IndexError``, and ``KeyError`` come from a
+#: damaged header, a missing keyword, or an unexpected block layout.
+#: ``VerifyError`` comes from astropy's own header checks. Code that reads a
+#: file it did not write catches this tuple instead of every exception, so a
+#: real bug still shows up.
+FITS_READ_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ValueError,
+    TypeError,
+    IndexError,
+    KeyError,
+    fits.VerifyError,
+)
+
 
 @contextmanager
-def open_primary_hdu(path: str) -> Iterator[fits.hdu.base._BaseHDU]:
+def open_primary_hdu(path: str) -> Generator[fits.hdu.base._BaseHDU]:
     """Open a FITS file and yield the HDU containing the pixel data.
 
     Parameters
@@ -57,7 +73,7 @@ def read_header(path: str) -> fits.Header:
         return hdu.header.copy()
 
 
-def read_data(path: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+def read_data(path: str) -> np.ndarray | None:
     """Read the raw pixel array from the FITS file.
 
     Parameters
@@ -73,6 +89,24 @@ def read_data(path: str):  # ruff: ignore[missing-return-type-undocumented-publi
     """
     with open_primary_hdu(path) as hdu:
         return hdu.data
+
+
+def write_image(path: str, data: np.ndarray, header: fits.Header | None = None) -> None:
+    """Write a 2D image to a new FITS file, with the pixels in HDU 0.
+
+    Every reader in this module finds the pixels in HDU 0 (or HDU 1 when
+    HDU 0 is empty), so writing to HDU 0 is always read back correctly.
+
+    Parameters
+    ----------
+    path : str
+        Where to write the file. An existing file is replaced.
+    data : numpy.ndarray
+        The pixel array to store.
+    header : astropy.io.fits.Header, optional
+        Keywords to store with the image.
+    """
+    fits.PrimaryHDU(data=data, header=header).writeto(path, overwrite=True)
 
 
 def frame_dimensions(path: str) -> tuple[int, int] | None:
@@ -92,7 +126,7 @@ def frame_dimensions(path: str) -> tuple[int, int] | None:
     try:
         header = read_header(path)
         return (int(header["NAXIS1"]), int(header["NAXIS2"]))
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read dimensions of %s: %s", path, read_error)
         return None
 
@@ -118,7 +152,7 @@ def frame_uses_color_filter_array(path: str) -> bool | None:
     """
     try:
         header = read_header(path)
-    except Exception as read_error:
+    except FITS_READ_ERRORS as read_error:
         logger.debug("Could not read header of %s for CFA detection: %s", path, read_error)
         return None
     bayer_pattern = header.get("BAYERPAT")

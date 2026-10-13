@@ -5,7 +5,6 @@ into standard pictures (PNGs) that can be shown on a webpage or app.
 """
 
 import base64
-import glob
 import logging
 import os
 from io import BytesIO
@@ -14,13 +13,79 @@ from typing import Any
 from PIL import Image
 
 from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.errors import NotFoundError, ProcessingError
+from astrometricslib.models.target import FitsHeaderEntry, RenderedImage, StretchParameters, ViewableImage
 from astrometricslib.pipelines.shared.image_scaling import ImageScaler
-from astrometricslib.utilities.exceptions import AstroLibError
+from astrometricslib.pipelines.shared.stack_preview_path import PREVIEW_JPEG_QUALITY, preview_path_for
 
 logger = logging.getLogger(__name__)
 
 # Shared in-memory cache for rendered PNG frames
-_png_cache: dict[tuple[str, int, float | None, float | None, str, bool], tuple[bytes, float, float]] = {}
+_png_cache: dict[
+    tuple[str, int, float | None, float | None, str, bool],
+    tuple[bytes, float, float, StretchParameters | None],
+] = {}
+
+
+def _stretch_used(data: Any, auto_stretched: bool) -> StretchParameters | None:
+    """Return the automatic stretch a picture was drawn with.
+
+    Parameters
+    ----------
+    data : `numpy.ndarray`
+        The image data that was drawn.
+    auto_stretched : `bool`
+        Whether the automatic stretch was asked for (stretch on, no manual
+        brightness range).
+
+    Returns
+    -------
+    parameters : `StretchParameters` or `None`
+        The stretch, measured the way `ImageScaler.scale_to_uint8` measures
+        it, or `None` when none was used.
+    """
+    return ImageScaler.autostretch_parameters(data, sample_sky=True) if auto_stretched else None
+
+
+def _siril_preview_picture(path: str, max_dimensions: int) -> str | None:
+    """Read the Siril-stretched JPEG that stacking saved beside a stack.
+
+    The picture is used only if it is at least as new as the stack, so an old
+    picture is never shown for a newer stack. A picture larger than
+    `max_dimensions` is shrunk to fit, as the PNG route does.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the stacked FITS file.
+    max_dimensions : `int`
+        The longest side the picture may have, in pixels.
+
+    Returns
+    -------
+    image_data : `str` or `None`
+        The picture as a ``data:image/jpeg;base64,...`` string, or `None` if
+        there is no current preview or it cannot be read.
+    """
+    preview_path = preview_path_for(path)
+    try:
+        if os.path.getmtime(preview_path) < os.path.getmtime(path):
+            return None
+        with open(preview_path, "rb") as preview_file:
+            jpeg_bytes = preview_file.read()
+        with Image.open(BytesIO(jpeg_bytes)) as picture:
+            width_px, height_px = picture.size
+            largest_side = max(width_px, height_px)
+            if largest_side > max_dimensions:
+                scale = float(max_dimensions) / largest_side
+                shrunk = picture.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
+                buffer = BytesIO()
+                shrunk.save(buffer, format="JPEG", quality=PREVIEW_JPEG_QUALITY)
+                jpeg_bytes = buffer.getvalue()
+    except (OSError, ValueError) as error:
+        logger.warning("Could not use the preview picture for '%s': %s", path, error)
+        return None
+    return f"data:image/jpeg;base64,{base64.b64encode(jpeg_bytes).decode('utf-8')}"
 
 
 class ImageConverter:
@@ -34,7 +99,7 @@ class ImageConverter:
         width: float | None = None,
         cmap: str = "gray",
         stretch: bool = True,
-    ) -> tuple[bytes, float, float]:
+    ) -> tuple[bytes, float, float, StretchParameters | None]:
         """Convert a FITS file to PNG bytes, tracking the brightness range.
 
         It uses a cache to remember recent images so they load faster
@@ -44,7 +109,8 @@ class ImageConverter:
         -------
         result : `tuple`
             A tuple containing `(png_bytes, minimum_brightness,
-            maximum_brightness)`.
+            maximum_brightness, stretch_parameters)`. The last is the
+            automatic stretch used, or `None` when none was.
         """
         cache_key = (path, int(max_dimensions), center, width, cmap, stretch)
         if cache_key in _png_cache:
@@ -56,7 +122,12 @@ class ImageConverter:
         vmin = (center - width / 2.0) if center is not None and width is not None else None
         vmax = (center + width / 2.0) if center is not None and width is not None else None
 
-        img8, vmin, vmax = ImageScaler.scale_to_uint8(data, vmin=vmin, vmax=vmax, stretch=stretch)
+        # Measuring the sky from a sample of the pixels gives the same picture
+        # in a fraction of the time on a large frame (see `measure_sky`).
+        img8, vmin, vmax = ImageScaler.scale_to_uint8(
+            data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
+        )
+        stretch_parameters = _stretch_used(data, stretch and center is None)
 
         pil_image = Image.fromarray(img8)
         if pil_image.mode != "L":
@@ -72,54 +143,17 @@ class ImageConverter:
             pil_image = pil_image.resize((round(width_px * scale), round(height_px * scale)), Image.LANCZOS)
 
         buffer = BytesIO()
-        pil_image.save(buffer, format="PNG", optimize=False)
+        # Compression level 1 encodes about 2.5 times faster than the default 6
+        # and makes the file about 10% bigger. The picture goes to the app on
+        # this computer, where the extra size costs almost nothing.
+        pil_image.save(buffer, format="PNG", optimize=False, compress_level=1)
         png_bytes = buffer.getvalue()
 
         # Simple cache pruning: evict oldest entry if cache grows too large
         if len(_png_cache) > 128:
             _png_cache.pop(next(iter(_png_cache)))
-        _png_cache[cache_key] = (png_bytes, vmin, vmax)
-        return png_bytes, vmin, vmax
-
-    @classmethod
-    def convert_fits_to_base64_png(
-        cls, path: str, max_dimensions: int = 2000, stretch: bool = True
-    ) -> dict[str, Any] | None:
-        """Convert a FITS image to text so it can be sent over the internet.
-
-        Returns
-        -------
-        result : `dict`
-            A dictionary with the image text (`image_data`), minimum
-            brightness (`min`), maximum brightness (`max`), and file headers.
-
-        Raises
-        ------
-        AstroLibError
-            If there is any problem changing the image.
-        """
-        try:
-            png_bytes, vmin, vmax = cls.convert_fits_to_png_with_stats(
-                path, max_dimensions=max_dimensions, stretch=stretch
-            )
-            base64_string = base64.b64encode(png_bytes).decode("utf-8")
-
-            # Extract FITS headers to bundle them in the output
-            headers = []
-            try:
-                headers = get_fits_header(None, path)
-            except Exception as e:
-                logger.warning(f"Could not extract headers during PNG conversion: {e}")
-
-            return {
-                "image_data": f"data:image/png;base64,{base64_string}",
-                "min": float(vmin),
-                "max": float(vmax),
-                "headers": headers,
-            }
-        except Exception as error:
-            logger.error(f"Failed to convert FITS to PNG: {error}")
-            raise AstroLibError(f"Failed to convert FITS to PNG: {error}") from error
+        _png_cache[cache_key] = (png_bytes, vmin, vmax, stretch_parameters)
+        return png_bytes, vmin, vmax, stretch_parameters
 
 
 def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
@@ -144,7 +178,7 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
 
     Raises
     ------
-    ValueError
+    NotFoundError
         If it can't find an image with those settings.
     """
 
@@ -188,63 +222,160 @@ def get_frame(target: Any, iso: str, exposure: str, index: int = 0) -> str:
             safe_index = max(0, min(index, len(matches) - 1))
             return matches[safe_index].path
 
-    raise ValueError(f"No frame found for ISO={iso} Exposure={exposure} Index={index}")
+    raise NotFoundError(
+        f"No frame found for ISO={iso} Exposure={exposure} Index={index}",
+        details={"target": getattr(target, "id", None), "iso": iso, "exposure": exposure, "index": index},
+    )
 
 
-def convert_fits_to_png(path: str, max_dimensions: int = 2000, stretch: bool = True) -> dict[str, Any] | None:
-    """Convert an image file to a text-based format for webpages.
-
-    Parameters
-    ----------
-    path : `str`
-        The file path to the image.
-    max_dimensions : `int`, optional
-        The maximum size (width or height) in pixels. Defaults to 2000.
-    stretch : `bool`, optional
-        Whether to adjust the image brightness so it's easier to see. Defaults
-        to True.
-
-    Returns
-    -------
-    png_data : `dict`
-        A dictionary with the converted image and its brightness settings.
-    """
-    return ImageConverter.convert_fits_to_base64_png(path, max_dimensions=max_dimensions, stretch=stretch)
-
-
-def convert_fits_to_png_with_stats(
+def render_data_url(
     path: str,
+    image_id: str = "",
     max_dimensions: int = 2000,
+    stretch: bool = True,
     center: float | None = None,
     width: float | None = None,
-    cmap: str = "gray",
-    stretch: bool = True,
-) -> tuple[bytes, float, float]:
-    """Convert a FITS image to raw PNG data and return the brightness range.
+) -> RenderedImage:
+    """Draw a FITS image as a data URL the app's viewer can show.
+
+    A stretched view of a stack uses the JPEG that stacking saved beside it
+    (see `stack_preview_path`), when that picture is current and no manual
+    brightness range is asked for. Every other request is drawn from the
+    FITS data as a PNG.
 
     Parameters
     ----------
     path : `str`
-        The file path to the image.
+        The FITS file.
+    image_id : `str`, optional
+        What the picture shows, such as the target id. Copied into the result.
     max_dimensions : `int`, optional
-        The maximum size (width or height) in pixels. Defaults to 2000.
-    center : `float`, optional
-        The middle value for adjusting brightness.
-    width : `float`, optional
-        The range of values around the center to show.
-    cmap : `str`, optional
-        The color scheme to use (like "gray"). Defaults to "gray".
+        Longest side of the picture, in pixels. Defaults to 2000.
     stretch : `bool`, optional
-        Whether to adjust the brightness. Defaults to True.
+        Brighten faint detail automatically. Defaults to `True`.
+    center : `float`, optional
+        Middle of a manual brightness range, in pixel values.
+    width : `float`, optional
+        Width of a manual brightness range, in pixel values.
 
     Returns
     -------
-    result : `tuple`
-        The image data as bytes, followed by the lowest and highest
-        brightness values used.
+    image : `RenderedImage`
+        The picture (``image_data``, a PNG or JPEG data URL), the brightness
+        range shown (``min``, ``max``; 0 and 255 for the JPEG) and the FITS
+        header.
+
+    Raises
+    ------
+    ProcessingError
+        If the file cannot be drawn.
     """
-    return ImageConverter.convert_fits_to_png_with_stats(
-        path, max_dimensions=max_dimensions, center=center, width=width, cmap=cmap, stretch=stretch
+    try:
+        preview = _siril_preview_picture(path, max_dimensions) if stretch and center is None else None
+        if preview is not None:
+            image_data, vmin, vmax, stretch_parameters = preview, 0.0, 255.0, None
+        else:
+            png_bytes, vmin, vmax, stretch_parameters = ImageConverter.convert_fits_to_png_with_stats(
+                path, max_dimensions=max_dimensions, center=center, width=width, stretch=stretch
+            )
+            image_data = f"data:image/png;base64,{base64.b64encode(png_bytes).decode('utf-8')}"
+    except (OSError, ValueError) as error:
+        raise ProcessingError(f"Failed to convert FITS to PNG: {error}", details={"path": path}) from error
+    try:
+        headers = [FitsHeaderEntry(**card) for card in get_fits_header(path)]
+    except (OSError, ValueError, NotFoundError) as error:
+        logger.warning("Could not read the header of %s while drawing it: %s", path, error)
+        headers = []
+    return RenderedImage(
+        id=image_id,
+        min=float(vmin),
+        max=float(vmax),
+        image_data=image_data,
+        headers=headers,
+        path=path,
+        stretch_parameters=stretch_parameters,
+    )
+
+
+def render_viewable_image(
+    path: str,
+    max_dimensions: int,
+    stretch: bool,
+    center: float | None,
+    width: float | None,
+    crop: tuple[int, int, int] | None,
+) -> ViewableImage:
+    """Draw a FITS frame or stack as a PNG picture, optionally zoomed.
+
+    Parameters
+    ----------
+    path : `str`
+        The FITS file.
+    max_dimensions : `int`
+        Longest side of the picture, in pixels.
+    stretch : `bool`
+        Brighten faint detail automatically. A stack's ``_processed.fits``
+        file is already stretched, so it is drawn as it is.
+    center : `float` or `None`
+        Middle of a manual brightness range, in pixel values.
+    width : `float` or `None`
+        Width of a manual brightness range, in pixel values.
+    crop : `tuple` [`int`, `int`, `int`] or `None`
+        Column and row of the centre of a zoomed piece, and its side, in
+        full-frame pixels.
+
+    Returns
+    -------
+    picture : `ViewableImage`
+        The PNG and a description of the brightness range and the crop.
+    """
+    from astrometricslib.pipelines.shared.stack_preview_path import is_processed_fits_path
+
+    if stretch and is_processed_fits_path(path):
+        stretch = False
+    data = AstrometricsImage(path).data
+    full_height, full_width = data.shape[-2:]
+    crop_box = None
+    if crop is not None:
+        crop_center_x, crop_center_y, crop_size = crop
+        half = max(8, int(crop_size)) // 2
+        left = max(0, min(int(crop_center_x) - half, full_width - 2 * half))
+        top = max(0, min(int(crop_center_y) - half, full_height - 2 * half))
+        data = data[..., top : top + 2 * half, left : left + 2 * half]
+        crop_box = {"left": left, "top": top, "width": 2 * half, "height": 2 * half}
+
+    vmin = (center - width / 2.0) if center is not None else None
+    vmax = (center + width / 2.0) if center is not None else None
+    img8, vmin, vmax = ImageScaler.scale_to_uint8(
+        data, vmin=vmin, vmax=vmax, stretch=stretch, sample_sky=True
+    )
+    stretch_parameters = _stretch_used(data, stretch and center is None)
+    picture = Image.fromarray(img8)
+    if picture.mode != "L":
+        picture = picture.convert("L")
+    longest_side = max(picture.size)
+    target_side = max_dimensions if crop_box is None else max_dimensions // 2
+    # A big frame is shrunk to fit. A small zoomed piece is enlarged so
+    # single stars are easy to see.
+    if longest_side > target_side or (crop_box is not None and longest_side < target_side):
+        scale = target_side / longest_side
+        picture = picture.resize(
+            (round(picture.size[0] * scale), round(picture.size[1] * scale)),
+            Image.NEAREST if scale > 1.0 else Image.LANCZOS,
+        )
+    buffer = BytesIO()
+    picture.save(buffer, format="PNG", compress_level=1)
+    return ViewableImage(
+        png_bytes=buffer.getvalue(),
+        description={
+            "path": path,
+            "full_frame_size": {"width": int(full_width), "height": int(full_height)},
+            "crop": crop_box,
+            "picture_size": {"width": picture.size[0], "height": picture.size[1]},
+            "brightness_range_shown": {"minimum": float(vmin), "maximum": float(vmax)},
+            "stretched": bool(stretch),
+        },
+        stretch_parameters=stretch_parameters,
     )
 
 
@@ -264,11 +395,11 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
 
     Raises
     ------
-    FileNotFoundError
+    NotFoundError
         If the file doesn't exist.
     """
     if not os.path.exists(path):
-        raise FileNotFoundError(f"File not found: {path}")
+        raise NotFoundError(f"File not found: {path}")
 
     from astropy.io import fits
 
@@ -284,50 +415,7 @@ def get_fits_header(path: str) -> list[dict[str, str]]:
     return header_list
 
 
-def get_light_frame_data(
-    target: Any, iso: str, exposure: str, index: int = 0, stretch: bool = True
-) -> dict[str, Any]:
-    """Find a specific telescope image and convert it for web display.
-
-    Parameters
-    ----------
-    target : `Target`
-        The target to look for.
-    iso : `str`
-        The camera ISO or gain.
-    exposure : `str`
-        The exposure time.
-    index : `int`, optional
-        Which matching frame to use if there are multiple. Defaults to 0.
-    stretch : `bool`, optional
-        Whether to adjust the brightness so things are easier to see.
-        Defaults to True.
-
-    Returns
-    -------
-    light_frame_data : `dict`
-        A dictionary with the target ID, brightness stats, and the image data.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the image can't be found or doesn't exist.
-    """
-    path = get_frame(target, iso, exposure, index)
-    if not path or not os.path.exists(path):
-        raise FileNotFoundError(f"Frame not found: {path}")
-
-    png_bytes, vmin, vmax = convert_fits_to_png_with_stats(path, max_dimensions=2000, stretch=stretch)
-    base64_string = base64.b64encode(png_bytes).decode("utf-8")
-    return {
-        "id": target.id,
-        "min": float(vmin),
-        "max": float(vmax),
-        "image_data": f"data:image/png;base64,{base64_string}",
-    }
-
-
-def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any] | None:
+def get_last_captured_image(config: Any, stretch: bool = True) -> RenderedImage | None:
     """Find the newest telescope image and convert it for web display.
 
     Parameters
@@ -339,36 +427,48 @@ def get_last_captured_image(config: Any, stretch: bool = True) -> dict[str, Any]
 
     Returns
     -------
-    image_data : `dict` or `None`
-        A dictionary with the image data and details, or None if no
-        images could be found.
+    image : `RenderedImage` or `None`
+        The picture as a data URL, with its brightness range, header and
+        path, or `None` if no image could be found.
     """
     frames_path = config.get_frames_path()
-    pattern = os.path.join(frames_path, "**", "*.fit*")
-    files = glob.glob(pattern, recursive=True)
-
-    if not files:
+    if not frames_path or not os.path.isdir(frames_path):
         return None
 
-    files.sort(key=os.path.getmtime, reverse=True)
-    latest_path = files[0]
+    latest_path: str | None = None
+    latest_mtime: float = -1.0
+
+    # Each folder and file is checked on its own, so one that cannot be
+    # read (OSError) is skipped and the scan goes on.
+    stack = [frames_path]
+    while stack:
+        current_dir = stack.pop()
+        try:
+            with os.scandir(current_dir) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            name_lower = entry.name.lower()
+                            if name_lower.endswith((".fits", ".fit", ".fts")):
+                                mtime = entry.stat().st_mtime
+                                if mtime > latest_mtime:
+                                    latest_mtime = mtime
+                                    latest_path = entry.path
+                    except OSError:
+                        continue
+        except OSError as scan_error:
+            logger.debug("Error scanning %s for the last image: %s", current_dir, scan_error)
+            continue
+
+    if not latest_path:
+        return None
 
     try:
-        png_bytes, vmin, vmax = convert_fits_to_png_with_stats(
-            latest_path, max_dimensions=2000, stretch=stretch
-        )
-        base64_string = base64.b64encode(png_bytes).decode("utf-8")
-        parent_folder = os.path.basename(os.path.dirname(latest_path))
-
-        return {
-            "id": parent_folder,
-            "min": float(vmin),
-            "max": float(vmax),
-            "image_data": f"data:image/png;base64,{base64_string}",
-            "path": latest_path,
-        }
-    except Exception as error:
-        logger.error(f"Failed to load last image: {error}")
+        return render_data_url(latest_path, os.path.basename(os.path.dirname(latest_path)), stretch=stretch)
+    except ProcessingError:
+        logger.exception("Failed to load the last image %s", latest_path)
         return None
 
 
@@ -401,7 +501,7 @@ def delete_images(
                 deleted_files.append(path)
             else:
                 deleted_files.append(path)
-        except Exception as error:
+        except OSError as error:
             failed_files.append({"path": path, "reason": str(error)})
 
     if target_catalog and target_id:

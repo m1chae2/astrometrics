@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { BaseModal } from './BaseModal';
 import { SectionPanel } from './SectionPanel';
+import { EmptyState } from './EmptyState';
 import { fetchTargetFrameHeader } from '../services/targetService';
 import { FitsHeaderEntry } from '../types/backendTypes';
+import { useToast } from '../hooks/useToast';
 import '../styles/layout.css';
 
 interface FitsHeaderModalProps {
@@ -26,6 +28,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const toast = useToast();
 
     useEffect(() => {
         if (isOpen && filePath && targetId) {
@@ -36,11 +39,13 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                     if (data) {
                         setHeaderData(data);
                     } else {
-                        setError('Failed to load FITS header.');
+                        setError('Could not load header data.');
+                        toast.show('Failed to load FITS header.', 'error');
                     }
                 })
                 .catch(err => {
-                    setError(String(err));
+                    setError('Could not load header data.');
+                    toast.show(String(err), 'error');
                 })
                 .finally(() => {
                     setLoading(false);
@@ -49,6 +54,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
             setHeaderData([]);
             setSearchTerm('');
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isOpen, filePath, targetId]);
 
     const filteredHeader = headerData.filter(entry =>
@@ -87,7 +93,7 @@ export const FitsHeaderModal: React.FC<FitsHeaderModalProps> = ({
                     {loading ? (
                         <div className="loading-container">Loading header data...</div>
                     ) : error ? (
-                        <div className="error-message">{error}</div>
+                        <EmptyState variant="error" message={error} />
                     ) : (
                         <div className="fits-header-container">
                             <table className="data-table">

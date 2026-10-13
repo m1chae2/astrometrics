@@ -19,7 +19,7 @@ FILTER_WFWHM_LOOSENING_LADDER: list[str | None] = ["80%", "90%", None]
 # That doesn't prove 5 is the *exact* right number (no failure mode was found
 # at 5 to calibrate against, since quality degrades continuously rather than
 # breaking at some threshold), but it does confirm 5 isn't producing garbage --
-# see logs/ for the raw per-N sweep this was checked against.
+# the raw per-N sweep this was checked against was not kept.
 DEFAULT_MINIMUM_SURVIVING_FRAMES = 5
 
 

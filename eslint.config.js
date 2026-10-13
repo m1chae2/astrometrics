@@ -100,4 +100,44 @@ export default [
       'no-undef': 'off',
     },
   },
+  {
+    // The app reaches the backend only through the public interface the
+    // backend declares in backend/public_interface.py. These two files are
+    // the only ones allowed to call `fetch` or open a WebSocket, and a backend
+    // test checks every path they use against that declaration. Every other
+    // app file goes through `callBackend`, `fetchImageFile` or the socket
+    // helpers. Tests, the test set-up files and the ui/mcp tool server are
+    // not part of the app, so they are left out.
+    files: ['ui/**/*.{js,jsx,ts,tsx}'],
+    ignores: [
+      'ui/common/services/backendApi.ts',
+      'ui/common/utils/socketClient.ts',
+      'ui/**/*.test.{js,jsx,ts,tsx}',
+      'ui/**/tests/**',
+      'ui/setupTests.ts',
+      'ui/globalSetup.ts',
+      'ui/testBackendMarker.ts',
+      'ui/mcp/**',
+    ],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message: 'Call the backend through callBackend or fetchImageFile in ui/common/services/backendApi.ts.',
+        },
+        {
+          name: 'WebSocket',
+          message: 'Open backend sockets through ui/common/utils/socketClient.ts.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        { object: 'window', property: 'fetch', message: 'Use ui/common/services/backendApi.ts.' },
+        { object: 'globalThis', property: 'fetch', message: 'Use ui/common/services/backendApi.ts.' },
+        { object: 'window', property: 'WebSocket', message: 'Use ui/common/utils/socketClient.ts.' },
+        { object: 'globalThis', property: 'WebSocket', message: 'Use ui/common/utils/socketClient.ts.' },
+      ],
+    },
+  },
 ]

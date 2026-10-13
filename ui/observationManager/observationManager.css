@@ -113,22 +113,6 @@
 
 
 
-.om-error-toast {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: var(--error-red);
-    color: var(--text-bright);
-    padding: 12px 24px;
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    z-index: 1000;
-    cursor: pointer;
-    animation: slideIn 0.3s ease-out;
-}
-
-
-
 /* Target Details Placeholders */
 .target-details__placeholder,
 .target-details__loading {

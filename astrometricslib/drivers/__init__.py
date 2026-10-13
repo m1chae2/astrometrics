@@ -1,6 +1,6 @@
 """Tools that talk directly to hardware, files, and other programs.
 
-This includes the Siril and Logger interfaces, the target/stellar
+This includes the Siril interface, the target/stellar
 catalog database (`catalog_access.py`, `local_database.py`,
 `catalog_store.py`), and the basic tools every driver uses to read and
 write FITS image files (`fits_access.py`, `image.py`,
@@ -15,10 +15,8 @@ specific to Siril's own file formats rather than a generic quality
 measurement.
 """
 
-from astrometricslib.drivers.logger_interface import LoggerInterface
 from astrometricslib.drivers.siril_interface import ImageProcessing
 
 __all__ = [
     "ImageProcessing",
-    "LoggerInterface",
 ]

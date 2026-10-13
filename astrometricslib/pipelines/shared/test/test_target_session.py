@@ -14,7 +14,7 @@ from astrometricslib.pipelines.shared.target_sessions import (
 )
 
 
-def _timestamp(year, month, day, hour, minute=0):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _timestamp(year, month, day, hour, minute=0) -> float:  # ruff: ignore[missing-type-function-argument]
     """Return a Unix timestamp for a local naive datetime, for readability.
 
     Returns
@@ -25,19 +25,19 @@ def _timestamp(year, month, day, hour, minute=0):  # ruff: ignore[missing-type-f
     return datetime(year, month, day, hour, minute).timestamp()
 
 
-def test_compute_session_night_before_noon_belongs_to_previous_night():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_session_night_before_noon_belongs_to_previous_night() -> None:
     """Verify a post-midnight capture belongs to the prior night."""
     timestamp = _timestamp(2026, 7, 15, 3, 30)
     assert compute_session_night(timestamp) == date(2026, 7, 14)
 
 
-def test_compute_session_night_after_noon_belongs_to_same_night():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_session_night_after_noon_belongs_to_same_night() -> None:
     """Verifies an evening capture belongs to that calendar date's night."""
     timestamp = _timestamp(2026, 7, 15, 21, 0)
     assert compute_session_night(timestamp) == date(2026, 7, 15)
 
 
-def test_derive_target_sessions_groups_by_night_gain_and_offset():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_groups_by_night_gain_and_offset() -> None:
     """Verifies frames from one night/config land in a single TargetSession."""
     frames = [
         FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
@@ -49,7 +49,7 @@ def test_derive_target_sessions_groups_by_night_gain_and_offset():  # ruff: igno
     assert sorted(sessions[0].frame_paths) == ["a.fits", "b.fits"]
 
 
-def test_derive_target_sessions_rejoins_non_contiguous_frames_same_night():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_rejoins_non_contiguous_frames_same_night() -> None:
     """Verify same night/config frames merge even if not contiguous."""
     frames = [
         FrameRecord(path="early.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 20, 0)),
@@ -64,7 +64,7 @@ def test_derive_target_sessions_rejoins_non_contiguous_frames_same_night():  # r
     assert sorted(matching_gain_sessions[0].frame_paths) == ["early.fits", "late.fits"]
 
 
-def test_derive_target_sessions_splits_on_gain_change():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_splits_on_gain_change() -> None:
     """Verifies a gain change within the same night starts a new session."""
     frames = [
         FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
@@ -75,7 +75,7 @@ def test_derive_target_sessions_splits_on_gain_change():  # ruff: ignore[missing
     assert {session.gain for session in sessions} == {"100", "200"}
 
 
-def test_derive_target_sessions_splits_on_offset_change():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_splits_on_offset_change() -> None:
     """Verifies an offset change within the same night starts a new session."""
     frames = [
         FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
@@ -86,7 +86,7 @@ def test_derive_target_sessions_splits_on_offset_change():  # ruff: ignore[missi
     assert {session.offset for session in sessions} == {"10", "20"}
 
 
-def test_derive_target_sessions_ignores_filter_and_exposure_changes():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_ignores_filter_and_exposure_changes() -> None:
     """Verifies filter/exposure changes do not split a session."""
     frames = [
         FrameRecord(
@@ -100,7 +100,7 @@ def test_derive_target_sessions_ignores_filter_and_exposure_changes():  # ruff: 
     assert len(sessions) == 1
 
 
-def test_derive_target_sessions_produces_deterministic_ids():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_produces_deterministic_ids() -> None:
     """Verify the session id derives from target_id, night, gain, offset."""
     frames = [
         FrameRecord(path="a.fits", iso="100", offset="10", timestamp=_timestamp(2026, 7, 15, 21, 0)),
@@ -109,7 +109,7 @@ def test_derive_target_sessions_produces_deterministic_ids():  # ruff: ignore[mi
     assert sessions[0].id == "M 13:2026-07-15:100:10"
 
 
-def test_derive_target_sessions_skips_frames_without_timestamp():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_derive_target_sessions_skips_frames_without_timestamp() -> None:
     """Verify frames with no capture timestamp are excluded, not crashed on."""
     frames = [
         FrameRecord(path="a.fits", iso="100", offset="10", timestamp=None),

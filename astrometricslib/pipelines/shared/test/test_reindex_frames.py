@@ -6,7 +6,10 @@ dataset type moved out of CatalogAccess and this now calls
 reindex_frames directly.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
+
+from pytest_mock import MockerFixture
 
 from astrometricslib import Target
 from astrometricslib.drivers.catalog_access import CatalogAccess
@@ -14,7 +17,7 @@ from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.target_records import reindex_frames
 
 
-def test_reindex_frames_skips_already_tracked_frames(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reindex_frames_skips_already_tracked_frames(tmp_path: Path, mocker: MockerFixture) -> None:
     """Verify reindex_frames re-parses only new, untracked frames."""
     lights_dir = tmp_path / "lights" / "TestTarget"
     lights_dir.mkdir(parents=True)

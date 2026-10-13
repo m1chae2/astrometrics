@@ -5,7 +5,7 @@ recovered before the observatory is taken to a safe state. Recovery is
 deliberately shallow -- it re-establishes a device's lifecycle state
 and nothing more, because a system that cannot see the observatory
 cannot distinguish a transient driver disconnection from a mechanical
-obstruction (`Wayfinding_Library_Architecture.md` §2.4.6). Exhausting
+obstruction (`Wayfinding_Library_Architecture.md`). Exhausting
 the attempt bound escalates to the safe-state sequence rather than to a
 deeper recovery strategy -- an unbounded retry is indistinguishable
 from a hang, and a hang is precisely what unattended operation cannot

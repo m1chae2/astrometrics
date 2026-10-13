@@ -36,7 +36,7 @@ def _make_asteroid_detection_metrics(**overrides) -> AsteroidDetectionPipelineQu
     return AsteroidDetectionPipelineQualityMetrics(**defaults)
 
 
-def test_asteroid_detection_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_asteroid_detection_quality_summary_constructs_with_minimal_fields() -> None:
     """Check that we can create an asteroid report with only required data."""
     summary = AsteroidDetectionQualitySummary(
         target_id="M 81", asteroid_detection_metrics=_make_asteroid_detection_metrics()
@@ -47,7 +47,7 @@ def test_asteroid_detection_quality_summary_constructs_with_minimal_fields():  #
     assert summary.flagged is False
 
 
-def test_asteroid_detection_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_asteroid_detection_quality_summary_defaults_to_empty_session_provenance() -> None:
     """Check that the list of observing sessions starts out empty."""
     summary = AsteroidDetectionQualitySummary(
         target_id="M 81", asteroid_detection_metrics=_make_asteroid_detection_metrics()
@@ -56,7 +56,7 @@ def test_asteroid_detection_quality_summary_defaults_to_empty_session_provenance
     assert summary.target_session_breakdown == []
 
 
-def test_astrometry_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_astrometry_quality_summary_constructs_with_minimal_fields() -> None:
     """Check that we can create an astrometry report with minimal data."""
     summary = AstrometryQualitySummary(
         target_id="M 13",
@@ -73,7 +73,7 @@ def test_astrometry_quality_summary_constructs_with_minimal_fields():  # ruff: i
     assert summary.flagged is False
 
 
-def test_astrometry_quality_summary_defaults_to_empty_session_provenance():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_astrometry_quality_summary_defaults_to_empty_session_provenance() -> None:
     """Check that the list of observing sessions stays empty for astrometry."""
     summary = AstrometryQualitySummary(
         target_id="M 13",
@@ -88,7 +88,7 @@ def test_astrometry_quality_summary_defaults_to_empty_session_provenance():  # r
     assert summary.target_session_breakdown == []
 
 
-def test_photometry_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_photometry_quality_summary_constructs_with_minimal_fields() -> None:
     """Check that we can create a photometry report with only required data."""
     summary = PhotometryQualitySummary(
         target_id="M 13",
@@ -107,7 +107,7 @@ def test_photometry_quality_summary_constructs_with_minimal_fields():  # ruff: i
     assert summary.flagged is False
 
 
-def test_photometry_quality_summary_has_no_upstream_reference():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_photometry_quality_summary_has_no_upstream_reference() -> None:
     """Check that photometry reports don't link back to a previous step."""
     summary = PhotometryQualitySummary(
         target_id="M 13",
@@ -118,7 +118,7 @@ def test_photometry_quality_summary_has_no_upstream_reference():  # ruff: ignore
     assert summary.upstream_quality_summary_reference is None
 
 
-def test_spectroscopy_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_spectroscopy_quality_summary_constructs_with_minimal_fields() -> None:
     """Check that we can create a spectroscopy report with minimal data."""
     summary = SpectroscopyQualitySummary(
         target_id="M 13",
@@ -133,7 +133,7 @@ def test_spectroscopy_quality_summary_constructs_with_minimal_fields():  # ruff:
     assert summary.upstream_quality_summary_reference == "stacking"
 
 
-def test_spectroscopy_quality_summary_trail_width_profile_defaults_unavailable():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_spectroscopy_quality_summary_trail_width_profile_defaults_unavailable() -> None:
     """Check that we correctly assume trail width data is missing at first."""
     summary = SpectroscopyQualitySummary(
         target_id="M 13",
@@ -142,7 +142,7 @@ def test_spectroscopy_quality_summary_trail_width_profile_defaults_unavailable()
     assert summary.spectroscopy_metrics.trail_width_profile_available is False
 
 
-def test_stack_quality_summary_constructs_with_minimal_fields():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_stack_quality_summary_constructs_with_minimal_fields() -> None:
     """Check that we can create a stacking report with only required data."""
     summary = StackQualitySummary(
         target_id="M 13",

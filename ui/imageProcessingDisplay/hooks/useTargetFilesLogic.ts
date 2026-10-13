@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTargetFiles } from '../../common/services/targetService';
-import { deleteFiles } from '../../common/services/imagingService';
+import { deleteFiles } from '../../common/services/imaging/imageService';
 import { emitToast } from '../../common/utils/emitToast';
 import { matchesQuery } from '../../common/utils/searchLogic';
 import { FileItem } from '../fileBrowser/FileBrowser';
@@ -16,6 +16,19 @@ import { FileItem } from '../fileBrowser/FileBrowser';
  * const { allFiles, filteredFiles, handleDelete } = useTargetFilesLogic('target-1', 0);
  */
 export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, shouldFetch: boolean = true) => {
+    // See the matching comment in useStackingJob.ts: deriving "is loading"
+    // from a pending-vs-settled key comparison (rather than a boolean this
+    // hook's own effect toggles) keeps it correct the instant `shouldFetch`
+    // flips true, even when that flip happens one render after some other
+    // state (e.g. the shared target list confirming this target is local)
+    // resolves -- a plain effect-toggled flag would read stale for that one
+    // render, which is exactly the render callers gating "fully loaded" on
+    // it (see ImageProcessingDisplay.tsx's app boot readiness check) would
+    // otherwise sample.
+    const pendingFilesKey = selectedTarget && shouldFetch ? `${selectedTarget}:${reloadKey}` : null;
+    const [settledFilesKey, setSettledFilesKey] = useState<string | null>(null);
+    const isLoadingFiles = pendingFilesKey !== null && settledFilesKey !== pendingFilesKey;
+
     const [allFiles, setAllFiles] = useState<FileItem[]>([]);
     const [exposureCounts, setExposureCounts] = useState<Record<string, number>>({});
     const [fileFilterText, setFileFilterText] = useState('');
@@ -28,7 +41,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
     const [showFileDeleteConfirm, setShowFileDeleteConfirm] = useState(false);
     const [filesToDelete, setFilesToDelete] = useState<string[]>([]);
 
-    const loadTargetFiles = useCallback((targetId: string) => {
+    const loadTargetFiles = useCallback((targetId: string, settledKey: string) => {
         fetchTargetFiles(targetId).then(res => {
             const mappedFiles: FileItem[] = (res.files || []).map(f => ({
                 path: f.path,
@@ -52,6 +65,8 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             setStackedSpectralTarget(null);
             setTotalExposure(0);
             setExposureCounts({});
+        }).finally(() => {
+            setSettledFilesKey(settledKey);
         });
     }, []);
 
@@ -63,7 +78,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             setAllFiles([]);
             return;
         }
-        loadTargetFiles(selectedTarget);
+        loadTargetFiles(selectedTarget, `${selectedTarget}:${reloadKey}`);
     }, [selectedTarget, reloadKey, loadTargetFiles, shouldFetch]);
 
     const filteredFiles = useMemo(() => {
@@ -84,7 +99,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
             await deleteFiles(filesToDelete, selectedTarget || undefined);
             emitToast(`Deleted ${filesToDelete.length} files.`, 'success');
             setFilesToDelete([]);
-            if (selectedTarget) loadTargetFiles(selectedTarget);
+            if (selectedTarget) loadTargetFiles(selectedTarget, `${selectedTarget}:${reloadKey}`);
         } catch (e) {
             emitToast(`Failed to delete files: ${e}`, 'error');
         }
@@ -120,6 +135,7 @@ export const useTargetFilesLogic = (selectedTarget: string, reloadKey: number, s
 
     return {
         allFiles,
+        isLoadingFiles,
         filteredFiles,
         exposureCounts,
         fileFilterText,

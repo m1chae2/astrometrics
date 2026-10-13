@@ -31,6 +31,27 @@ const getFilename = (path: string): string => {
 };
 
 /**
+ * The calibration frame types the "Calibration" meta-target can ingest.
+ * Matches the folder names the backend looks for on the telescope
+ * (see IngestionService._list_calibration_files).
+ */
+const CALIBRATION_FRAME_TYPES = ['Dark', 'Bias', 'Flat'] as const;
+
+/**
+ * Selects only the remote files belonging to one calibration frame type.
+ * Calibration files are listed prefixed with their folder, e.g.
+ * "Dark/foo.fits", so this matches on that prefix.
+ *
+ * @param remoteFiles All remote files currently listed for the target.
+ * @param frameType The calibration frame type to select, e.g. "Dark".
+ * @returns The subset of `remoteFiles` belonging to `frameType`.
+ */
+const selectCalibrationFrameType = (remoteFiles: string[], frameType: string): string[] => {
+    const prefix = `${frameType}/`;
+    return remoteFiles.filter(file => file.startsWith(prefix));
+};
+
+/**
  * IngestFramesModal renders the file selection and status monitoring modal during ingestion.
  *
  * @param props The props for configuring the modal window, ingestion state, and close callback.
@@ -63,12 +84,17 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
         isActive
     } = ingestionState;
 
-    // Auto-scan on open if needed
+    // Auto-refresh file list and scan remote folders whenever the modal is opened
     useEffect(() => {
-        if (isOpen && ingestionState.remoteFolders.length === 0) {
-            scanRemote();
+        if (isOpen) {
+            if (ingestionState.refreshFiles) {
+                ingestionState.refreshFiles();
+            }
+            if (ingestionState.remoteFolders.length === 0) {
+                scanRemote();
+            }
         }
-    }, [isOpen, ingestionState.remoteFolders.length, scanRemote]);
+    }, [isOpen, ingestionState.remoteFolders.length, scanRemote, ingestionState.refreshFiles]);
 
     // Cleanup Only on COMPLETE success + Close?
     // User requested persistence, so we do NOT reset on close.
@@ -107,6 +133,7 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
     if (!isOpen) return null;
 
     const isRunning = isActive;
+    const isCalibrationTarget = targetName.trim().toLowerCase() === 'calibration';
 
     const footerButtons = (
         <>
@@ -187,20 +214,51 @@ export const IngestFramesModal: React.FC<IngestFramesModalProps> = ({
                             <div className="ingest-modal__file-selection-container">
                                 <div className="ingest-modal__file-selection-header">
                                     <label className="ingest-modal__label-zero-margin">Select Files ({selectedFiles.size} / {remoteFiles.length})</label>
-                                    <button
-                                        className="btn-link"
-                                        onClick={() => {
-                                            if (selectedFiles.size === remoteFiles.length) {
-                                                setSelectedFiles(new Set());
-                                            } else {
-                                                setSelectedFiles(new Set(remoteFiles));
-                                            }
-                                        }}
-                                        disabled={isRunning}
-                                    >
-                                        {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
-                                    </button>
+                                    <div className="ingest-modal__file-selection-actions">
+                                        <button
+                                            type="button"
+                                            className="ingest-modal__refresh-btn"
+                                            onClick={() => ingestionState.refreshFiles && ingestionState.refreshFiles()}
+                                            disabled={isRunning || isLoadingStats}
+                                            title="Refresh file list from telescope"
+                                        >
+                                            ↻ Refresh
+                                        </button>
+                                        <button
+                                            className="btn-link"
+                                            onClick={() => {
+                                                if (selectedFiles.size === remoteFiles.length) {
+                                                    setSelectedFiles(new Set());
+                                                } else {
+                                                    setSelectedFiles(new Set(remoteFiles));
+                                                }
+                                            }}
+                                            disabled={isRunning}
+                                        >
+                                            {selectedFiles.size === remoteFiles.length ? 'Deselect All' : 'Select All'}
+                                        </button>
+                                    </div>
                                 </div>
+                                {isCalibrationTarget && (
+                                    <div className="ingest-modal__calibration-type-row">
+                                        {CALIBRATION_FRAME_TYPES.map(frameType => {
+                                            const framesOfType = selectCalibrationFrameType(remoteFiles, frameType);
+                                            if (framesOfType.length === 0) return null;
+                                            return (
+                                                <button
+                                                    key={frameType}
+                                                    type="button"
+                                                    className="btn-link"
+                                                    onClick={() => setSelectedFiles(new Set(framesOfType))}
+                                                    disabled={isRunning}
+                                                    title={`Select only the ${framesOfType.length} ${frameType} frame(s)`}
+                                                >
+                                                    {frameType} Only
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                                 <div className="modal-list-container ingest-modal__list-container">
                                     {remoteFiles.map(file => (
                                         <label key={file} className={`ingest-modal__file-row ${isRunning ? 'ingest-modal__file-row--default' : 'ingest-modal__file-row--clickable'}`}>

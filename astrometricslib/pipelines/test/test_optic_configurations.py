@@ -25,7 +25,7 @@ from astrometricslib.pipelines.shared.frame_grouping import (
 class _Frame:
     """A frame record stand-in carrying camera, optic, and role."""
 
-    def __init__(self, camera="Nikon D5300", focal_length_mm=300.0, role="LIGHT", path="/f.fits"):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, camera="Nikon D5300", focal_length_mm=300.0, role="LIGHT", path="/f.fits") -> None:  # ruff: ignore[missing-type-function-argument]
         self.camera = camera
         self.focal_length_mm = focal_length_mm
         self.role = role
@@ -35,32 +35,32 @@ class _Frame:
 class _Target:
     """A target stand-in exposing only the frames list."""
 
-    def __init__(self, frames):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, frames) -> None:  # ruff: ignore[missing-type-function-argument]
         self.id = "OpticTestTarget"
         self.frames = frames
 
 
-def test_a_configuration_names_both_camera_and_optic():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_configuration_names_both_camera_and_optic() -> None:
     """Either alone is insufficient to decide what may be stacked."""
     assert frame_configuration_key(_Frame("Nikon D5300", 300.0)) == "Nikon D5300@300mm"
 
 
-def test_focal_length_is_keyed_to_whole_millimetres():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_focal_length_is_keyed_to_whole_millimetres() -> None:
     """405 and 405.0 are one optic, not two."""
     assert frame_configuration_key(_Frame("ASI533", 405.0)) == frame_configuration_key(_Frame("ASI533", 405))
 
 
-def test_a_frame_without_a_focal_length_has_no_configuration():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_frame_without_a_focal_length_has_no_configuration() -> None:
     """Guessing an optic is exactly what must not happen."""
     assert frame_configuration_key(_Frame("Nikon D5300", None)) is None
 
 
-def test_a_nonsense_focal_length_has_no_configuration():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_nonsense_focal_length_has_no_configuration() -> None:
     """Zero is a missing value written badly, not a real optic."""
     assert frame_configuration_key(_Frame("Nikon D5300", 0.0)) is None
 
 
-def test_two_optics_form_two_groups():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_two_optics_form_two_groups() -> None:
     """The regression: NGC 7023's two optics must not share a stack."""
     frames = [_Frame(focal_length_mm=300.0) for _ in range(424)]
     frames += [_Frame(focal_length_mm=405.0) for _ in range(111)]
@@ -72,14 +72,14 @@ def test_two_optics_form_two_groups():  # ruff: ignore[missing-return-type-undoc
     assert len(grouped["Nikon D5300@405mm"]) == 111
 
 
-def test_the_same_optic_on_two_cameras_stays_separate():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_same_optic_on_two_cameras_stays_separate() -> None:
     """A shared focal length does not make two cameras interchangeable."""
     frames = [_Frame("ASI533", 405.0), _Frame("Nikon D5300", 405.0)]
 
     assert len(group_frames_by_configuration(_Target(frames))) == 2
 
 
-def test_groups_are_ordered_largest_first():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_groups_are_ordered_largest_first() -> None:
     """The biggest group is the most useful default to reach for."""
     frames = [_Frame(focal_length_mm=405.0) for _ in range(3)]
     frames += [_Frame(focal_length_mm=300.0) for _ in range(9)]
@@ -87,7 +87,7 @@ def test_groups_are_ordered_largest_first():  # ruff: ignore[missing-return-type
     assert next(iter(group_frames_by_configuration(_Target(frames)))) == "Nikon D5300@300mm"
 
 
-def test_grouping_can_be_restricted_to_one_camera():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_grouping_can_be_restricted_to_one_camera() -> None:
     """The camera filter still applies on top of the optic split."""
     frames = [_Frame("ASI533", 405.0), _Frame("Nikon D5300", 405.0), _Frame("Nikon D5300", 300.0)]
 
@@ -96,7 +96,7 @@ def test_grouping_can_be_restricted_to_one_camera():  # ruff: ignore[missing-ret
     assert set(grouped) == {"Nikon D5300@405mm", "Nikon D5300@300mm"}
 
 
-def test_unassignable_frames_are_reported_not_hidden():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unassignable_frames_are_reported_not_hidden() -> None:
     """Frames with no FOCALLEN must be reported, never lost silently."""
     frames = [_Frame(focal_length_mm=300.0), _Frame(focal_length_mm=None)]
 
@@ -106,7 +106,7 @@ def test_unassignable_frames_are_reported_not_hidden():  # ruff: ignore[missing-
     assert len(frames_missing_focal_length(_Target(frames))) == 1
 
 
-def test_selecting_one_configuration_excludes_the_other():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_selecting_one_configuration_excludes_the_other() -> None:
     """A stack must receive one optic's frames and no others."""
     frames = [
         _Frame(focal_length_mm=300.0, path="/a.fits"),
@@ -119,19 +119,19 @@ def test_selecting_one_configuration_excludes_the_other():  # ruff: ignore[missi
     assert [frame.path for frame in selected] == ["/a.fits", "/c.fits"]
 
 
-def test_a_single_optic_target_forms_one_group():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_single_optic_target_forms_one_group() -> None:
     """Most targets are unaffected and must not be split."""
     frames = [_Frame(focal_length_mm=405.0) for _ in range(20)]
 
     assert len(group_frames_by_configuration(_Target(frames))) == 1
 
 
-def test_a_target_with_no_frames_groups_to_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_target_with_no_frames_groups_to_nothing() -> None:
     """An empty target is not an error."""
     assert group_frames_by_configuration(_Target([])) == {}
 
 
-def test_scale_difference_between_this_librarys_optics():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_scale_difference_between_this_librarys_optics() -> None:
     """Documents why blending is wrong, not merely untidy.
 
     206.265 * pixel_size / focal_length gives 2.675 arcsec/px at 300mm

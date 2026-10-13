@@ -4,7 +4,7 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend } from './backendApi';
+import { callBackend, CallBackendOptions } from './backendApi';
 import { reportError } from '../utils/reportError';
 
 export interface IntrospectionObject {
@@ -31,6 +31,12 @@ export interface TelescopePulse {
     humidity: string;
     filter: string;
     focuserPosition: number;
+    cameraTemperature?: string;
+    cameraStatus?: string;
+    targetName?: string;
+    alignmentAttempts?: any[];
+    alignmentActive?: boolean;
+    guidingHistory?: Record<string, any>[];
 }
 
 export interface SystemPulse {
@@ -53,13 +59,15 @@ export async function fetchSystemCompletions(text: string): Promise<string[]> {
     }
 }
 
+
 /**
  * Fetches the entire application configuration from the backend.
+ * @param options Optional CallBackendOptions such as timeoutMs or abort signal.
  * @return Configuration dictionary mapped by sections.
  */
-export async function getSystemConfig(): Promise<Record<string, Record<string, unknown>>> {
+export async function getSystemConfig(options?: CallBackendOptions): Promise<Record<string, Record<string, unknown>>> {
     try {
-        const data = await callBackend("system:get_config", {});
+        const data = await callBackend("system:get_config", {}, options);
         return data || {};
     } catch (err: unknown) {
         reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
@@ -149,34 +157,5 @@ export async function getSystemPulse(): Promise<SystemPulse | null> {
     } catch (err: unknown) {
         console.error('Failed to fetch system status pulse', err);
         return null;
-    }
-}
-
-/**
- * Resolves the configured agent command palette keyboard shortcut.
- * @return The shortcut string (e.g. 'Ctrl+Space').
- */
-export function getAgentShortcut(): string {
-    try {
-        if (typeof window === 'undefined') return 'Ctrl+Space';
-        return window.localStorage.getItem('agentShortcut') || 'Ctrl+Space';
-    } catch {
-        return 'Ctrl+Space';
-    }
-}
-
-/**
- * Persists the agent command palette keyboard shortcut.
- * @param shortcut Keyboard combination shortcut string.
- */
-export function setAgentShortcut(shortcut: string): void {
-    if (typeof window === 'undefined') return;
-    try {
-        window.localStorage.setItem('agentShortcut', shortcut);
-        window.dispatchEvent(
-            new CustomEvent('astrometrics:shortcutChange', { detail: shortcut })
-        );
-    } catch {
-        // Ignore persistence failures.
     }
 }

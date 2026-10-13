@@ -6,30 +6,44 @@ worry about where the data actually lives.
 """
 
 import logging
+import math
 import os
+import re
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 from pydantic import BaseModel, Field
 
-from astrometricslib.utilities.enums import FilterType
-from datastore.butler import Butler as _GenericButler
-from datastore.butler import DatasetSpec
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import InvalidArgumentError
+from astrometricslib.foundation.storage.butler import Butler as _GenericButler
+from astrometricslib.foundation.storage.butler import DatasetSpec
 
 # Declares this module's own public surface. Without it, sphinx-automodapi
 # documents every imported name too, which is what produced the
 # "stub file not found" warnings for re-exports and typing helpers.
 __all__ = [
     "POSITION_ONLY_STAR_ID_PREFIX",
+    "UNRESOLVED_DETECTION_ID",
     "AbstractCatalogAccess",
     "CatalogAccess",
     "FrameSelector",
+    "StarGroupCount",
     "StarPosition",
     "StarSummary",
 ]
 
 logger = logging.getLogger(__name__)
+
+UNRESOLVED_DETECTION_ID = re.compile(r":Star_\d+$")
+"""The end of the id photometry gives each point source it finds in a single
+frame: the session id (``"{target}:{night}:{gain}:{offset}"``) joined with
+``":Star_<n>"``. These detections are kept in the star catalog, but they are
+working records, not real catalog stars. One imaging session can leave
+thousands of them."""
 
 
 class FrameSelector(BaseModel):
@@ -105,6 +119,25 @@ class StarSummary(BaseModel):
     target_ids: list[str] = Field(default_factory=list)
     has_spectra: bool = False
     has_photometry: bool = False
+    # Filled in by `list_star_summaries` and `list_stars_in_region`. A star
+    # with no known brightness or spectral type keeps the defaults.
+    magnitude: float | None = None
+    spectral_type: str = ""
+
+
+class StarGroupCount(BaseModel):
+    """How many stars share one target list, spectral type and data flags.
+
+    Counting stars by target or by spectral class only needs these four
+    facts, so the database can group stars by them and count each group.
+    That avoids building one object per star.
+    """
+
+    target_ids: list[str] = Field(default_factory=list)
+    spectral_type: str = ""
+    has_spectra: bool = False
+    has_photometry: bool = False
+    count: int = 0
 
 
 class StarPosition(BaseModel):
@@ -118,6 +151,101 @@ class StarPosition(BaseModel):
     right_ascension: float
     declination: float
     target_ids: list[str] = Field(default_factory=list)
+
+
+# A circle on the sky is searched by first cutting out a box that surely
+# contains it, using the database's sorted columns, and then checking each
+# star in the box against the circle. The box is made a hair larger than the
+# circle so a star sitting exactly on the edge is never lost to rounding.
+# 1e-6 degrees is about 0.004 arcseconds, far below any position we store.
+_BOX_MARGIN_DEGREES = 1e-6
+
+_FULL_CIRCLE_DEGREES = 360.0
+
+
+def _region_search_box(
+    ra_degrees: float, dec_degrees: float, radius_degrees: float
+) -> tuple[tuple[float, float], list[tuple[float, float]] | None]:
+    """Work out a box on the sky that contains a circle.
+
+    Declination (up/down) is easy: the box is the circle's center plus and
+    minus its radius. Right ascension (left/right) is harder for two
+    reasons. Lines of equal right ascension squeeze together near the
+    poles, so a circle there spans more right ascension than its radius.
+    And right ascension wraps around from 360 back to 0, so a circle near
+    that seam needs two ranges.
+
+    Parameters
+    ----------
+    ra_degrees : `float`
+        Right ascension of the circle's center, in degrees.
+    dec_degrees : `float`
+        Declination of the circle's center, in degrees.
+    radius_degrees : `float`
+        Radius of the circle, in degrees.
+
+    Returns
+    -------
+    dec_range : `tuple` [`float`, `float`]
+        Lowest and highest declination in the box.
+    ra_ranges : `list` [`tuple` [`float`, `float`]] or `None`
+        Right ascension ranges of the box, one or two of them. `None`
+        means the circle reaches a pole or is so wide that every right
+        ascension must be searched.
+    """
+    radius = min(radius_degrees, 180.0) + _BOX_MARGIN_DEGREES
+    dec_range = (max(dec_degrees - radius, -90.0), min(dec_degrees + radius, 90.0))
+    if dec_degrees + radius >= 90.0 or dec_degrees - radius <= -90.0:
+        return dec_range, None
+
+    # For a circle that does not reach a pole, the widest it gets in right
+    # ascension is asin(sin(radius) / cos(dec)). The formula only works
+    # while that ratio is below 1, which the pole check above guarantees.
+    half_width_degrees = math.degrees(
+        math.asin(math.sin(math.radians(radius)) / math.cos(math.radians(dec_degrees)))
+    )
+    if half_width_degrees >= 180.0:
+        return dec_range, None
+
+    ra_low = ra_degrees - half_width_degrees
+    ra_high = ra_degrees + half_width_degrees
+    if ra_low < 0.0:
+        return dec_range, [(ra_low + _FULL_CIRCLE_DEGREES, _FULL_CIRCLE_DEGREES), (0.0, ra_high)]
+    if ra_high >= _FULL_CIRCLE_DEGREES:
+        return dec_range, [(ra_low, _FULL_CIRCLE_DEGREES), (0.0, ra_high - _FULL_CIRCLE_DEGREES)]
+    return dec_range, [(ra_low, ra_high)]
+
+
+def _angular_separation_degrees(
+    ra_degrees: float, dec_degrees: float, other_ra_degrees: np.ndarray, other_dec_degrees: np.ndarray
+) -> np.ndarray:
+    """Measure the angle on the sky from one point to many points.
+
+    Uses the haversine formula, which stays accurate for very small angles
+    where the simpler cosine formula loses digits.
+
+    Parameters
+    ----------
+    ra_degrees, dec_degrees : `float`
+        The single point, in degrees.
+    other_ra_degrees, other_dec_degrees : `numpy.ndarray`
+        The many points, in degrees.
+
+    Returns
+    -------
+    separation_degrees : `numpy.ndarray`
+        The angle from the single point to each of the many points.
+    """
+    ra_radians = math.radians(ra_degrees)
+    dec_radians = math.radians(dec_degrees)
+    other_ra_radians = np.radians(other_ra_degrees)
+    other_dec_radians = np.radians(other_dec_degrees)
+    half_dec_difference = np.sin((other_dec_radians - dec_radians) / 2.0)
+    half_ra_difference = np.sin((other_ra_radians - ra_radians) / 2.0)
+    haversine = (
+        half_dec_difference**2 + math.cos(dec_radians) * np.cos(other_dec_radians) * half_ra_difference**2
+    )
+    return np.degrees(2.0 * np.arcsin(np.sqrt(np.clip(haversine, 0.0, 1.0))))
 
 
 def _split_target_ids(joined_target_ids: Any) -> list[str]:
@@ -209,6 +337,44 @@ class AbstractCatalogAccess(ABC):
         """
         pass
 
+    def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:
+        """Count stars by target list, spectral type and data flags.
+
+        This default builds the counts from `list_star_summaries`.
+        `CatalogAccess` overrides it to let the database do the counting.
+
+        Parameters
+        ----------
+        include_unresolved : `bool`, optional
+            Also count single-frame detections. Defaults to `False`.
+
+        Returns
+        -------
+        groups : `list` [`StarGroupCount`]
+            One entry per distinct combination, with how many stars have it.
+        """
+        grouped: dict[tuple[tuple[str, ...], str, bool, bool], int] = {}
+        for summary in self.list_star_summaries():
+            if not include_unresolved and UNRESOLVED_DETECTION_ID.search(summary.id):
+                continue
+            key = (
+                tuple(summary.target_ids),
+                summary.spectral_type or "",
+                bool(summary.has_spectra),
+                bool(summary.has_photometry),
+            )
+            grouped[key] = grouped.get(key, 0) + 1
+        return [
+            StarGroupCount(
+                target_ids=list(target_ids),
+                spectral_type=spectral_type,
+                has_spectra=has_spectra,
+                has_photometry=has_photometry,
+                count=count,
+            )
+            for (target_ids, spectral_type, has_spectra, has_photometry), count in grouped.items()
+        ]
+
     @abstractmethod
     def list_star_summaries(
         self, target_id: str | None = None, limit: int | None = None
@@ -227,6 +393,37 @@ class AbstractCatalogAccess(ABC):
         -------
         summaries : `list` [`StarSummary`]
             One summary per matching star.
+        """
+        pass
+
+    @abstractmethod
+    def list_stars_in_region(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[StarSummary]:
+        """List the stars inside a circle on the sky, in short form.
+
+        Parameters
+        ----------
+        ra_degrees : `float`
+            Right ascension of the circle's center, in degrees.
+        dec_degrees : `float`
+            Declination of the circle's center, in degrees.
+        radius_degrees : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary, with brightness and spectral type filled in, per
+            star whose position is inside the circle.
         """
         pass
 
@@ -250,6 +447,77 @@ class AbstractCatalogAccess(ABC):
             One entry per position-only star.
         """
         pass
+
+    # The four methods below are ordinary (not abstract) so that a simple
+    # stand-in for a database, such as the ones tests use, keeps working
+    # without writing them. These versions read the whole catalog through
+    # `get` and so are slow on a real library; `CatalogAccess` replaces every
+    # one of them with a query that touches only the rows it needs.
+
+    def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
+        """Load only the records with the given ids.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            The kind of data to load (like "stellar_catalog").
+        ids : `list` [`str`]
+            The ids to look for.
+
+        Returns
+        -------
+        records : `list`
+            The records that were found, in no particular order.
+        """
+        wanted_ids = set(ids)
+        return [record for record in self.get(dataset_type, {}) if record.id in wanted_ids]
+
+    def list_star_ids(self) -> list[str]:
+        """List the id of every star in the catalog.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            One id per star.
+        """
+        return [summary.id for summary in self.list_star_summaries()]
+
+    def existing_star_ids(self, ids: list[str]) -> set[str]:
+        """Say which of the given star ids are in the catalog.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a star record.
+        """
+        return set(ids) & set(self.list_star_ids())
+
+    def find_star_ids_by_name(self, name: str) -> list[str]:
+        """Find the ids of stars whose id or name equals `name`, ignoring case.
+
+        Parameters
+        ----------
+        name : `str`
+            The id or name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every matching star.
+        """
+        if not name:
+            return []
+        wanted_name = name.lower()
+        return [
+            summary.id
+            for summary in self.list_star_summaries()
+            if summary.id == name or (summary.name and summary.name.lower() == wanted_name)
+        ]
 
 
 def _target_extra_columns(target: Any) -> dict[str, Any]:
@@ -299,6 +567,7 @@ def _stellar_extra_columns(stellar_object: Any) -> dict[str, Any]:
         "magnitude": _coerce_float(getattr(stellar_object, "magnitude", None)),
         "has_spectra": int(stellar_object.has_spectra),
         "has_photometry": int(stellar_object.has_photometry),
+        "spectral_type": stellar_object.spectral_type or "",
     }
 
 
@@ -311,7 +580,7 @@ class CatalogAccess(AbstractCatalogAccess):
     disk it sits.
     """
 
-    def __init__(self, config=None):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, config=None) -> None:  # ruff: ignore[missing-type-function-argument]
         """Set up the CatalogAccess.
 
         Parameters
@@ -321,12 +590,52 @@ class CatalogAccess(AbstractCatalogAccess):
             default settings.
         """
         if config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             config = get_configuration()
         self.config = config
-        self._stellar_catalog_cache: list[Any] | None = None
         self._generic = self._build_generic_butler(config)
+        self._dataset_versions: dict[str, int] = {}
+        self._dataset_versions_lock = threading.Lock()
+
+    def get_dataset_version(self, dataset_type: str) -> int:
+        """Report how many writes `dataset_type` has had in this process.
+
+        A caller that wants to know whether a dataset has changed since it
+        last looked -- e.g. a cache deciding whether to redo an expensive
+        scan -- can keep the number it saw last time and compare it to this
+        one, instead of re-reading the whole dataset or guessing from a
+        timer. Every `put`, `merge_and_record`, and `delete_by_ids` call on
+        `dataset_type` counts as one write. Starts at 0 for a dataset this
+        process hasn't written to yet.
+
+        This is one in-memory counter per running backend process, not a
+        durable value: it does not see a write made by a different process
+        (e.g. a maintenance script run from the command line while the app
+        isn't running), and it resets on restart. A caller relying on it
+        for correctness, not just avoiding unnecessary work, should still
+        keep a coarse time-based fallback for that case.
+
+        Parameters
+        ----------
+        dataset_type : `str`
+            The kind of data to check (e.g. "stellar_catalog").
+
+        Returns
+        -------
+        version : `int`
+            The number of writes made to `dataset_type` in this process.
+        """
+        with self._dataset_versions_lock:
+            return self._dataset_versions.get(dataset_type, 0)
+
+    def _bump_dataset_version(self, dataset_type: str) -> None:
+        """Record one more write to `dataset_type`.
+
+        Call after a write to it succeeds.
+        """
+        with self._dataset_versions_lock:
+            self._dataset_versions[dataset_type] = self._dataset_versions.get(dataset_type, 0) + 1
 
     @staticmethod
     def _build_generic_butler(config: Any) -> _GenericButler:
@@ -354,10 +663,18 @@ class CatalogAccess(AbstractCatalogAccess):
                         "magnitude": "REAL",
                         "has_spectra": "INTEGER",
                         "has_photometry": "INTEGER",
+                        "spectral_type": "TEXT",
                     },
                     extra_columns=_stellar_extra_columns,
-                    # Speeds up an exact single-target match (the common
-                    # case: most stars belong to only one target). The
+                    # Rows saved before this column existed still hold the
+                    # value inside their stored JSON. The database copies it
+                    # out once, when the column is first added.
+                    column_backfills={
+                        "spectral_type": "COALESCE(json_extract(data_json, '$.spectralType'), '')"
+                    },
+                    # The first entry speeds up an exact single-target
+                    # match (the common case: most stars belong to only
+                    # one target). The
                     # two places this column is actually filtered today
                     # -- list_star_summaries and list_position_only_stars
                     # -- use `like` (a star can belong to more than one
@@ -368,7 +685,31 @@ class CatalogAccess(AbstractCatalogAccess):
                     # regardless. Kept anyway since it costs little at
                     # this table's size and does serve an exact match, if
                     # a future caller adds one.
-                    indexed_columns=("target_id",),
+                    #
+                    # The second entry is one index over every column that
+                    # `list_stars_in_region` reads, starting with "dec". A
+                    # sky map only wants the stars near one spot. Sorting
+                    # by declination lets the database skip the stars that
+                    # are too far north or south, and holding every column
+                    # the map reads means it never opens the large stored
+                    # rows. Measured on a real 270,000-star library, a
+                    # region read took about 136 ms with a plain "dec"
+                    # index and about 8 ms with this one, at a cost of
+                    # about 30 MB of disk.
+                    indexed_columns=(
+                        "target_id",
+                        (
+                            "dec",
+                            "ra",
+                            "magnitude",
+                            "has_spectra",
+                            "has_photometry",
+                            "spectral_type",
+                            "name",
+                            "target_id",
+                            "id",
+                        ),
+                    ),
                 ),
             },
         )
@@ -391,7 +732,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If a data type it doesn't recognize is requested.
         """
         if dataset_type == "target_catalog":
@@ -403,13 +744,17 @@ class CatalogAccess(AbstractCatalogAccess):
 
             return local_database.load_targets(self.config)
         elif dataset_type == "stellar_catalog":
-            # put()/merge_and_record() write through to (or
-            # invalidate) self._stellar_catalog_cache specifically so
-            # this can skip disk I/O on repeated reads -- serve from it
-            # when populated, instead of unconditionally hitting disk.
-            if self._stellar_catalog_cache is None:
-                self._stellar_catalog_cache = self._generic.get_all("stellar_catalog")
-            return self._stellar_catalog_cache
+            # Reads every star from the database into new objects each time,
+            # and keeps none of them. It used to keep the list in a cache
+            # here, but every write emptied that cache, each `CatalogAccess`
+            # had its own, and `put` filled it with whatever list it was
+            # handed -- so a busy backend held several full copies (about
+            # 2.8 GB each on a 274,000-star library) and was killed for
+            # running out of memory. The database is the one copy of the
+            # catalog. Ask for only what is needed: `list_star_summaries`,
+            # `list_stars_in_region`, `get_by_ids`, `list_star_ids` and
+            # `existing_star_ids`.
+            return self._generic.get_all("stellar_catalog")
 
         elif dataset_type == "raw_frame" or dataset_type == "stacked_image":
             path = self.get_local_path(dataset_type, selector)
@@ -417,7 +762,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
             return AstrometricsImage(path)
         else:
-            raise ValueError(f"Unknown dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Unknown dataset type: {dataset_type}")
 
     def put(self, obj: Any, dataset_type: str, selector: dict[str, Any]) -> None:
         """Save data to the database or hard drive.
@@ -433,7 +778,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If an unsupported data type is being saved.
         """
         if dataset_type == "target_catalog":
@@ -442,9 +787,9 @@ class CatalogAccess(AbstractCatalogAccess):
             self._generic.put(obj, "target_catalog")
         elif dataset_type == "stellar_catalog":
             self._generic.put_all("stellar_catalog", obj)
-            self._stellar_catalog_cache = obj
         else:
-            raise ValueError(f"Write operation not supported on dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"Write operation not supported on dataset type: {dataset_type}")
+        self._bump_dataset_version("target_catalog" if dataset_type == "target_record" else dataset_type)
 
     def merge_and_record(
         self,
@@ -470,18 +815,14 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If the dataset type isn't supported for merging.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
-            raise ValueError(f"merge_and_record is not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"merge_and_record is not supported for dataset type: {dataset_type}")
 
         self._generic.merge_and_record(dataset_type, objects, merge_function)
-
-        # Invalidate the cache so the next get() re-reads the merged
-        # state from disk.
-        if dataset_type == "stellar_catalog":
-            self._stellar_catalog_cache = None
+        self._bump_dataset_version(dataset_type)
 
     def delete_by_ids(self, dataset_type: str, ids: list[str]) -> None:
         """Delete specific records from the database using their IDs.
@@ -495,16 +836,14 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If the dataset type isn't supported for deleting.
         """
         if dataset_type not in ("stellar_catalog", "target_catalog"):
-            raise ValueError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(f"delete_by_ids is not supported for dataset type: {dataset_type}")
 
         self._generic.delete_by_ids(dataset_type, ids)
-
-        if dataset_type == "stellar_catalog":
-            self._stellar_catalog_cache = None
+        self._bump_dataset_version(dataset_type)
 
     def get_by_ids(self, dataset_type: str, ids: list[str]) -> list[Any]:
         """Load only specific records from the database instead of everything.
@@ -522,6 +861,94 @@ class CatalogAccess(AbstractCatalogAccess):
             The records that were found.
         """
         return self._generic.get_by_ids(dataset_type, ids)
+
+    def list_star_ids(self) -> list[str]:
+        """List the id of every star, reading nothing but the id column.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            One id per star.
+        """
+        return [row["id"] for row in self._generic.list_projected("stellar_catalog", ["id"])]
+
+    def existing_star_ids(self, ids: list[str]) -> set[str]:
+        """Say which of the given star ids are in the catalog.
+
+        Parameters
+        ----------
+        ids : `list` [`str`]
+            The star ids to look for.
+
+        Returns
+        -------
+        found_ids : `set` [`str`]
+            The subset of `ids` that has a star record.
+        """
+        return self._generic.existing_ids("stellar_catalog", ids)
+
+    def find_star_ids_by_name(self, name: str) -> list[str]:
+        """Find the ids of stars whose id or name equals `name`, ignoring case.
+
+        The database narrows the search to names that contain `name`, and
+        the exact comparison happens afterwards, so only a handful of rows
+        are ever read.
+
+        Parameters
+        ----------
+        name : `str`
+            The id or name to look for.
+
+        Returns
+        -------
+        star_ids : `list` [`str`]
+            The ids of every matching star.
+        """
+        if not name:
+            return []
+        wanted_name = name.lower()
+        candidate_rows = self._generic.list_projected("stellar_catalog", ["id", "name"], like={"name": name})
+        matching_ids = [
+            row["id"] for row in candidate_rows if row["name"] and row["name"].lower() == wanted_name
+        ]
+        # A star matches by its id even when its stored name differs.
+        matching_ids.extend(
+            found_id for found_id in self.existing_star_ids([name]) if found_id not in matching_ids
+        )
+        return matching_ids
+
+    def count_star_groups(self, include_unresolved: bool = False) -> list[StarGroupCount]:
+        """Count stars by target list, spectral type and data flags.
+
+        The database groups and counts the rows, so no star is turned into
+        a Python object. A real 270,000-star catalog gives a few thousand
+        groups.
+
+        Parameters
+        ----------
+        include_unresolved : `bool`, optional
+            Also count single-frame detections. Defaults to `False`.
+
+        Returns
+        -------
+        groups : `list` [`StarGroupCount`]
+            One entry per distinct combination, with how many stars have it.
+        """
+        grouped_rows = self._generic.count_grouped(
+            "stellar_catalog",
+            ["target_id", "spectral_type", "has_spectra", "has_photometry"],
+            skip_id_pattern=None if include_unresolved else UNRESOLVED_DETECTION_ID,
+        )
+        return [
+            StarGroupCount(
+                target_ids=_split_target_ids(row["target_id"]),
+                spectral_type=row["spectral_type"] or "",
+                has_spectra=bool(row["has_spectra"]),
+                has_photometry=bool(row["has_photometry"]),
+                count=count,
+            )
+            for row, count in grouped_rows
+        ]
 
     def list_star_summaries(
         self, target_id: str | None = None, limit: int | None = None
@@ -550,7 +977,17 @@ class CatalogAccess(AbstractCatalogAccess):
         """
         rows = self._generic.list_projected(
             "stellar_catalog",
-            ["id", "name", "ra", "dec", "target_id", "has_spectra", "has_photometry"],
+            [
+                "id",
+                "name",
+                "ra",
+                "dec",
+                "target_id",
+                "has_spectra",
+                "has_photometry",
+                "magnitude",
+                "spectral_type",
+            ],
             like={"target_id": target_id} if target_id else None,
             limit=limit,
         )
@@ -568,6 +1005,98 @@ class CatalogAccess(AbstractCatalogAccess):
                     target_ids=target_ids,
                     has_spectra=bool(row["has_spectra"]),
                     has_photometry=bool(row["has_photometry"]),
+                    magnitude=_coerce_float(row["magnitude"]),
+                    spectral_type=row["spectral_type"] or "",
+                )
+            )
+        return summaries
+
+    def list_stars_in_region(
+        self,
+        ra_degrees: float,
+        dec_degrees: float,
+        radius_degrees: float,
+        magnitude_range: tuple[float, float] | None = None,
+    ) -> list[StarSummary]:
+        """List the stars inside a circle on the sky, in short form.
+
+        Reads only the saved columns, so a star's stored JSON is never
+        parsed, and uses the declination index so stars far from the
+        circle are never read at all. Loading every star in full for each
+        pan or zoom of the sky map took about ten seconds on a real
+        270,000-star library.
+
+        Parameters
+        ----------
+        ra_degrees : `float`
+            Right ascension of the circle's center, in degrees.
+        dec_degrees : `float`
+            Declination of the circle's center, in degrees.
+        radius_degrees : `float`
+            Radius of the circle, in degrees.
+        magnitude_range : `tuple` [`float`, `float`], optional
+            Lowest and highest magnitude to keep, ends included. Stars
+            with no saved magnitude are left out. Every star is kept when
+            omitted. The database applies this while it searches, so a
+            wide view that only wants bright stars never reads the faint
+            ones at all.
+
+        Returns
+        -------
+        summaries : `list` [`StarSummary`]
+            One summary, with brightness and spectral type filled in, per
+            star whose position is inside the circle. Stars with no
+            position are left out. A star exactly at right ascension 0 and
+            declination 0 is a "no position" placeholder and is left out
+            too, the same as the sky map has always done.
+        """
+        dec_range, ra_ranges = _region_search_box(ra_degrees, dec_degrees, radius_degrees)
+        columns = [
+            "id",
+            "name",
+            "ra",
+            "dec",
+            "target_id",
+            "has_spectra",
+            "has_photometry",
+            "magnitude",
+            "spectral_type",
+        ]
+        rows: list[dict[str, Any]] = []
+        for ra_range in ra_ranges if ra_ranges is not None else [None]:
+            between = {"dec": dec_range}
+            if ra_range is not None:
+                between["ra"] = ra_range
+            if magnitude_range is not None:
+                between["magnitude"] = magnitude_range
+            rows.extend(self._generic.list_projected("stellar_catalog", columns, between=between))
+        if not rows:
+            return []
+
+        star_ras = np.array([row["ra"] for row in rows], dtype=float)
+        star_decs = np.array([row["dec"] for row in rows], dtype=float)
+        separations = _angular_separation_degrees(ra_degrees, dec_degrees, star_ras, star_decs)
+        is_inside_circle = separations <= radius_degrees
+
+        summaries = []
+        for row, star_ra, star_dec, is_inside in zip(
+            rows, star_ras, star_decs, is_inside_circle, strict=True
+        ):
+            # Both coordinates being zero means "no position saved yet".
+            has_no_position = not (star_ra or star_dec)
+            if not is_inside or has_no_position:
+                continue
+            summaries.append(
+                StarSummary(
+                    id=row["id"],
+                    name=row["name"] or "",
+                    right_ascension=float(star_ra),
+                    declination=float(star_dec),
+                    target_ids=_split_target_ids(row["target_id"]),
+                    has_spectra=bool(row["has_spectra"]),
+                    has_photometry=bool(row["has_photometry"]),
+                    magnitude=row["magnitude"],
+                    spectral_type=row["spectral_type"] or "",
                 )
             )
         return summaries
@@ -629,7 +1158,9 @@ class CatalogAccess(AbstractCatalogAccess):
         try:
             path = self.get_local_path(dataset_type, selector)
             return os.path.exists(path)
-        except Exception:
+        except InvalidArgumentError, AttributeError, TypeError:
+            # The data type has no known path, or the selector's target is
+            # not text.
             return False
 
     def get_local_path(self, dataset_type: str, selector: dict[str, Any]) -> str:
@@ -649,7 +1180,7 @@ class CatalogAccess(AbstractCatalogAccess):
 
         Raises
         ------
-        ValueError
+        InvalidArgumentError
             If it doesn't know how to build a path for that data type.
         """
         if selector.get("path"):
@@ -661,10 +1192,12 @@ class CatalogAccess(AbstractCatalogAccess):
         if dataset_type == "stacked_image":
             safe_target = target.replace(" ", "_")
             return os.path.join(
-                self.config.get_frames_path(), "lights", target, f"{safe_target}_Stacked.fits"
+                self.config.get_stacks_path(), "lights", target, f"{safe_target}_Stacked.fits"
             )
         elif dataset_type == "raw_frame":
             # Just fallback to frames root lights mapping
             return os.path.join(self.config.get_frames_path(), role.lower() + "s", target)
         else:
-            raise ValueError(f"Local path resolution not supported for dataset type: {dataset_type}")
+            raise InvalidArgumentError(
+                f"Local path resolution not supported for dataset type: {dataset_type}"
+            )

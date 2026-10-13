@@ -1,7 +1,7 @@
 """Purpose: Site Profile Domain Models.
 
 Description: The observing location's coordinates and horizon
-obstructions. Per `Wayfinding_Library_Architecture.md` §2.2.2, this is
+obstructions. Per `Wayfinding_Library_Architecture.md`, this is
 the architecture's single authoritative source of observer position:
 any calculation needing latitude, longitude, or elevation resolves them
 from `SiteProfile` rather than from a connected device's reported

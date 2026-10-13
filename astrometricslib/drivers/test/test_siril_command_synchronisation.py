@@ -26,6 +26,7 @@ import time
 import pytest
 
 from astrometricslib.drivers import siril_interface
+from astrometricslib.foundation.errors import ExternalServiceError
 
 
 @pytest.fixture
@@ -182,7 +183,7 @@ def test_open_pipe_or_die_raises_once_the_process_exits(tmp_path: pathlib.Path) 
     process.wait()
 
     started_at = time.monotonic()
-    with pytest.raises(RuntimeError, match="exited"):
+    with pytest.raises(ExternalServiceError, match="exited"):
         siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=30)
     elapsed = time.monotonic() - started_at
 
@@ -197,7 +198,7 @@ def test_open_pipe_or_die_times_out_on_a_process_that_never_connects(tmp_path: p
     os.mkfifo(pipe_path)
     process = subprocess.Popen(["sleep", "30"])
     try:
-        with pytest.raises(TimeoutError):
+        with pytest.raises(ExternalServiceError):
             siril_interface._open_pipe_or_die(pipe_path, "w", process, timeout=0.3)
     finally:
         process.kill()

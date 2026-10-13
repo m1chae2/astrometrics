@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTargetListLogic } from '../common/hooks/useTargetListLogic';
 import { RadioListManager } from '../common/radioList/RadioListManager';
+import { TargetListFilterPanel } from '../common/radioList/TargetListFilterPanel';
 import { ListActions } from '../common/components/ListActions'; // Import ListActions
 import '../common/styles/button.css'; // Ensure button styles are loaded
 
@@ -31,12 +32,11 @@ export const TargetListPanel: React.FC<Props> = ({
     // Hook only used for list logic now, passing in the state from props
     const {
         items,
-        filterOptions,
-        selectedFilterOption,
-        setFilterOption,
+        filterPanel,
         filterText,
         setFilterText,
         highlightedIds,
+        isLoading,
     } = useTargetListLogic(reloadKey, pendingTarget, selectedTarget, setPendingTarget);
 
     React.useEffect(() => {
@@ -58,12 +58,14 @@ export const TargetListPanel: React.FC<Props> = ({
                     setPendingTarget(id);
                     setSelectedTarget(id);
                 }}
-                filterOptions={filterOptions}
-                selectedFilterOption={selectedFilterOption}
-                onFilterOptionChange={setFilterOption}
+                topPanel={<TargetListFilterPanel {...filterPanel} />}
+                topPanelTitle="Filter Targets"
                 filterText={filterText}
                 onFilterTextChange={setFilterText}
                 highlightedIds={highlightedIds}
+                isLoading={isLoading}
+                loadingMessage="Loading targets…"
+                emptyMessage="No targets in the catalog."
                 className="target-list-manager"
                 actions={
                     <ListActions>

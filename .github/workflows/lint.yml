@@ -86,6 +86,27 @@ jobs:
       - name: Run ruff format check
         run: ruff format --check .
 
+  import-layers:
+    name: Import Layers
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install import-linter
+        run: pip install import-linter==2.15
+
+      - name: Check import layers
+        run: lint-imports
+
   pyrefly:
     name: Pyrefly Type Check
     needs: changes

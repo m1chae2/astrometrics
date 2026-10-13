@@ -22,14 +22,14 @@ Options:
       flatpak: installs flatpak, adds the Flathub repository, then installs
         org.siril.Siril from it. This tracks Siril's latest release much
         more closely, and is the option that supports weighted stacking
-        (stack_weight in astrometrics.config).
+        (stack_weight in astrometrics.config.toml).
 
   --with-local-solver           (default: off)
       Installs astrometry.net (the solve-field program) so that plate
       solving runs on this machine instead of over the internet. Leave it
       off if you would rather use the online astrometry.net service, which
       needs an api_key under [Processing.Astrometry.Online Solver] in
-      astrometrics.config. Plate solving needs one or the other.
+      astrometrics.config.toml. Plate solving needs one or the other.
       The Tycho-2 index files this installs are sized for the camera and
       telescope in the config template (a ZWO ASI533MM Pro at 405mm focal
       length, which sees about 1.6 degrees of sky). A different camera or
@@ -126,7 +126,7 @@ fi
 echo "=== Dependencies installed successfully! ==="
 echo "You can now run ./build/linux/setup_venv.sh to create the virtual environment."
 echo ""
-echo "This script does not edit astrometrics.config for you. After"
+echo "This script does not edit astrometrics.config.toml for you. After"
 echo "setup_venv.sh creates it, apply the settings below."
 echo ""
 echo "Siril (source: $SIRIL_SOURCE), under [Processing.Siril]:"
@@ -153,7 +153,7 @@ if [ "$WITH_LOCAL_SOLVER" = "1" ]; then
   echo "  Ready to use via [Processing.Astrometry.Local Solver]"
   echo "  (index_path = /usr/share/astrometry, already the template default)."
   echo "  The index files installed are sized for the camera and telescope in"
-  echo "  astrometrics.config.example. If yours differ, install index files"
+  echo "  astrometrics.config.example.toml. If yours differ, install index files"
   echo "  matching how much sky your setup actually sees"
   echo "  (apt-cache search astrometry-data)."
 else

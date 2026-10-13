@@ -72,7 +72,7 @@ def _make_candidate(**overrides) -> AsteroidDetectionCandidate:  # ruff: ignore[
     return AsteroidDetectionCandidate(**defaults)
 
 
-def test_render_draws_one_line_per_candidate_with_detections():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_render_draws_one_line_per_candidate_with_detections() -> None:
     """A candidate with detections gets one Line2D artist."""
     fig, ax = plt.subplots()
     overlay = TrackOverlay(ax, VisualizationConfig())
@@ -83,7 +83,7 @@ def test_render_draws_one_line_per_candidate_with_detections():  # ruff: ignore[
     plt.close(fig)
 
 
-def test_render_skips_candidates_with_no_detections():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_render_skips_candidates_with_no_detections() -> None:
     """A candidate that somehow has zero detections draws nothing."""
     fig, ax = plt.subplots()
     overlay = TrackOverlay(ax, VisualizationConfig())
@@ -94,7 +94,7 @@ def test_render_skips_candidates_with_no_detections():  # ruff: ignore[missing-r
     plt.close(fig)
 
 
-def test_render_orders_the_path_by_timestamp_not_input_order():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_render_orders_the_path_by_timestamp_not_input_order() -> None:
     """The drawn path follows time, not the input order."""
     fig, ax = plt.subplots()
     overlay = TrackOverlay(ax, VisualizationConfig())
@@ -113,7 +113,7 @@ def test_render_orders_the_path_by_timestamp_not_input_order():  # ruff: ignore[
     plt.close(fig)
 
 
-def test_matched_candidate_uses_matched_color_and_designation_label():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_matched_candidate_uses_matched_color_and_designation_label() -> None:
     """A candidate matched to a known body is styled and labeled as such."""
     fig, ax = plt.subplots()
     config = VisualizationConfig()
@@ -132,7 +132,7 @@ def test_matched_candidate_uses_matched_color_and_designation_label():  # ruff: 
     plt.close(fig)
 
 
-def test_unconfirmed_candidate_uses_unconfirmed_color_and_generic_label():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unconfirmed_candidate_uses_unconfirmed_color_and_generic_label() -> None:
     """A candidate not matched to any known body is styled accordingly."""
     fig, ax = plt.subplots()
     config = VisualizationConfig()

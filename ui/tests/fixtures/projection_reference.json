@@ -1,0 +1,406 @@
+{
+  "description": "Reference values from wayfindinglib.astronomy.coordinate_transforms for the planetarium projection tests. Do not edit by hand: run `python -m wayfindinglib.scripts.generate_projection_reference`.",
+  "units": "degrees; altitude and azimuth without refraction; azimuth from north through east",
+  "site": {
+    "latitudeDeg": 39.7392,
+    "longitudeDeg": -104.9903,
+    "elevationM": 1600.0
+  },
+  "cases": [
+    {
+      "utc": "2000-01-01T12:00:00Z",
+      "unixMs": 946728000000,
+      "localSiderealTimeDeg": 175.4682557,
+      "stars": [
+        {
+          "name": "Polaris",
+          "raJ2000Deg": 37.95456,
+          "decJ2000Deg": 89.26411,
+          "raCurrentEpochDeg": 38.1901479,
+          "decCurrentEpochDeg": 89.266973,
+          "altDeg": 39.1990031,
+          "azDeg": 359.3584087
+        },
+        {
+          "name": "Vega",
+          "raJ2000Deg": 279.23473,
+          "decJ2000Deg": 38.78369,
+          "raCurrentEpochDeg": 279.2252089,
+          "decCurrentEpochDeg": 38.7846808,
+          "altDeg": 14.9460435,
+          "azDeg": 51.5966085
+        },
+        {
+          "name": "Betelgeuse",
+          "raJ2000Deg": 88.79294,
+          "decJ2000Deg": 7.40706,
+          "raCurrentEpochDeg": 88.7949159,
+          "decCurrentEpochDeg": 7.4051496,
+          "altDeg": 7.2757934,
+          "azDeg": 273.6020276
+        },
+        {
+          "name": "Sirius",
+          "raJ2000Deg": 101.28716,
+          "decJ2000Deg": -16.71612,
+          "raCurrentEpochDeg": 101.2901876,
+          "decCurrentEpochDeg": -16.7177405,
+          "altDeg": 0.9681904,
+          "azDeg": 247.1581834
+        },
+        {
+          "name": "Canopus",
+          "raJ2000Deg": 95.98796,
+          "decJ2000Deg": -52.69566,
+          "raCurrentEpochDeg": 95.996156,
+          "decCurrentEpochDeg": -52.6976339,
+          "altDeg": -25.0481944,
+          "azDeg": 221.12257
+        },
+        {
+          "name": "Arcturus",
+          "raJ2000Deg": 213.9153,
+          "decJ2000Deg": 19.18241,
+          "raCurrentEpochDeg": 213.9090704,
+          "decCurrentEpochDeg": 19.1824652,
+          "altDeg": 51.1605113,
+          "azDeg": 110.5618517
+        },
+        {
+          "name": "Deneb",
+          "raJ2000Deg": 310.35798,
+          "decJ2000Deg": 45.28034,
+          "raCurrentEpochDeg": 310.3496221,
+          "decCurrentEpochDeg": 45.2823698,
+          "altDeg": 4.1566732,
+          "azDeg": 29.9917405
+        },
+        {
+          "name": "Fomalhaut",
+          "raJ2000Deg": 344.41269,
+          "decJ2000Deg": -29.62224,
+          "raCurrentEpochDeg": 344.405206,
+          "decCurrentEpochDeg": -29.6262404,
+          "altDeg": -76.4195809,
+          "azDeg": 45.2657414
+        }
+      ]
+    },
+    {
+      "utc": "2026-03-20T04:00:00Z",
+      "unixMs": 1773979200000,
+      "localSiderealTimeDeg": 132.7171516,
+      "stars": [
+        {
+          "name": "Polaris",
+          "raJ2000Deg": 37.95456,
+          "decJ2000Deg": 89.26411,
+          "raCurrentEpochDeg": 46.1063213,
+          "decCurrentEpochDeg": 89.3785865,
+          "altDeg": 39.7732437,
+          "azDeg": 359.1930478
+        },
+        {
+          "name": "Vega",
+          "raJ2000Deg": 279.23473,
+          "decJ2000Deg": 38.78369,
+          "raCurrentEpochDeg": 279.45429,
+          "decCurrentEpochDeg": 38.7999937,
+          "altDeg": -5.76864,
+          "azDeg": 25.4440407
+        },
+        {
+          "name": "Betelgeuse",
+          "raJ2000Deg": 88.79294,
+          "decJ2000Deg": 7.40706,
+          "raCurrentEpochDeg": 89.1495266,
+          "decCurrentEpochDeg": 7.4106527,
+          "altDeg": 39.4172444,
+          "azDeg": 242.2121258
+        },
+        {
+          "name": "Sirius",
+          "raJ2000Deg": 101.28716,
+          "decJ2000Deg": -16.71612,
+          "raCurrentEpochDeg": 101.5825182,
+          "decCurrentEpochDeg": -16.7463497,
+          "altDeg": 26.4923769,
+          "azDeg": 213.5877013
+        },
+        {
+          "name": "Canopus",
+          "raJ2000Deg": 95.98796,
+          "decJ2000Deg": -52.69566,
+          "raCurrentEpochDeg": 96.1348093,
+          "decCurrentEpochDeg": -52.7141323,
+          "altDeg": -7.7340628,
+          "azDeg": 201.3677461
+        },
+        {
+          "name": "Arcturus",
+          "raJ2000Deg": 213.9153,
+          "decJ2000Deg": 19.18241,
+          "raCurrentEpochDeg": 214.2295302,
+          "decCurrentEpochDeg": 19.0563801,
+          "altDeg": 18.4214093,
+          "azDeg": 80.1761099
+        },
+        {
+          "name": "Deneb",
+          "raJ2000Deg": 310.35798,
+          "decJ2000Deg": 45.28034,
+          "raCurrentEpochDeg": 310.5759534,
+          "decCurrentEpochDeg": 45.3692055,
+          "altDeg": -4.8698052,
+          "azDeg": 1.5096508
+        },
+        {
+          "name": "Fomalhaut",
+          "raJ2000Deg": 344.41269,
+          "decJ2000Deg": -29.62224,
+          "raCurrentEpochDeg": 344.7677778,
+          "decCurrentEpochDeg": -29.4829252,
+          "altDeg": -61.8837781,
+          "azDeg": 281.4101555
+        }
+      ]
+    },
+    {
+      "utc": "2026-06-21T07:30:00Z",
+      "unixMs": 1782027000000,
+      "localSiderealTimeDeg": 277.0262955,
+      "stars": [
+        {
+          "name": "Polaris",
+          "raJ2000Deg": 37.95456,
+          "decJ2000Deg": 89.26411,
+          "raCurrentEpochDeg": 46.1929192,
+          "decCurrentEpochDeg": 89.3716808,
+          "altDeg": 39.3407521,
+          "azDeg": 0.6300754
+        },
+        {
+          "name": "Vega",
+          "raJ2000Deg": 279.23473,
+          "decJ2000Deg": 38.78369,
+          "raCurrentEpochDeg": 279.4651044,
+          "decCurrentEpochDeg": 38.8050546,
+          "altDeg": 87.8934997,
+          "azDeg": 115.5505537
+        },
+        {
+          "name": "Betelgeuse",
+          "raJ2000Deg": 88.79294,
+          "decJ2000Deg": 7.40706,
+          "raCurrentEpochDeg": 89.1476835,
+          "decCurrentEpochDeg": 7.4118281,
+          "altDeg": -42.2889,
+          "azDeg": 10.5882361
+        },
+        {
+          "name": "Sirius",
+          "raJ2000Deg": 101.28716,
+          "decJ2000Deg": -16.71612,
+          "raCurrentEpochDeg": 101.5787673,
+          "decCurrentEpochDeg": -16.743753,
+          "altDeg": -66.6660892,
+          "azDeg": 348.93681
+        },
+        {
+          "name": "Canopus",
+          "raJ2000Deg": 95.98796,
+          "decJ2000Deg": -52.69566,
+          "raCurrentEpochDeg": 96.1261112,
+          "decCurrentEpochDeg": -52.7096852,
+          "altDeg": -77.0149372,
+          "azDeg": 177.572177
+        },
+        {
+          "name": "Arcturus",
+          "raJ2000Deg": 213.9153,
+          "decJ2000Deg": 19.18241,
+          "raCurrentEpochDeg": 214.2316086,
+          "decCurrentEpochDeg": 19.0599422,
+          "altDeg": 32.7550589,
+          "azDeg": 268.2870261
+        },
+        {
+          "name": "Deneb",
+          "raJ2000Deg": 310.35798,
+          "decJ2000Deg": 45.28034,
+          "raCurrentEpochDeg": 310.5896942,
+          "decCurrentEpochDeg": 45.372302,
+          "altDeg": 64.8376055,
+          "azDeg": 65.9861027
+        },
+        {
+          "name": "Fomalhaut",
+          "raJ2000Deg": 344.41269,
+          "decJ2000Deg": -29.62224,
+          "raCurrentEpochDeg": 344.7789742,
+          "decCurrentEpochDeg": -29.4772628,
+          "altDeg": -3.5051294,
+          "azDeg": 126.1713547
+        }
+      ]
+    },
+    {
+      "utc": "2026-10-07T02:15:00Z",
+      "unixMs": 1791339300000,
+      "localSiderealTimeDeg": 304.51063,
+      "stars": [
+        {
+          "name": "Polaris",
+          "raJ2000Deg": 37.95456,
+          "decJ2000Deg": 89.26411,
+          "raCurrentEpochDeg": 47.0888218,
+          "decCurrentEpochDeg": 89.3741618,
+          "altDeg": 39.6002845,
+          "azDeg": 0.7929319
+        },
+        {
+          "name": "Vega",
+          "raJ2000Deg": 279.23473,
+          "decJ2000Deg": 38.78369,
+          "raCurrentEpochDeg": 279.4598357,
+          "decCurrentEpochDeg": 38.8107593,
+          "altDeg": 70.6487839,
+          "azDeg": 275.3082317
+        },
+        {
+          "name": "Betelgeuse",
+          "raJ2000Deg": 88.79294,
+          "decJ2000Deg": 7.40706,
+          "raCurrentEpochDeg": 89.1590799,
+          "decCurrentEpochDeg": 7.4135626,
+          "altDeg": -32.6460128,
+          "azDeg": 42.9535068
+        },
+        {
+          "name": "Sirius",
+          "raJ2000Deg": 101.28716,
+          "decJ2000Deg": -16.71612,
+          "raCurrentEpochDeg": 101.5883816,
+          "decCurrentEpochDeg": -16.7399935,
+          "altDeg": -59.5827529,
+          "azDeg": 47.4494536
+        },
+        {
+          "name": "Canopus",
+          "raJ2000Deg": 95.98796,
+          "decJ2000Deg": -52.69566,
+          "raCurrentEpochDeg": 96.1384929,
+          "decCurrentEpochDeg": -52.7037625,
+          "altDeg": -66.7135925,
+          "azDeg": 133.2513395
+        },
+        {
+          "name": "Arcturus",
+          "raJ2000Deg": 213.9153,
+          "decJ2000Deg": 19.18241,
+          "raCurrentEpochDeg": 214.2266662,
+          "decCurrentEpochDeg": 19.0595311,
+          "altDeg": 11.8389174,
+          "azDeg": 285.047704
+        },
+        {
+          "name": "Deneb",
+          "raJ2000Deg": 310.35798,
+          "decJ2000Deg": 45.28034,
+          "raCurrentEpochDeg": 310.5893152,
+          "decCurrentEpochDeg": 45.3808611,
+          "altDeg": 82.8021198,
+          "azDeg": 36.4157946
+        },
+        {
+          "name": "Fomalhaut",
+          "raJ2000Deg": 344.41269,
+          "decJ2000Deg": -29.62224,
+          "raCurrentEpochDeg": 344.7868003,
+          "decCurrentEpochDeg": -29.4777249,
+          "altDeg": 11.3110439,
+          "azDeg": 144.9750871
+        }
+      ]
+    },
+    {
+      "utc": "2026-12-31T23:59:00Z",
+      "unixMs": 1798761540000,
+      "localSiderealTimeDeg": 355.1833421,
+      "stars": [
+        {
+          "name": "Polaris",
+          "raJ2000Deg": 37.95456,
+          "decJ2000Deg": 89.26411,
+          "raCurrentEpochDeg": 47.1301029,
+          "decCurrentEpochDeg": 89.3821653,
+          "altDeg": 40.1183886,
+          "azDeg": 0.6363447
+        },
+        {
+          "name": "Vega",
+          "raJ2000Deg": 279.23473,
+          "decJ2000Deg": 38.78369,
+          "raCurrentEpochDeg": 279.4555534,
+          "decCurrentEpochDeg": 38.8061009,
+          "altDeg": 33.2550025,
+          "azDeg": 295.4295698
+        },
+        {
+          "name": "Betelgeuse",
+          "raJ2000Deg": 88.79294,
+          "decJ2000Deg": 7.40706,
+          "raCurrentEpochDeg": 89.1669789,
+          "decCurrentEpochDeg": 7.4113838,
+          "altDeg": 1.6898505,
+          "azDeg": 81.7615175
+        },
+        {
+          "name": "Sirius",
+          "raJ2000Deg": 101.28716,
+          "decJ2000Deg": -16.71612,
+          "raCurrentEpochDeg": 101.5970679,
+          "decCurrentEpochDeg": -16.7446368,
+          "altDeg": -23.0950924,
+          "azDeg": 93.0258924
+        },
+        {
+          "name": "Canopus",
+          "raJ2000Deg": 95.98796,
+          "decJ2000Deg": -52.69566,
+          "raCurrentEpochDeg": 96.1480919,
+          "decCurrentEpochDeg": -52.710293,
+          "altDeg": -36.6712729,
+          "azDeg": 132.1356686
+        },
+        {
+          "name": "Arcturus",
+          "raJ2000Deg": 213.9153,
+          "decJ2000Deg": 19.18241,
+          "raCurrentEpochDeg": 214.2324935,
+          "decCurrentEpochDeg": 19.0537838,
+          "altDeg": -20.840049,
+          "azDeg": 320.4200096
+        },
+        {
+          "name": "Deneb",
+          "raJ2000Deg": 310.35798,
+          "decJ2000Deg": 45.28034,
+          "raCurrentEpochDeg": 310.5817677,
+          "decCurrentEpochDeg": 45.3790466,
+          "altDeg": 57.0986189,
+          "azDeg": 294.7712994
+        },
+        {
+          "name": "Fomalhaut",
+          "raJ2000Deg": 344.41269,
+          "decJ2000Deg": -29.62224,
+          "raCurrentEpochDeg": 344.7823832,
+          "decCurrentEpochDeg": -29.4796532,
+          "altDeg": 20.1084776,
+          "azDeg": 189.6345252
+        }
+      ]
+    }
+  ]
+}

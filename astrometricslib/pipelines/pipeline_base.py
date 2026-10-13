@@ -226,8 +226,10 @@ def run_pipeline(adapter: AnalysisPipeline, request: PipelineRequest) -> dict[st
 
     This is the one place that calls all four `AnalysisPipeline` methods
     in order, so no pipeline's caller has to know the sequence -- or,
-    critically, remember that `validate_output` does not assign
-    `target.<pipeline_name>_quality_summary` itself.
+    critically, remember that `validate_output` does not assign the
+    summary onto `target` itself (`target.quality.<pipeline_name>` for
+    astrometry/photometry/spectroscopy,
+    `target.asteroid_detection.quality_summary` for asteroid detection).
 
     Parameters
     ----------
@@ -248,5 +250,27 @@ def run_pipeline(adapter: AnalysisPipeline, request: PipelineRequest) -> dict[st
         result = adapter.run(request, result)
 
     summary = adapter.validate_output(request, result)
-    setattr(request.target, f"{adapter.pipeline_name}_quality_summary", summary)
+    if adapter.pipeline_name == "asteroid_detection":
+        request.target.asteroid_detection.quality_summary = summary
+    else:
+        setattr(request.target.quality, adapter.pipeline_name, summary)
+
+    from astrometricslib.pipelines.shared.provenance_recording import (
+        record_pipeline_run,
+        stamp_generated_by_job_id,
+    )
+
+    job_id = request.options.get("job_id")
+    record_pipeline_run(
+        summary=summary,
+        job_id=job_id,
+        target_id=request.target.id,
+        pipeline_name=adapter.pipeline_name,
+        pipeline_version=summary.pipeline_version,
+        upstream_entity_id=request.options.get("upstream_entity_id"),
+        informant_activity_ids=request.options.get("informant_activity_ids"),
+        used_entity_ids=request.options.get("used_entity_ids"),
+    )
+    stamp_generated_by_job_id(adapter.pipeline_name, result.stellar_objects, job_id)
+
     return adapter.to_result_dict(request, result, summary)

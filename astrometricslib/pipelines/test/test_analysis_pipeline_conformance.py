@@ -35,12 +35,13 @@ _ADAPTER_AND_SUMMARY_PAIRS = [
 
 
 @pytest.mark.parametrize(("adapter_class", "summary_class"), _ADAPTER_AND_SUMMARY_PAIRS)
-def test_adapter_pipeline_name_matches_its_quality_summary(adapter_class, summary_class):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_adapter_pipeline_name_matches_its_quality_summary(adapter_class, summary_class) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify an adapter's `pipeline_name` matches its summary's literal.
 
-    `run_pipeline` builds the target attribute name from
-    `adapter.pipeline_name` (`f"{adapter.pipeline_name}_quality_summary"`)
-    but the summary object itself carries its own `pipeline_name` field,
+    `run_pipeline` routes the summary onto `target.quality.<pipeline_name>`
+    (or `target.asteroid_detection.quality_summary`) using
+    `adapter.pipeline_name`, but the summary object itself carries its own
+    `pipeline_name` field,
     set independently in `models/quality_summary.py`. Nothing forces
     these two to agree except this test.
     """
@@ -51,7 +52,7 @@ def test_adapter_pipeline_name_matches_its_quality_summary(adapter_class, summar
 
 
 @pytest.mark.parametrize("adapter_class", [pair[0] for pair in _ADAPTER_AND_SUMMARY_PAIRS])
-def test_every_adapter_is_a_real_analysis_pipeline(adapter_class):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_every_adapter_is_a_real_analysis_pipeline(adapter_class) -> None:  # ruff: ignore[missing-type-function-argument]
     """Verify each adapter actually implements every abstract method.
 
     `AnalysisPipeline` is an ABC; a subclass missing one of

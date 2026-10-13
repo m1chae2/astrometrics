@@ -17,20 +17,27 @@ import {
     TelescopeStatus,
     SystemHealth,
     IntrospectionEndpoint,
-    GuidingStatus,
+    LiveGuidingStatus,
     RenderedImage,
     SequenceItem,
     SequencePlan,
     CalibrationStats,
     MosaicPanel,
-    FrameRecord
+    FrameRecord,
+    AlignmentAttempt,
+    PolarAlignmentStatus,
+    AlignmentSessionSummary,
+    AlignmentTargetSession,
+    PerformanceEnvelope,
+    ObjectVisibility,
+    RpcMethod,
+    BACKEND_ROUTES
 } from '../types/backendTypes';
 
 import {
     PlanetariumSource,
     PlanetariumTarget,
     ObserverLocation,
-    PlanetariumVisibilityItem,
     ConstellationLineSegment
 } from '../types/planetariumTypes';
 
@@ -42,6 +49,22 @@ export interface ObservationSessionSummary {
     status: string;
     nightDate: string;
     entryCount: number;
+}
+
+/** How much of the downloaded deep-star (Gaia DR3) catalog is installed, from planetarium:get_deep_catalog_status. */
+export interface DeepCatalogStatus {
+    /** True once any part of the catalog has been downloaded. */
+    installed: boolean;
+    /** True once every chunk of the sky has been downloaded. */
+    complete: boolean;
+    star_count: number;
+    pixels_downloaded: number;
+    pixels_total: number | null;
+    healpix_level: number | null;
+    magnitude_limit: number | null;
+    size_megabytes: number;
+    /** The command that downloads the catalog. */
+    installCommand: string;
 }
 
 /** Camera sensor profile as returned by observatory:list_cameras. */
@@ -61,7 +84,54 @@ export interface EquipmentConfigurationResult {
     fovHeightDeg: number;
 }
 
-// Strongly typed ActionRegistry to map RPC action names to their payload and response models.
+// Result of a bulk delegation-state change (observatory:enter_monitoring_mode /
+// observatory:enter_controller_mode). Not a pydantic model, so not part of the
+// auto-generated backendTypes.ts -- kept in sync by hand with
+// wayfindinglib/tasks/control_tasks/capability_promotion.py's BulkDelegationOutcome
+// and backend/services/observatory/equipment_service.py's _outcome_as_dict.
+export interface BulkDelegationOutcome {
+    applied: Record<string, string>;
+    rejected: Record<string, string>;
+}
+
+/** One configured camera and how many targets have light frames from it. */
+export interface TargetCameraSummary {
+    name: string;
+    targetCount: number;
+}
+
+/** A target's light-frame count and newest frame time for one camera. */
+export interface TargetCameraFrames {
+    frameCount: number;
+    lastFrameTime: number | null;
+}
+
+/** Response of target:get_camera_index: what the target list filters and sorts on. */
+export interface TargetCameraIndex {
+    cameras: TargetCameraSummary[];
+    targets: Record<string, {
+        lastFrameTime: number | null;
+        cameras: Record<string, TargetCameraFrames>;
+    }>;
+}
+
+/** The shared workspace state that follows the user between devices (handoff:*). */
+export interface HandoffState {
+    active_mode: string;
+    selected_target: string | null;
+    coordinates: Record<string, any>;
+    telemetry: Record<string, any>;
+    origin_device: string;
+    updated_at: number;
+}
+
+/**
+ * The payload and response of every RPC method the backend serves.
+ *
+ * The keys must be exactly the generated `RpcMethod` names from
+ * backend/public_interface.py; `ActionRegistryMatchesBackend` below fails to
+ * compile when they differ.
+ */
 export interface ActionRegistry {
     // Targets
     "target:list": { payload: Record<string, never>; response: TargetObject[] };
@@ -71,33 +141,54 @@ export interface ActionRegistry {
     "target:update": { payload: { target_id: string; updates: Partial<TargetObject> }; response: TargetObject | null };
     "target:delete": { payload: { target_id: string }; response: boolean };
     "target:get_files": { payload: { target_id: string }; response: TargetFilesResponse };
+    "target:get_camera_index": { payload: Record<string, never>; response: TargetCameraIndex };
     "target:get_frames": { payload: { target_id: string }; response: FrameRecord[] };
     "target:get_frames_grouped": { payload: { target_id: string; camera?: string }; response: GroupedFrameStat[] };
     "target:add_data": { payload: { target_id: string; image_file: string }; response: boolean };
+    "target:send_to_phone": { payload: { target_id: string }; response: { path: string; method: string; device?: string } };
     "target:refresh": { payload: { target_id: string; prune_missing?: boolean }; response: void };
     "target:get_frame_header": { payload: { target_id: string; frame_path: string }; response: FitsHeaderEntry[] };
 
     // Astronomy & Stellar Library
-    "astronomy:get_status": { payload: { target_id: string }; response: TelescopeStatus };
-    "astronomy:visible": { payload: Record<string, never>; response: Spectrum[] };
+    "astronomy:get_status": { payload: { target_id: string }; response: ObjectVisibility };
+    "astronomy:visible": { payload: Record<string, never>; response: ObjectVisibility[] };
     "astronomy:list": { payload: { target_id?: string; limit?: number; search?: string; filter_type?: string }; response: Spectrum[] };
+    "astronomy:count": { payload: { target_id?: string; search?: string; filter_type?: string }; response: number };
     "astronomy:get": { payload: { object_id: string }; response: Spectrum | null };
+    "astronomy:analyze_periodicity": { payload: { object_id: string }; response: Spectrum | null };
     "astronomy:delete": { payload: { object_id: string }; response: boolean };
-    "astronomy:update": { payload: { object_id: string; updates: Partial<Spectrum> }; response: Spectrum | null };
-    "astronomy:create": { payload: { object_id: string; ra?: string; dec?: string }; response: Spectrum | null };
-    "astronomy:get_audit": { payload: Record<string, never>; response: Record<string, any>[] };
-    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number }; response: PlanetariumSource[] };
+    "astronomy:save": { payload: Record<string, never>; response: void };
+    "astronomy:get_stellar_objects": { payload: { target_id?: string }; response: Spectrum[] };
+    "astronomy:get_overlay_stars": { payload: { target_id: string; limit?: number }; response: any[] };
+    "astronomy:target_data_availability": { payload: Record<string, never>; response: Record<string, { hasSpectra: boolean; hasPhotometry: boolean; starCount: number }> };
+    "astronomy:spectral_class_summary": { payload: Record<string, never>; response: { spectralClass: string; label: string; count: number }[] };
+    "astronomy:stars_by_spectral_class": { payload: { spectral_class: string }; response: { id: string; name: string; ra: number | null; dec: number | null; magnitude: number | null; spectralType: string; hasSpectra: boolean; hasPhotometry: boolean; selfDeterminedSpectralTypeRms: number | null }[] };
+    "planetarium:get_sources": { payload: { ra: number; dec: number; radius: number; limiting_magnitude?: number; include_stars_without_catalog_magnitude?: boolean }; response: PlanetariumSource[] };
     "planetarium:get_targets": { payload: Record<string, never>; response: PlanetariumTarget[] };
-    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: PlanetariumVisibilityItem[] };
+    "planetarium:get_visibility": { payload: { objects: Array<{ id: string; type?: string }>; time?: string }; response: ObjectVisibility[] };
     "planetarium:get_observer_location": { payload: Record<string, never>; response: ObserverLocation };
-    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[] }; response: PlanetariumSource[] };
+    "planetarium:get_catalog_sources": { payload: { ra: number; dec: number; radius: number; enabled_drivers: string[]; limiting_magnitude?: number }; response: PlanetariumSource[] };
+    "planetarium:get_deep_catalog_status": { payload: Record<string, never>; response: DeepCatalogStatus };
     "planetarium:list_catalog_drivers": { payload: Record<string, never>; response: Array<{ driver_name: string; display_name: string; maximum_query_radius_degrees: number }> };
     "planetarium:get_constellation_lines": { payload: Record<string, never>; response: ConstellationLineSegment[] };
 
     // Equipment Configuration
     "observatory:list_cameras": { payload: Record<string, never>; response: EquipmentCameraProfile[] };
     "observatory:get_equipment_configuration": { payload: Record<string, never>; response: EquipmentConfigurationResult | null };
+    "telescope:slew_target": { payload: { target_name: string }; response: boolean };
     "observatory:set_active_camera": { payload: { camera_name: string }; response: boolean };
+    "telescope:apply_promotion_decision": {
+        payload: { capability: string; new_state: string; evidence_note?: string };
+        response: Record<string, any>;
+    };
+    "observatory:enter_monitoring_mode": {
+        payload: { evidence_note?: string };
+        response: BulkDelegationOutcome;
+    };
+    "observatory:enter_controller_mode": {
+        payload: { evidence_note?: string };
+        response: BulkDelegationOutcome;
+    };
 
     // System
     "system:save": { payload: Record<string, never>; response: void };
@@ -109,13 +200,13 @@ export interface ActionRegistry {
     "system:cameras": { payload: Record<string, never>; response: string[] };
     "system:filters": { payload: Record<string, never>; response: string[] };
     "system:pulse": { payload: Record<string, never>; response: SystemPulse };
+    "system:notifications": { payload: { unread_only?: boolean }; response: Record<string, any>[] };
     "system:frontend_log": { payload: { level: string; message: string; stack?: string; componentStack?: string }; response: void };
 
 
     // Telescope
     "telescope:status": { payload: Record<string, never>; response: TelescopeStatus };
     "telescope:connect": { payload: Record<string, never>; response: boolean };
-    "telescope:slew": { payload: { target_name: string }; response: boolean };
     "telescope:slew_coordinates": { payload: { ra: number; dec: number }; response: boolean };
     "telescope:park": { payload: Record<string, never>; response: boolean };
     "telescope:unpark": { payload: Record<string, never>; response: boolean };
@@ -133,9 +224,16 @@ export interface ActionRegistry {
     "telescope:is_syncing": { payload: { object_id: string }; response: boolean };
     "telescope:alignment_start": { payload: { target_ra: string; target_dec: string }; response: boolean };
     "telescope:alignment_stop": { payload: Record<string, never>; response: boolean };
+    "telescope:list_alignment_sessions": { payload: Record<string, never>; response: AlignmentSessionSummary[] };
+    "telescope:get_session_alignment": { payload: { session_id?: string }; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:get_performance_envelope": { payload: Record<string, never>; response: PerformanceEnvelope | null };
+    "telescope:get_cumulative_tracking_data": { payload: { limit?: number } | Record<string, never>; response: { alignmentAttempts: AlignmentAttempt[]; alignmentTargets: AlignmentTargetSession[]; polarAlignment: PolarAlignmentStatus | null } };
+    "telescope:sync_logs": { payload: Record<string, never>; response: { status: string; guideLogsDownloaded: number; guidingSamplesIngested: number; fitsSolvesRecorded: number; message: string } };
+    "telescope:get_pointing_model": { payload: { session_id?: string }; response: import('../types/backendTypes').MountPointingModel };
+    "telescope:get_guiding_spectrum": { payload: { session_id?: string }; response: import('../types/backendTypes').GuidingSpectrumAnalysis };
 
     // Guiding
-    "guiding:status": { payload: Record<string, never>; response: GuidingStatus };
+    "guiding:status": { payload: Record<string, never>; response: LiveGuidingStatus };
     "guiding:start": { payload: { exposure: number; gain: number }; response: boolean };
     "guiding:stop": { payload: Record<string, never>; response: boolean };
     "guiding:capture_frame": { payload: { exposure?: number; gain?: number }; response: boolean };
@@ -166,7 +264,9 @@ export interface ActionRegistry {
     "processing:get_job": { payload: { job_id: string }; response: ProcessingJob | null };
     "processing:delete_job": { payload: { job_id: string }; response: boolean };
     "processing:jobs_for_target": { payload: { target_id: string }; response: ProcessingJob[] };
-    "processing:active_jobs": { payload: Record<string, never>; response: ProcessStatus[] };
+    // Backed by JobService.get_active_jobs(), which returns full ProcessingJob
+    // records (with progressCurrent/progressTotal), not the lighter ProcessStatus.
+    "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Analysis
@@ -178,7 +278,7 @@ export interface ActionRegistry {
     // Matches ImagingService.capture_sequence. An earlier declaration listed
     // exposure/iso/filter/camera/delay/prefix, none of which the handler accepts;
     // a call typed against it failed on a missing target_id.
-    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number }; response: string };
+    "imaging:capture": { payload: { target_id: string; exposure_seconds: number; count: number; image_type?: string; filter_name?: string; delay_seconds?: number; dither?: boolean }; response: string };
     "imaging:get_active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
 
     // Images
@@ -206,7 +306,46 @@ export interface ActionRegistry {
     "sequencer:reorder": { payload: { sequence_ids: string[] }; response: boolean };
     "sequencer:begin": { payload: Record<string, never>; response: void };
     "sequencer:modify": { payload: { sequence_id: string; sequence: SequenceItem }; response: boolean };
+
+    // Terminal, Console & Documentation
+    "terminal:execute": { payload: { code_str: string; source?: string }; response: { status: string; stdout: string; stderr: string; result: any; plots: string[]; interactive_plots?: Array<{ figure_id: number; plot_path: string; url: string }>; execution_time_ms: number; workspace: any[] } };
+    "terminal:get_workspace": { payload: Record<string, never>; response: any[] };
+    "terminal:completions": { payload: { text: string }; response: string[] };
+    "terminal:list_recipes": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; category: string; description: string; size_bytes: number }> };
+    "terminal:get_recipe": { payload: { recipe_id: string }; response: { id: string; filename: string; code: string } };
+    "terminal:list_scripts": { payload: Record<string, never>; response: Array<{ id: string; name: string; filename: string; size_bytes: number; modified_at: number }> };
+    "terminal:read_script": { payload: { filename: string }; response: { filename: string; code: string } };
+    "terminal:save_script": { payload: { filename: string; content: string }; response: { filename: string; size_bytes: number; status: string } };
+    "terminal:reset_workspace": { payload: Record<string, never>; response: any[] };
+    "docs:list_topics": { payload: Record<string, never>; response: Array<{ id: string; title: string; path: string; category: string }> };
+    "docs:search_topics": { payload: { query: string }; response: Array<{ id: string; title: string; path: string; category: string; snippet?: string }> };
+    "docs:get_topic": { payload: { topic_id: string }; response: { id: string; title: string; content: string } };
+    "ui:editor_get": { payload: Record<string, never>; response: { code: string } };
+    "ui:editor_set": { payload: { code_content: string }; response: { status: string; length: number } };
+    "ui:navigate": { payload: { mode: string; target?: string | null }; response: void };
+    "ui:inspect_variable": { payload: { variable_name: string }; response: void };
+
+    // Hand-off of the workspace to a paired phone
+    "handoff:get_state": { payload: Record<string, never>; response: HandoffState };
+    "handoff:update_state": { payload: { active_mode?: string; selected_target?: string; coordinates?: Record<string, any>; telemetry?: Record<string, any>; origin_device?: string }; response: HandoffState };
+    "handoff:beam": { payload: { target?: string; mode?: string }; response: Record<string, any> };
+    "handoff:list_devices": { payload: Record<string, never>; response: Array<Record<string, any>> };
+    "handoff:send_alert": { payload: { title: string; message: string; priority?: string; ring_device?: boolean; device_id?: string }; response: Record<string, any> };
+    "handoff:share_file": { payload: { file_path: string; device_id?: string }; response: Record<string, any> };
 }
+
+/** `true` when the two key unions are exactly the same. */
+type SameKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/** Accepts only `true`, so a `false` check fails to compile. */
+type MustBeTrue<T extends true> = T;
+
+/**
+ * Fails to compile when `ActionRegistry` names a method the backend does not
+ * serve, or misses one it does. Regenerate backendTypes.ts with
+ * build/codegen/generate-types.sh after changing backend/public_interface.py.
+ */
+export type ActionRegistryMatchesBackend = MustBeTrue<SameKeys<keyof ActionRegistry, RpcMethod>>;
 
 /**
  * Resolves the backend base URL according to defined priority rules.
@@ -248,7 +387,7 @@ export function getBackendBase(): string {
 
 /**
  * Builds a full absolute backend URL from a relative path.
- * @param path The API path (e.g., '/api/status').
+ * @param path The route's path, such as `BACKEND_ROUTES.rpc`.
  * @return The full absolute URL.
  */
 export function getBackendUrl(path: string): string {
@@ -279,55 +418,147 @@ export function setBackendBase(url: string | null): void {
 }
 
 /**
- * Parses a fetch Response error body into a human-readable string.
+ * Parses a failed fetch Response into a human-readable string.
+ *
+ * The backend answers every well-formed JSON-RPC call with HTTP 200, even when
+ * the call failed. A response that is not OK therefore comes from below the RPC
+ * layer: a request that was not valid JSON-RPC, or a missing or wrong session
+ * token.
  * @param response The Response object from a failed fetch.
  * @return A descriptive error message.
  */
 export async function parseResponseError(response: Response): Promise<string> {
-    try {
-        const body: any = await response.json().catch(() => null);
-        if (!body) {
-            const errorText = await response.text().catch(() => '');
-            return `${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ''}`;
-        }
-        if (typeof body === 'string') {
-            return `${response.status} ${response.statusText}: ${body}`;
-        }
-        if (typeof body === 'object' && body !== null) {
-            // Priority: jsonrpc error > ApiResponse.message > legacy detail > legacy error
-            if (body.error) {
-                return `[RPC Error ${body.error.code}] ${body.error.message}`;
-            }
-            const parsedBody = body as Record<string, any>;
-            if ('message' in parsedBody && parsedBody.message) {
-                 return `${response.status} ${response.statusText}: ${String(parsedBody.message)}`;
-            }
-            if ('detail' in parsedBody && parsedBody.detail) {
-                return `${response.status} ${response.statusText}: ${String(parsedBody.detail)}`;
-            }
-            if ('error' in parsedBody && parsedBody.error) {
-                return `${response.status} ${response.statusText}: ${String(parsedBody.error)}`;
-            }
-            return `${response.status} ${response.statusText}: ${JSON.stringify(parsedBody)}`;
-        }
-    } catch {
-        // Fall through to status text only.
+    const body: any = await response.json().catch(() => null);
+    if (body && typeof body === 'object' && body.error) {
+        return `[RPC Error ${body.error.code}] ${body.error.message}`;
     }
     return `${response.status} ${response.statusText}`;
 }
 
 import { emitToast } from '../utils/emitToast';
+import { BackendError, presentBackendError } from './backendError';
+export { BackendError } from './backendError';
+
+/** Default timeout in milliseconds for standard RPC requests (45 seconds). */
+export const DEFAULT_RPC_TIMEOUT_MS = 45000;
+
+/** Extended timeout in milliseconds for heavy analytics or batch processing requests (90 seconds). */
+export const EXTENDED_RPC_TIMEOUT_MS = 90000;
+
+/** Actions that perform heavy database aggregations, plate solving, or frame analysis. */
+const HEAVY_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
+    'telescope:get_session_alignment',
+    'telescope:get_cumulative_tracking_data',
+    'telescope:get_performance_envelope',
+    'telescope:sync_logs',
+    'processing:stack',
+    'processing:status',
+    'astronomy:visible',
+    'astronomy:target_data_availability',
+    'astronomy:spectral_class_summary',
+    'astronomy:stars_by_spectral_class',
+    'images:last',
+    'telescope:slew_target',
+]);
 
 /**
- * Unified type-safe JSON-RPC 2.0 network client.
- * Dispatches a POST request to '/api/rpc'.
+ * Idempotent read actions that are safe to deduplicate (in-flight request coalescing)
+ * and safe to automatically retry on transient network or timeout failures.
  */
-export async function callBackend<A extends keyof ActionRegistry>(
+const IDEMPOTENT_READ_ACTIONS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
+    'telescope:list_alignment_sessions',
+    'execution:list_sessions',
+    'telescope:get_session_alignment',
+    'telescope:get_cumulative_tracking_data',
+    'telescope:get_performance_envelope',
+    'planetarium:get_constellation_lines',
+    'planetarium:get_sources',
+    'planetarium:get_deep_catalog_status',
+    'target:list',
+    'target:get',
+    'target:get_targets',
+    'target:get_camera_index',
+    'target:get_frames',
+    'target:get_frames_grouped',
+    'target:get_frame_header',
+    'astronomy:list',
+    'astronomy:count',
+    'astronomy:get',
+    'astronomy:get_status',
+    'astronomy:visible',
+    'astronomy:target_data_availability',
+    'astronomy:spectral_class_summary',
+    'astronomy:stars_by_spectral_class',
+    'observatory:get_equipment_configuration',
+    'observatory:list_cameras',
+]);
+
+/** In-flight request map for coalescing identical concurrent idempotent read queries. */
+const inFlightRequests = new Map<string, Promise<any>>();
+
+/**
+ * Optional settings for a single callBackend request.
+ */
+export interface CallBackendOptions {
+    /**
+     * Cancels the request when signalled. A cancelled call rejects with an
+     * `AbortError` and shows no error toast, since cancelling is deliberate.
+     */
+    signal?: AbortSignal;
+    /**
+     * Milliseconds to wait before aborting the request. Defaults to 45000ms
+     * (or 90000ms for heavy processing/session aggregations).
+     */
+    timeoutMs?: number;
+    /**
+     * When true, does not emit a toast notification on timeout or error (useful for background polling).
+     */
+    silent?: boolean;
+    /**
+     * Maximum number of automatic retries on transient network/timeout failure.
+     * Defaults to 1 for idempotent read actions, 0 for mutating commands.
+     */
+    maxRetries?: number;
+}
+
+/**
+ * Dispatches a single RPC attempt with individual timeout handling.
+ *
+ * @param {string} action - RPC action name.
+ * @param {unknown} params - Action parameters payload.
+ * @param {number} timeoutMs - Timeout duration in milliseconds.
+ * @param {AbortSignal} [signal] - Optional parent cancellation signal.
+ * @returns {Promise<unknown>} Result data on success.
+ */
+async function executeRpcAttempt<A extends keyof ActionRegistry>(
     action: A,
-    params: ActionRegistry[A]["payload"]
+    params: ActionRegistry[A]["payload"],
+    timeoutMs: number,
+    signal?: AbortSignal
 ): Promise<ActionRegistry[A]["response"]> {
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let didTimeout = false;
+
+    if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+            didTimeout = true;
+            controller.abort(new Error(`Request timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+    }
+
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort(signal.reason);
+        } else {
+            signal.addEventListener('abort', () => {
+                controller.abort(signal.reason);
+            }, { once: true });
+        }
+    }
+
     try {
-        const url = getBackendUrl('/api/rpc');
+        const url = getBackendUrl(BACKEND_ROUTES.rpc);
         const requestId = Math.floor(Math.random() * 1000000).toString();
 
         const response = await fetch(url, {
@@ -340,7 +571,8 @@ export async function callBackend<A extends keyof ActionRegistry>(
                 method: action,
                 params: params,
                 id: requestId
-            })
+            }),
+            signal: controller.signal
         });
 
         if (!response.ok) {
@@ -350,21 +582,153 @@ export async function callBackend<A extends keyof ActionRegistry>(
 
         const body = await response.json();
         if (body.error) {
-            throw new Error(body.error.message || `RPC Error: ${JSON.stringify(body.error)}`);
+            const data = body.error.data;
+            throw new BackendError({
+                code: data?.code ?? 'internal',
+                message: data?.message ?? body.error.message ?? `RPC Error: ${JSON.stringify(body.error)}`,
+                details: data?.details,
+                retryable: data?.retryable,
+                requestId: data?.requestId,
+            });
         }
 
-        // Unpack the ApiResponse structure nested inside JSON-RPC's result field:
-        // { "result": { "status": "success", "data": ... } }
         if (body.result && body.result.status === 'success') {
             return body.result.data;
         }
 
         throw new Error('Malformed RPC response envelope');
     } catch (error: any) {
-        const msg = error?.message || String(error);
-        emitToast(msg, 'error', `API:${action}`);
+        if (didTimeout) {
+            const timeoutError = new Error(`Request timed out for ${action}`);
+            (timeoutError as any).didTimeout = true;
+            throw timeoutError;
+        }
         throw error;
+    } finally {
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+        }
     }
+}
+
+/**
+ * Handles retries with backoff for idempotent RPC calls.
+ *
+ * @param {string} action - RPC action name.
+ * @param {unknown} params - Action parameters payload.
+ * @param {CallBackendOptions} [options] - Call options.
+ * @returns {Promise<unknown>} Result data.
+ */
+async function callBackendInternal<A extends keyof ActionRegistry>(
+    action: A,
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
+): Promise<ActionRegistry[A]["response"]> {
+    const isIdempotent = IDEMPOTENT_READ_ACTIONS.has(action);
+    const defaultTimeout = HEAVY_ACTIONS.has(action) ? EXTENDED_RPC_TIMEOUT_MS : DEFAULT_RPC_TIMEOUT_MS;
+    const timeoutMs = options?.timeoutMs ?? defaultTimeout;
+    const maxRetries = options?.maxRetries ?? (isIdempotent ? 1 : 0);
+
+    let attempt = 0;
+    while (true) {
+        try {
+            return await executeRpcAttempt(action, params, timeoutMs, options?.signal);
+        } catch (error: any) {
+            attempt++;
+            const isAbortedByUser = options?.signal?.aborted;
+            const isTransient = error?.didTimeout || error?.name === 'TypeError' || error?.message?.includes('fetch');
+
+            if (!isAbortedByUser && isIdempotent && attempt <= maxRetries && isTransient) {
+                // Linear backoff before retry (1000ms * attempt)
+                await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+                continue;
+            }
+
+            if (error?.didTimeout) {
+                const msg = `Request timed out for ${action}`;
+                if (!options?.silent) {
+                    emitToast(msg, 'error', `API:${action}`);
+                }
+                throw new Error(msg);
+            }
+
+            if (error?.name === 'AbortError') {
+                throw error;
+            }
+
+            if (error instanceof BackendError) {
+                if (!options?.silent) {
+                    const presentation = presentBackendError(error);
+                    emitToast(presentation.text, presentation.kind, `API:${action}`);
+                }
+                throw error;
+            }
+
+            const msg = error?.message || String(error);
+            if (!options?.silent) {
+                emitToast(msg, 'error', `API:${action}`);
+            }
+            throw error;
+        }
+    }
+}
+
+/**
+ * Unified type-safe JSON-RPC 2.0 network client.
+ * Dispatches a POST request to '/api/rpc'.
+ * Coalesces in-flight duplicate idempotent reads and auto-retries transient timeouts.
+ *
+ * @param {string} action - RPC method identifier.
+ * @param {unknown} params - Action payload.
+ * @param {CallBackendOptions} [options] - Request options.
+ * @returns {Promise<unknown>} Response payload.
+ */
+export async function callBackend<A extends keyof ActionRegistry>(
+    action: A,
+    params: ActionRegistry[A]["payload"],
+    options?: CallBackendOptions
+): Promise<ActionRegistry[A]["response"]> {
+    const isIdempotent = IDEMPOTENT_READ_ACTIONS.has(action);
+
+    // If idempotent read, deduplicate in-flight concurrent requests
+    if (isIdempotent) {
+        const cacheKey = `${action}:${JSON.stringify(params ?? {})}`;
+        let existingPromise = inFlightRequests.get(cacheKey);
+
+        if (!existingPromise) {
+            existingPromise = callBackendInternal(action, params, options)
+                .finally(() => {
+                    inFlightRequests.delete(cacheKey);
+                });
+            inFlightRequests.set(cacheKey, existingPromise);
+        }
+
+        // If caller passed a custom abort signal, attach listener to caller's signal
+        // without cancelling the shared underlying fetch
+        if (options?.signal) {
+            if (options.signal.aborted) {
+                return Promise.reject(options.signal.reason);
+            }
+            return new Promise((resolve, reject) => {
+                const onAbort = () => reject(options.signal!.reason);
+                options.signal!.addEventListener('abort', onAbort, { once: true });
+                existingPromise!.then(
+                    (res) => {
+                        options.signal!.removeEventListener('abort', onAbort);
+                        resolve(res);
+                    },
+                    (err) => {
+                        options.signal!.removeEventListener('abort', onAbort);
+                        reject(err);
+                    }
+                );
+            });
+        }
+
+        return existingPromise;
+    }
+
+    return callBackendInternal(action, params, options);
 }
 
 /**
@@ -372,6 +736,9 @@ export async function callBackend<A extends keyof ActionRegistry>(
  * socket reconnect does not re-request it.
  */
 let cachedSessionToken: string | null = null;
+
+/** The token lookup in progress, shared so a burst of callers makes one request. */
+let sessionTokenRequest: Promise<string> | null = null;
 
 /**
  * Resolves the session token required by the backend's WebSocket endpoints.
@@ -392,9 +759,23 @@ let cachedSessionToken: string | null = null;
  */
 export async function getSessionToken(): Promise<string> {
     if (cachedSessionToken) return cachedSessionToken;
+    if (!sessionTokenRequest) {
+        sessionTokenRequest = resolveSessionToken().finally(() => {
+            sessionTokenRequest = null;
+        });
+    }
+    return sessionTokenRequest;
+}
+
+/**
+ * Looks the session token up from the backend, then the Electron bridge.
+ *
+ * @return The session token, or an empty string if it could not be resolved.
+ */
+async function resolveSessionToken(): Promise<string> {
 
     try {
-        const response = await fetch(getBackendUrl('/api/session-token'));
+        const response = await fetch(getBackendUrl(BACKEND_ROUTES.sessionToken));
         if (response.ok) {
             const body = await response.json();
             const token = String(body.token ?? '');
@@ -425,6 +806,20 @@ export async function getSessionToken(): Promise<string> {
 }
 
 /**
+ * Forgets the cached session token so the next `getSessionToken()` asks the
+ * backend again.
+ *
+ * A backend restart mints a new token, so a page that was already open keeps
+ * presenting the old one and is refused on every reconnect. Browsers do not
+ * report why a WebSocket handshake failed, so callers use this when a socket
+ * closes without ever opening.
+ */
+export function resetSessionToken(): void {
+    cachedSessionToken = null;
+    sessionTokenRequest = null;
+}
+
+/**
  * Appends the session token to a WebSocket URL.
  *
  * @param wsUrl Fully-formed `ws://` or `wss://` endpoint URL.
@@ -445,9 +840,9 @@ export async function withSessionToken(wsUrl: string): Promise<string> {
 export function resolveImageSrc(absolutePath: string | null | undefined): string {
     if (!absolutePath) return '';
 
-    // Check if running in Electron (window.astrometricsIPC is defined)
+    // Check if running in Electron (window.astrometrics is defined)
     // under the file:// protocol, and path is already an absolute system path
-    if (typeof window !== 'undefined' && (window as any).astrometricsIPC && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
+    if (typeof window !== 'undefined' && ((window as any).astrometrics || (window as any).astrometricsIPC) && window.location.protocol === 'file:' && /^[/\\]/.test(absolutePath)) {
         return `file://${absolutePath.replace(/\\/g, '/')}`;
     }
 
@@ -463,9 +858,9 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
     const parts = absolutePath.replace(/\\/g, '/').split('/');
 
     // Frame roots live under the external library (served at /static/frames/).
-    // Library roots live under libraryIndex (served at /static/).
+    // Library roots live under library (served at /static/).
     const frameRoots = ['_Astrophotography', 'lights', 'darks', 'biases', 'flats', 'processed', 'spectrum'];
-    const libraryRoots = ['libraryIndex'];
+    const libraryRoots = ['library'];
     const allRoots = [...frameRoots, ...libraryRoots];
 
     let relPath = absolutePath.replace(/\\/g, '/');
@@ -482,6 +877,21 @@ export function resolveImageSrc(absolutePath: string | null | undefined): string
         }
     }
 
-    const prefix = isFramePath ? '/static/frames/' : '/static/';
-    return `${base}${prefix}${relPath}`;
+    const prefix = `${isFramePath ? BACKEND_ROUTES.staticFrames : BACKEND_ROUTES.staticLibrary}/`;
+    const rawUrl = `${base}${prefix}${relPath}`;
+    return encodeURI(decodeURI(rawUrl));
+}
+
+/**
+ * Downloads an image or FITS file the backend serves under `/static`, or a
+ * local `file://` path in the desktop app.
+ *
+ * This file and socketClient.ts are the only places the app may call `fetch`
+ * or open a WebSocket, so every other module downloads files through here.
+ * @param url The file's address, from `resolveImageSrc`.
+ * @param signal Cancels the download when signalled.
+ * @return The HTTP response.
+ */
+export async function fetchImageFile(url: string, signal?: AbortSignal): Promise<Response> {
+    return fetch(url, { method: 'GET', signal });
 }

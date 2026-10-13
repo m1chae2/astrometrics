@@ -2,8 +2,8 @@
 
 Description: Reads the session runner's heartbeat and, if it has aged
 past `watchdog_timeout_sec`, invokes the safe-state sequence itself,
-per `Wayfinding_Library_Architecture.md` §2.5.7. Runs as a separate
-process from whatever it watches -- "Watchdog Is Out Of Process" (§2.5.9):
+per `Wayfinding_Library_Architecture.md`. Runs as a separate
+process from whatever it watches -- "Watchdog Is Out Of Process":
 imports only `control_tasks.safe_state` and the models it needs, never
 the session runner, so a hang in the process being watched cannot also
 disable the mechanism meant to catch it. Deliberately excluded from

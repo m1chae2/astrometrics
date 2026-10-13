@@ -15,6 +15,11 @@
 #
 # Any additional arguments are forwarded to pytest, e.g.
 #   ./build/linux/run_tests.sh wayfindinglib -k visibility
+#
+# Parallel runs (needs pytest-xdist, which setup_venv.sh installs): set
+# PYTEST_WORKERS to a worker count, or to "auto" for one per core, e.g.
+#   PYTEST_WORKERS=8 ./build/linux/run_tests.sh astrometricslib
+# Unset, the tests run one at a time, as CI does.
 # =============================================================================
 
 set -euo pipefail
@@ -42,6 +47,7 @@ suite_targets() {
     astrometricslib) echo "astrometricslib/" ;;
     wayfindinglib)   echo "wayfindinglib/ --ignore=wayfindinglib/scripts/commissioning/test" ;;
     backend)         echo "backend/tests/" ;;
+    mcp_servers)     echo "mcp_servers/" ;;
     *) echo "unknown suite: $1" >&2; return 1 ;;
   esac
 }
@@ -62,22 +68,26 @@ run_suite() {
 
   echo "=== $suite ==="
   # shellcheck disable=SC2086 -- targets intentionally word-splits into args.
-  $PYTEST ${coverage_args[@]+"${coverage_args[@]}"} $targets "$@"
+  local worker_args=()
+  if [ -n "${PYTEST_WORKERS:-}" ]; then
+    worker_args=(-n "$PYTEST_WORKERS")
+  fi
+  $PYTEST ${coverage_args[@]+"${coverage_args[@]}"} ${worker_args[@]+"${worker_args[@]}"} $targets "$@"
 }
 
 case "$SUITE" in
   all)
     # Coverage is per-package and each run overwrites coverage.xml, so the
     # combined run is for local use and leaves coverage to the CI jobs.
-    for suite in astrometricslib wayfindinglib backend; do
+    for suite in astrometricslib wayfindinglib backend mcp_servers; do
       COVERAGE=0 run_suite "$suite" "$@"
     done
     ;;
-  astrometricslib|wayfindinglib|backend)
+  astrometricslib|wayfindinglib|backend|mcp_servers)
     run_suite "$SUITE" "$@"
     ;;
   *)
-    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend] [pytest args...]" >&2
+    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers] [pytest args...]" >&2
     exit 2
     ;;
 esac

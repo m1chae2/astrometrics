@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { matchesQuery } from '../../common/utils/searchLogic';
+import { EmptyState } from '../../common/components/EmptyState';
 import '../imageProcessingDisplay.css'; // Consolidated styles
 
 export interface FileItem {
@@ -276,6 +277,13 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
                         </tr>
                     </thead>
                     <tbody>
+                        {sortedFiles.length === 0 && (
+                            <tr>
+                                <td colSpan={8} className="no-data">
+                                    <EmptyState message="No files for this target." />
+                                </td>
+                            </tr>
+                        )}
                         {sortedFiles.map((file, index) => {
                             const rejected = isRejected(file.path);
                             const isOutlier = outlierFrames.has(file.path);

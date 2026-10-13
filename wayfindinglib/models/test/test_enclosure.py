@@ -9,7 +9,7 @@ import pytest
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureState, EnclosureType
 
 
-def test_enclosure_constructs_with_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_enclosure_constructs_with_defaults() -> None:
     """Verify an Enclosure constructs with the default clearance/timeout."""
     enclosure = Enclosure(
         id="roof1",
@@ -22,7 +22,7 @@ def test_enclosure_constructs_with_defaults():  # ruff: ignore[missing-return-ty
     assert enclosure.motion_timeout_sec == 180
 
 
-def test_enclosure_present_false_distinguishable_from_default():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_enclosure_present_false_distinguishable_from_default() -> None:
     """Verify present=False is stored distinctly from the default."""
     enclosure = Enclosure(
         id="roof1",
@@ -34,7 +34,7 @@ def test_enclosure_present_false_distinguishable_from_default():  # ruff: ignore
     assert enclosure.present is False
 
 
-def test_enclosure_state_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_enclosure_state_values() -> None:
     """Verify all five enclosure motion states plus UNKNOWN are distinct."""
     states = {
         EnclosureState.OPEN,

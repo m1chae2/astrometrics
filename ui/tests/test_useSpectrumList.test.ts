@@ -5,16 +5,12 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { useSpectrumList } from '../astronomyDisplay/hooks/useSpectrumList';
+import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
 import { Spectrum } from '../common/types/backendTypes';
 
 // Mock TanStack Query hooks and toast hook
 vi.mock('../common/queries/useAstronomyListQuery', () => ({
     useAstronomyListQuery: vi.fn(),
-}));
-
-vi.mock('../common/queries/useTargetListQuery', () => ({
-    useTargetListQuery: vi.fn(() => ({ data: [], isLoading: false, error: null, refetch: vi.fn() })),
 }));
 
 vi.mock('../common/hooks/useToast', () => ({
@@ -25,20 +21,16 @@ import { useAstronomyListQuery } from '../common/queries/useAstronomyListQuery';
 
 describe('useSpectrumList Filtering Suite', () => {
     /**
-     * Test case verifying filtering when objects have explicit hasSpectra / hasPhotometry or nested data.
+     * Test case verifying each star's own hasSpectra/hasPhotometry badge is
+     * computed from its explicit flags or nested spectroscopy/photometry data.
      */
-    it('should filter stars by With Spectra and With Photometry options', () => {
-        /**
-         * Purpose: Ensures dropdown option 'With Spectra' and 'With Photometry'
-         * correctly filter objects based on hasSpectra/has_spectra or nested arrays.
-         */
+    it('computes each star\'s hasSpectra/hasPhotometry badge from its own data', () => {
         const mockStars: Spectrum[] = [
             {
                 id: 'star-1',
                 label: 'Star 1 (Spectra Only)',
                 hasSpectra: true,
                 hasPhotometry: false,
-                spectraHistory: [{ timestamp: '2026-01-01', wavelengths: [5000], intensities: [1.0] }],
             },
             {
                 id: 'star-2',
@@ -67,22 +59,12 @@ describe('useSpectrumList Filtering Suite', () => {
 
         const { result } = renderHook(() => useSpectrumList());
 
-        // Default filter: All
         expect(result.current.items).toHaveLength(4);
-
-        // Filter: With Spectra
-        act(() => {
-            result.current.setFilterOption('With Spectra');
-        });
-        expect(result.current.items.map((i) => i.id)).toEqual(['star-1', 'star-3']);
-        expect(result.current.items[0].hasSpectra).toBe(true);
-
-        // Filter: With Photometry
-        act(() => {
-            result.current.setFilterOption('With Photometry');
-        });
-        expect(result.current.items.map((i) => i.id)).toEqual(['star-2']);
-        expect(result.current.items[0].hasPhotometry).toBe(true);
+        const byId = Object.fromEntries(result.current.items.map((i) => [i.id, i]));
+        expect(byId['star-1']).toMatchObject({ hasSpectra: true, hasPhotometry: false });
+        expect(byId['star-2']).toMatchObject({ hasSpectra: false, hasPhotometry: true });
+        expect(byId['star-3']).toMatchObject({ hasSpectra: true, hasPhotometry: false });
+        expect(byId['star-4']).toMatchObject({ hasSpectra: false, hasPhotometry: false });
     });
 
     /**

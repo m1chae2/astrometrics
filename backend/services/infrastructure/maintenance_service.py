@@ -6,6 +6,12 @@ REQ: SYS-1.0: Periodic maintenance and cleanup.
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.services.infrastructure.system_status_service import SystemStatusService
+    from backend.services.observatory.telescope_service import TelescopeService
+    from backend.services.processing.job_service import JobService
 
 logger = logging.getLogger(__name__)
 
@@ -13,14 +19,14 @@ logger = logging.getLogger(__name__)
 class MaintenanceService:
     """Handle background maintenance: log pruning, database cleanup."""
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
-        job_service,  # ruff: ignore[missing-type-function-argument]
+        job_service: JobService,
         pruning_days: int = 7,
         interval_seconds: int = 3600,
-        system_status_service=None,  # ruff: ignore[missing-type-function-argument]
-        telescope_service=None,  # ruff: ignore[missing-type-function-argument]
-    ):
+        system_status_service: SystemStatusService | None = None,
+        telescope_service: TelescopeService | None = None,
+    ) -> None:
         self.job_service = job_service
         self.pruning_days = pruning_days
         self.interval_seconds = interval_seconds
@@ -29,7 +35,7 @@ class MaintenanceService:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def start(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def start(self) -> None:
         """Start the background maintenance thread."""
         if self._thread is not None and self._thread.is_alive():
             return
@@ -39,9 +45,9 @@ class MaintenanceService:
             target=self._run_maintenance_loop, daemon=True, name="MaintenanceThread"
         )
         self._thread.start()
-        logger.info(f"MaintenanceService started with pruning threshold of {self.pruning_days} days.")
+        logger.info("MaintenanceService started with pruning threshold of %s days.", self.pruning_days)
 
-    def stop(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def stop(self) -> None:
         """Stop the background maintenance thread."""
         self._stop_event.set()
         if self._thread:
@@ -49,7 +55,7 @@ class MaintenanceService:
             self._thread = None
         logger.info("MaintenanceService stopped.")
 
-    def _run_maintenance_loop(self):  # ruff: ignore[missing-return-type-private-function]
+    def _run_maintenance_loop(self) -> None:
         """Periodically runs maintenance tasks."""
         # Initial run after a short delay
         time.sleep(10)
@@ -57,8 +63,10 @@ class MaintenanceService:
         while not self._stop_event.is_set():
             try:
                 self.perform_cleanup()
-            except Exception as e:
-                logger.error(f"Error during maintenance cleanup: {e}")
+            except Exception:
+                # This loop runs for the life of the app and must not die.
+                # The traceback is logged and the next pass tries again.
+                logger.exception("Error during maintenance cleanup")
 
             # Wait for next interval or stop signal
             # We sleep in small chunks to be responsive to stop event
@@ -67,14 +75,14 @@ class MaintenanceService:
                     break
                 time.sleep(1)
 
-    def perform_cleanup(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def perform_cleanup(self) -> None:
         """Execute all cleanup tasks."""
         logger.info("Starting periodic maintenance cleanup...")
 
         # 1. Prune old jobs and logs
         removed_count = self.job_service.prune_old_jobs(self.pruning_days)
         if removed_count > 0:
-            logger.info(f"Pruned {removed_count} jobs older than {self.pruning_days} days.")
+            logger.info("Pruned %s jobs older than %s days.", removed_count, self.pruning_days)
 
         # Add future maintenance tasks here (e.g. temporary file cleanup)
 

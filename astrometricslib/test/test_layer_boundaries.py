@@ -23,6 +23,16 @@ list *and* reviewed for the HDU0/HDU1 rule at the same time. A second check
 makes sure the list can only shrink, never grow stale: every entry on it
 must still contain a real call, so deleting the code without deleting the
 matching list entry also fails the build.
+
+A second ratchet in this file keeps the wall clock out of the pipelines
+(`datetime.now()` and `datetime.utcnow()` under `pipelines/`). A pipeline
+that reads the clock instead of a frame's own capture time fabricates
+timestamps. See `KNOWN_WALL_CLOCK_SITES`.
+
+A third ratchet keeps unseeded randomness out of the pipelines (review item
+S20). A random generator with no seed gives a different answer on every run,
+so a detection threshold or a preview could change between two runs on the
+same frame. See `KNOWN_UNSEEDED_RANDOM_SITES`.
 """
 
 import ast
@@ -43,19 +53,21 @@ KNOWN_FITS_ACCESS_SITES = frozenset({
     "drivers/calibration_library.py",
     "drivers/fits_access.py",
     "drivers/image.py",
-    "drivers/plate_solve_interface.py",
+    "drivers/astrometry_net_driver.py",
     "drivers/siril_interface.py",
-    "pipelines/astrometry/catalog_seeding.py",
-    "pipelines/astrometry/fwhm.py",
-    "pipelines/astrometry/runner.py",
-    "pipelines/astrometry/session_identification.py",
+    "pipelines/astrometry/utilities/catalog_seeding.py",
+    "pipelines/astrometry/pre_processing/fwhm.py",
+    "pipelines/shared/session_identification.py",
     "pipelines/asteroid_detection/pipeline.py",
-    "pipelines/photometry/variability_analyzer.py",
-    "pipelines/shared/frame_scanning.py",
+    "pipelines/photometry/pre_processing/frame_photometry.py",
+    "pipelines/photometry/processing/variability_analyzer.py",
     "pipelines/shared/image_conversions.py",
     "pipelines/shared/quality/background_measurement.py",
     "pipelines/shared/quality/quality_metrics.py",
     "scripts/backfill_focal_length.py",
+    # Reads pixels on its own on purpose: it re-measures saved numbers by
+    # a path independent of the pipeline's FITS access.
+    "scripts/recompute_headline_numbers.py",
     "scripts/spectral_registration_quality_analysis.py",
     "visualization/helpers.py",
 })
@@ -107,7 +119,7 @@ def _find_raw_fits_access_sites() -> set[str]:
     return files_with_access
 
 
-def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_no_new_files_call_fits_directly() -> None:
     """Verify no file outside the known list reads or writes FITS data raw.
 
     New code should call through `pipelines/shared/frame_scanning.py` or
@@ -126,7 +138,7 @@ def test_no_new_files_call_fits_directly():  # ruff: ignore[missing-return-type-
     )
 
 
-def test_the_known_list_has_no_stale_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_known_list_has_no_stale_entries() -> None:
     """Verify every allowlisted file still has a raw fits.* call in it.
 
     A stale entry would hide the fact that a call site was fixed or
@@ -141,3 +153,253 @@ def test_the_known_list_has_no_stale_entries():  # ruff: ignore[missing-return-t
         f"left: {sorted(stale_entries)}. Remove them from the list in this "
         f"file -- that shrinking is the whole point of the ratchet."
     )
+
+
+# Files under `pipelines/` that call `datetime.now()` or `datetime.utcnow()`
+# on purpose. Each entry needs a reason. A pipeline must never use the clock
+# to stamp a frame or a measurement (review item S5); it may use it to date
+# its own bookkeeping.
+KNOWN_WALL_CLOCK_SITES = frozenset({
+    # Writes the time a rejected frame was moved into quarantine, in the
+    # move log. It dates the move itself, not any frame's observation.
+    "pipelines/stacking/pre_processing/frame_quarantine.py",
+})
+
+
+def _find_wall_clock_sites() -> set[str]:
+    """List every pipeline file that reads the wall clock.
+
+    A call counts when it has the form ``datetime.now(...)`` or
+    ``datetime.utcnow(...)``, including ``datetime.datetime.now(...)``.
+    Test modules are skipped.
+
+    Returns
+    -------
+    files_with_clock : `set` [`str`]
+        Paths, relative to `astrometricslib/`, of every non-test file under
+        `pipelines/` with at least one such call.
+    """
+    files_with_clock: set[str] = set()
+
+    for module_path in sorted((ASTROMETRICSLIB_ROOT / "pipelines").rglob("*.py")):
+        if _is_test_module(module_path):
+            continue
+
+        tree = ast.parse(module_path.read_text(), filename=str(module_path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"now", "utcnow"}
+            ):
+                continue
+            owner = node.func.value
+            owner_name = owner.id if isinstance(owner, ast.Name) else getattr(owner, "attr", None)
+            if owner_name == "datetime":
+                files_with_clock.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+                break
+
+    return files_with_clock
+
+
+def test_pipelines_do_not_read_the_wall_clock() -> None:
+    """Verify no pipeline file reads the wall clock.
+
+    The banned calls are ``datetime.now()`` and ``datetime.utcnow()``. A
+    frame's time comes from its ``DATE-OBS`` header (see
+    `parse_observation_time`). Falling back to the current time gave a
+    frame with no capture time a made-up one. A file that needs the clock
+    for its own bookkeeping goes on `KNOWN_WALL_CLOCK_SITES` with a reason.
+    """
+    new_sites = _find_wall_clock_sites() - KNOWN_WALL_CLOCK_SITES
+
+    assert not new_sites, (
+        f"datetime.now()/utcnow() found in pipeline file(s): {sorted(new_sites)}. "
+        f"Read the frame's capture time from its header instead, or if the "
+        f"file dates its own bookkeeping, add it to KNOWN_WALL_CLOCK_SITES "
+        f"with a reason."
+    )
+
+
+def test_the_wall_clock_list_has_no_stale_entries() -> None:
+    """Verify every allowlisted wall-clock file still reads the clock.
+
+    A stale entry would leave a file free to add a clock call later with
+    nothing to flag it.
+    """
+    stale_entries = KNOWN_WALL_CLOCK_SITES - _find_wall_clock_sites()
+
+    assert not stale_entries, (
+        f"KNOWN_WALL_CLOCK_SITES lists file(s) with no datetime.now()/utcnow() "
+        f"call left: {sorted(stale_entries)}. Remove them from the list."
+    )
+
+
+# Files under `pipelines/` that use unseeded randomness on purpose. Each
+# entry needs a reason. It is empty: the two sites found by review item S20
+# (the source detector's background subsample and the preview scaler's
+# percentile sample) now take fixed seeds.
+KNOWN_UNSEEDED_RANDOM_SITES: frozenset[str] = frozenset()
+
+# The `numpy.random` module-level functions that draw from numpy's hidden
+# global generator. They cannot be given a seed per call.
+_LEGACY_NUMPY_RANDOM_FUNCTIONS = frozenset({
+    "rand",
+    "randn",
+    "randint",
+    "random",
+    "random_sample",
+    "ranf",
+    "sample",
+    "normal",
+    "standard_normal",
+    "uniform",
+    "choice",
+    "shuffle",
+    "permutation",
+    "poisson",
+    "seed",
+    "bytes",
+    "RandomState",
+})
+
+# The `random` standard-library functions that draw from its hidden global
+# generator.
+_LEGACY_STDLIB_RANDOM_FUNCTIONS = frozenset({
+    "random",
+    "randint",
+    "randrange",
+    "uniform",
+    "choice",
+    "choices",
+    "shuffle",
+    "sample",
+    "gauss",
+    "normalvariate",
+    "seed",
+})
+
+
+def _is_unseeded_random_call(node: ast.AST) -> bool:
+    """Decide whether a syntax-tree node draws unseeded randomness.
+
+    Three forms count: ``default_rng()`` (or ``default_rng(None)``) with no
+    seed, a ``numpy.random`` legacy function such as ``np.random.randint``,
+    and a ``random`` standard-library function such as ``random.random``.
+
+    Parameters
+    ----------
+    node : `ast.AST`
+        Any node from a parsed module.
+
+    Returns
+    -------
+    is_unseeded : `bool`
+        `True` if the node is one of those calls.
+    """
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute | ast.Name)):
+        return False
+    function = node.func
+    function_name = function.attr if isinstance(function, ast.Attribute) else function.id
+
+    if function_name == "default_rng":
+        seed_is_missing = not node.args and not node.keywords
+        seed_is_none = (
+            len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and node.args[0].value is None
+        )
+        return seed_is_missing or seed_is_none
+
+    if not isinstance(function, ast.Attribute):
+        return False
+    owner = function.value
+    # `np.random.<name>` or `numpy.random.<name>`
+    if (
+        isinstance(owner, ast.Attribute)
+        and owner.attr == "random"
+        and isinstance(owner.value, ast.Name)
+        and owner.value.id in {"np", "numpy"}
+    ):
+        return function_name in _LEGACY_NUMPY_RANDOM_FUNCTIONS
+    # `random.<name>` from the standard library
+    if isinstance(owner, ast.Name) and owner.id == "random":
+        return function_name in _LEGACY_STDLIB_RANDOM_FUNCTIONS
+    return False
+
+
+def _find_unseeded_random_sites() -> set[str]:
+    """List every pipeline file that draws unseeded randomness.
+
+    Test modules are skipped.
+
+    Returns
+    -------
+    files_with_random : `set` [`str`]
+        Paths, relative to `astrometricslib/`, of every non-test file under
+        `pipelines/` with at least one unseeded random call.
+    """
+    files_with_random: set[str] = set()
+
+    for module_path in sorted((ASTROMETRICSLIB_ROOT / "pipelines").rglob("*.py")):
+        if _is_test_module(module_path):
+            continue
+
+        tree = ast.parse(module_path.read_text(), filename=str(module_path))
+        if any(_is_unseeded_random_call(node) for node in ast.walk(tree)):
+            files_with_random.add(str(module_path.relative_to(ASTROMETRICSLIB_ROOT)))
+
+    return files_with_random
+
+
+def test_pipelines_do_not_use_unseeded_randomness() -> None:
+    """Verify no pipeline file draws random numbers without a seed.
+
+    A bare ``default_rng()``, a ``numpy.random`` legacy function, or a
+    ``random`` standard-library function gives different numbers on every
+    run. Build a generator with ``np.random.default_rng(seed)`` and a named
+    seed constant instead. A file that truly needs unseeded randomness goes
+    on `KNOWN_UNSEEDED_RANDOM_SITES` with a reason.
+    """
+    new_sites = _find_unseeded_random_sites() - KNOWN_UNSEEDED_RANDOM_SITES
+
+    assert not new_sites, (
+        f"Unseeded randomness found in pipeline file(s): {sorted(new_sites)}. "
+        f"Pass a fixed seed to np.random.default_rng, or if the file truly "
+        f"needs a different answer each run, add it to "
+        f"KNOWN_UNSEEDED_RANDOM_SITES with a reason."
+    )
+
+
+def test_the_unseeded_random_list_has_no_stale_entries() -> None:
+    """Verify every allowlisted unseeded-random file still uses it.
+
+    A stale entry would leave a file free to add unseeded randomness later
+    with nothing to flag it.
+    """
+    stale_entries = KNOWN_UNSEEDED_RANDOM_SITES - _find_unseeded_random_sites()
+
+    assert not stale_entries, (
+        f"KNOWN_UNSEEDED_RANDOM_SITES lists file(s) with no unseeded random "
+        f"call left: {sorted(stale_entries)}. Remove them from the list."
+    )
+
+
+def test_the_unseeded_random_scan_recognizes_each_banned_form() -> None:
+    """Verify the scan flags the banned calls and accepts seeded ones."""
+    banned = [
+        "np.random.default_rng()",
+        "default_rng(None)",
+        "np.random.randint(0, 5)",
+        "numpy.random.normal(0, 1)",
+    ]
+    banned += ["random.random()", "np.random.RandomState(1)"]
+    allowed = [
+        "np.random.default_rng(0)",
+        "np.random.default_rng(seed=3)",
+        "rng.integers(0, 5)",
+        "np.random.Generator",
+    ]
+
+    for source in banned:
+        assert _is_unseeded_random_call(ast.parse(source).body[0].value), source
+    for source in allowed:
+        assert not _is_unseeded_random_call(ast.parse(source).body[0].value), source

@@ -46,13 +46,13 @@ class PHD2Client:
         reconnect behavior without waiting the production cooldown.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         host: str = "localhost",
         port: int = DEFAULT_PHD2_PORT,
         socket_factory: Callable[[], socket.socket] | None = None,
         reconnect_cooldown_seconds: float = _RECONNECT_COOLDOWN_SECONDS,
-    ):
+    ) -> None:
         """Initialize the client without opening a connection yet."""
         self.host = host
         self.port = port
@@ -112,7 +112,7 @@ class PHD2Client:
             try:
                 sock = self._connect()
             except OSError as connect_error:
-                logger.warning(f"PHD2 connection to {self.host}:{self.port} failed: {connect_error}")
+                logger.warning("PHD2 connection to %s:%s failed: %s", self.host, self.port, connect_error)
                 continue
 
             try:
@@ -126,8 +126,8 @@ class PHD2Client:
                     try:
                         yield json.loads(stripped_line)
                     except json.JSONDecodeError:
-                        logger.warning(f"Skipping malformed PHD2 event line: {stripped_line!r}")
+                        logger.warning("Skipping malformed PHD2 event line: %r", stripped_line)
             except OSError as read_error:
-                logger.warning(f"PHD2 connection to {self.host}:{self.port} dropped: {read_error}")
+                logger.warning("PHD2 connection to %s:%s dropped: %s", self.host, self.port, read_error)
             finally:
                 sock.close()

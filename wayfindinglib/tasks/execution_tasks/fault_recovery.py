@@ -2,7 +2,7 @@
 
 Description: A device reporting `FAULT` opens a `FaultRecord` and
 begins recovery governed by `RecoveryPolicy`, per
-`Wayfinding_Library_Architecture.md` §2.4.6: return the device to
+`Wayfinding_Library_Architecture.md`: return the device to
 `STANDBY`, re-enable it, and verify it reports `ENABLED`. Attempts are
 bounded by `max_attempts` with an interval growing by
 `backoff_multiplier`; each attempt appends a `RecoveryAttempt` with its
@@ -11,7 +11,7 @@ outcome. Exhausting the bound escalates to the safe-state sequence.
 Recovery is deliberately shallow -- it re-establishes lifecycle state
 and nothing more, because software that cannot see the observatory
 cannot distinguish a transient disconnection from a mechanical
-obstruction (`Wayfinding_Library_Architecture.md` §2.4.6). Every
+obstruction (`Wayfinding_Library_Architecture.md`). Every
 hardware-facing step and the sleep between attempts are injected
 callables, so this module carries no hardware import and is testable
 without real timing delays.
@@ -74,7 +74,7 @@ def recover_fault(
         the first; injected so tests need no real wall-clock delay.
     escalate : callable, optional
         Invoked once if every attempt is exhausted without recovery
-        -- the safe-state trigger (§2.5.7). Not called when recovery
+        -- the safe-state trigger. Not called when recovery
         succeeds.
 
     Returns

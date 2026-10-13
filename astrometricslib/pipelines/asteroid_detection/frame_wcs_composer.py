@@ -56,8 +56,9 @@ def estimate_frame_wcs_from_mount_pointing(
         declination_deg = float(declination_deg)
     except TypeError, ValueError:
         logger.warning(
-            f"Frame FITS header's RA/DEC values are not numeric "
-            f"(RA={right_ascension_deg!r}, DEC={declination_deg!r}); cannot estimate its WCS."
+            "Frame FITS header's RA/DEC values are not numeric (RA=%r, DEC=%r); cannot estimate its WCS.",
+            right_ascension_deg,
+            declination_deg,
         )
         return None
 

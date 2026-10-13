@@ -25,7 +25,7 @@
     height: 100%;
     background-color: var(--term-bg-dark);
     color: var(--term-fg);
-    font-family: monospace;
+    font-family: var(--font-family-mono);
     font-size: 14px;
     padding: 10px;
     border-left: 1px solid var(--term-border);
@@ -88,7 +88,7 @@
     border-right: 1px solid var(--term-border);
     color: var(--text-dark);
     font-size: 13px;
-    font-family: monospace;
+    font-family: var(--font-family-mono);
     box-sizing: border-box;
 }
 

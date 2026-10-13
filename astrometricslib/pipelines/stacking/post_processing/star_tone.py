@@ -19,6 +19,13 @@ curves.
 
 Both curves act on the stretched picture only. The stack itself is never
 changed.
+
+A colour picture is toned on its brightness (the mean of its three channels),
+and every channel of a pixel is scaled by the same factor. Toning each
+channel on its own would not keep the colour: the star finder works from the
+noise of one channel, and the channels differ in noise, so each would be
+dimmed by a different amount and the sky would change colour from one part of
+the frame to another.
 """
 
 import logging
@@ -132,7 +139,9 @@ def tone_stars(image: np.ndarray) -> np.ndarray:
     ----------
     image : `numpy.ndarray`
         A stretched picture with values between 0 and 1. A colour picture
-        (channels first) is toned one channel at a time.
+        (channels first) is toned on its brightness, the mean of its
+        channels, and each pixel's channels are scaled by the same factor, so
+        the toning cannot change a pixel's colour.
 
     Returns
     -------
@@ -141,8 +150,12 @@ def tone_stars(image: np.ndarray) -> np.ndarray:
     """
     clipped = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
     if clipped.ndim == 3:
-        planes = [soft_highlights(dim_stars(plane)) for plane in clipped]
-        return np.stack(planes).astype(np.float32)
+        brightness = clipped.mean(axis=0)
+        toned_brightness = soft_highlights(dim_stars(brightness))
+        factor = np.divide(
+            toned_brightness, brightness, out=np.ones_like(brightness), where=brightness > _MINIMUM_ROOM
+        )
+        return np.clip(clipped * factor, 0.0, 1.0).astype(np.float32)
     return soft_highlights(dim_stars(clipped)).astype(np.float32)
 
 

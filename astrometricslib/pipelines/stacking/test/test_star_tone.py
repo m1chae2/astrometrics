@@ -110,7 +110,7 @@ def test_a_nebula_much_larger_than_a_star_is_barely_dimmed() -> None:
 
 
 def test_tone_stars_keeps_the_shape_and_range_of_a_colour_image() -> None:
-    """A channels-first colour image is toned plane by plane."""
+    """A channels-first colour image keeps its shape and stays below white."""
     plane = BACKGROUND + gaussian_star(100, 100, 0.8)
     image = np.stack([plane, plane, plane])
 
@@ -120,6 +120,41 @@ def test_tone_stars_keeps_the_shape_and_range_of_a_colour_image() -> None:
     assert toned.dtype == np.float32
     assert toned.min() >= 0.0
     assert toned.max() < 1.0
+
+
+def test_toning_never_changes_the_colour_of_a_pixel() -> None:
+    """One factor scales all channels of a pixel, so its colour ratios stay."""
+    rng = np.random.default_rng(3)
+    star = gaussian_star(100, 100, 0.7)
+    image = np.stack([
+        BACKGROUND * 0.8 + 0.5 * star + rng.normal(0, 0.02, (SIZE, SIZE)),
+        BACKGROUND + star + rng.normal(0, 0.05, (SIZE, SIZE)),
+        BACKGROUND * 1.2 + 0.7 * star + rng.normal(0, 0.08, (SIZE, SIZE)),
+    ]).clip(0.01, 1.0)
+
+    toned = star_tone.tone_stars(image)
+
+    before = image[0] / image[1], image[2] / image[1]
+    after = toned[0] / toned[1], toned[2] / toned[1]
+    assert after[0] == pytest.approx(before[0], rel=1e-3)
+    assert after[1] == pytest.approx(before[1], rel=1e-3)
+
+
+def test_channels_with_different_noise_do_not_get_a_colour_cast() -> None:
+    """A sky whose channels differ in noise keeps its colour balance.
+
+    Toned one channel at a time, the noisier channel was dimmed more, and the
+    sky of a Nikon stack went yellow in the middle and blue at the edges.
+    """
+    rng = np.random.default_rng(4)
+    noise = (0.05, 0.057, 0.065)
+    image = np.stack([BACKGROUND + rng.normal(0, sigma, (SIZE, SIZE)) for sigma in noise]).clip(0.0, 1.0)
+
+    toned = star_tone.tone_stars(image)
+
+    sky_before = np.median(image, axis=(1, 2))
+    sky_after = np.median(toned, axis=(1, 2))
+    assert sky_after / sky_after[1] == pytest.approx(sky_before / sky_before[1], rel=0.02)
 
 
 def test_tone_stars_in_file_writes_a_toned_copy_with_the_header(tmp_path: Path) -> None:

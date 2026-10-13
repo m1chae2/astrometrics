@@ -16,6 +16,12 @@ from astrometricslib.pipelines.stacking import stage
 MEASURE = "astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm"
 
 
+@pytest.fixture(autouse=True)
+def measure_in_this_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Measure serially so in-process fakes can record their calls."""
+    monkeypatch.setattr(stage, "_fwhm_worker_count", lambda sample_size: 1)
+
+
 def make_summary() -> SimpleNamespace:
     """Build a stand-in summary holding empty stacking metrics.
 
@@ -114,3 +120,58 @@ def test_a_width_far_above_the_inputs_still_flags_the_stack() -> None:
         stage._measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=3.4)
 
     assert summary.stacking_metrics.fwhm_degraded
+
+
+def fake_width_by_name(path: str) -> float | None:
+    """Give a width from the file name, for use in worker processes.
+
+    Parameters
+    ----------
+    path : `str`
+        A frame path; "bad" raises, "none" has no width.
+
+    Returns
+    -------
+    width : `float` or `None`
+        The number in the name, or `None` for "none".
+
+    Raises
+    ------
+    ValueError
+        For the path "bad".
+    """
+    if path == "bad":
+        raise ValueError("unreadable")
+    return None if path == "none" else float(path)
+
+
+def test_parallel_measurement_keeps_order_and_skips_failures() -> None:
+    """Worker processes give the same ordered widths as a serial loop."""
+    paths = ["1.5", "bad", "3.5", "none", "2.5", "4.5"]
+    with patch(MEASURE, side_effect=fake_width_by_name):
+        serial = stage._measure_sample_fwhms(paths, 1)
+        parallel = stage._measure_sample_fwhms(paths, 3)
+    assert serial == [1.5, None, 3.5, None, 2.5, 4.5]
+    assert parallel == serial
+
+
+def test_parallel_widths_give_the_same_summary_as_serial() -> None:
+    """The median and expected width do not depend on the worker count."""
+    frames = [SimpleNamespace(path=str(1 + index / 10)) for index in range(12)]
+    results = []
+    for count in (1, 4):
+        summary = make_summary()
+        with (
+            patch(MEASURE, side_effect=fake_width_by_name),
+            patch.object(stage, "_fwhm_worker_count", return_value=count),
+        ):
+            stage._measure_fwhm_degradation(summary, "stack.fits", frames, stacked_fwhm=1.5)
+        metrics = summary.stacking_metrics
+        results.append((metrics.median_input_fwhm_px, metrics.expected_stack_fwhm_px))
+    assert results[0] == results[1]
+
+
+def test_a_sample_of_one_frame_needs_no_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sample of one frame is measured in this process."""
+    monkeypatch.undo()
+    assert stage._fwhm_worker_count(1) == 1

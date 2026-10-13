@@ -165,13 +165,48 @@ def _plate_scale_arcsec_per_pixel(wcs: Any) -> float | None:
         return None
 
 
-def _measure_star_fwhm_px(image: Any) -> float | None:
+def _stored_stack_fwhm_px(path: str, target: Any) -> float | None:
+    """Look up the star width the stacking step stored for the same file.
+
+    Parameters
+    ----------
+    path : `str`
+        Path of the image being analyzed.
+    target : `Target` or `None`
+        The image's target.
+
+    Returns
+    -------
+    fwhm : `float` or `None`
+        The stored width, or `None` when there is no target, the image is not
+        the target's stacked image, or no width was stored.
+    """
+    from pathlib import Path
+
+    try:
+        stacking = target.stacking
+        stacked_image = stacking.stacked_image
+        stored = stacking.quality_summary.stacking_metrics.stacked_fwhm_px
+    except AttributeError:
+        return None
+    if not stacked_image or stored is None:
+        return None
+    if Path(stacked_image).resolve() != Path(path).resolve():
+        return None
+    return float(stored)
+
+
+def _measure_star_fwhm_px(image: Any, target: Any = None) -> float | None:
     """Measure how wide the stars of an image are.
 
     Parameters
     ----------
     image : `AstrometricsImage`
         The analyzed image.
+    target : `Target`, optional
+        The image's target. When the image is the target's stacked image and
+        the stacking quality summary already holds its star width, that
+        stored width is reused instead of measuring the file again.
 
     Returns
     -------
@@ -183,6 +218,9 @@ def _measure_star_fwhm_px(image: Any) -> float | None:
     path = getattr(image, "path", None)
     if not path:
         return None
+    stored_fwhm = _stored_stack_fwhm_px(path, target)
+    if stored_fwhm is not None:
+        return stored_fwhm
     try:
         return measure_image_fwhm(path)
     except (*FITS_READ_ERRORS, *DATA_ERRORS):
@@ -316,7 +354,7 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
                 **_refinement_metrics(result.context.wcs_refinement),
                 astrometry_flags=list(result.context.astrometry_flags),
                 plate_scale_arcsec_per_pixel=_plate_scale_arcsec_per_pixel(result.context.wcs),
-                star_fwhm_px=_measure_star_fwhm_px(result.context.image),
+                star_fwhm_px=_measure_star_fwhm_px(result.context.image, request.target),
                 plate_solve_succeeded=result.context.wcs is not None,
                 simbad_matched_count=result.payload["simbad_matched_count"],
                 remote_catalog_queries_attempted=int(gaia_statistics["attempted"]),

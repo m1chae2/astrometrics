@@ -102,7 +102,7 @@ def _validate_with_measured_scale(
         The summary `validate_output` built.
     """
     monkeypatch.setattr(runner, "_plate_scale_arcsec_per_pixel", lambda wcs: 1.9)
-    monkeypatch.setattr(runner, "_measure_star_fwhm_px", lambda image: 3.0)
+    monkeypatch.setattr(runner, "_measure_star_fwhm_px", lambda image, target=None: 3.0)
     return _validate(monkeypatch, wcs=object(), **context_fields)
 
 

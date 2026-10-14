@@ -45,6 +45,7 @@
     "electron-log": "^5.4.4",
     "electron-squirrel-startup": "^1.0.1",
     "electron-updater": "^6.8.9",
+    "events": "^3.3.0",
     "jsfitsio": "^3.1.0",
     "plotly.js-dist-min": "^4.1.2",
     "react": "^19.3.0",

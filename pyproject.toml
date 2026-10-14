@@ -50,12 +50,11 @@ dependencies = [
     "import-linter",
     "matplotlib",
     "numpy",
-    # Held below 3.1: photutils 3.1 changed DAOStarFinder's `flux` (now summed
-    # over the kernel footprint, not the whole cutout) and `peak` (now the
-    # central pixel, not the cutout maximum). That lowers the source-detection
-    # fluxes 3-11% and fails the M 13 golden test. Lift the cap only after
-    # deciding whether to re-baseline astrometricslib/test/golden/golden_values.json.
-    "photutils<3.1",
+    # 3.1 or newer: from 3.1, DAOStarFinder's `flux` is the sum inside the
+    # kernel footprint (photutils PR #2493) instead of the whole kernel box,
+    # about 3% lower. The golden pins in astrometricslib/test/golden/ are
+    # measured with that definition; older versions would fail them (see #69).
+    "photutils>=3.1",
     "Pillow",
     "pydantic>=1.10",
     "pytest",

@@ -18,9 +18,9 @@ import argparse
 import logging
 import sys
 
-from astrometricslib import Astrometrics
+from astrometricslib import Astrometrics, configure_logging
 from astrometricslib.drivers.catalog_store import summarize_catalog_coverage
-from astrometricslib.pipelines.astrometry.catalog_seeding import (
+from astrometricslib.pipelines.astrometry.utilities.catalog_seeding import (
     DEFAULT_FIELD_RADIUS_DEGREES,
     DEFAULT_MAGNITUDE_LIMIT,
     DEFAULT_REQUEST_DELAY_SECONDS,
@@ -95,7 +95,7 @@ def run_catalog_seeding(argv: list[str] | None = None) -> int:
         nothing to seed at all.
     """
     arguments = _build_argument_parser().parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    configure_logging("seed_local_star_catalog", level=logging.INFO, log_dir="")
 
     astrometrics = Astrometrics()
     targets = astrometrics.targets.list()

@@ -14,19 +14,20 @@ import logging
 import os
 import sys
 import time
+from typing import Any
 
-from astrometricslib import Astrometrics
+from astrometricslib import DATA_ERRORS, Astrometrics, AstrometricsError, configure_logging
 
 SIGMA_GRID: list[tuple[float, float]] = [(2.0, 2.0), (2.5, 2.5), (3.0, 3.0), (3.5, 3.5), (4.0, 4.0)]
 FILTER_WFWHM_GRID: list[str | None] = [None, "90%", "80%"]
 
 
-def resolve_target_frames(  # ruff: ignore[missing-return-type-undocumented-public-function]
+def resolve_target_frames(
     target,  # ruff: ignore[missing-type-function-argument]
     camera: str,
     filter_type_names: tuple[str, ...],
     date_prefix: str | None = None,
-):
+) -> list[Any]:
     """Select a target's light frames matching camera/filter criteria.
 
     Excludes derived products (stacked, starless, or starmask
@@ -49,7 +50,7 @@ def resolve_target_frames(  # ruff: ignore[missing-return-type-undocumented-publ
     list
         The subset of target.frames matching the criteria.
     """
-    from astrometricslib.utilities.enums import FilterType
+    from astrometricslib.foundation.enums import FilterType
 
     matching_filters = tuple(getattr(FilterType, name) for name in filter_type_names)
     return [
@@ -77,8 +78,8 @@ def run_analysis() -> None:
         Raised with exit code 1 if the target has no frames, or no
         frames match the camera/filter/date criteria.
     """
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout
+    configure_logging(
+        "rejection_threshold_analysis", level=logging.INFO, log_dir="", console_stream=sys.stdout
     )
 
     parser = argparse.ArgumentParser(description="Sigma x Filter-Percentile Rejection Threshold Analysis")
@@ -135,15 +136,15 @@ def run_analysis() -> None:
 
             start_time = time.time()
             try:
-                stacked_path = astrometrics.processing.run_stacking(
+                stacked_path = astrometrics.processing.stack(
                     target,
-                    frames_to_stack=target_frames,
+                    frames=target_frames,
                     rejection_sigma=(sigma_low, sigma_high),
                     filter_wfwhm=filter_wfwhm,
                     stack_weight="wfwhm",
                     generate_rejmap=True,
-                )
-            except Exception as stack_err:
+                ).stacked_path
+            except (AstrometricsError, OSError, *DATA_ERRORS) as stack_err:
                 row["error"] = str(stack_err)
                 row["elapsed_s"] = time.time() - start_time
                 print(f"Stacking failed for {label}: {stack_err}")
@@ -158,10 +159,11 @@ def run_analysis() -> None:
                 results.append(row)
                 continue
 
-            row["stacked_fwhm"] = astrometrics.processing.diagnostics.measure_stack_fwhm(stacked_path)
-            row["rejected_fraction"] = astrometrics.processing.diagnostics.measure_stack_rejected_fraction(
-                stacked_path
+            quality = astrometrics.processing.diagnostics.stack_quality(
+                stacked_path, include=["fwhm", "rejected_fraction"]
             )
+            row["stacked_fwhm"] = quality.fwhm_px
+            row["rejected_fraction"] = quality.rejected_fraction
             print(
                 f"Result: FWHM={row['stacked_fwhm']}, rejected_fraction={row['rejected_fraction']}, "
                 f"elapsed={row['elapsed_s']:.1f}s"
@@ -184,7 +186,7 @@ def run_analysis() -> None:
             f"{fwhm_str:>9} {rej_str:>9} {elapsed_str:>10}"
         )
 
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.foundation.config import get_configuration
 
     config = get_configuration()
     safe_id = target.id.replace(" ", "_")

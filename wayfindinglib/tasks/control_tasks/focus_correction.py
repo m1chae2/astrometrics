@@ -1,7 +1,7 @@
 """Purpose: Autofocus Curve Fitting and Position Selection.
 
 Description: `compute_focus_correction` per
-`Wayfinding_Library_Architecture.md` §2.5.5 -- a pure function that
+`Wayfinding_Library_Architecture.md` -- a pure function that
 fits a parabola to a sampled focus curve and selects its minimum,
 clamped to the sampled span so an ill-conditioned fit cannot command
 an extrapolated position. Star-size measurement (`measure_image_fwhm`,
@@ -23,6 +23,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import FocusCorrection, FocusCurvePoint
@@ -50,7 +51,7 @@ def sample_focus_curve(
         ``(measured_fwhm_px, star_count)``, or `None` if measurement
         failed at that position (skipped from the curve).
     starting_position : `int`
-        The model-derived starting position (§2.5.5, step 2).
+        The model-derived starting position (step 2).
     sample_count : `int`
         Number of positions to sample, evenly spaced across the span.
     sample_span_steps : `int`
@@ -136,13 +137,15 @@ def compute_focus_correction(
 
     Raises
     ------
-    ValueError
+    InvalidArgumentError
         If fewer than 3 points were sampled -- a parabola cannot be
         fit, and this indicates a sampling failure the caller must
         handle, not a normal outcome to silently paper over.
     """
     if len(curve) < 3:
-        raise ValueError(f"compute_focus_correction requires at least 3 sampled points, got {len(curve)}")
+        raise InvalidArgumentError(
+            f"compute_focus_correction requires at least 3 sampled points, got {len(curve)}"
+        )
 
     positions = np.array([point.focuser_position for point in curve], dtype=float)
     fwhms = np.array([point.measured_fwhm_px for point in curve], dtype=float)

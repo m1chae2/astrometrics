@@ -1,0 +1,13 @@
+# Template, installed by build/linux/install_backup_timer.sh.
+# Watches the local image library and starts an upload to Google Drive once
+# changes have settled (see build/linux/watch_library_uploads.sh).
+[Unit]
+Description=Watch the Astrometrics library and upload changes to Google Drive
+
+[Service]
+ExecStart=%h/Repos/astrometrics/build/linux/watch_library_uploads.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

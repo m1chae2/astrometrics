@@ -19,7 +19,7 @@ def _denver() -> SiteProfile:
     )
 
 
-def test_resolve_night_window_brackets_solar_midnight():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_night_window_brackets_solar_midnight() -> None:
     """Verify the window brackets solar midnight, not an assumed clock hour.
 
     The algorithm finds the point of minimum solar altitude first, then
@@ -50,7 +50,7 @@ def test_resolve_night_window_brackets_solar_midnight():  # ruff: ignore[missing
     assert (dawn - dusk).total_seconds() < 3600 * 14
 
 
-def test_resolve_night_window_respects_custom_twilight_threshold():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_night_window_respects_custom_twilight_threshold() -> None:
     """Verify a stricter twilight threshold yields a shorter window."""
     site = _denver()
     nautical = resolve_night_window(site, date(2026, 8, 10), PlanningConfig(twilight_sun_altitude_deg=-12.0))
@@ -63,7 +63,7 @@ def test_resolve_night_window_respects_custom_twilight_threshold():  # ruff: ign
     assert astronomical_duration < nautical_duration
 
 
-def test_resolve_night_window_uses_default_config_when_none_given():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_night_window_uses_default_config_when_none_given() -> None:
     """Verify resolve_night_window works with no explicit PlanningConfig."""
     site = _denver()
     dusk, dawn = resolve_night_window(site, date(2026, 8, 10))

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SectionPanel } from '../common/components/SectionPanel';
 import { FitsRenderer } from '../common/fitsViewer/FitsRenderer';
-import { fetchLastImage } from '../common/services/imagingService';
+import { fetchLastImage } from '../common/services/imaging/imageService';
 import { socketClient } from '../common/utils/socketClient';
 import './observationManager.css';
 

@@ -9,7 +9,7 @@ reference.
 import importlib
 
 from docutils.statemachine import StringList
-from numpydoc.docscrape import NumpyDocString
+from numpydoc.docscrape import NumpyDocString, ParseError
 from sphinx.util.docutils import SphinxDirective
 
 
@@ -73,7 +73,7 @@ class UIActionDirective(SphinxDirective):
             self.state_machine.insert_input(StringList(rst_lines, source=target_path), target_path)
             return []
 
-        except Exception as e:
+        except (ValueError, ParseError) as e:
             error_msg = f"Failed to generate UI Action for {target_path}: {e!s}"
             return [self.state_machine.reporter.error(error_msg, line=self.lineno)]
 

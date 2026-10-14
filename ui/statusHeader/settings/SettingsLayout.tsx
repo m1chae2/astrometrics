@@ -1,9 +1,14 @@
 import React, { useRef, useEffect } from 'react';
-import { SystemForm } from './components/SystemForm';
-import { ConfigForm } from './components/ConfigForm';
+import { GeneralForm } from './components/GeneralForm';
+import { ObservatoryForm } from './components/ObservatoryForm';
+import { EquipmentForm } from './components/EquipmentForm';
+import { ProcessingForm } from './components/ProcessingForm';
+import { AdvancedForm } from './components/AdvancedForm';
 import { useSettingsLogic } from './hooks/useSettingsLogic';
 
 type LogicResult = ReturnType<typeof useSettingsLogic>;
+
+const SETTINGS_TABS = ['General', 'Observatory', 'Equipment', 'Processing', 'Advanced'] as const;
 
 interface SettingsLayoutProps extends LogicResult {
     open: boolean; // needed for focus effect dependency if re-opening? Main wrapper handles mount.
@@ -13,15 +18,12 @@ interface SettingsLayoutProps extends LogicResult {
 
 export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
     activeConfigTab, setActiveConfigTab,
-    validationError,
-    backendInput, setBackendInput,
     secondaryWindowEnabled, handleToggleSecondaryWindow,
+    controllerModeEnabled, isChangingControlMode, handleSetControlMode,
     configData, loadingConfig,
-    groupedConfig,
     handleConfigChange,
     handleSaveBackend,
     handleRevertBackend,
-    agentShortcut, setAgentShortcutInput,
     isReindexing, reindexingStatus, reindexingProgress, handleReindex,
     closing,
     onClose
@@ -63,6 +65,7 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                         className="settings__close-button"
                         onClick={onClose}
                         aria-label="Close settings"
+                        title="Close settings"
                         type="button"
                     >
                         <svg viewBox="0 0 24 24" width="20" height="20">
@@ -71,81 +74,91 @@ export const SettingsLayout: React.FC<SettingsLayoutProps> = ({
                     </button>
                 </div>
 
-                {/* Sub-tabs for Config Sections */}
-                {!loadingConfig && (
-                    <div className="settings__tabs settings__tabs--sub">
-                        <button
-                            className={`settings__tab-button ${activeConfigTab === 'System' ? 'settings__tab-button--active' : ''}`}
-                            onClick={() => setActiveConfigTab('System')}
-                        >
-                            System
-                        </button>
-                        {groupedConfig.filter(g => g.name !== 'System').map(group => (
+                <div className="settings__body">
+                    <div className="settings__sidebar">
+                        {SETTINGS_TABS.map((tab) => (
                             <button
-                                key={group.name}
-                                className={`settings__tab-button ${activeConfigTab === group.name ? 'settings__tab-button--active' : ''}`}
-                                onClick={() => setActiveConfigTab(group.name)}
+                                key={tab}
+                                className={`settings__tab-button ${activeConfigTab === tab ? 'settings__tab-button--active' : ''}`}
+                                onClick={() => setActiveConfigTab(tab)}
+                                type="button"
                             >
-                                {group.name}
+                                {tab}
                             </button>
                         ))}
                     </div>
-                )}
 
-                <div
-                    ref={contentRef}
-                    className="settings__content"
-                >
-                    {activeConfigTab === 'System' && (
-                        <SystemForm
-                            backendInput={backendInput}
-                            setBackendInput={setBackendInput}
-                            validationError={validationError}
-                            secondaryWindowEnabled={secondaryWindowEnabled}
-                            handleToggleSecondaryWindow={handleToggleSecondaryWindow}
-                            configData={configData}
-                            handleConfigChange={handleConfigChange}
-                            agentShortcut={agentShortcut}
-                            setAgentShortcutInput={setAgentShortcutInput}
-                        />
-                    )}
-
+                    <div
+                        ref={contentRef}
+                        className="settings__content"
+                    >
                     {loadingConfig ? (
                         <div className="settings__loading">Loading configuration...</div>
                     ) : (
                         <>
-                            {groupedConfig.filter(g => g.name !== 'System').map(group => {
-                                if (group.name !== activeConfigTab) return null;
-                                return (
-                                    <ConfigForm
-                                        key={group.name}
-                                        group={group}
-                                        onConfigChange={handleConfigChange}
-                                        isReindexing={isReindexing}
-                                        reindexingStatus={reindexingStatus}
-                                        reindexingProgress={reindexingProgress}
-                                        onReindex={handleReindex}
-                                    />
-                                );
-                            })}
+                            {activeConfigTab === 'General' && (
+                                <GeneralForm
+                                    secondaryWindowEnabled={secondaryWindowEnabled}
+                                    handleToggleSecondaryWindow={handleToggleSecondaryWindow}
+                                    configData={configData}
+                                    handleConfigChange={handleConfigChange}
+                                    loadingConfig={loadingConfig}
+                                    isReindexing={isReindexing}
+                                    reindexingStatus={reindexingStatus}
+                                    reindexingProgress={reindexingProgress}
+                                    onReindex={handleReindex}
+                                />
+                            )}
+                            {activeConfigTab === 'Observatory' && (
+                                <ObservatoryForm
+                                    configData={configData}
+                                    handleConfigChange={handleConfigChange}
+                                    loadingConfig={loadingConfig}
+                                    controllerModeEnabled={controllerModeEnabled}
+                                    isChangingControlMode={isChangingControlMode}
+                                    onSetControlMode={handleSetControlMode}
+                                />
+                            )}
+                            {activeConfigTab === 'Equipment' && (
+                                <EquipmentForm
+                                    configData={configData}
+                                    handleConfigChange={handleConfigChange}
+                                    loadingConfig={loadingConfig}
+                                />
+                            )}
+                            {activeConfigTab === 'Processing' && (
+                                <ProcessingForm
+                                    configData={configData}
+                                    handleConfigChange={handleConfigChange}
+                                    loadingConfig={loadingConfig}
+                                />
+                            )}
+                            {activeConfigTab === 'Advanced' && (
+                                <AdvancedForm
+                                    configData={configData}
+                                    handleConfigChange={handleConfigChange}
+                                    loadingConfig={loadingConfig}
+                                />
+                            )}
                         </>
                     )}
 
-                    <div className="settings__footer">
-                        <button
-                            className="btn"
-                            onClick={handleRevertBackend}
-                            type="button"
-                        >
-                            Revert
-                        </button>
-                        <button
-                            className="btn btn--primary"
-                            onClick={handleSaveBackend}
-                            type="button"
-                        >
-                            Save
-                        </button>
+                        <div className="settings__footer">
+                            <button
+                                className="btn"
+                                onClick={handleRevertBackend}
+                                type="button"
+                            >
+                                Revert
+                            </button>
+                            <button
+                                className="btn btn--primary"
+                                onClick={handleSaveBackend}
+                                type="button"
+                            >
+                                Save
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

@@ -15,12 +15,11 @@ REQ: PLN-3.2
 """
 
 import logging
-import sqlite3
 from pathlib import Path
 
 import numpy as np
 
-from astrometricslib import StellarObject
+from astrometricslib import StellarObject, connect_db
 from wayfindinglib.drivers.catalog.base_catalog_driver import CatalogDriver
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
     REQ: PLN-3.2
     """
 
-    def __init__(self, catalog_path: Path | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, catalog_path: Path | None = None) -> None:
         self._catalog_path = catalog_path or default_catalog_path()
         self._cached_rows: np.ndarray | None = None
 
@@ -103,10 +102,16 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
             self._cached_rows = np.empty(0, dtype=_ROW_DTYPE)
             return self._cached_rows
 
-        conn = sqlite3.connect(str(self._catalog_path))
+        conn = connect_db(str(self._catalog_path))
         try:
             cursor = conn.execute(f"SELECT hip_id, ra, dec, magnitude FROM {CATALOG_TABLE_NAME}")
-            rows = cursor.fetchall()
+            # connect_db's row_factory returns sqlite3.Row objects, which
+            # np.array(..., dtype=_ROW_DTYPE) -- a *structured* dtype --
+            # would silently broadcast each scalar into all four fields
+            # instead of building one record per row. Converting back to
+            # plain tuples first keeps the structured-array construction
+            # below correct.
+            rows = [tuple(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -118,6 +123,7 @@ class LocalBrightStarCatalogDriver(CatalogDriver):
         ra_degrees: float,
         dec_degrees: float,
         radius_degrees: float,
+        magnitude_limit: float | None = None,
     ) -> list[StellarObject]:
         """Return bundled bright Hipparcos stars within a circular sky region.
 

@@ -35,7 +35,13 @@ export class StarSelectionOverlay implements PlanetariumOverlay {
     const selected = projectionContext.sources.find(
       source =>
         source.id === projectionContext.selectedTargetId &&
-        isDisplayableStar(source, projectionContext.showStars, projectionContext.showCatalog, limitingMagnitude),
+        isDisplayableStar(
+          source,
+          projectionContext.showStars,
+          projectionContext.showCatalog,
+          limitingMagnitude,
+          projectionContext.fov,
+        ),
     );
     if (!selected) return;
 

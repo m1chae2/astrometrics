@@ -6,6 +6,16 @@ among connected devices requires inspecting each device's properties/name for
 type-specific signals. This module centralizes those heuristics.
 """
 
+import logging
+from typing import TYPE_CHECKING
+
+from wayfindinglib.drivers.indi.pyindi_compatibility import INDI_ERRORS, PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
+
+logger = logging.getLogger(__name__)
+
 
 class DeviceDiscovery:
     """Finds and caches role-specific devices on an INDI client.
@@ -13,7 +23,7 @@ class DeviceDiscovery:
     Roles include telescope, focuser, camera, and filter wheel.
     """
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
         self._cached_filterwheel = None
 
@@ -25,12 +35,22 @@ class DeviceDiscovery:
         client = self.client
         if not client.isServerConnected():
             return
-        for device in client.getDevices():
-            name = device.getDeviceName()
-            if name not in client.deviceMap:
-                client.deviceMap[name] = client.getDevice(name)
+        if not hasattr(client, "deviceMap") or client.deviceMap is None:
+            client.deviceMap = {}
+        # Clean up any invalid or empty-string keys
+        empty_keys = [k for k in client.deviceMap if not k or not str(k).strip()]
+        for k in empty_keys:
+            client.deviceMap.pop(k, None)
 
-    def find_device_with_property(self, property_name: str):  # ruff: ignore[missing-return-type-undocumented-public-function]
+        for device in client.getDevices():
+            try:
+                name = device.getDeviceName()
+                if name and name.strip() and name not in client.deviceMap:
+                    client.deviceMap[name] = client.getDevice(name)
+            except INDI_ERRORS as e:
+                logger.debug("Failed to query device name during refresh: %s", e)
+
+    def find_device_with_property(self, property_name: str) -> PyIndi.BaseDevice | None:
         """Search connected devices for one with the specified property.
 
         Returns
@@ -45,7 +65,7 @@ class DeviceDiscovery:
         if not client.isServerConnected() or not client.deviceMap:
             return None
 
-        def has_property(device):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+        def has_property(device: PyIndi.BaseDevice) -> bool:
             return (
                 device.getNumber(property_name)
                 or device.getText(property_name)
@@ -64,7 +84,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_telescope(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_telescope(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the telescope device.
 
         1. Look for device with EQUATORIAL_EOD_COORD (definitive). 2.
@@ -103,7 +123,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_powerbox(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_powerbox(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find powerbox.
 
         1. Look for WEATHER_PARAMETERS. 2. Look for 'Powerbox' or 'Pegasus' in
@@ -125,7 +145,7 @@ class DeviceDiscovery:
                 return device
         return None
 
-    def find_focuser(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_focuser(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find focuser.
 
         1. Look for ABS_FOCUS_POSITION or REL_FOCUS_POSITION. 2. Prefer
@@ -150,7 +170,7 @@ class DeviceDiscovery:
             return candidates[0]
         return None
 
-    def find_filterwheel(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_filterwheel(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find filter wheel.
 
         1. Look for FILTER_SLOT. 2. Prefer 'Filter' or 'Wheel' in name/info.
@@ -183,7 +203,36 @@ class DeviceDiscovery:
             return candidates[0]
         return None
 
-    def find_guide_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    @staticmethod
+    def _sensor_pixel_count(camera_device: PyIndi.BaseDevice) -> int:
+        """Return a camera's sensor size in pixels, or 0 if it is unknown.
+
+        Reads the INDI ``CCD_INFO`` property (``CCD_MAX_X`` times
+        ``CCD_MAX_Y``). Used to tell the imaging camera from a small guide
+        camera whose name does not say "guide" (for example an ASI120).
+
+        Parameters
+        ----------
+        camera_device : `PyIndi.BaseDevice`
+            A camera device that has a ``CCD_EXPOSURE`` property.
+
+        Returns
+        -------
+        pixel_count : `int`
+            Width times height in pixels, or 0 when the camera does not
+            report its size.
+        """
+        try:
+            ccd_info = camera_device.getNumber("CCD_INFO")
+            if not ccd_info:
+                return 0
+            sizes = {element.name: element.value for element in ccd_info}
+            return int(sizes.get("CCD_MAX_X", 0) * sizes.get("CCD_MAX_Y", 0))
+        except INDI_ERRORS as info_error:
+            logger.debug("Failed to read CCD_INFO: %s", info_error)
+            return 0
+
+    def find_guide_camera(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find guide camera.
 
         1. Look for device with CCD_EXPOSURE. 2. Prefer device with
@@ -208,13 +257,39 @@ class DeviceDiscovery:
         for candidate_device in candidates:
             if "guide" in candidate_device.getDeviceName().lower():
                 return candidate_device
-        return candidates[0]
+        # No camera is named "guide": the smallest sensor is the guide camera.
+        return min(candidates, key=self._sensor_pixel_count)
 
-    def find_main_camera(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def find_enclosure(self) -> PyIndi.BaseDevice | None:
+        """Heuristic to find the roll-off-roof/dome device.
+
+        1. Look for the standard INDI Dome Interface's `DOME_SHUTTER`
+        switch. 2. Prefer device with 'dome', 'roof', or 'shutter' in
+        name.
+
+        Returns
+        -------
+        device
+            The enclosure device, or `None` if none is found.
+        """
+        device = self.find_device_with_property("DOME_SHUTTER")
+        if device:
+            return device
+        client = self.client
+        if not client.isServerConnected() or not client.deviceMap:
+            return None
+        for device_name, device in client.deviceMap.items():
+            lowered_name = device_name.lower()
+            if "dome" in lowered_name or "roof" in lowered_name or "shutter" in lowered_name:
+                return device
+        return None
+
+    def find_main_camera(self) -> PyIndi.BaseDevice | None:
         """Heuristic to find the main imaging camera.
 
-        1. Look for device with CCD_EXPOSURE. 2. Prefer device WITHOUT
-        'Guide' in name.
+        1. Look for device with CCD_EXPOSURE. 2. Prefer devices WITHOUT
+        'Guide' in the name. 3. Among those, pick the largest sensor, so a
+        small guide camera that is not named "guide" is not chosen.
 
         Returns
         -------
@@ -239,6 +314,4 @@ class DeviceDiscovery:
             for candidate_device in candidates
             if "guide" not in candidate_device.getDeviceName().lower()
         ]
-        if main_candidates:
-            return main_candidates[0]
-        return candidates[0]
+        return max(main_candidates or candidates, key=self._sensor_pixel_count)

@@ -4,6 +4,8 @@ Description: Combines 2D star fields and 1D analysis visualization layers
 into interactive 2-panel views.
 """
 
+import logging
+
 import matplotlib.pyplot as plt
 
 from astrometricslib.models.stellar_source import StellarObject
@@ -18,8 +20,12 @@ from .layers import (
     SpectrumOverlay,
     StarOverlay,
     StarSelectionOverlay,
+    resolve_star_radius,
 )
+from .spectroscopy_field_access import get_spectroscopy_field as _get_spectroscopy_field
 from .visualization_config import VisualizationConfig
+
+logger = logging.getLogger(__name__)
 
 
 class _AnalysisView:
@@ -42,7 +48,7 @@ class _AnalysisView:
         `"spectroscopy"`.
     """
 
-    def __init__(  # ruff: ignore[missing-return-type-special-method]
+    def __init__(
         self,
         context: AnalysisContext,
         enriched_objects: list[StellarObject],
@@ -50,18 +56,28 @@ class _AnalysisView:
         ax_image=None,  # ruff: ignore[missing-type-function-argument]
         ax_spectrum=None,  # ruff: ignore[missing-type-function-argument]
         mode: str = "spectroscopy",
-    ):
+    ) -> None:
         self.context = context
         self.stellar_objects = enriched_objects
         self.config = VisualizationConfig()
         self.mode = mode
         self.active_star_index = 0
 
-        # Initialize Figure
+        # Initialize Figure. Spectroscopy mode gets a raw and a calibrated
+        # spectrum panel side by side, rather than one panel toggled
+        # between the two views, so both are visible at once; photometry
+        # mode's light curve keeps a single panel.
+        self.ax_spectrum_corrected = None
         if fig is not None and ax_image is not None and ax_spectrum is not None:
             self.fig = fig
             self.ax_image = ax_image
             self.ax_spectrum = ax_spectrum
+        elif mode == "spectroscopy":
+            self.fig = plt.figure(figsize=(9, 13))
+            gs = self.fig.add_gridspec(3, 1, height_ratios=[2, 1, 1], hspace=0.5)
+            self.ax_image = self.fig.add_subplot(gs[0, 0])
+            self.ax_spectrum = self.fig.add_subplot(gs[1, 0])
+            self.ax_spectrum_corrected = self.fig.add_subplot(gs[2, 0])
         else:
             self.fig, (self.ax_image, self.ax_spectrum) = plt.subplots(
                 2, 1, figsize=(9, 11), gridspec_kw={"height_ratios": [2, 1], "hspace": 0.45}
@@ -72,7 +88,9 @@ class _AnalysisView:
         self.layer_stars = StarOverlay(self.ax_image, self.config)
         self.layer_selection = StarSelectionOverlay(self.ax_image, self.config)
         self.layer_dispersion = DispersionOverlay(self.ax_image, self.config)
-        self.renderer_spectrum = SpectrumOverlay(self.ax_spectrum, self.fig, self.config)
+        self.renderer_spectrum = SpectrumOverlay(
+            self.ax_spectrum, self.fig, self.config, corrected_axis=self.ax_spectrum_corrected
+        )
         self.layer_photometry = PhotometryOverlay(self.ax_spectrum, self.fig, self.config)
 
         self.interaction = InteractionHandler(self.fig, self.ax_image, self.ax_spectrum, self.config)
@@ -86,10 +104,10 @@ class _AnalysisView:
         self.star_patches = []
         self.rectangle_patches = []
 
-    def plot(self, block: bool = True, add_buttons: bool = True, limit: int | None = None):  # ruff: ignore[missing-return-type-private-function]
+    def plot(self, block: bool = True, add_buttons: bool = True, limit: int | None = None) -> None:
         """Launch the interactive visualization window."""
         if not self.stellar_objects:
-            print("No stars to display.")
+            logger.info("No stars to display.")
             return
 
         # 1. Render Image Layer
@@ -112,48 +130,42 @@ class _AnalysisView:
         # 4. Add Controls & Connect Events
         if add_buttons and self.mode == "spectroscopy":
             self.renderer_spectrum.add_balmer_toggle()
-            has_qe = any(
-                getattr(obj, "spectrum_data_processed", None)
-                and "quantum_efficiency_corrected_intensities" in obj.spectrum_data_processed
-                for obj in self.stellar_objects
-            )
-            if has_qe:
-                self.renderer_spectrum.add_quantum_efficiency_correction_toggle()
+            # With a separate calibrated-view panel (ax_spectrum_corrected),
+            # both the raw and corrected spectra are always visible, so
+            # there is nothing left for a raw/corrected toggle to switch.
 
         self.interaction.connect_events()
 
         if block:
             plt.show()
 
-    def setup_multi_field_controls(self):  # ruff: ignore[missing-return-type-private-function]
+    def setup_multi_field_controls(self) -> None:
         """Configure interactive controls across multiple target fields."""
         pass
 
-    def _plot_active_analysis(self):  # ruff: ignore[missing-return-type-private-function]
+    def _plot_active_analysis(self) -> None:
         """Render active star 1D analysis profile (spectrum or light curve)."""
         if not self.stellar_objects:
             return
         obj = self.stellar_objects[self.active_star_index]
         if self.mode == "spectroscopy":
-            data = getattr(obj, "spectrum_data_processed", None) or {}
             self.renderer_spectrum.render_spectrum(
                 self.active_star_index,
                 getattr(obj, "name", ""),
                 getattr(obj, "stellar_spectral_type", ""),
-                data.get("wavelengths_angstrom"),
-                data.get("intensities"),
-                quantum_efficiency_corrected_intensities=data.get("quantum_efficiency_corrected_intensities"),
+                _get_spectroscopy_field(obj, "wavelengths_angstrom"),
+                _get_spectroscopy_field(obj, "intensities"),
+                quantum_efficiency_corrected_intensities=_get_spectroscopy_field(
+                    obj, "quantum_efficiency_corrected_intensities"
+                ),
+                response_corrected_intensities=_get_spectroscopy_field(obj, "response_corrected_intensities"),
             )
         else:
-            light_curve = getattr(obj, "light_curve", None)
-            timestamps = light_curve.timestamps if light_curve else None
+            photometry = getattr(obj, "photometry", None)
+            timestamps = photometry.timestamps if photometry else None
             flux = (
-                (
-                    light_curve.fluxes_detrended
-                    if light_curve.fluxes_detrended
-                    else light_curve.fluxes_normalized
-                )
-                if light_curve
+                (photometry.fluxes_detrended if photometry.fluxes_detrended else photometry.fluxes_normalized)
+                if photometry
                 else None
             )
             is_var = getattr(obj, "is_variable_candidate", False)
@@ -165,7 +177,7 @@ class _AnalysisView:
                 is_variable_candidate=is_var,
             )
 
-    def _update_selection(self, index: int):  # ruff: ignore[missing-return-type-private-function]
+    def _update_selection(self, index: int) -> None:
         """Handle selection of a new star."""
         self.active_star_index = index
         for i, cp in enumerate(self.star_patches):
@@ -185,11 +197,22 @@ class _AnalysisView:
         self._plot_active_analysis()
         self.fig.canvas.draw_idle()
 
-    def _handle_star_drag(self, new_x: float, new_y: float):  # ruff: ignore[missing-return-type-private-function]
-        """Handle dragging of the active star's centroid."""
-        if not self.stellar_objects:
+    def _handle_star_drag(self, index: int, new_x: float, new_y: float) -> None:
+        """Handle dragging of a star's centroid.
+
+        Parameters
+        ----------
+        index : `int`
+            Index of the star being dragged (`InteractionHandler`'s
+            ``dragged_star_index``).
+        new_x : `float`
+            New X data coordinate for the star's centroid.
+        new_y : `float`
+            New Y data coordinate for the star's centroid.
+        """
+        if not self.stellar_objects or index is None:
             return
-        obj = self.stellar_objects[self.active_star_index]
+        obj = self.stellar_objects[index]
         if hasattr(obj, "star_data"):
             obj.star_data["xcentroid"] = new_x
             obj.star_data["ycentroid"] = new_y
@@ -197,7 +220,7 @@ class _AnalysisView:
             obj["xcentroid"] = new_x
             obj["ycentroid"] = new_y
 
-        cp = self.star_patches[self.active_star_index]
+        cp = self.star_patches[index]
         if cp is not None:
             cp.center = (new_x, new_y)
 
@@ -225,57 +248,65 @@ class _AnalysisView:
                 else obj.get("ycentroid", obj.get("y_centroid", 0.0))
             )
 
+            radius = resolve_star_radius(obj, self.config.fixed_radius)
             dx = event_x - x
             dy = event_y - y
-            if (dx * dx + dy * dy) <= (self.config.fixed_radius * self.config.fixed_radius):
+            if (dx * dx + dy * dy) <= radius * radius:
                 return i
 
             if self.mode == "spectroscopy":
-                rect = getattr(obj, "rectangle", None) if is_obj else obj.get("rectangle")
-                angle = getattr(obj, "dispersion_angle", 0.0) if is_obj else obj.get("dispersion_angle", 0.0)
-                if rect is not None and hit_test_rectangle(event_x, event_y, rect, angle):
+                rect = _get_spectroscopy_field(obj, "rectangle")
+                angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
+                if rect is not None and hit_test_rectangle(event_x, event_y, *rect, angle):
                     return i
         return None
 
-    def _sync_crosshairs(self, mouse_x: float):  # ruff: ignore[missing-return-type-private-function]
-        """Synchronize crosshairs between panels."""
+    def _sync_crosshairs(self, panel: str, x: float, y: float) -> None:
+        """Synchronize crosshairs between panels.
+
+        Parameters
+        ----------
+        panel : `str`
+            Which panel the click came from: ``"image"`` or
+            ``"spectrum"``.
+        x : `float`
+            Data-space X coordinate of the click, in the source
+            panel's own axis.
+        y : `float`
+            Data-space Y coordinate of the click, in the source
+            panel's own axis.
+        """
         if self.active_star_index >= len(self.stellar_objects):
             return
         obj = self.stellar_objects[self.active_star_index]
         if self.mode != "spectroscopy":
             return
-        rect = getattr(obj, "rectangle", None) if hasattr(obj, "star_data") else obj.get("rectangle")
-        angle = (
-            getattr(obj, "dispersion_angle", 0.0)
-            if hasattr(obj, "star_data")
-            else obj.get("dispersion_angle", 0.0)
-        )
+        rect = _get_spectroscopy_field(obj, "rectangle")
+        angle = _get_spectroscopy_field(obj, "dispersion_angle", 0.0)
         if rect is None:
             return
+        rect_center_x, rect_center_y, _rect_width, _rect_height = rect
 
-        x0 = (
-            obj.star_data.get("xcentroid", obj.star_data.get("x_centroid"))
-            if hasattr(obj, "star_data")
-            else obj.get("xcentroid", obj.get("x_centroid", 0.0))
-        )
-        y0 = (
-            obj.star_data.get("ycentroid", obj.star_data.get("y_centroid"))
-            if hasattr(obj, "star_data")
-            else obj.get("ycentroid", obj.get("y_centroid", 0.0))
-        )
+        if panel == "image":
+            pt_x, pt_y = x, y
+        else:
+            x0 = (
+                obj.star_data.get("xcentroid", obj.star_data.get("x_centroid"))
+                if hasattr(obj, "star_data")
+                else obj.get("xcentroid", obj.get("x_centroid", 0.0))
+            )
+            y0 = (
+                obj.star_data.get("ycentroid", obj.star_data.get("y_centroid"))
+                if hasattr(obj, "star_data")
+                else obj.get("ycentroid", obj.get("y_centroid", 0.0))
+            )
+            xr, yr = rotate_point(x, 0.0, angle)
+            pt_x = x0 + xr
+            pt_y = y0 + yr
 
-        xr, yr = rotate_point(mouse_x, 0.0, angle)
-        pt_x = x0 + xr
-        pt_y = y0 + yr
-
-        data = (
-            getattr(obj, "spectrum_data_processed", {})
-            if hasattr(obj, "star_data")
-            else obj.get("spectrum_data_processed", {})
-        )
-        wavelengths = data.get("wavelengths_angstrom")
+        wavelengths = _get_spectroscopy_field(obj, "wavelengths_angstrom")
         if wavelengths is not None and len(wavelengths) > 0:
-            rel_x = map_point_to_relative_x(pt_x, pt_y, rect, angle)
+            rel_x = map_point_to_relative_x(pt_x, pt_y, rect_center_x, rect_center_y, angle)
             idx = max(0, min(int(rel_x), len(wavelengths) - 1))
             wavelength_val = wavelengths[idx]
             self.interaction.update_spectrum_crosshair(wavelength_val)

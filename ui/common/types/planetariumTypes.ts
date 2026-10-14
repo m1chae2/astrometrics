@@ -20,9 +20,11 @@ export interface PlanetariumSource {
   name: string;
   spectralType?: string;
   magnitude?: number;
+  /** The library's verdict that `magnitude` is a real catalog magnitude (not missing, 0 or instrumental). */
+  hasCatalogMagnitude?: boolean;
   hasSpectra: boolean;
   hasPhotometry: boolean;
-  type?: "star" | "target";
+  type?: "star" | "target" | "alignment";
   altitude?: number;
   azimuth?: number;
   hourAngle?: number;
@@ -33,9 +35,13 @@ export interface PlanetariumSource {
   transitTime?: string;
   aboveHorizon?: boolean;
   /** Online catalog driver that produced this source. Undefined for local library sources. */
-  catalogSource?: 'gaia' | 'hipparcos';
+  catalogSource?: 'deep_stars' | 'hipparcos';
   stackedImage?: string;
   fieldOfView?: string;
+  /** Associated alignment attempt metadata when type === 'alignment'. */
+  alignmentAttempt?: import('./backendTypes').AlignmentAttempt;
+  /** The library's per-target alignment session when type === 'alignment'. */
+  alignmentSession?: import('./backendTypes').AlignmentTargetSession;
 }
 
 /**
@@ -61,27 +67,6 @@ export interface ObserverLocation {
   latitude: number;
   longitude: number;
   elevation: number;
-}
-
-/**
- * PlanetariumVisibilityItem Interface
- *
- * Defines the visibility results for a specific astronomical source/target.
- */
-export interface PlanetariumVisibilityItem {
-  id: string;
-  name: string;
-  ra: string;
-  dec: string;
-  altitude: number;
-  azimuth: number;
-  hour_angle: number;
-  flip_required: boolean;
-  time_to_flip_seconds: number;
-  rise_time: string;
-  set_time: string;
-  transit_time: string;
-  above_horizon: boolean;
 }
 
 /**

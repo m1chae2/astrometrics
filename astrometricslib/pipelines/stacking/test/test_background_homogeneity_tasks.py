@@ -7,13 +7,13 @@ patterns modeled on real sessions.
 
 from dataclasses import dataclass
 
-from astrometricslib.pipelines.stacking.background_homogeneity import (
+from astrometricslib.pipelines.stacking.pre_processing.background_homogeneity import (
     detect_background_split,
     find_dominant_background_subset,
 )
 
 
-def test_detect_background_split_flags_a_real_cloud_event_pattern():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_background_split_flags_a_real_cloud_event_pattern() -> None:
     """Verifies a sudden background change (like clouds) is detected.
 
     Simulates a step-change in background brightness to test the detector.
@@ -30,7 +30,7 @@ def test_detect_background_split_flags_a_real_cloud_event_pattern():  # ruff: ig
     assert result["gap_ratio"] > 4.0
 
 
-def test_detect_background_split_ignores_homogeneous_session():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_background_split_ignores_homogeneous_session() -> None:
     """Verify a tight, homogeneous background range isn't flagged.
 
     Modeled on M 13's clean session.
@@ -39,7 +39,7 @@ def test_detect_background_split_ignores_homogeneous_session():  # ruff: ignore[
     assert detect_background_split(backgrounds) is None
 
 
-def test_detect_background_split_ignores_gradual_drift():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_background_split_ignores_gradual_drift() -> None:
     """Verify wide but gradual, continuous background drift isn't flagged.
 
     Modeled on M 81: its real session ranged 244-4512 ADU across
@@ -51,10 +51,17 @@ def test_detect_background_split_ignores_gradual_drift():  # ruff: ignore[missin
     assert detect_background_split(backgrounds) is None
 
 
-def test_detect_background_split_handles_too_few_frames():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_detect_background_split_handles_too_few_frames() -> None:
     """Verify empty and single-frame inputs are handled without raising."""
     assert detect_background_split([]) is None
     assert detect_background_split([500.0]) is None
+
+
+@dataclass
+class _Measurements:
+    """Minimal stand-in for `FrameMeasurements`."""
+
+    background_level: float | None
 
 
 @dataclass
@@ -64,8 +71,19 @@ class _Frame:
     path: str
     background_level: float | None
 
+    @property
+    def measurements(self) -> _Measurements:
+        """Wrap `background_level` as a `FrameMeasurements` stand-in.
 
-def test_a_lone_washed_out_frame_is_excluded_not_stacked():  # ruff: ignore[missing-return-type-undocumented-public-function]
+        Returns
+        -------
+        measurements : `_Measurements`
+            A stand-in carrying this frame's `background_level`.
+        """
+        return _Measurements(background_level=self.background_level)
+
+
+def test_a_lone_washed_out_frame_is_excluded_not_stacked() -> None:
     """Verify a lone washed-out frame is excluded.
 
     Simulates a mostly good session with one bad frame to ensure the
@@ -82,7 +100,7 @@ def test_a_lone_washed_out_frame_is_excluded_not_stacked():  # ruff: ignore[miss
     assert summary["high_group_count"] == 1
 
 
-def test_a_homogeneous_session_keeps_every_frame():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_a_homogeneous_session_keeps_every_frame() -> None:
     """Verify no frames are dropped when there is no split to act on."""
     frames = [_Frame(f"f_{i}.fits", 300 + i * 4) for i in range(15)]
     kept, excluded, summary = find_dominant_background_subset(frames)
@@ -92,7 +110,7 @@ def test_a_homogeneous_session_keeps_every_frame():  # ruff: ignore[missing-retu
     assert summary is None
 
 
-def test_the_cloudy_majority_wins_over_a_clean_minority():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_the_cloudy_majority_wins_over_a_clean_minority() -> None:
     """Verify the larger group is kept even when it's the brighter sky.
 
     Homogeneity is the goal, not the lowest background -- a session that
@@ -107,7 +125,7 @@ def test_the_cloudy_majority_wins_over_a_clean_minority():  # ruff: ignore[missi
     assert summary is not None
 
 
-def test_unmeasured_frames_are_never_excluded():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_unmeasured_frames_are_never_excluded() -> None:
     """Verify a failed background measurement doesn't discard a frame.
 
     background_level is None only when measurement raised, which is not
@@ -122,6 +140,6 @@ def test_unmeasured_frames_are_never_excluded():  # ruff: ignore[missing-return-
     assert [f.path for f in excluded] == ["washed_out.fits"]
 
 
-def test_an_empty_frame_list_is_handled():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_an_empty_frame_list_is_handled() -> None:
     """Verify the empty case returns empty groups rather than raising."""
     assert find_dominant_background_subset([]) == ([], [], None)

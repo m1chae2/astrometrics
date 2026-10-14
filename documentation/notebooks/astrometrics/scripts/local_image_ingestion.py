@@ -79,7 +79,8 @@ def run_ingestion() -> None:
         )
 
     try:
-        frame_record = astrometrics.targets.add_frame(target, path=image_path, role=arguments.role)
+        astrometrics.targets.reindex_frames(target, paths=[image_path], role=arguments.role)
+        frame_record = next(frame for frame in target.frames if frame.path == image_path)
         print("Success! Registered Frame:")
         print(f"  Path: {frame_record.path}")
         print(f"  Filter: {frame_record.filter.name if frame_record.filter else 'None'}")

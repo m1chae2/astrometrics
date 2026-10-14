@@ -10,7 +10,10 @@ REQ: SYS-1.0, BKD-5.3
 import asyncio
 import logging
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from backend.services.infrastructure.socket_manager import SocketManager
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +26,7 @@ class AstrometricsService:
     state changes to the UI via SocketManager.
     """
 
-    def __init__(self, socket_manager):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, socket_manager: SocketManager) -> None:
         """Initialize the service with an injected socket manager.
 
         Parameters
@@ -37,7 +40,7 @@ class AstrometricsService:
         self._loop = None
         try:
             self._loop = asyncio.get_event_loop()
-        except Exception as exc:
+        except RuntimeError as exc:
             logger.debug("No event loop available at construction time: %s", exc)
 
         # Unified System State
@@ -126,7 +129,7 @@ class AstrometricsService:
         if not self._loop:
             try:
                 self._loop = asyncio.get_running_loop()
-            except Exception as exc:
+            except RuntimeError as exc:
                 logger.debug("No running event loop available: %s", exc)
 
         if self._loop and self._loop.is_running():

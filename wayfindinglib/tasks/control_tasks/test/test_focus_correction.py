@@ -4,11 +4,12 @@ Description: Verifies a known minimum is recovered from a synthetic
 V-curve, an ill-conditioned fit is rejected without moving, a fitted
 minimum outside the sampled span is clamped to it, and every sampled
 position is approached from one direction -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.models.equipment_and_site.focus_model import ApproachDirection
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.models.session.correction_result import FocusCurvePoint
@@ -29,7 +30,7 @@ def _v_curve(vertex_position: float, positions: list[float]) -> list[FocusCurveP
     ]
 
 
-def test_recovers_known_minimum_from_synthetic_v_curve():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovers_known_minimum_from_synthetic_v_curve() -> None:
     """Verify a clean parabola recovers its known vertex position."""
     curve = _v_curve(5000.0, [4900.0, 4950.0, 5000.0, 5050.0, 5100.0])
     config = CorrectionConfig(focus_fit_quality_floor=0.90)
@@ -43,7 +44,7 @@ def test_recovers_known_minimum_from_synthetic_v_curve():  # ruff: ignore[missin
     assert correction.fit_quality > 0.99
 
 
-def test_ill_conditioned_fit_is_rejected_without_moving():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_ill_conditioned_fit_is_rejected_without_moving() -> None:
     """Verify a noisy, non-parabolic curve is rejected and does not move."""
     curve = [
         FocusCurvePoint(focuser_position=4900, measured_fwhm_px=3.5, star_count=10),
@@ -62,7 +63,7 @@ def test_ill_conditioned_fit_is_rejected_without_moving():  # ruff: ignore[missi
     assert correction.selected_position == 4900
 
 
-def test_fitted_minimum_outside_span_is_clamped():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fitted_minimum_outside_span_is_clamped() -> None:
     """Verify a vertex beyond the sampled range clamps to the sampled edge."""
     # True vertex at 10000, but only sampled on the monotonically
     # decreasing side (100-500) -- the raw fit would extrapolate past 500.
@@ -77,17 +78,17 @@ def test_fitted_minimum_outside_span_is_clamped():  # ruff: ignore[missing-retur
     assert correction.selected_position == 500
 
 
-def test_requires_at_least_three_points():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_requires_at_least_three_points() -> None:
     """Verify fewer than 3 sampled points raises rather than proceeding."""
     curve = _v_curve(5000.0, [4900.0, 5000.0])
     config = CorrectionConfig()
-    with pytest.raises(ValueError, match="at least 3"):
+    with pytest.raises(InvalidArgumentError, match="at least 3"):
         compute_focus_correction(
             "run-4", curve, starting_position=4900, trigger_reason="scheduled", config=config
         )
 
 
-def test_sample_focus_curve_approaches_every_point_from_one_direction():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_sample_focus_curve_approaches_every_point_from_one_direction() -> None:
     """Verify every focuser move after run-up proceeds monotonically inward."""
     positions_commanded: list[int] = []
     current_position = {"value": 5000}
@@ -99,7 +100,7 @@ def test_sample_focus_curve_approaches_every_point_from_one_direction():  # ruff
     def get_position() -> int:
         return current_position["value"]
 
-    def measure_fwhm():  # ruff: ignore[missing-return-type-private-function]
+    def measure_fwhm() -> tuple[float, int] | None:
         return (2.0, 20)
 
     curve = sample_focus_curve(
@@ -120,7 +121,7 @@ def test_sample_focus_curve_approaches_every_point_from_one_direction():  # ruff
     )
 
 
-def test_sample_focus_curve_skips_failed_measurements():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_sample_focus_curve_skips_failed_measurements() -> None:
     """Verify a position where measurement fails is dropped from the curve."""
     current_position = {"value": 5000}
     call_count = {"value": 0}
@@ -131,7 +132,7 @@ def test_sample_focus_curve_skips_failed_measurements():  # ruff: ignore[missing
     def get_position() -> int:
         return current_position["value"]
 
-    def measure_fwhm():  # ruff: ignore[missing-return-type-private-function]
+    def measure_fwhm() -> tuple[float, int] | None:
         call_count["value"] += 1
         if call_count["value"] == 2:
             return None

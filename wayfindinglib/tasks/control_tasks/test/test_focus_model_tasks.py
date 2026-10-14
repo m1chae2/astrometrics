@@ -2,11 +2,12 @@
 
 Description: Verifies backlash, thermal coefficient, and per-filter
 offset measurement recover known values from simulated sequences --
-the case `Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+the case `Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest
 
+from astrometricslib import InvalidArgumentError
 from wayfindinglib.tasks.control_tasks.focus_model_tasks import (
     fit_thermal_coefficient_steps_per_c,
     measure_backlash_steps,
@@ -14,17 +15,17 @@ from wayfindinglib.tasks.control_tasks.focus_model_tasks import (
 )
 
 
-def test_measure_backlash_steps_recovers_known_lost_motion():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_backlash_steps_recovers_known_lost_motion() -> None:
     """Verify the gap between expected and actual position is the backlash."""
     assert measure_backlash_steps(expected_position=5000, actual_position=4950) == 50
 
 
-def test_measure_backlash_steps_is_zero_for_a_perfect_reversal():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_backlash_steps_is_zero_for_a_perfect_reversal() -> None:
     """Verify no lost motion yields zero backlash steps."""
     assert measure_backlash_steps(expected_position=5000, actual_position=5000) == 0
 
 
-def test_fit_thermal_coefficient_recovers_known_slope():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fit_thermal_coefficient_recovers_known_slope() -> None:
     """Verify a clean linear temperature/position curve recovers slope."""
     # 10 steps per degree C, positive slope.
     pairs = [(0.0, 5000), (5.0, 5050), (10.0, 5100), (-5.0, 4950)]
@@ -32,13 +33,13 @@ def test_fit_thermal_coefficient_recovers_known_slope():  # ruff: ignore[missing
     assert coefficient == pytest.approx(10.0)
 
 
-def test_fit_thermal_coefficient_requires_at_least_two_pairs():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_fit_thermal_coefficient_requires_at_least_two_pairs() -> None:
     """Verify fewer than 2 recorded pairs raises rather than proceeding."""
-    with pytest.raises(ValueError, match="at least 2"):
+    with pytest.raises(InvalidArgumentError, match="at least 2"):
         fit_thermal_coefficient_steps_per_c([(0.0, 5000)])
 
 
-def test_measure_filter_offsets_recovers_known_offsets():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_filter_offsets_recovers_known_offsets() -> None:
     """Verify offsets are relative to the baseline filter, which is omitted."""
     offsets = measure_filter_offsets(
         "Luminance",
@@ -49,7 +50,7 @@ def test_measure_filter_offsets_recovers_known_offsets():  # ruff: ignore[missin
     assert "Luminance" not in offsets_by_filter
 
 
-def test_measure_filter_offsets_requires_baseline_measured():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_measure_filter_offsets_requires_baseline_measured() -> None:
     """Verify a missing baseline filter measurement raises."""
-    with pytest.raises(ValueError, match="Luminance"):
+    with pytest.raises(InvalidArgumentError, match="Luminance"):
         measure_filter_offsets("Luminance", {"Red": 5020})

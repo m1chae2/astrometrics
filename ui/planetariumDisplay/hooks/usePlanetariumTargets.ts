@@ -4,50 +4,26 @@
  *
  */
 
-import { useState, useEffect } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { callBackend } from '../../common/services/backendApi';
 import { PlanetariumTarget } from '../../common/types/planetariumTypes';
 
 /**
- * Fetches all observation targets with associated stacked FITS image metadata.
+ * Fetches all observation targets, used for reticle bounds and selection on
+ * the Planetarium sky map.
  *
- * Targets are fetched once on mount. The stacked image paths in each target are
- * consumed by FitsLoaderItem for the FITS overlay pipeline.
+ * Targets are fetched once on mount, and the request is cancelled if the
+ * component unmounts before it resolves.
  *
  * @func usePlanetariumTargets
  * @returns {{ targets: PlanetariumTarget[]; loading: boolean; error: string | null }}
  */
 export const usePlanetariumTargets = () => {
-  const [targets, setTargets] = useState<PlanetariumTarget[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error } = useBackendFetch<PlanetariumTarget[]>(
+    (signal) => callBackend('planetarium:get_targets', {}, { signal }),
+    [],
+    { errorMessage: 'Failed to fetch planetarium targets' }
+  );
 
-  useEffect(() => {
-    let active = true;
-    const fetchTargets = async () => {
-      try {
-        setLoading(true);
-        const data = await callBackend('planetarium:get_targets', {});
-        if (active) {
-          setTargets(data);
-          setError(null);
-        }
-      } catch (err: any) {
-        if (active) {
-          setError(err?.message || 'Failed to fetch planetarium targets');
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchTargets();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return { targets, loading, error };
+  return { targets: data ?? [], loading, error };
 };

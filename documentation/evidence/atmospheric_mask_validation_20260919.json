@@ -1,0 +1,210 @@
+{
+  "description": "Where the atmospheric bands are in this setup's spectra, and what leaving them out does to spectral classification. Used to set ATMOSPHERIC_BANDS_ANGSTROM in atmospheric_mask.py.",
+  "method": "Star spectrum / matching reference spectrum blurred to ~43 A / smooth trend (600 A running median). Dips deeper than 3% between 5000 and 8400 A. Vega master stack (A0V, 2026-05-24) and the second star of the Alcor pair (A5V, 2026-05-02), same camera and telescope.",
+  "dips_found": {
+    "Vega": [
+      [
+        6882,
+        6915,
+        4.6
+      ],
+      [
+        7510,
+        7521,
+        3.0
+      ],
+      [
+        7543,
+        7686,
+        16.0
+      ],
+      [
+        7751,
+        7773,
+        5.3
+      ],
+      [
+        7905,
+        7916,
+        3.3
+      ],
+      [
+        8123,
+        8298,
+        11.5
+      ]
+    ],
+    "Alcor_pair_star_2": [
+      [
+        5449,
+        5461,
+        3.2
+      ],
+      [
+        7521,
+        7697,
+        14.4
+      ],
+      [
+        7740,
+        7762,
+        4.1
+      ],
+      [
+        7894,
+        7905,
+        3.5
+      ],
+      [
+        8134,
+        8167,
+        4.7
+      ],
+      [
+        8200,
+        8211,
+        4.3
+      ],
+      [
+        8254,
+        8265,
+        3.4
+      ]
+    ],
+    "format": "[start_A, end_A, deepest_percent]"
+  },
+  "not_seen_above_3_percent": [
+    "oxygen band near 6280 A",
+    "water band near 7160-7340 A"
+  ],
+  "not_included_in_mask": "Dips at about 7740-7773 A and 7894-7916 A appear in both stars at 3-5% but are not in a named atmospheric band; left out of the mask.",
+  "bands_chosen_angstrom": {
+    "oxygen B band": [
+      6860,
+      6940
+    ],
+    "oxygen A band": [
+      7490,
+      7720
+    ],
+    "water band": [
+      8100,
+      8320
+    ]
+  },
+  "classification_test": {
+    "stars": "11 stored spectra with a catalog type and QE-corrected data; instrument response re-derived from the Vega stack for each upper limit (Vega is not independent of it).",
+    "mean_steps_off_by_upper_limit_mask_off_to_on": {
+      "7000": [
+        7.4,
+        8.5
+      ],
+      "7300": [
+        9.3,
+        9.3
+      ],
+      "7600": [
+        11.0,
+        10.4
+      ],
+      "7800": [
+        11.2,
+        10.9
+      ],
+      "8000": [
+        11.3,
+        11.0
+      ]
+    },
+    "true_type_in_top_3_off_to_on": {
+      "7000": [
+        6,
+        5
+      ],
+      "7300": [
+        3,
+        3
+      ],
+      "7600": [
+        2,
+        2
+      ],
+      "8000": [
+        2,
+        2
+      ]
+    },
+    "letter_right_off_to_on": {
+      "7000": [
+        6,
+        5
+      ],
+      "7300": [
+        5,
+        5
+      ],
+      "7600": [
+        4,
+        4
+      ],
+      "8000": [
+        4,
+        4
+      ]
+    },
+    "good_match_off_to_on": {
+      "7000": [
+        5,
+        6
+      ],
+      "7300": [
+        4,
+        4
+      ],
+      "7600": [
+        3,
+        3
+      ],
+      "8000": [
+        3,
+        3
+      ]
+    },
+    "no_star_worse_at_or_above_7300": true,
+    "worse_at_7000": [
+      "g UMa (0 -> 2 steps)",
+      "2MASS J05182233+4554089 (1 -> 8)",
+      "2MASS J05192973+4616552 (7 -> 10)"
+    ],
+    "k_stars_still_misclassified_as_M_with_mask_at_8000": {
+      "BD+36 2764": 13,
+      "HD 150293": 11,
+      "HD 151086": 10
+    },
+    "standards_mask_off_to_on": {
+      "Vega_circular": {
+        "7000": "A0V -> A0V",
+        "7600": "B9V -> A0V",
+        "8000": "A0V -> B9V"
+      },
+      "Alcor_pair_star_2_A5V": {
+        "7000": "A3V -> A3V",
+        "7600": "A5V -> A5V",
+        "8000": "A5V -> A5V"
+      },
+      "Alcor_pair_star_1_A2V": "F2V at every setting, mask on or off"
+    }
+  },
+  "feature_detector_test": {
+    "description": "Mask applied as NaN before detect_named_features, 131 stored spectra, no reference type.",
+    "feature_tests": 1016,
+    "verdict_changed": 127,
+    "verdict_changed_percent": 12.5,
+    "p_value_shift_median": -0.0015,
+    "p_value_shift_5th_95th_percentile": [
+      -0.187,
+      0.161
+    ],
+    "decision": "Mask not applied to the feature detector."
+  }
+}

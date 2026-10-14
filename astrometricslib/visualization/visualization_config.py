@@ -36,6 +36,12 @@ class VisualizationConfig(BaseModel):
     balmer_color : `str`
         Color used to highlight Balmer series lines (default
         ``"cyan"``).
+    matched_track_color : `str`
+        Color used for an asteroid-detection track matched to a known
+        body (default ``"chartreuse"``).
+    unconfirmed_track_color : `str`
+        Color used for an asteroid-detection track not matched to any
+        known body (default ``"orange"``).
     button_color : `str`
         Background color for UI buttons (default ``"#222222"``).
     button_hover : `str`
@@ -62,6 +68,8 @@ class VisualizationConfig(BaseModel):
     rectangle_color: str = Field(default="lime")
     crosshair_color: str = Field(default="red")
     balmer_color: str = Field(default="cyan")
+    matched_track_color: str = Field(default="chartreuse")
+    unconfirmed_track_color: str = Field(default="orange")
     button_color: str = Field(default="#222222")
     button_hover: str = Field(default="#444444")
 

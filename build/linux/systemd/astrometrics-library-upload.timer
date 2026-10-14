@@ -1,0 +1,13 @@
+# Template, installed by build/linux/install_backup_timer.sh.
+# Safety net for the watcher: upload the library 5 minutes after login and
+# every 4 hours while the laptop is on, catching changes the watcher missed.
+[Unit]
+Description=Upload the Astrometrics library to Google Drive every 4 hours
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=4h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

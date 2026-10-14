@@ -4,7 +4,7 @@ Description: `execute(trigger, steps)` runs the six ordered steps of
 `Wayfinding_Library_Architecture.md` Table 6 -- abandon exposure, stop
 guiding, park mount, close enclosure, warm sensor, close session --
 recording each into a `SafeStateOutcome`, per
-`Wayfinding_Library_Architecture.md` §2.5.7.
+`Wayfinding_Library_Architecture.md`.
 
 Each step is attempted even if an earlier one failed: a mount that
 will not park must not prevent the attempt to warm the sensor.
@@ -23,16 +23,19 @@ completed safe state is diagnosable rather than an unknown condition.
 
 Every hardware-facing step is injected as a callable (`SafeStateSteps`)
 rather than imported, so this module carries no hardware import and is
-exercisable with no Execution package present (§2.5.9, "Safety Runs
+exercisable with no Execution package present ("Safety Runs
 Without Execution").
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
 from wayfindinglib.tasks.control_tasks.enclosure_control import mount_within_clearance
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +70,9 @@ def _attempt(action: Callable[[], bool]) -> bool:
     try:
         return bool(action())
     except Exception:
+        # A safety step must never stop the steps after it, so any error is
+        # caught here. The traceback is logged and the step counts as failed.
+        logger.exception("Safe-state step %s failed", getattr(action, "__name__", action))
         return False
 
 

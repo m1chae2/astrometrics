@@ -3,7 +3,7 @@
 Description: One episode where this system's own guiding, under
 `AUTHORITATIVE` control, could not measure a valid star-centroid drift
 for a guide frame, and the bounded reacquisition attempted in response
-(`Wayfinding_Library_Architecture.md` §2.4.6's "recovery is
+(`Wayfinding_Library_Architecture.md`'s "recovery is
 deliberately shallow" precedent, applied here to guiding rather than
 device lifecycle). Distinct from `MeridianFlipOutcome
 .guide_reacquire_attempts` -- that field is a bounded reacquisition

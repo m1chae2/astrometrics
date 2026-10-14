@@ -3,14 +3,17 @@
 Description: Verifies the six steps run in order even when earlier
 ones fail, enclosure closure is skipped (not attempted) when the mount
 did not park, and `failed_step` records the first failure -- the cases
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
+
+from collections.abc import Callable
+from typing import Any, Never
 
 from wayfindinglib.models.equipment_and_site.enclosure import Enclosure, EnclosureType
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps, execute
 
 
-def _enclosure(**overrides) -> Enclosure:  # ruff: ignore[missing-type-kwargs]
+def _enclosure(**overrides: Any) -> Enclosure:
     defaults = {
         "id": "enc-1",
         "enclosure_type": EnclosureType.ROLL_OFF_ROOF,
@@ -23,7 +26,7 @@ def _enclosure(**overrides) -> Enclosure:  # ruff: ignore[missing-type-kwargs]
     return Enclosure(**defaults)
 
 
-def _steps(**overrides) -> SafeStateSteps:  # ruff: ignore[missing-type-kwargs]
+def _steps(**overrides: Any) -> SafeStateSteps:
     defaults = {
         "abandon_exposure": lambda: True,
         "stop_guiding": lambda: True,
@@ -38,7 +41,7 @@ def _steps(**overrides) -> SafeStateSteps:  # ruff: ignore[missing-type-kwargs]
     return SafeStateSteps(**defaults)
 
 
-def test_all_steps_succeed_records_no_failure():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_all_steps_succeed_records_no_failure() -> None:
     """Verify a fully successful run records every step and no failure."""
     outcome = execute("unsafe_verdict", _steps())
     assert outcome.exposure_abandoned is True
@@ -51,7 +54,7 @@ def test_all_steps_succeed_records_no_failure():  # ruff: ignore[missing-return-
     assert outcome.trigger == "unsafe_verdict"
 
 
-def test_park_failure_skips_enclosure_close_but_continues():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_park_failure_skips_enclosure_close_but_continues() -> None:
     """Verify a failed park skips enclosure close but continues other steps."""
     calls = []
     outcome = execute(
@@ -71,7 +74,7 @@ def test_park_failure_skips_enclosure_close_but_continues():  # ruff: ignore[mis
     assert outcome.failed_step == "mount"
 
 
-def test_first_failure_is_recorded_not_last():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_first_failure_is_recorded_not_last() -> None:
     """Verify failed_step names the first failure, not a later one."""
     outcome = execute(
         "watchdog",
@@ -80,10 +83,10 @@ def test_first_failure_is_recorded_not_last():  # ruff: ignore[missing-return-ty
     assert outcome.failed_step == "guiding"
 
 
-def test_exception_in_a_step_is_treated_as_failure_and_does_not_abort():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_exception_in_a_step_is_treated_as_failure_and_does_not_abort() -> None:
     """Verify a step that raises is a failure and later steps still run."""
 
-    def failing_park():  # ruff: ignore[missing-return-type-private-function]
+    def failing_park() -> Never:
         raise RuntimeError("mount not responding")
 
     outcome = execute("watchdog", _steps(park_mount=failing_park))
@@ -93,7 +96,7 @@ def test_exception_in_a_step_is_treated_as_failure_and_does_not_abort():  # ruff
     assert outcome.session_closed is True
 
 
-def test_mount_outside_clearance_after_park_skips_enclosure_and_flags_it():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_mount_outside_clearance_after_park_skips_enclosure_and_flags_it() -> None:
     """Verify a parked-but-outside-clearance report skips closure."""
     outcome = execute(
         "unsafe_verdict",
@@ -104,12 +107,12 @@ def test_mount_outside_clearance_after_park_skips_enclosure_and_flags_it():  # r
     assert outcome.failed_step == "enclosure"
 
 
-def test_steps_run_in_documented_order():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_steps_run_in_documented_order() -> None:
     """Verify the six steps are attempted in the documented order."""
     call_order = []
 
-    def tracker(name):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
-        def _call():  # ruff: ignore[missing-return-type-private-function]
+    def tracker(name: str) -> Callable[[], bool]:
+        def _call() -> bool:
             call_order.append(name)
             return True
 

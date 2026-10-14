@@ -1,5 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+/**
+ * @file TargetContext.tsx
+ * @description Context provider and hooks for target selection and metadata sharing across application displays.
+ * Synchronizes selected targets with local storage and global application events.
+ */
+
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { on as onEvent } from '../utils/eventBus';
+import { DisplayActiveContext } from './DisplayActiveContext';
 
 export type InvalidationScope = 'targets' | 'frames' | 'all';
 
@@ -26,22 +33,47 @@ export interface TargetContextValue {
     setDecShared: (val: string) => void;
 }
 
-/**
- * Alias for TargetContextValue for backward compatibility with older hook signatures.
- */
-export type UseTargetSelectionResult = TargetContextValue;
-
 const TargetContext = createContext<TargetContextValue | undefined>(undefined);
 
 interface TargetProviderProps {
     children: ReactNode;
 }
 
+/**
+ * Top-level provider for active target selection state and metadata synchronization.
+ */
 export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
-    const [selectedTarget, setSelectedTarget] = useState<string>('');
-    const [pendingTarget, setPendingTarget] = useState<string>('');
+    const [selectedTarget, setSelectedTargetState] = useState<string>(() => {
+        try {
+            return window.localStorage.getItem('selectedTarget') || '';
+        } catch {
+            return '';
+        }
+    });
+    const [pendingTarget, setPendingTargetState] = useState<string>(() => {
+        try {
+            return window.localStorage.getItem('selectedTarget') || '';
+        } catch {
+            return '';
+        }
+    });
     const [reloadKey, setReloadKey] = useState<number>(0);
     const [framesReloadKey, setFramesReloadKey] = useState<number>(0);
+
+    const setSelectedTarget = useCallback((id: string) => {
+        setSelectedTargetState(id);
+        try {
+            if (id) {
+                window.localStorage.setItem('selectedTarget', id);
+            }
+        } catch {
+            // Ignore
+        }
+    }, []);
+
+    const setPendingTarget = useCallback((id: string) => {
+        setPendingTargetState(id);
+    }, []);
 
     // Shared editing state
     const [catalogId, setCatalogId] = useState<string>('');
@@ -61,6 +93,20 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     const forceReload = useCallback(() => {
         invalidate('targets');
     }, [invalidate]);
+
+    // Synchronize external target selection events (e.g. from Astronomy Manager, Planetarium, or WebSocket)
+    useEffect(() => {
+        const handleTargetSelected = (event: Event) => {
+            const raw = (event as CustomEvent).detail;
+            const targetId = typeof raw === 'string' ? raw : raw?.targetId;
+            if (targetId) {
+                setSelectedTarget(targetId);
+                setPendingTarget(targetId);
+            }
+        };
+        window.addEventListener('astrometrics:targetSelected', handleTargetSelected);
+        return () => window.removeEventListener('astrometrics:targetSelected', handleTargetSelected);
+    }, [setSelectedTarget, setPendingTarget]);
 
     useEffect(() => {
         const detach = onEvent('targetsUpdated', () => {
@@ -101,6 +147,43 @@ export const TargetProvider: React.FC<TargetProviderProps> = ({ children }) => {
     );
 };
 
+interface DeferWhileHiddenProps {
+    /** Whether the display wrapped by this component is the one on screen. */
+    active: boolean;
+    children: ReactNode;
+}
+
+/**
+ * Keeps a hidden display from reacting to target changes.
+ *
+ * Every visited display stays mounted and is only hidden with CSS, so each
+ * click on a target used to make all of them fetch that target's data, even
+ * the ones nobody could see (about 20 network calls per click). While
+ * `active` is false this passes down the last target state the display saw
+ * while it was on screen; when the display is shown again it gets the
+ * current state and loads it then.
+ *
+ * @param props Whether the display is active, and the display itself.
+ * It also tells the display whether it is active (see `DisplayActiveContext`) so
+ * its pollers can pause while hidden.
+ *
+ * @return The children, inside a target context that holds still while hidden.
+ */
+export const DeferWhileHidden: React.FC<DeferWhileHiddenProps> = ({ active, children }) => {
+    const live = useContext(TargetContext);
+    const [lastSeen, setLastSeen] = useState(live);
+    useEffect(() => {
+        if (active) setLastSeen(live);
+    }, [active, live]);
+    // While active the live value is used directly; the saved copy is only read once hidden.
+    const value = active ? live : lastSeen;
+    return (
+        <DisplayActiveContext.Provider value={active}>
+            <TargetContext.Provider value={value}>{children}</TargetContext.Provider>
+        </DisplayActiveContext.Provider>
+    );
+};
+
 /**
  * Hook to consume the TargetContext.
  * @throws Error if used outside of a TargetProvider.
@@ -111,4 +194,12 @@ export const useTargetContext = (): TargetContextValue => {
         throw new Error('useTargetContext must be used within a TargetProvider');
     }
     return context;
+};
+
+/**
+ * Optional hook to consume TargetContext without throwing when unmounted in isolated tests.
+ * @returns TargetContextValue or undefined if outside a provider.
+ */
+export const useOptionalTargetContext = (): TargetContextValue | undefined => {
+    return useContext(TargetContext);
 };

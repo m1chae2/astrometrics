@@ -1,13 +1,20 @@
 """Filter wheel controller for INDI devices."""
 
+from typing import TYPE_CHECKING
+
+from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
+
 
 class FilterWheelController:
     """Manages filter wheel operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def get_names(self, device) -> list[str]:  # ruff: ignore[missing-type-function-argument]
+    def get_names(self, device: PyIndi.BaseDevice) -> list[str]:
         """Return a list of available filter names from the filter wheel.
 
         Returns
@@ -23,7 +30,7 @@ class FilterWheelController:
             return [name_element.getText() for name_element in names_property]
         return []
 
-    def resolve_name(self, device, filter_name: str) -> str | None:  # ruff: ignore[missing-type-function-argument]
+    def resolve_name(self, device: PyIndi.BaseDevice, filter_name: str) -> str | None:
         """Resolve a target filter name to the name supported by the device.
 
         Uses exact and prefix/fuzzy matches to bridge telescope control
@@ -65,7 +72,7 @@ class FilterWheelController:
                 return known_filter
         return None
 
-    def set_position(self, device, filter_name) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def set_position(self, device: PyIndi.BaseDevice, filter_name: str) -> bool:
         """Set the active filter on the filter wheel by slot number or name.
 
         Handles fuzzy matching for standard filters.
@@ -120,7 +127,7 @@ class FilterWheelController:
             except ValueError:
                 pass
 
-        # 2. Try Legacy/Text (Text Property)
+        # 2. Try the Text property
         filter_property = device.getText("FILTER_SLOT")
         if filter_property:
             filter_property[0].text = filter_name
@@ -129,7 +136,7 @@ class FilterWheelController:
 
         return False
 
-    def get_current_filter(self, device) -> str | None:  # ruff: ignore[missing-type-function-argument]
+    def get_current_filter(self, device: PyIndi.BaseDevice) -> str | None:
         """Return the current filter name, or None if unavailable.
 
         Falls back to the slot number as a string if no name is known.

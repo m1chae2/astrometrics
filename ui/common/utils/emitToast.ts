@@ -45,6 +45,25 @@ export function emitToast(
     } catch {
       // Ignore event dispatch failures.
     }
+
+    // Forward to native desktop notification if window is hidden/blurred or for error alerts
+    try {
+      if (typeof window !== 'undefined' && window.astrometrics?.app?.showNotification) {
+        const isHidden = typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
+        const isCritical = kind === 'error';
+        if (isHidden || isCritical) {
+          const capitalizedSource = source ? source.charAt(0).toUpperCase() + source.slice(1) : 'Observatory Alert';
+          const tag = source ? `${source.toLowerCase()}-status` : 'app-alert';
+          window.astrometrics.app.showNotification(capitalizedSource, text, {
+            urgency: isCritical ? 'critical' : 'normal',
+            tag,
+            timeoutType: isCritical ? 'never' : 'default',
+          });
+        }
+      }
+    } catch {
+      // Ignore notification failures.
+    }
   } catch {
     // Ignore any failures in the notification path.
   }

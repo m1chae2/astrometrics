@@ -11,10 +11,19 @@ import {
   type CallToolRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import { runFrontendTests, diagnoseCode, auditAccessibility, buildCheck } from "./tools.js";
+import { GAP_REPORT_GUIDANCE, currentProfile, findWithheldTools, loadManifest, refusalMessage } from "./profile.js";
 import * as path from "path";
+import * as fs from "fs";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Find project repo root
-const repoRoot = path.resolve(process.cwd());
+let repoRoot = path.resolve(process.cwd());
+if (!fs.existsSync(path.join(repoRoot, "package.json"))) {
+  repoRoot = path.resolve(__dirname, "../../..");
+}
 
 const server = new Server(
   {
@@ -25,16 +34,15 @@ const server = new Server(
     capabilities: {
       tools: {},
     },
+    instructions: GAP_REPORT_GUIDANCE,
   }
 );
 
 /**
  * ### Description
- * Registers the available tools schema to the client.
+ * Every tool this server declares, before the profile removes any.
  */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
+const TOOL_DEFINITIONS = [
       {
         name: "ui_run_tests",
         description: "Run the frontend unit test suite (vitest) to verify UI components integrity.",
@@ -67,7 +75,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
-    ],
+    ];
+
+/**
+ * ### Description
+ * The tools the manifest does not allow for the chosen profile, with the reason for each.
+ * The manifest sits next to the compiled `dist` folder.
+ */
+const withheldTools = findWithheldTools(
+  TOOL_DEFINITIONS.map((tool) => tool.name),
+  loadManifest(path.resolve(__dirname, "../tool_manifest.json")),
+  currentProfile()
+);
+
+/**
+ * ### Description
+ * Registers the tools the profile allows to the client.
+ */
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: TOOL_DEFINITIONS.filter((tool) => !withheldTools.has(tool.name)),
   };
 });
 
@@ -79,6 +106,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
   const { name } = request.params;
 
   try {
+    if (withheldTools.has(name)) {
+      throw new Error(refusalMessage(name, withheldTools.get(name)));
+    }
     switch (name) {
       case "ui_run_tests": {
         const result = await runFrontendTests(repoRoot);
@@ -105,7 +135,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         };
       }
       default:
-        throw new Error(`Unknown tool: ${name}`);
+        throw new Error(refusalMessage(name));
     }
   } catch (error: any) {
     return {

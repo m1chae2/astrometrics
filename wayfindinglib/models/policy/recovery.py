@@ -5,7 +5,7 @@ recovered before the observatory is taken to a safe state. Recovery is
 deliberately shallow -- it re-establishes a device's lifecycle state
 and nothing more, because a system that cannot see the observatory
 cannot distinguish a transient driver disconnection from a mechanical
-obstruction (`Wayfinding_Library_Architecture.md` §2.4.6). Exhausting
+obstruction (`Wayfinding_Library_Architecture.md`). Exhausting
 the attempt bound escalates to the safe-state sequence rather than to a
 deeper recovery strategy -- an unbounded retry is indistinguishable
 from a hang, and a hang is precisely what unattended operation cannot
@@ -49,9 +49,9 @@ class RecoveryAttempt(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    attempted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    outcome: DeviceSummaryState
-    detail: str = Field(default="")
+    attempted_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="attemptedAt")
+    outcome: DeviceSummaryState = Field(alias="outcome")
+    detail: str = Field(default="", alias="detail")
 
 
 class FaultRecord(BaseModel):
@@ -59,10 +59,10 @@ class FaultRecord(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    id: str
-    device_id: str
-    faulted_state: DeviceSummaryState
-    fault_detail: str = Field(default="")
-    attempts: list[RecoveryAttempt] = Field(default_factory=list)
-    recovered: bool = Field(default=False)
-    escalated_to_safe_state: bool = Field(default=False)
+    id: str = Field(alias="id")
+    device_id: str = Field(alias="deviceId")
+    faulted_state: DeviceSummaryState = Field(alias="faultedState")
+    fault_detail: str = Field(default="", alias="faultDetail")
+    attempts: list[RecoveryAttempt] = Field(default_factory=list, alias="attempts")
+    recovered: bool = Field(default=False, alias="recovered")
+    escalated_to_safe_state: bool = Field(default=False, alias="escalatedToSafeState")

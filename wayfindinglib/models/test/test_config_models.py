@@ -11,7 +11,7 @@ from wayfindinglib.models.planning.planning_config import PlanningConfig
 from wayfindinglib.models.session.correction_config import CorrectionConfig
 
 
-def test_planning_config_defaults_match_documented_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_planning_config_defaults_match_documented_values() -> None:
     """Verify PlanningConfig's defaults match Appendix A exactly."""
     config = PlanningConfig()
     assert config.night_window_time_step_min == pytest.approx(5.0)
@@ -23,7 +23,7 @@ def test_planning_config_defaults_match_documented_values():  # ruff: ignore[mis
     assert config.mosaic_panel_overlap_percent == pytest.approx(10.0)
 
 
-def test_correction_config_defaults_match_documented_values():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_correction_config_defaults_match_documented_values() -> None:
     """Verify CorrectionConfig's defaults match Appendix A exactly."""
     config = CorrectionConfig()
     assert config.guiding_aggressiveness == pytest.approx(0.7)

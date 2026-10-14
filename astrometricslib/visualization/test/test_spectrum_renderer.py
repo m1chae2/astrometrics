@@ -10,7 +10,7 @@ from astrometricslib.visualization.layers.spectrum_overlay import SpectrumOverla
 from astrometricslib.visualization.visualization_config import VisualizationConfig
 
 
-def test_spectrum_renderer_balmer_lines():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_spectrum_renderer_balmer_lines() -> None:
     """Tests that SpectrumOverlay correctly saves active data and renders.
 
     vertical Balmer lines when toggled on.

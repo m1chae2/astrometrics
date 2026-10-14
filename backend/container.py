@@ -3,6 +3,11 @@
 Constructs and holds the single `Container` instance (`container`) that
 `backend/routers/` reach through `backend.container.get_container()` to
 obtain fully wired service instances.
+
+Creating the `Container` builds nothing. `init_resources()` builds the
+services and `shutdown_resources()` stops them. The backend calls them from
+the app's lifespan in `backend/main_backend.py`, so importing that module
+starts nothing.
 """
 
 import os
@@ -11,12 +16,11 @@ from backend.services.analysis.analysis_orchestrator import AnalysisOrchestrator
 from backend.services.data.image_service import ImageService
 from backend.services.data.stellar_service import StellarService
 from backend.services.data.target_service import TargetService
+from backend.services.infrastructure.handoff_service import HandoffService
 from backend.services.infrastructure.maintenance_service import MaintenanceService
 from backend.services.infrastructure.notification_service import NotificationService
 from backend.services.infrastructure.sync_service import SyncService
-from backend.services.observatory.observatory_service import ObservatoryService
 from backend.services.observatory.target_imaging_executor import TargetImagingExecutor
-from backend.services.observatory.target_imaging_planner import TargetImagingPlanner
 from backend.services.observatory.telescope_service import TelescopeService
 from backend.services.processing.image_processing_service import ImageProcessingService
 from backend.services.processing.job_service import JobService
@@ -29,10 +33,12 @@ class Container:
     dependencies are properly wired and shared across the application.
     """
 
-    def __init__(self):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self) -> None:
+        """Start with every service unset; `init_resources` builds them."""
         # Core Infrastructure
         self.config_service = None
         self.indi_driver = None
+        self.indi_worker_client = None
         self.calibration_library = None
 
         # Domain Services
@@ -42,10 +48,12 @@ class Container:
         self.image_service = None
         self.image_processing_service = None
         self.sync_service = None
-        self.remote_service = None
         self.socket_manager = None
         self.telescope_service = None
         self.notification_service = None
+        self.handoff_service = None
+        self.settings_service = None
+        self.equipment_service = None
         self.scripting_service = None
         self.ingestion_service = None
         self.system_status_service = None
@@ -56,22 +64,46 @@ class Container:
         self.job_repository = None
         self.job_service = None
         self.maintenance_service = None
-        self.target_imaging_planner = None
         self.target_imaging_executor = None
         self.execution_service = None
         self.stellar_service = None
 
         self.initialized = False
 
-    def init_resources(self):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def init_resources(self) -> None:
         """Initialize all resources.
 
         Safe to call multiple times; subsequent calls are no-ops once
-        `initialized` is `True`.
+        `initialized` is `True`. If building fails partway, whatever was
+        started (the maintenance thread, the INDI worker client) is stopped
+        and the container is reset, so a later call starts clean instead of
+        building a second set of services.
+        The error from the failing step is raised again after the cleanup.
         """
         if self.initialized:
             return
+        try:
+            self._build_resources()
+        except Exception:
+            self.shutdown_resources()
+            self.__init__()
+            raise
 
+    def shutdown_resources(self) -> None:
+        """Stop the background threads and processes the container started.
+
+        Stops the maintenance thread and the INDI worker client. Safe to
+        call more than once, and safe on a container that was never
+        initialized or only partly built.
+        """
+        if self.maintenance_service is not None:
+            self.maintenance_service.stop()
+        if self.indi_worker_client is not None:
+            self.indi_worker_client.stop()
+        self.initialized = False
+
+    def _build_resources(self) -> None:
+        """Construct and wire every service, then start maintenance."""
         # 1. Initialize Configuration
         from astrometricslib import get_configuration
 
@@ -82,8 +114,7 @@ class Container:
         from wayfindinglib import Wayfinder
 
         self.astrometrics = Astrometrics(self.config_service)
-        self.wayfinder = Wayfinder(self.config_service)
-        self.wayfinder.control.driver = self.indi_driver
+        self.wayfinder = Wayfinder(self.config_service, astrometrics=self.astrometrics)
 
         self.target_service = TargetService(self.config_service, astrometrics=self.astrometrics)
         self.stellar_object_service = StellarService(
@@ -91,9 +122,9 @@ class Container:
         )
         self.stellar_service = self.stellar_object_service
         self.image_service = ImageService(target_service=self.target_service)
-        from astrometricslib import LoggerInterface
+        from astrometricslib import JobStore
 
-        self.job_repository = LoggerInterface(self.config_service.get_logs_db_path())
+        self.job_repository = JobStore(str(self.config_service.get_logs_db_path()))
         self.job_service = JobService(self.job_repository)
         self.maintenance_service = MaintenanceService(self.job_service)
         # Reuse the calibration namespace's single CalibrationLibrary
@@ -101,8 +132,6 @@ class Container:
         self.calibration_library = self.astrometrics.processing.calibration.library
 
         # Load data from disk
-        self.target_service.load_targets()
-        self.stellar_object_service.load_stellar_objects()
         self.calibration_library.load_library()
 
         # 3. Initialize Hardware Drivers
@@ -111,20 +140,34 @@ class Container:
 
             self.indi_driver = SimulatorIndiInterface(config=self.config_service)
         else:
-            from wayfindinglib import IndiInterface
+            # The real IndiInterface runs in its own OS process, not here:
+            # pyindi-client does not release the GIL during its blocking
+            # calls, so running it in this process would freeze the whole
+            # backend (every concurrent request, the event loop, everything)
+            # for however long that call takes -- see
+            # backend/services/infrastructure/indi_worker.py for the full
+            # story and measurements. IndiWorkerProxy forwards every call to
+            # that process and stands in for a real IndiInterface wherever
+            # one is expected.
+            from backend.services.infrastructure.indi_worker import IndiWorkerClient, IndiWorkerProxy
 
-            self.indi_driver = IndiInterface(config=self.config_service)
+            self.indi_worker_client = IndiWorkerClient()
+            self.indi_driver = IndiWorkerProxy(self.indi_worker_client)
 
         self.wayfinder.control.driver = self.indi_driver
 
+        from backend.services.infrastructure.settings_service import SettingsService
+
+        self.settings_service = SettingsService(self.config_service, driver=self.indi_driver)
+
         # 4. Initialize Infrastructure Services
-        from backend.services.infrastructure.remote_service import RemoteService
-
-        self.remote_service = RemoteService(config_service=self.config_service)
-
         from backend.services.infrastructure.socket_manager import SocketManager
 
         self.socket_manager = SocketManager()
+        # stellar_object_service is constructed earlier in this method, before
+        # socket_manager exists, so it's wired in here instead of passed to
+        # the constructor.
+        self.stellar_object_service.set_socket_manager(self.socket_manager)
 
         from backend.services.infrastructure.astrometrics_service import AstrometricsService
 
@@ -132,20 +175,32 @@ class Container:
 
         notification_path = os.path.join(os.path.dirname(__file__), "notifications.json")
         self.notification_service = NotificationService(storage_path=notification_path)
+        self.handoff_service = HandoffService(socket_manager=self.socket_manager)
 
         from backend.services.observatory.guiding_service import GuidingService
 
         self.guiding_service = GuidingService(observatory_api=self.wayfinder.control)
-        self.wayfinder.control.guiding_service = self.guiding_service
 
         # 5. Initialize Domain Services with proper DI
+        from backend.services.observatory.alignment_service import AlignmentService
+        from wayfindinglib import ControlRecordStore
+
+        self.alignment_service = AlignmentService(
+            observatory_api=self.wayfinder.control,
+            records=ControlRecordStore.for_configuration(self.config_service),
+            targets=self.astrometrics.targets,
+        )
         self.telescope_service = TelescopeService(
-            driver=self.indi_driver,
             guiding_service=self.guiding_service,
             target_service=self.target_service,
             wayfinder=self.wayfinder,
             astrometrics_service=self.astrometrics_service,
+            alignment_service=self.alignment_service,
         )
+
+        from backend.services.observatory.equipment_service import EquipmentService
+
+        self.equipment_service = EquipmentService(observatory_api=self.wayfinder.control)
 
         from astrometricslib import ImageProcessing
 
@@ -173,39 +228,29 @@ class Container:
             astrometrics=self.astrometrics,
         )
 
-        self.sync_service = SyncService(remote_service=self.remote_service)
+        self.sync_service = SyncService(observatory_api=self.wayfinder.control)
 
         from backend.services.observatory.imaging_service import ImagingService
 
-        self.imaging_service = ImagingService(indi_interface=self.indi_driver, job_service=self.job_service)
-
-        self.target_imaging_planner = TargetImagingPlanner()
-        self.target_imaging_executor = TargetImagingExecutor(
-            telescope_service=self.telescope_service, imaging_service=self.imaging_service
+        self.imaging_service = ImagingService(
+            observatory_api=self.wayfinder.control, job_service=self.job_service
         )
+
+        from backend.services.observatory.indi_diagnostics_service import IndiDiagnosticsService
+
+        self.indi_diagnostics_service = IndiDiagnosticsService(observatory_api=self.wayfinder.control)
+
+        self.target_imaging_executor = TargetImagingExecutor(wayfinder=self.wayfinder)
 
         # Adapter over wayfindinglib's Observation Execution astrometrics,
         # which had no route into the application at all before this.
         from backend.services.observatory.execution_service import ExecutionService
 
-        self.execution_service = ExecutionService(
-            wayfinder=self.wayfinder, astrometrics=self.astrometrics, config=self.config_service
-        )
-
-        from astrometricslib import StarIdentifier
-        from backend.services.observatory.alignment_service import AlignmentService
-
-        star_identifier = StarIdentifier(config=self.config_service)
-        self.alignment_service = AlignmentService(
-            indi_interface=self.indi_driver,
-            imaging_service=self.imaging_service,
-            star_identifier=star_identifier,
-        )
-        self.telescope_service._alignment_service = self.alignment_service
+        self.execution_service = ExecutionService(wayfinder=self.wayfinder)
 
         from backend.services.observatory.mosaic_service import MosaicService
 
-        self.mosaic_service = MosaicService(target_manager=self.target_service, wayfinder=self.wayfinder)
+        self.mosaic_service = MosaicService(wayfinder=self.wayfinder)
 
         from backend.services.processing.ingestion_service import IngestionService
 
@@ -221,22 +266,11 @@ class Container:
 
         from backend.services.infrastructure.system_status_service import SystemStatusService
 
-        self.system_status_service = SystemStatusService(
-            telescope_service=self.telescope_service,
-            image_processing_service=self.image_processing_service,
-            astrometrics_service=self.astrometrics_service,
-        )
+        self.system_status_service = SystemStatusService(astrometrics_service=self.astrometrics_service)
 
         from backend.services.infrastructure.scripting_service import ScriptingService
 
         self.scripting_service = ScriptingService(self)
-
-        # Wire the optional injected services into the Wayfinder domain
-        # high-level interface
-        self.wayfinder.control.sync_service = self.sync_service
-
-        # Initialize ObservatoryService (peripheral state)
-        self.observatory_service = ObservatoryService(self.indi_driver)
 
         # 7. Start Background Maintenance
         self.maintenance_service.system_status_service = self.system_status_service

@@ -79,3 +79,5 @@ For users interested in understanding the mathematical models and logic powering
    Wayfinding Architecture <library_design/Wayfinding_Library_Architecture>
    Image Processing Implementation <library_design/Astrometrics_Library_Implementation>
    Wayfinding Implementation <library_design/Wayfinding_Library_Implementation>
+   Pipeline Audit Report <library_design/Pipeline_Audit_Report>
+   Pipeline Review Guides <library_design/pipelines/index>

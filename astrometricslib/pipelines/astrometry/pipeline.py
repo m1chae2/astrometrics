@@ -9,11 +9,14 @@ import logging
 import os
 from typing import Any
 
-from astrometricslib.image_processing.image import AstrometricsImage
-from astrometricslib.pipelines.astrometry.star_identifier import StarIdentifier
+from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConfigurationError, ExternalServiceError, InvalidArgumentError
+from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 from astrometricslib.pipelines.shared.analysis_context import AnalysisContext, ExtendedSourceHint
-from astrometricslib.utilities.config_loader import AppConfiguration
-from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
+from astrometricslib.pipelines.shared.target_center_hint import resolve_center_hint
+from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +28,7 @@ class AstrometryPipeline:
     and identifies the objects.
     """
 
-    def __init__(self, app_config: AppConfiguration | None = None):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, app_config: AppConfiguration | None = None, *, drivers: Drivers | None = None) -> None:
         """Set up the pipeline using the program's settings.
 
         Parameters
@@ -33,14 +36,18 @@ class AstrometryPipeline:
         app_config : `AppConfiguration`, optional
             The settings to use. If left blank, it will just
             use the default system settings.
+        drivers : `Drivers`, optional
+            The plate solver and SIMBAD driver to use. Any left out is the
+            built-in one.
         """
         if app_config is None:
-            from astrometricslib.utilities.config_loader import get_configuration
+            from astrometricslib.foundation.config import get_configuration
 
             app_config = get_configuration()
 
         self.config = app_config
-        self.star_identifier = StarIdentifier(app_config)
+        self.drivers = drivers or Drivers()
+        self.star_identifier = StarIdentifier(app_config, drivers=self.drivers)
 
     def prepare_image(
         self,
@@ -48,6 +55,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Old name for the 'process' function (kept so old code still works).
 
@@ -62,13 +70,15 @@ class AstrometryPipeline:
             A hint for the horizontal coordinate (Right Ascension).
         target_dec : `float`, optional
             A hint for the vertical coordinate (Declination).
+        target_name : `str`, optional
+            The name of the target being imaged (see `process`).
 
         Returns
         -------
         analysis_context : `AnalysisContext`
             The results of running the pipeline on this image.
         """
-        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec)
+        return self.process(image_or_path, attempt_plate_solving, target_ra, target_dec, target_name)
 
     def process(
         self,
@@ -76,6 +86,7 @@ class AstrometryPipeline:
         attempt_plate_solving: bool = True,
         target_ra: float | None = None,
         target_dec: float | None = None,
+        target_name: str | None = None,
     ) -> AnalysisContext:
         """Run the whole pipeline on an image.
 
@@ -90,6 +101,11 @@ class AstrometryPipeline:
             A hint for where the telescope was pointing horizontally.
         target_dec : `float`, optional
             A hint for where the telescope was pointing vertically.
+        target_name : `str`, optional
+            The name of the target being imaged. When the field is not
+            solved, it names the star at the frame centre, and a planet or
+            the Moon is left without a star's name (see
+            `StarIdentifier._identify_stars_with_simbad`).
 
         Returns
         -------
@@ -97,14 +113,71 @@ class AstrometryPipeline:
             An object that holds the original image and all the stars
             and data found in it.
         """
-        if isinstance(image_or_path, str):
-            logger.info(f"Loading image from path: {image_or_path}")
-            image = AstrometricsImage(image_or_path)
-        else:
-            image = image_or_path
-
+        image = self._load_image(image_or_path)
         logger.info("Processing image for stars...")
 
+        ra_hint, dec_hint = self._resolve_coordinate_hint(image, target_ra, target_dec)
+
+        stellar_objects, wcs = self.star_identifier.process_image(
+            image,
+            attempt_plate_solving=attempt_plate_solving,
+            center_ra=ra_hint,
+            center_dec=dec_hint,
+            target_name=target_name,
+        )
+        wcs = self._fallback_to_header_wcs(image, wcs)
+
+        object_name = self._resolve_object_name(image)
+        extended_source_hint = self._build_extended_source_hint(object_name, wcs, target_ra, target_dec)
+
+        # Start downloading Gaia DR3 stars for this image's area in the
+        # background.
+        self._seed_gaia_cache_from_wcs(image, wcs)
+
+        return AnalysisContext(
+            image=image,
+            stellar_objects=stellar_objects,
+            wcs=wcs,
+            extended_source_hint=extended_source_hint,
+            sources_detected=self.star_identifier.sources_detected,
+            solve_attempted=self.star_identifier.solve_attempted,
+            catalog_match_separation_rms_arcsec=(
+                self.star_identifier.get_catalog_match_separation_rms_arcsec()
+            ),
+            plate_solve_fit_residual_rms_arcsec=self.star_identifier.plate_solve_fit_residual_rms_arcsec,
+            plate_solve_matched_star_count=self.star_identifier.plate_solve_matched_star_count,
+            wcs_refinement=self.star_identifier.wcs_refinement,
+            astrometry_flags=list(self.star_identifier.astrometry_flags),
+        )
+
+    def _load_image(self, image_or_path: AstrometricsImage | str) -> AstrometricsImage:
+        """Load an image from a path, or pass a loaded image through.
+
+        Returns
+        -------
+        image : `AstrometricsImage`
+            The loaded image.
+        """
+        if isinstance(image_or_path, str):
+            logger.info("Loading image from path: %s", image_or_path)
+            return AstrometricsImage(image_or_path)
+        return image_or_path
+
+    def _resolve_coordinate_hint(
+        self, image: AstrometricsImage, target_ra: float | None, target_dec: float | None
+    ) -> tuple[float | None, float | None]:
+        """Figure out the RA/Dec hint to seed star identification with.
+
+        Explicit `target_ra`/`target_dec` arguments take priority; when
+        absent (or blank-default zeros), the image's own FITS header is
+        used instead.
+
+        Returns
+        -------
+        ra_hint, dec_hint : `float` or `None`
+            The resolved coordinate hint, or `None` if none could be
+            determined.
+        """
         # If specific coordinates are provided, they are used instead of
         # looking in the image's FITS header. Any hour/minute/second
         # strings are converted into plain decimal degrees for math.
@@ -113,22 +186,14 @@ class AstrometryPipeline:
         if target_ra is not None and target_dec is not None:
             try:
                 if isinstance(target_ra, str) and ("h" in target_ra or "°" in target_ra or " " in target_ra):
-                    resolved_ra_deg = parse_coordinate_string(str(target_ra), is_ra=True)
-                    resolved_dec_deg = parse_coordinate_string(str(target_dec), is_ra=False)
-                    # Sometimes an empty database field will default to
-                    # 0h 0m 0s. Exact zeros are ignored because they are
-                    # almost certainly a blank default, not an actual
-                    # pointing at the 0,0 coordinate.
-                    if resolved_ra_deg != 0.0 or resolved_dec_deg != 0.0:  # ruff: ignore[float-equality-comparison] -- 0h0m0s placeholder sentinel, not measured
-                        ra_hint = float(resolved_ra_deg)
-                        dec_hint = float(resolved_dec_deg)
+                    ra_hint, dec_hint = resolve_center_hint(target_ra, target_dec)
                 else:
                     if float(target_ra) != 0.0 or float(target_dec) != 0.0:  # ruff: ignore[float-equality-comparison] -- 0.0 placeholder sentinel, not measured
                         ra_hint = float(target_ra)
                         dec_hint = float(target_dec)
-            except Exception as e:
+            except (InvalidArgumentError, ValueError, TypeError) as e:
                 logger.warning(
-                    f"Could not parse target coordinate strings '{target_ra}', '{target_dec}': {e}"
+                    "Could not parse target coordinate strings '%s', '%s': %s", target_ra, target_dec, e
                 )
 
         if ra_hint is None or dec_hint is None:
@@ -151,19 +216,35 @@ class AstrometryPipeline:
                         ra_hint = float(header_ra)
                         dec_hint = float(header_dec)
 
-                    logger.info(f"Found FITS header coordinate hints: {ra_hint}, {dec_hint}")
-                except Exception as e:
-                    logger.warning(f"Could not parse FITS header coordinates: {e}")
+                    logger.info("Found FITS header coordinate hints: %s, %s", ra_hint, dec_hint)
+                except DATA_ERRORS as e:
+                    logger.warning("Could not parse FITS header coordinates: %s", e)
 
-        stellar_objects, wcs = self.star_identifier.process_image(
-            image, attempt_plate_solving=attempt_plate_solving, center_ra=ra_hint, center_dec=dec_hint
-        )
+        return ra_hint, dec_hint
 
+    def _fallback_to_header_wcs(self, image: AstrometricsImage, wcs: Any) -> Any:
+        """Fall back to the image's own FITS header WCS if solving found none.
+
+        Returns
+        -------
+        wcs : `astropy.wcs.WCS` or `None`
+            `wcs` unchanged, or the image header's own WCS if `wcs`
+            was `None` and the header has one.
+        """
         # Fallback to pre-existing WCS if available in the image header
         if wcs is None and hasattr(image, "wcs") and image.wcs is not None and image.wcs.is_celestial:
             logger.info("Using pre-existing WCS from FITS image header as fallback.")
-            wcs = image.wcs
+            return image.wcs
+        return wcs
 
+    def _resolve_object_name(self, image: AstrometricsImage) -> str | None:
+        """Figure out the main target's name from the header or file name.
+
+        Returns
+        -------
+        object_name : `str` or `None`
+            The target's name, or `None` if it couldn't be determined.
+        """
         # 1. Figure out the main target's name by looking in the FITS header,
         # or by guessing from the file name if the header is missing.
         object_name = image.header.get("OBJECT")
@@ -175,119 +256,213 @@ class AstrometryPipeline:
                 object_name = "M 13"
             elif "Vega" in base_file:
                 object_name = "Vega"
+        return object_name
 
-        extended_source_hint = None
+    def _resolve_extraction_center(
+        self, wcs: Any, target_coord: Any, target_ra: float | None, target_dec: float | None
+    ) -> tuple[Any, Any] | None:
+        """Convert an extended target's sky coordinates to pixel coordinates.
 
-        if object_name:
-            # 2. Ask the SIMBAD database to figure out what type of object
-            # this is.
-            is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name)
+        A WCS that is celestial in shape (real CTYPE keywords) but
+        degenerate in content -- e.g. copied verbatim from a
+        capture-time header rather than plate-solved -- doesn't raise
+        here; world_to_pixel just returns NaN. `(nan, nan)` is a
+        2-tuple, and a 2-tuple is always truthy, so `if not
+        extraction_center` alone can't catch this: `_is_finite_pixel`
+        is what actually distinguishes a real answer from a degenerate
+        one.
 
-            if is_extended:
-                logger.info(
-                    f"Primary target '{object_name}' detected as an extended source ({otype}). "
-                    "Resolving pixel coordinates..."
-                )
+        Returns
+        -------
+        extraction_center : `tuple` or `None`
+            The `(x, y)` pixel coordinates, or `None` if they could
+            not be resolved.
+        """
 
-                # 3. Convert the object's real sky coordinates (from the
-                # database)
-                # into exact X/Y pixel coordinates on the image.
-                extraction_center = None
-                if wcs and target_coord:
-                    try:
-                        x, y = wcs.world_to_pixel(target_coord)
-                        extraction_center = (x, y)
-                    except Exception as e:
-                        logger.warning(f"WCS target conversion failed: {e}")
+        def _is_finite_pixel(pixel: tuple[Any, Any] | None) -> bool:
+            if pixel is None:
+                return False
+            import numpy as np
 
-                if not extraction_center and (target_ra is not None and target_dec is not None) and wcs:
-                    try:
-                        from astropy.coordinates import SkyCoord
+            return bool(np.isfinite(pixel[0]) and np.isfinite(pixel[1]))
 
-                        coord = SkyCoord(target_ra, target_dec, unit="deg")
-                        x, y = wcs.world_to_pixel(coord)
-                        extraction_center = (x, y)
-                    except Exception as e:
-                        logger.warning(f"WCS RA/Dec coordinate conversion failed: {e}")
+        extraction_center = None
+        if wcs and target_coord:
+            try:
+                x, y = wcs.world_to_pixel(target_coord)
+                if _is_finite_pixel((x, y)):
+                    extraction_center = (x, y)
+            except DATA_ERRORS as e:
+                logger.warning("WCS target conversion failed: %s", e)
 
-                if not extraction_center:
-                    logger.warning(
-                        f"Failed to resolve coordinates for extended source target '{object_name}'; "
-                        f"skipping extended-target enrichment."
-                    )
-                else:
-                    # 4. Note down where this target sits and how big it
-                    # is, so whichever pipeline needs a measurement
-                    # region for it (spectroscopy, currently) can build
-                    # one without astrometry needing to know how.
-                    #
-                    # Calculate how big that region should be by looking
-                    # at the object's actual size in the catalog and the
-                    # telescope's zoom level.
-                    extraction_radius_px = 60  # Default fallback
-                    if majaxis is not None and wcs:
-                        try:
-                            from astropy.wcs.utils import proj_plane_pixel_scales
+        if not extraction_center and (target_ra is not None and target_dec is not None) and wcs:
+            try:
+                from astropy.coordinates import SkyCoord
 
-                            scales = proj_plane_pixel_scales(wcs)
-                            # scales is degrees per pixel
-                            deg_per_px = float(scales[0])
-                            if deg_per_px > 0:
-                                arcmin_per_px = deg_per_px * 60.0
-                                # Major axis in pixels
-                                majaxis_px = majaxis / arcmin_per_px
-                                # Set the measuring radius to half the
-                                # object's total width.
-                                derived_radius = round(majaxis_px / 2.0)
-                                # Keep the radius between 15 and 200 pixels.
-                                # This stops the
-                                # program from crashing or slowing down if the
-                                # catalog
-                                # gives weird or incorrect size data.
-                                extraction_radius_px = int(max(15, min(200, derived_radius)))
-                                logger.info(
-                                    f"Derived extended extraction radius from SIMBAD ({majaxis} arcmin): "
-                                    f"{extraction_radius_px} pixels"
-                                )
-                        except Exception as e:
-                            logger.warning(f"Failed to derive extraction radius from WCS/SIMBAD: {e}")
+                coord = SkyCoord(target_ra, target_dec, unit="deg")
+                x, y = wcs.world_to_pixel(coord)
+                if _is_finite_pixel((x, y)):
+                    extraction_center = (x, y)
+            except DATA_ERRORS as e:
+                logger.warning("WCS RA/Dec coordinate conversion failed: %s", e)
 
-                    extended_source_hint = ExtendedSourceHint(
-                        object_name=object_name,
-                        otype=otype,
-                        extraction_center=extraction_center,
-                        extraction_radius_px=extraction_radius_px,
-                    )
-                    logger.info(f"Recorded extended-source hint for '{object_name}'.")
+        return extraction_center
 
-        # Start downloading Gaia DR3 stars for this image's area in the
-        # background.
-        # This speeds things up by saving the stars to the local database.
-        if wcs is not None and wcs.is_celestial:
+    def _derive_extraction_radius_px(self, wcs: Any, majaxis: float | None) -> int:
+        """Work out how large an extended target's extraction region is.
+
+        Calculate how big that region should be by looking at the
+        object's actual size in the catalog and the telescope's zoom
+        level.
+
+        Returns
+        -------
+        extraction_radius_px : `int`
+            The measurement radius to use, in pixels.
+        """
+        extraction_radius_px = 60  # Default fallback
+        if majaxis is not None and wcs:
             try:
                 from astropy.wcs.utils import proj_plane_pixel_scales
 
                 scales = proj_plane_pixel_scales(wcs)
+                # scales is degrees per pixel
                 deg_per_px = float(scales[0])
-                width = image.data.shape[1] if hasattr(image, "data") and image.data is not None else 1000
-                height = image.data.shape[0] if hasattr(image, "data") and image.data is not None else 1000
-                field_radius_deg = (max(width, height) * deg_per_px) / 2.0
-                field_radius_deg = min(max(0.2, field_radius_deg), 1.0)
+                if deg_per_px > 0:
+                    arcmin_per_px = deg_per_px * 60.0
+                    # Major axis in pixels
+                    majaxis_px = majaxis / arcmin_per_px
+                    # Set the measuring radius to half the
+                    # object's total width.
+                    derived_radius = round(majaxis_px / 2.0)
+                    # Keep the radius between 15 and 200 pixels.
+                    # This stops the
+                    # program from crashing or slowing down if the
+                    # catalog
+                    # gives weird or incorrect size data.
+                    extraction_radius_px = int(max(15, min(200, derived_radius)))
+                    logger.info(
+                        "Derived extended extraction radius from SIMBAD (%s arcmin): %s pixels",
+                        majaxis,
+                        extraction_radius_px,
+                    )
+            except DATA_ERRORS as e:
+                logger.warning("Failed to derive extraction radius from WCS/SIMBAD: %s", e)
+        return extraction_radius_px
 
-                ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
-                self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
-            except Exception as e:
-                logger.warning(f"Automatic Gaia cache seeding skipped: {e}")
+    def build_extended_source_hint(
+        self, image: AstrometricsImage, wcs: Any, target_ra: float | None, target_dec: float | None
+    ) -> ExtendedSourceHint | None:
+        """Build an image's extended-source hint from a supplied WCS.
 
-        return AnalysisContext(
-            image=image,
-            stellar_objects=stellar_objects,
-            wcs=wcs,
-            extended_source_hint=extended_source_hint,
-            sources_detected=self.star_identifier.sources_detected,
-            solve_attempted=self.star_identifier.solve_attempted,
-            astrometric_residual_rms_arcsec=(self.star_identifier.get_astrometric_residual_rms_arcsec()),
+        `process` builds the hint itself when the image has a plate
+        solution. A spectroscopy stack has none, so its caller works one out
+        afterwards (from a solved stack of the same field, shifted to match)
+        and asks for the hint here.
+
+        Parameters
+        ----------
+        image : `AstrometricsImage`
+            The image whose target name is looked up.
+        wcs : `astropy.wcs.WCS`
+            A plate solution that gives this image's pixel positions.
+        target_ra : `float` or `None`
+            The target's right ascension in decimal degrees, used when the
+            catalog lookup gives no position.
+        target_dec : `float` or `None`
+            The target's declination in decimal degrees.
+
+        Returns
+        -------
+        extended_source_hint : `ExtendedSourceHint` or `None`
+            The hint, or `None` if the target isn't an extended source or
+            its region couldn't be resolved.
+        """
+        return self._build_extended_source_hint(self._resolve_object_name(image), wcs, target_ra, target_dec)
+
+    def _build_extended_source_hint(
+        self,
+        object_name: str | None,
+        wcs: Any,
+        target_ra: float | None,
+        target_dec: float | None,
+    ) -> ExtendedSourceHint | None:
+        """Build the extended-source hint for a target, if SIMBAD flags one.
+
+        Looks up `object_name` in SIMBAD; if it comes back as an
+        extended object (a galaxy, nebula, or cluster rather than a
+        point source), resolves where it sits in pixel space and how
+        large a measurement region it needs, so whichever pipeline
+        needs one (spectroscopy, currently) can build it without
+        astrometry needing to know how.
+
+        Returns
+        -------
+        extended_source_hint : `ExtendedSourceHint` or `None`
+            The hint, or `None` if the target isn't an extended
+            source or its region couldn't be resolved.
+        """
+        if not object_name:
+            return None
+
+        # 2. Ask the SIMBAD database to figure out what type of object
+        # this is.
+        is_extended, target_coord, otype, majaxis = self.check_extended_source(object_name)
+
+        if not is_extended:
+            return None
+
+        logger.info(
+            "Primary target '%s' detected as an extended source (%s). Resolving pixel coordinates...",
+            object_name,
+            otype,
         )
+
+        # 3. Convert the object's real sky coordinates (from the
+        # database) into exact X/Y pixel coordinates on the image.
+        extraction_center = self._resolve_extraction_center(wcs, target_coord, target_ra, target_dec)
+
+        if not extraction_center:
+            logger.warning(
+                "Failed to resolve coordinates for extended source target '%s'; skipping "
+                "extended-target enrichment.",
+                object_name,
+            )
+            return None
+
+        # 4. Note down where this target sits and how big it is.
+        extraction_radius_px = self._derive_extraction_radius_px(wcs, majaxis)
+
+        extended_source_hint = ExtendedSourceHint(
+            object_name=object_name,
+            otype=otype,
+            extraction_center=extraction_center,
+            extraction_radius_px=extraction_radius_px,
+        )
+        logger.info("Recorded extended-source hint for '%s'.", object_name)
+        return extended_source_hint
+
+    def _seed_gaia_cache_from_wcs(self, image: AstrometricsImage, wcs: Any) -> None:
+        """Kick off a background Gaia DR3 seed for this image's sky area.
+
+        This speeds things up by saving the stars to the local database.
+        """
+        if wcs is None or not wcs.is_celestial:
+            return
+        try:
+            from astropy.wcs.utils import proj_plane_pixel_scales
+
+            scales = proj_plane_pixel_scales(wcs)
+            deg_per_px = float(scales[0])
+            width = image.data.shape[1] if hasattr(image, "data") and image.data is not None else 1000
+            height = image.data.shape[0] if hasattr(image, "data") and image.data is not None else 1000
+            field_radius_deg = (max(width, height) * deg_per_px) / 2.0
+            field_radius_deg = min(max(0.2, field_radius_deg), 1.0)
+
+            ra_c, dec_c = float(wcs.wcs.crval[0]), float(wcs.wcs.crval[1])
+            self.star_identifier._seed_gaia_cache_for_field(ra_c, dec_c, radius_deg=field_radius_deg)
+        except (ConfigurationError, *DATA_ERRORS) as e:
+            logger.warning("Automatic Gaia cache seeding skipped: %s", e)
 
     def check_extended_source(self, object_name: str) -> tuple[bool, Any | None, str | None, float | None]:
         """Ask the SIMBAD database if this target is an extended object.
@@ -334,13 +509,11 @@ class AstrometryPipeline:
             from astropy import units as u
             from astropy.coordinates import SkyCoord
             from astropy.wcs import FITSFixedWarning
-            from astroquery.simbad import Simbad
 
             warnings.simplefilter("ignore", FITSFixedWarning)
-            Simbad.reset_votable_fields()
-            Simbad.add_votable_fields("otype", "ra", "dec", "galdim_majaxis")
-
-            result = Simbad.query_object(object_name)
+            result = self.drivers.simbad_or_default().query_object(
+                object_name, votable_fields=("otype", "ra", "dec", "galdim_majaxis")
+            )
             if result is not None and len(result) > 0:
                 otype = str(result["otype"][0]).strip()
                 ra_deg = float(result["ra"][0])
@@ -358,7 +531,7 @@ class AstrometryPipeline:
                             pass
 
                 return otype in extended_otypes, coord, otype, majaxis
-        except Exception as e:
-            logger.warning(f"SIMBAD query failed for object '{object_name}': {e}")
+        except (ExternalServiceError, *DATA_ERRORS) as e:
+            logger.warning("SIMBAD query failed for object '%s': %s", object_name, e)
 
         return False, None, None, None

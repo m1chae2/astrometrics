@@ -10,14 +10,14 @@ minutes of a run to reach a conclusion that was never in doubt.
 from astrometricslib.scripts.run_all_target_processing import _build_argument_parser
 
 
-def test_skip_target_is_repeatable():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skip_target_is_repeatable() -> None:
     """Several targets must be excludable in one invocation."""
     arguments = _build_argument_parser().parse_args(["--skip-target", "Sun", "--skip-target", "Venus"])
 
     assert arguments.skip_target_ids == ["Sun", "Venus"]
 
 
-def test_skipping_defaults_to_nothing():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skipping_defaults_to_nothing() -> None:
     """A plain run must still process everything."""
     arguments = _build_argument_parser().parse_args([])
 
@@ -25,14 +25,14 @@ def test_skipping_defaults_to_nothing():  # ruff: ignore[missing-return-type-und
     assert arguments.skip_targets_from is None
 
 
-def test_skips_can_come_from_a_file():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skips_can_come_from_a_file() -> None:
     """A permanent exclusion list belongs in a file, not a command line."""
     arguments = _build_argument_parser().parse_args(["--skip-targets-from", "/tmp/skip.txt"])
 
     assert arguments.skip_targets_from == "/tmp/skip.txt"
 
 
-def test_skip_and_select_can_combine():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skip_and_select_can_combine() -> None:
     """Selecting a subset and excluding from it are independent."""
     arguments = _build_argument_parser().parse_args([
         "--target",

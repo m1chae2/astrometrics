@@ -89,7 +89,9 @@ Astrometrics can extract precise light curves to detect variable stars or exopla
    - Click **Execute**.
    - Review the best-fit transit light curve, calculated orbital period, transit depth, and the phase-folded plot.
 
-
+:::{note}
+**Time Standard.** Time series light curves record observation midpoints as **Barycentric Julian Date in Barycentric Dynamical Time ($\text{BJD}_{\text{TDB}}$)**, accounting for solar system light-travel time delays.
+:::
 
 ---
 
@@ -102,5 +104,9 @@ For targets captured with a diffraction grating (e.g., Star Analyser 100), Astro
 2. Click **Extract Profile** to perform optimal aperture extraction along the dispersion axis.
 3. Wavelength Calibration: Match known arc lamp emission lines or prominent absorption lines to build a wavelength scale (in Angstroms).
 4. Click **Fit Continuum** and drag a selection over an absorption line to automatically calculate the Equivalent Width, a physical measure of the line's strength.
+
+:::{note}
+**Relative Flux Status.** Extracted 1D spectra represent instrumental flux (ADU) along the calibrated wavelength axis. Absolute energy flux ($F_\lambda$) requires dividing by an instrument response curve derived from a spectrophotometric standard star.
+:::
 
 *(For polynomial fitting degrees and Equivalent Width integration math, see the {py:class}`~astrometricslib.api.stars.StellarCatalog` API Reference)*

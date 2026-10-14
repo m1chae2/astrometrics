@@ -426,10 +426,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_01_flux": {
-        "value": 1084897.93,
+        "value": 1008462.26,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_02_x": {
         "value": 2020.32144,
@@ -444,10 +444,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_02_flux": {
-        "value": 1047906.94,
+        "value": 932519.109,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_03_x": {
         "value": 163.506556,
@@ -462,10 +462,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_03_flux": {
-        "value": 798848.224,
+        "value": 768032.988,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_04_x": {
         "value": 88.3006126,
@@ -480,10 +480,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_04_flux": {
-        "value": 694867.336,
+        "value": 668055.443,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_05_x": {
         "value": 2358.60427,
@@ -498,10 +498,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_05_flux": {
-        "value": 654545.392,
+        "value": 630815.888,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_06_x": {
         "value": 2172.47823,
@@ -516,10 +516,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_06_flux": {
-        "value": 568332.664,
+        "value": 550881.834,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_07_x": {
         "value": 2429.50429,
@@ -534,10 +534,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_07_flux": {
-        "value": 541183.714,
+        "value": 524717.039,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_08_x": {
         "value": 1317.5955,
@@ -552,10 +552,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_08_flux": {
-        "value": 488557.348,
+        "value": 473493.772,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_09_x": {
         "value": 703.203042,
@@ -570,10 +570,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_09_flux": {
-        "value": 424235.97,
+        "value": 413011.975,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       },
       "source_10_x": {
         "value": 747.098703,
@@ -588,10 +588,10 @@
         "why": "baseline 2026-10-10 before tier 1 fixes"
       },
       "source_10_flux": {
-        "value": 399056.401,
+        "value": 388660.337,
         "tolerance": 0.01,
         "tolerance_type": "relative",
-        "why": "baseline 2026-10-10 before tier 1 fixes"
+        "why": "photutils 3.1 (PR #2493): DAOStarFinder flux is now the sum inside the kernel footprint, not the whole kernel box (#69)"
       }
     }
   },

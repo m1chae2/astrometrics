@@ -518,7 +518,7 @@ function createDisplayWindow(options = {}) {
   const allDisplays = screen.getAllDisplays();
   if (allDisplays.length > 1) {
     const primaryDisplay = screen.getPrimaryDisplay();
-    let targetDisplay = null;
+    let targetDisplay;
     if (typeof displayIndex === 'number' && allDisplays[displayIndex]) {
       targetDisplay = allDisplays[displayIndex];
     } else {

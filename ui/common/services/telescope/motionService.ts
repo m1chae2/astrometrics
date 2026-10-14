@@ -18,7 +18,7 @@ export async function syncLightFrames(objectId: string): Promise<boolean> {
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         reportError(new Error(`Failed to start sync for ${objectId}: ${msg}`), 'backend');
-        throw new Error(`Failed to start sync for ${objectId}: ${msg}`);
+        throw new Error(`Failed to start sync for ${objectId}: ${msg}`, { cause: err });
     }
 }
 

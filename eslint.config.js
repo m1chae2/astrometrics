@@ -1,3 +1,14 @@
+/**
+ * ESLint settings for the front end (`ui/`) and the Electron shell
+ * (`electron/`). Uses the "flat config" format, the only one ESLint 10 reads.
+ *
+ * The TypeScript parser below needs TypeScript's JavaScript API. TypeScript 7
+ * (the fast native compiler that `npm run type-check` runs) does not have that
+ * API yet. So package.json installs two copies, the way the TypeScript team
+ * recommends: TypeScript 6 under the name `typescript` for tools like this
+ * parser, and TypeScript 7 under the alias `@typescript/native`, which owns
+ * the `tsc` command.
+ */
 import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'

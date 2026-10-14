@@ -40,7 +40,7 @@ export const TimeSeriesPlot = React.memo(({
 
     const plotData: PlotlyTrace[] = useMemo(() => {
         return data.map(series => {
-            let xData: any[] = [];
+            let xData: any[];
             if (series.timestamps) {
                 xData = series.timestamps.map(t => {
                     const ts = typeof t === 'string' ? parseFloat(t) : t;

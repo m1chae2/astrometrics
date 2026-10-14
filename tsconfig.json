@@ -5,7 +5,8 @@
     "lib": [
       "DOM",
       "DOM.Iterable",
-      "ES2020"
+      "ES2020",
+      "ES2022.Error"
     ],
     "allowJs": true,
     "skipLibCheck": true,
@@ -20,9 +21,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx",
-    "baseUrl": ".",
-    "paths": {}
+    "jsx": "react-jsx"
   },
   "include": [
     "ui",

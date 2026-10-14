@@ -79,6 +79,9 @@ export default {
       /^\/node_modules\/@types($|\/)/,
       /^\/node_modules\/@typescript-eslint($|\/)/,
       /^\/node_modules\/typescript($|\/)/,
+      // TypeScript 7 (aliased as @typescript/native), its per-platform
+      // compiler binaries, and the TypeScript 6 copy the linter uses.
+      /^\/node_modules\/@typescript($|\/)/,
       /^\/node_modules\/vitest($|\/)/,
       // Generic build/config ignores
       /eslint\.config\.js$/,

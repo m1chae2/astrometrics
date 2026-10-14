@@ -65,7 +65,7 @@ export const fetchIngestStatus = async (jobId: string): Promise<IngestStatusResp
         if (error instanceof BackendError && (error.code === 'not_found' || error.code === 'configuration')) {
             return FAILED_INGEST_STATUS;
         }
-        throw new Error('Failed to fetch status');
+        throw new Error('Failed to fetch status', { cause: error });
     }
 };
 

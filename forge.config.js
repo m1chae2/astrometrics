@@ -48,6 +48,7 @@ export default {
       /^\/\.github($|\/)/,
       /^\/\.husky($|\/)/,
       /^\/\.agent($|\/)/,
+      /^\/\.claude($|\/)/,
       /^\/\.vscode($|\/)/,
       /^\/ui($|\/)/,
       /^\/tests($|\/)/,
@@ -116,43 +117,29 @@ export default {
     {
       name: '@electron-forge/maker-deb',
       config: {
-        maintainer: 'Astrometrics Team <noreply@astrometrics.app>',
-        homepage: 'https://github.com/m1chae2/astrometrics',
-        icon: path.join(__dirname, 'assets', 'orbit.png'),
-        categories: ['Science', 'Education', 'Utility'],
-        mimeType: ['image/fits', 'application/fits', 'application/x-fits'],
-        genericName: 'Astronomy Application',
-        description: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
-        productName: 'Astrometrics',
-        productDescription: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
-        depends: [
-          'libnotify4',
-          'xdg-utils',
-          'shared-mime-info',
-          'libayatana-appindicator3-1'
-        ], // Ensure notifications, mime-types, file-open, and top-panel AppIndicator support
-        desktop: {
-          Name: 'Astrometrics',
-          GenericName: 'Astronomy Application',
-          Comment: 'Astrometrics Image Viewer and Analyzer',
-          Categories: 'Science;Education;Graphics;',
-          MimeType: 'image/fits;application/fits;application/x-fits;',
-          // Matches app.name in electron/platforms/linux.js#configureIdentity so GNOME
-          // Shell reliably groups the running window under this launcher's icon.
-          StartupWMClass: 'astrometrics',
-          Actions: 'Planetarium;Observatory;Processing;',
-          'Desktop Action Planetarium': {
-            Name: 'Open Planetarium',
-            Exec: 'astrometrics --mode=Planetarium'
-          },
-          'Desktop Action Observatory': {
-            Name: 'Observatory Manager',
-            Exec: 'astrometrics --mode="Observatory Manager"'
-          },
-          'Desktop Action Processing': {
-            Name: 'Image Processing',
-            Exec: 'astrometrics --mode="Image Processing"'
-          }
+        // electron-installer-debian only reads its settings from `options`.
+        // Keys placed directly on `config` are mostly ignored, which is how
+        // `depends` and the desktop-entry settings used to go missing.
+        options: {
+          maintainer: 'Astrometrics Team <noreply@astrometrics.app>',
+          homepage: 'https://github.com/m1chae2/astrometrics',
+          icon: path.join(__dirname, 'assets', 'orbit.png'),
+          categories: ['Science', 'Education', 'Graphics'],
+          mimeType: ['image/fits', 'application/fits', 'application/x-fits'],
+          genericName: 'Astronomy Application',
+          description: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
+          productName: 'Astrometrics',
+          productDescription: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
+          // Notifications, mime types, opening files, and the top-panel AppIndicator.
+          depends: [
+            'libnotify4',
+            'xdg-utils',
+            'shared-mime-info',
+            'libayatana-appindicator3-1'
+          ],
+          // The built-in desktop template can't add launcher actions and sets
+          // the wrong StartupWMClass; see the template's header for details.
+          desktopTemplate: path.join(__dirname, 'assets', 'desktop', 'astrometrics.desktop.ejs')
         }
       }
     },

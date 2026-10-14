@@ -1,0 +1,36 @@
+<% /*
+  Desktop entry template for the Linux .deb package.
+
+  electron-installer-debian (used by @electron-forge/maker-deb) fills this in
+  to make /usr/share/applications/astrometrics.desktop. Its built-in template
+  has no way to add launcher actions, and it sets StartupWMClass to the
+  product name ("Astrometrics"). We need "astrometrics" there, because that is
+  the app.name set in electron/platforms/linux.js#configureIdentity, and GNOME
+  Shell only groups the running window under this launcher when they match.
+  forge.config.js points the deb maker's desktopTemplate option at this file.
+  (The template engine is lodash.template, so this note sits in a JS comment.)
+*/ %>[Desktop Entry]
+Name=<%= productName %>
+GenericName=<%= genericName %>
+Comment=Astrometrics Image Viewer and Analyzer
+Exec=<%= name %> %U
+Icon=<%= name %>
+Type=Application
+Terminal=false
+StartupNotify=true
+StartupWMClass=astrometrics
+Categories=<%= categories.join(';') %>;
+MimeType=<%= mimeType.join(';') %>;
+Actions=Planetarium;Observatory;Processing;
+
+[Desktop Action Planetarium]
+Name=Open Planetarium
+Exec=<%= name %> --mode=Planetarium
+
+[Desktop Action Observatory]
+Name=Observatory Manager
+Exec=<%= name %> --mode="Observatory Manager"
+
+[Desktop Action Processing]
+Name=Image Processing
+Exec=<%= name %> --mode="Image Processing"

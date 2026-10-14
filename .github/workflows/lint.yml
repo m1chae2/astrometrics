@@ -41,7 +41,7 @@ jobs:
 
       - name: Filter Changed Paths
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             python:

@@ -7,16 +7,24 @@ library uses: `StackingDriver` (a stacking program such as Siril),
 low-resolution XP spectra) and `ReddeningDriver` (a catalog of
 interstellar reddening values). The rest of the library depends on
 these interfaces, and each concrete driver in `drivers/` implements one.
+`PipelineSteps` carries the stacking pipeline's own steps into a
+stacking driver, so the driver never imports pipeline code.
 """
 
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, PlateSolveHeader
 from astrometricslib.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.drivers.interfaces.simbad_driver import SimbadDriver
-from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackRunResult, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import (
+    PipelineSteps,
+    StackingDriver,
+    StackRunResult,
+    StackSettings,
+)
 
 __all__ = [
     "GaiaXpDriver",
+    "PipelineSteps",
     "PlateSolveDriver",
     "PlateSolveHeader",
     "ReddeningDriver",

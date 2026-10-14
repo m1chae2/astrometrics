@@ -2,11 +2,12 @@
 
 Description: "phase_correlation" is not a Siril star-detection setting --
 it tells `process_target` to skip Siril's own registration entirely and
-align the calibrated frames in Python instead (see
-`spectral_frame_alignment`). This checks that the calibration script sent
-to Siril for that mode omits the register/stack commands other modes
-send, and converts to loose per-frame FITS files (not a packed fitseq
-file) so the alignment step can read them back afterward.
+align the calibrated frames in Python instead, with the alignment step
+the stacking pipeline passes in (`PipelineSteps.align_frames`). This
+checks that the calibration script sent to Siril for that mode omits the
+register/stack commands other modes send, and converts to loose per-frame
+FITS files (not a packed fitseq file) so the alignment step can read them
+back afterward.
 
 Reuses the same Siril-stubbing convention as
 `test_siril_frame_filter_placement.py`.
@@ -21,7 +22,20 @@ from unittest.mock import MagicMock
 import pytest
 
 from astrometricslib.drivers import siril_interface
-from astrometricslib.pipelines.stacking.processing import spectral_frame_alignment
+from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
+
+
+def _fake_align_frames(paths: list[str], directory: str) -> tuple[list[str], dict[str, int]]:
+    """Stand in for the pipeline's alignment step: one frame aligns.
+
+    Returns
+    -------
+    aligned_paths : `list` [`str`]
+        One made-up aligned frame.
+    counts : `dict` [`str`, `int`]
+        One frame registered, none failed.
+    """
+    return ["b.fits"], {"registered": 1, "failed": 0}
 
 
 @pytest.fixture
@@ -77,7 +91,9 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(siril_interface, "_frames_use_color_filter_array", lambda path: False)
     monkeypatch.setattr(siril_interface, "siril_process_lock", lambda **kwargs: _NullContext())
 
-    def run_process_target(through_stacking: bool = False) -> list[str] | list[list[str]]:
+    def run_process_target(
+        through_stacking: bool = False, with_alignment_step: bool = True
+    ) -> list[str] | list[list[str]]:
         mock_config = MagicMock()
         mock_config.get_siril_executable.return_value = "siril"
         mock_config.get_logs_path.return_value = str(tmp_path)
@@ -93,15 +109,10 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         mock_config.get_minimum_calibration_frames.return_value = 3
 
         if through_stacking:
-            # Pretend the calibrated frames exist and align, so the second
-            # (stacking) Siril run is built too.
+            # Pretend the calibrated frames exist, so they are aligned and
+            # the second (stacking) Siril run is built too.
             monkeypatch.setattr(
-                spectral_frame_alignment, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]
-            )
-            monkeypatch.setattr(
-                spectral_frame_alignment,
-                "align_calibrated_frames",
-                lambda paths, directory: (["b.fits"], {"registered": 1, "failed": 0}),
+                siril_interface, "find_calibrated_frame_paths", lambda directory, seq: ["a.fits"]
             )
 
         driver = siril_interface.ImageProcessing(mock_config, MagicMock())
@@ -111,7 +122,11 @@ def captured_calibration_script(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
             image_files=[{"path": "a.fits", "camera": "Cam"}],
             is_spectral=True,
             spectral_star_detection="phase_correlation",
+            steps=PipelineSteps(align_frames=_fake_align_frames if with_alignment_step else None),
         )
+        if not with_alignment_step:
+            assert result is None
+            return sent_scripts
         if through_stacking:
             assert len(sent_scripts) == 2, "calibration run, then stacking run"
             return sent_scripts
@@ -183,3 +198,32 @@ def test_phase_correlation_pins_32_bit_output_in_both_siril_runs(captured_calibr
         )
         assert script.index("set32bits") < first_work
     assert any(command.startswith("stack ") for command in stacking_script)
+
+
+def test_phase_correlation_without_an_alignment_step_stops_before_siril(
+    captured_calibration_script: Any,
+) -> None:
+    """Without the pipeline's alignment step, no Siril script is sent."""
+    assert captured_calibration_script(with_alignment_step=False) == []
+
+
+def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path: Path) -> None:
+    """Only one sequence's pp_-prefixed calibrated frames are found."""
+    process_directory = tmp_path / "process"
+    process_directory.mkdir()
+    for name in (
+        "pp_light_source_00002.fits",
+        "pp_light_source_00001.fits",
+        # A different sequence's calibrated frames, and an uncalibrated
+        # raw frame, must not be picked up.
+        "pp_other_source_00001.fits",
+        "light_source_00001.fits",
+    ):
+        (process_directory / name).touch()
+
+    paths = siril_interface.find_calibrated_frame_paths(str(process_directory), "pp_light_source")
+
+    assert [Path(path).name for path in paths] == [
+        "pp_light_source_00001.fits",
+        "pp_light_source_00002.fits",
+    ]

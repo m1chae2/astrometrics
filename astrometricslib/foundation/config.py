@@ -834,7 +834,7 @@ class AppConfiguration:
         """Return whether frames are read into the mount's cache before Siril.
 
         Off by default, because it downloads files (see
-        `pipelines/stacking/pre_processing/frame_prefetch.py`). A missing
+        `drivers/frame_prefetch.py`). A missing
         setting means off.
 
         Returns

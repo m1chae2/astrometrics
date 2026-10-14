@@ -8,6 +8,7 @@ retrieve the resulting stacked image.
 import atexit
 import contextlib
 import contextvars
+import glob
 import logging
 import os
 import queue
@@ -30,6 +31,8 @@ from astrometricslib.drivers.calibration_library import (
     header_binning,
 )
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.drivers.frame_prefetch import prefetch_frames
+from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps
 from astrometricslib.drivers.siril_output_parsing import (
     parse_negative_pixel_percentage,
     parse_registration_totals,
@@ -96,6 +99,25 @@ SPECTRAL_STAR_DETECTION_COMMANDS = {
 # straight from each frame's own pixels and needs no registration data.
 WEIGHT_MODES_NEEDING_REGISTRATION_DATA = frozenset({"nbstars", "wfwhm"})
 PHASE_CORRELATION_FALLBACK_WEIGHT_MODE = "noise"
+
+# Written into the key of the stored master flats, so that a change to how
+# the master flat is built or blurred does not reuse one built the old way.
+# Increase it whenever that changes what the master flat contains, including
+# a change to how the stacking pipeline's flat assessment picks the blur
+# width. Version 4 subtracts the bias from a lone flat too. Version 5 is
+# saved as 32-bit floating point (the script sets ``set32bits``), not as the
+# 16-bit integers of Siril's default preference.
+FLAT_MASTER_RECIPE = "flat-recipe-5"
+
+# The name of the Siril sequence built by running `convert` over the frames
+# the phase-correlation alignment step wrote. It must differ from the
+# basename those frames are written under (`ALIGNED_FRAME_BASENAME` in
+# `pipelines/stacking/processing/spectral_frame_alignment.py`): Siril's
+# `convert` picks up every image file already in its target directory and
+# relinks it under its own numbering, and when the sequence name and the
+# files share one basename, its output paths collide with its own input
+# paths mid-conversion and corrupt the sequence it is building.
+ALIGNED_SIRIL_SEQUENCE_NAME = "aligned_light"
 
 # How long send_commands waits for one Siril command to report its own
 # completion before giving up on the whole script. This is a deadlock
@@ -464,9 +486,29 @@ def _master_recipe(kind: str) -> str:
     """
     if kind != "flat":
         return ""
-    from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import FLAT_MASTER_RECIPE
-
     return FLAT_MASTER_RECIPE
+
+
+def find_calibrated_frame_paths(process_directory: str, sequence_name: str) -> list[str]:
+    """List Siril's own converted/calibrated frames for one sequence.
+
+    Parameters
+    ----------
+    process_directory : `str`
+        Siril's scratch ``process`` folder for this stacking run.
+    sequence_name : `str`
+        The sequence's exact name as Siril wrote it, e.g.
+        ``"pp_light_source"`` for calibrated frames named
+        ``pp_light_source_00001.fits``, or plain ``"light_source"`` when
+        there were no calibration masters to apply.
+
+    Returns
+    -------
+    paths : `list` [`str`]
+        The frames, sorted by their frame number.
+    """
+    pattern = os.path.join(process_directory, f"{sequence_name}_*.fits")
+    return sorted(glob.glob(pattern))
 
 
 def _calibration_source_fingerprint(frames_directory: str, recipe: str = "") -> str | None:
@@ -1123,6 +1165,7 @@ class ImageProcessing:
         uses_color_filter_array: bool,
         job_logger: logging.Logger | None = None,
         camera: str | None = None,
+        assess_flats: Callable[[list[str], str | None], Any] | None = None,
     ) -> Any:
         """Measure the staged flat frames and decide whether to smooth them.
 
@@ -1149,20 +1192,29 @@ class ImageProcessing:
             The name of the camera that took the flats. Its profile sets
             the full-scale value the flat brightness is judged against.
             Without it, the assessment guesses the scale from the pixels.
+        assess_flats : `Callable`, optional
+            The stacking pipeline's flat measurement (see
+            `PipelineSteps.assess_flats`). Without it, the flats are not
+            measured and the master flat is not smoothed.
 
         Returns
         -------
-        assessment : `FlatAssessment`
+        assessment : `FlatAssessment` or `None`
             What was measured about the flat set. `smoothing_sigma_pixels` is
-            `None` when no smoothing is to be applied.
+            `None` when no smoothing is to be applied. `None` when no
+            ``assess_flats`` was given.
         """
         import dataclasses
 
-        from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
+        if assess_flats is None:
+            (job_logger or logger).warning(
+                "Flat calibration: no flat assessment step was given; the flats are not checked or smoothed."
+            )
+            return None
 
         flat_directory = os.path.join(target_folder, "flats")
         flat_paths = sorted(os.path.join(flat_directory, name) for name in os.listdir(flat_directory))
-        assessment = assess_flats(flat_paths, camera=camera)
+        assessment = assess_flats(flat_paths, camera)
         for issue in assessment.issues:
             (job_logger or logger).warning("Flat calibration: %s", issue)
         if assessment.needs_smoothing and uses_color_filter_array:
@@ -1873,8 +1925,6 @@ class ImageProcessing:
         # mock objects) never triggers a download.
         if self.config.get_prefetch_frames() is not True:
             return
-        from astrometricslib.pipelines.stacking.pre_processing.frame_prefetch import prefetch_frames
-
         real_paths: list[str] = []
         for sub_folder in ("lights", "darks", "biases", "flats"):
             folder = os.path.join(target_folder, sub_folder)
@@ -1905,6 +1955,7 @@ class ImageProcessing:
         stack_weight: str | None = None,
         generate_rejmap: bool | None = None,
         spectral_star_detection: str = "standard",
+        steps: PipelineSteps | None = None,
     ) -> str | None:
         """Calibrate, register, and stack a target's frames via Siril.
 
@@ -1953,6 +2004,16 @@ class ImageProcessing:
         generate_rejmap : `bool`, optional
             Whether to generate a rejection map. If `None` (default),
             the configured default is used.
+        spectral_star_detection : `str`, optional
+            How spectral frames are lined up: a key of
+            `SPECTRAL_STAR_DETECTION_COMMANDS`, or ``"phase_correlation"``
+            to skip Siril's registration and use ``steps.align_frames``.
+            Default is ``"standard"``.
+        steps : `PipelineSteps`, optional
+            The stacking pipeline's own steps this run calls: the flat
+            assessment and the phase-correlation alignment. If `None`
+            (default), the flats are not checked or smoothed, and a
+            phase-correlation run fails.
 
         Returns
         -------
@@ -1960,6 +2021,7 @@ class ImageProcessing:
             Path to the final stacked file, or `None` if the job
             failed.
         """
+        steps = steps or PipelineSteps()
         self.reset_gui_flag()
         # Populated as process_target runs, read by
         # stacking_operations.process_target immediately afterward
@@ -2212,13 +2274,19 @@ class ImageProcessing:
             flat_smoothing_sigma = None
             if num_flats > 0:
                 flat_assessment = self.assess_staged_flats(
-                    target_folder, uses_color_filter_array, job_logger=job_logger, camera=camera_filter
+                    target_folder,
+                    uses_color_filter_array,
+                    job_logger=job_logger,
+                    camera=camera_filter,
+                    assess_flats=steps.assess_flats,
                 )
-                self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
-                # A master restored from the cache was built, smoothed or not,
-                # under the same recipe, so only a master built now is blurred.
-                if "flat" not in restored_master_kinds:
-                    flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
+                if flat_assessment is not None:
+                    self.last_run_diagnostics["flat_calibration"] = flat_assessment.as_diagnostics()
+                    # A master restored from the cache was built, smoothed or
+                    # not, under the same recipe, so only a master built now
+                    # is blurred.
+                    if "flat" not in restored_master_kinds:
+                        flat_smoothing_sigma = flat_assessment.smoothing_sigma_pixels
 
             # A master built from fewer frames than the minimum is still
             # built (the library can legitimately hold one flat), but the run
@@ -2459,6 +2527,7 @@ class ImageProcessing:
                     rejection_sigma_high=rejection_sigma_high,
                     stack_weight=stack_weight,
                     job_logger=job_logger,
+                    align_frames=steps.align_frames,
                 )
             else:
 
@@ -2602,6 +2671,7 @@ class ImageProcessing:
         rejection_sigma_high: float,
         stack_weight: str | None,
         job_logger: logging.Logger,
+        align_frames: Callable[[list[str], str], tuple[list[str], dict[str, int]]] | None,
     ) -> str | None:
         """Calibrate with Siril, align in Python, then stack with Siril again.
 
@@ -2666,11 +2736,13 @@ class ImageProcessing:
             Siril run, or the alignment step in between, produced nothing
             to stack.
         """
-        from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
-            ALIGNED_SIRIL_SEQUENCE_NAME,
-            align_calibrated_frames,
-            find_calibrated_frame_paths,
-        )
+        if align_frames is None:
+            job_logger.error(
+                "Phase-correlation registration needs the stacking pipeline's alignment step, "
+                "and none was given; nothing to stack."
+            )
+            self._kill_process_tree(process, job_logger=job_logger, workdir=target_folder)
+            return None
 
         def write_calibration_commands() -> None:
             self.send_commands(
@@ -2709,7 +2781,7 @@ class ImageProcessing:
             return None
 
         aligned_directory = os.path.join(process_directory, "aligned")
-        aligned_paths, counts = align_calibrated_frames(calibrated_paths, aligned_directory)
+        aligned_paths, counts = align_frames(calibrated_paths, aligned_directory)
         self.last_run_diagnostics["registered_frames"] = counts["registered"]
         self.last_run_diagnostics["registration_failed_frames"] = counts["failed"]
         if not aligned_paths:

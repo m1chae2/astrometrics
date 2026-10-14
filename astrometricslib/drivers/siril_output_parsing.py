@@ -1,14 +1,18 @@
-"""Parsers for the text files Siril writes about a run.
+"""Parsers for the files Siril writes about a run.
 
 These read Siril's own output file formats (`.seq` registration
-summaries, `.lst` star lists) -- they're specific to how Siril reports
-its results, not a generic image-quality measurement, so they live
-alongside the Siril driver rather than with the quality math in
-`pipelines/shared/quality/`.
+summaries, `.lst` star lists, the `_RejMap.fits` rejection map) -- they're
+specific to how Siril reports its results, not a generic image-quality
+measurement, so they live alongside the Siril driver rather than with the
+quality math in `pipelines/shared/quality/`.
 """
 
 import os
 import re
+
+import numpy as np
+
+from astrometricslib.drivers.fits_access import read_data
 
 _REGISTRATION_LINE_PATTERN = re.compile(r"^R(\d+) ")
 
@@ -154,3 +158,32 @@ def parse_zero_order_star(lst_path: str) -> dict[str, float] | None:
                 "rmse": float(fields[12]),
             }
     return None
+
+
+def measure_rejected_fraction(stacked_path: str) -> float | None:
+    """Calculate what share of pixel values were thrown out during stacking.
+
+    Siril writes a rejection map beside a stack when asked (its ``-rejmap``
+    option), named after the stack with ``_RejMap`` added. Each pixel of the
+    map holds the fraction of frames whose value was rejected at that pixel,
+    so the map's mean is the share of all pixel values thrown out (for
+    example by satellites or clouds).
+
+    Parameters
+    ----------
+    stacked_path : `str`
+        The file path to the final stacked image.
+
+    Returns
+    -------
+    fraction : `float` or `None`
+        The mean of the rejection map, 0 to 1. `None` if the rejection map
+        file can't be found or holds no data.
+    """
+    rejmap_path = os.path.splitext(stacked_path)[0] + "_RejMap.fits"
+    if not os.path.exists(rejmap_path):
+        return None
+    data = read_data(rejmap_path)
+    if data is None:
+        return None
+    return float(np.mean(data))

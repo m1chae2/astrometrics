@@ -35,7 +35,7 @@ def isolated_config(tmp_path: Path) -> Iterator[AppConfiguration]:
     """Swap the process-wide config singleton for a fresh, tmp_path-scoped one.
 
     `_process_single_spectroscopy_frame_worker_v2` constructs its own
-    `Astrometrics()` with no arguments (mirroring the real subprocess
+    `CatalogAccess()` with no arguments (mirroring the real subprocess
     worker's self-contained-process design), which resolves config via
     `get_configuration()`'s process-wide singleton -- fine for a real,
     separate OS process, but means calling the worker function

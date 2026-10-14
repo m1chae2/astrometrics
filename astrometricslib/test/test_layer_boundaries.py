@@ -33,6 +33,13 @@ A third ratchet keeps unseeded randomness out of the pipelines (review item
 S20). A random generator with no seed gives a different answer on every run,
 so a detection threshold or a preview could change between two runs on the
 same frame. See `KNOWN_UNSEEDED_RANDOM_SITES`.
+
+A fourth ratchet keeps imports pointing down the layers (issue #78). The
+library's "Ratchet Rule" (see
+`documentation/library_design/Astrometrics_Library_Implementation.md`) says
+no layer imports from a layer above it. The scan reads every import,
+including the ones written inside a function body, which hide a dependency
+from a quick read of the file's header. See `KNOWN_UPWARD_IMPORTS`.
 """
 
 import ast
@@ -403,3 +410,188 @@ def test_the_unseeded_random_scan_recognizes_each_banned_form() -> None:
         assert _is_unseeded_random_call(ast.parse(source).body[0].value), source
     for source in allowed:
         assert not _is_unseeded_random_call(ast.parse(source).body[0].value), source
+
+
+# The imports a lower layer may not make. Each rule is the folder the
+# importing file sits in and the module prefixes it may not import. A prefix
+# also covers every module below it.
+#
+# - Drivers are the bottom layer: they serve the pipelines, the public
+#   helpers and the public API, and import none of them.
+# - The pipelines do not import the public API above them.
+# - Spectroscopy does not import `pipelines.tasks`, the dispatcher that
+#   runs it.
+# - The shared vocabulary (`models/`, `foundation/`, `utilities/`) is plain
+#   data and settings that every layer may import, so it imports no layer.
+_UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (
+        ("drivers/",),
+        ("astrometricslib.pipelines", "astrometricslib.api", "astrometricslib.visualization"),
+    ),
+    (("pipelines/",), ("astrometricslib.api",)),
+    (("pipelines/spectroscopy/",), ("astrometricslib.pipelines.tasks",)),
+    (
+        ("models/", "foundation/", "utilities/"),
+        (
+            "astrometricslib.drivers",
+            "astrometricslib.pipelines",
+            "astrometricslib.api",
+            "astrometricslib.visualization",
+        ),
+    ),
+)
+
+# The folders that may not import names from the `astrometricslib` package
+# itself (``from astrometricslib import Astrometrics``). The package's
+# `__init__.py` is the public API, the top layer.
+_NO_PACKAGE_ROOT_IMPORT_FOLDERS = ("drivers/", "pipelines/", "models/", "foundation/", "utilities/")
+
+# Upward imports that were already there when this ratchet was written,
+# as "file -> module". This list should only ever shrink.
+KNOWN_UPWARD_IMPORTS = frozenset({
+    # Each worker process builds a whole `Astrometrics()` to look up its
+    # target and run the full pipeline.
+    "pipelines/target_batch.py -> astrometricslib",
+    # `Target.object_type` classifies the target's name with a pipeline
+    # helper.
+    "models/target.py -> astrometricslib.pipelines.shared.target_classification",
+})
+
+
+def _imported_modules(module_path: pathlib.Path) -> set[str]:
+    """List every module a file imports, wherever in the file the import is.
+
+    Relative imports are turned into full module names. For
+    ``from package import name``, the module is ``package``.
+
+    Parameters
+    ----------
+    module_path : `pathlib.Path`
+        The Python file to read.
+
+    Returns
+    -------
+    modules : `set` [`str`]
+        The full names of the imported modules.
+    """
+    # The package a file belongs to: its folder, for a module and for an
+    # `__init__.py` alike.
+    package_parts = module_path.relative_to(ASTROMETRICSLIB_ROOT.parent).parent.parts
+    modules: set[str] = set()
+    tree = ast.parse(module_path.read_text(), filename=str(module_path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                modules.add(node.module or "")
+            else:
+                base = package_parts[: len(package_parts) - (node.level - 1)]
+                modules.add(".".join([*base, *([node.module] if node.module else [])]))
+    return modules
+
+
+def _is_upward_import(relative_path: str, module: str) -> bool:
+    """Decide whether one import from one file breaks the layer rule.
+
+    Parameters
+    ----------
+    relative_path : `str`
+        The importing file, relative to `astrometricslib/`, with forward
+        slashes.
+    module : `str`
+        The full name of the imported module.
+
+    Returns
+    -------
+    is_upward : `bool`
+        `True` if a rule in `_UPWARD_IMPORT_RULES` forbids the import, or if
+        the file imports from the package root and sits in one of
+        `_NO_PACKAGE_ROOT_IMPORT_FOLDERS`.
+    """
+    if module == "astrometricslib":
+        return relative_path.startswith(_NO_PACKAGE_ROOT_IMPORT_FOLDERS)
+    for folders, forbidden_prefixes in _UPWARD_IMPORT_RULES:
+        if not relative_path.startswith(folders):
+            continue
+        if any(module == prefix or module.startswith(prefix + ".") for prefix in forbidden_prefixes):
+            return True
+    return False
+
+
+def _find_upward_imports() -> set[str]:
+    """List every upward import in the library's production files.
+
+    Test modules are skipped.
+
+    Returns
+    -------
+    upward_imports : `set` [`str`]
+        One ``"file -> module"`` entry per upward import, with the file
+        relative to `astrometricslib/`.
+    """
+    upward_imports: set[str] = set()
+    for module_path in sorted(ASTROMETRICSLIB_ROOT.rglob("*.py")):
+        if _is_test_module(module_path):
+            continue
+        relative_path = module_path.relative_to(ASTROMETRICSLIB_ROOT).as_posix()
+        for module in _imported_modules(module_path):
+            if _is_upward_import(relative_path, module):
+                upward_imports.add(f"{relative_path} -> {module}")
+    return upward_imports
+
+
+def test_no_new_upward_imports() -> None:
+    """Verify no file imports from a layer above its own.
+
+    A driver that needs a pipeline's result should be handed it (the
+    stacking driver gets the pipeline's steps as a `PipelineSteps`). A
+    pipeline should take the catalog connection or the function it needs
+    instead of building the public `Astrometrics` object.
+    """
+    new_imports = _find_upward_imports() - KNOWN_UPWARD_IMPORTS
+
+    assert not new_imports, (
+        f"Upward import(s) found: {sorted(new_imports)}. A layer may not import "
+        f"from a layer above it; pass the needed value or function in instead."
+    )
+
+
+def test_the_upward_import_list_has_no_stale_entries() -> None:
+    """Verify every allowlisted upward import is still there.
+
+    A fixed import should come off the list, so the list only shrinks.
+    """
+    stale_entries = KNOWN_UPWARD_IMPORTS - _find_upward_imports()
+
+    assert not stale_entries, (
+        f"KNOWN_UPWARD_IMPORTS lists import(s) that are gone: {sorted(stale_entries)}. "
+        f"Remove them from the list."
+    )
+
+
+def test_the_upward_import_scan_recognizes_each_rule() -> None:
+    """Verify the scan flags each upward import and allows downward ones."""
+    upward = [
+        ("drivers/siril_interface.py", "astrometricslib.pipelines.stacking.stack_runner"),
+        ("drivers/siril_interface.py", "astrometricslib.api.processing"),
+        ("drivers/siril_interface.py", "astrometricslib"),
+        ("pipelines/stacking/stage.py", "astrometricslib.api"),
+        ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks"),
+        ("pipelines/spectroscopy/batch.py", "astrometricslib"),
+        ("models/target.py", "astrometricslib.pipelines.shared.target_classification"),
+    ]
+    downward = [
+        ("drivers/siril_interface.py", "astrometricslib.drivers.fits_access"),
+        ("drivers/siril_interface.py", "astrometricslib.foundation.errors"),
+        ("pipelines/stacking/stage.py", "astrometricslib.pipelines.tasks"),
+        ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.spectroscopy.runner"),
+        ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks_helpers"),
+        ("api/processing.py", "astrometricslib.pipelines.tasks"),
+        ("api/processing.py", "astrometricslib"),
+    ]
+
+    for relative_path, module in upward:
+        assert _is_upward_import(relative_path, module), (relative_path, module)
+    for relative_path, module in downward:
+        assert not _is_upward_import(relative_path, module), (relative_path, module)

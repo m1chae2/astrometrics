@@ -7,7 +7,6 @@ which ones to throw away.
 """
 
 import logging
-import os
 
 import numpy as np
 from astropy.io import fits
@@ -117,31 +116,3 @@ def measure_saturated_pixel_fraction(path: str) -> float | None:
     if data is None:
         return None
     return compute_stack_saturated_pixel_fraction(np.asarray(data, dtype=float))
-
-
-def measure_rejected_fraction(stacked_path: str) -> float | None:
-    """Calculate what percentage of pixels were thrown out during stacking.
-
-    Siril creates a rejection map file when it stacks images. This reads that
-    map to tell how much bad data (like satellites or clouds) had to be
-    removed to make the final image.
-
-    Parameters
-    ----------
-    stacked_path : `str`
-        The file path to the final stacked image.
-
-    Returns
-    -------
-    fraction : `float` or `None`
-        The average fraction of rejected pixels. None if the rejection map
-        file can't be found.
-    """
-    rejmap_path = os.path.splitext(stacked_path)[0] + "_RejMap.fits"
-    if not os.path.exists(rejmap_path):
-        return None
-    with fits.open(rejmap_path, memmap=False) as hdul:
-        data = hdul[0].data
-    if data is None:
-        return None
-    return float(np.mean(data))

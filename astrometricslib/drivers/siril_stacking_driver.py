@@ -17,7 +17,12 @@ import shlex
 import subprocess
 from typing import Any
 
-from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackRunResult, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import (
+    PipelineSteps,
+    StackingDriver,
+    StackRunResult,
+    StackSettings,
+)
 
 
 class SirilStackingDriver(StackingDriver):
@@ -62,8 +67,7 @@ class SirilStackingDriver(StackingDriver):
             The per-frame registration results and the rejected pixel
             fraction (see `StackingDriver.read_stack_artifacts`).
         """
-        from astrometricslib.drivers.siril_output_parsing import parse_seq_file
-        from astrometricslib.pipelines.shared.quality.quality_metrics import measure_rejected_fraction
+        from astrometricslib.drivers.siril_output_parsing import measure_rejected_fraction, parse_seq_file
 
         stem = stacked_path.rsplit(".", 1)[0]
         return {
@@ -81,6 +85,7 @@ class SirilStackingDriver(StackingDriver):
         settings: StackSettings,
         registration: str | None = None,
         job_id: str | None = None,
+        steps: PipelineSteps | None = None,
     ) -> StackRunResult:
         """Stack frames that can be combined as one set, with Siril.
 
@@ -99,6 +104,7 @@ class SirilStackingDriver(StackingDriver):
             log_file=log_file,
             is_spectral=is_spectral,
             job_id=job_id,
+            steps=steps,
             **options,
         )
         return StackRunResult(

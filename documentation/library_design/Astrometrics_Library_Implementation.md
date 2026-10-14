@@ -12,7 +12,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 ## Implementation Matrix
 
-The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it. This keeps the dependency graph one-directional: a lower layer never has to know a higher layer exists, so it can be tested, reused, or replaced without touching anything above it.
+The library is organized into five layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" strictly forbids any layer from importing from a layer above it. This keeps the dependency graph one-directional: a lower layer never has to know a higher layer exists, so it can be tested, reused, or replaced without touching anything above it. A test enforces the rule (`astrometricslib/test/test_layer_boundaries.py`). It reads every import in the library, including imports inside function bodies, and fails the build on a new upward one. When a lower layer needs work that belongs to a higher one, the higher layer passes it in. For example, the stacking pipeline hands its flat check and spectral frame alignment to the stacking driver as a `PipelineSteps`.
 
 Table columns are the five pipelines plus a column for code shared across all of them; rows are the layers, numbered 1 (public-facing) down to 5 (closest to disk, network, or an external program). Each cell lists the key module(s) that pipeline uses at that layer, and the annotation under each layer number says which layer it's allowed to call into.
 

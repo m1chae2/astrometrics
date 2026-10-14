@@ -18,7 +18,6 @@ against another's -- the same idea, applied one raw calibrated frame at a
 time instead of once per group.
 """
 
-import glob
 import logging
 import os
 
@@ -32,40 +31,15 @@ logger = logging.getLogger(__name__)
 # The basename this module writes its own aligned copies under:
 # `<basename>_00001.fits`, `<basename>_00002.fits`, and so on. Deliberately
 # not the same name as the Siril sequence built from them afterward
-# (`ALIGNED_SIRIL_SEQUENCE_NAME`): Siril's own `convert` picks up every
-# image file already sitting in its target directory and relinks it under
-# its own numbering, and pointed at a directory where the sequence name
-# and the files already share one basename, its output paths collide with
-# its own input paths mid-conversion, corrupting the sequence it is
-# building. Two different names keep the raw files convert reads
-# distinct from the sequence it writes.
+# (`ALIGNED_SIRIL_SEQUENCE_NAME` in `drivers/siril_interface.py`): Siril's
+# own `convert` picks up every image file already sitting in its target
+# directory and relinks it under its own numbering, and pointed at a
+# directory where the sequence name and the files already share one
+# basename, its output paths collide with its own input paths
+# mid-conversion, corrupting the sequence it is building. Two different
+# names keep the raw files convert reads distinct from the sequence it
+# writes.
 ALIGNED_FRAME_BASENAME = "raw_aligned"
-
-# The name of the Siril sequence built by running `convert` over the
-# `ALIGNED_FRAME_BASENAME`-named files in their own directory.
-ALIGNED_SIRIL_SEQUENCE_NAME = "aligned_light"
-
-
-def find_calibrated_frame_paths(process_directory: str, sequence_name: str) -> list[str]:
-    """List Siril's own converted/calibrated frames for one sequence.
-
-    Parameters
-    ----------
-    process_directory : `str`
-        Siril's scratch ``process`` folder for this stacking run.
-    sequence_name : `str`
-        The sequence's exact name as Siril wrote it, e.g.
-        ``"pp_light_source"`` for calibrated frames named
-        ``pp_light_source_00001.fits``, or plain ``"light_source"`` when
-        there were no calibration masters to apply.
-
-    Returns
-    -------
-    paths : `list` [`str`]
-        The frames, sorted by their frame number.
-    """
-    pattern = os.path.join(process_directory, f"{sequence_name}_*.fits")
-    return sorted(glob.glob(pattern))
 
 
 def _reference_frame_index(images: list[np.ndarray]) -> int:
@@ -97,7 +71,7 @@ def align_calibrated_frames(
     Parameters
     ----------
     calibrated_frame_paths : `list` [`str`]
-        The calibrated frames to align, from `find_calibrated_frame_paths`.
+        The calibrated frames to align, as the stacking driver lists them.
     output_directory : `str`
         Where the aligned copies are written, created if it does not
         already exist. Numbered contiguously from 1, the way Siril's own

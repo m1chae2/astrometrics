@@ -8,9 +8,26 @@
 import '@testing-library/jest-dom';
 import { expect } from 'vitest';
 import * as matchers from '@testing-library/jest-dom/matchers';
+import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers';
 
 // Extend Vitest's expect with jest-dom matchers
 expect.extend(matchers);
+
+/**
+ * Tell TypeScript about the jest-dom matchers (`toBeInTheDocument` and so on).
+ *
+ * Vitest 5 reads custom matcher types only from its own `Matchers<R, T>`
+ * interface. jest-dom 7 still declares its types on the old global
+ * `jest.Matchers` (and its `/vitest` entry on the old one-parameter
+ * `Assertion<T>`), so without this block every jest-dom matcher is a type
+ * error. `R` is what the matcher returns, which is what jest-dom expects as
+ * its second type parameter.
+ */
+declare module 'vitest' {
+    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    interface Matchers<R extends void | Promise<void> = void | Promise<void>, T = unknown>
+        extends TestingLibraryMatchers<unknown, R> {}
+}
 
 // Mock scrollIntoView for jsdom environment compatibility
 if (typeof window !== 'undefined') {

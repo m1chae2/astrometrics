@@ -13,6 +13,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # @types/node must match the Node major that CI runs (node-version in
+    # frontend.yml and lint.yml). Bump it by hand together with the runtime.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
@@ -22,6 +27,11 @@ updates:
     directory: /ui/mcp
     schedule:
       interval: weekly
+    # @types/node must match the Node major that CI runs (node-version in
+    # frontend.yml and lint.yml). Bump it by hand together with the runtime.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       ui-mcp-minor-and-patch:
         update-types: [minor, patch]

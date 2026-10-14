@@ -135,7 +135,7 @@ export class WindowsPlatform extends BasePlatform {
     const workArea = display.workArea;
 
     let x = Math.round(trayBounds.x + (trayBounds.width / 2) - (width / 2));
-    let y = 0;
+    let y;
 
     // Check if taskbar is at bottom or top
     if (trayBounds.y >= workArea.y + workArea.height / 2) {

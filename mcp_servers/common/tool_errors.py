@@ -54,7 +54,7 @@ def error_content(info: ErrorInfo) -> ToolErrorContent:
     return ToolErrorContent([TextContent(type="text", text=text)])
 
 
-def as_call_tool_result(content: Any) -> Any:
+def as_call_tool_result(content: list[Any]) -> CallToolResult:
     """Turn a registry's reply into what an MCP ``call_tool`` handler returns.
 
     Parameters
@@ -64,10 +64,8 @@ def as_call_tool_result(content: Any) -> Any:
 
     Returns
     -------
-    result : `~mcp.types.CallToolResult` or `list`
-        A result flagged as an error if `content` is a `ToolErrorContent`.
-        Otherwise the list, unchanged.
+    result : `~mcp.types.CallToolResult`
+        The content, flagged as an error if `content` is a
+        `ToolErrorContent`.
     """
-    if isinstance(content, ToolErrorContent):
-        return CallToolResult(content=list(content), isError=True)
-    return content
+    return CallToolResult(content=list(content), is_error=isinstance(content, ToolErrorContent))

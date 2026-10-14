@@ -93,4 +93,4 @@ Some bundled assets are the work of others and remain under their own terms:
 
 * **Hipparcos bright-star catalog** (`wayfindinglib/drivers/catalog/bright_star_catalog.sqlite`): derived from the ESA Hipparcos mission catalogue.
 * **Constellation line data** (`wayfindinglib/drivers/catalog/constellation_lines.json`): derived from [d3-celestial](https://github.com/ofrohn/d3-celestial), Copyright (c) 2015 Olaf Frohn, BSD-3-Clause.
-* **Plotly.js** (`public/js/plotly.min.js`): Copyright 2012-2025 Plotly, Inc., MIT.
+* **Plotly.js** (`public/js/plotly.min.js`, v4.1.2, a copy of the `plotly.js-dist-min` npm package): Copyright 2012-2026 Plotly, Inc., MIT.

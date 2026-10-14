@@ -132,7 +132,7 @@ class ToolRegistry:
             """
             self.tools[name] = {
                 "func": func,
-                "tool_def": Tool(name=name, description=description, inputSchema=schema),
+                "tool_def": Tool(name=name, description=description, input_schema=schema),
             }
             return func
 
@@ -243,7 +243,7 @@ class ToolRegistry:
             logger.warning("jsonschema is not installed, so tool arguments are not checked.")
         else:
             try:
-                jsonschema.validate(instance=arguments, schema=self.tools[name]["tool_def"].inputSchema)
+                jsonschema.validate(instance=arguments, schema=self.tools[name]["tool_def"].input_schema)
             except (jsonschema.ValidationError, jsonschema.SchemaError) as error:
                 return error_content(
                     ErrorInfo(
@@ -377,7 +377,7 @@ def result_content(result: Any) -> list[Any]:
         # A picture goes back as a real image, not as base64 text.
         return [
             ImageContent(
-                type="image", data=base64.b64encode(result.png_bytes).decode("ascii"), mimeType="image/png"
+                type="image", data=base64.b64encode(result.png_bytes).decode("ascii"), mime_type="image/png"
             ),
             TextContent(type="text", text=json.dumps(_picture_description(result), indent=2, default=str)),
         ]
@@ -449,7 +449,7 @@ def _figure_as_image(figure: Any) -> list[ImageContent | TextContent]:
         pass
     return [
         ImageContent(
-            type="image", data=base64.b64encode(buffer.getvalue()).decode("ascii"), mimeType="image/png"
+            type="image", data=base64.b64encode(buffer.getvalue()).decode("ascii"), mime_type="image/png"
         ),
         TextContent(type="text", text=json.dumps(description, indent=2)),
     ]

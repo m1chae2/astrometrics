@@ -180,7 +180,7 @@ export async function deleteTarget(objectId: string): Promise<unknown | null> {
                 ? err.message
                 : `Error deleting ${objectId}: ${String(err)}`;
         reportError(new Error(message), 'backend');
-        throw new Error(message);
+        throw new Error(message, { cause: err });
     }
 }
 

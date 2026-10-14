@@ -68,6 +68,9 @@ export async function loadPlotly(): Promise<PlotlyStatic> {
   // Plotly is loaded via <script> tag in index.html to avoid massive build times
   // with Vite/Rollup transforming the minified bundle.
   // We wait for it to be available on window.
+  // public/js/plotly.min.js is a copy of node_modules/plotly.js-dist-min/plotly.min.js.
+  // When you upgrade the npm package, copy the new file over too
+  // (test_plotlyAttributes checks that the two versions match).
 
   if (typeof window === 'undefined') {
     throw new Error('loadPlotly can only be run in a browser environment');

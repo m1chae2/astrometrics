@@ -81,7 +81,7 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
 
 def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> None:
     """`diagnostics_frame_quality` takes the documented, optional arguments."""
-    schema = registry.tools["diagnostics_frame_quality"]["tool_def"].inputSchema
+    schema = registry.tools["diagnostics_frame_quality"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "target",
         "folder_path",
@@ -103,7 +103,7 @@ def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> N
 
 def test_jobs_query_has_the_documented_arguments(registry: ToolRegistry) -> None:
     """`jobs_query` takes the documented arguments, none required."""
-    schema = registry.tools["jobs_query"]["tool_def"].inputSchema
+    schema = registry.tools["jobs_query"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "job_id",
         "target_id",
@@ -152,6 +152,6 @@ def test_a_rendered_frame_reaches_the_client_as_an_image(tmp_path: Path) -> None
     content = asyncio.run(copy.execute("view", {}))
 
     assert content[0].type == "image"
-    assert content[0].mimeType == "image/png"
+    assert content[0].mime_type == "image/png"
     assert Image.open(BytesIO(base64.b64decode(content[0].data))).size[0] > 0
     assert "brightness_range_shown" in json.loads(content[1].text)

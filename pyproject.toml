@@ -50,7 +50,12 @@ dependencies = [
     "import-linter",
     "matplotlib",
     "numpy",
-    "photutils",
+    # Held below 3.1: photutils 3.1 changed DAOStarFinder's `flux` (now summed
+    # over the kernel footprint, not the whole cutout) and `peak` (now the
+    # central pixel, not the cutout maximum). That lowers the source-detection
+    # fluxes 3-11% and fails the M 13 golden test. Lift the cap only after
+    # deciding whether to re-baseline astrometricslib/test/golden/golden_values.json.
+    "photutils<3.1",
     "Pillow",
     "pydantic>=1.10",
     "pytest",
@@ -75,11 +80,18 @@ dependencies = [
 # The MCP SDK, needed only by the MCP servers in mcp_servers/. The libraries
 # and the backend import without it. build/linux/setup_venv.sh installs it.
 mcp = [
-    "mcp>=1.28.0,<2.0.0", # mcp_servers/common/tool_registry.py reads Tool.inputSchema (camelCase); 1.x only, 2.0 renamed it to input_schema
+    "mcp>=2.3.0,<3.0.0", # 2.x API: snake_case fields (Tool.input_schema) and on_* handlers passed to Server() in mcp_servers/common/server.py
+    # mcp_servers/backend/mcp_http.py posts to the running backend with httpx.
+    # MCP SDK 1.x brought httpx in with it; 2.x moved to httpx2, so it must be
+    # declared here.
+    "httpx>=0.27",
+    # mcp_servers/common/server.py checks tool arguments against their schemas
+    # itself, because SDK 2.x no longer does.
+    "jsonschema>=4.20",
 ]
 dev = [
     "flake8>=7.0.0",
-    "ruff>=0.16.0",
+    "ruff>=0.17.0",
     "safety>=3.0.0",
     "pyinstaller",
     # Type checker configured by pyrefly.toml. Previously that config was

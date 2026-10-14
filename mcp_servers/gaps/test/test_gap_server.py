@@ -136,7 +136,7 @@ def test_a_refused_call_is_an_mcp_error_result(monkeypatch: pytest.MonkeyPatch, 
     result = as_call_tool_result(
         asyncio.run(gap_server.GapTools().execute("report_capability_gap", {"tier": "ui"}))
     )
-    assert result.isError is True
+    assert result.is_error is True
     assert result.content[0].text.startswith("invalid_argument: Missing required")
 
 

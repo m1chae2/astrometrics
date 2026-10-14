@@ -649,7 +649,7 @@ async function callBackendInternal<A extends keyof ActionRegistry>(
                 if (!options?.silent) {
                     emitToast(msg, 'error', `API:${action}`);
                 }
-                throw new Error(msg);
+                throw new Error(msg, { cause: error });
             }
 
             if (error?.name === 'AbortError') {

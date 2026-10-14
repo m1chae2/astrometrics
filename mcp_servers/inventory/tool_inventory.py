@@ -542,7 +542,7 @@ def collect_python_server_tools(server: str, module_name: str) -> list[ToolRecor
     for name, entry in sorted(registry.tools.items()):
         tool_definition = entry["tool_def"]
         description = (tool_definition.description or "").strip()
-        properties = (tool_definition.inputSchema or {}).get("properties", {})
+        properties = (tool_definition.input_schema or {}).get("properties", {})
         records.append(ToolRecord(server, name, description, sorted(properties)))
     return records
 

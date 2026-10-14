@@ -6,8 +6,8 @@
  * sharing the same vendor chunk split.
  *
  * CSP injection is handled by the inline `injectCspPlugin`, which replaces the
- * <%- csp %> EJS placeholder in every HTML file during both dev and build,
- * without requiring vite-plugin-html's per-page configuration overhead.
+ * <%- csp %> placeholder in every HTML file during both dev and build. No
+ * third-party HTML plugin is needed.
  */
 
 import { defineConfig } from "vite";
@@ -26,8 +26,7 @@ export default defineConfig(({ mode }) => {
   /**
    * Inline Vite plugin that replaces the <%- csp %> EJS placeholder in any
    * HTML file with the resolved CSP meta tag. Applied to all HTML files so
-   * both index.html and tray_popover.html receive injection without requiring
-   * vite-plugin-html's per-page configuration.
+   * both index.html and tray_popover.html receive the tag.
    */
   const injectCspPlugin = {
     name: 'inject-csp',
@@ -45,10 +44,10 @@ export default defineConfig(({ mode }) => {
       alias: [
         // Match the longer path first to avoid Vite appending suffixes like
         // '/promises' to the replacement file path.
-        { find: 'node:fs/promises', replacement: path.resolve(__dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
-        { find: 'node:fs', replacement: path.resolve(__dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
-        { find: 'fs/promises', replacement: path.resolve(__dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
-        { find: 'fs', replacement: path.resolve(__dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') }
+        { find: 'node:fs/promises', replacement: path.resolve(import.meta.dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
+        { find: 'node:fs', replacement: path.resolve(import.meta.dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
+        { find: 'fs/promises', replacement: path.resolve(import.meta.dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') },
+        { find: 'fs', replacement: path.resolve(import.meta.dirname, 'ui', 'common', 'utils', 'nodeFsShim.js') }
       ]
     },
     server: {
@@ -66,17 +65,23 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: '../dist',
       emptyOutDir: true,
-      rollupOptions: {
+      // Vite 8 bundles with Rolldown, so the old `rollupOptions` key is now
+      // `rolldownOptions`, and the object form of `manualChunks` is gone.
+      // Each `codeSplitting` group below puts one package (plus the packages
+      // it imports) into its own named chunk, as `manualChunks` did before.
+      rolldownOptions: {
         input: {
-          main: path.resolve(__dirname, 'ui/index.html'),
-          tray_popover: path.resolve(__dirname, 'ui/tray_popover.html'),
+          main: path.resolve(import.meta.dirname, 'ui/index.html'),
+          tray_popover: path.resolve(import.meta.dirname, 'ui/tray_popover.html'),
         },
         output: {
-          manualChunks: {
-            'vendor': ['react', 'react-dom'],
-            'plotly': ['plotly.js-dist-min'],
-            'fits': ['jsfitsio']
-          }
+          codeSplitting: {
+            groups: [
+              { name: 'vendor', test: /[\\/]node_modules[\\/](react|react-dom)[\\/]/ },
+              { name: 'plotly', test: /[\\/]node_modules[\\/]plotly\.js-dist-min[\\/]/ },
+              { name: 'fits', test: /[\\/]node_modules[\\/]jsfitsio[\\/]/ },
+            ],
+          },
         }
       },
       chunkSizeWarningLimit: 2000

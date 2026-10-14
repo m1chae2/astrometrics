@@ -178,7 +178,7 @@ class Parser {
             const [, propertyKey, operator, valueString] = match;
 
             // Map short property names to FileItem properties
-            let fileValueString = '';
+            let fileValueString: string;
             if (propertyKey.startsWith('exp')) fileValueString = String(this.file.exposure || '');
             else if (propertyKey === 'iso') fileValueString = String(this.file.iso || '');
             else if (propertyKey.startsWith('cam')) fileValueString = String(this.file.camera || '');

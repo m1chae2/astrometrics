@@ -151,7 +151,7 @@ export const useTargetListLogic = (
                 (!filterProcessedOnly || hasProcessedImage(t))
         );
         return sortTargets(matching, sort, camera, cameraIndex);
-    }, [targets, catalog, camera, cameraIndex, sort, applyTextFilter, filterText, filterProcessedOnly]);
+    }, [targets, catalog, camera, cameraIndex, sort, applyTextFilter, filterProcessedOnly]);
 
     // Auto-selection Logic
     useEffect(() => {

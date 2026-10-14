@@ -100,7 +100,7 @@ export async function saveAstrometrics(): Promise<Record<string, unknown>> {
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         reportError(new Error(`Failed to persist library: ${msg}`), 'backend');
-        throw new Error(`Failed to persist library: ${msg}`);
+        throw new Error(`Failed to persist library: ${msg}`, { cause: err });
     }
 }
 

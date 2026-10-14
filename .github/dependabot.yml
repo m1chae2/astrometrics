@@ -1,0 +1,47 @@
+# Dependabot version updates for every package manager in this repo.
+#
+# Security updates are switched on in the repository settings and work on
+# their own. This file adds weekly version-update PRs, so dependencies don't
+# drift far behind between security fixes. Minor and patch updates for each
+# ecosystem are grouped into one PR to keep the PR count low; major updates
+# still arrive one per package, because they usually need code changes.
+
+version: 2
+updates:
+  # Root npm project: the React/Vite UI, Electron shell and build tooling.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The Node MCP server for UI diagnostics, which has its own lockfile.
+  - package-ecosystem: npm
+    directory: /ui/mcp
+    schedule:
+      interval: weekly
+    groups:
+      ui-mcp-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Python dependencies declared in pyproject.toml.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Actions used by the CI workflows and the local composite action.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup-python-env
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

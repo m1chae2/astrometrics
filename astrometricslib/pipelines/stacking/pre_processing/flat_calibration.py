@@ -78,14 +78,6 @@ MAXIMUM_SMOOTHING_SIGMA_PIXELS = 8.0
 # Siril's stack makes the true figure only a little better than the estimate.
 MAXIMUM_FRAMES_AVERAGED = 32
 
-# Written into the key of the stored master flats, so that a change to how
-# the master flat is built or blurred does not reuse one built the old way.
-# Increase it whenever that changes what the master flat contains. Version 4
-# subtracts the bias from a lone flat too. Version 5 is saved as 32-bit
-# floating point (the script sets ``set32bits``), not as the 16-bit integers
-# of Siril's default preference.
-FLAT_MASTER_RECIPE = "flat-recipe-5"
-
 # The sources `FlatAssessment.full_scale_source` can name. The first is the
 # sensor's own clip level from its camera profile. The other two are guesses
 # made from the pixel values, used when no profile applies.

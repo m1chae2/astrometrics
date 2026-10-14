@@ -25,10 +25,19 @@ import shutil
 from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
-from astrometricslib.drivers.interfaces.stacking_driver import StackingDriver, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps, StackingDriver, StackSettings
+from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
+from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# The pipeline's own steps the engine calls in the middle of a run: judging
+# the flat frames (and how much to blur a noisy master flat), and lining up
+# spectral frames by phase correlation when star matching fails. They are
+# handed to the engine on every run, because a driver may not import
+# pipeline code.
+PIPELINE_STEPS = PipelineSteps(assess_flats=assess_flats, align_frames=align_calibrated_frames)
 
 # The share of frames that must register for a spectral stack to be accepted
 # as it is. Below this, the stack is retried with relaxed star detection and
@@ -213,6 +222,7 @@ def _stack_one_batch(
             settings,
             registration=mode,
             job_id=job_id,
+            steps=PIPELINE_STEPS,
         )
         path = result.stacked_path
         diagnostics = dict(result.diagnostics)

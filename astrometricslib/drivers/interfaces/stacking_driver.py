@@ -12,9 +12,15 @@ commands or file formats.
 A driver takes a `StackSettings` and returns a `StackRunResult`. Everything
 the pipeline needs to know about the run, including values it used to read
 from Siril's own files, comes back in the result's diagnostics.
+
+Some work in the middle of a run is the pipeline's own science, such as
+judging the flat frames or lining up spectral frames without stars. The
+pipeline hands those steps to the driver as a `PipelineSteps`, so the driver
+never has to import pipeline code.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from typing import Any
 
@@ -62,6 +68,33 @@ class StackSettings:
             for item in fields(self)
             if getattr(self, item.name) is not None
         }
+
+
+@dataclass(frozen=True)
+class PipelineSteps:
+    """Steps the stacking pipeline runs for the engine in the middle of a run.
+
+    Drivers sit below the pipelines and must not import them. When a run
+    needs one of the pipeline's own measurements, the pipeline passes the
+    function in here instead. A step left as `None` is skipped, and the
+    driver logs what it could not do.
+
+    Parameters
+    ----------
+    assess_flats : `Callable` or `None`
+        Measures a set of flat frames: ``assess_flats(flat_paths, camera)``
+        returns a dataclass with ``issues`` (a list of sentences),
+        ``needs_smoothing``, ``smoothing_sigma_pixels`` (the Gaussian blur
+        width for the master flat, or `None`) and ``as_diagnostics()``.
+    align_frames : `Callable` or `None`
+        Lines up calibrated spectral frames by phase correlation:
+        ``align_frames(frame_paths, output_directory)`` writes the aligned
+        copies and returns ``(aligned_paths, counts)``, where ``counts`` has
+        ``"registered"`` and ``"failed"`` frame counts.
+    """
+
+    assess_flats: Callable[[list[str], str | None], Any] | None = None
+    align_frames: Callable[[list[str], str], tuple[list[str], dict[str, int]]] | None = None
 
 
 @dataclass
@@ -139,6 +172,7 @@ class StackingDriver(ABC):
         settings: StackSettings,
         registration: str | None = None,
         job_id: str | None = None,
+        steps: PipelineSteps | None = None,
     ) -> StackRunResult:
         """Calibrate, register and stack frames that can be combined as one.
 
@@ -162,6 +196,9 @@ class StackingDriver(ABC):
         job_id : `str` or `None`
             The tracked job the run belongs to, so the engine can report
             progress against it.
+        steps : `PipelineSteps` or `None`
+            The pipeline's own steps the engine runs mid-run. `None` skips
+            them all.
 
         Returns
         -------

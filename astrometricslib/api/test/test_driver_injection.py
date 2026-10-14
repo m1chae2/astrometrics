@@ -33,6 +33,7 @@ from astrometricslib import (
     Target,
 )
 from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib.drivers.interfaces import PipelineSteps
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
@@ -191,6 +192,7 @@ class FakeStacker(StackingDriver):
         settings: StackSettings,
         registration: str | None = None,
         job_id: str | None = None,
+        steps: PipelineSteps | None = None,
     ) -> StackRunResult:
         """Record the frames and report a stack at the fixed output path.
 

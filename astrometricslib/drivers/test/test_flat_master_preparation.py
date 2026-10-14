@@ -19,6 +19,7 @@ from astrometricslib.drivers.siril_interface import (
     _master_recipe,
     build_flat_master_commands,
 )
+from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
 
 SIZE = 96
 
@@ -59,16 +60,26 @@ def stage_flats(target_folder: Path, count: int, level: float, noise: float) -> 
 def test_a_noisy_single_flat_is_assessed_for_smoothing(tmp_path: Path) -> None:
     """The assessment carries the blur width and the issues."""
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
+    assessment = make_processor().assess_staged_flats(
+        str(tmp_path), uses_color_filter_array=False, assess_flats=assess_flats
+    )
     assert assessment.needs_smoothing
     assert assessment.smoothing_sigma_pixels == pytest.approx(2.5, abs=0.2)
     assert any("take more flats" in issue for issue in assessment.issues)
 
 
+def test_flats_are_not_assessed_without_the_pipelines_step(tmp_path: Path) -> None:
+    """Without the assessment step, the flats are not measured or smoothed."""
+    stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
+    assert make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=False) is None
+
+
 def test_a_good_set_of_flats_is_left_alone(tmp_path: Path) -> None:
     """A quiet master flat has no issues and no blur."""
     stage_flats(tmp_path, count=30, level=0.4, noise=0.01)
-    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
+    assessment = make_processor().assess_staged_flats(
+        str(tmp_path), uses_color_filter_array=False, assess_flats=assess_flats
+    )
     assert assessment.issues == []
     assert not assessment.needs_smoothing
 
@@ -76,7 +87,9 @@ def test_a_good_set_of_flats_is_left_alone(tmp_path: Path) -> None:
 def test_a_colour_sensor_flat_is_measured_but_not_smoothed(tmp_path: Path) -> None:
     """Blurring a Bayer mosaic would mix colours, so it is only reported."""
     stage_flats(tmp_path, count=1, level=0.01, noise=0.045)
-    assessment = make_processor().assess_staged_flats(str(tmp_path), uses_color_filter_array=True)
+    assessment = make_processor().assess_staged_flats(
+        str(tmp_path), uses_color_filter_array=True, assess_flats=assess_flats
+    )
     assert not assessment.needs_smoothing
     assert any("colour sensor" in issue for issue in assessment.issues)
 
@@ -141,9 +154,11 @@ def test_staged_flats_are_judged_against_the_named_cameras_clip_ceiling(tmp_path
     data = 4000.0 * (1.0 + 0.01 * generator.standard_normal((SIZE, SIZE)))
     fits.writeto(tmp_path / "flats" / "flat_00000.fits", data.astype(np.uint16))
     processor = make_processor()
-    without_camera = processor.assess_staged_flats(str(tmp_path), uses_color_filter_array=False)
+    without_camera = processor.assess_staged_flats(
+        str(tmp_path), uses_color_filter_array=False, assess_flats=assess_flats
+    )
     with_camera = processor.assess_staged_flats(
-        str(tmp_path), uses_color_filter_array=False, camera="Nikon D5300"
+        str(tmp_path), uses_color_filter_array=False, camera="Nikon D5300", assess_flats=assess_flats
     )
     assert any(issue.startswith("flats are faint:") for issue in without_camera.issues)
     assert not any(issue.startswith("flats are faint:") for issue in with_camera.issues)

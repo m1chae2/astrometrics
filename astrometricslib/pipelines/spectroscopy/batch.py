@@ -177,108 +177,16 @@ def _angular_separation_degrees(
     return math.degrees(2.0 * math.asin(min(1.0, math.sqrt(haversine))))
 
 
-def _process_single_spectroscopy_frame_worker(path: str, target_id: str) -> dict:
-    """Run spectroscopy analysis on one frame in its own process.
-
-    This function is designed to run independently in the background
-    (parallel processing). It sets up its own environment so it doesn't
-    interfere with other tasks.
-
-    Parameters
-    ----------
-    path : `str`
-        The location of the image file to analyze.
-    target_id : `str`
-        The ID of the target this image belongs to.
-
-    Returns
-    -------
-    result : `dict`
-        A dictionary with "status" (success/failed), "error" (if any),
-        and "stars_processed" (how many stars were analyzed).
-    """
-    from astrometricslib import Astrometrics
-    from astrometricslib.models.target import FrameRecord
-    from astrometricslib.pipelines.tasks import analyze_target
-
-    result = {"status": "failed", "error": None, "stars_processed": 0}
-    try:
-        astrometrics = Astrometrics()
-        target = astrometrics.targets.get(target_id)
-        if target is None:
-            result["error"] = "Target not found in catalog"
-            return result
-
-        analysis_outcome = analyze_target(
-            target,
-            frames=[FrameRecord(path=path)],
-            pipeline_type="spectroscopy",
-            catalog_access=astrometrics.catalog_access,
-        )
-        result["stars_processed"] = len(analysis_outcome.get("stellar_objects") or [])
-        result["status"] = "success"
-    except Exception as processing_error:
-        # This runs in a worker process, so it is the last place that can
-        # catch an error from one frame. The traceback is logged and the
-        # frame is recorded as failed, so the rest of the batch goes on.
-        logger.exception("Spectroscopy analysis failed for frame %s", path)
-        result["error"] = str(processing_error)
-
-    return result
-
-
-def process_spectroscopy_frames(
-    api: Any,
-    target_id: str,
-    paths: list[str],
-    max_workers: int | None = None,
-    on_item_complete: Callable[[str, dict, int, int], None] | None = None,
-) -> parallel_batch.BatchRunSummary:
-    """Process many spectroscopy frames at the same time.
-
-    (Note: This is an older function. The newer version,
-    `process_spectroscopy_frames_by_session`, is better because it
-    groups images by session so stars can be tracked across frames.)
-
-    Parameters
-    ----------
-    api : `Any`
-        The main program interface.
-    target_id : `str`
-        The ID of the target the images belong to.
-    paths : `list` of `str`
-        The file locations of the images to process.
-    max_workers : `int` or `None`, optional
-        How many processes to run at once.
-    on_item_complete : `Callable`, optional
-        A function to call every time one image finishes.
-
-    Returns
-    -------
-    summary : `BatchRunSummary`
-        A report showing how many images succeeded or failed.
-    """
-    if max_workers is None:
-        worker_counts = resolve_worker_counts("1", api.config.get_photometry_workers())
-        max_workers = worker_counts.inner_worker_count
-
-    return parallel_batch.run_parallel_batch(
-        paths,
-        _process_single_spectroscopy_frame_worker,
-        worker_arguments=(target_id,),
-        max_workers=max_workers,
-        niceness=api.config.get_worker_niceness(),
-        on_item_complete=on_item_complete,
-    )
-
-
-def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path: str, result: dict) -> dict:
+def _fallback_independent_frame_analysis(
+    catalog_access: Any, target_id: str, path: str, result: dict
+) -> dict:
     """Analyze a single frame when session grouping fails.
 
     This is a backup plan. If we can't figure out the star coordinates
     for the whole session (e.g., if plate solving failed), we fall back
     to treating this image independently and just trying to find whatever
-    bright stars we can.
+    bright stars we can. The run is recorded in the job list, like any
+    other single-image analysis.
 
     Returns
     -------
@@ -286,19 +194,28 @@ def _fallback_independent_frame_analysis(astrometrics: Any, target_id: str, path
         The same `result` dictionary that was passed in, updated with
         success/failure details.
     """
-    from astrometricslib.pipelines.tasks import analyze_target
+    from astrometricslib.foundation.jobs.runner import registered_job
+    from astrometricslib.pipelines.shared.target_records import find_stored_target
+    from astrometricslib.pipelines.spectroscopy.runner import run_spectroscopy_analysis
 
-    target = astrometrics.targets.get(target_id)
+    target = find_stored_target(catalog_access, target_id)
     if target is None:
         result["error"] = "Target not found in catalog"
         return result
 
-    analysis_outcome = analyze_target(
-        target,
-        frames=[FrameRecord(path=path)],
-        pipeline_type="spectroscopy",
-        catalog_access=astrometrics.catalog_access,
-    )
+    with registered_job(
+        enabled=True,
+        job_type="analysis",
+        target_id=target.id,
+        completed_message=f"[{target.id}] Analysis completed successfully.",
+        failed_message=f"[{target.id}] Analysis failed.",
+    ) as job:
+        job.info(
+            f"[{target.id}] Analysis job started for {target.id} (type: spectroscopy, Job: {job.job_id})"
+        )
+        analysis_outcome = run_spectroscopy_analysis(
+            target, [FrameRecord(path=path)], None, catalog_access, path, job_id=job.job_id
+        )
     fallback_stars = analysis_outcome.get("stellar_objects") or []
     result["stars_processed"] = len(fallback_stars)
     result["spectrum_facts"] = spectrum_facts(fallback_stars)
@@ -383,13 +300,13 @@ def _process_single_spectroscopy_frame_worker_v2(
         "gaia_xp": [],
     }
     try:
-        from astrometricslib import Astrometrics
+        from astrometricslib.drivers.catalog_access import CatalogAccess
         from astrometricslib.drivers.image import AstrometricsImage
 
-        astrometrics = Astrometrics()
+        catalog_access = CatalogAccess()
 
         if not session_stars:
-            return _fallback_independent_frame_analysis(astrometrics, target_id, path, result)
+            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
 
         frame_image = AstrometricsImage(path)
         wcs = frame_image.wcs if frame_image.wcs is not None and frame_image.wcs.is_celestial else None
@@ -404,11 +321,11 @@ def _process_single_spectroscopy_frame_worker_v2(
                 wcs = WCS(session_wcs_header, naxis=2)
 
         if wcs is None:
-            return _fallback_independent_frame_analysis(astrometrics, target_id, path, result)
+            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
 
         projected_stars = _project_session_stars_to_frame_pixels(session_stars, wcs)
         if not projected_stars:
-            return _fallback_independent_frame_analysis(astrometrics, target_id, path, result)
+            return _fallback_independent_frame_analysis(catalog_access, target_id, path, result)
 
         from astrometricslib.pipelines.spectroscopy.pipeline import (
             SpectroscopyPipeline,
@@ -426,7 +343,7 @@ def _process_single_spectroscopy_frame_worker_v2(
 
         stellar_objects, _breakdown, result["spectral_classification_concerns"] = (
             record_and_flag_spectroscopy_stars(
-                stellar_objects, catalog_access=astrometrics.catalog_access, target_id=target_id
+                stellar_objects, catalog_access=catalog_access, target_id=target_id
             )
         )
 

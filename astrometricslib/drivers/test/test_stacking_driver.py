@@ -14,7 +14,7 @@ from typing import Any, cast
 
 import pytest
 
-from astrometricslib.drivers.interfaces.stacking_driver import StackRunResult, StackSettings
+from astrometricslib.drivers.interfaces.stacking_driver import PipelineSteps, StackRunResult, StackSettings
 from astrometricslib.drivers.siril_stacking_driver import SirilStackingDriver
 from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
@@ -50,6 +50,7 @@ class OtherEngine:
         """Remember where to write stacks."""
         self.directory = directory
         self.batches: list[tuple[int, str | None]] = []
+        self.steps: list[PipelineSteps | None] = []
 
     def version(self) -> str | None:
         """Report a made-up version.
@@ -81,6 +82,7 @@ class OtherEngine:
         settings: StackSettings,
         registration: str | None = None,
         job_id: str | None = None,
+        steps: PipelineSteps | None = None,
     ) -> StackRunResult:
         """Write a stack and report it.
 
@@ -93,6 +95,7 @@ class OtherEngine:
         from astropy.io import fits
 
         self.batches.append((len(frames), registration))
+        self.steps.append(steps)
         path = self.directory / output_file
         fits.writeto(path, np.full((20, 20), 5.0, dtype=np.float32), overwrite=True)
         return StackRunResult(str(path), {"num_lights": len(frames)}, self.name, self.version())
@@ -144,6 +147,29 @@ def test_the_runner_works_with_an_engine_that_is_not_siril(tmp_path: Path) -> No
     assert diagnostics["stacking_engine_version"] == "9.9"
     assert diagnostics["rejected_pixel_fraction"] == pytest.approx(0.02)
     assert diagnostics["registration_frames"] == [{"dx": 0.0}]
+
+
+def test_the_runner_hands_the_engine_the_pipelines_own_steps(tmp_path: Path) -> None:
+    """The engine gets the pipeline's flat assessment and frame alignment."""
+    from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import assess_flats
+    from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
+        align_calibrated_frames,
+    )
+
+    engine = OtherEngine(tmp_path)
+    run_stack(engine, [{"path": "a.fits", "exposure": "30"}], "M 42", "M_42_L_Stacked.fits", None, False)
+    steps = engine.steps[0]
+    assert steps is not None
+    assert steps.assess_flats is assess_flats
+    assert steps.align_frames is align_calibrated_frames
+
+
+def test_the_adapter_passes_the_pipeline_steps_to_siril() -> None:
+    """`SirilStackingDriver` forwards the steps to `process_target`."""
+    driver = FakeSirilDriver()
+    steps = PipelineSteps()
+    SirilStackingDriver(driver).stack_batch([], "M 42", "out.fits", None, False, StackSettings(), steps=steps)
+    assert driver.calls[0]["steps"] is steps
 
 
 def test_the_job_id_reaches_the_engine() -> None:

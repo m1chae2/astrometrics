@@ -182,6 +182,28 @@ def _find_target(targets: list[Any], target_id: str) -> Any | None:
     return None
 
 
+def find_stored_target(catalog_access: Any, target_id: str) -> Any | None:
+    """Read the stored targets and find one by name.
+
+    The name is matched the same forgiving way `get_target` matches it. This
+    is for code that has a catalog connection but no target catalog of its
+    own, such as a worker process that handles one frame.
+
+    Parameters
+    ----------
+    catalog_access : `Any`
+        The connection to the stored catalog.
+    target_id : `str`
+        The name of the target to find.
+
+    Returns
+    -------
+    target : `Any` or `None`
+        The stored target, or `None` if no stored target matches.
+    """
+    return _find_target(catalog_access.get("target_catalog", {}) or [], target_id)
+
+
 def list_targets(api: Any) -> list[Any]:
     """Return all the targets, seeing what other programs have saved.
 

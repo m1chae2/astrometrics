@@ -6,9 +6,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from astrometricslib.drivers import siril_interface
+from astrometricslib.drivers import frame_prefetch, siril_interface
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.pipelines.stacking.pre_processing import frame_prefetch
 
 
 def test_prefetch_reads_all_files_and_skips_missing(tmp_path: Path) -> None:
@@ -111,7 +110,7 @@ def test_stacking_hook_runs_only_when_enabled(tmp_path: Path, monkeypatch: pytes
     """The driver pre-fetches the resolved staged files only when allowed."""
     calls = []
     monkeypatch.setattr(
-        frame_prefetch,
+        siril_interface,
         "prefetch_frames",
         lambda paths, workers: calls.append((paths, workers)) or MagicMock(),
     )

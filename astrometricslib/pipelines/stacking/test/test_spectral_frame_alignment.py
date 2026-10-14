@@ -13,10 +13,7 @@ import numpy as np
 from astropy.io import fits
 
 from astrometricslib.pipelines.stacking.processing.group_alignment import apply_shift
-from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import (
-    align_calibrated_frames,
-    find_calibrated_frame_paths,
-)
+from astrometricslib.pipelines.stacking.processing.spectral_frame_alignment import align_calibrated_frames
 
 
 def _make_field(seed: int, size: int = 200) -> np.ndarray:
@@ -43,25 +40,6 @@ def _write_frame(path: object, data: np.ndarray, exptime: float = 0.2) -> None:
     header = fits.Header()
     header["EXPTIME"] = exptime
     fits.PrimaryHDU(data=data, header=header).writeto(path)
-
-
-def test_find_calibrated_frame_paths_matches_sirils_pp_prefix_naming(tmp_path: Path) -> None:
-    """Verify only one sequence's pp_-prefixed calibrated frames are found."""
-    process_directory = tmp_path / "process"
-    process_directory.mkdir()
-    _write_frame(process_directory / "pp_light_source_00001.fits", _make_field(1))
-    _write_frame(process_directory / "pp_light_source_00002.fits", _make_field(2))
-    # A different sequence's calibrated frames, and an uncalibrated raw
-    # frame, must not be picked up.
-    _write_frame(process_directory / "pp_other_source_00001.fits", _make_field(3))
-    _write_frame(process_directory / "light_source_00001.fits", _make_field(4))
-
-    paths = find_calibrated_frame_paths(str(process_directory), "pp_light_source")
-
-    assert [p.split("/")[-1] for p in paths] == [
-        "pp_light_source_00001.fits",
-        "pp_light_source_00002.fits",
-    ]
 
 
 def test_align_calibrated_frames_recovers_a_known_shift_and_writes_a_sequence(tmp_path: Path) -> None:

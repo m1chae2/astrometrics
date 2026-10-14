@@ -3,7 +3,7 @@
 Description: Verifies recovery succeeds and stops on the first ENABLED
 outcome, attempts are bounded by max_attempts, the backoff interval is
 applied between attempts, and exhaustion escalates to safe state --
-the cases `Wayfinding_Library_Architecture.md` §2.4.11 calls out.
+the cases `Wayfinding_Library_Architecture.md` calls out.
 """
 
 from wayfindinglib.models.policy.device_state import DeviceSummaryState
@@ -11,11 +11,11 @@ from wayfindinglib.models.policy.recovery import RecoveryPolicy
 from wayfindinglib.tasks.execution_tasks.fault_recovery import recover_fault
 
 
-def test_recovery_succeeds_on_first_enabled_outcome():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_succeeds_on_first_enabled_outcome() -> None:
     """Verify recovery stops as soon as the device reports ENABLED."""
     call_count = {"value": 0}
 
-    def read_state():  # ruff: ignore[missing-return-type-private-function]
+    def read_state() -> DeviceSummaryState:
         call_count["value"] += 1
         return DeviceSummaryState.ENABLED
 
@@ -37,7 +37,7 @@ def test_recovery_succeeds_on_first_enabled_outcome():  # ruff: ignore[missing-r
     assert call_count["value"] == 1
 
 
-def test_recovery_exhausts_attempts_and_escalates():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_exhausts_attempts_and_escalates() -> None:
     """Verify exhausted attempts set escalated_to_safe_state and escalate."""
     escalate_calls = []
 
@@ -60,7 +60,7 @@ def test_recovery_exhausts_attempts_and_escalates():  # ruff: ignore[missing-ret
     assert escalate_calls == [True]
 
 
-def test_recovery_without_escalate_callable_does_not_raise():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_without_escalate_callable_does_not_raise() -> None:
     """Verify escalation with no injected escalate callable does not raise."""
     record = recover_fault(
         "fault-3",
@@ -76,7 +76,7 @@ def test_recovery_without_escalate_callable_does_not_raise():  # ruff: ignore[mi
     assert record.escalated_to_safe_state is True
 
 
-def test_backoff_interval_applied_between_attempts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_backoff_interval_applied_between_attempts() -> None:
     """Verify the sleep interval grows by backoff_multiplier."""
     slept_intervals = []
 
@@ -96,7 +96,7 @@ def test_backoff_interval_applied_between_attempts():  # ruff: ignore[missing-re
     assert slept_intervals == [10.0, 20.0]
 
 
-def test_attempt_records_every_outcome_in_order():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_attempt_records_every_outcome_in_order() -> None:
     """Verify each attempt's outcome is recorded in the order it occurred."""
     outcomes = iter([DeviceSummaryState.FAULT, DeviceSummaryState.STANDBY, DeviceSummaryState.ENABLED])
 

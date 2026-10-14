@@ -2,7 +2,7 @@
 
 Description: Design-estimate parameters for the pointing, guiding, and
 focus correction algorithms, and the divergence tolerances the delegation
-phase gates (`Wayfinding_Library_Architecture.md` §3 Table 7) are
+phase gates (`Wayfinding_Library_Architecture.md`) are
 evaluated against. None has been validated against a full observing
 night -- the guiding and focus parameters in particular are expected to
 be revised from the first real distribution of Phase 2 divergence data

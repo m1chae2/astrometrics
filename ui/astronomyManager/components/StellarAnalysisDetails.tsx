@@ -1,0 +1,467 @@
+/**
+ * @fileoverview Detailed analytical metrics component in AstronomyManager: a
+ * light curve summary, the spectrum's best-matching type, and the Lomb-Scargle
+ * periodogram and Box-fitting Least Squares (BLS) transit parameters.
+ */
+
+import React, { useState } from 'react';
+import '../styles/astronomyManager.css';
+import {
+    describeEmissionLineDetail,
+    describeFeatureDetail,
+    describeMatchGap,
+    describeMissingPattern,
+    describeTemplateMatch,
+    formatFalseAlarmProbability,
+    formatPeriod,
+    formatTimestampsSpan,
+    isSignificantVerdict,
+    isDepthMeaningful,
+    shortFeatureName,
+    splitEmissionLinesForTable,
+    splitFeaturesForTable,
+} from '../utils/starDisplayFormat';
+import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+
+/**
+ * A false-alarm probability above this means a pattern this strong would show up
+ * by chance more than 1 time in 100, so the period is not trustworthy.
+ */
+const SIGNIFICANT_FALSE_ALARM_PROBABILITY = 0.01;
+
+import ReactDOM from 'react-dom';
+
+/** A small "i" that shows a longer explanation when hovered, so the panel itself can stay short. */
+const InfoTip: React.FC<{ text: string }> = ({ text }) => {
+    const [visible, setVisible] = useState(false);
+    const triggerRef = React.useRef<HTMLSpanElement | null>(null);
+    const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+
+    const showTooltip = () => {
+        if (triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect();
+            // Position above the "i" button, aligned toward the left with viewport boundary protection
+            const tooltipWidth = Math.min(280, window.innerWidth - 32);
+            let left = rect.left + rect.width / 2 - tooltipWidth + 30;
+            if (left < 16) left = 16;
+            if (left + tooltipWidth > window.innerWidth - 16) {
+                left = window.innerWidth - tooltipWidth - 16;
+            }
+            setPos({
+                top: rect.top - 8,
+                left,
+            });
+        }
+        setVisible(true);
+    };
+
+    const hideTooltip = () => setVisible(false);
+
+    return (
+        <span
+            ref={triggerRef}
+            className="stellar-analysis-details__info"
+            onMouseEnter={showTooltip}
+            onMouseLeave={hideTooltip}
+            onFocus={showTooltip}
+            onBlur={hideTooltip}
+            tabIndex={0}
+            role="tooltip"
+            aria-label={text}
+        >
+            ⓘ
+            {visible &&
+                ReactDOM.createPortal(
+                    <span
+                        className="stellar-analysis-details__tooltip stellar-analysis-details__tooltip--portal"
+                        style={{
+                            top: `${pos.top}px`,
+                            left: `${pos.left}px`,
+                        }}
+                    >
+                        {text}
+                    </span>,
+                    document.body
+                )}
+        </span>
+    );
+};
+
+/** Number of closest spectral types listed under the best match. */
+const LISTED_SPECTRAL_TYPE_CANDIDATES = 3;
+
+export interface StellarAnalysisDetailsProps {
+    /** Detailed astronomy data containing photometry periodogram and transitCandidate. */
+    astronomyData?: any;
+    /** Runs the period and transit search for the shown star. */
+    onAnalyze?: () => void;
+    /** Whether a period search is running now. */
+    isAnalyzing?: boolean;
+    /** Message from the last failed period search, if any. */
+    analysisError?: string | null;
+}
+
+/**
+ * Renders a light curve summary, spectrum classification, and periodogram and BLS analysis details.
+ */
+export const StellarAnalysisDetails: React.FC<StellarAnalysisDetailsProps> = ({
+    astronomyData,
+    onAnalyze,
+    isAnalyzing = false,
+    analysisError = null,
+}) => {
+    const photometry = astronomyData?.photometry;
+    const periodogram = photometry?.periodogram;
+    const transitCandidate = photometry?.transitCandidate;
+    const spectroscopy = astronomyData?.spectroscopy;
+
+    const timestamps: string[] = photometry?.timestamps ?? [];
+    const pointCount = timestamps.length;
+    const timeSpanText = formatTimestampsSpan(timestamps);
+
+    const measuredSpectralType: string = spectroscopy?.selfDeterminedSpectralType || '';
+    const spectralRms = spectroscopy?.selfDeterminedSpectralTypeRms;
+    const templateMatch = describeTemplateMatch(astronomyData, astronomyData?.spectralType);
+    const spectralCandidates: any[] = spectroscopy?.selfDeterminedSpectralTypeCandidates ?? [];
+    const matchGap = describeMatchGap(spectroscopy);
+    const testedFeatures = (spectroscopy?.probableSpectralFeatures ?? []) as SpectralFeatureResult[];
+    // A glowing-gas source (such as a nebula) is described by its emission lines, not by a star type.
+    const emissionLines = (spectroscopy?.emissionLines ?? []) as EmissionLineResult[];
+    const isGlowingGas = spectroscopy?.isEmissionLineSource === true;
+    const emissionLineTable = splitEmissionLinesForTable(emissionLines);
+    const listedEmissionLines = emissionLineTable.shown;
+    const featureTable = splitFeaturesForTable(testedFeatures);
+    const listedFeatures = featureTable.shown;
+    const periodogramIsSignificant = isSignificantVerdict(periodogram?.verdict);
+    const transitIsSignificant = isSignificantVerdict(transitCandidate?.verdict);
+    const hasSearchResult = !!periodogram || !!transitCandidate;
+
+    // A photometry run already searches the target's own star and its brightest stars. The button is for
+    // any other star, so it is only offered while a star has no result.
+    // The library says whether the light curve is long enough for each search.
+    const canRunPeriodSearch = astronomyData?.canRunPeriodSearch === true;
+    const canRunTransitSearch = astronomyData?.canRunTransitSearch === true;
+    const canAnalyze = !!onAnalyze && canRunPeriodSearch && !hasSearchResult;
+
+    if (pointCount === 0 && !measuredSpectralType && testedFeatures.length === 0 && emissionLines.length === 0 && !periodogram && !transitCandidate) {
+        return (
+            <div className="stellar-analysis-details__empty">
+                <span>This star has no light curve or classified spectrum to analyze.</span>
+            </div>
+        );
+    }
+
+    // A short line for the panel, and the fuller explanation for its tooltip.
+    let periodSearchNote = '';
+    let periodSearchNoteDetail = '';
+    if (!hasSearchResult && pointCount > 0) {
+        if (!canRunPeriodSearch) {
+            periodSearchNote = `Too few measurements for a period search; this star has ${pointCount}.`;
+        } else {
+            periodSearchNote = 'Not run yet.';
+            periodSearchNoteDetail =
+                `It would search ${pointCount} measurements` +
+                (timeSpanText ? ` spanning ${timeSpanText}` : '') +
+                ', so it can only find patterns shorter than that span.' +
+                (!canRunTransitSearch ? ' The repeating-dip search needs more measurements.' : '');
+        }
+    }
+
+    const missingCycle = periodogram && !periodogramIsSignificant ? describeMissingPattern(periodogram, 'peak') : null;
+    const missingDip =
+        transitCandidate && !transitIsSignificant ? describeMissingPattern(transitCandidate, 'repeating dip') : null;
+
+    return (
+        <div className="stellar-analysis-details">
+            {pointCount > 0 && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">Light Curve</div>
+                    <div className="stellar-analysis-details__grid">
+                        <div className="analysis-row" title="How many brightness measurements were made.">
+                            <span className="analysis-label">Measurements:</span>
+                            <span className="analysis-value">{pointCount}</span>
+                        </div>
+                        {timeSpanText && (
+                            <div className="analysis-row" title="Time from the first measurement to the last.">
+                                <span className="analysis-label">Time span:</span>
+                                <span className="analysis-value">{timeSpanText}</span>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {measuredSpectralType && !isGlowingGas && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Stellar Classification
+                        <InfoTip text="Compares this spectrum's shape against reference stars, O (hottest) to M (coolest). Lower percentages indicate a closer match; above 15% is considered no match. Separation shows the gap in fit (RMS) between the closest reference and the runner-up, and whether the class or only the subtype is uncertain." />
+                    </div>
+                    <div className="stellar-analysis-details__grid">
+                        <div
+                            className="analysis-row"
+                            title={
+                                templateMatch?.isPoor
+                                    ? "No reference star's shape was within 15% of this spectrum."
+                                    : 'The reference star whose shape is closest to this spectrum.'
+                            }
+                        >
+                            <span className="analysis-label">{templateMatch?.isPoor ? 'Result:' : 'Closest reference:'}</span>
+                            <span className="analysis-value">
+                                {templateMatch?.isPoor
+                                    ? 'No good match'
+                                    : `${measuredSpectralType}${typeof spectralRms === 'number' ? ` (${(spectralRms * 100).toFixed(0)}% off)` : ''}`}
+                            </span>
+                        </div>
+                        {matchGap && !templateMatch?.isPoor && (
+                            <div
+                                className="analysis-row"
+                                title={
+                                    matchGap.status === 'clear'
+                                        ? 'No other reference star fits nearly as well as the closest one.'
+                                        : matchGap.status === 'subtype-uncertain'
+                                          ? 'Another reference star of the same class fits almost as well, so the number after the class letter is uncertain.'
+                                          : 'A reference star of a different class fits almost as well, so the class letter itself is uncertain.'
+                                }
+                            >
+                                <span className="analysis-label">Separation:</span>
+                                <span className={`analysis-value${matchGap.status === 'clear' ? '' : ' analysis-value--caution'}`}>
+                                    {matchGap.label.charAt(0).toUpperCase() + matchGap.label.slice(1)}
+                                    {matchGap.detail ? ` (${matchGap.detail})` : ''}
+                                </span>
+                            </div>
+                        )}
+                        {spectralCandidates.slice(0, LISTED_SPECTRAL_TYPE_CANDIDATES).map((candidate) => (
+                            <div
+                                className="analysis-row"
+                                key={candidate.spectral_type}
+                                title={`How far this spectrum's shape is from a ${candidate.spectral_type} star's (lower is closer).`}
+                            >
+                                <span className="analysis-label">{candidate.spectral_type}:</span>
+                                <span className="analysis-value">{(Number(candidate.rms) * 100).toFixed(0)}% off</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {isGlowingGas && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Glowing Gas
+                        <InfoTip text="This spectrum is made of bright emission lines, like a nebula, not the smooth glow with dark dips of a star, so no star type is given. The lines are as wide as the object is across, so nearby lines run together and are listed as one blend. Line strengths are not compared, because the red end of the spectrum is not reliable." />
+                    </div>
+                    <div className="stellar-analysis-details__grid">
+                        <div className="analysis-row" title="Two or more emission lines were found well above the noise.">
+                            <span className="analysis-label">Result:</span>
+                            <span className="analysis-value">Emission-line source</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {emissionLines.length > 0 && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Emission Lines
+                        <InfoTip text="Bright humps in the spectrum where glowing gas gives off light. Only light below 8,000 Å is used. Hover a result for its significance." />
+                    </div>
+                    {listedEmissionLines.length > 0 ? (
+                        <div className="stellar-analysis-details__table-wrapper">
+                            <table className="stellar-analysis-details__table">
+                                <thead>
+                                    <tr>
+                                        <th>Line</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {listedEmissionLines.map((line) => {
+                                        const detail = describeEmissionLineDetail(line);
+                                        return (
+                                            <tr key={line.line} className={`feature-row feature-row--${line.verdict}`}>
+                                                <td className="feature-name-cell">{line.line}</td>
+                                                <td title={detail.explanation}>{detail.label}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="stellar-analysis-details__empty-note">No detected emission lines</div>
+                    )}
+                </div>
+            )}
+
+            {testedFeatures.length > 0 && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Absorption Features
+                        <InfoTip text="Dips in the spectrum where an element absorbs light. Green lines on the plot are found features; red lines are dips the noise is too large to confirm. Hover a result for what it means." />
+                    </div>
+                    {listedFeatures.length > 0 ? (
+                        <div className="stellar-analysis-details__table-wrapper">
+                            <table className="stellar-analysis-details__table">
+                                <thead>
+                                    <tr>
+                                        <th>Feature</th>
+                                        <th>Result</th>
+                                        <th title="How far the dip goes below the spectrum around it.">Depth</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {listedFeatures.map((feature) => {
+                                        const detail = describeFeatureDetail(feature);
+                                        return (
+                                            <tr key={feature.feature} className={`feature-row feature-row--${feature.verdict}`}>
+                                                <td className="feature-name-cell">
+                                                    {shortFeatureName(feature.feature)}
+                                                    {feature.kind === 'emission' ? ' (emission)' : ''}
+                                                </td>
+                                                <td title={detail.explanation}>{detail.label}</td>
+                                                <td>
+                                                    {isDepthMeaningful(feature.verdict) && feature.depth !== undefined
+                                                        ? `${(feature.depth * 100).toFixed(0)}%`
+                                                        : '–'}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        <div className="stellar-analysis-details__empty-note">No detected features</div>
+                    )}
+                </div>
+            )}
+
+            {hasSearchResult && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">
+                        Repeating Patterns
+                        <InfoTip text="Looks for brightness that rises and falls, or dips, on a regular schedule. 'Chance of noise' is how often random scatter would make a pattern this strong; lower is more convincing." />
+                    </div>
+
+                    {periodogram && (
+                        <div className="stellar-analysis-details__result">
+                            <div
+                                className="stellar-analysis-details__result-title"
+                                title="A Lomb-Scargle search: finds brightness that rises and falls regularly, like a pulsating star."
+                            >
+                                Smooth cycle
+                            </div>
+                            {periodogramIsSignificant ? (
+                                <div className="stellar-analysis-details__grid">
+                                    <div className="analysis-row">
+                                        <span className="analysis-label">{periodogram.verdict === 'detected' ? 'Detected period:' : 'Possible period:'}</span>
+                                        <span className="analysis-value">
+                                            {formatPeriod(periodogram.bestPeriodDays)}
+                                        </span>
+                                    </div>
+                                    <div
+                                        className="analysis-row"
+                                        title="How often random scatter would make a pattern this strong. Lower is more convincing."
+                                    >
+                                        <span className="analysis-label">Chance of noise:</span>
+                                        <span className="analysis-value">{formatFalseAlarmProbability(periodogram.falseAlarmProbability)}</span>
+                                    </div>
+                                    <div
+                                        className="analysis-row"
+                                        title="How many full cycles fit in the time observed. More is more convincing."
+                                    >
+                                        <span className="analysis-label">Cycles seen:</span>
+                                        <span className="analysis-value">{periodogram.cyclesObserved !== null && periodogram.cyclesObserved !== undefined ? periodogram.cyclesObserved.toFixed(1) : 'n/a'}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                missingCycle && (
+                                    <div className="stellar-analysis-details__grid">
+                                        <div className="analysis-row" title={missingCycle.explanation}>
+                                            <span className="analysis-label">Result:</span>
+                                            <span className="analysis-value">{missingCycle.value}</span>
+                                        </div>
+                                    </div>
+                                )
+                            )}
+                        </div>
+                    )}
+
+                    {transitCandidate && (
+                        <div className="stellar-analysis-details__result">
+                            <div
+                                className="stellar-analysis-details__result-title"
+                                title="Brightness drops at regular intervals, like a planet crossing its star or two stars eclipsing each other."
+                            >
+                                Repeating dip
+                            </div>
+                            {transitIsSignificant ? (
+                                <div className="stellar-analysis-details__grid">
+                                    <div className="analysis-row">
+                                        <span className="analysis-label">{transitCandidate.verdict === 'detected' ? 'Detected period:' : 'Possible period:'}</span>
+                                        <span className="analysis-value">{formatPeriod(transitCandidate.periodDays)}</span>
+                                    </div>
+                                    <div className="analysis-row" title="How much the star dims during a dip, in magnitudes.">
+                                        <span className="analysis-label">Depth:</span>
+                                        <span className="analysis-value">{Number(transitCandidate.transitDepthMag).toFixed(4)} mag</span>
+                                    </div>
+                                    <div className="analysis-row" title="How long each dip lasts.">
+                                        <span className="analysis-label">Duration:</span>
+                                        <span className="analysis-value">{Number(transitCandidate.transitDurationHours).toFixed(2)} hrs</span>
+                                    </div>
+                                    <div className="analysis-row" title="How many separate dips were seen, and how many measurements fall inside them.">
+                                        <span className="analysis-label">Dips seen:</span>
+                                        <span className="analysis-value">{transitCandidate.transitCount} ({transitCandidate.pointsInTransit} measurements)</span>
+                                    </div>
+                                    <div
+                                        className="analysis-row"
+                                        title="How often random scatter would make a dip pattern this strong. Lower is more convincing."
+                                    >
+                                        <span className="analysis-label">Chance of noise:</span>
+                                        <span className="analysis-value">{formatFalseAlarmProbability(transitCandidate.falseAlarmProbability)}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                missingDip && (
+                                    <div className="stellar-analysis-details__grid">
+                                        <div className="analysis-row" title={missingDip.explanation}>
+                                            <span className="analysis-label">Result:</span>
+                                            <span className="analysis-value">{missingDip.value}</span>
+                                        </div>
+                                    </div>
+                                )
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {(periodSearchNote || canAnalyze || analysisError) && (
+                <div className="stellar-analysis-details__section">
+                    <div className="stellar-analysis-details__section-title">Period Search</div>
+                    {periodSearchNote && (
+                        <div className="stellar-analysis-details__note" title={periodSearchNoteDetail || undefined}>
+                            {periodSearchNote}
+                        </div>
+                    )}
+                    {analysisError && (
+                        <div className="stellar-analysis-details__note stellar-analysis-details__note--error">
+                            {analysisError}
+                        </div>
+                    )}
+                    {canAnalyze && (
+                        <button
+                            type="button"
+                            className="stellar-analysis-details__run-btn"
+                            onClick={onAnalyze}
+                            disabled={isAnalyzing}
+                        >
+                            {isAnalyzing ? 'Analyzing…' : 'Run period analysis'}
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};

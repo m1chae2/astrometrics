@@ -1,0 +1,150 @@
+"""Purpose: Verify spectral classification is wired into StellarObject.
+
+Description: `classify_spectral_type` has its own unit tests; this
+confirms `_apply_result_to_stellar_object` actually calls it and stores
+the result, since that wiring is exactly the kind of thing that's easy
+to write, forget to call, or call with the wrong array.
+"""
+
+from types import SimpleNamespace
+
+import numpy as np
+
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response import load_instrument_response
+from astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction import (
+    curve_from_profile_record,
+    interpolate_quantum_efficiency,
+)
+from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import _get_reference_templates
+from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
+
+# A stand-in for AstrometricsImage: _apply_result_to_stellar_object only
+# reads its .header (via getattr with a None default), so an empty
+# SimpleNamespace is enough.
+_FAKE_IMAGE = SimpleNamespace()
+
+
+def _build_pipeline(camera_name: str = "ZWO ASI 533MM Pro") -> SpectroscopyPipeline:
+    """Build a `SpectroscopyPipeline` for a named test camera.
+
+    Parameters
+    ----------
+    camera_name : `str`, optional
+        The camera's name. The default has a quantum efficiency curve and
+        an instrument response on file; any other name has neither.
+
+    Returns
+    -------
+    pipeline : `SpectroscopyPipeline`
+        The constructed pipeline.
+    """
+    camera = CameraConfig(
+        name=camera_name,
+        pixel_size_um=3.76,
+        sensor_width_px=900,
+        sensor_height_px=900,
+        sensor_min_wavelength=300.0,
+        sensor_max_wavelength=1000.0,
+    )
+    config = SpectroscopyConfig(camera=camera, grating_distance_mm=16.5)
+    return SpectroscopyPipeline(config=config)
+
+
+def _as_the_instrument_would_record(spectral_type: str) -> tuple[np.ndarray, np.ndarray]:
+    """Build the raw counts a reference star would give this instrument.
+
+    The pipeline divides raw counts by the sensor's quantum efficiency and
+    then by the instrument response, so multiplying a reference spectrum
+    by both is the exact inverse: a correct pipeline recovers the type.
+
+    Returns
+    -------
+    wavelength_angstrom, counts : `tuple` [`np.ndarray`, `np.ndarray`]
+        The reference wavelengths and the simulated raw counts.
+    """
+    wavelength_angstrom, flux = _get_reference_templates()[spectral_type]
+    curve = curve_from_profile_record(resolve_camera_profile("ZWO ASI 533MM Pro").quantum_efficiency)
+    response = load_instrument_response("ZWO ASI 533MM Pro")
+    quantum_efficiency = interpolate_quantum_efficiency(wavelength_angstrom / 10.0, curve)
+    return wavelength_angstrom, flux * quantum_efficiency * response.value_at(wavelength_angstrom)
+
+
+def test_apply_result_to_stellar_object_sets_a_self_determined_spectral_type() -> None:
+    """Verify a G0V-like extracted spectrum gets classified onto the star."""
+    pipeline = _build_pipeline()
+    wavelength_angstrom, counts = _as_the_instrument_would_record("G0V")
+    star = StellarObject(id="TestStar")
+    result = {
+        "detected_angle": 0.0,
+        "wavelengths": (wavelength_angstrom / 10.0).tolist(),
+        "intensities": counts.tolist(),
+        "target_pos": (100.0, 200.0),
+        "trail_centerline_px": None,
+        "trail_width_px": None,
+    }
+
+    pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
+
+    assert star.spectroscopy.self_determined_spectral_type == "G0V"
+    assert star.spectroscopy.self_determined_spectral_type_rms < 0.05
+    assert star.spectroscopy.self_determined_spectral_type_candidates
+    assert star.spectroscopy.self_determined_spectral_type_candidates[0]["spectral_type"] == "G0V"
+    assert isinstance(star.spectroscopy.probable_spectral_features, list)
+
+
+def test_a_camera_with_no_instrument_response_gets_no_spectral_type() -> None:
+    """Verify a spectrum is not classified when its tilt cannot be removed."""
+    pipeline = _build_pipeline(camera_name="TestCam")
+    wavelength_angstrom, flux = _get_reference_templates()["G0V"]
+    star = StellarObject(id="TestStar")
+    result = {
+        "detected_angle": 0.0,
+        "wavelengths": (wavelength_angstrom / 10.0).tolist(),
+        "intensities": flux.tolist(),
+        "target_pos": (100.0, 200.0),
+        "trail_centerline_px": None,
+        "trail_width_px": None,
+    }
+
+    pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
+
+    assert star.spectroscopy.self_determined_spectral_type == "Unknown"
+    assert star.spectroscopy.self_determined_spectral_type_rms is None
+    assert "instrument response" in star.spectroscopy.self_determined_spectral_type_note
+
+
+def test_apply_result_to_stellar_object_handles_unclassifiable_data() -> None:
+    """Verify a too-short extracted spectrum doesn't crash the pipeline."""
+    pipeline = _build_pipeline()
+    star = StellarObject(id="TestStar")
+    result = {
+        "detected_angle": 0.0,
+        "wavelengths": [500.0, 501.0, 502.0],
+        "intensities": [1.0, 1.1, 0.9],
+        "target_pos": (100.0, 200.0),
+        "trail_centerline_px": None,
+        "trail_width_px": None,
+    }
+
+    pipeline._apply_result_to_stellar_object(star, result, _FAKE_IMAGE)
+
+    assert star.spectroscopy.self_determined_spectral_type == "Unknown"
+    assert star.spectroscopy.self_determined_spectral_type_rms is None
+    assert star.spectroscopy.self_determined_spectral_type_candidates == []
+    assert star.spectroscopy.probable_spectral_features == []
+
+
+def test_the_pipeline_finds_its_camera_data_once_when_it_is_built() -> None:
+    """Verify the curve, response and profile are resolved at construction."""
+    known = _build_pipeline()
+    assert known.camera_profile.camera_name == "ZWO ASI533MM Pro"
+    assert known.quantum_efficiency_curve is not None
+    assert known.instrument_response is not None
+
+    unlisted = _build_pipeline(camera_name="TestCam")
+    assert unlisted.camera_profile.is_generic_fallback
+    assert unlisted.quantum_efficiency_curve is None
+    assert unlisted.instrument_response is None

@@ -1,15 +1,16 @@
 """Purpose: Observation Package Domain Models.
 
 Description: A reusable imaging request for one target, authored
-independent of any specific night (`Wayfinding_Library_Architecture.md`
-§2.3). `ExposureRequest.frame_type` covers light and calibration
+independent of any specific night (`Wayfinding_Library_Architecture.md`).
+`ExposureRequest.frame_type` covers light and calibration
 exposures alike in one list rather than a separate request mechanism,
 matching how package authoring is actually used today
-(`Wayfinding_Library_Architecture.md` §2.3.2). `filter` is typed
-`astrometricslib.utilities.enums.FilterType` -- a deliberate
+(`Wayfinding_Library_Architecture.md`). `filter` is typed
+`astrometricslib.foundation.enums.FilterType` -- a deliberate
 cross-library type dependency in the direction this library already
-depends, per Design Invariant 1's scope (`Wayfinding_Library_Architecture.md`
-§2.1): it constrains dependencies within this library's layers, not
+depends, per Design Invariant 1's scope
+(`Wayfinding_Library_Architecture.md`): it constrains dependencies within this
+library's layers, not
 against the science library.
 """
 
@@ -35,9 +36,9 @@ class DitherConfig(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    enabled: bool = Field(default=False)
-    every_n_frames: int = Field(default=3, gt=0)
-    pixels: float = Field(default=3.0, gt=0.0)
+    enabled: bool = Field(default=False, alias="enabled")
+    every_n_frames: int = Field(default=3, gt=0, alias="everyNFrames")
+    pixels: float = Field(default=3.0, gt=0.0, alias="pixels")
 
 
 class ExposureRequest(BaseModel):
@@ -45,16 +46,16 @@ class ExposureRequest(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    frame_type: FrameType
-    filter: FilterType = Field(default=FilterType.NONE)
-    exposure_sec: float = Field(..., gt=0.0)
-    count: int = Field(..., gt=0)
-    delay_sec: float = Field(default=0.0, ge=0.0)
+    frame_type: FrameType = Field(alias="frameType")
+    filter: FilterType = Field(default=FilterType.NONE, alias="filter")
+    exposure_sec: float = Field(..., gt=0.0, alias="exposureSec")
+    count: int = Field(..., gt=0, alias="count")
+    delay_sec: float = Field(default=0.0, ge=0.0, alias="delaySec")
 
     def total_exposure_sec(self) -> float:
         """Total wall-clock time this request occupies, exposures plus pacing.
 
-        Per `Wayfinding_Library_Architecture.md` §2.3.2: a package's
+        Per `Wayfinding_Library_Architecture.md`: a package's
         total duration sums every requested exposure's
         `total_exposure_sec` including calibration entries.
 
@@ -71,7 +72,7 @@ class ObservationPackage(BaseModel):
 
     `target_id` references an existing `astrometricslib.models.target.Target`
     by identifier only, never embedded -- resolved live at placement
-    time, never cached (`Wayfinding_Library_Architecture.md` §2.3.2,
+    time, never cached (`Wayfinding_Library_Architecture.md`,
     the "Live Target Resolution" invariant).
     """
 

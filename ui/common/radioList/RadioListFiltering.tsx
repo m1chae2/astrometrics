@@ -1,4 +1,5 @@
 import React from 'react';
+import { CustomSelect } from '../components/CustomSelect';
 import '../styles/entry.css';
 import '../styles/manager.css';
 
@@ -25,17 +26,11 @@ export const RadioListFiltering: React.FC<RadioListFilteringProps> = ({
     return (
         <div className="manager__filter">
             {options.length > 0 && (
-                <select
-                    className="dropdown"
+                <CustomSelect
+                    options={options}
                     value={selectedOption}
-                    onChange={(e) => onOptionChange(e.target.value)}
-                >
-                    {options.map((opt) => (
-                        <option key={opt} value={opt}>
-                            {opt}
-                        </option>
-                    ))}
-                </select>
+                    onChange={onOptionChange}
+                />
             )}
             <input
                 type="text"

@@ -1,0 +1,50 @@
+/* Segmented-button mode toggle and its "browser" (target/spectral-class list)
+   column layout — shared by Astronomy Manager and Planetarium Display, which
+   both embed the same target/spectral-class picker sidebar. Previously only
+   defined in astronomyManager.css, with Planetarium importing that whole
+   500-line stylesheet across a display boundary just for these few rules. */
+
+.astronomy-display__browser {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 8px;
+    overflow: hidden;
+}
+
+.astronomy-display__mode-toggle {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 2px;
+}
+
+.astronomy-display__mode-toggle .segmented-btn {
+    flex: 1;
+}
+
+.segmented-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-dim, #9aa5b5);
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.segmented-btn:hover {
+    color: var(--text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.segmented-btn.active {
+    background: rgba(36, 74, 112, 0.45);
+    border-color: rgba(53, 132, 228, 0.35);
+    color: #ffffff;
+    font-weight: 500;
+}

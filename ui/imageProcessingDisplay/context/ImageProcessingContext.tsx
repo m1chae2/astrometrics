@@ -8,6 +8,7 @@ import React, { createContext, useContext, ReactNode } from 'react';
 import { useImageProcessing, UseImageProcessingResult } from '../hooks/useImageProcessing';
 import { useTargetContext } from '../../common/context/TargetContext';
 import { SelectableItem } from '../../common/components/SelectableList';
+import type { TargetListFilterPanelProps } from '../../common/radioList/TargetListFilterPanel';
 import { useTargetFilesLogic } from '../hooks/useTargetFilesLogic';
 import { useIngestionManager, IngestionState } from '../../common/hooks/useIngestionManager';
 
@@ -17,9 +18,8 @@ import { useIngestionManager, IngestionState } from '../../common/hooks/useInges
 export interface ImageProcessingContextValue extends UseImageProcessingResult {
     isLocalTarget: boolean;
     items: SelectableItem[];
-    filterOptions: string[];
-    selectedFilterOption: string;
-    setFilterOption: (option: string) => void;
+    isLoading: boolean;
+    filterPanel: TargetListFilterPanelProps;
     filterText: string;
     setFilterText: (text: string) => void;
     // Files Logic
@@ -34,9 +34,8 @@ interface ImageProcessingProviderProps {
     children: ReactNode;
     isLocalTarget: boolean;
     items: SelectableItem[];
-    filterOptions: string[];
-    selectedFilterOption: string;
-    setFilterOption: (option: string) => void;
+    isLoading: boolean;
+    filterPanel: TargetListFilterPanelProps;
     filterText: string;
     setFilterText: (text: string) => void;
 }
@@ -49,9 +48,8 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
     children,
     isLocalTarget,
     items,
-    filterOptions,
-    selectedFilterOption,
-    setFilterOption,
+    isLoading,
+    filterPanel,
     filterText,
     setFilterText
 }) => {
@@ -64,9 +62,8 @@ export const ImageProcessingProvider: React.FC<ImageProcessingProviderProps> = (
         ...processingResult,
         isLocalTarget,
         items,
-        filterOptions,
-        selectedFilterOption,
-        setFilterOption,
+        isLoading,
+        filterPanel,
         filterText,
         setFilterText,
         files,

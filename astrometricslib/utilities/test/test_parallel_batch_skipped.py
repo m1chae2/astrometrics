@@ -24,7 +24,7 @@ def _worker_by_status(item_id: str) -> dict:
     return {"status": "success", "error": None}
 
 
-def test_skipped_items_are_not_counted_as_successes():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skipped_items_are_not_counted_as_successes() -> None:
     """Skips land in their own list, keeping the success count honest."""
     summary = run_parallel_batch(["ok_a", "skip_a", "skip_b", "fail_a"], _worker_by_status, max_workers=2)
 
@@ -33,26 +33,26 @@ def test_skipped_items_are_not_counted_as_successes():  # ruff: ignore[missing-r
     assert [item_id for item_id, _reason in summary.failed] == ["fail_a"]
 
 
-def test_skip_reason_is_preserved():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skip_reason_is_preserved() -> None:
     """The worker's explanation reaches the summary for reporting."""
     summary = run_parallel_batch(["skip_a"], _worker_by_status, max_workers=1)
 
     assert summary.skipped[0][1] == "No frames matching camera 'X'"
 
 
-def test_skipped_items_still_appear_in_results():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_skipped_items_still_appear_in_results() -> None:
     """A skip is a real outcome, so callers can still inspect its result."""
     summary = run_parallel_batch(["skip_a"], _worker_by_status, max_workers=1)
 
     assert summary.results["skip_a"]["status"] == "skipped"
 
 
-def test_summary_defaults_to_no_skips():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_summary_defaults_to_no_skips() -> None:
     """Workers that never skip leave the list empty rather than absent."""
     assert BatchRunSummary().skipped == []
 
 
-def test_merge_preserves_skipped_entries():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_merge_preserves_skipped_entries() -> None:
     """Per-session summaries are concatenated without dropping skips."""
     from astrometricslib.pipelines.spectroscopy.batch import (
         _merge_batch_summaries,

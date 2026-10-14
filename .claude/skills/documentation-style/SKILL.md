@@ -1,6 +1,6 @@
 ---
 name: documentation-style
-description: House documentation conventions for Coniglio Observatory docs. Use when writing, editing, restructuring, or reviewing any file under documentation/ (papers, guides, requirement docs) to apply the repo's structure, citation, numbering, admonition, and cross-reference rules.
+description: House documentation conventions for Coniglio Observatory docs. Use when writing, editing, restructuring, or reviewing any file under documentation/ (papers, guides) to apply the repo's structure, citation, numbering, admonition, and cross-reference rules.
 ---
 
 # Coniglio Observatory Documentation Style
@@ -13,23 +13,26 @@ and specutils documentation ecosystems, adapted to a markdown-in-repo setting.
 Match the document to its tier before writing; each tier has different rules.
 
 1. **Explanation tier (papers)** — scientific-paper-style documents such as
-   `Image_Processing_Architecture.md`. Describe *what the system does today and
+   `library_design/Astrometrics_Library_Architecture.md`. Describe *what the system does today and
    why* — never implementation history ("prior to this work…" is banned). Architecture-tier
    papers are implementation-agnostic: no file paths, class names, function names, config keys,
    or tuned numeric defaults (naming external tools/libraries as design-level attributions is
    fine — "delegated to Siril" is architecture, `siril_interface.py` is not). Implementation-tier
-   papers carry the concrete identifiers and empirical results.
-2. **Specification tier** — `documentation/requirements/`. Numbered requirements; unchanged by
-   this skill.
-3. **User-guide tier (aspirational)** — task-oriented topic guides pairing prose with runnable
+   papers (e.g. `library_design/Astrometrics_Library_Implementation.md`) carry the concrete
+   identifiers and empirical results.
+2. **User-guide tier (aspirational)** — task-oriented topic guides pairing prose with runnable
    examples and their output, in the style of photutils/specutils topic pages. Does not exist
    yet; when creating one, follow the template below.
+
+There is no specification/requirements tier — the project dropped requirements traceability, and
+`documentation/requirements/` does not exist. Do not recreate it or a numbered-requirement
+convention without the user asking.
 
 ## File conventions
 
 - Naming: `<Topic>.md` (underscored title case).
 - Companion documents cross-reference each other by plain bracketed filename in prose —
-  `` `Image_Processing_Implementation.md` `` — never as a numbered reference entry.
+  `` `Astrometrics_Library_Implementation.md` `` — never as a numbered reference entry.
 - Every paper carries a one-line metadata header directly under the H1 title:
   `*Version X.Y · YYYY-MM-DD · Status: current*`. Bump the version on substantive revisions.
 
@@ -68,7 +71,7 @@ Use MyST "colon fence" syntax for markdown documents and Sphinx reStructuredText
 - **Tone**: Strictly neutral, objective, and direct. Avoid conversational filler, marketing speak, and overly academic phrasing.
 - **Reading Level**: Accessible and clear. Write for a general technical reader or hobbyist, not necessarily someone with an engineering degree. Use plain English where possible.
 - **Clarity**: Sentences do one job. Use shorter, punchy sentences and avoid long, multi-clause paragraphs.
-- **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the glossary (`Image_Processing_Architecture.md`, Appendix B) current when introducing new ones.
+- **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the glossary (`library_design/Astrometrics_Library_Architecture.md`, Appendix B) current when introducing new ones.
 - **Structure**: Rationale first, mechanism second. Explain *why* before *how*. Keep implementation pointers as terse trailing parentheticals or appendix rows, not the spine of the prose.
 - **Formatting**: No bold-for-emphasis mid-sentence (italics at most). No adverb-ly hyphenation ("locally installed", not "locally-installed").
 

@@ -1,0 +1,691 @@
+"""Purpose: Run a long piece of work as a recorded job, and collect its log.
+
+Description: A "job" is any piece of work slow enough that the user
+interface wants to show progress for it: stacking a target, running an
+analysis, downloading frames from the telescope. For each one the same
+three things happen:
+
+1. A row is written into the logs database (`JobStore`), so the job
+   appears in the job list.
+2. The job's log file and database rows are registered with the job log
+   router (`astrometricslib.foundation.logging.JobLogRouter`). The work
+   runs inside a log context that names the job, so every message any
+   module of either library writes during the work reaches them.
+3. When the work ends, the job is marked finished and its log sinks are
+   unregistered and closed.
+
+No handler is attached to a shared logger and no logger level is changed,
+so nothing can be left behind when a job ends. The program decides how
+loud logging is, through `configure_logging`.
+
+This module also holds `background_job`, the marker for methods that a
+server runs in the background, `run_as_background_job`, which runs them,
+and `close_interrupted_jobs`, which closes the jobs a program left open
+when it ended.
+"""
+
+import dataclasses
+import logging
+import os
+import sqlite3
+import threading
+import uuid
+from collections.abc import Callable, Generator
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
+from datetime import datetime
+from typing import Any
+
+from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.jobs.models import ProcessingJob
+from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
+from astrometricslib.foundation.jobs.store import DbLogHandler, JobStore
+from astrometricslib.foundation.logging import active_job_ids, get_job_log_router, log_context
+
+logger = logging.getLogger(__name__)
+
+# Statuses that mean the job is over. Once the work sets one of these, the
+# context manager stops second-guessing it -- see `registered_job`.
+_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+
+
+_current_job: ContextVar[JobHandle | None] = ContextVar("current_job", default=None)
+"""The job being run, set by `registered_job`."""
+
+_job_started_listener: ContextVar[Callable[[JobHandle], None] | None] = ContextVar(
+    "job_started_listener", default=None
+)
+"""Told about each new job row `registered_job` makes in this thread. Set by
+`run_as_background_job`, which needs the id of the job its work records."""
+
+
+def get_current_job() -> JobHandle | None:
+    """Give the job the calling work is running as, if any.
+
+    Work that runs inside `registered_job` (every method that records its
+    own job) can use this to write log lines and report progress without
+    being handed the job.
+
+    Returns
+    -------
+    job : `JobHandle` or `None`
+        The running job's handle, or `None` when the code is not running
+        as a background job, such as in a plain function call or a test.
+    """
+    return _current_job.get()
+
+
+class JobHandle:
+    """A handle to one running job, used to log messages and report status.
+
+    A handle is always returned, even when job recording is switched off
+    or the logs database could not be opened. In that case every method
+    quietly does nothing, so the work being wrapped never has to check
+    whether recording succeeded.
+
+    Attributes
+    ----------
+    job_id : `str` or `None`
+        Unique id for this job, or `None` if nothing was recorded.
+    log_file_path : `str` or `None`
+        Where this job's log file is being written.
+    job_type : `str` or `None`
+        What kind of job this is, such as "stacking".
+    target_id : `str` or `None`
+        Which target the job is working on.
+    reached_terminal_status : `bool`
+        Whether the work has already said how the job ended.
+    terminal_status : `str` or `None`
+        How the job ended ("completed" or "failed") once the work has said
+        so, otherwise `None`.
+    """
+
+    def __init__(
+        self,
+        job_id: str | None = None,
+        log_file_path: str | None = None,
+        job_store: JobStore | None = None,
+        job_type: str | None = None,
+        target_id: str | None = None,
+    ) -> None:
+        self.job_id = job_id
+        self.log_file_path = log_file_path
+        self.job_type = job_type
+        self.target_id = target_id
+        self._job_store = job_store
+        self.reached_terminal_status = False
+        self.terminal_status: str | None = None
+
+    def stage(self, progress_current: int, message: str) -> None:
+        """Report that the job has reached a named step.
+
+        Writes the step to the job's log and moves the job's progress bar, so
+        a person watching the job list can tell a slow job from a stuck one.
+        Does nothing to the status once the job has finished.
+
+        Parameters
+        ----------
+        progress_current : `int`
+            How far along the job is, out of 100.
+        message : `str`
+            A short description of the step, such as "Stacking frames".
+        """
+        self.info(f"Stage ({progress_current}%): {message}")
+        if not self.reached_terminal_status:
+            self.mark("running", progress_current, message=message)
+
+    def info(self, message: str) -> None:
+        """Write an informational line to this job's log.
+
+        The line goes through this module's logger. The job log router
+        delivers it to the job's log file and rows, because the work runs
+        inside the job's log context.
+
+        Parameters
+        ----------
+        message : `str`
+            The line to write.
+        """
+        if self.job_id:
+            logger.info("%s", message)
+
+    def error(self, message: str) -> None:
+        """Write an error line to this job's log.
+
+        Parameters
+        ----------
+        message : `str`
+            The line to write.
+        """
+        if self.job_id:
+            logger.error("%s", message)
+
+    def mark(
+        self,
+        status: str,
+        progress_current: int = 100,
+        *,
+        progress_total: int | None = None,
+        message: str | None = None,
+        output_metrics: dict | None = None,
+    ) -> None:
+        """Record how far along this job is, or that it has finished.
+
+        Failures here are deliberately swallowed. Updating the job list is
+        a convenience for the user interface; it must never take down the
+        actual work.
+
+        Parameters
+        ----------
+        status : `str`
+            The job's new status, such as "completed" or "failed".
+        progress_current : `int`, optional
+            How far along the job is, out of 100. Defaults to 100.
+        progress_total : `int`, optional
+            What "all the way along" means, when it isn't the usual 100
+            (for example, a batch's frame or target count). Left
+            unchanged when omitted.
+        message : `str`, optional
+            A human-readable status line, such as a batch's final
+            succeeded/failed/skipped counts. Left unchanged when omitted.
+        output_metrics : `dict`, optional
+            Structured results a later caller would want back -- the
+            work's own return value, and/or the target(s)' quality
+            summaries before and after, so a poller has something real to
+            discuss, not just a status word. Left unchanged when omitted.
+        """
+        if status in _TERMINAL_STATUSES:
+            self.reached_terminal_status = True
+            self.terminal_status = status
+
+        if not (self._job_store and self.job_id):
+            return
+        try:
+            stored_job = self._job_store.get_job(self.job_id)
+            if stored_job:
+                stored_job.status = status
+                stored_job.progress_current = progress_current
+                if progress_total is not None:
+                    stored_job.progress_total = progress_total
+                if message is not None:
+                    stored_job.message = message
+                if output_metrics is not None:
+                    stored_job.output_metrics = output_metrics
+                stored_job.updated_at = datetime.now().isoformat()
+                self._job_store.upsert_job(stored_job)
+        except sqlite3.Error as update_error:
+            logger.debug("Could not update job '%s' to '%s': %s", self.job_id, status, update_error)
+
+
+#: The library packages whose messages reach a job's log even when the work
+#: that wrote them lost the job's log context, such as a worker thread that
+#: was started without copying it.
+JOB_LOG_PACKAGES: tuple[str, ...] = ("astrometricslib", "wayfindinglib")
+
+
+@contextmanager
+def capture_job_logs(
+    *,
+    job_id: str,
+    log_file_path: str | None,
+    job_store: JobStore | None = None,
+) -> Generator[None]:
+    """Send the log messages written during a block to one job's log.
+
+    This is the half every caller needs, whether the job row was just
+    created here or already existed. The job's log file and database rows
+    are registered with the job log router, and the block runs inside a log
+    context that names the job. Every message any module writes inside the
+    block, through its own ``logging.getLogger(__name__)`` logger, then
+    reaches the job's log. Callers write their own milestone lines the same
+    way.
+
+    On the way out the log sinks are unregistered *and closed*. A file
+    handler that is only removed stops receiving messages but leaves its
+    file open, and an unclosed handler is a file handle held for the life of
+    the process.
+
+    Parameters
+    ----------
+    job_id : `str`
+        Identifies the job.
+    log_file_path : `str` or `None`
+        Where to write this job's log file. `None` skips the file and
+        keeps only the database rows.
+    job_store : `JobStore`, optional
+        Where to write the job's log rows. `None` skips the database rows.
+        The rows are also skipped when the block already runs inside the
+        same job, whose own capture writes them.
+
+    Yields
+    ------
+    None
+        The block runs with the job's log context.
+    """
+    sinks: list[logging.Handler] = []
+    if log_file_path:
+        log_directory = os.path.dirname(log_file_path)
+        if log_directory:
+            os.makedirs(log_directory, exist_ok=True)
+        file_handler = logging.FileHandler(log_file_path)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        sinks.append(file_handler)
+    if job_store is not None and job_id not in active_job_ids():
+        sinks.append(DbLogHandler(job_store, job_id=job_id))
+
+    # The router sends each record that carries this job's id to the sinks.
+    # Nothing is attached to a shared logger, so nothing can be left behind.
+    router = get_job_log_router()
+    sink_key = router.register(job_id, sinks, JOB_LOG_PACKAGES)
+    try:
+        with log_context(job_id=job_id):
+            yield
+    finally:
+        for handler in router.unregister(sink_key):
+            try:
+                handler.close()
+            except OSError as close_error:
+                logger.debug("Could not close a job log handler: %s", close_error)
+
+
+def _create_job_row(*, job_type: str, target_id: str, log_file: str | None) -> tuple[str, str, JobStore]:
+    """Write a "started" row for a new job into the logs database.
+
+    Returns
+    -------
+    job_id : `str`
+        The new job's unique id.
+    log_file_path : `str`
+        Where this job's log file should be written.
+    job_store : `JobStore`
+        The logs database the row was written to.
+    """
+    from astrometricslib.foundation.config import get_configuration
+
+    configuration = get_configuration()
+    job_store = JobStore(str(configuration.get_logs_db_path()))
+    close_interrupted_jobs(configuration)
+    owner_pid, owner_started_at = current_process_identity()
+    job_id = str(uuid.uuid4())
+
+    safe_target = target_id.replace(" ", "_").replace("/", "_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_directory = configuration.get_logs_path()
+    os.makedirs(log_directory, exist_ok=True)
+    log_file_path = log_file or str(log_directory / f"{job_type}_{safe_target}_{timestamp}.log")
+
+    job_store.upsert_job(
+        ProcessingJob(
+            id=job_id,
+            target_id=target_id,
+            job_type=job_type,
+            status="started",
+            progress_current=0,
+            progress_total=100,
+            log_file_path=log_file_path,
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+            owner_pid=owner_pid,
+            owner_started_at=owner_started_at,
+        )
+    )
+    return job_id, log_file_path, job_store
+
+
+InterruptedJobCleanup = Callable[[list[ProcessingJob], JobStore, Any], None]
+"""A function that tidies up after some kinds of interrupted job.
+
+It receives the jobs just closed, the job store, and the application
+configuration.
+"""
+
+_interrupted_job_cleanups: list[InterruptedJobCleanup] = []
+
+
+def register_interrupted_job_cleanup(cleanup: InterruptedJobCleanup) -> None:
+    """Add a function that tidies up after jobs a program left open.
+
+    `close_interrupted_jobs` calls each registered function with the jobs it
+    closed. The stacking stage uses this to put back a stack that a restack
+    left parked in a staging folder. A function registered twice runs once.
+
+    Parameters
+    ----------
+    cleanup : `InterruptedJobCleanup`
+        The function to call.
+    """
+    if cleanup not in _interrupted_job_cleanups:
+        _interrupted_job_cleanups.append(cleanup)
+
+
+def recover_interrupted_jobs(
+    job_store: JobStore,
+    configuration: Any,
+    is_process_alive: Callable[[int, str], bool] = process_is_alive,
+) -> list[ProcessingJob]:
+    """Close the jobs a program left open, then run the registered cleanups.
+
+    Parameters
+    ----------
+    job_store : `JobStore`
+        The logs database that holds the job list.
+    configuration : `AppConfiguration`
+        Passed on to the cleanup functions, which find their folders in it.
+    is_process_alive : `Callable`, optional
+        Says whether a program, given its number and start time, still runs.
+        Tests pass a stand-in.
+
+    Returns
+    -------
+    interrupted : `list` [`ProcessingJob`]
+        The jobs that were closed.
+    """
+    interrupted = job_store.interrupt_orphaned_jobs(is_process_alive)
+    for job in interrupted:
+        logger.warning(
+            "Closed %s job %s for '%s': the program running it ended before it finished.",
+            job.job_type,
+            job.id,
+            job.target_id,
+        )
+    if interrupted:
+        for cleanup in list(_interrupted_job_cleanups):
+            cleanup(interrupted, job_store, configuration)
+    return interrupted
+
+
+def close_interrupted_jobs(configuration: Any | None = None) -> list[ProcessingJob]:
+    """Close the jobs a program left open, using the app's own settings.
+
+    A program calls this when it starts, and the job runner calls it before
+    each new job is recorded, so a stuck job does not stay in the list until
+    someone notices it. It never raises: tidying the job list must not stop a
+    program from starting or new work from running.
+
+    Parameters
+    ----------
+    configuration : `AppConfiguration`, optional
+        Where the logs database is found. Defaults to the app's
+        configuration.
+
+    Returns
+    -------
+    interrupted : `list` [`ProcessingJob`]
+        The jobs that were closed. Empty if there were none or the job list
+        could not be read.
+    """
+    try:
+        if configuration is None:
+            from astrometricslib.foundation.config import get_configuration
+
+            configuration = get_configuration()
+        return recover_interrupted_jobs(JobStore(str(configuration.get_logs_db_path())), configuration)
+    except (AstrometricsError, sqlite3.Error, OSError) as recovery_error:
+        logger.warning("Could not close interrupted jobs: %s", recovery_error)
+        return []
+
+
+@contextmanager
+def registered_job(
+    *,
+    enabled: bool,
+    job_type: str,
+    target_id: str,
+    log_file: str | None = None,
+    completed_message: str | None = None,
+    failed_message: str | None = None,
+) -> Generator[JobHandle]:
+    """Record a job, capture its log messages, and always clean up after it.
+
+    Wrap the slow work in this. On the way out the job is marked finished
+    and the job's log sinks are unregistered and closed, whether the work
+    succeeded, failed, or raised.
+
+    If the work raises, the job is marked "failed" and the error is passed
+    straight back up -- recording a job must never turn a failure into a
+    silent success. If the work finishes without marking itself, it is
+    assumed to have completed. Work that decides its own outcome (stacking
+    can finish cleanly but still produce no image) should call
+    `handle.mark(...)` itself; that choice is respected.
+
+    Callers that already have a job row, such as the backend's analysis
+    orchestrator, want `capture_job_logs` instead.
+
+    Parameters
+    ----------
+    enabled : `bool`
+        Whether to record anything at all. When `False` the handle still
+        works, it just does nothing.
+    job_type : `str`
+        What kind of job this is, such as "analysis" or "stacking". Also
+        used as the log file name prefix.
+    target_id : `str`
+        Which target the job is working on.
+    log_file : `str`, optional
+        Write the log here instead of generating a name.
+    completed_message : `str`, optional
+        Line to write to the job log when the work finishes successfully.
+    failed_message : `str`, optional
+        Line to write to the job log when the work fails.
+
+    Yields
+    ------
+    handle : `JobHandle`
+        Used to log messages and report progress.
+    """
+    running_job = _current_job.get()
+    if (
+        enabled
+        and running_job is not None
+        and running_job.job_id is not None
+        and running_job.job_type == job_type
+        and running_job.target_id == target_id
+    ):
+        # The caller is already running as this very job, for example the
+        # MCP wrapper around a stacking method that registers its own job.
+        # Join it instead of listing the same work twice. The outer owner
+        # decides how the job ends.
+        try:
+            yield running_job
+        except Exception:
+            if failed_message:
+                running_job.error(failed_message)
+            raise
+        else:
+            if completed_message:
+                running_job.info(completed_message)
+        return
+
+    handle = JobHandle()
+
+    with ExitStack() as log_capture:
+        if enabled:
+            try:
+                job_id, log_file_path, job_store = _create_job_row(
+                    job_type=job_type, target_id=target_id, log_file=log_file
+                )
+                log_capture.enter_context(
+                    capture_job_logs(job_id=job_id, log_file_path=log_file_path, job_store=job_store)
+                )
+                handle = JobHandle(
+                    job_id=job_id,
+                    log_file_path=log_file_path,
+                    job_store=job_store,
+                    job_type=job_type,
+                    target_id=target_id,
+                )
+                listener = _job_started_listener.get()
+                if listener is not None:
+                    listener(handle)
+            except (sqlite3.Error, OSError, AstrometricsError) as registration_error:
+                # A job we cannot record is still a job worth doing.
+                logger.warning("Could not register %s job: %s", job_type, registration_error)
+                handle = JobHandle()
+
+        job_token = _current_job.set(handle if handle.job_id else _current_job.get())
+        try:
+            yield handle
+        except Exception:
+            handle.mark("failed", 0)
+            if failed_message:
+                handle.error(failed_message)
+            raise
+        else:
+            if not handle.reached_terminal_status:
+                handle.mark("completed", 100)
+            if completed_message:
+                handle.info(completed_message)
+        finally:
+            _current_job.reset(job_token)
+
+
+def _to_plain(value: Any) -> Any:
+    """Convert a result into plain, JSON-safe data.
+
+    `ProcessingJob.output_metrics` is stored via `json.dumps` (see
+    `JobStore.upsert_job`), which chokes on pydantic models and
+    dataclasses -- both of which pipeline results are made of throughout
+    this library (`BatchRunSummary`, the various `*QualitySummary`
+    models). Recurses through dicts/lists so a pydantic model or
+    dataclass nested arbitrarily deep still comes out as plain data.
+
+    Returns
+    -------
+    plain : `Any`
+        `value`, with any pydantic model or dataclass replaced by its
+        plain dict form.
+    """
+    if hasattr(value, "model_dump"):
+        return _to_plain(value.model_dump(mode="json"))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _to_plain(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, dict):
+        return {k: _to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain(v) for v in value]
+    return value
+
+
+def background_job(job_type: str, *, grace_period_seconds: float = 5.0) -> Callable:
+    """Mark a method as slow enough to run in the background when served.
+
+    This is metadata only: it stamps the given job type and grace period
+    onto the function and returns it unchanged. Calling the decorated
+    method directly in Python runs it to completion, as the backend and the
+    tests do. The method records its own job when called with
+    ``register_job=True``. A server that must stay responsive (the MCP
+    servers) checks for this marker, calls the method with
+    ``register_job=True`` through `run_as_background_job`, and so answers
+    with a job id when the work takes longer than the grace period.
+
+    Parameters
+    ----------
+    job_type : `str`
+        What kind of job this is (see `registered_job`).
+    grace_period_seconds : `float`, optional
+        How long a caller should wait for the work to finish before
+        giving up and returning a job id to poll instead, by default 5.0.
+
+    Returns
+    -------
+    decorator : `Callable`
+        A decorator that stamps the given metadata onto a function.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        func.__background_job_type__ = job_type
+        func.__background_job_grace_period__ = grace_period_seconds
+        return func
+
+    return decorator
+
+
+def run_as_background_job(
+    work_fn: Callable[[], Any],
+    *,
+    grace_period_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Run work that records its own job in a background thread.
+
+    The work is a call of a method made with ``register_job=True``, so the
+    method itself writes the job row (through `registered_job`). This
+    function only notices that row, waits a while for the work to finish,
+    and stores the work's result on the job. A fast call hands back its
+    real result directly. A slow call gets the job id (and log file path)
+    to poll with, and the thread keeps running to completion whatever the
+    caller does next: a caller disconnecting can no longer kill the work
+    partway through, which a synchronous call wrapped in a cancellable
+    request could.
+
+    Parameters
+    ----------
+    work_fn : `Callable`
+        The work to run, with no arguments. Its return value is stored in
+        the job's ``output_metrics["result"]`` for later retrieval.
+    grace_period_seconds : `float`, optional
+        How long to wait before giving up and returning a job id instead
+        of the real result, by default 5.0.
+
+    Returns
+    -------
+    outcome : `dict`
+        ``{"jobId": ..., "result": ...}`` if the work finished within
+        `grace_period_seconds`, or ``{"status": "running", "jobId": ...,
+        "logFilePath": ...}`` if it is still going. The job id is `None`
+        when the work recorded no job. If `work_fn` fails within
+        `grace_period_seconds`, its exception is raised here again.
+    """
+    job_finished = threading.Event()
+    started_jobs: list[JobHandle] = []
+    outcome: dict[str, Any] = {}
+
+    def _remember_first_job(handle: JobHandle) -> None:
+        """Keep the first job the work records, the outermost one."""
+        if not started_jobs:
+            started_jobs.append(handle)
+
+    def _run() -> None:
+        listener_token = _job_started_listener.set(_remember_first_job)
+        try:
+            outcome["result"] = work_fn()
+        except Exception as work_error:
+            # This thread is a boundary: nobody would catch the error here.
+            # A caller still waiting gets it from `outcome`; the job itself
+            # was already marked failed by `registered_job`.
+            outcome["error"] = work_error
+            logger.debug("Background work failed.", exc_info=True)
+        finally:
+            _job_started_listener.reset(listener_token)
+        if "result" in outcome and started_jobs:
+            job = started_jobs[0]
+            # The work already decided how its job ended (stacking that
+            # makes no image is "failed"); only the result is added.
+            job.mark(
+                job.terminal_status or "completed",
+                100,
+                output_metrics={"result": _to_plain(outcome["result"])},
+            )
+        job_finished.set()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    if job_finished.wait(timeout=grace_period_seconds):
+        if "error" in outcome:
+            raise outcome["error"]
+        job_id = started_jobs[0].job_id if started_jobs else None
+        return {"jobId": job_id, "result": outcome["result"]}
+
+    job = started_jobs[0] if started_jobs else None
+    return {
+        "status": "running",
+        "jobId": job.job_id if job else None,
+        "logFilePath": job.log_file_path if job else None,
+        "message": (
+            f"Still running after {grace_period_seconds:.0f}s; poll with job_get_status/"
+            "job_tail_log using this job id."
+            if job
+            else f"Still running after {grace_period_seconds:.0f}s in the background. It records no job "
+            "to poll; check its effect once it has had time to finish."
+        ),
+    }

@@ -10,7 +10,7 @@ from wayfindinglib.models.session.correction_config import CorrectionConfig
 from wayfindinglib.tasks.execution_tasks.guide_star_loss_recovery import attempt_guide_star_recovery
 
 
-def test_recovery_stops_at_the_first_successful_attempt():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_stops_at_the_first_successful_attempt() -> None:
     """Verify the loop stops as soon as reacquisition succeeds."""
     attempts_made = []
 
@@ -27,7 +27,7 @@ def test_recovery_stops_at_the_first_successful_attempt():  # ruff: ignore[missi
     assert len(attempts_made) == 2
 
 
-def test_recovery_reports_unrecovered_after_exhausting_attempts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_reports_unrecovered_after_exhausting_attempts() -> None:
     """Verify an always-failing reacquisition exhausts the configured bound."""
     event = attempt_guide_star_recovery(
         "loss-2", "session-1", "frame-2", lambda: False, CorrectionConfig(guide_reacquire_attempts=3)
@@ -37,7 +37,7 @@ def test_recovery_reports_unrecovered_after_exhausting_attempts():  # ruff: igno
     assert event.reacquire_attempts == 3
 
 
-def test_recovery_succeeds_on_the_first_attempt():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovery_succeeds_on_the_first_attempt() -> None:
     """Verify a first-attempt success does not run any further attempts."""
     attempts_made = []
 

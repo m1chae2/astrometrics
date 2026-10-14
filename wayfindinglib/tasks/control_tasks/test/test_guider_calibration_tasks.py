@@ -2,15 +2,16 @@
 
 Description: Verifies guider/focus calibration recovers known values
 from simulated sequences -- the case
-`Wayfinding_Library_Architecture.md` §2.5.11 calls out.
+`Wayfinding_Library_Architecture.md` calls out.
 """
 
 import pytest
 
+from astrometricslib import ProcessingError
 from wayfindinglib.tasks.control_tasks.guider_calibration_tasks import compute_guider_calibration
 
 
-def test_recovers_known_calibration_from_axis_aligned_moves():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovers_known_calibration_from_axis_aligned_moves() -> None:
     """Verify axis-aligned moves recover known rates and a 0deg angle."""
     calibration = compute_guider_calibration(
         "cal-1",
@@ -30,7 +31,7 @@ def test_recovers_known_calibration_from_axis_aligned_moves():  # ruff: ignore[m
     assert calibration.arcsec_per_pixel == pytest.approx(2.0)
 
 
-def test_recovers_nonzero_camera_angle():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_recovers_nonzero_camera_angle() -> None:
     """Verify a diagonal RA move recovers the correct camera angle."""
     calibration = compute_guider_calibration(
         "cal-2",
@@ -47,9 +48,9 @@ def test_recovers_nonzero_camera_angle():  # ruff: ignore[missing-return-type-un
     assert calibration.camera_angle_deg == pytest.approx(45.0)
 
 
-def test_raises_when_ra_axis_produces_no_displacement():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_raises_when_ra_axis_produces_no_displacement() -> None:
     """Verify an RA pulse with no displacement raises, not divides by zero."""
-    with pytest.raises(ValueError, match="no measurable star displacement"):
+    with pytest.raises(ProcessingError, match="no measurable star displacement"):
         compute_guider_calibration(
             "cal-3",
             "cam-1",

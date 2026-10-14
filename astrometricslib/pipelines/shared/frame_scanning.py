@@ -1,0 +1,619 @@
+"""Tools for finding and reading image files.
+
+This module scans folders to find telescope images (FITS files) and reads
+the basic information saved inside them (like camera temperature or exposure
+time).
+"""
+
+import logging
+import os
+import re
+from datetime import datetime
+from typing import Any
+
+from astrometricslib.drivers.camera_profile_store import record_name_for_camera, resolve_camera_profile
+from astrometricslib.drivers.filter_detection import get_filter_type
+from astrometricslib.drivers.fits_access import FITS_READ_ERRORS, read_header
+from astrometricslib.drivers.image import AstrometricsImage
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.enums import FilterType
+from astrometricslib.foundation.errors import AstrometricsError
+from astrometricslib.foundation.storage.mount import require_mounted_storage
+from astrometricslib.foundation.warn_once import warn_once
+from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.frame_optics import resolve_frame_telescope
+from astrometricslib.pipelines.shared.previous_stack_path import PREVIOUS_STACK_FOLDER_NAME
+from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
+from astrometricslib.utilities.iso_text import iso_or_gain_text
+
+logger = logging.getLogger(__name__)
+
+# Folders the pipeline keeps inside a target's folder that are not inputs:
+# frames it set aside, and the stack a restack replaced.
+_SKIPPED_FOLDER_NAMES = (QUARANTINE_FOLDER_NAME, PREVIOUS_STACK_FOLDER_NAME)
+
+# The ISO or gain written on a record when the image header gives none, the
+# camera's config section gives no `default_iso`, and so nothing is known.
+# These are stand-ins, not measurements. They are the values this module used
+# before `default_iso` existed. A warning is logged whenever one is used.
+PLACEHOLDER_RECORD_ISO = "800"
+PLACEHOLDER_FOLDER_ISO = "0"
+
+
+def _coerce_header_number(value: Any, cast: type) -> Any:
+    """Try to convert a value from an image file into a number.
+
+    Different cameras save data differently (sometimes as text, sometimes
+    as numbers). This function tries to safely turn whatever it finds
+    into the number type we need (like an integer or decimal).
+
+    Parameters
+    ----------
+    value : `Any`
+        The raw value read from the file.
+    cast : `type`
+        The type of number we want (e.g., `int` or `float`).
+
+    Returns
+    -------
+    number : `Any`
+        The converted number, or `None` if it couldn't be converted.
+    """
+    if value is None:
+        return None
+    try:
+        return cast(value)
+    except TypeError, ValueError:
+        return None
+
+
+def _populate_acquisition_conditions(record: FrameRecord, header: Any) -> None:
+    """Copy sky and equipment settings from the image file to the records.
+
+    This reads information like the telescope's position, camera temperature,
+    and focus position. If some information is missing (since different cameras
+    save different things), it just leaves that part blank.
+
+    Parameters
+    ----------
+    record : `FrameRecord`
+        The record being filled with information.
+    header : `Any`
+        The data header from the image file.
+    """
+    pier_side = header.get("PIERSIDE")
+    # Recorded because a meridian flip mid-session moves the field
+    # abruptly. Without it, tracking analysis reads that jump as a bump
+    # or cable snag rather than a normal, expected flip.
+    if pier_side is not None and str(pier_side).strip():
+        record.pier_side = str(pier_side).strip().upper()
+
+    record.airmass = _coerce_header_number(header.get("AIRMASS"), float)
+    record.altitude_degrees = _coerce_header_number(header.get("OBJCTALT"), float)
+    record.azimuth_degrees = _coerce_header_number(header.get("OBJCTAZ"), float)
+
+    # SECPIX1 is arcsec/pixel directly; SCALE is the same quantity under
+    # a different writer's spelling. Recorded so a FWHM in pixels can be
+    # expressed in arcsec, which is comparable across cameras and focal
+    # lengths where a pixel count is not.
+    record.pixel_scale_arcsec = _coerce_header_number(header.get("SECPIX1", header.get("SCALE")), float)
+
+    # FOCALLEN identifies the optic, which decides which frames may be
+    # stacked together. Left None when the header does not carry it;
+    # `scripts/backfill_focal_length` exists to fill those in
+    # deliberately rather than having the library guess.
+    record.focal_length_mm = _coerce_header_number(header.get("FOCALLEN"), float)
+    record.binning = _coerce_header_number(header.get("XBINNING"), int)
+
+    record.sensor_temperature_c = _coerce_header_number(header.get("CCD-TEMP"), float)
+    record.focuser_position = _coerce_header_number(header.get("FOCUSPOS"), int)
+    record.focuser_temperature_c = _coerce_header_number(header.get("FOCUSTEM"), float)
+
+
+def _camera_default_iso(camera_name: str, config: Any) -> str | None:
+    """Look up the ISO or gain configured for a camera whose header lacks one.
+
+    Parameters
+    ----------
+    camera_name : `str`
+        The camera's name, written in any spelling.
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    default_iso : `str` or `None`
+        The camera's ``default_iso`` from the config, or `None` when it has
+        none. Every known spelling of the camera is tried, because the config
+        section may be named differently from the image header.
+    """
+    profile = resolve_camera_profile(camera_name, config)
+    names = [camera_name]
+    if not profile.is_generic_fallback:
+        names += [profile.camera_name, *profile.name_aliases]
+        if profile.record_name:
+            names.append(profile.record_name)
+    for name in names:
+        configured = config.get_camera_default_iso(name)
+        if configured:
+            return configured
+    return None
+
+
+def read_iso_or_gain(header: Any, camera_name: str, config: Any, placeholder: str) -> str:
+    """Read the ISO (or gain) an image was taken at.
+
+    The header's ``ISOSPEED`` is used first (written without a needless
+    decimal, so ``800.0`` becomes ``800``), then its ``GAIN`` exactly as the
+    header spells it. If it has
+    neither, the camera's ``default_iso`` from the config is used, and if
+    there is none of those either, `placeholder` is used with a warning.
+
+    Parameters
+    ----------
+    header : `Any`
+        The image header.
+    camera_name : `str`
+        The camera's name, used to find its ``default_iso``.
+    config : `AppConfiguration`
+        The application settings.
+    placeholder : `str`
+        The stand-in to use when nothing else gives a value.
+
+    Returns
+    -------
+    iso : `str`
+        The ISO or gain, as text.
+    """
+    value = iso_or_gain_text(header)
+    if value is not None:
+        return value
+    configured = _camera_default_iso(camera_name, config)
+    if configured is not None:
+        return configured
+    warn_once(
+        logger,
+        f"Images from camera {camera_name!r} carry no ISO or gain, and its config section has no "
+        f"default_iso; assuming {placeholder!r}. Add default_iso to the camera's section.",
+    )
+    return placeholder
+
+
+def _record_camera_name(header_camera_name: str, config: Any) -> str:
+    """Give the camera name spelling that records and folders use.
+
+    Parameters
+    ----------
+    header_camera_name : `str`
+        The camera as written in the image header, or ``"Unknown"`` when the
+        header has none.
+    config : `AppConfiguration`
+        The application settings.
+
+    Returns
+    -------
+    camera_name : `str`
+        The camera's ``record_name`` from its profile, or the header's text
+        when it has none. When the header names no camera, the configured
+        primary camera is used, or ``"Unknown"`` if none is configured.
+    """
+    if header_camera_name and header_camera_name != "Unknown":
+        return record_name_for_camera(header_camera_name, config)
+    primary_camera_name = config.get_primary_camera_name()
+    if primary_camera_name:
+        return record_name_for_camera(primary_camera_name, config)
+    warn_once(
+        logger,
+        "An image header names no camera and no default_primary_camera is configured; "
+        "the camera is recorded as 'Unknown'.",
+    )
+    return "Unknown"
+
+
+def create_frame_record_from_fits(path: str, camera: str | None = None, config: Any = None) -> FrameRecord:
+    """Read an image file and create a record for it.
+
+    This function opens a telescope image, reads its settings (like exposure
+    time, date, and camera used), and creates a `FrameRecord` so the rest
+    of the program knows about it without having to open the file again.
+
+    Parameters
+    ----------
+    path : `str`
+        The full file path to the image.
+    camera : `str`, optional
+        The name of the camera, if it needs to be forced to a specific value.
+    config : `AppConfiguration`, optional
+        The application settings, used to find the camera's default ISO and
+        the optic that took the frame. The system configuration is loaded
+        when this is left out.
+
+    Returns
+    -------
+    record : `FrameRecord`
+        The record containing the image's information.
+    """
+    if config is None:
+        from astrometricslib.foundation.config import get_configuration
+
+        config = get_configuration()
+    filename = os.path.basename(path)
+    record = FrameRecord(
+        path=path,
+        filter=FilterType.NONE,
+        role="LIGHT",
+        iso="800",
+        offset="0",
+        exposure="1.0",
+        camera=camera or "Unknown",
+        telescope="Unknown",
+    )
+
+    try:
+        image = AstrometricsImage(path)
+        header = image.header
+        record.filter = image.filter_type
+        record.offset = str(header.get("OFFSET", header.get("BLKLEVEL", "0")))
+        record.exposure = str(header.get("EXPTIME", "1.0"))
+        record.timestamp = image.timestamp
+
+        if image.timestamp:
+            record.date = datetime.fromtimestamp(image.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # Fallback to filename date extraction if timestamp is missing
+            date_match = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})", filename)
+            if date_match:
+                raw = date_match.group(1)
+                parts = raw.split("T")
+                d_part = parts[0]
+                t_part = parts[1].replace("-", ":")
+                record.date = f"{d_part} {t_part}"
+
+        if not camera:
+            record.camera = _record_camera_name(
+                str(header.get("INSTRUME", header.get("CAMERA", "Unknown"))), config
+            )
+
+        record.iso = read_iso_or_gain(header, record.camera, config, PLACEHOLDER_RECORD_ISO)
+
+        # The focal length is read here, before the optic is chosen, because
+        # the optic is chosen by matching it.
+        _populate_acquisition_conditions(record, header)
+        record.telescope = resolve_frame_telescope(
+            record.camera, record.focal_length_mm, path, config.get_observatory_setups(), config
+        ).telescope_name
+    except (AstrometricsError, *FITS_READ_ERRORS) as e:
+        logger.warning("Failed to parse FITS header for %s: %s", filename, e)
+
+    return record
+
+
+def refresh_acquisition_conditions(frame: FrameRecord) -> bool:
+    """Re-read the basic equipment settings from an image file.
+
+    If new things need to be tracked (like a new temperature sensor),
+    this allows going back and reading those new values from images already
+    found, without having to do all the heavy processing again.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The frame record to update.
+
+    Returns
+    -------
+    refreshed : `bool`
+        True if the file was read successfully, False if there was an error.
+    """
+    try:
+        # AstrometricsImage.header, not fits.getheader(path): the latter
+        # only ever reads HDU0, while a real frame's header can live in
+        # HDU1 when HDU0 carries no data (AstrometricsImage._load_header
+        # falls back to HDU1 in that case, matching the read
+        # create_frame_record_from_fits used when this frame was first
+        # indexed). Reading HDU0's empty header here would overwrite
+        # every field _populate_acquisition_conditions sets with None,
+        # even though the initial scan recorded them correctly.
+        header = AstrometricsImage(frame.path).header
+    except (AstrometricsError, *FITS_READ_ERRORS) as header_error:
+        logger.debug("Could not refresh header conditions for %s: %s", frame.path, header_error)
+        return False
+
+    _populate_acquisition_conditions(frame, header)
+    return True
+
+
+# Words in a file name that mark the output of processing, not a raw frame.
+# "_stacked", "starless" and "starmask" come from this library's own stacking
+# and star removal. "processed" marks a stack that was finished by hand (for
+# example in Siril) and saved next to the raw frames. Two such files in the
+# real library (13,740 s and 1,320 s long) were recorded as light frames and
+# added hours to their targets' total exposure.
+STACKED_OUTPUT_NAME_MARKERS = ("_stacked", "starless", "starmask", "processed")
+
+
+def is_stacked_output(file_name: str, header: Any = None) -> bool:
+    """Tell whether a FITS file is the output of processing, not a raw frame.
+
+    Siril keeps ``IMAGETYP = Light Frame`` on a stack, so the type in the
+    header cannot tell a stack from a raw light. A stack does carry
+    ``STACKCNT``, the number of frames combined, which a raw frame never has.
+
+    Parameters
+    ----------
+    file_name : `str`
+        The file's name (not its folder).
+    header : `Any`, optional
+        The file's FITS header, if it has been read. Without it, only the
+        name is checked.
+
+    Returns
+    -------
+    is_output : `bool`
+        `True` if the name carries one of `STACKED_OUTPUT_NAME_MARKERS`, or the
+        header has a positive ``STACKCNT``.
+    """
+    lowered = file_name.lower()
+    if any(marker in lowered for marker in STACKED_OUTPUT_NAME_MARKERS):
+        return True
+    if header is None:
+        return False
+    try:
+        return int(header.get("STACKCNT", 0) or 0) > 0
+    except TypeError, ValueError:
+        return False
+
+
+def _stamp_file_state(frame: Any, file_state: os.stat_result | None) -> None:
+    """Record the file's size and modification time on a frame record.
+
+    Parameters
+    ----------
+    frame : `FrameRecord`
+        The record to stamp.
+    file_state : `os.stat_result` or `None`
+        The file's `os.stat` result. Nothing is stamped when this is `None`.
+    """
+    if file_state is not None:
+        frame.file_size = file_state.st_size
+        frame.file_modified_ns = file_state.st_mtime_ns
+
+
+def _stat_or_none(file_path: str) -> os.stat_result | None:
+    """Read a file's size and times.
+
+    Returns
+    -------
+    file_state : `os.stat_result` or `None`
+        The `os.stat` result, or `None` if the file cannot be read.
+    """
+    try:
+        return os.stat(file_path)
+    except OSError:
+        return None
+
+
+def _is_unchanged(frame: Any, file_state: os.stat_result | None) -> bool:
+    """Tell whether a file still has the size and time stored on its record.
+
+    Returns
+    -------
+    unchanged : `bool`
+        `True` only if the record has both stored values and both match
+        `file_state`. A record without them (saved by older code) is never
+        unchanged, so it is read once and stamped.
+    """
+    if file_state is None:
+        return False
+    stored_size = getattr(frame, "file_size", None)
+    stored_modified_ns = getattr(frame, "file_modified_ns", None)
+    if stored_size is None or stored_modified_ns is None:
+        return False
+    return stored_size == file_state.st_size and stored_modified_ns == file_state.st_mtime_ns
+
+
+def scan_target_directory(target: Target, frames_root_path: str, refresh_headers: bool = False) -> None:
+    """Look through folders to find new images for a specific target.
+
+    This function searches the hard drive for any image folders that match
+    the target's name. If it finds new images, it adds them to the target's
+    list.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target (like a galaxy or nebula) being looked for.
+    frames_root_path : `str`
+        The main folder where all images are kept.
+    refresh_headers : `bool`, optional
+        If True, it will also re-read the settings of images already known
+        about. A known image whose size and modification time still match
+        its record is not opened; the stored values are kept.
+    """
+    variants = [
+        target.id,
+        target.id.replace(" ", "_"),
+        target.id.replace("_", " "),
+        target.id.replace(" ", ""),
+    ]
+    variants = list(dict.fromkeys(variants))
+
+    found_directory = None
+    for d in variants:
+        path = os.path.join(frames_root_path, "lights", d)
+        if os.path.exists(path):
+            found_directory = path
+            break
+
+    if not found_directory:
+        m = re.match(r"^([A-Za-z]+)\s*(\d+)$", target.id)
+        if m:
+            prefix, num = m.groups()
+            aggressive_variants = [f"{prefix} {num}", f"{prefix}_{num}", f"{prefix}{num}"]
+            for d in aggressive_variants:
+                path = os.path.join(frames_root_path, "lights", d)
+                if os.path.exists(path) and d not in variants:
+                    found_directory = path
+                    break
+
+    if not found_directory:
+        return
+
+    known_paths = {frame.path for frame in target.frames}
+    new_paths: set[str] = set()
+    for root, directories, files in os.walk(found_directory):
+        # Frames the stacking pipeline set aside for clouds or trailed stars
+        # live in an `_excluded` folder; walking into it would add them
+        # straight back to the target.
+        directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]
+        for file in files:
+            if file.lower().endswith((".fits", ".fit")):
+                if is_stacked_output(file):
+                    continue
+                file_path = os.path.join(root, file)
+                # Check if already tracked
+                if file_path not in known_paths:
+                    file_state = _stat_or_none(file_path)
+                    if is_stacked_output(file, _read_header_or_none(file_path)):
+                        continue
+                    frame_record = create_frame_record_from_fits(file_path)
+                    _stamp_file_state(frame_record, file_state)
+                    target.frames.append(frame_record)
+                    known_paths.add(file_path)
+                    new_paths.add(file_path)
+
+    frames_reused = 0
+    frames_read = len(new_paths)
+    if refresh_headers:
+        for frame in target.frames:
+            if frame.path in new_paths:
+                continue
+            file_state = _stat_or_none(frame.path)
+            if _is_unchanged(frame, file_state):
+                frames_reused += 1
+                continue
+            frames_read += 1
+            if refresh_acquisition_conditions(frame):
+                _stamp_file_state(frame, file_state)
+    logger.info(
+        "Re-indexed %s: %d frames reused without opening the file, %d read.",
+        target.id,
+        frames_reused,
+        frames_read,
+    )
+
+    target.recalculate_total_exposure()
+
+
+def _read_header_or_none(file_path: str) -> Any:
+    """Read a FITS header, or give `None` if the file cannot be read.
+
+    Returns
+    -------
+    header : `Any`
+        The header, or `None` for an unreadable file, which the caller then
+        treats as it would any file whose header says nothing.
+    """
+    try:
+        return read_header(file_path)
+    except FITS_READ_ERRORS as error:
+        logger.warning("Could not read the header of %s: %s", file_path, error)
+        return None
+
+
+def classify_and_sort_fits_files(
+    scan_list: list[str],
+    target_id: str,
+    config: AppConfiguration,
+    telescope_name: str,
+    added_paths: list[str] | None = None,
+) -> int:
+    """Sort new image files into the correct folders.
+
+    This reads new images, figures out what kind they are (like a dark frame,
+    flat frame, or regular light frame), and moves them into the organized
+    folder structure based on the camera and telescope used.
+
+    Parameters
+    ----------
+    scan_list : `list` of `str`
+        A list of folders to check for new images.
+    target_id : `str`
+        The name of the target for regular light frames.
+    config : `AppConfiguration`
+        Application settings to know where the main folder is.
+    telescope_name : `str`
+        The name of the telescope used.
+    added_paths : `list` of `str`, optional
+        If given, the new path of every file that was moved to a place where
+        no file of that name was yet. A caller can count the additions from
+        this list, instead of walking the whole library before and after.
+
+    Returns
+    -------
+    processed_count : `int`
+        The number of files that were successfully moved.
+    """
+    import shutil
+
+    processed_count = 0
+    fits_files = []
+
+    for src in scan_list:
+        for root, directories, files in os.walk(src):
+            # Frames set aside by the stacking pipeline stay where they are.
+            directories[:] = [d for d in directories if d not in _SKIPPED_FOLDER_NAMES]
+            # Avoid recursively walking into destination structures if
+            # they exist inside src
+            if any(part in root.split(os.sep) for part in [telescope_name, "darks", "biases", "flats"]):
+                continue
+            for file in files:
+                if file.lower().endswith((".fits", ".fit")):
+                    fits_files.append((os.path.join(root, file), file))
+
+    frames_path = config.get_frames_path()
+    if fits_files:
+        # Refuse before moving anything, so the files stay where they were.
+        require_mounted_storage(frames_path, config)
+
+    for file_path, file in fits_files:
+        try:
+            dest_path = ""
+            header = read_header(file_path)
+            frame_type = header.get("FRAME", header.get("IMAGETYP", "Light")).replace(" ", "").lower()
+            camera = _record_camera_name(header.get("INSTRUME", header.get("CAMERA", "Unknown")), config)
+
+            if is_stacked_output(file, header):
+                dest_path = os.path.join(frames_path, "others")
+            elif "light" in frame_type:
+                if target_id:
+                    dest_path = os.path.join(frames_path, "lights", target_id, telescope_name, camera)
+                else:
+                    continue
+            elif "dark" in frame_type:
+                exposure = float(header.get("EXPTIME", 0))
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
+                dest_path = os.path.join(frames_path, "darks", camera, str(gain), str(exposure))
+            elif "bias" in frame_type:
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
+                dest_path = os.path.join(frames_path, "biases", camera, str(gain))
+            elif "flat" in frame_type:
+                filter_enum = get_filter_type(header)
+                filter_name = filter_enum.name if hasattr(filter_enum, "name") else str(filter_enum)
+                gain = read_iso_or_gain(header, camera, config, PLACEHOLDER_FOLDER_ISO)
+                dest_path = os.path.join(frames_path, "flats", telescope_name, camera, filter_name, str(gain))
+            else:
+                dest_path = os.path.join(frames_path, "others")
+
+            if dest_path:
+                os.makedirs(dest_path, exist_ok=True)
+                destination_file = os.path.join(dest_path, file)
+                is_new_file = not os.path.exists(destination_file)
+                shutil.move(file_path, destination_file)
+                processed_count += 1
+                if added_paths is not None and is_new_file:
+                    added_paths.append(destination_file)
+        except (AstrometricsError, *FITS_READ_ERRORS):
+            logger.exception("Error classifying frame %s", file)
+
+    return processed_count

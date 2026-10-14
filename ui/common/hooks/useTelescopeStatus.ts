@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { emitToast } from '../utils/emitToast';
-import { AlignmentAttempt } from '../types/backendTypes';
+import { AlignmentAttempt, AlignmentTargetSession, PolarAlignmentStatus } from '../types/backendTypes';
 import { useAstrometrics } from '../context/AstrometricsContext';
 
 /** Represents the telemetry data returned from the telescope. */
@@ -25,8 +25,18 @@ export interface TelescopeTelemetry {
     guidingHistory: any[];
     /** List of alignment attempts. */
     alignmentAttempts: AlignmentAttempt[];
+    /** The same attempts grouped by target, with tracking statistics from the library. */
+    alignmentTargets: AlignmentTargetSession[];
     /** Whether an alignment run is currently in progress. */
     alignmentActive: boolean;
+    /** Current polar alignment assistant status. */
+    polarAlignment?: PolarAlignmentStatus | null;
+    /** Current camera sensor temperature. */
+    cameraTemperature?: string;
+    /** Current camera exposure or idle status. */
+    cameraStatus?: string;
+    /** Catalog target currently being tracked/pointed at. */
+    targetName?: string;
 }
 
 /** Result of the useTelescopeStatus hook. */
@@ -56,7 +66,9 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
         filter: '',
         guidingHistory: [],
         alignmentAttempts: [],
+        alignmentTargets: [],
         alignmentActive: false,
+        polarAlignment: null,
     });
     const [telescopeConnection, setTelescopeConnection] = useState<boolean | null>(
         null
@@ -98,7 +110,12 @@ export function useTelescopeStatus(): UseTelescopeStatusResult {
             filter: activeFilter,
             guidingHistory: guideHist,
             alignmentAttempts: telescope.alignmentAttempts ?? [],
+            alignmentTargets: telescope.alignmentTargets ?? [],
             alignmentActive: telescope.alignmentActive ?? false,
+            polarAlignment: telescope.polarAlignment ?? null,
+            cameraTemperature: telescope.cameraTemperature ?? undefined,
+            cameraStatus: telescope.cameraStatus ?? undefined,
+            targetName: telescope.targetName ?? undefined,
         });
 
         // Parse Connection and Tracking status.

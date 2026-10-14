@@ -1,0 +1,321 @@
+"""Purpose: Turn the libraries' public methods into MCP tools.
+
+Description: Reads each public method's signature, type hints and numpydoc
+docstring to build a JSON schema, and registers the method as a tool. A tool
+only passes the client's arguments to the method: the library methods accept
+what a client can send (a target id, an ISO time, a position dictionary) and
+convert it themselves. A method marked with `background_job` is called with
+``register_job=True`` in a background thread, so a slow call answers with
+the id of the job it recorded instead of blocking the server.
+"""
+
+import asyncio
+import inspect
+import re
+import typing
+from collections.abc import Callable
+from typing import Any, Union
+
+
+def parse_docstring_params(doc: str) -> dict[str, str]:
+    """Parse Google and NumPy style docstrings for parameter descriptions.
+
+    Parameters
+    ----------
+    doc : `str`
+        Docstring text to parse.
+
+    Returns
+    -------
+    param_descriptions : `dict` [`str`, `str`]
+        Mapping of parameter name to its extracted description string.
+    """
+    if not doc:
+        return {}
+
+    param_descriptions = {}
+    lines = doc.splitlines()
+    in_params_section = False
+    current_param = None
+
+    sections = ("Returns", "Raises", "Yields", "Examples", "Notes")
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped in ("Parameters", "Args:") or stripped.startswith(("Parameters", "Args:")):
+            in_params_section = True
+            current_param = None
+            continue
+
+        if in_params_section:
+            if stripped.startswith(sections):
+                in_params_section = False
+                current_param = None
+                continue
+
+            if set(stripped) <= {"-", "="}:
+                continue
+
+            match_bullet = re.match(r"^\s*-\s*([a-zA-Z0-9_]+)\s*:\s*(.*)", line)
+            if match_bullet:
+                current_param = match_bullet.group(1)
+                param_descriptions[current_param] = match_bullet.group(2).strip()
+                continue
+
+            match_numpy = re.match(r"^\s*([a-zA-Z0-9_]+)\s*:\s*(.*)", line)
+            if match_numpy:
+                current_param = match_numpy.group(1)
+                param_descriptions[current_param] = match_numpy.group(2).strip()
+                continue
+
+            if current_param:
+                existing = param_descriptions.get(current_param, "")
+                param_descriptions[current_param] = (existing + " " + stripped).strip()
+
+    return param_descriptions
+
+
+def get_json_schema_type(python_type: Any) -> str:
+    """Map a Python PEP-484 type hint to a JSON Schema type name.
+
+    Parameters
+    ----------
+    python_type : `Any`
+        Python type hint or construct (e.g. `int`, `str`, `Union`).
+
+    Returns
+    -------
+    json_type_name : `str`
+        The JSON Schema type string (e.g. ``"string"``, ``"integer"``).
+    """
+    if python_type is str:
+        return "string"
+    elif python_type is int:
+        return "integer"
+    elif python_type is float:
+        return "number"
+    elif python_type is bool:
+        return "boolean"
+    elif python_type in (list, tuple, set):
+        return "array"
+    elif python_type in (dict,):
+        return "object"
+
+    origin = typing.get_origin(python_type)
+    if origin is Union:
+        args = typing.get_args(python_type)
+        non_none_args = [a for a in args if a is not type(None)]
+        if non_none_args:
+            return get_json_schema_type(non_none_args[0])
+    elif origin in (list, tuple, set):
+        return "array"
+    elif origin in (dict,):
+        return "object"
+
+    return "string"
+
+
+def generate_tool_schema(func: Callable[..., Any]) -> dict[str, Any]:
+    """Generate a JSON Schema object from signature and docstrings.
+
+    Parameters
+    ----------
+    func : `Callable`
+        The target function to introspect.
+
+    Returns
+    -------
+    schema : `dict` [`str`, `Any`]
+        A JSON Schema dictionary with ``"type"``, ``"properties"``, and
+        ``"required"`` keys.
+    """
+    signature = inspect.signature(func)
+    try:
+        type_hints = typing.get_type_hints(func)
+    except NameError, TypeError, AttributeError:
+        # A hint that names a type this module cannot see cannot be
+        # resolved. The schema then falls back to the plain signature.
+        type_hints = {}
+
+    docstring = inspect.getdoc(func) or ""
+    param_descs = parse_docstring_params(docstring)
+
+    properties = {}
+    required_params = []
+
+    for param_name, param in signature.parameters.items():
+        if param_name in ("self", "args", "kwargs"):
+            continue
+
+        param_type = type_hints.get(param_name, str)
+        js_type = get_json_schema_type(param_type)
+        desc = param_descs.get(param_name, f"Parameter {param_name}")
+
+        properties[param_name] = {"type": js_type, "description": desc}
+
+        if param.default == inspect.Parameter.empty:
+            required_params.append(param_name)
+
+    return {"type": "object", "properties": properties, "required": required_params}
+
+
+# Methods whose names start with one of these are never offered as tools.
+# An AI client cannot be trusted to confirm a deletion with the person first
+# (a target was once deleted on an unclear request), so deleting is left to
+# the app's own UI, which asks the person directly.
+WITHHELD_METHOD_PREFIXES = ("delete",)
+
+# Parameters the server decides, never the client: whether a call shows up
+# in the job list (the server already runs each slow call as a job), and
+# progress callbacks, which a client cannot send. They are left out of every
+# tool's schema.
+SERVER_ONLY_PARAMETERS = ("register_job", "on_item_complete", "on_progress")
+
+
+def _call_arguments(kwargs: dict[str, Any], parameter_names: set[str]) -> dict[str, Any]:
+    """Add the server's own arguments to a client's call of a slow method.
+
+    Parameters
+    ----------
+    kwargs : `dict` [`str`, `Any`]
+        The arguments the client sent.
+    parameter_names : `set` [`str`]
+        The method's parameter names.
+
+    Returns
+    -------
+    arguments : `dict` [`str`, `Any`]
+        The client's arguments, plus ``register_job=True`` when the method
+        takes it, so the method records its own job for the client to poll.
+    """
+    arguments = dict(kwargs)
+    if "register_job" in parameter_names:
+        arguments["register_job"] = True
+    return arguments
+
+
+def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dict[str, str]) -> int:
+    """Register the public methods of a library's API object as tools.
+
+    A tool passes the client's arguments to the method as they are. The
+    library methods accept what a client can send: a target id for a
+    target, an ISO string for a time, a dictionary for a sky position.
+
+    Parameters
+    ----------
+    registry : `ToolRegistry`
+        The tool registry instance to register tools into.
+    api_object : `Any`
+        The library's top-level object (`Astrometrics` or `Wayfinder`).
+    branch_mapping : `dict` [`str`, `str`]
+        Mapping of attribute name on the high-level interface
+        (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
+        key of ``""`` maps to root astrometrics methods. A dotted name
+        (e.g. ``"processing.diagnostics"``) walks nested attributes.
+
+    Returns
+    -------
+    registered_count : `int`
+        Total number of public tools dynamically registered.
+    """
+    count = 0
+
+    for attr_name, prefix in branch_mapping.items():
+        if attr_name == "":
+            target_obj = api_object
+        else:
+            target_obj = api_object
+            for part in attr_name.split("."):
+                target_obj = getattr(target_obj, part, None)
+                if target_obj is None:
+                    break
+
+        if not target_obj:
+            continue
+
+        for method_name in dir(target_obj):
+            if method_name.startswith("_") or method_name.startswith(WITHHELD_METHOD_PREFIXES):
+                continue
+
+            method = getattr(target_obj, method_name)
+            if not callable(method):
+                continue
+
+            tool_name = f"{prefix}_{method_name}" if prefix else method_name
+
+            # Extract human-readable summary from docstring
+            doc = inspect.getdoc(method) or ""
+            summary = doc.split("\n\n")[0] if "\n\n" in doc else doc
+            if not summary:
+                summary = f"Reflected tool {tool_name}"
+
+            schema = generate_tool_schema(method)
+            for hidden_name in SERVER_ONLY_PARAMETERS:
+                schema["properties"].pop(hidden_name, None)
+                if hidden_name in schema["required"]:
+                    schema["required"].remove(hidden_name)
+
+            registry.register(tool_name, summary, schema)(_make_executor(method))
+            count += 1
+
+    return count
+
+
+def _make_executor(target_callable: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a library method as an asynchronous tool function.
+
+    Parameters
+    ----------
+    target_callable : `Callable`
+        The bound library method.
+
+    Returns
+    -------
+    execute : `Callable`
+        A coroutine function that runs the method off the server's event
+        loop with the client's arguments.
+    """
+    parameter_names = set(inspect.signature(target_callable).parameters)
+    grace_period = getattr(target_callable, "__background_job_grace_period__", None)
+
+    async def execute_reflected(**kwargs: Any) -> Any:
+        """Run the method with the client's arguments.
+
+        Returns
+        -------
+        result : `Any`
+            The method's result, or for a slow method still running, the
+            job id to poll.
+        """
+        if grace_period is not None:
+            # A method marked with `@background_job` runs slowly enough that
+            # calling it directly would block this server's single
+            # connection for its whole duration. It records its own job
+            # (``register_job=True``) and runs in a background thread; the
+            # client gets its real result if it finishes quickly, or the
+            # job id to poll.
+            from astrometricslib import run_as_background_job
+
+            arguments = _call_arguments(kwargs, parameter_names)
+            return await asyncio.to_thread(
+                run_as_background_job,
+                lambda: target_callable(**arguments),
+                grace_period_seconds=grace_period,
+            )
+
+        if inspect.iscoroutinefunction(target_callable):
+            return await target_callable(**kwargs)
+
+        # A plain synchronous method still needs its own thread, not a
+        # direct call on this coroutine: some (e.g. wayfindinglib's
+        # `ObservatoryControl`, which bridges into async INDI drivers via
+        # `hardware_operations._run_sync`'s own `asyncio.run(...)`) start a
+        # second event loop internally, which Python refuses whenever the
+        # calling thread already has one running -- exactly this server's
+        # own loop.
+        return await asyncio.to_thread(target_callable, **kwargs)
+
+    return execute_reflected

@@ -15,7 +15,7 @@ from wayfindinglib.astronomy.coordinate_transforms import (
 )
 
 
-def test_compute_altaz_object_at_zenith():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_compute_altaz_object_at_zenith() -> None:
     """Verify a target at the observer's zenith reports ~90 degrees altitude.
 
     At local sidereal time equal to the target's RA, and dec equal to
@@ -35,7 +35,7 @@ def test_compute_altaz_object_at_zenith():  # ruff: ignore[missing-return-type-u
     assert altitude_deg == pytest.approx(90.0, abs=1.0)
 
 
-def test_hour_angle_zero_at_transit():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_hour_angle_zero_at_transit() -> None:
     """Verify hour angle is ~0 when RA equals the local sidereal time."""
     location = earth_location(latitude_deg=39.7392, longitude_deg=-104.9903, elevation_m=1600.0)
     obstime = Time("2026-08-10T06:00:00")
@@ -45,7 +45,7 @@ def test_hour_angle_zero_at_transit():  # ruff: ignore[missing-return-type-undoc
     assert hour_angle_deg(ra_deg, location, obstime) == pytest.approx(0.0, abs=0.1)
 
 
-def test_hour_angle_normalizes_to_plus_minus_180():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_hour_angle_normalizes_to_plus_minus_180() -> None:
     """Verify hour_angle_deg never returns a value outside [-180, 180)."""
     location = earth_location(latitude_deg=39.7392, longitude_deg=-104.9903, elevation_m=1600.0)
     obstime = Time("2026-08-10T06:00:00")

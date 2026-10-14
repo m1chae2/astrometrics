@@ -4,10 +4,16 @@
  * Aligns with the Google TypeScript Style Guide.
  */
 
-import { callBackend } from './backendApi';
+import { callBackend, TargetCameraIndex } from './backendApi';
 import { reportError } from '../utils/reportError';
 import { emitToast } from '../utils/emitToast';
-import { TargetObject, TargetFilesResponse, GroupedFrameStat, FitsHeaderEntry } from '../types/backendTypes';
+import {
+    TargetObject,
+    TargetFilesResponse,
+    GroupedFrameStat,
+    FitsHeaderEntry,
+    ObjectVisibility
+} from '../types/backendTypes';
 
 /**
  * Fetches the pre-shaped file list for a target.
@@ -211,6 +217,25 @@ export async function addTargetData(
     }
 }
 
+/**
+ * Sends the target's JPEG picture to the user's phone. The backend uses
+ * GSConnect to send it straight to a connected phone, or opens LocalSend
+ * with the picture queued when no phone is connected. The backend reports a
+ * missing picture or phone link as an error toast.
+ *
+ * @param targetId Unique identifier of the target.
+ * @return How it was sent, with the phone's name for GSConnect.
+ */
+export async function sendTargetToPhone(
+    targetId: string
+): Promise<{ method: string; device?: string }> {
+    const result = await callBackend("target:send_to_phone", { target_id: targetId });
+    if (result.method === 'gsconnect') {
+        emitToast(`Sent the picture of ${targetId} to ${result.device}`, 'success', 'backend');
+    }
+    return result;
+}
+
 export interface FrameStat {
     telescope: string;
     camera: string;
@@ -236,25 +261,14 @@ export async function getFrameStats(targetId: string): Promise<FrameStat[]> {
 }
 
 
-export interface VisibleTarget {
-    id: string;
-    ra: string;
-    dec: string;
-    alt: string;
-    az: string;
-    visible: boolean;
-    rise_time: string;
-    set_time: string;
-}
-
 /**
- * Fetches the list of all currently visible targets.
- * @return List of visible targets.
+ * Fetches the library targets above the horizon now, highest first.
+ * @return Where each visible target is.
  */
-export async function fetchVisibleTargets(): Promise<VisibleTarget[]> {
+export async function fetchVisibleTargets(): Promise<ObjectVisibility[]> {
     try {
-        const data = await callBackend("astronomy:visible", {});
-        return (data || []) as VisibleTarget[];
+        const data = await callBackend("astronomy:visible", {}, { timeoutMs: 30000 });
+        return data || [];
     } catch (err) {
         console.error('Failed to fetch visible targets', err);
         return [];
@@ -267,17 +281,26 @@ export async function fetchVisibleTargets(): Promise<VisibleTarget[]> {
  * Fetches the FITS header info for a specific frame of a target.
  * @param targetId The identifier of the target.
  * @param framePath The system file path to the FITS frame.
+ * @param options Set `silent` for an optional lookup: a failure (for example a file that is
+ *   missing from disk) is thrown to the caller without a toast or an error report.
  * @return List of FITS header entry objects.
  */
 export async function fetchTargetFrameHeader(
     targetId: string,
-    framePath: string
+    framePath: string,
+    options?: { silent?: boolean }
 ): Promise<FitsHeaderEntry[]> {
     try {
-        const data = await callBackend("target:get_frame_header", { target_id: targetId, frame_path: framePath });
+        const data = await callBackend(
+            "target:get_frame_header",
+            { target_id: targetId, frame_path: framePath },
+            options?.silent ? { silent: true } : undefined
+        );
         return (data || []) as FitsHeaderEntry[];
     } catch (err: unknown) {
-        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        if (!options?.silent) {
+            reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        }
         throw err;
     }
 }
@@ -295,5 +318,18 @@ export async function refreshTarget(targetId: string, pruneMissing: boolean = fa
         const txt = `Error reindexing target ${targetId}`;
         reportError(err instanceof Error ? err : new Error(txt), 'backend');
         throw err;
+    }
+}
+
+/**
+ * Fetches which configured camera took each target's light frames, and when.
+ * @return The camera index, or an empty one if the request fails.
+ */
+export async function fetchTargetCameraIndex(): Promise<TargetCameraIndex> {
+    try {
+        return await callBackend("target:get_camera_index", {});
+    } catch (err: unknown) {
+        reportError(err instanceof Error ? err : new Error(String(err)), 'backend');
+        return { cameras: [], targets: {} };
     }
 }

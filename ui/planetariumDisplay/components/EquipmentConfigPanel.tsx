@@ -65,7 +65,7 @@ export const EquipmentConfigPanel: React.FC<Props> = ({
           <div className="equipment-config-panel__row">
             <span className="equipment-config-panel__label">Focal Length</span>
             <span className="equipment-config-panel__value">
-              {configuration ? `${configuration.telescope.focal_length_mm} mm` : '—'}
+              {configuration ? `${configuration.telescope.focalLengthMm} mm` : '—'}
             </span>
           </div>
 
@@ -88,14 +88,14 @@ export const EquipmentConfigPanel: React.FC<Props> = ({
           <div className="equipment-config-panel__row">
             <span className="equipment-config-panel__label">Pixel Size</span>
             <span className="equipment-config-panel__value">
-              {configuration ? `${configuration.camera.pixel_size_um} μm` : '—'}
+              {configuration ? `${configuration.camera.pixelSizeUm} μm` : '—'}
             </span>
           </div>
           <div className="equipment-config-panel__row">
             <span className="equipment-config-panel__label">Sensor</span>
             <span className="equipment-config-panel__value">
               {configuration
-                ? `${configuration.camera.sensor_width_px} × ${configuration.camera.sensor_height_px} px`
+                ? `${configuration.camera.sensorWidthPx} × ${configuration.camera.sensorHeightPx} px`
                 : '—'}
             </span>
           </div>
@@ -106,14 +106,14 @@ export const EquipmentConfigPanel: React.FC<Props> = ({
           <div className="equipment-config-panel__row">
             <span className="equipment-config-panel__label">Plate Scale</span>
             <span className="equipment-config-panel__value equipment-config-panel__value--mono">
-              {configuration ? `${configuration.plate_scale_arcsec_per_px.toFixed(3)} ″/px` : '—'}
+              {configuration ? `${configuration.plateScaleArcsecPerPx.toFixed(3)} ″/px` : '—'}
             </span>
           </div>
           <div className="equipment-config-panel__row">
             <span className="equipment-config-panel__label">FOV</span>
             <span className="equipment-config-panel__value equipment-config-panel__value--mono">
               {configuration
-                ? `${configuration.fov_width_deg.toFixed(3)}° × ${configuration.fov_height_deg.toFixed(3)}°`
+                ? `${configuration.fovWidthDeg.toFixed(3)}° × ${configuration.fovHeightDeg.toFixed(3)}°`
                 : '—'}
             </span>
           </div>

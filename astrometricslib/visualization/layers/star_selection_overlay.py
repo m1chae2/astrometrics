@@ -15,13 +15,13 @@ class StarSelectionOverlay:
         Color configuration.
     """
 
-    def __init__(self, axis, config):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, axis, config) -> None:  # ruff: ignore[missing-type-function-argument]
         self.ax = axis
         self.config = config
         self.crosshair_v = None
         self.crosshair_h = None
 
-    def update_selection(self, x: float, y: float):  # ruff: ignore[missing-return-type-undocumented-public-function]
+    def update_selection(self, x: float, y: float) -> None:
         """Update active selection crosshairs at position (x, y)."""
         if self.crosshair_v is not None:
             self.crosshair_v.remove()

@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=python3
+Exec=/home/michael/Repos/astrometrics/.venv/bin/python /home/michael/Repos/astrometrics/scripts/linux/generate_fits_thumbnail.py %i %o %s
+MimeType=image/fits;application/fits;application/x-fits;

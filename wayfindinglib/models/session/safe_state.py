@@ -3,7 +3,7 @@
 Description: The record of one execution of the ordered, bounded
 safe-state sequence: abandon exposure, stop guiding, park mount, close
 enclosure, warm sensor, close session
-(`Wayfinding_Library_Architecture.md` §2.5.5, Table 6). Each step is
+(`Wayfinding_Library_Architecture.md`). Each step is
 attempted even if an earlier one failed, except enclosure closure, which
 is *skipped* rather than forced when the mount did not reach a
 clearance position -- forcing it is the damage case.

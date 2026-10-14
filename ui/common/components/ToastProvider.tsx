@@ -89,12 +89,9 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
           typeof p === 'object' && p !== null && typeof p['source'] === 'string'
             ? String(p['source'])
             : 'external';
-        const kind =
-          typeof p === 'object' &&
-            p !== null &&
-            (p as Record<string, unknown>)['kind'] === 'error'
-            ? 'error'
-            : 'success';
+        const rawKind = typeof p === 'object' && p !== null ? (p as Record<string, unknown>)['kind'] : undefined;
+        const kind: ToastType =
+          rawKind === 'error' || rawKind === 'info' || rawKind === 'warning' ? rawKind : 'success';
 
         const key = `${source}:${text}`;
         const recent = recentKeysRef.current;
@@ -110,7 +107,7 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         }, 4000);
 
         if (text) {
-          show(text, kind as ToastType);
+          show(text, kind);
         }
       } catch {
         // Ignore failures from external emitters.
@@ -145,12 +142,9 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
           typeof p === 'object' && p !== null && typeof p['source'] === 'string'
             ? String(p['source'])
             : 'external';
-        const kind =
-          typeof p === 'object' &&
-            p !== null &&
-            (p as Record<string, unknown>)['kind'] === 'error'
-            ? 'error'
-            : 'success';
+        const rawKind = typeof p === 'object' && p !== null ? (p as Record<string, unknown>)['kind'] : undefined;
+        const kind: ToastType =
+          rawKind === 'error' || rawKind === 'info' || rawKind === 'warning' ? rawKind : 'success';
 
         const key = `${source}:${text}`;
         const recent = recentKeysRef.current;
@@ -166,7 +160,7 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         }, 4000);
 
         if (text) {
-          show(text, kind as ToastType);
+          show(text, kind);
         }
       } catch {
         // Ignore listener failures.
@@ -183,10 +177,17 @@ export const ToastProvider: React.FC<Props> = ({ children }) => {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`toast ${t.type === 'success' ? 'toast-success' : 'toast-error'
-              }`}
+            className={`toast toast-${t.type}`}
           >
-            {t.msg}
+            <span className="toast__message">{t.msg}</span>
+            <button
+              type="button"
+              className="toast__dismiss"
+              aria-label="Dismiss notification"
+              onClick={() => remove(t.id)}
+            >
+              &times;
+            </button>
           </div>
         ))}
       </div>

@@ -3,7 +3,7 @@
  * @description Hook for managing the ingestion of images from telescope or remote folders.
  * Orchestrates job creation, status polling, and log management.
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     startIngestion,
     fetchIngestStatus,
@@ -42,6 +42,7 @@ export interface IngestionState {
     closeIngestModal: () => void;
     startIngestionJob: () => Promise<void>;
     scanRemote: () => Promise<void>;
+    refreshFiles: () => Promise<void>;
     resetState: () => void;
     isActive: boolean;
 }
@@ -98,37 +99,52 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
     }, [initialTargetName]);
 
 
+    /**
+     * Queries remote folder statistics and available files for the given folder or active target.
+     *
+     * @param folder The folder name or target name to scan.
+     */
+    const refreshFolderFiles = useCallback(async (folder: string) => {
+        if (!folder) {
+            setFileCount(null);
+            setRemoteFiles([]);
+            setSelectedFiles(new Set());
+            return;
+        }
+        setIsLoadingStats(true);
+        try {
+            const [statsRes, filesRes] = await Promise.all([
+                fetchRemoteFolderStats(folder),
+                fetchRemoteFiles(folder)
+            ]);
+            setFileCount(statsRes.fileCount);
+            setRemoteFiles(filesRes.files || []);
+            // By default, select all files
+            setSelectedFiles(new Set(filesRes.files || []));
+        } catch (err) {
+            console.error('Failed to get remote stats/files:', err);
+            setFileCount(null);
+            setRemoteFiles([]);
+            setSelectedFiles(new Set());
+        } finally {
+            setIsLoadingStats(false);
+        }
+    }, []);
+
+    /**
+     * Refreshes the file list for the currently active target.
+     */
+    const refreshFiles = useCallback(async () => {
+        if (targetName && targetName.length > 2) {
+            await refreshFolderFiles(targetName);
+        }
+    }, [targetName, refreshFolderFiles]);
+
     // Debounce target name change for fetching stats
     useEffect(() => {
         const timer = setTimeout(() => {
-            const checkFolderStats = async (folder: string) => {
-                if (!folder) {
-                    setFileCount(null);
-                    setRemoteFiles([]);
-                    setSelectedFiles(new Set());
-                    return;
-                }
-                setIsLoadingStats(true);
-                try {
-                    const [statsRes, filesRes] = await Promise.all([
-                        fetchRemoteFolderStats(folder),
-                        fetchRemoteFiles(folder)
-                    ]);
-                    setFileCount(statsRes.fileCount);
-                    setRemoteFiles(filesRes.files || []);
-                    // By default, select all files
-                    setSelectedFiles(new Set(filesRes.files || []));
-                } catch (err) {
-                    console.error('Failed to get remote stats/files:', err);
-                    setFileCount(null);
-                    setRemoteFiles([]);
-                    setSelectedFiles(new Set());
-                } finally {
-                    setIsLoadingStats(false);
-                }
-            };
             if (targetName && targetName.length > 2) {
-                checkFolderStats(targetName);
+                refreshFolderFiles(targetName);
             } else {
                 setFileCount(null);
                 setRemoteFolder('');
@@ -138,7 +154,7 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [targetName]);
+    }, [targetName, refreshFolderFiles]);
 
     /**
      * Starts the ingestion job for the current target.
@@ -212,6 +228,7 @@ export const useIngestionManager = (initialTargetName: string = ''): IngestionSt
         closeIngestModal,
         startIngestionJob,
         scanRemote,
+        refreshFiles,
         resetState,
         isActive
     };

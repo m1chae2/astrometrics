@@ -36,7 +36,13 @@ export const ProcessingStatus: React.FC<ProcessingStatusProps> = ({
     // selected, shows the tail of a job selected from Recent Jobs, or
     // streams live output for whichever job is currently active
     // (including one started outside the UI, e.g. from a script).
-    const isSuccess = !isProcessing && logLines.some(l => l.includes('status: success stack'));
+    const isSuccess = !isProcessing && logLines.some(l =>
+        l.includes('status: success stack') ||
+        l.includes('analysis complete') ||
+        l.includes('Analysis complete') ||
+        l.includes('analysis finished') ||
+        l.includes('Analysis finished')
+    );
     const isIdle = !isProcessing && logLines.length === 0;
 
     return (

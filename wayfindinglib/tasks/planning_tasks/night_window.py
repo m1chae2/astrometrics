@@ -5,7 +5,7 @@ night by sampling solar altitude at a configurable interval and
 thresholding against a twilight definition -- coarse, sample-step
 bracketing rather than exact rise/set bisection, adequate for the
 scheduling granularity this subsystem needs
-(`Wayfinding_Library_Architecture.md` §2.3.3). This is the *policy* of
+(`Wayfinding_Library_Architecture.md`). This is the *policy* of
 which solar altitude brackets a usable night; the underlying solar
 altitude calculation itself is Foundation-level, pure calculation in
 `wayfindinglib.astronomy.solar_position`.

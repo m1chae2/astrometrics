@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 
 /** Possible levels for a toast notification. */
-export type ToastType = 'success' | 'error';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 /** Function type for showing a toast notification. */
 export type ToastShowFn = (

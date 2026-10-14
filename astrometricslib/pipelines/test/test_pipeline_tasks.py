@@ -1,11 +1,13 @@
-"""Purpose: Unit tests for pipelines/dispatch.py and its Target workflow.
+"""Purpose: Unit tests for analyze_target/stacking and Target workflow.
 
 Description: Verifies analyze_target, stack_frames's homogeneous frame
-validation, and the add_frame/analyze_frame_spectroscopy helpers
-dispatch.py's workflow relies on -- the free functions that replaced
-Target's former orchestration methods.
+validation, and the add_frame/analyze_frame_spectroscopy helpers that
+workflow relies on -- the free functions that replaced Target's former
+orchestration methods.
 """
 
+import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Never
 
@@ -13,19 +15,27 @@ import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.modeling.models import Gaussian2D
+from pytest_mock import MockerFixture
 
 from astrometricslib import Astrometrics
-from astrometricslib.data_access.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.drivers.catalog_access import CatalogAccess, StarPosition
+from astrometricslib.foundation.config import AppConfiguration
+from astrometricslib.foundation.errors import ConflictError
 from astrometricslib.models.moving_object import CascadeStage
-from astrometricslib.models.stellar_source import StellarObject
+from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.models.target import FrameRecord, Target
-from astrometricslib.pipelines import dispatch
+from astrometricslib.pipelines import tasks
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
+from astrometricslib.pipelines.shared.star_recording import (
+    StarIdentificationBreakdown,
+    _drop_unresolved_stars,
+    _reconcile_position_only_star_ids,
+)
 from astrometricslib.pipelines.spectroscopy.frame_analysis import analyze_frame_spectroscopy
-from astrometricslib.pipelines.test.test_pipeline_return_contracts import (
+from astrometricslib.pipelines.stacking import stage as stacking_stage
+from astrometricslib.pipelines.test.test_pipeline_result_keys import (
     assert_result_keys,
 )
-from astrometricslib.utilities.config_loader import AppConfiguration
 
 
 def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
@@ -37,7 +47,9 @@ def _make_image_fits(path: str, shape: tuple = (100, 100)) -> None:
     hdu.writeto(path, overwrite=True)
 
 
-def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_drop_unresolved_stars_separates_catalog_position_and_dropped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Verify _drop_unresolved_stars buckets, filters, and logs correctly.
 
     Catalog-matched (SIMBAD/Gaia) and position-only (FIELD_J) stars
@@ -56,8 +68,8 @@ def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  
     bare_placeholder = StellarObject(id="Star_3")
     prefixed_placeholder = StellarObject(id="sess1:Star_7")
 
-    with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.dispatch"):
-        resolved, breakdown = dispatch._drop_unresolved_stars(
+    with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.shared.star_recording"):
+        resolved, breakdown = _drop_unresolved_stars(
             [catalog_star, position_only_star, bare_placeholder, prefixed_placeholder],
             target_id="TestTarget",
             pipeline_name="astrometry",
@@ -75,14 +87,12 @@ def test_drop_unresolved_stars_separates_catalog_position_and_dropped(caplog):  
     assert "2 dropped" in caplog.text
 
 
-def test_drop_unresolved_stars_empty_input_returns_zero_counts():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_drop_unresolved_stars_empty_input_returns_zero_counts() -> None:
     """Verify an empty input produces an empty result and all-zero counts."""
-    resolved, breakdown = dispatch._drop_unresolved_stars(
-        [], target_id="EmptyTarget", pipeline_name="photometry"
-    )
+    resolved, breakdown = _drop_unresolved_stars([], target_id="EmptyTarget", pipeline_name="photometry")
 
     assert resolved == []
-    assert breakdown == dispatch.StarIdentificationBreakdown(catalog_matched=0, position_only=0, unresolved=0)
+    assert breakdown == StarIdentificationBreakdown(catalog_matched=0, position_only=0, unresolved=0)
 
 
 def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
@@ -104,7 +114,7 @@ def _position_only_star(id_: str, ra: float, dec: float) -> StellarObject:
 class _StubCatalogAccess:
     """Fake catalog_access that only answers list_position_only_stars."""
 
-    def __init__(self, stars: list[StarPosition]):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, stars: list[StarPosition]) -> None:
         self._stars = stars
 
     def list_position_only_stars(self, target_id: str | None = None) -> list[StarPosition]:
@@ -120,7 +130,9 @@ class _StubCatalogAccess:
         return [star for star in self._stars if target_id in star.target_ids]
 
 
-def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Verify a star within the match radius reuses that row's id.
 
     FIELD_J{ra:.4f}{dec:+.4f} bins position to 0.36 arcsec, well inside
@@ -136,8 +148,8 @@ def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog): 
         StarPosition(id=existing_id, right_ascension=128.834300, declination=-26.627778, target_ids=["M42"])
     ])
 
-    with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.dispatch"):
-        result = dispatch._reconcile_position_only_star_ids(
+    with caplog.at_level(logging.INFO, logger="astrometricslib.pipelines.shared.star_recording"):
+        result = _reconcile_position_only_star_ids(
             [new_star], catalog_access=stub_catalog_access, target_id="M42"
         )
 
@@ -146,7 +158,7 @@ def test_reconcile_position_only_star_ids_reuses_a_nearby_existing_row(caplog): 
     assert "Reconciled 1 position-only" in caplog.text
 
 
-def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone() -> None:
     """Verify a distant star keeps its own freshly minted id."""
     fresh_id = "FIELD_J083344.3050-263739.9980"
     new_star = _position_only_star(fresh_id, ra=128.834305, dec=-26.62777)
@@ -160,14 +172,14 @@ def test_reconcile_position_only_star_ids_leaves_a_distant_star_alone():  # ruff
         )
     ])
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [new_star], catalog_access=stub_catalog_access, target_id="M42"
     )
 
     assert result[0].id == fresh_id
 
 
-def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows() -> None:
     """Verify a row belonging only to a different target is not reused.
 
     target_id is a comma-joined string, so membership must be checked
@@ -185,14 +197,14 @@ def test_reconcile_position_only_star_ids_only_matches_the_same_targets_rows(): 
         )
     ])
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [new_star], catalog_access=stub_catalog_access, target_id="M42"
     )
 
     assert result[0].id == "FIELD_J083344.3050-263739.9980"
 
 
-def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_matches_a_multi_target_row() -> None:
     """Verify a comma-joined target_id matches this target among several."""
     existing_id = "FIELD_J083344.3000-263740.0000"
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
@@ -205,14 +217,14 @@ def test_reconcile_position_only_star_ids_matches_a_multi_target_row():  # ruff:
         )
     ])
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [new_star], catalog_access=stub_catalog_access, target_id="M42"
     )
 
     assert result[0].id == existing_id
 
 
-def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide() -> None:
     """Verify two new stars matching one existing row don't collapse onto it.
 
     Colliding two genuinely different stars onto one row would silently
@@ -226,7 +238,7 @@ def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  #
         StarPosition(id=existing_id, right_ascension=128.834300, declination=-26.627778, target_ids=["M42"])
     ])
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [first, second], catalog_access=stub_catalog_access, target_id="M42"
     )
 
@@ -237,7 +249,7 @@ def test_reconcile_position_only_star_ids_never_lets_two_new_stars_collide():  #
     assert len(reconciled_ids) == 2
 
 
-def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_skips_catalog_matched_stars() -> None:
     """Verify a SIMBAD/Gaia-matched star is never touched by reconciliation.
 
     Only FIELD_J-prefixed ids are ever position-derived; a real catalog
@@ -256,14 +268,14 @@ def test_reconcile_position_only_star_ids_skips_catalog_matched_stars():  # ruff
         )
     ])
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [catalog_star], catalog_access=stub_catalog_access, target_id="Vega"
     )
 
     assert result[0].id == "* alf Lyr"
 
 
-def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully() -> None:
     """Verify a lookup error doesn't block recording of this run's stars.
 
     Reconciliation is an optimisation over an already-correct (if
@@ -273,11 +285,11 @@ def test_reconcile_position_only_star_ids_handles_a_lookup_failure_gracefully():
 
     class _BrokenCatalogAccess:
         def list_position_only_stars(self, *args: Any, **kwargs: Any) -> Never:
-            raise RuntimeError("catalog unreachable")
+            raise sqlite3.OperationalError("catalog unreachable")
 
     new_star = _position_only_star("FIELD_J083344.3050-263739.9980", ra=128.834305, dec=-26.62777)
 
-    result = dispatch._reconcile_position_only_star_ids(
+    result = _reconcile_position_only_star_ids(
         [new_star], catalog_access=_BrokenCatalogAccess(), target_id="M42"
     )
 
@@ -291,11 +303,11 @@ def test_target_analyze_target(tmp_path: Any) -> None:
     Confirms the pipeline correctly identifies stars in the frame.
     """
     config = AppConfiguration()
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        astrometrics = Astrometrics(app_config=config)
+        astrometrics = Astrometrics(config=config)
 
         image_path = str(tmp_path / "test_image.fits")
         _make_image_fits(image_path)
@@ -303,23 +315,23 @@ def test_target_analyze_target(tmp_path: Any) -> None:
         target = astrometrics.targets.create("Vega")
         from astrometricslib import FrameRecord
 
-        results = dispatch.analyze_target(target, frames=[FrameRecord(path=image_path)])
+        results = tasks.analyze_target(target, frames=[FrameRecord(path=image_path)])
         assert "stellar_objects" in results
         assert "wcs" in results
     finally:
         config.update_config({"Image Library": {"path": original_path}})
 
 
-def test_target_stack_and_solve_homogeneous_validation() -> None:
-    """Verifies that stack_and_solve.
+def test_target_stack_frames_homogeneous_validation() -> None:
+    """Verifies that stacking.
 
     validates that only homogeneous frame types are stacked,.
-    and raises a ValueError if frames are mixed or missing.
+    and raises a ConflictError if frames are mixed or missing.
     """
     # 1. Test empty frames
     target = Target(id="EmptyTarget")
-    with pytest.raises(ValueError, match=r"Target has no frames available to stack\."):
-        dispatch.stack_and_solve(target)
+    with pytest.raises(ConflictError, match=r"Target has no frames available to stack\."):
+        stacking_stage.stack_frames(target)
 
     # 2. Test mixed frames (SPEC + standard LIGHT)
     target_mixed = Target(
@@ -330,9 +342,9 @@ def test_target_stack_and_solve_homogeneous_validation() -> None:
         ],
     )
     with pytest.raises(
-        ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
+        ConflictError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
     ):
-        dispatch.stack_and_solve(target_mixed)
+        stacking_stage.stack_frames(target_mixed)
 
     # 3. Test homogeneous frames (no mixed-frame error, though it might
     # fail later due to missing file/Siril execution)
@@ -346,15 +358,14 @@ def test_target_stack_and_solve_homogeneous_validation() -> None:
 
     # It should pass the homogeneous check and return None due to
     # dummy paths and unconfigured Siril driver
-    result = dispatch.stack_and_solve(target_homog)
+    result = stacking_stage.stack_frames(target_homog)
     assert result is None
 
 
-def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Tests that add_frame.
+def test_target_add_frame_validation(tmp_path: Path) -> None:
+    """Verify that add_frame extracts FITS metadata, prevents duplicate paths.
 
-    correctly extracts FITS metadata, prevents duplicate paths,. and
-    proactively enforces filter homogeneity.
+    Also verifies multi-modal frame types can be added to a single target.
     """
     # Create test FITS files
     standard_fit = tmp_path / "standard.fits"
@@ -392,25 +403,26 @@ def test_target_add_frame_validation(tmp_path):  # ruff: ignore[missing-type-fun
     assert rec2 == rec1
     assert len(target.frames) == 1
 
-    # 3. Add incompatible spectral frame (proactive boundary validation)
-    with pytest.raises(
-        ValueError, match=r"Target contains a mixed set of spectral.*and standard imaging frames"
-    ):
-        add_frame(target, str(spectral_fit))
+    # 3. Add spectral frame to the same target (multi-modal target support)
+    rec3 = add_frame(target, str(spectral_fit))
+    assert rec3.filter.name == "SPEC"
+    assert rec3.exposure == "10.0"
+    assert target.exposure_sec == pytest.approx(15.0)
+    assert len(target.frames) == 2
 
 
-def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_frame_spectroscopy(tmp_path: Path, mocker: MockerFixture) -> None:
     """Tests analyze_frame_spectroscopy.
 
     coordinates execution, target ID mapping, and database index saving.
     """
-    from astrometricslib.utilities import config_loader
+    from astrometricslib.foundation import config as config_loader
 
     config = AppConfiguration()
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
@@ -424,7 +436,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         hdu.writeto(fit_path, overwrite=True)
 
         # Mock Pipelines
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -448,7 +460,7 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         assert len(target.frames) == 1
 
         # Verify recording
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         loaded = CatalogAccess(config).get("stellar_catalog", {})
         assert len(loaded) == 1
@@ -459,7 +471,9 @@ def test_target_analyze_frame_spectroscopy(tmp_path, mocker):  # ruff: ignore[mi
         config_loader._instance = original_instance
 
 
-def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """Verify an unrelated star's has_spectra survives the write.
 
     Regression test: analyze_frame_spectroscopy used to load every
@@ -471,24 +485,24 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
     only this frame's own star ids, so an unrelated row's indexed
     columns must come back unchanged.
     """
-    from astrometricslib.utilities import config_loader
+    from astrometricslib.foundation import config as config_loader
 
     config = AppConfiguration()
     original_instance = config_loader._instance
     config_loader._instance = config
 
-    original_path = config.get_value("Image Library", "path", fallback="./libraryIndex")
+    original_path = config.get_value("Image Library", "path", fallback="./library")
     config.update_config({"Image Library": {"path": str(tmp_path)}})
 
     try:
-        from astrometricslib.data_access.catalog_access import CatalogAccess
+        from astrometricslib.drivers.catalog_access import CatalogAccess
 
         catalog_access = CatalogAccess(config)
         other_star = StellarObject(id="Unrelated_Star", name="Unrelated_Star")
-        other_star.spectrum_data_processed = {
-            "wavelengths_angstrom": [4000.0, 5000.0],
-            "intensities": [1.0, 2.0],
-        }
+        other_star.spectroscopy = SpectroscopyResult(
+            wavelengths_angstrom=[4000.0, 5000.0],
+            intensities=[1.0, 2.0],
+        )
         assert other_star.has_spectra
         catalog_access.put([other_star], "stellar_catalog", {})
 
@@ -500,7 +514,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         hdu.header["EXPTIME"] = 5.0
         hdu.writeto(fit_path, overwrite=True)
 
-        from astrometricslib.image_processing.image import AstrometricsImage
+        from astrometricslib.drivers.image import AstrometricsImage
         from astrometricslib.pipelines.shared.analysis_context import AnalysisContext
 
         img = AstrometricsImage(str(fit_path))
@@ -526,7 +540,7 @@ def test_analyze_frame_spectroscopy_does_not_disturb_other_stars_indexed_columns
         config_loader._instance = original_instance
 
 
-def _write_asteroid_recovery_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_frame_fits(path, star_pixel_xy, extra_source_pixel_xy_list=()) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic light frame FITS file with Gaussian source(s).
 
     `extra_source_pixel_xy_list` adds further one-off point sources to
@@ -545,7 +559,7 @@ def _write_asteroid_recovery_frame_fits(path, star_pixel_xy, extra_source_pixel_
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def _write_asteroid_recovery_stack_fits(path):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_asteroid_detection_stack_fits(path) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic stack FITS file with a real TAN WCS header."""
     header = fits.Header()
     header["NAXIS1"] = 64
@@ -565,8 +579,8 @@ def _write_asteroid_recovery_stack_fits(path):  # ruff: ignore[missing-type-func
     fits.PrimaryHDU(np.zeros((64, 64), dtype=np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Verify analyze_target wires the asteroid recovery pipeline.
+def test_target_analyze_target_asteroid_detection(tmp_path: Path, mocker: MockerFixture) -> None:
+    """Verify analyze_target wires the asteroid detection pipeline.
 
     Candidates are populated on the Target, and the quality summary
     reflects the pipeline's own metrics and session provenance.
@@ -578,41 +592,43 @@ def test_target_analyze_target_asteroid_recovery(tmp_path, mocker):  # ruff: ign
     frames = []
     for index, (star_pixel, timestamp) in enumerate(zip(star_pixel_positions, timestamps, strict=False)):
         frame_path = tmp_path / f"frame{index}.fits"
-        _write_asteroid_recovery_frame_fits(frame_path, star_pixel)
+        _write_asteroid_detection_frame_fits(frame_path, star_pixel)
         frames.append(FrameRecord(path=str(frame_path), timestamp=timestamp))
 
     stack_path = tmp_path / "stack.fits"
-    _write_asteroid_recovery_stack_fits(stack_path)
+    _write_asteroid_detection_stack_fits(stack_path)
 
-    target = Target(id="AsteroidRecoveryTestTarget", frames=frames)
-    target.stacked_image = str(stack_path)
+    target = Target(id="AsteroidDetectionTestTarget", frames=frames)
+    target.stacking.stacked_image = str(stack_path)
 
-    result = dispatch.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
-    assert_result_keys(result, "asteroid_recovery")
+    assert_result_keys(result, "asteroid_detection")
     assert result["status"] == "completed"
-    assert len(target.asteroid_candidates) == 1
-    assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+    assert len(target.asteroid_detection.candidates) == 1
+    assert target.asteroid_detection.candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
-    summary = target.asteroid_recovery_quality_summary
+    summary = target.asteroid_detection.quality_summary
     assert summary is not None
     assert summary.upstream_quality_summary_reference == "astrometry"
-    assert summary.asteroid_recovery_metrics.frames_with_wcs_estimate == 4
-    assert summary.asteroid_recovery_metrics.candidates_rate_linearity_confirmed == 1
+    assert summary.asteroid_detection_metrics.frames_with_wcs_estimate == 4
+    assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
     assert len(summary.target_session_breakdown) == 1
     assert summary.target_session_breakdown[0].frames_contributed == 4
     assert summary.flagged is True
     assert "not matched to a known body" in summary.flag_reasons[0]
 
 
-def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_path, mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_asteroid_detection_drops_rejected_candidates(
+    tmp_path: Path, mocker: MockerFixture
+) -> None:
     """Verify only surviving candidates are recorded onto the target.
 
     A cosmic-ray-like point source appearing in a single frame only
     chains into its own single-detection candidate alongside the
     genuine moving-object track. `analyze_target` should still report
     it in the run's metrics (the full discrimination-cascade audit
-    trail), but must not record it onto `target.asteroid_candidates`
+    trail), but must not record it onto `target.asteroid_detection.candidates`
     -- otherwise a dense field's rejected noise chains bloat the
     target's recorded record without limit.
     """
@@ -624,34 +640,34 @@ def test_target_analyze_target_asteroid_recovery_drops_rejected_candidates(tmp_p
     for index, (star_pixel, timestamp) in enumerate(zip(star_pixel_positions, timestamps, strict=False)):
         frame_path = tmp_path / f"frame{index}.fits"
         extra_sources = [(50.0, 10.0)] if index == 0 else []
-        _write_asteroid_recovery_frame_fits(frame_path, star_pixel, extra_sources)
+        _write_asteroid_detection_frame_fits(frame_path, star_pixel, extra_sources)
         frames.append(FrameRecord(path=str(frame_path), timestamp=timestamp))
 
     stack_path = tmp_path / "stack.fits"
-    _write_asteroid_recovery_stack_fits(stack_path)
+    _write_asteroid_detection_stack_fits(stack_path)
 
-    target = Target(id="AsteroidRecoveryMixedTestTarget", frames=frames)
-    target.stacked_image = str(stack_path)
+    target = Target(id="AsteroidDetectionMixedTestTarget", frames=frames)
+    target.stacking.stacked_image = str(stack_path)
 
-    result = dispatch.analyze_target(target, pipeline_type="asteroid_recovery")
+    result = tasks.analyze_target(target, pipeline_type="asteroid_detection")
 
-    assert_result_keys(result, "asteroid_recovery")
+    assert_result_keys(result, "asteroid_detection")
     assert result["status"] == "completed"
     # Only the confirmed track is recorded -- the single-frame cosmic
     # ray is dropped, not carried onto the target.
-    assert len(target.asteroid_candidates) == 1
-    assert target.asteroid_candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
+    assert len(target.asteroid_detection.candidates) == 1
+    assert target.asteroid_detection.candidates[0].cascade_stage == CascadeStage.RATE_LINEARITY_CONFIRMED
 
     # But the pipeline's own metrics still account for both candidates
     # it evaluated, proving the drop happens at recording time, not
     # inside the discrimination cascade itself.
-    summary = target.asteroid_recovery_quality_summary
-    assert summary.asteroid_recovery_metrics.candidates_detected == 2
-    assert summary.asteroid_recovery_metrics.candidates_rate_linearity_confirmed == 1
-    assert result["candidates"] == target.asteroid_candidates
+    summary = target.asteroid_detection.quality_summary
+    assert summary.asteroid_detection_metrics.candidates_detected == 2
+    assert summary.asteroid_detection_metrics.candidates_rate_linearity_confirmed == 1
+    assert result["candidates"] == target.asteroid_detection.candidates
 
 
-def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
     """Well-separated star pixel positions on a grid, generous clearance.
 
     Returns
@@ -665,7 +681,7 @@ def _grid_star_positions(count, spacing=30.0, margin=30.0, per_row=6):  # ruff: 
     ]
 
 
-def _write_photometry_frame_fits(path, star_pixel_positions, date_obs):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+def _write_photometry_frame_fits(path, star_pixel_positions, date_obs) -> None:  # ruff: ignore[missing-type-function-argument]
     """Write a synthetic light frame FITS file with many Gaussian sources."""
     rng = np.random.default_rng(0)
     shape = (256, 256)
@@ -678,7 +694,9 @@ def _write_photometry_frame_fits(path, star_pixel_positions, date_obs):  # ruff:
     fits.PrimaryHDU(data.astype(np.float32), header=header).writeto(path, overwrite=True)
 
 
-def test_target_analyze_target_photometry_runs_each_session_independently(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_runs_each_session_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify photometry splits multi-session frames, not cross-tracking.
 
     Pixel-position re-centroiding against a single reference frame only
@@ -697,7 +715,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     bug), only one session's reference frame would ever be identified
     against, so the total would be 12 or 18, never the sum of both.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -729,7 +747,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
                 )
             )
 
-    from astrometricslib.pipelines.astrometry import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     # Sky offsets are 190 degrees apart, far beyond the 5 arcsec
     # cross-session match tolerance, so no session A/B star can ever
@@ -765,7 +783,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
 
     target = Target(id="PhotometrySessionSplitTestTarget", frames=frames)
 
-    result = dispatch.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
@@ -776,7 +794,7 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     assert result["starsProcessed"] == expected_independent_total
     assert result["starsFound"] == expected_independent_total
 
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary is not None
     assert len(summary.target_session_ids) == 2
 
@@ -798,7 +816,9 @@ def test_target_analyze_target_photometry_runs_each_session_independently(tmp_pa
     assert sum(1 for star_id in recorded_ids if star_id.startswith("SessB-")) == len(session_b_positions)
 
 
-def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_stars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify use_astrometry_seed=True threads identify_session_stars output.
 
     Bypasses real plate-solving/SIMBAD by monkeypatching
@@ -808,7 +828,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     star carries its real astrometry-derived id) without depending on
     solve-field or a network SIMBAD query.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -832,7 +852,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     # catalog-matched, not position-only, by _drop_unresolved_stars.
     seed_star.is_catalog_identified = True
 
-    from astrometricslib.pipelines.astrometry import session_identification
+    from astrometricslib.pipelines.shared import session_identification
 
     fake_wcs = object()
 
@@ -857,7 +877,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
 
     target = Target(id="PhotometryAstrometrySeedTestTarget", frames=frames)
 
-    result = dispatch.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=True
     )
 
@@ -870,7 +890,7 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert len(matching) == 1
     assert matching[0].name == "Vega"
 
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary is not None
     assert summary.photometry_metrics.astrometry_identified_star_count == 1
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == summary.target_session_ids
@@ -879,7 +899,9 @@ def test_target_analyze_target_photometry_with_astrometry_seed_uses_identified_s
     assert summary.photometry_metrics.unresolved_star_count == 0
 
 
-def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(tmp_path, monkeypatch):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Verify use_astrometry_seed=False's synthetic-id stars aren't recorded.
 
     Without astrometry seeding, every tracked star only ever gets a
@@ -890,7 +912,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     meaningfully merged back into the physical star it came from on a
     later run.
     """
-    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config"))
+    monkeypatch.setenv("ASTROMETRICS_CONFIG_PATH", str(tmp_path / "astrometrics.config.toml"))
     config = AppConfiguration()
     config.update_config({"Image Library": {"path": str(tmp_path)}})
     catalog_access = CatalogAccess(config=config)
@@ -906,7 +928,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
 
     target = Target(id="PhotometryNoSeedTestTarget", frames=frames)
 
-    result = dispatch.analyze_target(
+    result = tasks.analyze_target(
         target, pipeline_type="photometry", catalog_access=catalog_access, use_astrometry_seed=False
     )
 
@@ -914,7 +936,7 @@ def test_target_analyze_target_photometry_without_astrometry_seed_persists_nothi
     assert result["status"] == "completed"
     assert result["starsProcessed"] == 0
     assert result["starsFound"] == 0
-    summary = target.photometry_quality_summary
+    summary = target.quality.photometry
     assert summary.photometry_metrics.astrometry_identified_star_count == 0
     assert summary.photometry_metrics.sessions_with_reused_header_wcs == []
 
@@ -931,12 +953,12 @@ class _FakeLinearWcs:
     `dispatch._stars_to_sky` calls it.
     """
 
-    def __init__(self, ra_offset: float, dec_offset: float, scale_deg_per_px: float = 0.0001):  # ruff: ignore[missing-return-type-special-method]
+    def __init__(self, ra_offset: float, dec_offset: float, scale_deg_per_px: float = 0.0001) -> None:
         self.ra_offset = ra_offset
         self.dec_offset = dec_offset
         self.scale_deg_per_px = scale_deg_per_px
 
-    def wcs_pix2world(self, x_array, y_array, _origin):  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+    def wcs_pix2world(self, x_array, y_array, _origin):  # ruff: ignore[missing-return-type-private-function, missing-type-function-argument]
         ra = self.ra_offset + np.array(x_array) * self.scale_deg_per_px
         dec = self.dec_offset + np.array(y_array) * self.scale_deg_per_px
         return ra, dec
@@ -946,7 +968,7 @@ def _make_matching_test_star(star_id: str, pixel_x: float, pixel_y: float) -> St
     """Build a minimal StellarObject with a pixel position and light curve.
 
     Enough for `_match_and_merge_across_sessions`/
-    `_rescale_and_merge_light_curve` to operate on without needing a
+    `_merge_light_curves` to operate on without needing a
     real VariabilityAnalyzer run.
 
     Returns
@@ -956,14 +978,14 @@ def _make_matching_test_star(star_id: str, pixel_x: float, pixel_y: float) -> St
     """
     from datetime import datetime, timedelta
 
-    from astrometricslib.models.stellar_source import LightCurve
+    from astrometricslib.models.stellar_source import PhotometryResult
 
     t0 = datetime(2026, 1, 1)
     timestamps = [t0 + timedelta(minutes=5 * i) for i in range(5)]
     fluxes = [100.0, 101.0, 99.0, 100.0, 102.0]
     star = StellarObject(id=star_id)
     star.star_data = {"xcentroid": pixel_x, "ycentroid": pixel_y}
-    star.light_curve = LightCurve(
+    star.photometry = PhotometryResult(
         timestamps=timestamps,
         fluxes=fluxes,
         fluxes_normalized=fluxes,
@@ -989,7 +1011,7 @@ def _make_test_session(session_index: int) -> object:
     )
 
 
-def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_merges_matching_stars(mocker: MockerFixture) -> None:
     """Verify a star detected in two sessions merges into one canonical entry.
 
     Session A's star at pixel (10, 10) and session B's star at pixel
@@ -1017,11 +1039,11 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     )
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1046,10 +1068,12 @@ def test_match_and_merge_across_sessions_merges_matching_stars(mocker):  # ruff:
     merged_star = merged_by_id[star_a1.id]
     assert len(merged_star.session_matches) == 1
     assert merged_star.session_matches[0].session_id == session_b.id
-    assert len(merged_star.light_curve.timestamps) == 10  # 5 from each session
+    assert len(merged_star.photometry.timestamps) == 10  # 5 from each session
 
 
-def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solving(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solving(
+    mocker: MockerFixture,
+) -> None:
     """Verify session_wcs_map entry is used as-is.
 
     identify_session_stars (called upstream, per-session, by
@@ -1069,9 +1093,9 @@ def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solv
         ra_offset=100.0 + 10 * 0.0001 - 30 * 0.0001, dec_offset=20.0 + 10 * 0.0001 - 30 * 0.0001
     )
 
-    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.runner._solve_session_wcs")
+    solve_spy = mocker.patch("astrometricslib.pipelines.photometry.batch._solve_session_wcs")
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1092,17 +1116,19 @@ def test_match_and_merge_across_sessions_reuses_pre_resolved_wcs_without_re_solv
     assert len(merged) == 1
 
 
-def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_absent_from_map(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_absent_from_map(
+    mocker: MockerFixture,
+) -> None:
     """A session missing from session_wcs_map still solves the old way."""
     session_a = _make_test_session(0)
     star_a1 = _make_matching_test_star(f"{session_a.id}:Star_1", 10.0, 10.0)
     wcs_a = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0)
 
     solve_spy = mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs", return_value=wcs_a
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs", return_value=wcs_a
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [(SimpleNamespace(stellar_objects=[star_a1]), [])]
@@ -1112,7 +1138,9 @@ def test_match_and_merge_across_sessions_falls_back_to_solving_when_session_abse
     solve_spy.assert_called_once_with(session_a, target)
 
 
-def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous(
+    mocker: MockerFixture,
+) -> None:
     """Verify a canonical star only absorbs its nearest session-star match.
 
     One canonical star (from session A) and two session-B stars both
@@ -1135,11 +1163,11 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
     wcs_b = _FakeLinearWcs(ra_offset=100.0, dec_offset=20.0, scale_deg_per_px=0.0000003)
 
     mocker.patch(
-        "astrometricslib.pipelines.photometry.runner._solve_session_wcs",
+        "astrometricslib.pipelines.photometry.batch._solve_session_wcs",
         side_effect=[wcs_a, wcs_b],
     )
 
-    from astrometricslib.pipelines.photometry.runner import _match_and_merge_across_sessions
+    from astrometricslib.pipelines.photometry.batch import _match_and_merge_across_sessions
 
     target = Target(id="MatchTestTarget")
     per_session_results = [
@@ -1157,59 +1185,58 @@ def test_match_and_merge_across_sessions_avoids_double_assignment_when_ambiguous
 
     merged_star_a1 = next(star for star in merged if star.id == star_a1.id)
     assert len(merged_star_a1.session_matches) == 1
-    assert len(merged_star_a1.light_curve.timestamps) == 10  # merged with star_b1, not star_b2
+    assert len(merged_star_a1.photometry.timestamps) == 10  # merged with star_b1, not star_b2
 
     assert any(star.id == star_b2.id for star in merged)
 
 
-def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def test_solve_session_wcs_failure_does_not_abort_other_sessions(mocker: MockerFixture) -> None:
     """Verify one session's plate-solve failure only excludes that session.
 
-    `PlateSolver.solve()` returns `None` on an ordinary solve failure
-    (no matching field), but a genuinely unexpected exception (a config
-    error, a malformed header, etc.) must also be caught rather than
-    propagating and taking down every other, otherwise-independent
-    session's photometry results too.
+    `AstrometryNetPlateSolveDriver.solve()` returns `None` on an ordinary
+    solve failure (no matching field), but a genuinely unexpected
+    exception (a config error, a malformed header, etc.) must also be
+    caught rather than propagating and taking down every other,
+    otherwise-independent session's photometry results too.
     """
     session_a = _make_test_session(0)
     session_b = _make_test_session(1)
 
-    from astrometricslib.pipelines.photometry.runner import _solve_session_wcs
+    from astrometricslib.pipelines.photometry.batch import _solve_session_wcs
 
     target = Target(id="MatchTestTarget")
 
     mocker.patch(
-        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
+        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         return_value=None,
     )
     result_a = _solve_session_wcs(session_a, target)
     assert result_a is None  # ordinary solve failure -- no exception at all
 
     mocker.patch(
-        "astrometricslib.drivers.plate_solve_interface.PlateSolver.solve",
+        "astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve",
         side_effect=RuntimeError("unexpected local solver failure"),
     )
     result_b = _solve_session_wcs(session_b, target)
     assert result_b is None  # caught, not raised -- the caller stays alive
 
 
-def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify merging rescales each session to a shared baseline first.
+def test_merge_light_curves_keeps_inter_session_level_difference() -> None:
+    """Verify merging keeps each session's own normalized level.
 
-    Two sessions normalized against different local comparison-star
-    ensembles can carry a different absolute flux scale even for a
-    genuinely non-variable star. Naively concatenating them would
-    inject a step-change at the session boundary that reads as
-    variability; rescaling the incoming segment to the canonical
-    segment's own median removes it.
+    Each session is normalized against its own comparison stars, so its
+    level is the between-night comparison of the star. Rescaling the
+    incoming segment to the canonical segment's median would remove a real
+    brightness change between nights. The merge must concatenate both
+    segments unchanged and sort them by time.
     """
     from datetime import datetime, timedelta
 
-    from astrometricslib.models.stellar_source import LightCurve
-    from astrometricslib.pipelines.photometry.runner import _rescale_and_merge_light_curve
+    from astrometricslib.models.stellar_source import PhotometryResult
+    from astrometricslib.pipelines.photometry.batch import _merge_light_curves
 
     t0 = datetime(2026, 1, 1)
-    canonical = LightCurve(
+    canonical = PhotometryResult(
         timestamps=[t0 + timedelta(minutes=i) for i in range(5)],
         fluxes=[100.0] * 5,
         fluxes_normalized=[1.0, 1.01, 0.99, 1.0, 1.02],
@@ -1217,9 +1244,8 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
         airmasses=[1.1] * 5,
         is_saturated=[False] * 5,
     )
-    # A different session, same star, but its own ensemble normalization
-    # scales it to roughly 5x the canonical segment's level.
-    new_segment = LightCurve(
+    # A different session, same star, at about 5x the canonical level.
+    new_segment = PhotometryResult(
         timestamps=[t0 + timedelta(days=10, minutes=i) for i in range(5)],
         fluxes=[500.0] * 5,
         fluxes_normalized=[5.0, 5.05, 4.95, 5.0, 5.1],
@@ -1228,15 +1254,9 @@ def test_rescale_and_merge_light_curve_removes_inter_session_step_change():  # r
         is_saturated=[False] * 5,
     )
 
-    merged = _rescale_and_merge_light_curve(canonical, new_segment)
+    merged = _merge_light_curves(canonical, new_segment)
 
     assert len(merged.timestamps) == 10
     assert merged.timestamps == sorted(merged.timestamps)
-
-    merged_flux_array = np.array(merged.fluxes_normalized)
-    merged_cv = float(np.std(merged_flux_array) / np.mean(merged_flux_array))
-    # Un-rescaled, concatenating a ~1.0-level and ~5.0-level segment
-    # would give a coefficient of variation approaching 0.5-1.0 (a huge,
-    # spurious "variability" signal); after rescaling it should read
-    # close to each segment's own genuine ~1-2% scatter.
-    assert merged_cv < 0.05
+    assert merged.fluxes_normalized == canonical.fluxes_normalized + new_segment.fluxes_normalized
+    assert merged.fluxes_detrended == canonical.fluxes_detrended + new_segment.fluxes_detrended

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>astrometrics</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Astrometrics</name>
+  <summary>Modern astronomical image viewer, analyzer, and observatory control suite</summary>
+  <description>
+    <p>
+      Astrometrics is a high-performance astronomy application designed for telescope control,
+      observatory automation, planetarium celestial tracking, FITS image inspection, and
+      spectroscopy analysis.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Interactive WebGL-powered 60 FPS celestial sky map and star catalog.</li>
+      <li>INDI and Alpaca telescope mount, focuser, and camera control.</li>
+      <li>Sub-pixel star detection, FITS plate-solving, stacking, and photometry.</li>
+      <li>Live multi-monitor observing workspaces with system tray quick telemetry.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">astrometrics.desktop</launchable>
+  <url type="homepage">https://github.com/m1chae2/astrometrics</url>
+  <url type="bugtracker">https://github.com/m1chae2/astrometrics/issues</url>
+  <provides>
+    <mediatype>image/fits</mediatype>
+    <mediatype>application/fits</mediatype>
+    <mediatype>application/x-fits</mediatype>
+  </provides>
+  <categories>
+    <category>Science</category>
+    <category>Astronomy</category>
+    <category>Education</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.2.0" date="2026-09-21">
+      <description>
+        <p>Ubuntu 26.04 Wayland enhancements, AppStream metadata, native XDG thumbnailer, and platform adapter architecture.</p>
+      </description>
+    </release>
+  </releases>
+</component>

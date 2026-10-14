@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for Astrometrics. GNOME Software / Ubuntu App Center read
+  this file (installed to /usr/share/metainfo/) to show a full listing —
+  description, categories, and screenshots — instead of a bare launcher entry.
+  Reference: https://www.freedesktop.org/software/appstream/docs/chap-Metadata.html
+-->
+<component type="desktop-application">
+  <id>astrometrics.desktop</id>
+  <name>Astrometrics</name>
+  <summary>Astrophotography image viewer and analyzer</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      Astrometrics is a desktop application for astrophotography image processing
+      and spectroscopy. It supports FITS image viewing, stacking, astrometry and
+      plate solving, photometry, and observatory control for telescope, focuser,
+      and camera hardware.
+    </p>
+  </description>
+  <launchable type="desktop-id">astrometrics.desktop</launchable>
+  <categories>
+    <category>Science</category>
+    <category>Education</category>
+    <category>Graphics</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <url type="homepage">https://github.com/m1chae2/astrometrics</url>
+  <url type="bugtracker">https://github.com/m1chae2/astrometrics/issues</url>
+  <provides>
+    <mediatype>image/fits</mediatype>
+    <mediatype>application/fits</mediatype>
+    <mediatype>application/x-fits</mediatype>
+  </provides>
+  <releases>
+    <release version="0.2.0" date="2026-09-27" />
+  </releases>
+</component>

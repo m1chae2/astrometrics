@@ -1,13 +1,20 @@
 """Camera and guiding controller for INDI devices."""
 
+from typing import TYPE_CHECKING, Any
+
+from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
+
+if TYPE_CHECKING:
+    from wayfindinglib.drivers.indi_interface import IndiInterface
+
 
 class CameraController:
     """Manages camera exposure and mount pulse-guiding operations via INDI."""
 
-    def __init__(self, client):  # ruff: ignore[missing-type-function-argument, missing-return-type-special-method]
+    def __init__(self, client: IndiInterface) -> None:
         self.client = client
 
-    def pulse_guide(self, telescope, direction: str, duration_ms) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def pulse_guide(self, telescope: PyIndi.BaseDevice, direction: str, duration_ms: float) -> bool:
         """Send a pulse guide command to the telescope/mount.
 
         Parameters
@@ -50,7 +57,9 @@ class CameraController:
         self.client.sendNewNumber(axis)
         return True
 
-    def expose(self, camera_device, exposure_seconds, gain=None) -> bool:  # ruff: ignore[missing-type-function-argument]
+    def expose(
+        self, camera_device: PyIndi.BaseDevice, exposure_seconds: float, gain: float | None = None
+    ) -> bool:
         """Start an exposure on the given camera device.
 
         Optionally sets gain first. Used for both the main imaging camera
@@ -87,21 +96,30 @@ class CameraController:
             return True
         return False
 
-    def get_guide_image(self, guide_camera_device):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-        """Retrieve the last image blob from the guide camera.
+    def get_last_image(self, camera_device: Any) -> bytes | None:
+        """Retrieve the last image frame a camera sent, as raw bytes.
 
         Parameters
         ----------
-        guide_camera_device
-            INDI device handle for the guide camera.
+        camera_device : `PyIndi.BaseDevice` or `None`
+            INDI device handle for the main or the guide camera.
 
         Returns
         -------
-        The CCD1 or CCD2 BLOB property, or None if the device is missing.
+        data : `bytes` or `None`
+            The CCD1 or CCD2 frame's raw data (usually a FITS file in
+            memory), or `None` if the device or frame is missing. Returned
+            as plain `bytes` -- not the INDI BLOB property object itself --
+            so the caller never has to know this came from INDI, and so the
+            value can cross a process boundary (e.g. to the caller running
+            in a different process than this driver).
         """
-        if not guide_camera_device:
+        if not camera_device:
             return None
         # BaseDevice has no getBlobs() (plural) -- BLOB properties are
         # looked up by name like every other property type
         # (getSwitch/getNumber/getText).
-        return guide_camera_device.getBLOB("CCD1") or guide_camera_device.getBLOB("CCD2")
+        blob_vector = camera_device.getBLOB("CCD1") or camera_device.getBLOB("CCD2")
+        if not blob_vector:
+            return None
+        return bytes(blob_vector[0].getblobdata())

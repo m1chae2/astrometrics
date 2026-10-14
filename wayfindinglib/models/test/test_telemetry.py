@@ -1,9 +1,8 @@
 """Purpose: Unit tests for telemetry domain models.
 
 Description: Verifies GuidingSample.total_drift and
-AlignmentAttempt.pointing_error's Euclidean-norm calculations, carried
-forward unchanged from `wayfindinglib.observatorylib.test.test_observatory`
-per `Wayfinding_Library_Architecture.md` §2.4.7, plus basic
+AlignmentAttempt.pointing_error's Euclidean-norm calculations
+(`Wayfinding_Library_Architecture.md`), plus basic
 construction coverage for the previously untested telemetry models.
 """
 
@@ -13,8 +12,8 @@ from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     GuidingSample,
     GuidingStats,
-    GuidingStatus,
     IndiStatus,
+    LiveGuidingStatus,
 )
 
 
@@ -41,14 +40,14 @@ def test_alignment_attempt_pointing_error() -> None:
     assert attempt_without_offsets.pointing_error is None
 
 
-def test_indi_status_defaults_to_unknown():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_indi_status_defaults_to_unknown() -> None:
     """Verify IndiStatus defaults to UNKNOWN when unset."""
     assert IndiStatus().status == "UNKNOWN"
 
 
-def test_guiding_status_defaults():  # ruff: ignore[missing-return-type-undocumented-public-function]
-    """Verify GuidingStatus defaults to not guiding with zeroed stats."""
-    status = GuidingStatus()
+def test_guiding_status_defaults() -> None:
+    """Verify LiveGuidingStatus defaults to not guiding with zeroed stats."""
+    status = LiveGuidingStatus()
     assert status.is_guiding is False
     assert status.stats == GuidingStats()
     assert status.history == []

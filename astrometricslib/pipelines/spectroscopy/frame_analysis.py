@@ -13,8 +13,15 @@ from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import add_frame
 
 
-def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tuple[Any, list[Any]]:
+def analyze_frame_spectroscopy(target: Target, path: str, limit: int | None = None) -> tuple[Any, list[Any]]:
     """Run spectroscopy analysis on a single frame in this target's context.
+
+    Parameters
+    ----------
+    limit : `int`, optional
+        A cap on how many detected stars to extract. `None` (the
+        default) processes every candidate that clears the point-source
+        detector's own 5-sigma threshold; see `SpectroscopyPipeline.process`.
 
     Returns
     -------
@@ -25,12 +32,15 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     if not any(f.path == path for f in target.frames):
         add_frame(target, path)
 
-    from astrometricslib.data_access.catalog_access import CatalogAccess
+    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.astrometry.pipeline import AstrometryPipeline
     from astrometricslib.pipelines.spectroscopy.pipeline import (
         SpectroscopyPipeline,
     )
-    from astrometricslib.utilities.config_loader import get_configuration
+    from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
+        load_atmospheric_conditions,
+    )
 
     config = get_configuration()
     astrometry = AstrometryPipeline(config)
@@ -39,7 +49,16 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
     from astrometricslib.utilities import ConfigLoader
 
     spec_config = ConfigLoader.load_spectroscopy_config(app_config=config)
-    spectroscopy = SpectroscopyPipeline(spec_config)
+    # The observatory site and the air's conditions let the pipeline correct
+    # the wavelengths for atmospheric differential refraction.
+    site = config.get_observatory_site()
+    spectroscopy = SpectroscopyPipeline(
+        spec_config,
+        observatory_site=site,
+        atmospheric_conditions=(
+            load_atmospheric_conditions(config, site.elevation_m) if site is not None else None
+        ),
+    )
     stellar_objects = spectroscopy.process(context, limit=limit)
 
     for obj in stellar_objects:
@@ -57,7 +76,7 @@ def analyze_frame_spectroscopy(target: Target, path: str, limit: int = 10) -> tu
         for target_id in updated.target_ids:
             if target_id not in existing.target_ids:
                 existing.target_ids.append(target_id)
-        existing.spectrum_data_processed = updated.spectrum_data_processed
+        existing.spectroscopy = updated.spectroscopy
         return existing
 
     CatalogAccess(config).merge_and_record("stellar_catalog", stellar_objects, _merge_frame_star)

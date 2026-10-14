@@ -7,52 +7,38 @@
  *
  */
 
-import { useState, useEffect } from 'react';
+import { useBackendFetch } from '../../common/hooks/useBackendFetch';
 import { callBackend } from '../../common/services/backendApi';
 import { ObserverLocation } from '../../common/types/planetariumTypes';
+
+const DEFAULT_LOCATION: ObserverLocation = { latitude: 39.7392, longitude: -104.9903, elevation: 1600.0 };
 
 /**
  * Fetches the observer's geographic location from the backend INDI GPS daemon.
  *
- * Returns null during the initial load. On error, sets a hard-coded Denver fallback
- * to ensure the sky map renders without a valid GPS fix.
+ * Returns the Denver fallback during the initial load and if the fetch fails,
+ * so the sky map always has a location to render with.
  *
  * @func useObserverLocation
- * @returns {{ location: ObserverLocation | null; loading: boolean }}
- *   location — The observer's coordinates, or null before the fetch completes.
+ * @returns {{ location: ObserverLocation; loading: boolean }}
+ *   location — The observer's coordinates, or the Denver fallback before the fetch completes or on failure.
  *   loading — True while the request is in flight.
  */
 export const useObserverLocation = () => {
-  const [location, setLocation] = useState<ObserverLocation | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  useEffect(() => {
-    let active = true;
-    const fetchLocation = async () => {
+  const { data, loading } = useBackendFetch<ObserverLocation>(
+    async (signal) => {
       try {
-        setLoading(true);
-        const data = await callBackend('planetarium:get_observer_location', {});
-        if (active) {
-          setLocation(data);
+        return await callBackend('planetarium:get_observer_location', {}, { signal, silent: true });
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw err;
         }
-      } catch (err) {
         console.error('Failed to get observer location, using default', err);
-        if (active) {
-          // Default: Denver, CO (39.7392°N, 104.9903°W, 1600m ASL)
-          setLocation({ latitude: 39.7392, longitude: -104.9903, elevation: 1600.0 });
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
+        return DEFAULT_LOCATION;
       }
-    };
+    },
+    []
+  );
 
-    fetchLocation();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  return { location, loading };
+  return { location: data ?? DEFAULT_LOCATION, loading };
 };

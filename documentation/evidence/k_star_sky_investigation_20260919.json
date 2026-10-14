@@ -1,0 +1,73 @@
+{
+  "description": "Why K stars were classified as M stars, and how the sky background subtraction stage fixed it (2026-09-19). Frame: M 13 spectral stack (ASI533MM Pro, 405 mm). Stars are HD/BD field stars of magnitude 6.8-9.2 with catalog types.",
+  "finding_1_residuals": {
+    "method": "Corrected star spectrum divided by the best-scaled reference of its catalog type, median per wavelength bin (bands excluded).",
+    "bright_standards_A_stars": "Vega, Alcor-pair star 2, g UMa: within about 6% of 1.00 at every wavelength.",
+    "six_K_stars_as_stored": "0.6-0.8 at 4200-6000 A, about 1.0 at 6000-6800, then 1.4-1.7 at 6960-7700 and about 2.0 at 7720-8000. Same shape in every star (spread 0.14-0.38).",
+    "HD_150679_catalog_A2": "3.3 at 7720-8000, the same kind of red excess."
+  },
+  "finding_2_sky_share_removed_by_the_sky_stage": {
+    "format": "share of the un-subtracted spectrum that was background, by wavelength band 4200-5400 / 5400-6800 / 6800-7400 / 7400-8000",
+    "BD+36 2764 (V 9.16)": [
+      0.67,
+      0.68,
+      0.82,
+      0.91
+    ],
+    "BD+36 2775 (V 8.79)": [
+      0.62,
+      0.49,
+      0.89,
+      0.92
+    ],
+    "HD 150293 (V 8.74)": [
+      1.02,
+      1.01,
+      1.0,
+      1.0
+    ],
+    "HD 150679 (V 7.32)": [
+      0.22,
+      0.32,
+      0.59,
+      0.8
+    ],
+    "HD 150998 (V 6.83)": [
+      0.25,
+      0.17,
+      0.29,
+      0.44
+    ],
+    "HD 151023 (V 8.47)": [
+      0.55,
+      0.54,
+      null,
+      null
+    ],
+    "HD 151086 (V 8.68)": [
+      0.55,
+      0.49,
+      0.92,
+      0.92
+    ],
+    "Vega (for comparison, from the earlier Vega sweep)": "0.6% of the total flux"
+  },
+  "finding_3_types_after_re_extraction_with_sky_subtraction": {
+    "format": "catalog type: stored result -> re-extracted with pooled-median sky subtraction -> with the lower-of-two-bands estimator (score); steps from the catalog type in brackets",
+    "BD+36 2764 K0": "M2V(12) -> K0V 0.084(0) -> K0V 0.07(0)",
+    "BD+36 2775 K5": "M2V(7) -> K3V 0.19(2) -> K4V 0.17(1)",
+    "HD 151086 K2": "M1V(9) -> G8V 0.12(4) -> K0V 0.11(2)",
+    "HD 150998 K2": "M0V(8) -> K5V 0.13(3) -> K5V 0.13(3)",
+    "HD 151023 K0": "K2V 0.105(2) -> K2V 0.053(2) -> K2V 0.05(2)",
+    "HD 150679 A2": "G0V(18) -> A7V 0.081(5) -> A7V 0.08(5)",
+    "HD 150293 K0": "M1V(11) -> Unknown -> M5V 0.76(15): the extraction fails for this star with either estimator (100% of its spectrum is removed as background). Not resolved; probably the trail is not being followed (star at x=85, near the left edge), not a sky-estimator problem."
+  },
+  "estimator_comparison_mean_steps_from_catalog_type_on_the_six_stars_that_extract": {
+    "none": null,
+    "pooled median": 2.67,
+    "lower of the two bands": 2.17,
+    "pooled 25th percentile": 2.17
+  },
+  "decision": "Lower of the two band medians (pooled median failed when a neighbour's trail filled one band). One frame, seven stars: treat as provisional.",
+  "consequence": "The stored spectra of faint stars were extracted before the sky stage existed and are mostly background. They must be re-extracted from the images, not just recomputed. The earlier 7000 A upper-limit effect on K stars was this same background, which is brightest in the red."
+}

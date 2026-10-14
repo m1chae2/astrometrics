@@ -7,12 +7,12 @@ filter from leaving too few frames to stack.
 from astrometricslib.utilities.stack_filter_floor import resolve_filter_wfwhm_with_floor
 
 
-def test_resolve_filter_wfwhm_no_filter_requested():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_filter_wfwhm_no_filter_requested() -> None:
     """Verify no filter requested means no filter, never flagged loosened."""
     assert resolve_filter_wfwhm_with_floor(num_lights=40, requested_filter_wfwhm=None) == (None, False)
 
 
-def test_resolve_filter_wfwhm_stays_at_requested_when_above_floor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_filter_wfwhm_stays_at_requested_when_above_floor() -> None:
     """Verify a large session keeps the requested percentage unchanged."""
     # 40 frames * 80% = 32, comfortably above the default floor of 5.
     effective, loosened = resolve_filter_wfwhm_with_floor(num_lights=40, requested_filter_wfwhm="80%")
@@ -20,7 +20,7 @@ def test_resolve_filter_wfwhm_stays_at_requested_when_above_floor():  # ruff: ig
     assert loosened is False
 
 
-def test_resolve_filter_wfwhm_loosens_one_step_when_below_floor():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_filter_wfwhm_loosens_one_step_when_below_floor() -> None:
     """Verify a small session loosens 80% -> 90% when 80% drops below floor."""
     # 6 frames * 80% = 4.8 -> 5 (rounds to exactly the floor, so
     # let's use 5 frames instead)
@@ -33,7 +33,7 @@ def test_resolve_filter_wfwhm_loosens_one_step_when_below_floor():  # ruff: igno
     assert loosened is True
 
 
-def test_resolve_filter_wfwhm_loosens_exactly_one_step_when_that_suffices():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_filter_wfwhm_loosens_exactly_one_step_when_that_suffices() -> None:
     """Verify loosening stops at the first step that satisfies the floor."""
     # 7 frames * 80% = 5.6 -> 6 (below floor=7... use a case where
     # 80% fails but 90% passes)
@@ -46,7 +46,7 @@ def test_resolve_filter_wfwhm_loosens_exactly_one_step_when_that_suffices():  # 
     assert loosened is True
 
 
-def test_resolve_filter_wfwhm_falls_back_to_unfiltered_when_no_step_suffices():  # ruff: ignore[missing-return-type-undocumented-public-function]
+def test_resolve_filter_wfwhm_falls_back_to_unfiltered_when_no_step_suffices() -> None:
     """Verify escalation to unfiltered when the loosest step is still low."""
     effective, loosened = resolve_filter_wfwhm_with_floor(
         num_lights=3, requested_filter_wfwhm="80%", minimum_surviving_frames=5

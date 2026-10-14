@@ -208,7 +208,7 @@ class NotificationResource:
                 uri=NOTIFICATIONS_URI,
                 name="System Notifications",
                 description="Real-time notifications about background job completions",
-                mimeType="application/json",
+                mime_type="application/json",
             )
         ]
 

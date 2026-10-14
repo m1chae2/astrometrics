@@ -75,11 +75,11 @@ dependencies = [
 # The MCP SDK, needed only by the MCP servers in mcp_servers/. The libraries
 # and the backend import without it. build/linux/setup_venv.sh installs it.
 mcp = [
-    "mcp>=1.28.0,<2.0.0", # mcp_servers/common/tool_registry.py reads Tool.inputSchema (camelCase); 1.x only, 2.0 renamed it to input_schema
+    "mcp>=2.3.0,<3.0.0", # 2.x API: snake_case fields (Tool.input_schema) and on_* handlers passed to Server() in mcp_servers/common/server.py
 ]
 dev = [
     "flake8>=7.0.0",
-    "ruff>=0.16.0",
+    "ruff>=0.17.0",
     "safety>=3.0.0",
     "pyinstaller",
     # Type checker configured by pyrefly.toml. Previously that config was

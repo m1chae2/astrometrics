@@ -117,7 +117,9 @@ async def test_a_background_job_method_records_its_own_job(
 
     isolated_registry = ToolRegistry()
     register_reflected_tools(isolated_registry, FakeApi(), {"": "fake"})
-    schema = next(t for t in isolated_registry.get_tool_definitions() if t.name == "fake_do_work").inputSchema
+    schema = next(
+        t for t in isolated_registry.get_tool_definitions() if t.name == "fake_do_work"
+    ).input_schema
 
     result = await isolated_registry.execute("fake_do_work", {"target": "Vega"})
 

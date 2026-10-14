@@ -2,7 +2,7 @@
 
 This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries and the backend know nothing about MCP. The front end's server (`astrometrics-ui`) is written in TypeScript and lives in `ui/mcp/`.
 
-The servers need the MCP SDK, the `mcp` package. It is an optional extra in `pyproject.toml`, so the libraries and the backend install and run without it. `build/linux/setup_venv.sh` installs the project with the extra (`pip install -e ".[mcp]"`). Run the servers' tests with `build/linux/run_tests.sh mcp_servers`.
+The servers need version 2 of the MCP SDK, the `mcp` package. It is an optional extra in `pyproject.toml`, so the libraries and the backend install and run without it. `build/linux/setup_venv.sh` installs the project with the extra (`pip install -e ".[mcp]"`). Run the servers' tests with `build/linux/run_tests.sh mcp_servers`.
 
 ## What each folder is for
 
@@ -11,7 +11,7 @@ The servers need the MCP SDK, the `mcp` package. It is an optional extra in `pyp
   - `tool_registry.py` — holds a server's tools and sends an incoming tool call to the right method. Every Python server with a registry uses this one class. Two options cover the differences: `sandbox_paths` refuses path arguments outside the library folders (the library servers turn it on), and `remediation` adds a recovery hint to a failed call's error (the backend server uses it).
   - `profile.py` — the rules for which tools a client may use. A profile limits tools by class and disposition. See "Which tools the server offers" below. It is the only definition of the rules: `build/mcp/generate_client_configs.py` copies its constants into `ui/mcp/src/profileRules.ts` for the TypeScript server, and a test fails when that file is out of date.
   - `tool_errors.py` — turns an error raised by a tool into a reply the client can read.
-  - `server.py` — the loop that serves one client over standard input and output. Every Python server's `__main__.py` builds its tools and calls `run_server`. It imports only the MCP package, so the gap server can use it.
+  - `server.py` — the loop that serves one client over standard input and output. Every Python server's `__main__.py` builds its tools and calls `run_server`. Before it runs a tool, the loop checks the call's arguments against the tool's JSON Schema (the description of the arguments a tool accepts) and refuses a call that does not match. It also turns a tool that raises an exception into an error result the client can read. Version 2 of the MCP SDK leaves both jobs to the server. The loop imports only the MCP package and `jsonschema`, which the MCP package itself needs, so the gap server can use it.
 - `astrometrics_core/` — the `astrometricslib-core` server. Run it with `python -m mcp_servers.astrometrics_core`. `definition.py` builds its registry from `Astrometrics`, and `tool_manifest.json` is the reviewed list of its tools with a class, category and disposition for each.
 - `wayfinding_core/` — the `wayfindinglib-core` server, built from `Wayfinder` in the same way. Run it with `python -m mcp_servers.wayfinding_core`. Its own README describes its tools.
 - `backend/` — the `astrometrics-backend` server. Run it with `python -m mcp_servers.backend`. Its tools reach the running backend over HTTP. See its README.

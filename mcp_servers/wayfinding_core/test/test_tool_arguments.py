@@ -15,10 +15,10 @@ pytestmark = pytest.mark.anyio
 
 def test_server_only_parameters_are_hidden_from_registered_tool_schemas(registry: ToolRegistry) -> None:
     """Clients are not asked for `register_job`; the server decides it."""
-    schema = registry.tools["planning_deep_catalog_status"]["tool_def"].inputSchema
+    schema = registry.tools["planning_deep_catalog_status"]["tool_def"].input_schema
     assert "register_job" not in schema["properties"]
     assert "include" in schema["properties"]
-    advisory = registry.tools["planning_get_advisory"]["tool_def"].inputSchema
+    advisory = registry.tools["planning_get_advisory"]["tool_def"].input_schema
     assert advisory["required"] == ["kind"]
 
 

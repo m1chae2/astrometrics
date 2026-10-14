@@ -25,12 +25,13 @@ Three properties are architectural rather than incidental
 from datetime import datetime
 
 from astrometricslib import ConfigurationError
-from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRule, SafetyRuleSet, SafetyVerdict
-
-# Readings are measurement name -> (value, observed_at); a measurement
-# absent from this mapping is indistinguishable from an unparseable one --
-# both simply have no entry, and both yield UNKNOWN for any rule naming them.
-SensorReadings = dict[str, tuple[float, datetime]]
+from wayfindinglib.models.policy.safety import (
+    SafetyAssessment,
+    SafetyRule,
+    SafetyRuleSet,
+    SafetyVerdict,
+    SensorReadings,
+)
 
 _NON_UNKNOWN_SEVERITY = {
     SafetyVerdict.SAFE: 0,

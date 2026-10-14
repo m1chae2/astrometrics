@@ -3,5 +3,5 @@
 Description: What to shoot -- reusable observation packages, mosaic
 panel generation, target quality advisories, and planning
 configuration. Foundation-layer pure Pydantic schema, no behavior, per
-`Wayfinding_Library_Architecture.md` Table 1.
+`Wayfinding_Library_Architecture.md` Figure 1.
 """

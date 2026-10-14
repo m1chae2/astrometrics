@@ -334,6 +334,9 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 [tool.importlinter]
 root_packages = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers"]
 include_external_packages = false
+# Imports used only for type hints (inside `if TYPE_CHECKING:`) are not
+# counted: they never run, so they create no dependency when the code runs.
+exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
 name = "astrometricslib never imports wayfindinglib or backend"
@@ -457,3 +460,149 @@ forbidden_modules = [
     "backend.services.infrastructure.system_status_service",
     "backend.services.infrastructure.thread_management"
 ]
+
+# --- wayfindinglib's own layers (issue #79) ---------------------------------
+# Wayfinding_Library_Architecture.md, Figure 1: Foundation depends on nothing
+# above it; Control and Planning are peers that never import each other;
+# nothing but the composition root imports Execution; Planning is
+# hardware-free. The layer map:
+#   Foundation  models, astronomy, data_access, analytics, drivers.butler,
+#               drivers.control_record_store, drivers.catalog
+#   Control     tasks.control_tasks, session_analysis, watchdog, api.control,
+#               and the hardware drivers (drivers.indi, drivers.indi_interface,
+#               drivers.interfaces, drivers.phd2, drivers.simulators,
+#               drivers.ekos, drivers.stellarmate_interface)
+#   Planning    tasks.planning_tasks, api.planning
+#   Execution   tasks.execution_tasks, api.execution
+#   Root        wayfindinglib (package __init__), wayfindinglib.api (__init__)
+# Every folder named here must be a regular package (have an __init__.py);
+# import-linter cannot see namespace folders.
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib Foundation imports nothing above it"
+type = "forbidden"
+source_modules = [
+    "wayfindinglib.models",
+    "wayfindinglib.astronomy",
+    "wayfindinglib.data_access",
+    "wayfindinglib.analytics",
+    "wayfindinglib.drivers.butler",
+    "wayfindinglib.drivers.control_record_store",
+    "wayfindinglib.drivers.catalog",
+]
+forbidden_modules = [
+    # Control
+    "wayfindinglib.tasks.control_tasks",
+    "wayfindinglib.session_analysis",
+    "wayfindinglib.watchdog",
+    "wayfindinglib.api.control",
+    # The hardware drivers (Control)
+    "wayfindinglib.drivers.indi",
+    "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.interfaces",
+    "wayfindinglib.drivers.phd2",
+    "wayfindinglib.drivers.simulators",
+    "wayfindinglib.drivers.ekos",
+    "wayfindinglib.drivers.stellarmate_interface",
+    # Planning
+    "wayfindinglib.tasks.planning_tasks",
+    "wayfindinglib.api.planning",
+    # Execution
+    "wayfindinglib.tasks.execution_tasks",
+    "wayfindinglib.api.execution",
+    # The facade (`wayfindinglib.api` and everything in it) and the scripts
+    "wayfindinglib.api",
+    "wayfindinglib.scripts",
+]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib Control never imports Planning"
+type = "forbidden"
+source_modules = [
+    "wayfindinglib.tasks.control_tasks",
+    "wayfindinglib.session_analysis",
+    "wayfindinglib.watchdog",
+    "wayfindinglib.api.control",
+    "wayfindinglib.drivers.indi",
+    "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.interfaces",
+    "wayfindinglib.drivers.phd2",
+    "wayfindinglib.drivers.simulators",
+    "wayfindinglib.drivers.ekos",
+    "wayfindinglib.drivers.stellarmate_interface",
+]
+forbidden_modules = [
+    "wayfindinglib.tasks.planning_tasks",
+    "wayfindinglib.api.planning",
+]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib Planning never imports Control"
+type = "forbidden"
+source_modules = [
+    "wayfindinglib.tasks.planning_tasks",
+    "wayfindinglib.api.planning",
+]
+forbidden_modules = [
+    "wayfindinglib.tasks.control_tasks",
+    "wayfindinglib.session_analysis",
+    "wayfindinglib.watchdog",
+    "wayfindinglib.api.control",
+]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib Planning is hardware-free, even indirectly"
+type = "forbidden"
+source_modules = [
+    "wayfindinglib.tasks.planning_tasks",
+    "wayfindinglib.api.planning",
+]
+forbidden_modules = [
+    "wayfindinglib.drivers.indi",
+    "wayfindinglib.drivers.indi_interface",
+    "wayfindinglib.drivers.interfaces",
+    "wayfindinglib.drivers.phd2",
+    "wayfindinglib.drivers.simulators",
+    "wayfindinglib.drivers.ekos",
+    "wayfindinglib.drivers.stellarmate_interface",
+]
+# Indirect imports are counted (the default): a chain such as
+# Planning -> Foundation reader -> driver registry is a violation too.
+allow_indirect_imports = false
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib Execution is imported only by the composition root"
+type = "protected"
+# `as_packages = false` so that `wayfindinglib` and `wayfindinglib.api` in
+# `allowed_importers` mean only those two package `__init__` modules, not
+# every module below them. The `**` wildcards then name each Execution
+# module, so the Execution modules may import one another.
+as_packages = false
+protected_modules = [
+    "wayfindinglib.tasks.execution_tasks",
+    "wayfindinglib.tasks.execution_tasks.**",
+    "wayfindinglib.api.execution",
+]
+allowed_importers = [
+    "wayfindinglib",
+    "wayfindinglib.api",
+    "wayfindinglib.tasks.execution_tasks",
+    "wayfindinglib.tasks.execution_tasks.**",
+    "wayfindinglib.api.execution",
+]
+
+[[tool.importlinter.contracts]]
+name = "wayfindinglib models are plain schemas that import no Foundation behavior"
+type = "forbidden"
+# Models sit at the bottom of the Foundation. Calculations on them live in
+# `analytics`, which imports the models; a model that called back into
+# `analytics` (or a reader or a store) would form an import cycle.
+source_modules = ["wayfindinglib.models"]
+forbidden_modules = [
+    "wayfindinglib.analytics",
+    "wayfindinglib.data_access",
+    "wayfindinglib.drivers.butler",
+    "wayfindinglib.drivers.control_record_store",
+    "wayfindinglib.drivers.catalog",
+]
+

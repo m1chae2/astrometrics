@@ -1,15 +1,12 @@
 """Purpose: Unit tests for the ObservationExecution astrometrics.
 
 Description: Verifies each method delegates to its underlying task
-function with the interface's own storage layer where relevant,
-and that this module's own source carries no direct INDI hardware import
--- a static source-text scan mirroring
-`test_planning.py::test_planning_module_tree_imports_no_device_driver`,
-since a runtime `sys.modules` check would be polluted by this
-package's own pre-existing `phd2_guiding_service -> observatory
--> drivers.indi.hardware_lock` import chain (a lightweight file-lock
-utility, not real hardware driver code, and out of this module's
-scope to change).
+function with the interface's own storage layer where relevant, and that
+`api/execution.py` itself names no INDI module or `PyIndi`. That last
+check is a scan of the source text, not of `sys.modules`: Execution may
+use Control, and Control loads the INDI drivers, so a runtime check would
+find them through Control. The rule tested is narrower: Execution reaches
+hardware only through Control, never by importing a driver itself.
 """
 
 import pathlib

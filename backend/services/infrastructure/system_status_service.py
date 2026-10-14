@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wayfindinglib import AlignmentTargetSession
-from wayfindinglib.models.session.telemetry import IndiStatus, PolarAlignmentStatus
+from wayfindinglib import AlignmentTargetSession, PolarAlignmentStatus
 
 if TYPE_CHECKING:
     from backend.services.infrastructure.astrometrics_service import AstrometricsService
@@ -165,6 +164,17 @@ class SystemStatusService:
                     resources["vram_status"] = self._cached_vram
 
         return resources
+
+
+class IndiStatus(BaseModel):
+    """Status of the connected INDI hardware driver layer.
+
+    Only the system health report uses it, so it lives here rather than in
+    wayfindinglib.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    status: str = Field(default="UNKNOWN", alias="status")
 
 
 class SystemHealth(BaseModel):

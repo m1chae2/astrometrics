@@ -1,6 +1,6 @@
 # Wayfinding Library: Architecture and Design
 
-*Version 2.13 · 2026-10-08 · Status: current*
+*Version 2.14 · 2026-10-14 · Status: current*
 
 ## Overview
 
@@ -707,7 +707,15 @@ Table 9 maps `wayfindinglib`'s headless Python API functions onto the desktop GU
 
 Verification follows the posture established for this library's recording-only predecessor: real transport and real persistence over mocks wherever practical, supplemented by a hardware simulator for end-to-end coverage.
 
-**Library-wide structural checks.** Five checks apply across the whole library: a **layering conformance test** asserting Foundation independence, Control/Planning peerage, and Execution's downward-only dependency by inspecting the import graph; an **execution-is-optional test** exercising Control and Planning with the Execution package absent; a **safety-without-execution test** exercising the safety monitor, enclosure interlock, and safe-state sequence with the Execution package absent, since safety that requires a session is not safety; a **planning-is-hardware-free test** running the full placement suite with the driver layer absent; and a **cross-library dependency test** asserting that the science library's core imports nothing from this library.
+**Library-wide structural checks.** Five checks apply across the whole library. They take two forms. A *static* check reads the import graph of the source code without running it; it sees every import, including ones made only on a rarely used path. A *runtime* check starts a fresh interpreter, runs the code, and lists the modules it loaded; it needs a fresh interpreter because the test run as a whole loads every layer on purpose. Imports made only for type checking are ignored by both, since they never run.
+
+* **Layering conformance** (static). Import-graph contracts in the project's lint configuration assert Foundation independence, Control/Planning peerage, and Execution's downward-only dependency. Within the Foundation, they also assert that the domain models import no calculation, reader, or store, so the models stay plain schemas.
+* **Execution is optional** (static and runtime). A contract allows only the composition root (the entry point that builds all three functions together) to import Execution. A runtime test in the library's own test suite builds Control and Planning, uses both, and asserts that no Execution module was loaded.
+* **Safety runs without Execution** (runtime). A test in the same place runs the safety monitor, the enclosure interlock, and the full safe-state sequence as the watchdog triggers it, and asserts that no Execution module was loaded, since safety that requires a session is not safety.
+* **Planning is hardware-free** (static and runtime). A contract forbids Planning from reaching any hardware driver, counting indirect chains through the Foundation as violations. A runtime test with the Planning tests imports Planning, reads the equipment catalog, and builds a session for the active rig, then asserts that no hardware-driver or Control module was loaded.
+* **Cross-library dependency** (static). A contract asserts that the science library imports nothing from this library.
+
+`Wayfinding_Library_Implementation.md` names the files that hold each check.
 
 **Delegation promotion gates.** Each phase of the architecture paper's Table 1 is entered only when the prior phase's gate is met. Table 7 states each. Every threshold is an unvalidated design estimate chosen to be conservative rather than derived from prior data — there is no body of historical divergence measurements to derive one from, the same disclosure posture Appendix A applies to configuration defaults. Thresholds are expected to be revised once Phase 2 produces the first real distribution of divergence magnitudes.
 

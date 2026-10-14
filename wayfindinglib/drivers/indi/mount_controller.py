@@ -317,8 +317,7 @@ class MountController:
         observation_time = Time.now()
         location = EarthLocation(lat=latitude * u.deg, lon=longitude * u.deg, height=elevation * u.m)
 
-        from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs
-        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
+        from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, current_epoch_to_icrs
 
         # ra is in hours and in the current-epoch frame (INDI convention);
         # compute_altaz takes ICRS degrees.

@@ -134,7 +134,7 @@ class ExecutionService:
         record : `dict`
             The divergence record, serialized for transport.
         """
-        from wayfindinglib.models.policy.delegation import ObservatoryCapability
+        from wayfindinglib import ObservatoryCapability
 
         record = self.wayfinder.execution.record_divergence(
             record_id,

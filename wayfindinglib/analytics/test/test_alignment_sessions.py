@@ -1,20 +1,18 @@
 """Purpose: Tests for grouping plate-solve attempts into target sessions.
 
-Description: `AlignmentTargetSession.from_attempts` (built on
-`group_alignment_attempts`) replaced the planetarium's own grouping code.
-These tests carry over that code's checks: jitter is the scatter around
-the settled offset, not the offset itself; runs split at long gaps; a
-single sync has no jitter; right ascension stays in degrees. They also
-check what the move fixed or added: the average right ascension wraps at
-0h/24h, unnamed solves group across 0h, and drift rates and the pooled
-night jitter.
+Description: Checks `group_alignment_attempts`, which the package root
+exports. Jitter is the scatter around the settled offset, not the offset
+itself; runs split at long gaps; a single sync has no jitter; right
+ascension stays in degrees; the average right ascension wraps at 0h/24h;
+unnamed solves group across 0h; and the drift rates and the pooled night
+jitter come out right.
 """
 
 import math
 
 import pytest
 
-from wayfindinglib import AlignmentAttempt, AlignmentTargetSession
+from wayfindinglib import AlignmentAttempt, group_alignment_attempts
 from wayfindinglib.analytics.alignment_sessions import mean_position_deg, pooled_jitter_arcsec
 
 
@@ -67,7 +65,7 @@ def test_jitter_is_scatter_around_the_settled_offset() -> None:
         _solve("Vega", 279.2, 38.8, dra, ddec, 1000 + 10 * i) for i, (dra, ddec) in enumerate(offsets)
     ]
 
-    (session,) = AlignmentTargetSession.from_attempts(attempts)
+    (session,) = group_alignment_attempts(attempts)
 
     assert session.target_name == "Vega"
     assert session.frame_count == 5
@@ -85,7 +83,7 @@ def test_runs_split_at_long_gaps_and_their_times_add() -> None:
         _solve("M 27", 300.0, 22.7, dra, ddec, 100000 + 30 * i) for i, (dra, ddec) in enumerate(night2)
     ]
 
-    (session,) = AlignmentTargetSession.from_attempts(attempts)
+    (session,) = group_alignment_attempts(attempts)
 
     assert session.frame_count == 6
     assert session.elapsed_seconds == pytest.approx(120.0)
@@ -94,7 +92,7 @@ def test_runs_split_at_long_gaps_and_their_times_add() -> None:
 
 def test_a_single_sync_has_no_jitter() -> None:
     """One solve keeps its pointing error and has zero jitter."""
-    (session,) = AlignmentTargetSession.from_attempts([_solve("Sync #1", 150.0, 60.0, 14.2, -8.1, 500)])
+    (session,) = group_alignment_attempts([_solve("Sync #1", 150.0, 60.0, 14.2, -8.1, 500)])
 
     assert session.frame_count == 1
     assert session.rms_total_arcsec == pytest.approx(0.0)
@@ -109,7 +107,7 @@ def test_right_ascension_stays_in_degrees() -> None:
         _solve("Schedar", 10.127, 56.537, 0.1, 0.2, 200),
     ]
 
-    navi, schedar = AlignmentTargetSession.from_attempts(attempts)
+    navi, schedar = group_alignment_attempts(attempts)
 
     assert navi.mean_ra_deg == pytest.approx(14.177)
     assert schedar.mean_ra_deg == pytest.approx(10.127)
@@ -120,7 +118,7 @@ def test_unnamed_solves_group_across_zero_hours() -> None:
     """Unnamed solves at 359.9 and 0.1 degrees are one target near 0h."""
     attempts = [_solve(None, 359.9, 30.0, 1.0, 1.0, 10), _solve(None, 0.1, 30.0, 1.2, 0.9, 20)]
 
-    (session,) = AlignmentTargetSession.from_attempts(attempts)
+    (session,) = group_alignment_attempts(attempts)
 
     assert session.frame_count == 2
     assert session.target_name == "Target Session #1"
@@ -131,7 +129,7 @@ def test_drift_rate_is_the_slope_of_the_offsets() -> None:
     """Offsets growing by 2 arcseconds a minute in RA give that drift rate."""
     attempts = [_solve("M 13", 250.4, 36.5, 2.0 * i, -1.0 * i, 60.0 * i) for i in range(5)]
 
-    (session,) = AlignmentTargetSession.from_attempts(attempts)
+    (session,) = group_alignment_attempts(attempts)
 
     assert session.drift_ra_arcsec_per_min == pytest.approx(2.0)
     assert session.drift_dec_arcsec_per_min == pytest.approx(-1.0)
@@ -143,15 +141,15 @@ def test_repeats_and_positionless_solves_are_dropped() -> None:
     solve = _solve("M 31", 10.7, 41.3, 1.0, 1.0, 50)
     blank = AlignmentAttempt(status="solving")
 
-    (session,) = AlignmentTargetSession.from_attempts([solve, solve, blank])
+    (session,) = group_alignment_attempts([solve, solve, blank])
 
     assert session.frame_count == 1
-    assert AlignmentTargetSession.from_attempts([blank]) == []
+    assert group_alignment_attempts([blank]) == []
 
 
 def test_pooled_jitter_weights_targets_by_solve_count() -> None:
     """Single-solve targets are ignored; others weigh by solve count."""
-    sessions = AlignmentTargetSession.from_attempts([
+    sessions = group_alignment_attempts([
         _solve("A", 10.0, 10.0, 0.0, 0.0, 1),
         _solve("A", 10.0, 10.0, 2.0, 0.0, 2),
         _solve("B", 50.0, 10.0, 5.0, 5.0, 3),

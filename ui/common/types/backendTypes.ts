@@ -37,7 +37,7 @@ export enum ImageType {
 /**
  * The kind of sky object a target is, read from its name.
  *
- * See `astrometricslib.pipelines.shared.target_classification` for the
+ * See `astrometricslib.utilities.target_classification` for the
  * rules. `STAR` is every name that fits no other kind.
  */
 export enum TargetObjectType {
@@ -1049,6 +1049,9 @@ export interface AlignmentTrackPoint {
  * run's own average offset, so a deliberate framing offset is not counted
  * as tracking error. Drift is the slope of a straight-line fit of the
  * offsets against time.
+ *
+ * `wayfindinglib.group_alignment_attempts` builds these from a list of
+ * `AlignmentAttempt` records.
  */
 export interface AlignmentTargetSession {
   id: string;
@@ -1398,6 +1401,9 @@ export interface FitsHeaderEntry {
 
 /**
  * Status of the connected INDI hardware driver layer.
+ *
+ * Only the system health report uses it, so it lives here rather than in
+ * wayfindinglib.
  */
 export interface IndiStatus {
   status?: string;

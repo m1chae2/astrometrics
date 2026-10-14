@@ -157,6 +157,9 @@ class AlignmentTargetSession(BaseModel):
     run's own average offset, so a deliberate framing offset is not counted
     as tracking error. Drift is the slope of a straight-line fit of the
     offsets against time.
+
+    `wayfindinglib.group_alignment_attempts` builds these from a list of
+    `AlignmentAttempt` records.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -184,32 +187,6 @@ class AlignmentTargetSession(BaseModel):
     )
     time_series: list[AlignmentTrackPoint] = Field(default_factory=list, alias="timeSeries")
     attempts: list[AlignmentAttempt] = Field(default_factory=list, alias="attempts")
-
-    @classmethod
-    def from_attempts(cls, attempts: list[AlignmentAttempt]) -> list[AlignmentTargetSession]:
-        """Group plate solves into one session per target.
-
-        Parameters
-        ----------
-        attempts : `list` [`AlignmentAttempt`]
-            Solves in any order. Ones without a position are skipped, and
-            repeats of the same time and target are counted once.
-
-        Returns
-        -------
-        sessions : `list` [`AlignmentTargetSession`]
-            One per target, in the order the targets were first solved.
-        """
-        from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
-
-        return group_alignment_attempts(attempts)
-
-
-class IndiStatus(BaseModel):
-    """Status of the connected INDI hardware driver layer."""
-
-    model_config = ConfigDict(populate_by_name=True)
-    status: str = Field(default="UNKNOWN", alias="status")
 
 
 class GuidingStats(BaseModel):

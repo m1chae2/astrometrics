@@ -2,7 +2,9 @@
 
 Confirms each ABC enforces its full abstract method set (mirrors
 `wayfindinglib/drivers/catalog/test/`'s approach for `CatalogDriver`)
-and that the INDI adapters conform to their respective ABCs.
+and that the INDI adapters conform to their respective ABCs. Also checks
+that the protocol names the equipment catalog reader accepts are exactly
+the keys of the driver registries.
 """
 
 from datetime import datetime
@@ -354,3 +356,32 @@ async def test_indi_weather_driver_delegates_to_session_weather_method() -> None
 
     driver = IndiWeatherDriver(session=_FakeSession())
     assert await driver.get_readings() == fixed_reading
+
+
+@pytest.mark.parametrize(
+    ("build_registry_name", "protocols_name"),
+    [
+        ("build_mount_driver_registry", "MOUNT_PROTOCOLS"),
+        ("build_camera_driver_registry", "CAMERA_PROTOCOLS"),
+        ("build_focuser_driver_registry", "FOCUSER_PROTOCOLS"),
+        ("build_filter_wheel_driver_registry", "FILTER_WHEEL_PROTOCOLS"),
+        ("build_enclosure_driver_registry", "ENCLOSURE_PROTOCOLS"),
+        ("build_switch_driver_registry", "SWITCH_PROTOCOLS"),
+        ("build_weather_driver_registry", "WEATHER_PROTOCOLS"),
+        ("build_guiding_driver_registry", "GUIDING_PROTOCOLS"),
+        ("build_remote_transfer_driver_registry", "REMOTE_TRANSFER_DRIVERS"),
+    ],
+)
+def test_protocol_names_match_the_driver_registry_keys(build_registry_name: str, protocols_name: str) -> None:
+    """Verify each Foundation protocol-name set equals its registry's keys.
+
+    The equipment catalog reader checks configured names against
+    `driver_protocols` so it never loads a driver. This test is what keeps
+    that check honest: a protocol added to a registry but not to the name
+    set, or the reverse, fails here.
+    """
+    from wayfindinglib.drivers.interfaces import registry
+    from wayfindinglib.models.equipment_and_site import driver_protocols
+
+    registry_keys = set(getattr(registry, build_registry_name)())
+    assert registry_keys == getattr(driver_protocols, protocols_name)

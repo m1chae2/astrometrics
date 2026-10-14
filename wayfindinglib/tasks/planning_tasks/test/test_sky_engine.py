@@ -11,13 +11,12 @@ from unittest.mock import MagicMock, patch
 
 import astropy.units as u
 import pytest
-from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from astrometricslib import StellarObject, Target
+from wayfindinglib.astronomy.coordinate_transforms import compute_altaz
 from wayfindinglib.data_access.site_profile_reader import configured_observer_location
 from wayfindinglib.tasks.planning_tasks.catalog_operations import astrometrics_catalog
-from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
 from wayfindinglib.tasks.planning_tasks.resolution_operations import get_library_star_summaries, get_sources
 from wayfindinglib.tasks.planning_tasks.sky_engine import SkyEngine
 from wayfindinglib.tasks.planning_tasks.visibility_operations import hour_angle_from_lst, rise_set_transit
@@ -184,27 +183,6 @@ def test_get_library_star_summaries_reads_the_region_summaries_from_astrometrics
     fake_sky._astrometrics.stars.query.assert_called_once_with(
         ra_deg=250.17, dec_deg=36.46, radius_deg=2.0, magnitude_min=None, magnitude_max=None, limit=None
     )
-
-
-def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:
-    """Locks compute_altaz's output to a recorded INDI driver baseline.
-
-    Regression test locking compute_altaz's output to values recorded
-    from the original inline SkyCoord/AltAz transform in
-    indi_interface.py and mount_controller.py before they were
-    consolidated onto this shared function. These two call sites feed
-    live telemetry display and the slew-safety altitude gate, so a
-    units/sign regression here must be caught.
-    """
-    location = EarthLocation(lat=39.7392 * u.deg, lon=-104.9903 * u.deg, height=1600.0 * u.m)
-    obstime = Time("2026-07-05T12:00:00")
-
-    # ra_hours=10.5 -> 157.5 deg, matching the driver's own
-    # hours->degrees conversion.
-    alt, az = compute_altaz(10.5 * 15.0, 45.0, location, obstime)
-
-    assert alt == pytest.approx(-3.38825174036355, abs=1e-5)
-    assert az == pytest.approx(14.476154024250459, abs=1e-5)
 
 
 def test_meridian_status_and_flips() -> None:

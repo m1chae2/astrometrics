@@ -15,11 +15,10 @@ from datetime import datetime
 from wayfindinglib.api.control.context import ControlChild
 from wayfindinglib.models.control_status import SafetyStatus
 from wayfindinglib.models.policy.delegation import DelegationPolicy, DelegationState, ObservatoryCapability
-from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRuleSet
+from wayfindinglib.models.policy.safety import SafetyAssessment, SafetyRuleSet, SensorReadings
 from wayfindinglib.models.session.safe_state import SafeStateOutcome
 from wayfindinglib.tasks.control_tasks.capability_promotion import BulkDelegationOutcome
 from wayfindinglib.tasks.control_tasks.safe_state import SafeStateSteps
-from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
 
 __all__ = ["SafetyControl"]
 

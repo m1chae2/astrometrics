@@ -1,11 +1,13 @@
 """Purpose: Unit tests for coordinate transform primitives.
 
-Description: Verifies compute_altaz against a known zenith case and
-hour_angle_deg's wraparound normalization, using real Astropy
-computation rather than mocks.
+Description: Verifies compute_altaz against a known zenith case and a
+recorded INDI driver baseline, and hour_angle_deg's wraparound
+normalization, using real Astropy computation rather than mocks.
 """
 
+import astropy.units as u
 import pytest
+from astropy.coordinates import EarthLocation
 from astropy.time import Time
 
 from wayfindinglib.astronomy.coordinate_transforms import (
@@ -52,3 +54,23 @@ def test_hour_angle_normalizes_to_plus_minus_180() -> None:
     for ra_deg in (0.0, 90.0, 180.0, 270.0, 359.0):
         ha = hour_angle_deg(ra_deg, location, obstime)
         assert -180.0 <= ha < 180.0
+
+
+def test_compute_altaz_matches_recorded_indi_driver_baseline() -> None:
+    """Lock compute_altaz's output to a recorded INDI driver baseline.
+
+    The expected values were recorded from the SkyCoord/AltAz transform
+    the INDI drivers use. Two driver call sites (`indi_interface.py` and
+    `drivers/indi/mount_controller.py`) feed the live altitude display and
+    the slew-safety altitude gate through this function, so a unit or
+    sign error here must fail a test.
+    """
+    location = EarthLocation(lat=39.7392 * u.deg, lon=-104.9903 * u.deg, height=1600.0 * u.m)
+    obstime = Time("2026-07-05T12:00:00")
+
+    # ra_hours=10.5 -> 157.5 deg, matching the driver's own
+    # hours->degrees conversion.
+    alt, az = compute_altaz(10.5 * 15.0, 45.0, location, obstime)
+
+    assert alt == pytest.approx(-3.38825174036355, abs=1e-5)
+    assert az == pytest.approx(14.476154024250459, abs=1e-5)

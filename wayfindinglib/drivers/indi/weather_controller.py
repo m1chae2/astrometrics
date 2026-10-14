@@ -12,7 +12,7 @@ vector actually publishes, in the `SensorReadings` shape
 from datetime import UTC, datetime
 
 from wayfindinglib.drivers.indi.pyindi_compatibility import PyIndi
-from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
+from wayfindinglib.models.policy.safety import SensorReadings
 
 _WEATHER_PARAMETERS_PROPERTY = "WEATHER_PARAMETERS"
 

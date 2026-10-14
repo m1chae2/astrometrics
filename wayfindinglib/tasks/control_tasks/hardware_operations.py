@@ -47,8 +47,7 @@ if TYPE_CHECKING:
     from astrometricslib import Target
     from wayfindinglib.api.control.context import ControlContext
     from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
-    from wayfindinglib.models.policy.safety import SafetyAssessment
-    from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
+    from wayfindinglib.models.policy.safety import SafetyAssessment, SensorReadings
 
 logger = logging.getLogger(__name__)
 

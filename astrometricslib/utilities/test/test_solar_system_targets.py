@@ -7,7 +7,7 @@ name, so these tests cover the spellings a target folder can have.
 
 import pytest
 
-from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
+from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
 
 @pytest.mark.parametrize("name", ["Mars", "mars", "MARS", " Mars ", "Moon", "Sun", "Jupiter", "Pluto"])

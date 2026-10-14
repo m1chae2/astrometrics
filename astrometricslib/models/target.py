@@ -269,7 +269,7 @@ class TargetQualitySummaries(BaseModel):
 class TargetObjectType(StrEnum):
     """The kind of sky object a target is, read from its name.
 
-    See `astrometricslib.pipelines.shared.target_classification` for the
+    See `astrometricslib.utilities.target_classification` for the
     rules. `STAR` is every name that fits no other kind.
     """
 
@@ -416,7 +416,7 @@ class Target(BaseModel):
         A planet, the Sun or the Moon; a Messier, NGC or IC number; a comet
         or asteroid; a calibration folder; or otherwise a star.
         """
-        from astrometricslib.pipelines.shared.target_classification import classify_target_name
+        from astrometricslib.utilities.target_classification import classify_target_name
 
         return classify_target_name(self.id)
 

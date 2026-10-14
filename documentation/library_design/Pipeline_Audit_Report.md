@@ -127,7 +127,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO` | RESOLVED | Active in codebase |
 | `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Active in codebase |
 | `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Active in codebase |
+| `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Active in codebase |
 | `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Active in codebase |
 | `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Active in codebase |
 | `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Active in codebase |

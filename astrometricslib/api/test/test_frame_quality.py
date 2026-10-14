@@ -7,6 +7,8 @@ kind, the newest-frames limit, the summary, and above all that the saved
 target is never changed.
 """
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -35,7 +37,10 @@ def _target(frame_count: int = 6) -> Target:
 
 
 def _fake_measure(
-    working: Target, include_fwhm: bool, remeasure: bool, camera_id: str | None
+    working: Target,
+    measure_fwhm: Callable[[Any], float | None] | None,
+    remeasure: bool,
+    camera_id: str | None,
 ) -> dict[str, int]:
     """Fill in measurements on the frames it is given, like the real function.
 

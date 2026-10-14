@@ -28,10 +28,10 @@ import numpy as np
 from scipy import ndimage
 
 from astrometricslib.foundation.errors import AstrometricsError, ProcessingError
-
-SATURATION_ADU = 65000
-"""Pixels at or above this value count as saturated when no camera profile
-gives a level (16-bit frames). The same level the raw frame check uses."""
+from astrometricslib.pipelines.shared.quality.saturation import (
+    SATURATION_ADU,
+    resolve_saturation_threshold,
+)
 
 ZERO_ORDER_PEAK_HALF_WINDOW_PX = 6
 """Half-size of the box around the zero order in which its peak is read."""
@@ -61,50 +61,6 @@ ZERO_ORDER_SATURATION_RADIUS_PX = 12
 _MAD_TO_SIGMA = 1.4826
 """A robust standard deviation is 1.4826 times the median absolute deviation
 for Gaussian noise."""
-
-
-def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
-    """Find the level at which this camera's pixels count as saturated.
-
-    The level is the camera profile's saturation threshold. A profile can
-    list a threshold above the value a clipped pixel actually reaches (its
-    clip ceiling), which would make saturation impossible to detect. In that
-    case the clip ceiling is used instead, and the source text says so. The
-    default `SATURATION_ADU` is used only when no profile can be read.
-
-    Parameters
-    ----------
-    camera_name : `str` or `None`
-        The camera that took the frame.
-
-    Returns
-    -------
-    threshold_adu : `float`
-        Pixels at or above this value count as saturated.
-    source : `str`
-        A sentence saying where the level came from.
-    """
-    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-
-    try:
-        profile = resolve_camera_profile(camera_name)
-    except AstrometricsError as error:
-        return float(
-            SATURATION_ADU
-        ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
-    threshold = float(profile.saturation_threshold_adu.value)
-    if profile.is_generic_fallback:
-        return (
-            threshold,
-            f"generic fallback camera profile, {threshold:g} ADU (camera {camera_name!r} is not listed)",
-        )
-    ceiling = float(profile.clip_ceiling_adu.value)
-    if not profile.saturation_threshold_can_be_reached:
-        return ceiling, (
-            f"{profile.camera_name} profile clip ceiling, {ceiling:g} ADU "
-            f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
-        )
-    return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"
 
 
 def _fwhm_across(profile: np.ndarray, centre: int) -> float | None:

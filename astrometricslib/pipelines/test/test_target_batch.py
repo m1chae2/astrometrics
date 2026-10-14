@@ -11,27 +11,32 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import astrometricslib
 from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.drivers import catalog_access as catalog_access_module
+from astrometricslib.foundation import config as config_module
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines import target_batch, tasks
 from astrometricslib.pipelines.shared import frame_grouping
 from astrometricslib.utilities import concurrency, parallel_batch
 
 
-def _patch_astrometrics(monkeypatch: pytest.MonkeyPatch, target) -> MagicMock:  # ruff: ignore[missing-type-function-argument]
-    """Point astrometricslib.Astrometrics() at a mock with a fixed target.
+def _patch_catalog(monkeypatch: pytest.MonkeyPatch, target: Target | None) -> tuple[MagicMock, MagicMock]:
+    """Point the worker's settings and catalog connection at mocks.
+
+    The worker reads its target from the stored catalog, so the mock
+    catalog holds `target`, or nothing when `target` is `None`.
 
     Returns
     -------
-    astrometrics_instance : `MagicMock`
-        The instance the worker will receive from `Astrometrics()`.
+    catalog_access, config : `tuple` [`MagicMock`, `MagicMock`]
+        The catalog connection and the settings the worker will build.
     """
-    astrometrics_instance = MagicMock()
-    astrometrics_instance.targets.get.return_value = target
-    astrometrics_class = MagicMock(return_value=astrometrics_instance)
-    monkeypatch.setattr(astrometricslib, "Astrometrics", astrometrics_class)
-    return astrometrics_instance
+    catalog_access = MagicMock()
+    catalog_access.get.return_value = [] if target is None else [target]
+    config = MagicMock()
+    monkeypatch.setattr(catalog_access_module, "CatalogAccess", MagicMock(return_value=catalog_access))
+    monkeypatch.setattr(config_module, "get_configuration", MagicMock(return_value=config))
+    return catalog_access, config
 
 
 class TestProcessSingleTargetWorker:
@@ -41,7 +46,7 @@ class TestProcessSingleTargetWorker:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Verify a missing target is reported as a failure, not a crash."""
-        _patch_astrometrics(monkeypatch, target=None)
+        _patch_catalog(monkeypatch, target=None)
 
         result = target_batch._process_single_target_worker("Missing", 2, "ASI294")
 
@@ -55,7 +60,7 @@ class TestProcessSingleTargetWorker:
         only reflects targets that were actually processed.
         """
         target = Target(id="M13")
-        _patch_astrometrics(monkeypatch, target=target)
+        _patch_catalog(monkeypatch, target=target)
         monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: [])
 
         result = target_batch._process_single_target_worker("M13", 2, "ASI294")
@@ -68,7 +73,7 @@ class TestProcessSingleTargetWorker:
     ) -> None:
         """Verify a normal run reports success and carries pipeline output."""
         target = Target(id="M13")
-        astrometrics_instance = _patch_astrometrics(monkeypatch, target=target)
+        catalog_access, config = _patch_catalog(monkeypatch, target=target)
         monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: ["a frame"])
         pipeline_mock = MagicMock(return_value={"astrometry": "ok"})
         monkeypatch.setattr(tasks, "run_full_pipeline", pipeline_mock)
@@ -78,7 +83,7 @@ class TestProcessSingleTargetWorker:
         assert result["status"] == "success"
         assert result["stack_outputs"] == {"astrometry": "ok"}
         pipeline_mock.assert_called_once_with(
-            target, astrometrics_instance, max_workers=2, camera_name="ASI294", focal_length_mm=600.0
+            target, catalog_access, config, max_workers=2, camera_name="ASI294", focal_length_mm=600.0
         )
 
     def test_returns_failed_with_the_exception_message_when_the_pipeline_raises(
@@ -91,7 +96,7 @@ class TestProcessSingleTargetWorker:
         failure the batch summary can attribute to this target.
         """
         target = Target(id="M13")
-        _patch_astrometrics(monkeypatch, target=target)
+        _patch_catalog(monkeypatch, target=target)
         monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: ["a frame"])
 
         def _explode(*args: object, **kwargs: object) -> object:
@@ -118,7 +123,7 @@ class TestProcessSingleTargetWorker:
         batch run came back as an undiagnosable "Unknown failure".
         """
         target = Target(id="M13")
-        _patch_astrometrics(monkeypatch, target=target)
+        _patch_catalog(monkeypatch, target=target)
         monkeypatch.setattr(frame_grouping, "select_frames_for_camera", lambda t, c: ["a frame"])
 
         def _explode_with_no_message(*args: object, **kwargs: object) -> object:

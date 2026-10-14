@@ -10,7 +10,7 @@ import numpy as np
 from astropy.io import fits
 
 from astrometricslib.drivers.calibration_library import FlatGroup
-from astrometricslib.pipelines.shared import calibration_ingest as ci
+from astrometricslib.pipelines.stacking import calibration_ingest as ci
 
 
 def write_flat(path: Path, seed: int, level: float = 0.45) -> str:

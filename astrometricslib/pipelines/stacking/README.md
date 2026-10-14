@@ -98,6 +98,7 @@ This pipeline combines many individual pictures (sub-exposures) of the same targ
 The folders follow the layout in `pipelines/README.md`.
 
 - `stage.py` is the coordinator: it runs the steps above in order for one target, and is what the rest of the codebase calls to stack a target's frames.
+- `calibration_ingest.py` turns a rescan of the calibration library into a report. It compares the library's frame lists from before and after the rescan, lists the groups that gained or lost frames, and measures each new set of flats with the stacker's own flat check (`pre_processing/flat_calibration.py`). `CalibrationCatalog.refresh` and `CalibrationCatalog.assess_flats` call it.
 - `stack_runner.py` runs the stacking engine (step 5): exposure groups, registration retries and the final read of the engine's files. The engine is the only code that stacks a batch's pixels. `processing/` combines the group stacks.
 - `pre_processing/` checks and prepares the inputs: the gain and background homogeneity checks, the flat-frame check, and the input-quality judgement (`StackingInputQuality`). See its README.
 - `processing/` lines up and combines frames: exposure groups, group alignment, spectral frame alignment and derotation. See its README.

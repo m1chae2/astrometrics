@@ -663,7 +663,7 @@ This appendix lists the tuned values the pipelines use and says which ones have 
 <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO -->
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
-<!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.CATALOG_MATCH_RADIUS_ARCSEC -->
+<!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
 <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION -->

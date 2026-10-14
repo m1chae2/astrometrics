@@ -13,6 +13,8 @@ The step is built to be undone:
 - It writes `excluded_frames.json` in the `_excluded` folder, listing where
   each frame came from and why it was moved.
 - `restore_quarantined_frames` moves the frames back.
+- `quarantine_preview_report` shows which frames the step would move,
+  without moving any.
 - It judges each frame against the other frames of its own session, camera,
   filter and exposure, so a poor night is not mistaken for a few bad frames.
 - It refuses to move more than a quarter of any batch. If a limit were
@@ -37,8 +39,10 @@ from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.excluded_frames import SetAsideFrame
+from astrometricslib.models.excluded_frames import QuarantinePreview, SetAsideFrame
 from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import raw_frame_check
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
@@ -59,6 +63,7 @@ __all__ = [
     "judge_batch",
     "list_set_aside_frames",
     "quarantine_bad_frames",
+    "quarantine_preview_report",
     "read_quarantine_manifest",
     "restore_quarantined_frames",
     "split_into_batches",
@@ -751,6 +756,42 @@ def decision_to_set_aside_frame(decision: QuarantineDecision) -> SetAsideFrame:
         typical_star_count=decision.typical_star_count,
         roundness=decision.roundness,
         sky_median_adu=decision.sky_median_adu,
+    )
+
+
+def quarantine_preview_report(target: Target, limit: int) -> QuarantinePreview:
+    """Show which frames the stacker would set aside, without moving any.
+
+    It measures every imaging light frame of the target (about a second
+    each), so a large target takes a while.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target to check.
+    limit : `int`
+        Most frames to list. ``would_move_total`` gives the full count.
+
+    Returns
+    -------
+    preview : `QuarantinePreview`
+        The frames the check would move, with the measurements behind each,
+        the batches it would leave alone, and any frame it could not read.
+    """
+    lights = [
+        frame
+        for frame in target.frames
+        if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
+    ]
+    found = find_frames_to_quarantine(lights)
+    would_move = [decision_to_set_aside_frame(decision) for decision in found.moved]
+    return QuarantinePreview(
+        target_id=target.id,
+        frames_checked=len(lights),
+        would_move_total=len(would_move),
+        would_move=would_move[:limit],
+        notes=found.notes,
+        unreadable=found.unreadable,
     )
 
 

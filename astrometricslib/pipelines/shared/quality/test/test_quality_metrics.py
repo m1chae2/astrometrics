@@ -1,10 +1,11 @@
 """Purpose: Unit tests for post-stack image quality measurements.
 
 Description: Verifies measure_saturated_pixel_fraction's saturated-pixel
-count. measure_image_fwhm now lives in pipelines/astrometry/fwhm.py
-and is tested there, and measure_rejected_fraction reads Siril's own
-rejection map, so it lives in drivers/siril_output_parsing.py and is
-tested in drivers/test/test_siril_rejection_map.py.
+count. measure_image_fwhm now lives in
+pipelines/astrometry/pre_processing/fwhm.py and is tested there, and
+measure_rejected_fraction reads Siril's own rejection map, so it lives in
+drivers/siril_output_parsing.py and is tested in
+drivers/test/test_siril_rejection_map.py.
 """
 
 from pathlib import Path

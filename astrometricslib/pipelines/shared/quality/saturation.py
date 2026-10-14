@@ -4,9 +4,19 @@ This counts how many pixels are completely maxed out (pure white). The
 photo isn't thrown away just because a few stars are too bright, but
 a warning flag is left so later steps know those specific stars can't
 be measured accurately.
+
+`resolve_saturation_threshold` finds the level at which a raw frame's pixels
+count as saturated, from the camera's profile. The raw frame check and the
+spectral frame check both use it, so they agree on the level.
 """
 
 import numpy as np
+
+from astrometricslib.foundation.errors import AstrometricsError
+
+SATURATION_ADU = 65000
+"""Pixels at or above this value count as saturated when no camera profile
+gives a level (16-bit frames). See `resolve_saturation_threshold`."""
 
 # A stack has no fixed saturation level: Siril rescales it, so a saturated
 # star can sit anywhere below 1.0 and an unsaturated stack also tops out at
@@ -174,3 +184,47 @@ def compute_stack_saturated_pixel_fraction(data: np.ndarray, region: np.ndarray 
     return compute_saturated_pixel_fraction(
         np.asarray(counted, dtype=float), ceiling * SATURATION_MASK_FRACTION_OF_CEILING
     )
+
+
+def resolve_saturation_threshold(camera_name: str | None) -> tuple[float, str]:
+    """Find the level at which this camera's pixels count as saturated.
+
+    The level is the camera profile's saturation threshold. A profile can
+    list a threshold above the value a clipped pixel actually reaches (its
+    clip ceiling), which would make saturation impossible to detect. In that
+    case the clip ceiling is used instead, and the source text says so. The
+    default `SATURATION_ADU` is used only when no profile can be read.
+
+    Parameters
+    ----------
+    camera_name : `str` or `None`
+        The camera that took the frame.
+
+    Returns
+    -------
+    threshold_adu : `float`
+        Pixels at or above this value count as saturated.
+    source : `str`
+        A sentence saying where the level came from.
+    """
+    from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
+
+    try:
+        profile = resolve_camera_profile(camera_name)
+    except AstrometricsError as error:
+        return float(
+            SATURATION_ADU
+        ), f"default {SATURATION_ADU:g} ADU (no camera profile could be read: {error})"
+    threshold = float(profile.saturation_threshold_adu.value)
+    if profile.is_generic_fallback:
+        return (
+            threshold,
+            f"generic fallback camera profile, {threshold:g} ADU (camera {camera_name!r} is not listed)",
+        )
+    ceiling = float(profile.clip_ceiling_adu.value)
+    if not profile.saturation_threshold_can_be_reached:
+        return ceiling, (
+            f"{profile.camera_name} profile clip ceiling, {ceiling:g} ADU "
+            f"(its saturation threshold of {threshold:g} ADU is above the ceiling and no pixel can reach it)"
+        )
+    return threshold, f"{profile.camera_name} profile saturation threshold, {threshold:g} ADU"

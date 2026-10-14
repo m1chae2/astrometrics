@@ -412,15 +412,35 @@ def test_the_unseeded_random_scan_recognizes_each_banned_form() -> None:
         assert not _is_unseeded_random_call(ast.parse(source).body[0].value), source
 
 
-# The imports a lower layer may not make. Each rule is the folder the
-# importing file sits in and the module prefixes it may not import. A prefix
-# also covers every module below it.
+# The specific pipeline packages, such as `stacking` and `astrometry`: every
+# folder under `pipelines/` that is a Python package, except `shared/` and
+# the test folder. They sit above `pipelines/shared/` and below
+# `pipelines/tasks.py`.
+_PIPELINE_PACKAGES = tuple(
+    sorted(
+        folder.name
+        for folder in (ASTROMETRICSLIB_ROOT / "pipelines").iterdir()
+        if (folder / "__init__.py").is_file() and folder.name not in {"shared", "test"}
+    )
+)
+
+# The pipeline modules that run the specific pipelines: the dispatcher and
+# the multi-target batch runner. They sit above every pipeline.
+_PIPELINE_RUNNERS = ("astrometricslib.pipelines.tasks", "astrometricslib.pipelines.target_batch")
+
+# The imports a lower layer may not make. Each rule is the folders or files
+# the importing file sits in and the module prefixes it may not import. A
+# prefix also covers every module below it.
 #
-# - Drivers are the bottom layer: they serve the pipelines, the public
-#   helpers and the public API, and import none of them.
+# - Drivers are the bottom layer above the shared vocabulary: they serve the
+#   pipelines, the public helpers and the public API, and import none of
+#   them.
 # - The pipelines do not import the public API above them.
-# - Spectroscopy does not import `pipelines.tasks`, the dispatcher that
-#   runs it.
+# - The shared pipeline code (`pipelines/shared/` and
+#   `pipelines/pipeline_base.py`) serves every pipeline, so it imports no
+#   specific pipeline and neither pipeline runner.
+# - A specific pipeline does not import a pipeline runner (`pipelines.tasks`
+#   or `pipelines.target_batch`). Imports between two pipelines are allowed.
 # - The shared vocabulary (`models/`, `foundation/`, `utilities/`) is plain
 #   data and settings that every layer may import, so it imports no layer.
 _UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
@@ -429,7 +449,11 @@ _UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
         ("astrometricslib.pipelines", "astrometricslib.api", "astrometricslib.visualization"),
     ),
     (("pipelines/",), ("astrometricslib.api",)),
-    (("pipelines/spectroscopy/",), ("astrometricslib.pipelines.tasks",)),
+    (
+        ("pipelines/shared/", "pipelines/pipeline_base.py"),
+        (*(f"astrometricslib.pipelines.{name}" for name in _PIPELINE_PACKAGES), *_PIPELINE_RUNNERS),
+    ),
+    (tuple(f"pipelines/{name}/" for name in _PIPELINE_PACKAGES), _PIPELINE_RUNNERS),
     (
         ("models/", "foundation/", "utilities/"),
         (
@@ -447,15 +471,9 @@ _UPWARD_IMPORT_RULES: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
 _NO_PACKAGE_ROOT_IMPORT_FOLDERS = ("drivers/", "pipelines/", "models/", "foundation/", "utilities/")
 
 # Upward imports that were already there when this ratchet was written,
-# as "file -> module". This list should only ever shrink.
-KNOWN_UPWARD_IMPORTS = frozenset({
-    # Each worker process builds a whole `Astrometrics()` to look up its
-    # target and run the full pipeline.
-    "pipelines/target_batch.py -> astrometricslib",
-    # `Target.object_type` classifies the target's name with a pipeline
-    # helper.
-    "models/target.py -> astrometricslib.pipelines.shared.target_classification",
-})
+# as "file -> module". This list should only ever shrink. It is empty: the
+# last entries were fixed by issue #79.
+KNOWN_UPWARD_IMPORTS: frozenset[str] = frozenset()
 
 
 def _imported_modules(module_path: pathlib.Path) -> set[str]:
@@ -579,13 +597,29 @@ def test_the_upward_import_scan_recognizes_each_rule() -> None:
         ("pipelines/stacking/stage.py", "astrometricslib.api"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib"),
-        ("models/target.py", "astrometricslib.pipelines.shared.target_classification"),
+        ("models/target.py", "astrometricslib.pipelines.shared.frame_grouping"),
+        ("pipelines/shared/frame_grouping.py", "astrometricslib.pipelines.stacking.pre_processing"),
+        ("pipelines/shared/quality/quality_metrics.py", "astrometricslib.pipelines.astrometry"),
+        ("pipelines/shared/target_sessions.py", "astrometricslib.pipelines.tasks"),
+        ("pipelines/shared/target_records.py", "astrometricslib.pipelines.target_batch"),
+        ("pipelines/pipeline_base.py", "astrometricslib.pipelines.spectroscopy.pipeline"),
+        ("pipelines/pipeline_base.py", "astrometricslib.pipelines.tasks"),
+        ("pipelines/stacking/stage.py", "astrometricslib.pipelines.target_batch"),
+        ("pipelines/photometry/pipeline.py", "astrometricslib.pipelines.tasks"),
+        ("pipelines/asteroid_detection/pipeline.py", "astrometricslib.pipelines.target_batch"),
     ]
     downward = [
         ("drivers/siril_interface.py", "astrometricslib.drivers.fits_access"),
         ("drivers/siril_interface.py", "astrometricslib.foundation.errors"),
-        ("pipelines/stacking/stage.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.spectroscopy.runner"),
+        ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.stacking.stage"),
+        ("pipelines/stacking/stage.py", "astrometricslib.pipelines.shared.frame_scanning"),
+        ("pipelines/stacking/stage.py", "astrometricslib.pipelines.pipeline_base"),
+        ("pipelines/shared/frame_scanning.py", "astrometricslib.pipelines.shared.angles"),
+        ("pipelines/shared/frame_scanning.py", "astrometricslib.pipelines.pipeline_base"),
+        ("pipelines/pipeline_base.py", "astrometricslib.pipelines.shared.analysis_context"),
+        ("pipelines/tasks.py", "astrometricslib.pipelines.stacking.stage"),
+        ("pipelines/target_batch.py", "astrometricslib.pipelines.tasks"),
         ("pipelines/spectroscopy/batch.py", "astrometricslib.pipelines.tasks_helpers"),
         ("api/processing.py", "astrometricslib.pipelines.tasks"),
         ("api/processing.py", "astrometricslib"),

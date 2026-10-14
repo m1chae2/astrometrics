@@ -7,6 +7,10 @@ memory error) cannot take the others down with it. A worker runs
 `tasks.run_full_pipeline`: stack the target's frames from one camera, plate
 solve the stack, measure star brightness, and extract spectra when there are
 spectroscopy frames.
+
+A worker builds only what the full pipeline needs: the settings and its own
+connection to the stored catalog. It does not build the public
+`Astrometrics` object, which sits in the layer above the pipelines.
 """
 
 import logging
@@ -48,14 +52,18 @@ def _process_single_target_worker(
         ``error`` (the reason, if any) and ``stack_outputs`` (the stacks
         made, by kind).
     """
-    from astrometricslib import Astrometrics
+    from astrometricslib.drivers.catalog_access import CatalogAccess
+    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
+    from astrometricslib.pipelines.shared.target_records import find_stored_target
     from astrometricslib.pipelines.tasks import run_full_pipeline
 
     result = {"status": "failed", "error": None, "stack_outputs": {}}
     try:
-        astrometrics = Astrometrics()
-        target = astrometrics.targets.get(target_id)
+        # Each worker process opens its own settings and catalog connection.
+        config = get_configuration()
+        catalog_access = CatalogAccess(config)
+        target = find_stored_target(catalog_access, target_id)
         if target is None:
             result["error"] = "Target not found in catalog"
             return result
@@ -69,7 +77,8 @@ def _process_single_target_worker(
 
         result["stack_outputs"] = run_full_pipeline(
             target,
-            astrometrics,
+            catalog_access,
+            config,
             max_workers=photometry_workers,
             camera_name=camera_id,
             focal_length_mm=focal_length_mm,

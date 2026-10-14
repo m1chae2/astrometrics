@@ -9,7 +9,7 @@ which the library counts as a solar-system body.
 import pytest
 
 from astrometricslib.models.target import Target, TargetObjectType
-from astrometricslib.pipelines.shared.target_classification import classify_target_name
+from astrometricslib.utilities.target_classification import classify_target_name
 
 
 @pytest.mark.parametrize(

@@ -437,7 +437,8 @@ def run_target_stages(
 
 def run_full_pipeline(
     target: Target,
-    astrometrics: Any,
+    catalog_access: Any,
+    config: Any,
     max_workers: int | None = None,
     *,
     camera_name: str,
@@ -453,8 +454,11 @@ def run_full_pipeline(
     ----------
     target : Target
         The target we want to process.
-    astrometrics : Any
-        The system interface that gives us config settings and database access.
+    catalog_access : Any
+        The connection to the stored catalog. Each stage reads from it, and
+        the target is saved to it after each stage.
+    config : `AppConfiguration`
+        The settings, for how many analysis jobs may run at once.
     max_workers : int, optional
         How many parallel processes to use during the brightness tracking step.
     camera_name : str
@@ -485,25 +489,25 @@ def run_full_pipeline(
     still_listed = {frame.path for frame in target.frames}
     camera_frames = [frame for frame in camera_frames if frame.path in still_listed]
     spectral_frames = [frame for frame in spectral_frames if frame.path in still_listed]
-    _save_target(target, astrometrics)
-    max_concurrent_jobs = astrometrics.config.get_max_concurrent_jobs()
+    _save_target(target, catalog_access)
+    max_concurrent_jobs = config.get_max_concurrent_jobs()
 
     # 2. Astrometry Analysis and 3. Photometry Analysis both work from the
     # standard stack -- skip them (rather than fail the whole target) when
     # it didn't stack, so a spectral-only success is still saved below.
     if "standard" in stack_outputs:
-        _run_astrometry_stage(target, astrometrics)
-        _save_target(target, astrometrics)
-        _run_photometry_stage(target, astrometrics, camera_frames, max_workers, max_concurrent_jobs)
-        _save_target(target, astrometrics)
+        _run_astrometry_stage(target, catalog_access)
+        _save_target(target, catalog_access)
+        _run_photometry_stage(target, catalog_access, config, camera_frames, max_workers, max_concurrent_jobs)
+        _save_target(target, catalog_access)
     elif standard_frames:
         logger.warning("[%s] Standard stacking failed; skipping astrometry and photometry.", target.id)
 
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
     if "spectral" in stack_outputs:
-        _run_spectroscopy_stage(target, astrometrics, spectral_frames, max_concurrent_jobs)
-        _save_target(target, astrometrics)
+        _run_spectroscopy_stage(target, catalog_access, config, spectral_frames, max_concurrent_jobs)
+        _save_target(target, catalog_access)
     elif spectral_frames:
         logger.warning("[%s] Spectral stacking failed; skipping spectroscopy.", target.id)
 
@@ -512,7 +516,7 @@ def run_full_pipeline(
     return stack_outputs
 
 
-def _save_target(target: Target, astrometrics: Any) -> None:
+def _save_target(target: Target, catalog_access: Any) -> None:
     """Persist a target's current in-memory state as its own database row.
 
     Called after each pipeline stage in `run_full_pipeline`, rather than
@@ -527,7 +531,7 @@ def _save_target(target: Target, astrometrics: Any) -> None:
     try:
         # Target-scoped write (safe under concurrent callers), unlike a
         # full-catalog resync.
-        astrometrics.catalog_access.put(target, "target_record", {})
+        catalog_access.put(target, "target_record", {})
     except Exception:
         logger.exception("[%s] Failed to save target after pipeline stage", target.id)
 
@@ -597,7 +601,7 @@ def _stack_camera_frames(
     return stack_outputs
 
 
-def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
+def _run_astrometry_stage(target: Target, catalog_access: Any) -> dict[str, Any]:
     """Run astrometry analysis on the target's stacked image.
 
     Returns
@@ -611,9 +615,7 @@ def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
         If astrometry analysis failed to produce a result.
     """
     logger.info("[%s] Running Astrometry Analysis...", target.id)
-    astrometry_results = analyze_target(
-        target, pipeline_type="astrometry", catalog_access=astrometrics.catalog_access
-    )
+    astrometry_results = analyze_target(target, pipeline_type="astrometry", catalog_access=catalog_access)
     if astrometry_results is None:
         raise ProcessingError("Astrometry analysis failed.")
     logger.info(
@@ -626,7 +628,8 @@ def _run_astrometry_stage(target: Target, astrometrics: Any) -> dict[str, Any]:
 
 def _run_photometry_stage(
     target: Target,
-    astrometrics: Any,
+    catalog_access: Any,
+    config: Any,
     camera_frames: list[FrameRecord],
     max_workers: int | None,
     max_concurrent_jobs: int,
@@ -639,12 +642,12 @@ def _run_photometry_stage(
         The photometry pipeline's result dict.
     """
     logger.info("[%s] Running Photometry/Variability Analysis...", target.id)
-    with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs):
         photometry_results = analyze_target(
             target,
             pipeline_type="photometry",
             frames=camera_frames,
-            catalog_access=astrometrics.catalog_access,
+            catalog_access=catalog_access,
             max_workers=max_workers,
         )
     logger.info(
@@ -657,7 +660,8 @@ def _run_photometry_stage(
 
 def _run_spectroscopy_stage(
     target: Target,
-    astrometrics: Any,
+    catalog_access: Any,
+    config: Any,
     spectral_frames: list[FrameRecord],
     max_concurrent_jobs: int,
 ) -> None:
@@ -673,9 +677,9 @@ def _run_spectroscopy_stage(
         return
 
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)
-    with acquire_resource_slot(astrometrics.config, "job", max_concurrent_jobs):
+    with acquire_resource_slot(config, "job", max_concurrent_jobs):
         spectroscopy_results = analyze_target(
-            target, pipeline_type="spectroscopy", limit=10, catalog_access=astrometrics.catalog_access
+            target, pipeline_type="spectroscopy", limit=10, catalog_access=catalog_access
         )
     if spectroscopy_results is None:
         raise ProcessingError("Spectroscopy analysis failed.")

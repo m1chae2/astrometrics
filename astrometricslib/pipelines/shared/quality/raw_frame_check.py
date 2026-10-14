@@ -31,7 +31,7 @@ from scipy import ndimage
 
 from astrometricslib.drivers.fits_access import open_primary_hdu
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.pipelines.shared.quality.spectral_frame_check import resolve_saturation_threshold
+from astrometricslib.pipelines.shared.quality.saturation import resolve_saturation_threshold
 
 logger = logging.getLogger(__name__)
 

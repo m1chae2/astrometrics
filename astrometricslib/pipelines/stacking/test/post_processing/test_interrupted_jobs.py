@@ -14,7 +14,7 @@ from typing import Any
 
 from astrometricslib.foundation.jobs import JobStore, ProcessingJob, recover_interrupted_jobs
 from astrometricslib.foundation.jobs.process_identity import current_process_identity, process_is_alive
-from astrometricslib.pipelines.shared.interrupted_jobs import (
+from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import (
     restore_interrupted_stacks,
     restore_orphaned_stack_staging,
 )

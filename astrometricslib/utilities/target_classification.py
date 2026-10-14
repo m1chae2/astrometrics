@@ -20,7 +20,7 @@ Underscores and non-breaking spaces in a name count as spaces, so
 import re
 
 from astrometricslib.models.target import TargetObjectType
-from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
+from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
 __all__ = ["classify_target_name"]
 

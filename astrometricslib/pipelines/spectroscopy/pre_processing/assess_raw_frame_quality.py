@@ -14,7 +14,7 @@ spectrum along and across the trail. The refraction record comes from
 altitude, the sky direction of the dispersion and the air's conditions. That
 module also corrects the wavelengths.
 
-The frame-level check in `pipelines/shared/quality/spectral_frame_check.py`
+The frame-level check in `spectral_frame_check.py` (this folder)
 measures the whole frame (streak tilt, peak above the sky, the saturation
 level and its source). The spectroscopy pipeline does not run it per star.
 When a caller has that result, passing it as ``frame_check`` adds its numbers.

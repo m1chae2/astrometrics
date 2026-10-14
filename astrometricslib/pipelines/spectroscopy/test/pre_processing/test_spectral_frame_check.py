@@ -12,11 +12,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from astrometricslib.pipelines.shared.quality.spectral_frame_check import (
-    SATURATION_ADU,
+from astrometricslib.pipelines.shared.quality.saturation import SATURATION_ADU, resolve_saturation_threshold
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
     analyze_spectral_frame,
     measure_spectral_frame_file,
-    resolve_saturation_threshold,
     summarize_spectral_frames,
 )
 from astrometricslib.test.synthetic.spectral_frame import make_spectral_frame
@@ -144,7 +143,7 @@ def test_a_frame_without_a_zero_order_star_raises(tmp_path: Path, monkeypatch: p
     from astropy.io import fits
 
     from astrometricslib.foundation.errors import ProcessingError
-    from astrometricslib.pipelines.shared.quality import spectral_frame_check
+    from astrometricslib.pipelines.spectroscopy.pre_processing import spectral_frame_check
     from astrometricslib.pipelines.stacking.processing import group_alignment
 
     path = tmp_path / "flat.fits"

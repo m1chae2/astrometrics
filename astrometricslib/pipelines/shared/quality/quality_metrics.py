@@ -7,6 +7,7 @@ which ones to throw away.
 """
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 from astropy.io import fits
@@ -23,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 def measure_frame_input_quality(
-    path: str, include_fwhm: bool = False, *, saturation_threshold_adu: float
+    path: str,
+    measure_fwhm: Callable[[np.ndarray], float | None] | None = None,
+    *,
+    saturation_threshold_adu: float,
 ) -> dict[str, float | None]:
     """Measure the basic quality of an image before trying to stack it.
 
@@ -35,9 +39,13 @@ def measure_frame_input_quality(
     ----------
     path : `str`
         The file path to the image.
-    include_fwhm : `bool`, optional
-        If True, it also measures star blurriness (which is slow).
-        Defaults to False.
+    measure_fwhm : `Callable`, optional
+        A function that takes the image's pixels and returns the stars'
+        FWHM in pixels, or `None`. When given, star blurriness is measured
+        too, which is slow. The caller passes it in (the astrometry
+        pipeline's `measure_fwhm_from_data`), because the star finder it
+        needs belongs to a pipeline above this shared module. Defaults to
+        `None`, which skips the measurement.
     saturation_threshold_adu : `float`
         A pixel at or above this value counts as saturated. Take it from
         the camera's profile.
@@ -81,11 +89,9 @@ def measure_frame_input_quality(
     except DATA_ERRORS as saturation_error:
         logger.debug("Saturation measurement failed for %s: %s", path, saturation_error)
 
-    if include_fwhm:
+    if measure_fwhm is not None:
         try:
-            from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
-
-            metrics["fwhm_px"] = measure_fwhm_from_data(data)
+            metrics["fwhm_px"] = measure_fwhm(data)
         except DATA_ERRORS as fwhm_error:
             logger.debug("FWHM measurement failed for %s: %s", path, fwhm_error)
 

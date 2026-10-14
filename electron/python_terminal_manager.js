@@ -4,19 +4,26 @@
  * Supervises the interactive Python environment, connects to the running backend
  * container over JSON-RPC, streams output chunks, broadcasts workspace variable
  * manifests, and integrates with the host OS platform adapter and powerMonitor.
+ * All backend requests go through `backend_client.js`.
  */
 
 import log from 'electron-log';
+import { callRpc } from './backend_client.js';
 import { getPlatform } from './platforms/index.js';
 
+/**
+ * Runs Python code in the backend for the app's Python terminal, and pauses or
+ * resumes background work when the computer sleeps or wakes.
+ */
 export class PythonTerminalManager {
   /**
    * @param {Object} [options]
    * @param {string} [options.backendUrl] Base URL of the Astrometrics backend.
+   *   When left out, each request uses the address `ASTROMETRICS_PORT` names.
    * @param {BasePlatform} [options.platform] Platform adapter.
    */
-  constructor({ backendUrl = 'http://127.0.0.1:5000', platform = getPlatform() } = {}) {
-    this.backendUrl = backendUrl.replace(/\/$/, '');
+  constructor({ backendUrl = null, platform = getPlatform() } = {}) {
+    this.backendUrl = backendUrl ? backendUrl.replace(/\/$/, '') : null;
     this.platform = platform;
     this.activeExecutions = new Set();
     this.isPaused = false;
@@ -48,23 +55,20 @@ export class PythonTerminalManager {
     const timeoutTimer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(`${this.backendUrl}/api/rpc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: execId,
-          method: 'terminal:execute',
-          params: { code_str: code }
-        }),
-        signal: controller.signal
+      const response = await callRpc('terminal:execute', { code_str: code }, {
+        id: execId,
+        signal: controller.signal,
+        baseUrl: this.backendUrl || undefined,
       });
 
       if (!response.ok) {
         throw new Error(`Terminal execution failed with HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const envelope = await response.json();
+      const envelope = response.envelope;
+      if (!envelope) {
+        throw new Error('Terminal execution failed: the backend reply was not JSON.');
+      }
       const data = envelope.result?.data || envelope.result || {
         status: 'error',
         stdout: '',
@@ -110,20 +114,13 @@ export class PythonTerminalManager {
    */
   async getWorkspaceVariables() {
     try {
-      const response = await fetch(`${this.backendUrl}/api/rpc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'workspace_poll',
-          method: 'terminal:get_workspace',
-          params: {}
-        })
+      const response = await callRpc('terminal:get_workspace', {}, {
+        id: 'workspace_poll',
+        baseUrl: this.backendUrl || undefined,
       });
 
       if (!response.ok) return [];
-      const data = await response.json();
-      return data.result?.data || [];
+      return response.envelope?.result?.data || [];
     } catch (err) {
       log.debug('Failed to fetch workspace manifest:', err);
       return [];
@@ -138,20 +135,13 @@ export class PythonTerminalManager {
    */
   async getCompletions(text) {
     try {
-      const response = await fetch(`${this.backendUrl}/api/rpc`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'completions',
-          method: 'terminal:completions',
-          params: { text }
-        })
+      const response = await callRpc('terminal:completions', { text }, {
+        id: 'completions',
+        baseUrl: this.backendUrl || undefined,
       });
 
       if (!response.ok) return [];
-      const data = await response.json();
-      return data.result?.data || [];
+      return response.envelope?.result?.data || [];
     } catch (err) {
       log.debug('Failed to fetch completions:', err);
       return [];

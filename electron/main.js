@@ -18,6 +18,8 @@ import { createTrayPopoverWindow } from './tray_window.js';
 import { getPlatform } from './platforms/index.js';
 import { PythonTerminalManager } from './python_terminal_manager.js';
 import { loadWindowState, trackWindowState } from './window_state.js';
+import { backendBaseUrl, backendPort } from './backend_client.js';
+import { resolveFigureTarget } from './figure_target.js';
 
 const platform = getPlatform();
 const pythonTerminalManager = new PythonTerminalManager({ platform });
@@ -309,7 +311,7 @@ async function openMainWindowWhenBackendIsWarm() {
       title: 'Astrometrics backend not running',
       message: 'The Astrometrics backend is not running.',
       detail:
-        'Nothing answered on http://127.0.0.1:5000. Start it with ' +
+        `Nothing answered on ${backendBaseUrl()}. Start it with ` +
         'build/linux/run_backend.sh start (check ~/.local/state/astrometrics/logs/run/backend.log if it stops), then retry.',
       buttons: ['Retry', 'Quit'],
       defaultId: 0,
@@ -589,11 +591,23 @@ function createDisplayWindow(options = {}) {
  * Creates an independent pop-up figure window for Matplotlib plots.
  * Supports both interactive WebAgg URLs and fallback static PNG images.
  *
+ * Only the backend's own `/figure/<number>` page, or a PNG file in the
+ * backend's scratch folder, may open (see `figure_target.js`). Anything else
+ * is logged and refused, and no window opens.
+ *
  * @param {string|{plotPath?: string, interactiveUrl?: string}} target
  *   Filesystem path, interactive URL, or descriptor object.
- * @returns {BrowserWindow}
+ * @returns {BrowserWindow|null} The new window, or null when the target was refused.
  */
 function createFigureWindow(target) {
+  const { interactiveUrl, plotPath, rejected } = resolveFigureTarget(target);
+  for (const reason of rejected) {
+    log.warn(reason);
+  }
+  if (!interactiveUrl && !plotPath) {
+    return null;
+  }
+
   const figureWin = new BrowserWindow({
     width: 760,
     height: 600,
@@ -608,41 +622,13 @@ function createFigureWindow(target) {
 
   figureWin.setMenuBarVisibility(false);
 
-  let plotPath = '';
-  let interactiveUrl = '';
-
-  if (typeof target === 'string') {
-    if (target.startsWith('http://') || target.startsWith('https://')) {
-      interactiveUrl = target;
-    } else if (target.startsWith('/figure/')) {
-      const port = process.env.ASTROMETRICS_PORT || '5000';
-      interactiveUrl = `http://127.0.0.1:${port}${target}`;
-    } else {
-      plotPath = target;
-    }
-  } else if (target && typeof target === 'object') {
-    plotPath = target.plotPath || '';
-    if (target.interactiveUrl) {
-      if (target.interactiveUrl.startsWith('http://') || target.interactiveUrl.startsWith('https://')) {
-        interactiveUrl = target.interactiveUrl;
-      } else {
-        const port = process.env.ASTROMETRICS_PORT || '5000';
-        interactiveUrl = `http://127.0.0.1:${port}${target.interactiveUrl}`;
-      }
-    }
-  }
-
   if (interactiveUrl) {
     figureWin.loadURL(interactiveUrl);
   } else {
     let imageSrc = '';
     try {
-      if (plotPath && fs.existsSync(plotPath)) {
-        const imgBuffer = fs.readFileSync(plotPath);
-        imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
-      } else if (plotPath) {
-        log.warn(`Figure path does not exist: ${plotPath}`);
-      }
+      const imgBuffer = fs.readFileSync(plotPath);
+      imageSrc = `data:image/png;base64,${imgBuffer.toString('base64')}`;
     } catch (err) {
       log.error(`Failed to read figure image at ${plotPath}:`, err);
     }
@@ -829,9 +815,12 @@ app.on('ready', () => {
   // Locks down what the renderer can load/connect to. No unsafe-eval permitted.
   // Dev allows the Vite dev server; production is restricted to localhost only.
   // ---------------------------------------------------------------------------
+  // The backend's address comes from ASTROMETRICS_PORT, like every other
+  // backend call, so a backend on another port is not blocked here.
+  const backendHost = `127.0.0.1:${backendPort()}`;
   const devCsp = [
     "default-src 'self'",
-    "connect-src 'self' http://127.0.0.1:5000 ws://127.0.0.1:5000 http://127.0.0.1:5173 ws://127.0.0.1:5173",
+    `connect-src 'self' http://${backendHost} ws://${backendHost} http://127.0.0.1:5173 ws://127.0.0.1:5173`,
     // @vitejs/plugin-react injects an inline preamble script for Fast Refresh (HMR).
     // unsafe-inline is required in dev; production is bundled with no inline scripts.
     "script-src 'self' 'unsafe-inline'",
@@ -842,7 +831,7 @@ app.on('ready', () => {
 
   const prodCsp = [
     "default-src 'self'",
-    "connect-src 'self' http://127.0.0.1:5000 ws://127.0.0.1:5000",
+    `connect-src 'self' http://${backendHost} ws://${backendHost}`,
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",

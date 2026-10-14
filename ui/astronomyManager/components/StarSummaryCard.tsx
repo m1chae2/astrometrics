@@ -11,7 +11,7 @@ import {
     formatCatalogMagnitude,
     formatDeclinationSexagesimal,
     formatRightAscensionSexagesimal,
-} from '../utils/starDisplayFormat';
+} from '../../common/utils/starDisplayFormat';
 import { useOptionalTargetContext } from '../../common/context/TargetContext';
 import { emitToast } from '../../common/utils/emitToast';
 import { navigateToElement } from '../../common/utils/displayCoordinator';

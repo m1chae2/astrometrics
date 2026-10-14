@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useStarsBySpectralClassQuery } from '../../common/queries/useStarsBySpectralClassQuery';
 import { SelectableItem } from '../../common/components/SelectableList';
-import { formatSpectralMatchQuality, formatStarListLabel } from '../utils/starDisplayFormat';
+import { formatSpectralMatchQuality, formatStarListLabel } from '../../common/utils/starDisplayFormat';
 
 /**
  * Fetches the stars in one catalog spectral class, best self-determined

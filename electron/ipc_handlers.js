@@ -38,17 +38,6 @@ export function registerIpcHandlers(
     }
   });
 
-  // Backend health check
-  ipcMain.handle('backend-ping', async (event, url) => {
-    const target = typeof url === 'string' && url ? url : (process.env.BACKEND_URL || 'http://127.0.0.1:5000/');
-    try {
-      const response = await fetch(target, { method: 'GET' });
-      return { ok: response.ok, status: response.status, statusText: response.statusText };
-    } catch (error) {
-      return { ok: false, status: 0, statusText: String(error) };
-    }
-  });
-
   // Open-file dialog
   ipcMain.handle('dialog-open-file', async (event, options) => {
     const dialogOptions = typeof options === 'object' && options ? options : { properties: ['openFile'] };
@@ -76,10 +65,12 @@ export function registerIpcHandlers(
   });
 
   // Open Matplotlib figure window
+  // The main process checks the target and opens no window (null) when the
+  // target is not one of the backend's own figures.
   ipcMain.handle('open-figure-window', (_event, target) => {
     if (typeof windowCoordinator.createFigureWindow === 'function') {
       const win = windowCoordinator.createFigureWindow(target);
-      return { windowId: win.id };
+      return win ? { windowId: win.id } : null;
     }
     return null;
   });

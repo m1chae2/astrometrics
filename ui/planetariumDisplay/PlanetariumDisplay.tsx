@@ -39,7 +39,7 @@ import { useTargetBrowserItems } from '../astronomyManager/hooks/useTargetBrowse
 import { useSpectralClassBrowserItems, ALL_SPECTRAL_CLASSES_VALUE } from '../astronomyManager/hooks/useSpectralClassBrowserItems';
 import { useSpectrumList } from '../astronomyManager/hooks/useSpectrumList';
 import { useStarsBySpectralClassList } from '../astronomyManager/hooks/useStarsBySpectralClassList';
-import { spectralClassLetter } from '../astronomyManager/utils/starDisplayFormat';
+import { spectralClassLetter } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import '../common/styles/segmentedToggle.css';
 import './styles/planetariumDisplay.css';

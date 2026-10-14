@@ -14,7 +14,7 @@
     "dev:local": "concurrently -k \"npm run dev:ui\" \"npm run dev:electron\"",
     "type-check": "tsc --noEmit",
     "build": "vite build",
-    "lint": "eslint ui",
+    "lint": "eslint ui electron",
     "test:unit": "vitest run",
     "preview": "vite preview",
     "electron-dev": "NODE_ENV=development electron .",

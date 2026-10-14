@@ -13,7 +13,7 @@ import { SectionPanel } from '../common/components/SectionPanel';
 import { GenericDisplayLayout } from '../common/components/GenericDisplayLayout';
 import { TimelineRangeSelector } from './components/TimelineRangeSelector';
 import { analyzeStarPeriodicity } from '../common/services/astronomyService';
-import { selectLightCurveSeries } from './utils/starDisplayFormat';
+import { selectLightCurveSeries } from '../common/utils/starDisplayFormat';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './styles/astronomyManager.css';
 

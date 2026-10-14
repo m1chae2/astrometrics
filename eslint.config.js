@@ -16,6 +16,48 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tsPlugin from '@typescript-eslint/eslint-plugin'
 import tsParser from '@typescript-eslint/parser'
 
+/** How many folders deep below `ui/common/` the folder rule checks. */
+const COMMON_FOLDER_RULE_MAX_DEPTH = 8
+
+/**
+ * Builds the ESLint settings that stop `ui/common/` from importing any other
+ * top-level `ui/` folder.
+ *
+ * ESLint's `no-restricted-imports` rule looks only at the import text, not at
+ * the file it points to. So a file's depth below `ui/common/` decides how many
+ * `../` steps lead out of `ui/common/`. This function makes one settings block
+ * per depth. Each block bans an import that climbs exactly to `ui/` and then
+ * enters a folder other than `common`. Imports that climb past `ui/` are left
+ * alone, since this rule is only about the `ui/` folders.
+ *
+ * @returns {object[]} One flat-config block per folder depth.
+ */
+function commonFolderImportRules() {
+  const blocks = []
+  for (let depth = 0; depth <= COMMON_FOLDER_RULE_MAX_DEPTH; depth += 1) {
+    const folders = '*/'.repeat(depth)
+    const stepsUp = depth + 1
+    blocks.push({
+      files: [`ui/common/${folders}*.{js,jsx,ts,tsx}`],
+      rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              {
+                regex: `^(\\.\\./){${stepsUp}}(?!common(/|$)|\\.\\.(/|$))`,
+                message:
+                  'ui/common is shared by the whole app and must not import another top-level ui/ folder. Move the shared code into ui/common instead.',
+              },
+            ],
+          },
+        ],
+      },
+    })
+  }
+  return blocks
+}
+
 export default [
   {
     // Build output, vendored third-party bundles, generated artifacts, and
@@ -151,4 +193,53 @@ export default [
       ],
     },
   },
+  {
+    // The Electron shell runs in Node.js. Its files are ES modules (package.json
+    // sets "type": "module"), except preload.js, which Electron loads as a
+    // CommonJS script and which uses `require`.
+    files: ['electron/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
+    files: ['electron/preload.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      parserOptions: { sourceType: 'script' },
+    },
+  },
+  {
+    // Electron's main process reaches the backend only through
+    // electron/backend_client.js, the same way the app uses backendApi.ts. A
+    // backend test checks every path that file uses against
+    // backend/public_interface.py.
+    files: ['electron/**/*.js'],
+    ignores: ['electron/backend_client.js'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          name: 'fetch',
+          message: 'Call the backend through callRpc or checkReady in electron/backend_client.js.',
+        },
+        {
+          name: 'WebSocket',
+          message: 'Electron does not open backend sockets; add any backend call to electron/backend_client.js.',
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        { object: 'globalThis', property: 'fetch', message: 'Use electron/backend_client.js.' },
+        { object: 'global', property: 'fetch', message: 'Use electron/backend_client.js.' },
+        { object: 'globalThis', property: 'WebSocket', message: 'Use electron/backend_client.js.' },
+        { object: 'global', property: 'WebSocket', message: 'Use electron/backend_client.js.' },
+      ],
+    },
+  },
+  // Shared code in ui/common must not depend on a feature folder such as
+  // ui/astronomyManager. See commonFolderImportRules above.
+  ...commonFolderImportRules(),
 ]

@@ -9,7 +9,7 @@ import { PlotlyTrace, getVar, buildLayout } from '../../common/utils/plotTools';
 import '../styles/astronomyViewer.css';
 
 import { Spectrum } from '../../common/types/backendTypes';
-import { formatPeriod, isSignificantVerdict, selectLightCurveSeries } from '../utils/starDisplayFormat';
+import { formatPeriod, isSignificantVerdict, selectLightCurveSeries } from '../../common/utils/starDisplayFormat';
 
 interface Props {
     astronomyData: Spectrum | null;

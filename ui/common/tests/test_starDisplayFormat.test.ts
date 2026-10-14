@@ -1,5 +1,6 @@
 /**
- * @fileoverview Tests for the Astronomy Manager's text-formatting helpers.
+ * @fileoverview Tests for the shared star text-formatting helpers in
+ * ui/common/utils/starDisplayFormat.ts.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -16,7 +16,9 @@ Center column: `TargetViewerManager` — displays the processed image. The
   viewer shows as it is, without stretching it again. The file's values run
   from 0 (black) to 1 (white), and the viewer draws them on that fixed scale,
   so the sky stays as dark as the pipeline made it. A JPEG or PNG processed
-  image is shown the same way.
+  image is shown the same way. The viewer parts live in `ui/common/fitsViewer/`
+  because the Image Processing view uses them too. `FitsViewerManager` picks
+  `FitsRenderer` for FITS data and `imageViewer/ImageViewer` for a plain picture.
 
 Right column: `TargetDetailsManager` — shows metadata and actions (analyze,
   stack, download). Actions here generally call backend endpoints and may

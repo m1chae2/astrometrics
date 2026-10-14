@@ -20,7 +20,7 @@ import {
     shortFeatureName,
     splitEmissionLinesForTable,
     splitFeaturesForTable,
-} from '../utils/starDisplayFormat';
+} from '../../common/utils/starDisplayFormat';
 import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
 
 /**

@@ -90,6 +90,10 @@ export const TimeSeriesPlot = React.memo(({
             title: { text: 'SNR', font: { size: 9 } },
             overlaying: 'y',
             side: 'right',
+            // Plotly 4 lines up the ticks of an overlaid axis with the main
+            // axis by default ('sync'). Ask for 'auto' so the SNR axis keeps
+            // its own evenly spaced ticks, as it did before.
+            tickmode: 'auto',
             showgrid: false,
             tickfont: { size: 9 },
             visible: hasSecondaryYAxis

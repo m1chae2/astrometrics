@@ -88,7 +88,6 @@ export const PhotometryViewer: React.FC<Props> = ({
                     mode: 'markers',
                     type: 'scatter',
                     marker: { color: getVar('--plot-accent', '#2196f3'), size: 6 },
-                    line: { width: 0 },
                     name: `${yLabel} (Phase-Folded P=${formatPeriod(bestPeriodDays)})`,
                 },
             ];
@@ -101,7 +100,6 @@ export const PhotometryViewer: React.FC<Props> = ({
                 mode: 'markers',
                 type: 'scatter',
                 marker: { color: getVar('--plot-accent', '#2196f3'), size: 6 },
-                line: { width: 0 },
                 name: yLabel,
             },
         ];

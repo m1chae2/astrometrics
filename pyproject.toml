@@ -76,6 +76,13 @@ dependencies = [
 # and the backend import without it. build/linux/setup_venv.sh installs it.
 mcp = [
     "mcp>=2.3.0,<3.0.0", # 2.x API: snake_case fields (Tool.input_schema) and on_* handlers passed to Server() in mcp_servers/common/server.py
+    # mcp_servers/backend/mcp_http.py posts to the running backend with httpx.
+    # MCP SDK 1.x brought httpx in with it; 2.x moved to httpx2, so it must be
+    # declared here.
+    "httpx>=0.27",
+    # mcp_servers/common/server.py checks tool arguments against their schemas
+    # itself, because SDK 2.x no longer does.
+    "jsonschema>=4.20",
 ]
 dev = [
     "flake8>=7.0.0",

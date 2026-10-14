@@ -392,8 +392,8 @@ class SourceDetector:
             else:
                 leader = group[0]
                 merged = leader.copy()
-                all_x = [coords[i][0] for i in range(len(group))]
-                all_y = [coords[i][1] for i in range(len(group))]
+                all_x = [coords[i][0] for i in neighbor_indices]
+                all_y = [coords[i][1] for i in neighbor_indices]
                 all_flux = [s.get("flux", 0.0) for s in group]
 
                 if "x_centroid" in merged:

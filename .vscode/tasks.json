@@ -57,7 +57,7 @@
     {
       "label": "Start Electron (dev)",
       "type": "shell",
-      "command": "npx nodemon --watch main.js --watch preload.js --exec \"ELECTRON_RENDERER_URL=http://127.0.0.1:5173 SKIP_BACKEND=1 NODE_ENV=development npx electron .\"",
+      "command": "ELECTRON_RENDERER_URL=http://127.0.0.1:5173 SKIP_BACKEND=1 NODE_ENV=development node --watch-path=electron --watch-preserve-output node_modules/electron/cli.js .",
       "isBackground": true,
       "presentation": {
         "reveal": "always",

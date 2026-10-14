@@ -7,16 +7,19 @@
       "name": "Run Electron (dev)",
       "type": "pwa-node",
       "request": "launch",
-      "runtimeExecutable": "npx",
+      // Node's built-in watch mode restarts Electron when a file under electron/ changes.
+      "runtimeExecutable": "node",
       "runtimeArgs": [
-        "nodemon",
-        "--watch",
-        "main.js",
-        "--watch",
-        "preload.js",
-        "--exec",
-        "ELECTRON_RENDERER_URL=http://127.0.0.1:5173 SKIP_BACKEND=1 NODE_ENV=development npx electron ."
+        "--watch-path=electron",
+        "--watch-preserve-output"
       ],
+      "program": "${workspaceFolder}/node_modules/electron/cli.js",
+      "args": ["."],
+      "env": {
+        "ELECTRON_RENDERER_URL": "http://127.0.0.1:5173",
+        "SKIP_BACKEND": "1",
+        "NODE_ENV": "development"
+      },
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "preLaunchTask": "Start Vite (5173)",

@@ -176,9 +176,16 @@ wait_for_pid_exit() {
 # check_and_fix_sandbox: checks whether chrome-sandbox has root setuid
 # permissions. If non-interactive sudo succeeds, it fixes permissions;
 # otherwise it safely sets FORCE_NO_SANDBOX=1 without blocking or prompting.
+# Since Electron 42, `npm install` no longer downloads the Electron binary;
+# it is fetched on first launch. Fetch it here first, so chrome-sandbox
+# exists to be checked before that first launch.
 # ---------------------------------------------------------------------------
 check_and_fix_sandbox() {
   local cs_path="$ROOT_DIR/node_modules/electron/dist/chrome-sandbox"
+  if [ ! -f "$cs_path" ] && [ -f "$ROOT_DIR/node_modules/electron/install.js" ]; then
+    echo "Downloading the Electron binary..."
+    (cd "$ROOT_DIR" && node node_modules/electron/install.js) || true
+  fi
   [ ! -f "$cs_path" ] && return 0
   owner=$(stat -c '%u' "$cs_path" 2>/dev/null || echo "")
   mode=$(stat -c '%a' "$cs_path" 2>/dev/null || echo "")
@@ -262,9 +269,10 @@ start_vite_bg() {
 
 # ---------------------------------------------------------------------------
 # start_electron_bg: launches Electron against the active Vite URL.
-# If WATCH=1 is set, wraps execution with nodemon to restart on main/preload
-# changes. Otherwise launches Electron directly so that window closure
-# triggers immediate application shutdown.
+# If WATCH=1 is set, runs Electron under Node's built-in watch mode
+# (node --watch-path), which restarts it whenever a file under electron/
+# (main process, preload) changes. Otherwise launches Electron directly so
+# that window closure triggers immediate application shutdown.
 # ---------------------------------------------------------------------------
 start_electron_bg() {
     local extra_args="--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations"
@@ -276,8 +284,9 @@ start_electron_bg() {
     if command -v npx >/dev/null 2>&1; then
         set +e
         if [ "${WATCH:-0}" = "1" ]; then
-            echo "Starting Electron (nodemon watch) (logs: $LOG_DIR/electron.log)..."
-            npx nodemon --watch main.js --watch preload.js --delay 1 --exec "ELECTRON_RENDERER_URL=${VITE_URL} SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg}" >"$LOG_DIR/electron.log" 2>&1 &
+            echo "Starting Electron (watch mode) (logs: $LOG_DIR/electron.log)..."
+            # OPEN_FILE is passed as one argument, so a path with spaces stays whole.
+            ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development node --watch-path=electron --watch-preserve-output node_modules/electron/cli.js . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${OPEN_FILE:+"$OPEN_FILE"} >"$LOG_DIR/electron.log" 2>&1 &
         else
             echo "Starting Electron (logs: $LOG_DIR/electron.log)..."
             ELECTRON_RENDERER_URL="${VITE_URL}" SKIP_BACKEND=1 NODE_ENV=development npx electron . --remote-debugging-port=${ELECTRON_DEBUG_PORT} ${extra_args} ${file_arg} >"$LOG_DIR/electron.log" 2>&1 &

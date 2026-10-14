@@ -26,7 +26,7 @@ Install from the command line:
 code --install-extension .vscode/devflow/astrometrics-devflow.vsix
 ```
 
-After installing the extension, restart VS Code. The status-bar Start/Stop button will appear in your main VS Code window (left side). Clicking it will start the dev flow (Vite + Electron via nodemon). Use the same button to stop the running tasks.
+After installing the extension, restart VS Code. The status-bar Start/Stop button will appear in your main VS Code window (left side). Clicking it will start the dev flow (Vite + Electron, restarted by Node's built-in `--watch-path` mode when a file under `electron/` changes). Use the same button to stop the running tasks.
 
 Notes:
 - If you prefer not to install, you can run the extension in an Extension Development Host by pressing F5 from this workspace.

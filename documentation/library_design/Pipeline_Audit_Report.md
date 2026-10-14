@@ -4,161 +4,205 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 127
-- **Valid Active Code Symbols:** 127
+- **Implementation References Checked:** 171
+- **Resolved Code Symbols:** 171
 - **Broken / Stale Implementation Links:** 0
-- **Analysis Pipelines Audited:** 5
+- **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
 - **Documented Design Parameters (Table A1):** 41
 
 ---
 
 ## 2. Pipeline Structural Conformance
 
-Every scientific pipeline must adhere to the 4-phase lifecycle defined in `AnalysisPipeline` (`pipeline_base.py`): input validation, execution, quality validation, and serialization.
+The four analysis pipelines each have an adapter that implements the 4-phase lifecycle defined in `AnalysisPipeline` (`pipeline_base.py`): input validation, execution, quality validation, and serialization. Stacking has no such adapter. It runs through `stacking.stage.stack_frames`, which hands the pixel work to a `StackingDriver` (by default `SirilStackingDriver`, built on the Siril session class `ImageProcessing` in `drivers/siril_interface.py`). Its row checks that those entry points exist.
 
-| Pipeline Domain | Adapter Class | Lifecycle Complete? | Quality Summary Model | Fields |
+| Pipeline Domain | Adapter Class or Entry Point | Lifecycle Complete? | Quality Summary Model | Fields |
 | :--- | :--- | :--- | :--- | :--- |
 | Astrometry | `AstrometryPipelineAdapter` | PASSED | `AstrometryQualitySummary` | 16 attributes |
 | Photometry | `PhotometryPipelineAdapter` | PASSED | `PhotometryQualitySummary` | 16 attributes |
 | Spectroscopy | `SpectroscopyPipelineAdapter` | PASSED | `SpectroscopyQualitySummary` | 16 attributes |
 | Asteroid_Detection | `AsteroidDetectionPipelineAdapter` | PASSED | `AsteroidDetectionQualitySummary` | 16 attributes |
-| Stacking | `StackingDriver / SirilInterface` | PASSED | `StackQualitySummary` | 18 attributes |
+| Stacking | `stacking.stage.stack_frames → SirilStackingDriver` | N/A (no adapter; entry points found) | `StackQualitySummary` | 18 attributes |
 
 ---
 
 ## 3. Implementation Link Integrity Audit
 
-Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_Library_Architecture.md` against live Python code:
+Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_Library_Architecture.md` against live Python code. The Notes column says whether any other production module of the library imports the symbol's module. A symbol can resolve and still be code that no pipeline step calls.
 
 | Documented Symbol | Resolution Status | Notes |
 | :--- | :--- | :--- |
-| `astrometricslib.drivers.calibration_library.calibration_setting_key` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.calibration_library.temperature_slot_c` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.siril_interface.build_flat_master_commands` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.siril_interface.build_single_light_commands` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.siril_interface.calibration_count_flags` | RESOLVED | Active in codebase |
-| `astrometricslib.utilities.rejection_thresholds.rejection_bounds` | RESOLVED | Active in codebase |
-| `astrometricslib.utilities.rejection_thresholds.chauvenet_sigma` | RESOLVED | Active in codebase |
-| `astrometricslib.scripts.rejection_small_n_check` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.find_dominant_gain_subset` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.pre_processing.assess_input_quality.calibration_gates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis` | RESOLVED | Active in codebase |
-| `astrometricslib.models.gate_result.unchecked_gate` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver._solve_locally` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.aperture_flux_error_adu` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.observation_times.barycentric_julian_dates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.read_observation_time` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.build_ensemble_signal` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_frames` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_measurements_for_star` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.detrend_light_curves_airmass` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.assess_variability` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.fit_noise_model` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.reduced_chi_square` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.stetson_j` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.calibrate_thresholds` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.flag_variable_stars` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.test.test_variability_injection` | RESOLVED | Active in codebase |
-| `astrometricslib.scripts.measure_variability_cutoff` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.batch._match_and_merge_across_sessions` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.batch._merge_light_curves` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.identify_long_term_variable_candidates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.measure_sky` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SpectrumExtractor._sum_aperture_minus_sky` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.box_pixel_weights` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.traced_aperture_half_widths_px` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.smooth_aperture_sigmas` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline._derive_extraction_radius_px` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction.apply_quantum_efficiency_correction` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.apply_instrument_response` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.apply_extinction_correction` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.classify_spectral_type` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.rms_gap_to_second_best` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.rms_gap_to_next_class` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.is_rms_gap_ambiguous` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.pipeline._detect_sources_in_one_frame` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence` | RESOLVED | Active in codebase |
-| `astrometricslib.utilities.observing_night.observing_night_id` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._evaluate_reference_frame_test` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._fit_rate_linearity` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.detection._reverses_direction` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher.cross_match_candidates` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.asteroid_detection.run_gates.asteroid_run_gates` | RESOLVED | Active in codebase |
-| `astrometricslib.scripts.validate_asteroid_detection` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | RESOLVED | Active in codebase |
-| `astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_BRIGHTEST_FRACTION` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Active in codebase |
-| `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_STARS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.DEFAULT_MAXIMUM_COMPARISON_STARS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.EXCESS_SCATTER_THRESHOLD` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CONTAMINATION_SIGMA` | RESOLVED | Active in codebase |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_MINIMUM_SAMPLE_COUNT` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Active in codebase |
-| `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Active in codebase |
-| `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Active in codebase |
+| `astrometricslib.drivers.camera_profile_store.resolve_camera_profile` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.applied_camera_profile.record_camera_profile` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.provenance_recording.record_pipeline_run` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.provenance_store.ProvenanceStore` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.provenance_store.export_target_lineage_as_prov_xml` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.calibration_library.calibration_setting_key` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.calibration_library.temperature_slot_c` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.siril_interface.build_flat_master_commands` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.siril_interface.build_single_light_commands` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.siril_interface.calibration_count_flags` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.utilities.rejection_thresholds.rejection_bounds` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.utilities.rejection_thresholds.chauvenet_sigma` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.scripts.rejection_small_n_check` | RESOLVED | Resolves; a script run by hand |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.find_dominant_gain_subset` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.stack_request.choose_frames_to_stack` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.stack_request.run_stack` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.stage.stack_frames` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.stack_runner.run_stack` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.tasks.stack_frames_with_timeout` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.calibration_ingest.build_ingest_report` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.restore_quarantined_frames` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.starnet_stretch.blend_stars` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.preview_remake.remake_stack_preview` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.judge_batch` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.quarantine_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.gain_homogeneity_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.background_homogeneity.detect_background_split` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.background_homogeneity.background_homogeneity_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.utilities.stack_filter_floor.resolve_filter_wfwhm_with_floor` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.assess_input_quality.calibration_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.assess_output_quality.output_quality_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.utilities.registration_quality.evaluate_spectral_registration_quality` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.stack_quality.zero_fraction_threshold` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_group_linearity_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_groups_combined_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.exposure_group_report.raw_frame_clipping_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.gate_result.unchecked_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver._solve_locally` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.aperture_flux_error_adu` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.observation_times.barycentric_julian_dates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.read_observation_time` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.build_ensemble_signal` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_frames` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_measurements_for_star` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.detrend_light_curves_airmass` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection` | RESOLVED | Resolves; a test module |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.assess_variability` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.fit_noise_model` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.reduced_chi_square` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.stetson_j` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.calibrate_thresholds` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.flag_variable_stars` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.test.test_variability_injection` | RESOLVED | Resolves; a test module |
+| `astrometricslib.scripts.measure_variability_cutoff` | RESOLVED | Resolves; a script run by hand |
+| `astrometricslib.pipelines.photometry.batch._match_and_merge_across_sessions` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.batch._merge_light_curves` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.identify_long_term_variable_candidates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.batch.search_periods_and_save` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.lomb_scargle_search` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.box_search` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.verdict_from_false_alarm` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.correlation_block_length` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.period_checks.apply_verdict_checks` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.family_wise_correction.apply_family_wise_correction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.measure_sky` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SpectrumExtractor._sum_aperture_minus_sky` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.box_pixel_weights` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.traced_aperture_half_widths_px` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.smooth_aperture_sigmas` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline._derive_extraction_radius_px` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction.apply_quantum_efficiency_correction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.apply_instrument_response` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.apply_extinction_correction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline._apply_result_to_stellar_object` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction.correct_differential_refraction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.measure_wavelength_zero_point` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.processing.star_reddening.look_up_star_reddening` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.processing.interstellar_extinction.deredden_spectrum` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.compare_to_gaia_xp` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.classify_spectral_type` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.rms_gap_to_second_best` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.rms_gap_to_next_class` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.is_rms_gap_ambiguous` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.pipeline._detect_sources_in_one_frame` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.utilities.observing_night.observing_night_id` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._evaluate_reference_frame_test` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._fit_rate_linearity` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.detection._reverses_direction` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher.cross_match_candidates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate` | RESOLVED | Resolves; present and tested, not called by any pipeline step |
+| `astrometricslib.pipelines.asteroid_detection.rotation_period.find_rotation_period` | RESOLVED | Resolves; present and tested, not called by any pipeline step |
+| `astrometricslib.pipelines.asteroid_detection.run_gates.asteroid_run_gates` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.scripts.validate_asteroid_detection` | RESOLVED | Resolves; a script run by hand |
+| `astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_BRIGHTEST_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.DEFAULT_MAXIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.EXCESS_SCATTER_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CONTAMINATION_SIGMA` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_MINIMUM_SAMPLE_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Resolves; used by library code |
 
 ---
 

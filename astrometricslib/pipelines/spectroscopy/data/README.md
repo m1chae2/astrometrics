@@ -1,9 +1,25 @@
-# Reference spectra for spectral classification
+# Spectroscopy data files
 
-Ninety reference spectra that `spectral_classifier.py` uses to estimate a
-star's broad spectral type by comparing an observed spectrum's shape against
-these known ones: 34 main-sequence stars and 56 giants, bright giants and
-supergiants (see "Giant and supergiant references" below).
+This folder holds the data files the spectroscopy pipeline reads at run
+time:
+
+- Ninety reference spectra (`<type>.txt`) that `spectral_classifier.py` uses
+  to estimate a star's broad spectral type by comparing an observed
+  spectrum's shape against these known ones: 34 main-sequence stars and 56
+  giants, bright giants and supergiants (see "Giant and supergiant
+  references" below). The sections up to "Instrument response" describe
+  them.
+- `instrument_response_zwo_asi_533mm_pro.json`, the instrument's measured
+  tilt (see "Instrument response").
+- `line_spread_zwo_asi_533mm_pro.json`, the instrument's blur at each
+  wavelength (see "Line spread").
+- `cross_trail_blur_zwo_asi_533mm_pro.json`, the shape of a streak across
+  the dispersion (see "Cross-streak blur").
+- `atmospheric_extinction_kpno.txt`, the air's dimming at each wavelength
+  (see "Atmospheric extinction").
+
+The camera-specific JSON files are found by their `camera_name` field, so a
+second camera needs its own file of each kind.
 
 ## Source
 
@@ -206,6 +222,41 @@ A setup where extending the range would help, for example one that adds a
 blocking filter to remove second-order light, can request the full range:
 
     python -m astrometricslib.scripts.derive_instrument_response --maximum-wavelength 10000
+
+## Line spread
+
+`line_spread_zwo_asi_533mm_pro.json` records the resolution element (the
+full width at half maximum of the instrument's blur along the spectrum, in
+Angstroms) at a few wavelengths: `wavelength_angstrom` and
+`resolution_element_angstrom`. The blur grows from 42 A at 4200 A to 148 A
+at H-alpha (6563 A), and the file holds that value out to 9000 A. The
+`source` field says how it was measured: the Gaussian blur that makes each
+catalog-type reference match the observed line depths of three stars, with
+the trail width used below 4400 A. It describes one focus setup.
+
+`load_line_spread_profile` in `pre_processing/spectral_resolution.py` reads
+it. The classifier blurs its references with it, and the wavelength
+zero-point fit, the equivalent widths, the measured-line-spread comparison,
+the Gaia XP comparison and `derive_instrument_response.py` use the same
+profile. For a camera with no file, they use one width for the whole
+spectrum: the resolution element measured from the trail, or a fixed
+fallback.
+
+## Cross-streak blur
+
+`cross_trail_blur_zwo_asi_533mm_pro.json` records the shape of an isolated
+bright star's streak across the dispersion direction. It comes from 40 short
+Vega frames, aligned on the zero order and averaged (the `source` field gives
+the date, the airmass and the focuser state). It holds `offsets_px`, the
+distance from the streak's centre in pixels (-75 to +75), `band_edges_px`,
+eight bands along the streak from 340 to 680 pixels beyond the zero order
+(about 3800 to 7700 A), and one normalized profile per band in `profiles`.
+
+`load_cross_trail_blur` in `pre_processing/neighbor_wing_correction.py`
+reads it. The neighbour-wing correction fits this stored shape to a crowded
+star's streak to work out how much of a bright neighbour's light falls in
+its box. The instrument response section above also takes its reference
+airmass from this file's log.
 
 ## Atmospheric extinction
 

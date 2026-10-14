@@ -9,23 +9,29 @@ the [pre-processing README](../pre_processing/README.md)).
 
 ## The flow
 
+`analyze_spectrum` in `spectrum_analysis.py` runs steps 1 to 7 for every
+spectrum. The pipeline and `scripts/recompute_spectral_analysis.py` both
+call it, so the two cannot drift apart. Step 8 runs in `pipeline.py` after
+it.
+
 1. **Check for a real signal.** A star too faint for the frames produces a
    "spectrum" that is just noise sitting on zero. The pipeline checks for
    this case before running anything else, because a classification or
    feature test still produces an answer for pure noise. That answer does
    not mean anything.
-2. **Flag possible second-order contamination.** A grating sends a small
-   amount of a star's blue light to a second position further along the
-   sensor, where it lands on top of the star's own red light. For a hot
-   star this can account for a meaningful share of the reported red
-   brightness, so the pipeline flags the risk instead of ignoring it.
+2. **Look for emission lines.** The pipeline looks for bright emission
+   humps at the known wavelengths of named emission lines
+   (`emission_line_detector.py`). It does this first because the
+   classification must leave detected emission out of its comparison.
+   When the catalog says the target is extended (a nebula or a cluster),
+   the pipeline stops here: it reports the emission lines and gives no
+   stellar type and no absorption-feature results, because the light is a
+   whole object's, not one star's. An extended target made of emission
+   lines is labelled as glowing gas.
 3. **Look for named features.** The pipeline checks the spectrum at the
    known wavelengths of standard absorption features, such as the hydrogen
    series and the Ca II H&K blend, and asks at each one whether the dip is
    deep enough that noise alone is unlikely to have produced it.
-   - For a star, these are absorption dips.
-   - For a glowing gas cloud (a nebula), the pipeline runs the same check
-     in reverse and looks for bright emission humps instead of dips.
 4. **Remove interstellar reddening, when the catalog gives it.** Dust
    between us and a star makes the star look redder than it is. When the
    star has a Gaia DR3 id and Gaia gives a colour excess E(B-V) for it, the
@@ -51,6 +57,16 @@ the [pre-processing README](../pre_processing/README.md)).
    observed spectrum, because the catalog colour it is later checked
    against is also reddened. Post-processing checks this measurement
    against the star's catalog colour.
+8. **Flag possible second-order contamination.** A grating sends a small
+   amount of a star's blue light to a second position further along the
+   sensor, where it lands on top of the star's own red light. For a hot
+   star this can account for a meaningful share of the reported red
+   brightness, so the pipeline flags the risk instead of ignoring it
+   (`second_order_risk.py`). It computes this ratio after the analysis
+   above, and nothing in steps 1 to 7 reads it.
+
+`star_reddening.py` connects a star to the reddening driver for step 4: it
+reads the star's Gaia DR3 id and asks the driver for E(B-V).
 
 ## What this stage records about its input
 

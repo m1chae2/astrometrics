@@ -13,7 +13,10 @@ Astrometry, spectroscopy, photometry, and asteroid detection are four very
 different pieces of science, but each exposes the same four-step shape to
 whatever calls it: check the input, do the work, check the output, hand back
 a result (`process_input` -> `run` -> `validate_output` -> `to_result_dict`,
-see `pipeline_base.py`). This is imposed from the outside — the pipeline's
+see `pipeline_base.py`). Stacking, the fifth pipeline, has no
+`AnalysisPipeline` adapter: `ProcessingPipelines.stack` and the full-pipeline
+run call `stacking/stage.py`, which hands the pixel work to
+`stacking/stack_runner.py`. This is imposed from the outside — the pipeline's
 own algorithm class (`SpectroscopyPipeline`, `AstrometryPipeline`, ...) is
 never touched by it; a separate adapter class (`SpectroscopyPipelineAdapter`
 in `runner.py`, and so on) owns the algorithm instance and reshapes its calls
@@ -57,10 +60,13 @@ spectroscopy/
 ├── post_processing/
 │   # judging the result: does it agree with independent, external
 │   # knowledge (a catalog), and how much should it be trusted overall.
-└── utilities/
-    # standalone tools nothing in the per-run pipeline calls: deriving
-    # camera calibration constants ahead of time, checking stack
-    # alignment quality after the fact. Not a stage, not orchestration.
+├── utilities/
+│   # standalone tools nothing in the per-run pipeline calls: deriving
+│   # camera calibration constants ahead of time, checking stack
+│   # alignment quality after the fact. Not a stage, not orchestration.
+└── data/
+    # reference files the stages read: template spectra, the atmospheric
+    # extinction table, and per-camera calibration JSON files.
 ```
 
 A file goes at the root only if it genuinely spans stages or drives a batch —
@@ -101,14 +107,28 @@ The pattern instead:
 
 `stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingDriver` contract in `drivers/interfaces/stacking_driver.py`, so the pipeline does not depend on Siril's commands or files.
 
-## Applying this to astrometry and photometry
+## Astrometry and photometry
 
-Not done yet, and not a mechanical copy. `astrometry/` (10 top-level files:
-detection, plate-solving, catalog identification, session logic) is a
-plausible candidate for the same three-folder split. `photometry/` (4
-top-level files) is probably too small for a folder split to add clarity —
-it likely only needs the structured-object *pattern* (a real
-`input_quality`/`output_quality` model in `models/`, builder functions
-alongside the existing code) without new subfolders. Decide this per
-pipeline, after spectroscopy's version has had a chance to prove out, not
-by applying the split unconditionally.
+Both follow the three-folder split. `astrometry/` has `pre_processing/`
+(source detection, star width), `processing/` (catalog star identification,
+WCS refinement) and `post_processing/` (match quality, gates), with
+`pipeline.py` and `runner.py` at the root and a `utilities/` folder for
+catalog seeding. `photometry/` has `pre_processing/` (per-frame photometry,
+noise, observation times, input quality), `processing/` (comparison stars,
+variability indices, period search) and `post_processing/` (gates, output
+quality, variability labels), with `batch.py` and `runner.py` at the root.
+Each stage folder has its own README.
+
+## Shared code and batch runs
+
+- `shared/` holds code that more than one pipeline uses: frame grouping,
+  angle helpers, star records, target records, catalog queries, and the
+  `quality/` measurements. Its README describes each module.
+- `tasks.py` runs one target through the stages. `analyze_target` picks one
+  analysis pipeline by name from `PIPELINE_RUNNERS`, and `run_full_pipeline`
+  stacks, plate-solves, measures brightness and extracts spectra, saving the
+  target's record after each stage.
+- `target_batch.py` runs `run_full_pipeline` for many targets, each in its
+  own worker process, so one target that crashes does not stop the others.
+
+For exact behavior, read the code.

@@ -25,10 +25,16 @@ checkpoints" below).
 
 ## How this runs in practice
 
-- **One image at a time**: the pipeline matches a single spectral image
-  against a normal image of the same field to work out which star is which,
-  then extracts every star's spectrum and carries it through all three
-  stages. When the target has no normal image of its own, the pipeline names
+- **One image at a time**: the pipeline works out which star is which in a
+  single spectral image, then extracts every star's spectrum and carries it
+  through all three stages. It names the stars from the plate solution of
+  the target's solved normal (non-spectral) stack first
+  (`identify_spectral_stars_via_solution` in
+  `pre_processing/spectral_star_registration.py`). When there is no solved
+  stack, or the solution matches no star, it falls back to lining up the
+  star positions of the two images by their geometry
+  (`identify_spectral_stars_via_registration`). When the target has no
+  normal image of its own, the pipeline names
   only the star at the frame centre: it uses the target's name first, then
   the brightest catalog star near the mount's reported position (see
   `astrometry/processing/README.md`). A planet, the Moon or the Sun gets no
@@ -37,19 +43,38 @@ checkpoints" below).
   stages once per frame in the session, in parallel, using star positions
   it works out from one reference frame in that session.
 
-Either way, the pipeline saves each star's result to the shared star
-catalog as soon as its three stages finish, so a crash partway through a
-session does not lose the frames already processed.
+Either way, the pipeline saves the results to the shared star catalog once
+per frame, after every star in that frame has finished its three stages.
+`record_and_flag_spectroscopy_stars.py` does this save for both paths: it
+reconciles the frame's stars with the catalog, saves them, and lists the
+classifications that need a reviewer's attention. A crash partway through a
+session does not lose the frames already saved.
 
 ## Two things that sit outside the three stages
 
-- **Utilities** (`utilities/`) hold standalone tools that are not part of
-  processing a target's spectra: deriving a camera's physical calibration
-  ahead of time, and checking how well a stack of spectral images aligned.
-- The files at this folder's root (`pipeline.py`, `runner.py`, `batch.py`,
-  `frame_analysis.py`) drive a star or a session through the three stages
-  above. They implement the "how this runs in practice" section, not a
-  fourth stage.
+- **Utilities** (`utilities/`) hold tools that are not part of
+  processing a target's spectra:
+  - `calibration_tuner.py` derives a camera's physical calibration ahead of
+    time (see "Calibration tuning" below).
+  - `registration_quality.py` checks how well a stack of spectral images
+    aligned. It follows each frame's zero-order star (the star's undispersed
+    image) and flags frames where that star jumps or fades. The stacking
+    stage calls it after it stacks spectral frames
+    (`_check_spectral_registration_quality` in `pipelines/stacking/stage.py`),
+    and `api/processing.py` exposes its outlier test and thresholds.
+- The files at this folder's root drive a star or a session through the three
+  stages above. They implement the "how this runs in practice" section, not a
+  fourth stage:
+  - `pipeline.py` holds `SpectroscopyPipeline`, which extracts and analyzes
+    every star in one image.
+  - `runner.py` runs one image: it identifies the stars, runs the pipeline and
+    builds the run summary.
+  - `batch.py` runs a whole session in parallel, one worker per frame.
+  - `frame_analysis.py` (`analyze_frame_spectroscopy`) analyzes one frame for
+    a target outside a full run and merges its stars into the catalog.
+  - `record_and_flag_spectroscopy_stars.py` saves one frame's stars to the
+    catalog and flags shaky classifications. Both `runner.py` and `batch.py`
+    call it.
 - `pre_processing/spectral_frame_check.py` measures raw slitless-spectrum
   frames for `QualityDiagnostics.spectral_frame_check`, outside any run:
   the zero-order position, the streak's tilt and width, and the saturated
@@ -79,7 +104,7 @@ A checkpoint is a `StageQualityCheckpoint` (in `models/spectroscopy_quality.py`)
 It holds the stage name (`raw_frame`, `pre_processing`, `processing` or
 `post_processing`), a list of `StageQualityMetric` records, and a list of
 `flags`. A flag is a short label for a condition worth a reader's attention,
-such as `zero_order_saturated`.
+such as `zero_order_saturated`. Each checkpoint below lists its flags.
 
 Each `StageQualityMetric` has these fields:
 
@@ -135,6 +160,12 @@ refraction numbers, which come from the target's position and the time.
 | `dar_across_dispersion_px` | pixel | none | How much refraction widens the trail between 4200 A and 8000 A. |
 | `target_altitude_degrees` | degree | 20, higher is better. A design choice, not a measurement | The target's altitude at mid-exposure. Below the limit the pipeline refuses the refraction model and sets the flags `target_altitude_low` and `dar_not_computed`. |
 | `parallactic_to_dispersion_angle_degrees` | degree | none | The angle from the direction of the zenith to the direction of the dispersion on the sky. 0 means the red end of the spectrum points at the zenith. |
+
+Checkpoint 0 raises these flags: `zero_order_saturated` (the saturation metric
+fails), `trail_partly_off_image` (`valid_fraction` below 1),
+`sky_band_contaminated` (at least one sky reading dropped a band), and the
+three refraction flags `dar_large`, `dar_not_computed` and
+`target_altitude_low`.
 
 The four refraction metrics have no value, and the checkpoint carries the flag
 `dar_not_computed`, when the pipeline has no observatory site, WCS or
@@ -229,7 +260,7 @@ carries the `unclassified` flag.
 | `class_ambiguous` | flag | 0, lower is better | 1 when the gap to the next class is below `AMBIGUOUS_RMS_GAP`. |
 | `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
 | `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
-| `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`. |
+| `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`: 0 when the match is poor, the subtype is ambiguous or the type disagrees with the catalog. |
 | `gaia_xp_residual_rms_fraction` | fraction | 0.05, lower is better (designed) | The RMS of (observed / Gaia XP - 1) over 4200-8000 Å. See "Check against Gaia XP". Empty when the spectrum was not compared. |
 | `gaia_xp_slope_percent_per_1000_angstrom` | percent per 1000 Å | 3, lower is better (designed) | The absolute tilt of observed / Gaia XP. A tilt points at the instrument response or the airmass correction. |
 | `gaia_xp_wavelength_shift_angstrom` | Å | 11, lower is better (designed) | The absolute shift of the spectrum's features against Gaia XP's. 11 Å is one pixel of dispersion. A shift points at the wavelength scale. |
@@ -238,6 +269,14 @@ carries the `unclassified` flag.
 The Gaia XP metrics are filled for classified and unclassified spectra alike,
 because they test the calibration, not the classification. When a Gaia XP metric
 fails, the checkpoint carries the `gaia_xp_disagrees` flag.
+
+For a classified spectrum, checkpoint 3 also raises one flag for each failed
+verdict: `poor_match`, `subtype_ambiguous`, `class_ambiguous`,
+`catalog_disagrees` (the measured type is too far from the catalog type),
+`colour_disagrees` (the B-V colour disagrees with the catalog) and
+`not_trustworthy`. The `trustworthy` verdict is
+`not (poor_match or subtype_ambiguous or catalog_disagrees)`. Class
+ambiguity and colour disagreement raise their own flags but do not change it.
 
 ### Check against Gaia XP
 
@@ -483,7 +522,9 @@ model, the distance from the grating to the sensor. It reads a frame of a
 star with known absorption lines (Vega, for example) and works in these
 steps:
 
-1. Extract the star's spectrum with the normal pipeline and smooth it.
+1. Extract the star's spectrum with the normal pipeline and smooth it with a
+   5-sample running mean (`SpectrumCalibrator.apply_smoothing`). Only the
+   tuner smooths; the pipeline itself never smooths a calibrated spectrum.
 2. Find the dark valleys (absorption lines) in the smoothed spectrum:
    1. Divide the spectrum by a running median 101 samples wide (its
       continuum, the slowly changing brightness under the lines). A valley's

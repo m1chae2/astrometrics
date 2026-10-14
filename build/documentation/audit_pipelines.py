@@ -8,6 +8,7 @@ formal audit report.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import re
 import sys
@@ -30,12 +31,17 @@ class ImplementationReference:
         The resolved Python object or None if resolution failed.
     error_message : `str`
         The error message encountered during resolution, if any.
+    usage_note : `str`
+        Whether the library's own code uses the module that holds the
+        symbol (see `describe_symbol_usage`). Empty when the symbol did not
+        resolve.
     """
 
     dotted_path: str
     resolved: bool
     resolved_object: Any = None
     error_message: str = ""
+    usage_note: str = ""
 
 
 @dataclass
@@ -100,6 +106,113 @@ def resolve_dotted_symbol(dotted_path: str) -> tuple[bool, Any, str]:
     return False, None, f"Could not import or resolve '{dotted_path}'"
 
 
+def _is_test_file(path: Path) -> bool:
+    """Decide whether a library file is a test rather than production code.
+
+    Parameters
+    ----------
+    path : `Path`
+        A Python file.
+
+    Returns
+    -------
+    is_test : `bool`
+        `True` for a file in a ``test`` folder or named ``test_*.py``.
+    """
+    return "test" in path.parts or path.name.startswith("test_")
+
+
+def _imports_by_file(library_root: Path) -> dict[str, set[str]]:
+    """List the modules each library file imports, wherever the import is.
+
+    For ``from package import name`` both ``package`` and
+    ``package.name`` are listed, because ``name`` may be a module.
+    Relative imports are turned into full module names.
+
+    Parameters
+    ----------
+    library_root : `Path`
+        The ``astrometricslib`` package folder.
+
+    Returns
+    -------
+    imports : `dict` [`str`, `set` [`str`]]
+        Imported module names, keyed by the importing file's own dotted
+        module name.
+    """
+    imports: dict[str, set[str]] = {}
+    for path in sorted(library_root.rglob("*.py")):
+        relative = path.relative_to(library_root.parent).with_suffix("")
+        parts = relative.parts[:-1] if relative.name == "__init__" else relative.parts
+        package_parts = relative.parts[:-1]
+        modules: set[str] = set()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level == 0:
+                    base = node.module or ""
+                else:
+                    kept = package_parts[: len(package_parts) - (node.level - 1)]
+                    base = ".".join([*kept, *([node.module] if node.module else [])])
+                modules.add(base)
+                modules.update(f"{base}.{alias.name}" for alias in node.names)
+        imports[".".join(parts)] = modules
+    return imports
+
+
+def describe_symbol_usage(dotted_path: str, imports: dict[str, set[str]]) -> str:
+    """Say whether the library's own code uses the module holding a symbol.
+
+    A symbol can resolve and still be code that nothing calls. This looks
+    for the symbol's module among the imports of every other production
+    file in the library, and among the imports of the test files.
+
+    Parameters
+    ----------
+    dotted_path : `str`
+        The resolved symbol, such as
+        ``astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate``.
+    imports : `dict` [`str`, `set` [`str`]]
+        What `_imports_by_file` returned.
+
+    Returns
+    -------
+    note : `str`
+        A short note for the report's Notes column.
+    """
+    parts = dotted_path.split(".")
+    module = next(
+        (".".join(parts[:end]) for end in range(len(parts), 0, -1) if ".".join(parts[:end]) in imports),
+        None,
+    )
+    if module is None:
+        return "Resolves; module not found in the library"
+    if ".scripts." in f"{module}.":
+        return "Resolves; a script run by hand"
+    if ".test." in f"{module}." or module.rsplit(".", 1)[-1].startswith("test_"):
+        return "Resolves; a test module"
+
+    importers = [
+        name
+        for name, modules in imports.items()
+        if name != module and any(item == module or item.startswith(f"{module}.") for item in modules)
+    ]
+    test_importers = [name for name in importers if _is_test_file(Path(*name.split(".")))]
+    script_importers = [name for name in importers if ".scripts." in f"{name}."]
+    if any(name not in test_importers and name not in script_importers for name in importers):
+        return "Resolves; used by library code"
+    if script_importers:
+        return "Resolves; used only by scripts, not by any pipeline step"
+    if test_importers:
+        return "Resolves; present and tested, not called by any pipeline step"
+    return "Resolves; not imported anywhere else"
+
+
 def extract_implementation_references(
     architecture_doc_path: Path,
 ) -> list[ImplementationReference]:
@@ -119,6 +232,9 @@ def extract_implementation_references(
     pattern = re.compile(r"<!--\s*impl:\s*([\w\.]+)\s*-->")
     found = pattern.findall(text)
 
+    library_root = Path(__file__).resolve().parents[2] / "astrometricslib"
+    imports = _imports_by_file(library_root)
+
     results: list[ImplementationReference] = []
     seen = set()
     for raw_symbol in found:
@@ -133,6 +249,7 @@ def extract_implementation_references(
                 resolved=success,
                 resolved_object=obj,
                 error_message=err,
+                usage_note=describe_symbol_usage(symbol, imports) if success else "",
             )
         )
     return results
@@ -261,21 +378,33 @@ def audit_pipeline_structures() -> list[dict[str, Any]]:
                 "error": str(exc),
             })
 
+    # Stacking has no `AnalysisPipeline` adapter. It runs through
+    # `stacking.stage.stack_frames`, which hands the pixel work to a
+    # `StackingDriver` (by default `SirilStackingDriver`, built on the Siril
+    # session class `ImageProcessing` in `drivers/siril_interface.py`). Its
+    # row checks that those pieces exist instead of a four-phase lifecycle.
+    stacking_entry = "stacking.stage.stack_frames → SirilStackingDriver"
     try:
+        stage_mod = importlib.import_module("astrometricslib.pipelines.stacking.stage")
+        driver_mod = importlib.import_module("astrometricslib.drivers.siril_stacking_driver")
+        session_mod = importlib.import_module("astrometricslib.drivers.siril_interface")
+        entry_points_exist = all((
+            callable(getattr(stage_mod, "stack_frames", None)),
+            getattr(driver_mod, "SirilStackingDriver", None) is not None,
+            getattr(session_mod, "ImageProcessing", None) is not None,
+        ))
         qs_mod = importlib.import_module("astrometricslib.models.quality_summary")
-        stacking_cls = qs_mod.StackQualitySummary
-        stacking_fields = list(stacking_cls.model_fields.keys())
+        stacking_fields = list(qs_mod.StackQualitySummary.model_fields.keys())
     except ImportError, AttributeError:
+        entry_points_exist = False
         stacking_fields = []
 
     results.append({
         "name": "stacking",
-        "adapter_class": "StackingDriver / SirilInterface",
+        "adapter_class": stacking_entry,
         "summary_class": "StackQualitySummary",
-        "has_process_input": True,
-        "has_run": True,
-        "has_validate_output": True,
-        "has_to_result_dict": True,
+        "has_adapter": False,
+        "entry_points_exist": entry_points_exist,
         "quality_summary_fields": stacking_fields,
     })
 
@@ -312,28 +441,44 @@ def generate_markdown_report(
         "## 1. Executive Summary",
         "",
         f"- **Implementation References Checked:** {total_count}",
-        f"- **Valid Active Code Symbols:** {resolved_count}",
+        f"- **Resolved Code Symbols:** {resolved_count}",
         f"- **Broken / Stale Implementation Links:** {total_count - resolved_count}",
-        f"- **Analysis Pipelines Audited:** {len(pipeline_structs)}",
+        f"- **Analysis Pipelines Audited:** {sum(1 for p in pipeline_structs if p.get('has_adapter', True))}"
+        " (plus stacking, which has no adapter)",
         f"- **Documented Design Parameters (Table A1):** {len(table_a1_rows)}",
         "",
         "---",
         "",
         "## 2. Pipeline Structural Conformance",
         "",
-        "Every scientific pipeline must adhere to the 4-phase lifecycle "
+        "The four analysis pipelines each have an adapter that implements the 4-phase lifecycle "
         "defined in `AnalysisPipeline` (`pipeline_base.py`): input validation, "
-        "execution, quality validation, and serialization.",
+        "execution, quality validation, and serialization. Stacking has no such adapter. "
+        "It runs through `stacking.stage.stack_frames`, which hands the pixel work to a "
+        "`StackingDriver` (by default `SirilStackingDriver`, built on the Siril session class "
+        "`ImageProcessing` in `drivers/siril_interface.py`). Its row checks that those entry "
+        "points exist.",
         "",
-        "| Pipeline Domain | Adapter Class | Lifecycle Complete? | Quality Summary Model | Fields |",
+        "| Pipeline Domain | Adapter Class or Entry Point | Lifecycle Complete? "
+        "| Quality Summary Model | Fields |",
         "| :--- | :--- | :--- | :--- | :--- |",
     ]
 
     for p in pipeline_structs:
-        complete = (
-            p["has_process_input"] and p["has_run"] and p["has_validate_output"] and p["has_to_result_dict"]
-        )
-        status_str = "PASSED" if complete else "FAIL"
+        if not p.get("has_adapter", True):
+            status_str = (
+                "N/A (no adapter; entry points found)"
+                if p["entry_points_exist"]
+                else "FAIL (entry points missing)"
+            )
+        else:
+            complete = (
+                p["has_process_input"]
+                and p["has_run"]
+                and p["has_validate_output"]
+                and p["has_to_result_dict"]
+            )
+            status_str = "PASSED" if complete else "FAIL"
         field_count = len(p["quality_summary_fields"])
         lines.append(
             f"| {p['name'].title()} | `{p['adapter_class']}` | {status_str} "
@@ -347,7 +492,10 @@ def generate_markdown_report(
         "## 3. Implementation Link Integrity Audit",
         "",
         "Traceability audit of embedded `<!-- impl: ... -->` symbols from "
-        "`Astrometrics_Library_Architecture.md` against live Python code:",
+        "`Astrometrics_Library_Architecture.md` against live Python code. "
+        "The Notes column says whether any other production module of the library "
+        "imports the symbol's module. A symbol can resolve and still be code that no "
+        "pipeline step calls.",
         "",
         "| Documented Symbol | Resolution Status | Notes |",
         "| :--- | :--- | :--- |",
@@ -355,8 +503,8 @@ def generate_markdown_report(
 
     for r in references:
         status = "RESOLVED" if r.resolved else "BROKEN"
-        err = r.error_message if r.error_message else "Active in codebase"
-        lines.append(f"| `{r.dotted_path}` | {status} | {err} |")
+        note = r.error_message if not r.resolved else r.usage_note
+        lines.append(f"| `{r.dotted_path}` | {status} | {note} |")
 
     lines.extend([
         "",

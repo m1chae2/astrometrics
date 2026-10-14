@@ -8,12 +8,9 @@ never needs to change when the variability-flagging logic does.
 
 from astrometricslib.models.photometry_quality import InputQualityAssessment
 
-# A star missing from half or more of a session's frames has a light
-# curve that is mostly gaps, not signal. 0.5 matches the least-strict
-# fallback step `_select_reference_ensemble` already relaxes coverage to
-# (0.8 -> 0.5 -> 0.25 -> 0.0) before giving up on stricter requirements --
-# below even that most-relaxed accepted bar, coverage itself is the
-# dominant quality problem.
+# A star missing from more than half of a session's frames has a light
+# curve that is mostly gaps, not signal. Below this share, coverage itself
+# is the dominant quality problem. A design estimate, not a measured value.
 LOW_COVERAGE_THRESHOLD = 0.5
 
 # `locate_star_centroid` only searches a +/-40px box around a star's

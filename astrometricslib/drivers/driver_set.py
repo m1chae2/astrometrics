@@ -1,6 +1,6 @@
 """Purpose: Carry the drivers a caller chose down to the code that uses them.
 
-Description: The library talks to four outside programs or services: a plate
+Description: The library talks to five outside programs or services: a plate
 solver, a stacking program, the SIMBAD database, the Gaia DR3 XP spectra
 and a catalog of interstellar reddening values. Each has an abstract base
 class in `drivers/interfaces/`. `Drivers` holds the instance a caller wants

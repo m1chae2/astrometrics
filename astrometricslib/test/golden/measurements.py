@@ -103,8 +103,9 @@ CAMERA_NAME = "ZWO ASI533MM Pro"
 CLUSTER_CORE_ROW_COLUMN = (1493.0, 1485.0)
 """Where the cluster core sits in the spectroscopy frames, as (row, column).
 
-M 13 is a crowded cluster, so no single star is "the" zero-order star and the
-library's finder rejects the frames (that rejection is itself pinned). The
+M 13 is a crowded cluster, so no single star is "the" zero-order star. The
+library's point-source search finds nothing, and its extended-target search
+lands within a few pixels of the core (that result is itself pinned). The
 point used here is the brightest spot of the frame smoothed with a Gaussian
 of sigma 8 px, searched within 100 px of the frame centre. It is the same,
 to a pixel, on all five spectroscopy frames.

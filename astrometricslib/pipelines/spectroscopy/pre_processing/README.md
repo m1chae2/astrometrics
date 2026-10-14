@@ -8,22 +8,43 @@ turns out to be. The pipeline runs this stage the same way for every star.
 
 1. **Identify each star.** A spectral image spreads each star's light into
    a streak, so the pipeline cannot match its stars against the catalog the
-   normal way. Instead, it lines up a normal (non-spectral) image of the
-   same field, where astrometry has already identified the stars, against
-   the spectral image, then carries the names across.
+   normal way. It names them from a normal (non-spectral) image of the same
+   field, where astrometry has already identified the stars
+   (`spectral_star_registration.py`):
+   - First, it uses the plate solution (the fitted map from pixel to sky
+     position) of the target's solved normal stack. The solution places
+     every catalog star in the spectral image by its sky position, saturated
+     stars included (`identify_spectral_stars_via_solution`).
+   - When there is no solved stack, or the solution names no star, it falls
+     back to lining up the two images' star positions by their geometry and
+     carrying the names across (`identify_spectral_stars_via_registration`).
+   A session run instead projects the stars found once in the session's
+   reference frame through that frame's sky coordinate system.
 2. **Model the instrument.** The pipeline builds a digital model of the
    camera and grating to work out where each star's rainbow should fall on
    the sensor, using the physics of how a grating spreads light.
+   `optics_physics.py` holds the grating equation, and
+   `spectroscopy_instrument.py` applies it with the camera's configuration.
 3. **Extract each spectrum.** The pipeline measures the brightness along
    each star's streak. At each step along the streak it adds up the light in
    a box across the streak, centred on the streak's fitted centre line, and
    subtracts the sky background. See "Extraction box and sky" below.
+   `spectrum_extractor.py` does this. `_extractor_c.c` is an optional C
+   version of the per-step Gaussian fit, about 300 times faster than the
+   Python fallback, which the extractor uses when it is built.
 4. **Correct for crowding.** When two stars sit close together, a bright
    neighbour's streak can leak light into a faint star's reading. The
    pipeline measures that leakage and subtracts it back out.
+   `neighbor_trail_deblending.py` fits the blurred profile of each streak
+   across the dispersion and works out each neighbour's share of the box.
+   `neighbor_wing_correction.py` applies it to the pipeline's stars, using
+   the camera's stored cross-streak blur
+   (`data/cross_trail_blur_*.json`), and records what share it removed at
+   each wavelength.
 5. **Convert pixels to wavelengths.** The pipeline converts each pixel
    position along the streak into a wavelength, using the grating's known
-   physics, and smooths the result into a clean curve. It then drops the
+   physics (`spectrum_calibrator.py`). It does not smooth the spectrum. It
+   then drops the
    samples that landed off the image or below the camera's shortest
    wavelength. For every sample it keeps, it records `sample_distances_px`:
    the distance from the zero-order star (the undispersed image of the
@@ -47,26 +68,39 @@ turns out to be. The pipeline runs this stage the same way for every star.
 7. **Check the zero point.** The pipeline then checks the wavelength
    scale against known lines (see "Wavelength zero point" below).
 8. **Remove signals that are not the star.** The pipeline corrects for
-   four things that are not properties of the star itself:
-   - the camera sensor's uneven sensitivity to different colours,
+   three things that are not properties of the star itself:
+   - the camera sensor's uneven sensitivity to different colours
+     (`quantum_efficiency_correction.py`, with the curve from the camera
+     profile),
    - the whole instrument's own tilt (the grating, the telescope's
-     coatings, and every other optic between the star and the sensor),
+     coatings, and every other optic between the star and the sensor;
+     `instrument_response.py`),
    - the difference in how much the air dimmed the blue light compared with
      the red light, between this frame and the frame of the standard star
      that the instrument's tilt was fitted to (see "Airmass extinction"
-     below),
-   - the wavelengths where Earth's own atmosphere absorbs light, which
-     would otherwise look like a feature of the star.
+     below).
+
+   The wavelengths where Earth's own atmosphere absorbs light (the
+   telluric bands) stay in the stored spectrum. `atmospheric_mask.py` lists
+   those bands, and the classifier, the line indices and the Gaia XP
+   comparison leave them out of their comparisons, so an atmospheric dip
+   does not count as a feature of the star.
 9. **Record what the numbers mean.** The pipeline records whether a stored
    spectrum's brightness values are raw camera counts or an averaged,
    stacked scale, since the two scales are not directly comparable.
+   `intensity_scale.py` works out the factor that turns them into detector
+   counts per second, and leaves the values themselves unchanged.
 10. **Measure the input quality.** Before finding anything in the spectrum,
    the pipeline measures the raw data itself: how much the instrument
    blurred it, how saturated the brightest part was, how much of the
    intended spectrum actually landed on the image, and how strongly it
    stood out from noise. It attaches this measurement to the result so a
    reviewer can tell whether a later classification worked from strong data
-   or weak data.
+   or weak data. `spectral_resolution.py` estimates the blur (the
+   resolution element) from the trail width, or uses a fixed fallback when
+   it cannot. It also loads the stored line-spread profile
+   (`data/line_spread_*.json`) that the classifier blurs its references
+   with.
 
 ## Extraction box and sky
 
@@ -99,8 +133,9 @@ of the box, separated from it by a 6-pixel gap and 10 pixels wide. It does
 this at every step:
 
 1. It removes pixels more than 3 sigma from the strip's median (hot pixels,
-   cosmic rays, the edge of a passing streak), repeats until nothing more
-   drops out, and takes the median of what is left.
+   cosmic rays, the edge of a passing streak) and repeats until nothing more
+   drops out, for at most `SKY_CLIP_MAX_PASSES` (5) passes. It takes the
+   median of what is left.
 2. When the two strip medians agree to within noise, the sky is their mean.
 3. When they differ by more than 3 times the noise of their difference, the
    pipeline treats the brighter strip as contaminated (light from a
@@ -477,8 +512,11 @@ shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
   saturated fraction, the valid fraction, the median trail width and the sky
   contamination from the extraction, and re-measures nothing. It adds the
   frame's streak tilt and peak above the sky only when the caller supplies the
-  frame-level check result. It also carries the four refraction metrics and
-  three flags described below.
+  frame-level check result. It also carries the four refraction metrics
+  described below. Its flags are `zero_order_saturated` (the saturated
+  fraction fails its limit), `trail_partly_off_image` (the valid fraction is
+  below 1), `sky_band_contaminated` (some sky readings dropped a strip), and
+  the three refraction flags described below.
 - **Checkpoint 1, calibrated spectrum** (`input_quality_checkpoint` in
   `assess_input_quality.py`): it carries the five numbers of the input quality
   assessment above and the four wavelength zero-point metrics. Its

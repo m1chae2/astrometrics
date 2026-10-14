@@ -49,9 +49,9 @@ Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason
 1. Each anchor is found in a wide box (`locate_star_centroid`) and the median shift is taken. The wide box is easily pulled off by a neighbor or a galaxy, with errors of several pixels on some stars in M 81, but the median ignores them.
 2. Each anchor is re-centered in the small box (`refine_star_centroid`), starting where the alignment so far says it is. A shift, a rotation and a scale change are then fitted to those accurate positions by least squares, leaving out anchors more than three scaled median absolute deviations from the fit. The small box refuses a wrong star by itself, because it will not move more than 1.5 pixels from where the alignment so far puts the star. When that leaves fewer than 10 anchors (a rotation not yet fitted can put the far ones out of reach), the step is tried again with 4 pixels (`ALIGNMENT_ANCHOR_REACH_PX`). A wide reach is only the second try, because it lets blends in: on M 81 it moved the corner displacement from 0.9 to 1.3 to 1.6 pixels, where an independent fit on 800 bright stars gave about 0.6. The step is repeated three times, because a better alignment puts more anchors inside the box.
 
-Only the shift is used when fewer than 10 anchors are found, or when they sit within 7 percent of the corner distance of one another (a cluster core cannot tell a rotation from a shift). The 7 percent, the 4 pixels and the three repeats are design estimates.
+When fewer than 5 anchors are found (`MINIMUM_ANCHORS_FOR_SHIFT`), the code fits nothing and treats the picture as not shifted at all, rather than guess a shift from too few stars. Only the shift is used when fewer than 10 anchors are found, or when they sit within 7 percent of the corner distance of one another (a cluster core cannot tell a rotation from a shift). The 7 percent, the 4 pixels and the three repeats are design estimates.
 
-The reason for fitting a rotation is NGC 2403. On 2026-10-11 its field turned by 0.05 degrees over the night, which moved the corners 1.9 pixels. A shift alone left the far stars outside the 1.5 pixel reach of the centroid box, and 12 percent of the measurements fell back to a position that was off the star. With the rotation fitted, 4 percent fell back. M 13 gave 0.2 pixels at the corner and M 81 gave 0.9, mostly the same shift of scale in every picture (a difference between the two ways of measuring a position, not a motion of the field).
+The reason for fitting a rotation is NGC 2403. On 2026-10-11 its field turned by 0.05 degrees over the night, which moved the corners 1.9 pixels in the worst picture (1.8 pixels at the 95th percentile over the pictures). A shift alone left the far stars outside the 1.5 pixel reach of the centroid box, and 12 percent of the measurements fell back to a position that was off the star. With the rotation fitted, 4 percent fell back. M 13 gave 0.2 pixels at the corner and M 81 gave 0.9, mostly the same shift of scale in every picture (a difference between the two ways of measuring a position, not a motion of the field).
 
 ### Per-star centroid offsets
 
@@ -109,7 +109,7 @@ A picture is rejected, and left out of every light curve, when `DATE-OBS` is mis
 
 ## Judging the raw data
 
-Once a star's full set of measurements for a session is ready, this step also builds a report on how good those raw measurements were:
+Once a star's full set of measurements for a session is ready, `assess_input_quality.py` builds a report on how good those raw measurements were:
 
 - How many of the session's pictures actually gave a usable measurement for this star, out of how many were possible.
 - How often this star's measurement was saturated.
@@ -126,7 +126,9 @@ The report built at this step contains the following values, one set per star:
 - **Coverage fraction.** Frames measured divided by frames available. A low value means the star's brightness history has a lot of gaps.
 - **Saturated fraction.** The share of this star's measurements that were too bright to measure accurately.
 - **Maximum registration drift.** The largest picture-to-picture drift, in pixels, seen across every picture this star was measured in. A large value points to a tracking problem rather than a change in the star's own brightness.
-- **Low coverage flag.** Set when the coverage fraction is too low to trust.
-- **Tracking unstable flag.** Set when the maximum registration drift is large enough that tracking, not the star, is the likely explanation for anything unusual in the data.
+- **Low coverage flag.** Set when the coverage fraction is below 0.5 (`LOW_COVERAGE_THRESHOLD`), so the star was measured in fewer than half of the session's pictures.
+- **Tracking unstable flag.** Set when the maximum registration drift is above 20 pixels (`UNSTABLE_TRACKING_DRIFT_PX`), so tracking, not the star, is the likely explanation for anything unusual in the data. The wide centroid search box reaches 40 pixels from a star's expected position, so 20 pixels flags the problem well before stars start to fall outside it. The `registration_drift` gate uses the same limit.
 
-A scientist reviewing a star's results can use these values to tell a thin, gap-filled, or poorly tracked brightness history apart from a solid one, before trusting whatever the later steps conclude about that star.
+A scientist reviewing a star's results can use these values to tell a thin, gap-filled, or poorly tracked brightness history apart from a solid one, before trusting whatever the later steps conclude about that star. Both limits are design estimates.
+
+For exact behavior, read the code.

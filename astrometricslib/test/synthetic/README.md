@@ -27,7 +27,9 @@ from astrometricslib.test.synthetic import (
 - **Pixel integration.** A star or trail is a Gaussian. Each pixel holds the
   exact integral of the Gaussian over the pixel area, found with the error
   function. A pixel does not hold a point sample at its centre. The total
-  of a noise-free star therefore equals its `flux_adu`.
+  of a noise-free star therefore equals its `flux_adu`. Both generators take
+  this integral from `pixel_fractions` in `_pixel_math.py`, so they agree
+  on what a pixel holds. That module also holds `FWHM_TO_SIGMA`.
 - **Noise model.** The generator first builds the clean image plus the sky.
   It then multiplies by the gain (electrons per ADU), draws a Poisson number
   for each pixel (photon counting noise), and divides by the gain. Last, it
@@ -210,7 +212,10 @@ The variability field is tested through the photometry pipeline's own
 tests (`pipelines/photometry/test/test_variability_injection.py`).
 `test_synthetic_generators.py` checks flux conservation, sub-pixel centroid
 shifts, the drift rule, line depth and column, the extractor's tilt sign,
-and seed repeatability. Run it with:
+and seed repeatability. `test_wavelength_dependent_trace.py` checks the
+`trace_sigma_by_wavelength` option of the spectral generator: leaving it out
+changes nothing, a constant table gives the same image as the plain width,
+and the trail width measured at a column follows the table. Run both with:
 
 ```bash
 .venv/bin/pytest astrometricslib/test/synthetic -q

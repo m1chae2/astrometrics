@@ -82,8 +82,13 @@ classification's own match checks into one overall verdict:
   `spectral_classification` gate fails on this flag, not on the subtype one.
 - **Catalog agreement**: repeats the spectral type agreement above, so a
   reviewer can see it without also opening the catalog comparison.
-- **Trustworthy**: the overall verdict. False when any of the checks above
-  raises a concern, true when none of them do.
+- **Trustworthy** (`is_trustworthy`): the overall verdict,
+  `not (is_poor_match or is_ambiguous or catalog disagrees)`. It is false
+  when the match is poor, the subtype is ambiguous or the measured type
+  disagrees with the catalog type. Class-level ambiguity and a colour
+  disagreement do not change it. They raise their own flags at checkpoint 3
+  (`class_ambiguous` and `colour_disagrees`), and class-level ambiguity
+  fails the `spectral_classification` gate.
 
 A reviewer can read this verdict as the bottom line for a star's
 classification, and open the individual checks above only when the bottom
@@ -117,11 +122,29 @@ quality assessment into the final `StageQualityCheckpoint` (stage
 ambiguity, catalog-agreement, colour-agreement and trustworthy verdicts as 1 or
 0 values, plus the distance in subtype steps between the measured and the
 catalog type, judged against `DIFFERS_FROM_CATALOG_SUBTYPES`. For an
-unclassified spectrum every value is empty. `run_gates.py` also rolls the four
+unclassified spectrum every value is empty and the flag is `unclassified`.
+For a classified spectrum it raises one flag per failed verdict:
+`poor_match`, `subtype_ambiguous`, `class_ambiguous`, `catalog_disagrees`,
+`colour_disagrees` and `not_trustworthy`. It raises `gaia_xp_disagrees`
+when a Gaia XP metric fails, classified or not. `run_gates.py` also rolls the four
 checkpoints of all spectra up into the run summary's `stage_quality_summary`
 and builds the `processing_quality` gate. `wavelength_scale.py` reads the
 wavelength zero-point metrics from the pre-processing checkpoints and builds
 the run-level `wavelength_scale_summary` and the `wavelength_scale` gate. The
 [pipeline README](../README.md) describes all three.
+
+## Files
+
+- `compare_to_catalog.py`: compares the measured type and colour with the
+  catalog values (step 1).
+- `assess_output_quality.py`: builds the output quality assessment, the
+  checkpoint 3 record, and the list of classifications a reviewer should
+  look at.
+- `compare_to_gaia_xp.py`: compares the calibrated spectrum with Gaia XP
+  (step 4).
+- `run_gates.py`: builds the run-level gates and the
+  `stage_quality_summary`.
+- `wavelength_scale.py`: builds the run-level wavelength zero-point summary
+  and the `wavelength_scale` gate.
 
 For exact behavior, read the code.

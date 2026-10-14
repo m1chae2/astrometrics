@@ -79,8 +79,9 @@ MAXIMUM_DETECTABLE_AMPLITUDE_MAG = 0.3
 # whose flat-field error differs by a different amount in every frame, which
 # adds scatter no comparison star can remove. 1 pixel is two thirds of
 # `MAX_CENTROID_SHIFT_PX` (1.5 px), where a centroid is refused. Measured on
-# 2026-10-11: M 13 0.05 px (rotation) and 0.2 px (scale) over a night, M 81
-# 0.5 px, NGC 2403 1.8 px (a real rotation of 0.05 degrees over the night).
+# 2026-10-11 (95th percentile over the frames): M 13 0.05 px (rotation) and
+# 0.2 px (scale) over a night, M 81 0.9 px, NGC 2403 1.8 px (a real rotation
+# of 0.05 degrees over the night; 1.9 px in the worst frame).
 # A designed limit, not a measured false-alarm rate.
 MAXIMUM_CORNER_DISPLACEMENT_PX = 1.0
 

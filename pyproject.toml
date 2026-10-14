@@ -357,15 +357,10 @@ forbidden_modules = ["backend.container", "backend.routers"]
 name = "wayfindinglib uses only the public API of astrometricslib"
 type = "forbidden"
 source_modules = ["wayfindinglib"]
-forbidden_modules = [
-    "astrometricslib.api",
-    "astrometricslib.drivers",
-    "astrometricslib.foundation",
-    "astrometricslib.models",
-    "astrometricslib.pipelines",
-    "astrometricslib.utilities",
-    "astrometricslib.visualization",
-]
+# Every subpackage of astrometricslib, so a new one is covered too. The
+# public API is the names in `astrometricslib.__all__`, imported from the
+# package root.
+forbidden_modules = ["astrometricslib.*"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
@@ -380,22 +375,24 @@ modules = ["astrometricslib.scripts.*", "wayfindinglib.scripts.*"]
 name = "the MCP servers use only the public API of astrometricslib and wayfindinglib"
 type = "forbidden"
 source_modules = ["mcp_servers"]
-forbidden_modules = [
-    "astrometricslib.api",
-    "astrometricslib.drivers",
-    "astrometricslib.foundation",
-    "astrometricslib.models",
-    "astrometricslib.pipelines",
-    "astrometricslib.utilities",
-    "astrometricslib.visualization",
-    "wayfindinglib.analytics",
-    "wayfindinglib.data_access",
-    "wayfindinglib.drivers",
-    "wayfindinglib.models",
-    "wayfindinglib.session_analysis",
-    "wayfindinglib.tasks",
-    "wayfindinglib.watchdog",
+# Every subpackage of both libraries, so a new one is covered too.
+forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "the backend uses only the public API of astrometricslib and wayfindinglib"
+type = "forbidden"
+# The backend's own code. Its tests (`backend.tests`) may reach into the
+# libraries to set up a case.
+source_modules = [
+    "backend.container",
+    "backend.main_backend",
+    "backend.public_interface",
+    "backend.routers",
+    "backend.services",
+    "backend.startup",
 ]
+forbidden_modules = ["astrometricslib.*", "wayfindinglib.*"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

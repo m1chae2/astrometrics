@@ -21,8 +21,11 @@ well the mount tracked each one:
 - **Average position.** Right ascension (RA) is averaged on the circle,
   so solves at 359 and 1 degrees average to 0 degrees, not 180.
 
-It is a pure function of its input. `AlignmentTargetSession.from_attempts`
-is the public way to call it.
+It is a pure function of its input. Code outside the library calls it as
+`wayfindinglib.group_alignment_attempts`. The grouping lives here rather
+than on the `AlignmentTargetSession` model, because models are plain
+schemas with no behavior, and a model that called this module would form
+an import cycle with it.
 """
 
 from __future__ import annotations

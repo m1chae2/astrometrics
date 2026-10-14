@@ -4,7 +4,7 @@ import { fetchAstronomyCount } from '../../common/services/astronomyService';
 import { reportError } from '../../common/utils/reportError';
 import { SelectableItem } from '../../common/components/SelectableList';
 import { Spectrum } from '../../common/types/backendTypes';
-import { buildStarListSubtitle, formatStarListLabel } from '../utils/starDisplayFormat';
+import { buildStarListSubtitle, formatStarListLabel } from '../../common/utils/starDisplayFormat';
 
 const STARS_PER_PAGE = 100;
 

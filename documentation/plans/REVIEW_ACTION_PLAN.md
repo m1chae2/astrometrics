@@ -967,7 +967,7 @@ check (`vulture` or an RPC-handler reachability test) to the lint workflow.
 
 **Issue.** Beyond the allowed planetarium projection (plan section 5.3), the UI holds: Julian Date
 conversion in `PlanetariumDateTimeModal.tsx`; a copy of `SPECTRAL_CLASS_ALIASES` in
-`astronomyManager/utils/starDisplayFormat.ts`; phase folding in
+`common/utils/starDisplayFormat.ts`; phase folding in
 `astronomyManager/components/PhotometryViewer.tsx`; sexagesimal parsing in
 `planetariumDisplay/utils/coordinateUtils.ts` and `common/utils/coordinateValidation.ts`;
 limiting-magnitude math in `planetariumDisplay/layers/StarOverlay.ts`. Electron calls `/api/rpc`

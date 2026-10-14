@@ -107,6 +107,7 @@ from astrometricslib.models.wavelength_scale import (
 )
 from backend.public_interface import ROUTES, RPC_METHODS
 from backend.services.infrastructure.system_status_service import (
+    IndiStatus,
     IntrospectionEndpoint,
     IntrospectionMethod,
     ProcessingJobPulse,
@@ -144,7 +145,6 @@ from wayfindinglib.models.session.telemetry import (
     GuidingSpectrumAnalysis,
     GuidingSpectrumPeak,
     GuidingStats,
-    IndiStatus,
     LiveGuidingStatus,
     MountPointingModel,
     PolarAlignmentStatus,

@@ -163,12 +163,12 @@ from astrometricslib.models.target import (
 )
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.frame_scanning import classify_and_sort_fits_files
-from astrometricslib.pipelines.shared.interrupted_jobs import restore_interrupted_stacks
 from astrometricslib.pipelines.shared.target_sessions import derive_target_sessions
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     SATURATED_BLOB_MINIMUM_PIXELS,
     SATURATED_FRAME_FRACTION,
 )
+from astrometricslib.pipelines.stacking.post_processing.interrupted_jobs import restore_interrupted_stacks
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
 from astrometricslib.utilities.observing_night import observing_night_id

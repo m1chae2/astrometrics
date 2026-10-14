@@ -42,10 +42,13 @@ from astrometricslib.pipelines.astrometry.post_processing.assess_match_quality i
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_blob_width_from_data
 from astrometricslib.pipelines.astrometry.pre_processing.source_detection import SourceDetector
 from astrometricslib.pipelines.astrometry.processing.wcs_refinement import WcsRefinement, refine_wcs_with_gaia
-from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_from_names
+from astrometricslib.pipelines.shared.catalog_star_identity import (
+    CATALOG_MATCH_RADIUS_ARCSEC,
+    gaia_dr3_source_id_from_names,
+)
 from astrometricslib.pipelines.shared.simbad_object_types import read_simbad_object_types
-from astrometricslib.pipelines.shared.solar_system_targets import is_solar_system_target
 from astrometricslib.utilities.exceptions import DATA_ERRORS, ONLINE_QUERY_ERRORS, PlateSolveFailedError
+from astrometricslib.utilities.solar_system_targets import is_solar_system_target
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +130,6 @@ GAIA_CONSECUTIVE_FAILURE_LIMIT = 3
 # helping the solve succeed. This limit only applies to solving the image;
 # we still measure the brightness of every star later.
 MAXIMUM_PLATE_SOLVE_SOURCES = 100
-
-# The maximum allowed distance between two star positions to consider them
-# the same physical star. This 10-arcsecond limit is used when matching our
-# detected stars to the SIMBAD/Gaia catalogs, and when merging duplicates.
-CATALOG_MATCH_RADIUS_ARCSEC = 10.0
 
 # Catalog entries closer together than this cannot be told apart in one of our
 # frames, so the light comes from all of them and the brightest dominates. The

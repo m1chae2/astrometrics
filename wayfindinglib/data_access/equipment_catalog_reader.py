@@ -35,9 +35,25 @@ import logging
 from typing import Any
 
 from astrometricslib import AppConfiguration, ConfigurationError
+from wayfindinglib.models.equipment_and_site.driver_protocols import (
+    CAMERA_PROTOCOLS,
+    FILTER_WHEEL_PROTOCOLS,
+    FOCUSER_PROTOCOLS,
+    GUIDING_PROTOCOLS,
+    MOUNT_PROTOCOLS,
+)
 from wayfindinglib.models.equipment_and_site.equipment import Camera, EquipmentCatalog, GuideScope, Telescope
 
 logger = logging.getLogger(__name__)
+
+_VALID_PROTOCOLS_BY_FIELD = {
+    "mount_protocol": MOUNT_PROTOCOLS,
+    "focuser_protocol": FOCUSER_PROTOCOLS,
+    "filter_wheel_protocol": FILTER_WHEEL_PROTOCOLS,
+    "guiding_protocol": GUIDING_PROTOCOLS,
+    "protocol": CAMERA_PROTOCOLS,
+}
+"""Equipment field name -> the protocol names valid for it."""
 
 TELESCOPE_SECTION = "Observatory.Telescope"
 ACTIVE_TELESCOPE_KEY = "active_telescope"
@@ -328,24 +344,17 @@ def _validate_protocol(entity_kind: str, entity_name: str, field_name: str, prot
     """Raise a clear error if a configured protocol name has no driver.
 
     Checked at catalog-load time rather than left to fail the first
-    time a `*_driver` property happens to be accessed mid-session.
+    time a `*_driver` property happens to be accessed mid-session. The
+    valid names come from `driver_protocols`, a Foundation module, so
+    this check loads no hardware driver; a test keeps those names equal
+    to the driver registry's keys.
 
     Raises
     ------
     ConfigurationError
-        Raised if `protocol` is not a key in the corresponding
-        protocol-driver registry.
+        Raised if `protocol` is not a valid name for `field_name`.
     """
-    from wayfindinglib.drivers.interfaces import registry
-
-    registry_by_field = {
-        "mount_protocol": registry.build_mount_driver_registry,
-        "focuser_protocol": registry.build_focuser_driver_registry,
-        "filter_wheel_protocol": registry.build_filter_wheel_driver_registry,
-        "guiding_protocol": registry.build_guiding_driver_registry,
-        "protocol": registry.build_camera_driver_registry,
-    }
-    valid_protocols = set(registry_by_field[field_name]())
+    valid_protocols = _VALID_PROTOCOLS_BY_FIELD[field_name]
     if protocol not in valid_protocols:
         raise ConfigurationError(
             f"{entity_kind} '{entity_name}' has {field_name}='{protocol}', which has no "

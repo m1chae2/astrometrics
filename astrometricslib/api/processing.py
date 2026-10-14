@@ -47,13 +47,13 @@ from astrometricslib.pipelines.shared.api_arguments import (
     resolve_target,
     to_epoch_seconds,
 )
-from astrometricslib.pipelines.shared.calibration_ingest import (
+from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
+from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
+from astrometricslib.pipelines.stacking.calibration_ingest import (
     assess_flat_group,
     build_ingest_report,
     flatten_frame_index,
 )
-from astrometricslib.pipelines.shared.camera_passes import resolve_processing_frames
-from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
@@ -324,14 +324,20 @@ class QualityDiagnostics:
                     resolved, folder_path, selection, limit, trend_frames, trend_threshold_percent
                 )
             elif kind == "quarantine_preview":
-                report = frame_quality_report.quarantine_preview_report(resolved, limit)
+                from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
+                    quarantine_preview_report,
+                )
+
+                report = quarantine_preview_report(resolved, limit)
             else:
+                from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
+
                 report = frame_quality_report.input_quality_report(
                     resolved,
                     selection,
                     camera_id,
                     limit,
-                    "fwhm" in sections,
+                    measure_fwhm_from_data if "fwhm" in sections else None,
                     remeasure,
                     trend_frames,
                     trend_threshold_percent,
@@ -402,7 +408,9 @@ class QualityDiagnostics:
         report : `SpectralFrameCheckReport`
             One row per frame and the summary.
         """
-        from astrometricslib.pipelines.shared.quality.spectral_frame_check import check_spectral_frames
+        from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import (
+            check_spectral_frames,
+        )
 
         resolved = resolve_target(self._targets, target)
         selection = _make_selection(None, first_file, last_file, since, until, True)

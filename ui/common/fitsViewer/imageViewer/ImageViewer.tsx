@@ -1,5 +1,11 @@
+/**
+ * @file ImageViewer.tsx
+ * @description Shows a processed (non-FITS) picture of a target, or a loading
+ * or error message in its place. FitsViewerManager uses it when the image is a
+ * normal picture file rather than raw FITS data.
+ */
 import React, { useEffect, useState } from 'react';
-import { ImageContainer } from '../ImageContainer';
+import { ImageContainer } from './ImageContainer';
 import './imageViewer.css';
 
 /** Props for the ImageViewer component. */

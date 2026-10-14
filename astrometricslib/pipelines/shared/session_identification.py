@@ -17,18 +17,72 @@ import os
 import re
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from astropy.io import fits
 from astropy.wcs import WCS, FITSFixedWarning
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.drivers.image import AstrometricsImage
-from astrometricslib.drivers.interfaces.plate_solve_driver import read_fit_statistics
+from astrometricslib.drivers.interfaces.plate_solve_driver import PlateSolveDriver, read_fit_statistics
 from astrometricslib.models.stellar_source import StellarObject
-from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 
 logger = logging.getLogger(__name__)
+
+
+class SessionStarIdentifier(Protocol):
+    """The parts of a star identifier this module uses.
+
+    The caller passes in the astrometry pipeline's `StarIdentifier`. This
+    shared module names only the methods it calls, so it does not import
+    the astrometry pipeline, which sits in a layer above it.
+    """
+
+    solver: PlateSolveDriver
+
+    def detect_stars(self, data: Any, is_color_frame: bool = False) -> tuple[list[dict], list[dict]]:
+        """Find the stars in an image and drop duplicates.
+
+        Returns
+        -------
+        sources, unique_sources : `tuple` [`list` [`dict`], `list` [`dict`]]
+            Every detection, and the detections left after duplicates go.
+        """
+        ...
+
+    def _calculate_scale_hints(self, image_data_or_path: Any) -> tuple[float | None, float | None]:
+        """Guess the image's pixel scale range for the plate solver.
+
+        Returns
+        -------
+        scale_hints : `tuple` [`float` or `None`, `float` or `None`]
+            The smallest and largest likely scale, in arcseconds per
+            pixel.
+        """
+        ...
+
+    def _build_stellar_objects_from_sources(self, sources: list[dict]) -> list[StellarObject]:
+        """Make one `StellarObject` for each detected source.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            One star per source, with a temporary name.
+        """
+        ...
+
+    def identify_stars_with_wcs(
+        self, stellar_objects: list[StellarObject], wcs: WCS, width: int, height: int
+    ) -> list[StellarObject]:
+        """Name each star from the catalogs, using the image's sky map.
+
+        Returns
+        -------
+        stellar_objects : `list` [`StellarObject`]
+            The same stars, with catalog names where one matched.
+        """
+        ...
+
 
 # Minimum fraction of a reference frame's detected stars that must resolve
 # to a real catalog identity (SIMBAD or Gaia) before a *reused* header WCS
@@ -103,7 +157,7 @@ def write_wcs_to_fits_header(path: str, wcs: WCS) -> None:
 
 def resolve_frame_wcs(
     image: AstrometricsImage,
-    star_identifier: StarIdentifier,
+    star_identifier: SessionStarIdentifier,
     allow_solve: bool = True,
     center_ra: float | None = None,
     center_dec: float | None = None,
@@ -121,7 +175,7 @@ def resolve_frame_wcs(
     ----------
     image : `AstrometricsImage`
         The image to map.
-    star_identifier : `StarIdentifier`
+    star_identifier : `SessionStarIdentifier`
         The tool that does the heavy lifting to identify stars.
     allow_solve : `bool`, optional
         If False, just check the file and give up if the map isn't
@@ -162,7 +216,7 @@ def resolve_frame_wcs(
 
 def _resolve_frame_wcs_with_fit(
     image: AstrometricsImage,
-    star_identifier: StarIdentifier,
+    star_identifier: SessionStarIdentifier,
     allow_solve: bool = True,
     center_ra: float | None = None,
     center_dec: float | None = None,
@@ -180,7 +234,7 @@ def _resolve_frame_wcs_with_fit(
     ----------
     image : `AstrometricsImage`
         The image to map.
-    star_identifier : `StarIdentifier`
+    star_identifier : `SessionStarIdentifier`
         The tool that does the heavy lifting to identify stars.
     allow_solve : `bool`, optional
         If False, just check the file and give up if the map isn't
@@ -309,7 +363,7 @@ class SessionIdentificationResult:
 
 def identify_session_stars(
     reference_image: AstrometricsImage,
-    star_identifier: StarIdentifier,
+    star_identifier: SessionStarIdentifier,
     center_ra: float | None = None,
     center_dec: float | None = None,
     max_detections: int | None = None,
@@ -324,7 +378,7 @@ def identify_session_stars(
     ----------
     reference_image : `AstrometricsImage`
         The image being analyzed.
-    star_identifier : `StarIdentifier`
+    star_identifier : `SessionStarIdentifier`
         The tool that does the math and database lookups.
     center_ra, center_dec : `float`, optional
         Hints about where the telescope was pointing.
@@ -403,7 +457,7 @@ def identify_session_stars(
 
 
 def _detect_and_limit_session_sources(
-    reference_image: AstrometricsImage, star_identifier: StarIdentifier, max_detections: int | None
+    reference_image: AstrometricsImage, star_identifier: SessionStarIdentifier, max_detections: int | None
 ) -> tuple[Any, list[dict], int]:
     """Detect a reference frame's stars and cap how many will be identified.
 
@@ -453,7 +507,7 @@ def _detect_and_limit_session_sources(
 
 def _reverify_wcs_solution(
     reference_image: AstrometricsImage,
-    star_identifier: StarIdentifier,
+    star_identifier: SessionStarIdentifier,
     unique_sources: list[dict],
     center_ra: float | None,
     center_dec: float | None,
@@ -472,7 +526,7 @@ def _reverify_wcs_solution(
     ----------
     reference_image : `AstrometricsImage`
         The frame being identified.
-    star_identifier : `StarIdentifier`
+    star_identifier : `SessionStarIdentifier`
         The tool that solves and identifies.
     unique_sources : `list` [`dict`]
         The detected sources.

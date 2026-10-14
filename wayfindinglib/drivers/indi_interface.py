@@ -1161,8 +1161,7 @@ class IndiInterface(IndiClient):
         ra = equatorial_coords[0].value  # Hours
         dec = equatorial_coords[1].value  # Degrees
 
-        from wayfindinglib.astronomy.coordinate_transforms import current_epoch_to_icrs
-        from wayfindinglib.tasks.planning_tasks.coordinate_operations import compute_altaz
+        from wayfindinglib.astronomy.coordinate_transforms import compute_altaz, current_epoch_to_icrs
 
         # INDI gives RA in hours, in the current-epoch frame; compute_altaz
         # takes ICRS degrees.

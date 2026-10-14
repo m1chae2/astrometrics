@@ -29,6 +29,7 @@ from typing import Any, NamedTuple
 from astrometricslib.drivers.catalog_access import POSITION_ONLY_STAR_ID_PREFIX
 from astrometricslib.foundation.errors import AstrometricsError
 from astrometricslib.pipelines.shared.catalog_star_identity import (
+    CATALOG_MATCH_RADIUS_ARCSEC,
     SAME_STAR_POSITION_TOLERANCE_ARCSEC,
     catalog_family,
     name_preference_rank,
@@ -172,10 +173,6 @@ def _reconcile_position_only_star_ids(
     """
     from astropy import units as u
     from astropy.coordinates import SkyCoord
-
-    from astrometricslib.pipelines.astrometry.processing.star_identifier import (
-        CATALOG_MATCH_RADIUS_ARCSEC,
-    )
 
     # Every real `FIELD_J...` star has both set to real floats at the
     # same place its id is minted (star_identifier.py's Step 3); this

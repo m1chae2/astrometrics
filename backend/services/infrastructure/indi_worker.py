@@ -90,11 +90,11 @@ def _worker_main(testing: bool, command_queue: Queue, result_queue: Queue, paren
 
         config = get_configuration()
         if testing:
-            from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
+            from wayfindinglib import SimulatorIndiInterface
 
             session = SimulatorIndiInterface(config=config)
         else:
-            from wayfindinglib.drivers.indi_interface import IndiInterface
+            from wayfindinglib import IndiInterface
 
             session = IndiInterface(config=config)
     except Exception:

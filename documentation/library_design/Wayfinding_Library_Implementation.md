@@ -16,7 +16,7 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Capability delegation and the monitoring/controller mode toggle:** `capability_promotion.py` (`apply_promotion_decision` per capability, `set_all_capabilities` for the bulk "monitoring mode"/"controller mode" convenience), reading/writing through `data_access/delegation_policy_reader.py`
 - **Enclosure and cooling control:** `enclosure_control.py` (pure interlock checks) and `cooling_control.py`; the roof/dome shutter's own INDI commands live in `wayfindinglib/drivers/indi/enclosure_controller.py`
 - **Remote file transfer and guiding/pointing log ingestion:** the pluggable `wayfindinglib/drivers/interfaces/remote_transfer_driver.py` (first implemented by `wayfindinglib/drivers/stellarmate_interface.py`) retrieves files from a telescope host; `guiding_log_ingestion.py` and `pointing_log_ingestion.py` chain the download/parse/analyze/persist and analyze/expose steps. `remote_transfer_tasks.py` copies frames and calibration folders; after each copy, `frame_pointing.py` records the pointing error of every new plate-solved frame as an alignment attempt. `control.remote.list(kind, folder_name=...)` exposes the one folder-name matcher (`matching_remote_folder`)
-- **Live guiding:** the `GuidingDriver` interface (`wayfindinglib/drivers/interfaces/guiding_driver.py`), chosen by `Telescope.guiding_protocol` through `build_guiding_driver_registry`: `phd2` (`drivers/phd2/guiding_driver.py`), `internal` (`drivers/indi/guiding_driver.py`, pulse estimates) and `simulator` (`drivers/simulators/guiding_simulator.py`). Pulse arithmetic and RMS are in `wayfindinglib/analytics/guide_pulses.py`. `tasks/control_tasks/live_guiding.py` keeps the `LiveGuidingMonitor`, polls the driver for `control.guiding.status(include=["live"])`, and runs `control.guiding.run_loop`
+- **Live guiding:** the `GuidingDriver` interface (`wayfindinglib/drivers/interfaces/guiding_driver.py`), chosen by `Telescope.guiding_protocol` through `build_guiding_driver_registry` (`wayfindinglib/drivers/interfaces/registry.py`): `phd2` (`drivers/phd2/guiding_driver.py`), `internal` (`drivers/indi/guiding_driver.py`, pulse estimates) and `simulator` (`drivers/simulators/guiding_simulator.py`). Pulse arithmetic and RMS are in `wayfindinglib/analytics/guide_pulses.py`. `tasks/control_tasks/live_guiding.py` keeps the `LiveGuidingMonitor`, polls the driver for `control.guiding.status(include=["live"])`, and runs `control.guiding.run_loop`
 - **Capture runs and centering:** `tasks/control_tasks/imaging_capture.py` (`control.imaging.capture_image` with `count`, `filter_name`, `dither`) and `tasks/control_tasks/centering.py` (`control.mount.slew(center=True)`: capture, plate solve with `astrometrics.stars.plate_solve`, `compute_pointing_correction`, sync, re-slew; `control.mount.abort_motion` stops it). `tasks/control_tasks/alignment_history.py` answers `control.history.query(kind="alignment")`, with a circular mean of right ascension per night
 - **Imaging queue:** `tasks/execution_tasks/imaging_queue.py` builds the `SessionRunnerDependencies` of an imaging queue from `control`, and `tasks/execution_tasks/queue_runner.py` repeats `advance_session` until the queue is done (`ObservationExecution.advance_session(session, stop=...)`). The application's sequencer queue is one observing session edited with `ObservationPlanning.edit_queue`
 - **Alignment and guiding records:** `wayfindinglib/drivers/control_record_store.py` (`ControlRecordStore`) keeps each night's plate-solve syncs (`alignment_attempts`), guiding samples (`guiding_samples`) and polar alignment runs (`polar_alignments`) in SQL tables of `wayfinding.db`. `DiskButler.control_records` gives the store, and `control` reads it as `ControlContext.records`. `control.history.query(kind="alignment")` summarizes the nights from it. `build/migrations/move_guiding_alignment_records.py` moves records an older version kept in `astrometrics_log.db`.
@@ -82,10 +82,43 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 - **Archive-informed advising:** `calibration_advisory_tasks.py` and `quality_advisory_tasks.py`
 - **Visibility report:** `visibility_report.py` answers `ObservationPlanning.get_visibility`, at one moment for any number of objects or over a night for up to 30, using the hour-angle and rise/set helpers in `visibility_operations.py`.
 - **Sequence plans:** `planning_operations.py` builds the plan the app's sequencer queue runs (`create_plan(kind="sequence")`).
-- **Sky engine:** `sky_engine.py` holds `SkyEngine`, which `ObservationPlanning` builds once and passes to the planning sums: the site (read through `data_access/site_profile_reader.py`), the meridian-flip delay, the library handle, the catalog drivers and the constellation lines. `coordinate_operations.py`, `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` hold those sums (name lookup, catalogs, coordinate sums).
+- **Sky engine:** `sky_engine.py` holds `SkyEngine`, which `ObservationPlanning` builds once and passes to the planning sums: the site (read through `data_access/site_profile_reader.py`), the meridian-flip delay, the library handle, the catalog drivers and the constellation lines. `coordinate_operations.py` (local sidereal time), `resolution_operations.py`, `visibility_operations.py`, `catalog_operations.py`, and `constellation_operations.py` hold those sums (name lookup, catalogs, coordinate sums). The RA/Dec to Alt/Az transform, `compute_altaz`, is in the Foundation (`wayfindinglib/astronomy/coordinate_transforms.py`), which both the planning code and the INDI drivers import.
 
 ### Storage
 
 *Located in:* `wayfindinglib/drivers/butler.py`
 
 - **Records:** `DiskButler` is the one storage path for wayfindinglib's records. It implements astrometricslib's shared `AbstractButler` and stores each dataset type (observation sessions, packages, site profiles, calibrations, policies and the rest, listed in `_DATASET_TYPES`) as its own table in `wayfinding.db`, through astrometricslib's generic SQLite `Butler`. `DiskButler.library_path` is the folder that holds the database and the files kept next to it, such as downloaded Ekos logs.
+
+## Layering and Structural Checks
+
+The architecture paper's Figure 1 maps onto these folders. Every folder below is a regular Python package (it has an `__init__.py`), because the import linter cannot see a folder without one.
+
+| Layer | Folders and modules |
+|---|---|
+| Foundation | `models/`, `astronomy/`, `data_access/`, `analytics/`, `drivers/butler.py`, `drivers/control_record_store.py`, `drivers/catalog/` |
+| Control | `tasks/control_tasks/`, `session_analysis/`, `watchdog/`, `api/control/`, and the hardware drivers: `drivers/indi/`, `drivers/indi_interface.py`, `drivers/interfaces/`, `drivers/phd2/`, `drivers/simulators/`, `drivers/ekos/`, `drivers/stellarmate_interface.py` |
+| Planning | `tasks/planning_tasks/`, `api/planning.py` |
+| Execution | `tasks/execution_tasks/`, `api/execution.py` |
+| Composition root | `wayfindinglib/__init__.py` (`Wayfinder` and the public exports), `api/__init__.py` |
+| Scripts | `scripts/` |
+
+Imports inside a `TYPE_CHECKING` block do not count: they never run.
+
+Three shared definitions sit in the Foundation so that a lower layer never has to import a higher one to use them:
+
+- **Protocol names.** `wayfindinglib/models/equipment_and_site/driver_protocols.py` lists the valid protocol name for each device type (`MOUNT_PROTOCOLS`, `GUIDING_PROTOCOLS` and the rest). `data_access/equipment_catalog_reader.py` checks the configured names against these sets, so reading the equipment catalog loads no driver. `drivers/interfaces/registry.py` keys its driver classes by the same names, and `test_protocol_names_match_the_driver_registry_keys` (`drivers/interfaces/test/test_driver_interfaces.py`) keeps the two equal.
+- **Sensor readings.** `SensorReadings`, the mapping the safety monitor evaluates, is defined in `wayfindinglib/models/policy/safety.py`. The weather drivers and `tasks/control_tasks/safety_monitor.py` import it from there; `drivers/interfaces/weather_driver.py` re-exports it as part of its interface.
+- **Alignment grouping.** `group_alignment_attempts` (`wayfindinglib/analytics/alignment_sessions.py`) groups plate solves into `AlignmentTargetSession` records. The package root exports it; the model itself carries no behavior.
+
+The checks, and where each lives:
+
+| Check | Static (import-linter contract in `pyproject.toml`) | Runtime (fresh-process test) |
+|---|---|---|
+| Layering conformance | "wayfindinglib Foundation imports nothing above it", "wayfindinglib Control never imports Planning", "wayfindinglib Planning never imports Control", "wayfindinglib models are plain schemas that import no Foundation behavior" | — |
+| Execution is optional | "wayfindinglib Execution is imported only by the composition root" | `test_control_and_planning_work_without_loading_execution` in `wayfindinglib/test/test_layer_independence.py` |
+| Safety runs without Execution | — | `test_safety_runs_without_loading_execution` in `wayfindinglib/test/test_layer_independence.py` |
+| Planning is hardware-free | "wayfindinglib Planning is hardware-free, even indirectly" | `test_planning_module_tree_imports_no_device_driver` in `wayfindinglib/api/test/test_planning.py` |
+| Cross-library dependency | "astrometricslib never imports wayfindinglib or backend" | — |
+
+The runtime tests share `wayfindinglib/test/import_probe.py`, which runs a code snippet in a new interpreter with an isolated configuration (one telescope, one camera) and returns the `wayfindinglib` modules in its `sys.modules`. Run the static checks with `.venv/bin/lint-imports` from the repository root; the contracts set `exclude_type_checking_imports = true`.

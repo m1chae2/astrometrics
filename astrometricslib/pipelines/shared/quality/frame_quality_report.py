@@ -1,33 +1,35 @@
 """Purpose: Build the reports that `QualityDiagnostics.frame_quality` returns.
 
 Description: `frame_quality` offers three checks of raw light frames, chosen
-with ``kind``. The API method only checks its arguments; the work for each
-kind is here:
+with ``kind``. The API method only checks its arguments; the work for two of
+the kinds is here:
 
 * `raw_check_report` runs the batch check (`raw_frame_check`) on a folder or
   on a target's frames and flags the frames that stand out.
 * `input_quality_report` measures the sky level, the saturated pixels and,
   if asked, the star width of a target's newest frames. It measures a copy of
   the target, so the saved catalog never changes.
-* `quarantine_preview_report` runs the check the stacker uses to set frames
-  aside, without moving any.
 
-Each report also finds slow drifts across the newest frames (`find_trends`).
-None of them saves anything.
+The third kind, ``quarantine_preview``, runs the check the stacker uses to
+set frames aside, so its report lives with that check, in
+`pipelines/stacking/pre_processing/frame_quarantine.py`.
+
+Each report here also finds slow drifts across the newest frames
+(`find_trends`). None of them saves anything.
 """
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.models.excluded_frames import QuarantinePreview
 from astrometricslib.models.quality_reports import InputQualityReport, RawFrameCheckReport
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics
 from astrometricslib.pipelines.shared.quality.frame_trends import find_trends
 
-__all__ = ["input_quality_report", "quarantine_preview_report", "raw_check_report"]
+__all__ = ["input_quality_report", "raw_check_report"]
 
 INPUT_QUALITY_METRICS = ("background_level", "saturated_pixel_fraction", "measured_fwhm_px")
 """The numbers `input_quality_report` gives for each frame."""
@@ -120,7 +122,7 @@ def input_quality_report(
     selection: frame_selection.FrameSelection,
     camera_id: str | None,
     limit: int,
-    include_fwhm: bool,
+    measure_fwhm: Callable[[Any], float | None] | None,
     remeasure: bool,
     trend_frames: int,
     trend_threshold_percent: float,
@@ -137,8 +139,10 @@ def input_quality_report(
         Only frames whose camera name contains this text, ignoring case.
     limit : `int`
         How many frames to measure.
-    include_fwhm : `bool`
-        Also measure the star width (about 50 times slower per frame).
+    measure_fwhm : `Callable` or `None`
+        A function that measures the star width from a frame's pixels, such
+        as the astrometry pipeline's `measure_fwhm_from_data`, or `None` to
+        skip it. Measuring it is about 50 times slower per frame.
     remeasure : `bool`
         Measure again frames that already have stored values.
     trend_frames : `int`
@@ -162,7 +166,7 @@ def input_quality_report(
     chosen = _newest_or_first(chosen, selection, limit)
     working = target.model_copy(deep=True)
     working.frames = [frame.model_copy(deep=True) for frame in chosen]
-    counts = frame_statistics.measure_frame_input_quality(working, include_fwhm, remeasure, None)
+    counts = frame_statistics.measure_frame_input_quality(working, measure_fwhm, remeasure, None)
     rows = [
         {
             "file": os.path.basename(frame.path),
@@ -202,45 +206,4 @@ def input_quality_report(
         ),
         frames=rows,
         note="Nothing was saved. Frames that were already measured keep their stored values.",
-    )
-
-
-def quarantine_preview_report(target: Target, limit: int) -> QuarantinePreview:
-    """Show which frames the stacker would set aside, without moving any.
-
-    It measures every imaging light frame of the target (about a second
-    each), so a large target takes a while.
-
-    Parameters
-    ----------
-    target : `Target`
-        The target to check.
-    limit : `int`
-        Most frames to list. ``would_move_total`` gives the full count.
-
-    Returns
-    -------
-    preview : `QuarantinePreview`
-        The frames the check would move, with the measurements behind each,
-        the batches it would leave alone, and any frame it could not read.
-    """
-    from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
-        decision_to_set_aside_frame,
-        find_frames_to_quarantine,
-    )
-
-    lights = [
-        frame
-        for frame in target.frames
-        if str(frame.role).upper() == "LIGHT" and not frame_is_spectral(frame)
-    ]
-    found = find_frames_to_quarantine(lights)
-    would_move = [decision_to_set_aside_frame(decision) for decision in found.moved]
-    return QuarantinePreview(
-        target_id=target.id,
-        frames_checked=len(lights),
-        would_move_total=len(would_move),
-        would_move=would_move[:limit],
-        notes=found.notes,
-        unreadable=found.unreadable,
     )

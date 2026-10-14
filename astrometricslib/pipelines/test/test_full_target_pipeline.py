@@ -11,7 +11,6 @@ runs exactly once.
 """
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -25,9 +24,11 @@ class _StubCatalogAccess:
     """Fake catalog_access that just remembers its last saved record."""
 
     def __init__(self) -> None:
+        """Start with no saved records."""
         self.saved: list[tuple[Any, str, dict]] = []
 
     def put(self, record: Any, record_type: str, options: dict) -> None:
+        """Remember one saved record."""
         self.saved.append((record, record_type, options))
 
 
@@ -35,12 +36,27 @@ class _StubConfig:
     """Fake config exposing only what the pipeline's stages read from it."""
 
     def __init__(self, library_path: Path) -> None:
+        """Keep the library folder the stages may ask for."""
         self._library_path = library_path
 
     def get_max_concurrent_jobs(self) -> int:
+        """Allow one analysis job at a time.
+
+        Returns
+        -------
+        count : `int`
+            Always 1.
+        """
         return 1
 
     def get_library_path(self) -> Path:
+        """Give the library folder.
+
+        Returns
+        -------
+        library_path : `pathlib.Path`
+            The folder given when the stub was made.
+        """
         return self._library_path
 
 
@@ -67,12 +83,19 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
     )
 
     def _fake_stack_frames(
-        target,  # ruff: ignore[missing-type-function-argument]
-        log_file=None,  # ruff: ignore[missing-type-function-argument]
-        frames_to_stack=None,  # ruff: ignore[missing-type-function-argument]
-        filter_type=None,  # ruff: ignore[missing-type-function-argument]
+        target: Target,
+        log_file: str | None = None,
+        frames_to_stack: list[FrameRecord] | None = None,
+        filter_type: Any = None,
         **kwargs: Any,
     ) -> str:
+        """Pretend to stack the frames and record the stack's path.
+
+        Returns
+        -------
+        stacked_path : `str`
+            The path of the stand-in stack file.
+        """
         target.stacking.stacked_image = stacked_path
         return stacked_path
 
@@ -81,14 +104,26 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
     pipeline_type_calls: list[str] = []
 
     def _fake_run_analysis_pipeline_match(
-        target,  # ruff: ignore[missing-type-function-argument]
-        frames,  # ruff: ignore[missing-type-function-argument]
-        pipeline_type,  # ruff: ignore[missing-type-function-argument]
-        filter_type,  # ruff: ignore[missing-type-function-argument]
-        catalog_access,  # ruff: ignore[missing-type-function-argument]
-        path,  # ruff: ignore[missing-type-function-argument]
+        target: Target,
+        frames: list[FrameRecord],
+        pipeline_type: str,
+        filter_type: Any,
+        catalog_access: Any,
+        path: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        """Return a canned result for each analysis stage.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            A stand-in result for astrometry or photometry.
+
+        Raises
+        ------
+        AssertionError
+            If any other stage runs.
+        """
         pipeline_type_calls.append(pipeline_type)
         if pipeline_type == "astrometry":
             return {"wcs": object()}
@@ -99,9 +134,10 @@ def test_run_full_pipeline_runs_astrometry_and_photometry_exactly_once(
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
 
     catalog_access = _StubCatalogAccess()
-    astrometrics = SimpleNamespace(catalog_access=catalog_access, config=_StubConfig(tmp_path))
 
-    stack_outputs = tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+    stack_outputs = tasks.run_full_pipeline(
+        target, catalog_access, _StubConfig(tmp_path), camera_name="TestCam"
+    )
 
     assert stack_outputs == {"standard": stacked_path}
     assert pipeline_type_calls.count("astrometry") == 1
@@ -139,26 +175,47 @@ def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(
     )
 
     def _fake_stack_frames(
-        target,  # ruff: ignore[missing-type-function-argument]
-        log_file=None,  # ruff: ignore[missing-type-function-argument]
-        frames_to_stack=None,  # ruff: ignore[missing-type-function-argument]
-        filter_type=None,  # ruff: ignore[missing-type-function-argument]
+        target: Target,
+        log_file: str | None = None,
+        frames_to_stack: list[FrameRecord] | None = None,
+        filter_type: Any = None,
         **kwargs: Any,
     ) -> str:
+        """Pretend to stack the frames and record the stack's path.
+
+        Returns
+        -------
+        stacked_path : `str`
+            The path of the stand-in stack file.
+        """
         target.stacking.stacked_image = stacked_path
         return stacked_path
 
     monkeypatch.setattr(stacking_stage, "stack_frames", _fake_stack_frames)
 
     def _fake_run_analysis_pipeline_match(
-        target,  # ruff: ignore[missing-type-function-argument]
-        frames,  # ruff: ignore[missing-type-function-argument]
-        pipeline_type,  # ruff: ignore[missing-type-function-argument]
-        filter_type,  # ruff: ignore[missing-type-function-argument]
-        catalog_access,  # ruff: ignore[missing-type-function-argument]
-        path,  # ruff: ignore[missing-type-function-argument]
+        target: Target,
+        frames: list[FrameRecord],
+        pipeline_type: str,
+        filter_type: Any,
+        catalog_access: Any,
+        path: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        """Return a canned result for astrometry, and fail photometry.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            A stand-in astrometry result.
+
+        Raises
+        ------
+        FileNotFoundError
+            When photometry runs, as a stale frame path would.
+        AssertionError
+            If any other stage runs.
+        """
         if pipeline_type == "astrometry":
             return {"wcs": object()}
         if pipeline_type == "photometry":
@@ -168,10 +225,9 @@ def test_a_later_stage_crashing_does_not_discard_an_earlier_stage_save(
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
 
     catalog_access = _StubCatalogAccess()
-    astrometrics = SimpleNamespace(catalog_access=catalog_access, config=_StubConfig(tmp_path))
 
     with pytest.raises(FileNotFoundError):
-        tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+        tasks.run_full_pipeline(target, catalog_access, _StubConfig(tmp_path), camera_name="TestCam")
 
     # Stacking and astrometry each checkpointed their own success before
     # photometry ever ran and crashed -- their results are not lost.
@@ -201,6 +257,13 @@ def test_frames_the_stacking_stage_removed_are_not_handed_to_photometry(
     )
 
     def _fake_stack_frames(target: Target, **kwargs: Any) -> str:
+        """Pretend to stack, moving one frame out of the target.
+
+        Returns
+        -------
+        stacked_path : `str`
+            The path of the stand-in stack file.
+        """
         target.frames = [frame for frame in target.frames if frame.path != "/fake/frame2.fits"]
         target.stacking.stacked_image = stacked_path
         return stacked_path
@@ -217,14 +280,19 @@ def test_frames_the_stacking_stage_removed_are_not_handed_to_photometry(
         path: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        """Record the frames photometry gets, and return canned results.
+
+        Returns
+        -------
+        result : `dict` [`str`, `Any`]
+            A stand-in result for the stage.
+        """
         if pipeline_type == "photometry":
             frames_seen_by_photometry.append([frame.path for frame in frames])
             return {"starsFound": 0}
         return {"wcs": object()}
 
     monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _fake_run_analysis_pipeline_match)
-    astrometrics = SimpleNamespace(catalog_access=_StubCatalogAccess(), config=_StubConfig(tmp_path))
-
-    tasks.run_full_pipeline(target, astrometrics, camera_name="TestCam")
+    tasks.run_full_pipeline(target, _StubCatalogAccess(), _StubConfig(tmp_path), camera_name="TestCam")
 
     assert frames_seen_by_photometry == [["/fake/frame1.fits", "/fake/frame3.fits"]]

@@ -5,6 +5,7 @@ such as counting how many images there are for different camera settings,
 and measuring basic quality metrics like the sky background brightness.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 
@@ -78,7 +79,7 @@ def list_camera_names(targets: list) -> dict[str, int]:
 
 def measure_frame_input_quality(
     target: Any,
-    include_fwhm: bool = False,
+    measure_fwhm: Callable[[Any], float | None] | None = None,
     remeasure: bool = False,
     camera_name: str | None = None,
 ) -> dict[str, int]:
@@ -92,8 +93,11 @@ def measure_frame_input_quality(
     ----------
     target : `Any`
         The target whose images need measuring.
-    include_fwhm : `bool`, optional
-        If True, also measures sharpness (FWHM). This takes a long time!
+    measure_fwhm : `Callable`, optional
+        A function that measures sharpness (FWHM) from an image's pixels,
+        such as the astrometry pipeline's `measure_fwhm_from_data`. When
+        given, sharpness is measured too, which takes a long time. Defaults
+        to `None`, which skips it.
     remeasure : `bool`, optional
         If True, forces it to re-check images it already measured before.
     camera_name : `str`, optional
@@ -121,7 +125,7 @@ def measure_frame_input_quality(
 
         saturation_threshold_adu = resolve_camera_profile(frame.camera).saturation_threshold_adu.value
         metrics = measure_one_frame(
-            frame.path, include_fwhm=include_fwhm, saturation_threshold_adu=saturation_threshold_adu
+            frame.path, measure_fwhm=measure_fwhm, saturation_threshold_adu=saturation_threshold_adu
         )
         if metrics["background_level"] is None:
             counts["failed"] += 1

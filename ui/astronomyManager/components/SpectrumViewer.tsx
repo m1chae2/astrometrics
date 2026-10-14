@@ -19,7 +19,7 @@ import {
     shortFeatureName,
     emissionLineMarks,
     significantFeatures,
-} from '../utils/starDisplayFormat';
+} from '../../common/utils/starDisplayFormat';
 
 interface Props {
     astronomyData: (Spectrum & { wavelength: number[]; spectrumFlux: number[] }) | null;

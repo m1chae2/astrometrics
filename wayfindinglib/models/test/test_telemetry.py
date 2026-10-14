@@ -12,7 +12,6 @@ from wayfindinglib.models.session.telemetry import (
     AlignmentAttempt,
     GuidingSample,
     GuidingStats,
-    IndiStatus,
     LiveGuidingStatus,
 )
 
@@ -38,11 +37,6 @@ def test_alignment_attempt_pointing_error() -> None:
     # Test with absent pointing offsets
     attempt_without_offsets = AlignmentAttempt(status="solving")
     assert attempt_without_offsets.pointing_error is None
-
-
-def test_indi_status_defaults_to_unknown() -> None:
-    """Verify IndiStatus defaults to UNKNOWN when unset."""
-    assert IndiStatus().status == "UNKNOWN"
 
 
 def test_guiding_status_defaults() -> None:

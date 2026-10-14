@@ -176,8 +176,9 @@ def test_measured_fwhm_is_kept_apart_from_registration_fwhm(tmp_path: Path) -> N
     target.frames[0].measurements.registration_fwhm_x_px = 3.2
     target.frames[0].measurements.registration_fwhm_y_px = 3.4
 
-    frame_statistics.measure_frame_input_quality(target, include_fwhm=True)
+    frame_statistics.measure_frame_input_quality(target, measure_fwhm=lambda data: 5.1)
 
+    assert target.frames[0].measurements.measured_fwhm_px == pytest.approx(5.1)
     assert target.frames[0].measurements.registration_fwhm_x_px == pytest.approx(3.2)
     assert target.frames[0].measurements.registration_fwhm_y_px == pytest.approx(3.4)
 

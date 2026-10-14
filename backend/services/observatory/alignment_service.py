@@ -17,11 +17,11 @@ from typing import Any
 from astrometricslib import InvalidArgumentError, StorageError, TargetCatalog, parse_coordinate_string
 from wayfindinglib import (
     AlignmentAttempt,
-    AlignmentTargetSession,
     ControlRecordStore,
     MountPointingModel,
     ObservatoryControl,
     SkyPosition,
+    group_alignment_attempts,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ class AlignmentService:
             )
             for row in rows
         ]
-        targets = AlignmentTargetSession.from_attempts(attempts)
+        targets = group_alignment_attempts(attempts)
         if self.is_active():
             attempts.append(AlignmentAttempt(status="solving"))
         return {
@@ -174,7 +174,7 @@ class AlignmentService:
             ``alignmentAttempts`` (a status the model does not know reads
             as ``aligned``), ``alignmentTargets`` (the attempts grouped by
             target, with jitter and drift rates, from
-            `AlignmentTargetSession.from_attempts`) and ``polarAlignment``.
+            `group_alignment_attempts`) and ``polarAlignment``.
         """
         if not self._records:
             return {"alignmentAttempts": [], "alignmentTargets": [], "polarAlignment": None}
@@ -218,7 +218,7 @@ class AlignmentService:
                     "timestamp": p.get("timestamp"),
                 }
 
-            targets = AlignmentTargetSession.from_attempts([
+            targets = group_alignment_attempts([
                 AlignmentAttempt.model_validate(attempt) for attempt in attempts
             ])
             return {

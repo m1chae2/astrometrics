@@ -14,7 +14,9 @@ save step (`star_recording`) and the one-time cleanup script
 
 They live here so the two can never disagree. The module also holds the
 rule for merging one row's data into another, which the cleanup scripts
-share.
+share, and `CATALOG_MATCH_RADIUS_ARCSEC`, the wider radius within which a
+detected star is matched to a catalog entry. The astrometry pipeline's star
+identifier and the save step both use that radius.
 """
 
 import re
@@ -30,6 +32,12 @@ from astrometricslib.models.stellar_source import StellarObject
 # under two names, and the few beyond are ordinary neighbors. 2 arcseconds
 # is also well below the separation of real neighbors in these fields.
 SAME_STAR_POSITION_TOLERANCE_ARCSEC = 2.0
+
+# The maximum allowed distance between a detected star and a catalog entry
+# for the two to count as the same physical star. This 10-arcsecond limit is
+# used when matching detected stars to the SIMBAD and Gaia catalogs, and when
+# reusing an existing position-only star's id (see `star_recording`).
+CATALOG_MATCH_RADIUS_ARCSEC = 10.0
 
 # Names that beat every other catalog, best first. A name matching the
 # first pattern is preferred to one matching the second, and both to any

@@ -5,8 +5,9 @@ storage path: packages check their target, a session built by hand with
 `edit_queue` has the same structure as one placed automatically,
 `get_plan` reads sessions back, and every `kind=` method refuses
 arguments its kind does not use. Also checks that the sky engine is built
-once even under concurrent first use, and that no planning source file
-imports a device driver, so planning stays free of hardware.
+once even under concurrent first use, and that using planning in a
+fresh process loads no hardware driver and no Control module, so planning
+stays free of hardware.
 """
 
 import pytest
@@ -437,27 +438,39 @@ def test_sky_engine_is_constructed_once_under_concurrent_first_access(
 
 
 def test_planning_module_tree_imports_no_device_driver() -> None:
-    """No planning task or planning API source imports the INDI device layer.
+    """Using Planning loads no hardware driver and no Control module.
 
-    A static check of the source rather than a runtime `sys.modules`
-    snapshot: other tests in the same pytest session legitimately import
-    INDI drivers (`control` needs them), so checking at runtime would
-    depend on test order and would not test what matters -- that the
-    planning code itself never reaches for a device driver.
+    "Planning Is Hardware-Free" (`Wayfinding_Library_Architecture.md`).
+    The check runs in a fresh Python process, because other tests in this
+    pytest session import the INDI drivers on purpose. The child imports
+    `wayfindinglib.api.planning`, reads the equipment catalog (which
+    checks each device's protocol name) and builds an empty session for
+    the active telescope and camera. Then no module of the hardware
+    drivers, the Control tasks or the Control API may be in `sys.modules`.
+    The import-linter contracts in ``pyproject.toml`` check the same rule
+    statically.
     """
-    import pathlib
+    from wayfindinglib.test.import_probe import (
+        CONTROL_PACKAGES,
+        modules_within,
+        wayfindinglib_modules_loaded_by,
+    )
 
-    planning_root = pathlib.Path(__file__).resolve().parents[2] / "tasks" / "planning_tasks"
-    api_file = pathlib.Path(__file__).resolve().parents[1] / "planning.py"
-    forbidden_substrings = ("wayfindinglib.drivers.indi", "import PyIndi", "from PyIndi")
+    loaded = wayfindinglib_modules_loaded_by(
+        """
+        from wayfindinglib.api.planning import ObservationPlanning
+        from wayfindinglib.data_access.equipment_catalog_reader import get_equipment_catalog
+        from wayfindinglib.drivers.butler import DiskButler
 
-    offending_files = []
-    for source_file in [*planning_root.glob("*.py"), api_file]:
-        text = source_file.read_text()
-        if any(needle in text for needle in forbidden_substrings):
-            offending_files.append(source_file.name)
+        assert get_equipment_catalog(config).active_telescope().mount_protocol == "indi"
+        planning = ObservationPlanning(config, DiskButler(app_config=config))
+        session = planning.create_plan("empty_session", night_id="2026-08-10")
+        assert (session.telescope_id, session.camera_id) == ("Short", "Main A")
+        """
+    )
 
-    assert offending_files == []
+    assert "wayfindinglib.api.planning" in loaded
+    assert modules_within(loaded, CONTROL_PACKAGES) == []
 
 
 def test_a_package_can_be_built_from_sequence_items(isolated_butler: DiskButler) -> None:

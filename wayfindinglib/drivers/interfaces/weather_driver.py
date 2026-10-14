@@ -1,17 +1,17 @@
 """Abstract base class for weather/environmental-sensing protocol drivers.
 
 Mirrors ASCOM's `IObservingConditions`. Returns exactly the
-`SensorReadings` shape `wayfindinglib.tasks.control_tasks.safety_monitor
-.assess_safety` already accepts -- verified to have no live caller
-anywhere in production code before this driver existed
-(`Wayfinding_Library_Architecture.md`); this driver is that live
-feed, not new safety logic.
+`SensorReadings` shape (defined in `wayfindinglib.models.policy.safety`)
+that `wayfindinglib.tasks.control_tasks.safety_monitor.assess_safety`
+accepts. This driver is the live feed of readings, not new safety logic
+(`Wayfinding_Library_Architecture.md`). `SensorReadings` is re-exported
+here because it is part of this interface's signature.
 """
 
 import abc
 
 from wayfindinglib.drivers.interfaces.base_protocol_driver import ProtocolDriver
-from wayfindinglib.tasks.control_tasks.safety_monitor import SensorReadings
+from wayfindinglib.models.policy.safety import SensorReadings
 
 __all__ = ["SensorReadings", "WeatherDriver"]
 

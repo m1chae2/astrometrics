@@ -54,8 +54,10 @@ EXPECTED_EXPORTS = frozenset({
     "NightConditions",
     "ObjectVisibility",
     "ObservationPackage",
+    "ObservatoryCapability",
     "ObservationSession",
     "ObservationSessionSummary",
+    "PolarAlignmentStatus",
     "QueueRequest",
     "SafetyStatus",
     "SequenceItem",
@@ -68,6 +70,8 @@ EXPECTED_EXPORTS = frozenset({
     "Telescope",
     "VisibilityReport",
     "VisibilitySpan",
+    # The one pure function.
+    "group_alignment_attempts",
     # The library's own error class.
     "DelegationPolicyValidationError",
 })

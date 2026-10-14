@@ -21,16 +21,14 @@ from backend.routers.rpc_router import rpc_registry
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
-#: The only app files allowed to call `fetch` or open a WebSocket (an ESLint
-#: rule enforces that), and the Electron files that call the backend.
+#: The only app and Electron files allowed to call `fetch` or open a
+#: WebSocket (ESLint rules enforce that), and the Electron module that decides
+#: which backend figure pages a figure window may open.
 CLIENT_FILES = (
     "ui/common/services/backendApi.ts",
     "ui/common/utils/socketClient.ts",
-    "electron/backend_manager.js",
-    "electron/emergency_park.js",
-    "electron/ipc_handlers.js",
-    "electron/main.js",
-    "electron/python_terminal_manager.js",
+    "electron/backend_client.js",
+    "electron/figure_target.js",
 )
 
 #: A backend path: one of the declared top-level folders, then more parts.
@@ -153,8 +151,8 @@ def test_the_client_files_use_only_declared_paths() -> None:
 
 
 def test_the_path_check_finds_paths() -> None:
-    """The path pattern finds the RPC path in the Electron park command."""
-    text = (REPOSITORY_ROOT / "electron/emergency_park.js").read_text(encoding="utf-8")
+    """The path pattern finds the RPC path in the Electron backend client."""
+    text = (REPOSITORY_ROOT / "electron/backend_client.js").read_text(encoding="utf-8")
     assert "/api/rpc" in _PATH_PATTERN.findall(text)
 
 

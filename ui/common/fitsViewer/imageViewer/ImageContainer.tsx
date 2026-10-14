@@ -1,5 +1,9 @@
+/**
+ * @file ImageContainer.tsx
+ * @description A simple frame that holds one picture for ImageViewer.
+ */
 import React from 'react';
-import './imageViewer/imageViewer.css';
+import './imageViewer.css';
 
 /** Props for the ImageContainer component. */
 interface Props {

@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import log from 'electron-log';
 import { getPlatform } from './platforms/index.js';
+import { checkReady, readyUrl as backendReadyUrl } from './backend_client.js';
 
 /**
  * Manages the backend process lifecycle.
@@ -121,8 +122,7 @@ export class BackendManager {
    * @return {Promise<boolean>} True if the backend reported ready, false if it gave up waiting.
    */
   async waitUntilWarm({ timeoutMs = 180000, pollIntervalMs = 500, unreachableTimeoutMs = 45000 } = {}) {
-    const port = process.env.ASTROMETRICS_PORT || '5000';
-    const readyUrl = `http://127.0.0.1:${port}/api/ready`;
+    const readyUrl = backendReadyUrl();
     const deadline = Date.now() + timeoutMs;
     let lastAnsweredAt = Date.now();
     this.warmUpFailureReason = null;
@@ -134,7 +134,7 @@ export class BackendManager {
         return false;
       }
       try {
-        const response = await fetch(readyUrl, { signal: AbortSignal.timeout(2000) });
+        const response = await checkReady({ timeoutMs: 2000 });
         lastAnsweredAt = Date.now();
         if (response.ok) {
           log.info('Backend finished warm-up.');

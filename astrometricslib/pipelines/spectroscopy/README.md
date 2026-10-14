@@ -50,6 +50,15 @@ session does not lose the frames already processed.
   `frame_analysis.py`) drive a star or a session through the three stages
   above. They implement the "how this runs in practice" section, not a
   fourth stage.
+- `pre_processing/spectral_frame_check.py` measures raw slitless-spectrum
+  frames for `QualityDiagnostics.spectral_frame_check`, outside any run:
+  the zero-order position, the streak's tilt and width, and the saturated
+  patches along the spectrum. It finds the zero order with the stacking
+  stage's point-source search, then its extended-target search for targets
+  such as globular clusters, or accepts a position from the caller. It
+  takes the saturation level from the camera profile
+  (`shared/quality/saturation.py`) and records the level and its source in
+  each result.
 
 ## Quality checkpoints
 

@@ -279,15 +279,6 @@ const api = {
 	},
 	backend: {
 		/**
-		 * Ping a backend URL (GET) and return the response status.
-		 * @param {string} [targetUrl] Optional URL to ping; defaults to backend base.
-		 * @returns {Promise<{ok:boolean, status:number, statusText:string}>}
-		 */
-		async ping(targetUrl) {
-			return ipcRenderer.invoke('backend-ping', targetUrl);
-		},
-
-		/**
 		 * Get the session token required by the backend's WebSocket endpoints.
 		 * Supplied by the main process, which minted it and passed it to the
 		 * backend on spawn; a file:// renderer cannot read the CORS-protected
@@ -319,6 +310,9 @@ const api = {
 
 		/**
 		 * Open an independent pop-up figure window for a Matplotlib plot.
+		 * The main process opens only the backend's own `/figure/<number>` page,
+		 * or a PNG file from the backend's scratch folder. It refuses anything
+		 * else and resolves to null.
 		 * @param {string|{plotPath?: string, interactiveUrl?: string}} target Path to PNG figure or interactive descriptor.
 		 * @returns {Promise<{ windowId: number }|null>}
 		 */

@@ -39,8 +39,8 @@ from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import
     measure_aperture_photometry,
 )
 from astrometricslib.pipelines.shared.quality.quality_metrics import measure_frame_input_quality
-from astrometricslib.pipelines.shared.quality.spectral_frame_check import analyze_spectral_frame
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline
+from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_frame_check import analyze_spectral_frame
 from astrometricslib.pipelines.stacking.processing.group_alignment import locate_zero_order
 from astrometricslib.utilities import CameraConfig, SpectroscopyConfig
 

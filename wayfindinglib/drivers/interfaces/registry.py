@@ -10,6 +10,12 @@ Concrete-class imports stay inside each function body so importing
 this module never pulls in `PyIndi`
 (`Wayfinding_Library_Architecture.md`, "Planning Is
 Hardware-Free").
+
+The protocol names come from
+`wayfindinglib/models/equipment_and_site/driver_protocols.py`, which the
+equipment catalog reader also uses to check a configured name without
+loading any driver. A test checks that each registry's keys equal the
+matching name set there.
 """
 
 from wayfindinglib.drivers.interfaces.camera_driver import CameraDriver
@@ -21,6 +27,13 @@ from wayfindinglib.drivers.interfaces.mount_driver import MountDriver
 from wayfindinglib.drivers.interfaces.remote_transfer_driver import RemoteTransferDriver
 from wayfindinglib.drivers.interfaces.switch_driver import SwitchDriver
 from wayfindinglib.drivers.interfaces.weather_driver import WeatherDriver
+from wayfindinglib.models.equipment_and_site.driver_protocols import (
+    INDI_PROTOCOL,
+    INTERNAL_GUIDING_PROTOCOL,
+    PHD2_GUIDING_PROTOCOL,
+    SIMULATOR_GUIDING_PROTOCOL,
+    STELLARMATE_TRANSFER_DRIVER,
+)
 
 
 def build_mount_driver_registry() -> dict[str, type[MountDriver]]:
@@ -33,7 +46,7 @@ def build_mount_driver_registry() -> dict[str, type[MountDriver]]:
     """
     from wayfindinglib.drivers.indi.mount_driver import IndiMountDriver
 
-    return {"indi": IndiMountDriver}
+    return {INDI_PROTOCOL: IndiMountDriver}
 
 
 def build_camera_driver_registry() -> dict[str, type[CameraDriver]]:
@@ -46,7 +59,7 @@ def build_camera_driver_registry() -> dict[str, type[CameraDriver]]:
     """
     from wayfindinglib.drivers.indi.camera_driver import IndiCameraDriver
 
-    return {"indi": IndiCameraDriver}
+    return {INDI_PROTOCOL: IndiCameraDriver}
 
 
 def build_focuser_driver_registry() -> dict[str, type[FocuserDriver]]:
@@ -59,7 +72,7 @@ def build_focuser_driver_registry() -> dict[str, type[FocuserDriver]]:
     """
     from wayfindinglib.drivers.indi.focuser_driver import IndiFocuserDriver
 
-    return {"indi": IndiFocuserDriver}
+    return {INDI_PROTOCOL: IndiFocuserDriver}
 
 
 def build_filter_wheel_driver_registry() -> dict[str, type[FilterWheelDriver]]:
@@ -73,7 +86,7 @@ def build_filter_wheel_driver_registry() -> dict[str, type[FilterWheelDriver]]:
     """
     from wayfindinglib.drivers.indi.filter_wheel_driver import IndiFilterWheelDriver
 
-    return {"indi": IndiFilterWheelDriver}
+    return {INDI_PROTOCOL: IndiFilterWheelDriver}
 
 
 def build_enclosure_driver_registry() -> dict[str, type[EnclosureDriver]]:
@@ -87,7 +100,7 @@ def build_enclosure_driver_registry() -> dict[str, type[EnclosureDriver]]:
     """
     from wayfindinglib.drivers.indi.enclosure_driver import IndiEnclosureDriver
 
-    return {"indi": IndiEnclosureDriver}
+    return {INDI_PROTOCOL: IndiEnclosureDriver}
 
 
 def build_switch_driver_registry() -> dict[str, type[SwitchDriver]]:
@@ -100,7 +113,7 @@ def build_switch_driver_registry() -> dict[str, type[SwitchDriver]]:
     """
     from wayfindinglib.drivers.indi.switch_driver import IndiSwitchDriver
 
-    return {"indi": IndiSwitchDriver}
+    return {INDI_PROTOCOL: IndiSwitchDriver}
 
 
 def build_weather_driver_registry() -> dict[str, type[WeatherDriver]]:
@@ -113,7 +126,7 @@ def build_weather_driver_registry() -> dict[str, type[WeatherDriver]]:
     """
     from wayfindinglib.drivers.indi.weather_driver import IndiWeatherDriver
 
-    return {"indi": IndiWeatherDriver}
+    return {INDI_PROTOCOL: IndiWeatherDriver}
 
 
 def build_guiding_driver_registry() -> dict[str, type[GuidingDriver]]:
@@ -132,7 +145,11 @@ def build_guiding_driver_registry() -> dict[str, type[GuidingDriver]]:
     from wayfindinglib.drivers.phd2.guiding_driver import Phd2GuidingDriver
     from wayfindinglib.drivers.simulators.guiding_simulator import SimulatedGuidingDriver
 
-    return {"phd2": Phd2GuidingDriver, "internal": IndiGuidingDriver, "simulator": SimulatedGuidingDriver}
+    return {
+        PHD2_GUIDING_PROTOCOL: Phd2GuidingDriver,
+        INTERNAL_GUIDING_PROTOCOL: IndiGuidingDriver,
+        SIMULATOR_GUIDING_PROTOCOL: SimulatedGuidingDriver,
+    }
 
 
 def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriver]]:
@@ -150,4 +167,4 @@ def build_remote_transfer_driver_registry() -> dict[str, type[RemoteTransferDriv
     """
     from wayfindinglib.drivers.stellarmate_interface import StellarMateInterface
 
-    return {"stellarmate": StellarMateInterface}
+    return {STELLARMATE_TRANSFER_DRIVER: StellarMateInterface}

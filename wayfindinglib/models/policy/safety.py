@@ -16,12 +16,25 @@ Three properties are architectural rather than incidental
   (`Wayfinding_Library_Architecture.md`), not by this schema.
 - Safety authority is not observing authority -- `SafetyAssessment` is
   published continuously, whether or not a session exists.
+
+`SensorReadings` is the shape of the readings the safety monitor
+evaluates. It lives here, in the Foundation, so the weather drivers that
+produce readings and the safety monitor that judges them both import it
+from below, rather than a driver importing the Control-layer monitor.
 """
 
 from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+
+SensorReadings = dict[str, tuple[float, datetime]]
+"""Measurement name -> ``(value, observed_at)``.
+
+A measurement absent from the mapping is treated the same as an
+unparseable one: both have no entry, and both yield `UNKNOWN` for any
+rule that names them.
+"""
 
 
 class SafetyVerdict(StrEnum):

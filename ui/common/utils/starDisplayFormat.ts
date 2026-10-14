@@ -1,11 +1,12 @@
 /**
  * @fileoverview Formatting helpers that turn a stellar object's raw fields
- * into the short text the Astronomy Manager shows: list labels, list
- * subtitles, coordinates, and the choice of light-curve series to plot.
+ * into short text: list labels, list subtitles, coordinates, and the choice
+ * of light-curve series to plot. The Astronomy Manager, the planetarium and
+ * the FITS viewer's star labels all use it, so it lives in ui/common.
  */
 
-import { PhotometryResult, SpectroscopyResult } from '../../common/types/backendTypes';
-import { EmissionLineResult, SpectralFeatureResult } from '../../common/types/spectralFeatureTypes';
+import { PhotometryResult, SpectroscopyResult } from '../types/backendTypes';
+import { EmissionLineResult, SpectralFeatureResult } from '../types/spectralFeatureTypes';
 
 /** Prefix of an id given to a star found in an image but never matched to a catalog. */
 const POSITION_ONLY_STAR_ID_PATTERN = /^FIELD_J(-?\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)$/;

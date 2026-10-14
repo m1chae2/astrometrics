@@ -5,7 +5,8 @@ Description: `Wayfinder` composes the library's three sub-APIs:
 observe) and `execution` (run and recover an observing session).
 `control` has seven children named by topic, such as `control.mount`
 and `control.history`. The package root also offers the models those
-sub-APIs take and return, and the library's own error class. The error
+sub-APIs take and return, the one pure function callers need
+(`group_alignment_attempts`), and the library's own error class. The error
 categories themselves (`NotFoundError`, `InvalidArgumentError` and the
 rest) come from `astrometricslib`.
 
@@ -38,6 +39,7 @@ configure_offline_iers()
 
 if TYPE_CHECKING:
     from astrometricslib import AppConfiguration, Astrometrics
+    from wayfindinglib.analytics.alignment_sessions import group_alignment_attempts
     from wayfindinglib.api.control import ObservatoryControl
     from wayfindinglib.api.execution import ObservationExecution
     from wayfindinglib.api.planning import ObservationPlanning
@@ -73,6 +75,7 @@ if TYPE_CHECKING:
         VisibilityReport,
         VisibilitySpan,
     )
+    from wayfindinglib.models.policy.delegation import ObservatoryCapability
     from wayfindinglib.models.session.capture_result import CaptureResult
     from wayfindinglib.models.session.observation_session import (
         ObservationSession,
@@ -85,6 +88,7 @@ if TYPE_CHECKING:
         AlignmentTargetSession,
         LiveGuidingStatus,
         MountPointingModel,
+        PolarAlignmentStatus,
     )
     from wayfindinglib.models.sky_position import SkyPosition
 
@@ -110,6 +114,11 @@ _LAZY_EXPORTS = {
     "LiveGuidingStatus": "wayfindinglib.models.session.telemetry",
     "AlignmentAttempt": "wayfindinglib.models.session.telemetry",
     "AlignmentTargetSession": "wayfindinglib.models.session.telemetry",
+    # The shape of `IndiInterface.get_polar_alignment_status()` and of a
+    # stored polar alignment run.
+    "PolarAlignmentStatus": "wayfindinglib.models.session.telemetry",
+    # The capability `control.safety` and `execution.record_divergence` take.
+    "ObservatoryCapability": "wayfindinglib.models.policy.delegation",
     "ImagingStatus": "wayfindinglib.models.control_status",
     "GuidingStatus": "wayfindinglib.models.control_status",
     "SafetyStatus": "wayfindinglib.models.control_status",
@@ -142,6 +151,8 @@ _LAZY_EXPORTS = {
     "SiteProfile": "wayfindinglib.models.equipment_and_site.site_profile",
     "Telescope": "wayfindinglib.models.equipment_and_site.equipment",
     "EquipmentConfiguration": "wayfindinglib.models.equipment_and_site.equipment",
+    # Groups plate solves into one `AlignmentTargetSession` per target.
+    "group_alignment_attempts": "wayfindinglib.analytics.alignment_sessions",
     # The library's own error class. The categories come from astrometricslib.
     "DelegationPolicyValidationError": "wayfindinglib.data_access.delegation_policy_reader",
 }
@@ -150,7 +161,7 @@ _LAZY_EXPORTS = {
 __all__ = sorted([*_LAZY_EXPORTS, "Wayfinder"])
 
 
-def __getattr__(name: str) -> type:
+def __getattr__(name: str) -> object:
     """Load an export on first use, so no hardware code loads early.
 
     Parameters
@@ -160,8 +171,8 @@ def __getattr__(name: str) -> type:
 
     Returns
     -------
-    resolved : `type`
-        The exported class.
+    resolved : `object`
+        The exported class or function.
 
     Raises
     ------

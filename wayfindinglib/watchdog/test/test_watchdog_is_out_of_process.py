@@ -1,13 +1,13 @@
 """Purpose: Verify the watchdog is out of process from what it watches.
 
 Description: A static source-text scan for "Watchdog Is Out Of Process"
-(`Wayfinding_Library_Architecture.md`): the watchdog module
-tree must never import the session runner, since a hang in the process
-being watched must not also disable the mechanism meant to catch it.
-Mirrors `test_planning.py`'s static-scan approach over a
-runtime import-graph check, since the watchdog and the session runner
-may both be imported elsewhere in the same pytest session, making a
-`sys.modules` snapshot order-dependent.
+(`Wayfinding_Library_Architecture.md`): the watchdog module tree must
+never name the session runner, since a hang in the process being watched
+must not also disable the mechanism meant to catch it. The runtime check,
+that the watchdog loads no Execution module at all, is
+`wayfindinglib/test/test_layer_independence.py`; it runs in a fresh
+process because other tests in the pytest session import the session
+runner.
 """
 
 import pathlib

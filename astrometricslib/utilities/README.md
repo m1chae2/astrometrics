@@ -11,5 +11,6 @@ This folder holds small, generic helpers that several parts of the library use a
 - `concurrency.py`, `parallel_batch.py` — generic worker-count reconciliation and a parallel batch-processing engine, used by any pipeline stage that fans work out across several processes.
 - `rejection_thresholds.py`, `stack_filter_floor.py` — generic algorithms for adjusting a pixel-rejection threshold by frame count (`rejection_bounds` adds a floor and a looser low limit for small stacks), and for keeping a sharpness filter from discarding too many frames.
 - `spectroscopy_models.py` — pydantic models for spectroscopy camera and session configuration.
+- `target_classification.py`, `solar_system_targets.py` — read a target's kind from its name alone, with no file or database access. `classify_target_name` returns a `TargetObjectType` (solar-system body, Messier, NGC or IC number, comet or asteroid, calibration folder, or star); `Target.object_type` calls it. `is_solar_system_target` tells whether a name is a planet, the Moon, the Sun, Pluto or Ceres. Code that names the star at the centre of a frame skips these targets, because they have no star-catalog entry. Both live here so the `models/` package can use them without importing pipeline code.
 
 For exact behavior, read the code — the code is always the source of truth.

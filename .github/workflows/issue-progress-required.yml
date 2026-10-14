@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check linked issues for an Analysis and Plan section
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const CLOSING_KEYWORD_PATTERN =

@@ -43,7 +43,7 @@ jobs:
     if: github.event.action == 'opened'
     steps:
       - name: Parse form answers and label the issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const KNOWN_LABELS = new Set([
@@ -79,7 +79,7 @@ jobs:
     if: always()
     steps:
       - name: Check the issue and flag if incomplete
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const SUBSYSTEM = ["astrometricslib", "wayfindinglib", "ui"];

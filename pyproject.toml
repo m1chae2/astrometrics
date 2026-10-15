@@ -109,14 +109,15 @@ docs = [
     "sphinx-copybutton>=0.5.2",
     "sphinx-design>=0.5.0",
     "sphinxcontrib-mermaid>=0.9.0",
-    "ipywidgets>=8.1.8"
+    "ipywidgets>=8.1.8",
+    "nbformat>=5.9.0"
 ]
 
 
 
 [project.urls]
 Homepage = "https://github.com/m1chae2/astrometrics"
-Documentation = "https://github.com/m1chae2/astrometrics/tree/main/documentation"
+Documentation = "https://astrometrics.readthedocs.io/en/latest/"
 Repository = "https://github.com/m1chae2/astrometrics"
 Issues = "https://github.com/m1chae2/astrometrics/issues"
 

@@ -2,16 +2,21 @@
 
 Description: ``documentation/library_design/validation/`` holds one file per
 pipeline. Each file lists the measurements behind the library's tuned values
-as numbered entries (``STK-01``, ``PHO-03`` and so on). The method documents
-cite an entry by ID instead of repeating its numbers. These tests keep that
-chain unbroken:
+as numbered entries (``STK-01``, ``PHO-03`` and so on) and ends with a table of
+design estimates (``STK-D01`` and so on). The method documents cite an entry by
+ID instead of repeating its numbers. These tests keep that chain unbroken:
 
-- every entry has the fields a reviewer needs to repeat it on their own data;
+- every entry has the fields a reviewer needs to repeat it on their own data,
+  in the template order of ``validation/index.md``;
+- every status, verdict and setting relation uses the allowed words;
+- every row of a design-estimate table has a stable ID, and no setting is both
+  supported by an entry and listed as a design estimate;
 - every ``<!-- impl: -->`` link in the register names code that exists;
 - every Python example in a procedure is valid Python;
 - every script or evidence file an entry names exists;
 - every link to an entry points at an ID that exists;
-- every entry is cited by at least one method document.
+- every entry is cited by at least one method document;
+- every data set ID an entry names is defined in ``validation/index.md``.
 """
 
 import ast
@@ -38,15 +43,36 @@ REQUIRED_FIELDS = (
     "Status",
     "Data you need",
     "Procedure",
+    "Acceptance criterion",
     "What to look at",
     "Our result",
+    "Verdict",
+    "Limits",
     "To tune for your setup",
+    "Regenerate with",
+    "Guarded by tests",
+    "Raw record",
 )
-ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2})\s*$", re.MULTILINE)
+# The template order. "Runs" is optional: only a re-run entry has it.
+FIELD_ORDER = (*REQUIRED_FIELDS[:9], "Runs", *REQUIRED_FIELDS[9:])
+RETIRED_FIELDS = ("Claim", "Status")
+ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE)
+FIELD_LINE = re.compile(r"^- \*\*([^*:]+):\*\*", re.MULTILINE)
+STATUS_FORM = re.compile(r"^(Measured|Partly measured|Design estimate|Retired)\. \S")
+RETIRED_FORM = re.compile(r"^Retired\. Superseded by \[([A-Z]{3}-\d{2,3})\]\([^)]*\)\.")
+VERDICT_FORM = re.compile(r"^(Pass|Fail|Inconclusive|Not judged)\b")
+RELATION_FORM = re.compile(r"Relation: (derived from|confirmed by|sanity check only|challenged by)\b")
+SUPPORTING_RELATIONS = ("derived from", "confirmed by")
+NO_SETTING = re.compile(r"^(None|No tuned value)\b")
+RUNS_HEADER = "| Date | Code version | Verdict | Record |"
+DESIGN_HEADING = "## Design estimates"
+DESIGN_ROW_ID = re.compile(r"^\| ([A-Z]{3}-D\d{2,3}) \|")
+DATA_SET_ID = re.compile(r"\bDS-[A-Z0-9]+\b")
+DATA_SET_ROW = re.compile(r"^\| (DS-[A-Z0-9]+) \|", re.MULTILINE)
 IMPL_COMMENT = re.compile(r"<!-- impl: ([^ ]+?) -->")
 PYTHON_BLOCK = re.compile(r"^[ \t]*```python\n(.*?)^[ \t]*```", re.DOTALL | re.MULTILINE)
 REPO_PATH = re.compile(r"`((?:astrometricslib/scripts|documentation/evidence)/[\w./-]+?\.(?:py|json))`")
-ENTRY_LINK = re.compile(r"validation/(\w+\.md)#([a-z]{3}-\d{2})\b")
+ENTRY_LINK = re.compile(r"validation/(\w+\.md)#([a-z]{3}-\d{2,3})\b")
 # Files that may cite register entries: every Markdown file in the library
 # and its documentation, plus the generator that writes the review guides.
 CITING_GLOBS = ("astrometricslib/**/*.md", "documentation/library_design/**/*.md")
@@ -112,15 +138,235 @@ def test_entry_ids_are_unique_and_use_the_file_prefix(name: str) -> None:
     assert not wrong, f"{name} has IDs with the wrong prefix: {wrong}"
 
 
+def _fields(body: str) -> dict[str, str]:
+    """Split one entry into its fields.
+
+    Parameters
+    ----------
+    body : `str`
+        The text of one entry, as returned by `_entries`.
+
+    Returns
+    -------
+    fields : `dict` [`str`, `str`]
+        The text of each field keyed by its label, in file order. A field runs
+        from its ``- **Label:**`` line to the next such line.
+    """
+    matches = list(FIELD_LINE.finditer(body))
+    fields = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(body)
+        text = body[match.end() : end].strip("\n")
+        fields[match.group(1)] = text if text.startswith("  ") else text.strip()
+    return fields
+
+
+def _is_retired(fields: dict[str, str]) -> bool:
+    """Say whether an entry has been retired.
+
+    Parameters
+    ----------
+    fields : `dict` [`str`, `str`]
+        The fields of one entry, as returned by `_fields`.
+
+    Returns
+    -------
+    retired : `bool`
+        True when the status begins with "Retired".
+    """
+    return fields.get("Status", "").startswith("Retired")
+
+
+def _setting_names(text: str) -> set[tuple[str, str]]:
+    """Find the code constants and config keys that a piece of text names.
+
+    Parameters
+    ----------
+    text : `str`
+        A setting bullet, or the first cells of a design-estimate row.
+
+    Returns
+    -------
+    names : `set` [`tuple` [`str`, `str`]]
+        Pairs of a setting name and the file it is said to live in. The file is
+        the empty string when the text names none ("in the same file").
+    """
+    files = re.findall(r"(\w+)\.py\b", text)
+    names = set()
+    for span in re.findall(r"`([^`\n]+)`", text):
+        word = span.split()[-1].rstrip(",.;:")
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", word) and ("_" in word or word.isupper()):
+            names.update((word, name_file) for name_file in (files or [""]))
+    return names
+
+
+def _design_rows(path: Path) -> list[str]:
+    """List the data rows of the design-estimate table of a register file.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        A register file.
+
+    Returns
+    -------
+    rows : `list` [`str`]
+        The table lines after the header and separator rows, in file order.
+    """
+    text = path.read_text(encoding="utf-8")
+    section = text[text.index(DESIGN_HEADING) :]
+    table = [line for line in section.splitlines() if line.startswith("|")]
+    return table[2:]
+
+
 @pytest.mark.parametrize("name", sorted(REGISTER_FILES))
 def test_every_entry_has_the_fields_a_reviewer_needs(name: str) -> None:
-    """Each entry gives its claim, data, procedure, result and tuning."""
+    """Each entry has every field of the template."""
     incomplete = {}
     for entry_id, body in _entries(REGISTER_DIR / name).items():
-        missing = [field for field in REQUIRED_FIELDS if f"**{field}:**" not in body]
+        fields = _fields(body)
+        needed = RETIRED_FIELDS if _is_retired(fields) else REQUIRED_FIELDS
+        missing = [field for field in needed if field not in fields]
         if missing:
             incomplete[entry_id] = missing
     assert not incomplete, f"{name}: entries missing fields: {incomplete}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_entry_fields_follow_the_template_order(name: str) -> None:
+    """Fields use only the template labels, in the template order."""
+    out_of_order = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        found = list(_fields(body))
+        expected = [field for field in FIELD_ORDER if field in found]
+        if found != expected:
+            out_of_order[entry_id] = found
+    assert not out_of_order, f"{name}: fields out of order or unknown: {out_of_order}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_status_uses_an_allowed_label_and_gives_a_reason(name: str) -> None:
+    """Each status reads ``<Label>. <qualifier>.``; retired ones link on."""
+    all_ids = {entry_id for other in REGISTER_FILES for entry_id in _entries(REGISTER_DIR / other)}
+    bad = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        status = _fields(body).get("Status", "")
+        if not STATUS_FORM.match(status):
+            bad[entry_id] = status[:60]
+        elif status.startswith("Retired"):
+            successor = RETIRED_FORM.match(status)
+            if successor is None or successor.group(1) not in all_ids or successor.group(1) == entry_id:
+                bad[entry_id] = status[:60]
+    assert not bad, f"{name}: statuses that break the form: {bad}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_verdict_uses_an_allowed_word(name: str) -> None:
+    """Each verdict begins with Pass, Fail, Inconclusive or Not judged."""
+    bad = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        fields = _fields(body)
+        if _is_retired(fields):
+            continue
+        if not VERDICT_FORM.match(fields.get("Verdict", "")):
+            bad[entry_id] = fields.get("Verdict", "")[:40]
+    assert not bad, f"{name}: verdicts that break the form: {bad}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_every_setting_states_its_relation_to_the_entry(name: str) -> None:
+    """Each setting bullet states one of the four allowed relations."""
+    bad = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        fields = _fields(body)
+        if _is_retired(fields):
+            continue
+        settings = fields.get("Settings it supports", "")
+        if NO_SETTING.match(settings):
+            continue
+        bullets = [line for line in settings.splitlines() if line.startswith("  - ")]
+        missing = [line[:60] for line in bullets if not RELATION_FORM.search(line)]
+        if not bullets or missing:
+            bad[entry_id] = missing or ["no setting bullets"]
+    assert not bad, f"{name}: settings without a relation: {bad}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_runs_tables_are_well_formed(name: str) -> None:
+    """A Runs table has the agreed columns and a valid verdict in every row."""
+    bad = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        runs = _fields(body).get("Runs")
+        if runs is None:
+            continue
+        rows = [line.strip() for line in runs.splitlines() if line.strip().startswith("|")]
+        problems = []
+        if len(rows) < 3 or rows[0] != RUNS_HEADER:
+            problems.append("header")
+        for row in rows[2:]:
+            cells = [cell.strip() for cell in row.strip("|").split("|")]
+            if len(cells) != 4 or not VERDICT_FORM.match(cells[2]):
+                problems.append(row[:50])
+        if problems:
+            bad[entry_id] = problems
+    assert not bad, f"{name}: bad Runs tables: {bad}"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_design_estimate_rows_have_stable_ids_and_a_risk_column(name: str) -> None:
+    """Design-estimate rows have IDs such as ``STK-D01`` and a risk column."""
+    text = (REGISTER_DIR / name).read_text(encoding="utf-8")
+    header = next(line for line in text[text.index(DESIGN_HEADING) :].splitlines() if line.startswith("|"))
+    assert "| ID |" in header and "Risk if wrong" in header, f"{name}: design table header is {header}"
+    rows = _design_rows(REGISTER_DIR / name)
+    assert rows, f"{name} has no design-estimate rows"
+    ids = []
+    for row in rows:
+        match = DESIGN_ROW_ID.match(row)
+        assert match, f"{name}: design row without an ID: {row[:60]}"
+        ids.append(match.group(1))
+    prefix = REGISTER_FILES[name] + "-D"
+    assert all(row_id.startswith(prefix) for row_id in ids), f"{name}: wrong design row prefix"
+    assert len(ids) == len(set(ids)), f"{name} repeats a design row ID"
+
+
+@pytest.mark.parametrize("name", sorted(REGISTER_FILES))
+def test_no_setting_is_both_supported_and_a_design_estimate(name: str) -> None:
+    """A supported setting is not also listed as a design estimate."""
+    design = set()
+    for row in _design_rows(REGISTER_DIR / name):
+        design |= _setting_names(" | ".join(row.strip("|").split("|")[1:4]))
+    clashes = {}
+    for entry_id, body in _entries(REGISTER_DIR / name).items():
+        settings = _fields(body).get("Settings it supports", "")
+        for line in settings.splitlines():
+            relation = RELATION_FORM.search(line)
+            if (
+                not line.startswith("  - ")
+                or relation is None
+                or relation.group(1) not in SUPPORTING_RELATIONS
+            ):
+                continue
+            for setting, setting_file in _setting_names(line):
+                for other, other_file in design:
+                    if setting == other and (
+                        not setting_file or not other_file or setting_file == other_file
+                    ):
+                        clashes.setdefault(entry_id, set()).add(setting)
+    assert not clashes, f"{name}: settings both supported and listed as design estimates: {clashes}"
+
+
+def test_every_data_set_id_is_defined_once_in_the_index() -> None:
+    """A ``DS-`` ID named in the register is defined in ``index.md``."""
+    index_text = (REGISTER_DIR / "index.md").read_text(encoding="utf-8")
+    defined = DATA_SET_ROW.findall(index_text)
+    assert defined, "index.md defines no data sets"
+    assert len(defined) == len(set(defined)), "index.md repeats a data set ID"
+    used = set()
+    for name in REGISTER_FILES:
+        used.update(DATA_SET_ID.findall((REGISTER_DIR / name).read_text(encoding="utf-8")))
+    undefined = sorted(used - set(defined))
+    assert not undefined, f"Data set IDs the index does not define: {undefined}"
 
 
 @pytest.mark.parametrize("name", sorted(REGISTER_FILES))

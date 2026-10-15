@@ -1,0 +1,30 @@
+// markdownlint for the library documentation (see documentation/Documentation_Conventions.md §6).
+// Run: build/documentation/lint_docs.sh
+{
+  "config": {
+    "default": true,
+    "MD003": { "style": "atx" },
+    "MD004": { "style": "dash" },
+    "MD007": { "indent": 2 },
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD025": true,
+    "MD029": { "style": "ordered" },
+    "MD033": false,
+    "MD036": false,
+    "MD041": true,
+    "MD049": { "style": "asterisk" },
+    "MD050": { "style": "asterisk" },
+    "MD055": { "style": "leading_and_trailing" },
+    "MD060": false
+  },
+  "globs": [
+    "astrometricslib/**/README.md",
+    "documentation/*.md",
+    "documentation/how_to/*.md",
+    "documentation/library_design/Astrometrics_Library_Implementation.md",
+    "documentation/library_design/pipelines/*.md",
+    "documentation/library_design/validation/*.md"
+  ],
+  "ignores": ["**/node_modules/**", "documentation/_build/**"]
+}

@@ -1,0 +1,9 @@
+# Documentation_Conventions.md §7: no first person outside a register entry's result.
+extends: existence
+message: "Avoid first person ('%s'); make the module or pipeline the subject."
+level: warning
+ignorecase: true
+tokens:
+  - we
+  - our
+  - us

@@ -7,17 +7,30 @@ Astropy, NumPy, SciPy, and Matplotlib.
 
 import os
 import sys
+import tomllib
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as installed_version
+from pathlib import Path
 
 # Insert root project path into sys.path to enable Sphinx autodoc reflection
 sys.path.insert(0, os.path.abspath(".."))
 sys.path.insert(0, os.path.abspath("../build/documentation"))
 
 # Project information
+# The version and author come from pyproject.toml, so each is written once.
+_PYPROJECT_PATH = Path(__file__).resolve().parent.parent / "pyproject.toml"
+_PYPROJECT = tomllib.loads(_PYPROJECT_PATH.read_text(encoding="utf-8"))["project"]
+
 project = "Astrometrics"
-copyright = "2026, Astrometrics"
-author = "Astrometrics"
-version = "2.0.0"
-release = "2.0.0"
+author = _PYPROJECT["authors"][0]["name"]
+copyright = f"2022-2026, {author}"
+try:
+    # The installed version. Read the Docs and CI install the package first.
+    release = installed_version("astrometrics")
+except PackageNotFoundError:
+    release = _PYPROJECT["version"]
+# The short X.Y version.
+version = ".".join(release.split(".")[:2])
 
 # Sphinx extension module names
 extensions = [
@@ -66,7 +79,7 @@ html_context = {
     "default_mode": "dark",
 }
 html_theme_options = {
-    "header_links_before_dropdown": 6,
+    "header_links_before_dropdown": 4,
     "navbar_align": "left",
     "logo": {
         "image_light": "_static/logo.png",
@@ -99,12 +112,11 @@ intersphinx_mapping = {
 # MyST-NB Execution Configuration
 nb_execution_mode = "off"  # Set to auto for live dynamic generation
 
-# Tutorial notebooks intentionally carry no `language_info`/`kernelspec`
-# metadata, so myst-nb cannot pick a Pygments lexer for their code cells and
-# emits a "No source code lexer found" warning per cell. myst-nb has no
-# config hook to supply a default lexer (see the TODO in
-# myst_nb.core.render._get_nb_source_code_lexer), so the warning is
-# suppressed rather than restoring metadata that was deliberately dropped.
+# Tutorial notebooks intentionally carry no `kernelspec` metadata. myst-nb then
+# cannot pick a Pygments lexer for their code cells and emits a "No source code
+# lexer found" warning per cell. myst-nb has no config hook to supply a default
+# lexer (see the TODO in myst_nb.core.render._get_nb_source_code_lexer), so the
+# warning is suppressed.
 suppress_warnings = ["myst-nb.lexer"]
 
 myst_enable_extensions = [

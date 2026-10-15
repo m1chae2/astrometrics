@@ -206,14 +206,18 @@ def test_pipeline_review_docs_generation(tmp_path: Path) -> None:
         assert len(content) > 500, f"Document {f.name} is unexpectedly short"
         assert "<<" not in content, f"Document {f.name} has an unfilled placeholder"
         assert "Not yet described" not in content, f"Document {f.name} has an undescribed gate"
+        assert generator.GLOSSARY_LINE in content, f"{f.name} lacks the glossary line"
+        assert "| :---" not in content, f"{f.name} has a left-aligned table separator"
         if f.name != "index.md":
-            assert "## 1. Overview & Scientific Objective" in content
-            assert "## 2. Input Requirements & FITS Header Specification" in content
-            assert "## 3. Mathematical & Algorithmic Formulation" in content
-            assert "## 4. Processing Flow" in content
-            assert "## 5. Tuned Calibration Parameters" in content
-            assert "## 6. Degraded States & Fallback Pathways" in content
-            assert "## 7. Quality Summary Data Models" in content
+            for heading in generator.SECTION_HEADINGS.values():
+                assert f"\n{heading}\n" in content, f"{f.name} lacks the heading {heading!r}"
+            assert "| Parameter | Live value | Status | Notes |" in content
+            pipeline = f.name.removesuffix(".md")
+            readme = f"astrometricslib/pipelines/{pipeline}/README.md"
+            assert f"]({generator.REPOSITORY_BLOB_URL}/{readme})" in content, (
+                f"{f.name} does not link its pipeline README"
+            )
+            assert (REPO_ROOT / readme).is_file(), f"{readme} does not exist"
         committed = (GUIDES_DIR / f.name).read_text(encoding="utf-8")
         assert committed == content, (
             f"{f.name} is out of date; run build/documentation/generate_pipeline_review_docs.py"

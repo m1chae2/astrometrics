@@ -1,0 +1,12 @@
+# Documentation_Conventions.md §7: state current behavior, not its history.
+extends: existence
+message: "'%s' narrates history. State the current behavior and its reason."
+level: warning
+ignorecase: true
+tokens:
+  - used to
+  - previously
+  - no longer
+  - now uses
+  - before this
+  - at first

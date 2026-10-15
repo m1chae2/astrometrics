@@ -15,6 +15,7 @@ Astrometrics is a desktop application designed to streamline astrophotography, p
 ## 2. Hardware Requirements
 
 Astrometrics works with a wide variety of cameras and mounts using INDI. To capture images, you will need:
+
 1. **A Tracking Mount:** A motorized mount to keep the stars stationary during exposures.
 2. **A Camera:** A dedicated astronomy camera or DSLR.
 3. **Optional (for Spectroscopy):** A diffraction grating like the Star Analyser 100 or 200 to split starlight into a spectrum.
@@ -32,16 +33,19 @@ To open the desktop application, run the following command in your terminal:
 Before using the analysis tools in the desktop application, it is helpful to understand the primary concepts and processes Astrometrics uses:
 
 ### Image Types
+
 - **Light Frames:** The actual pictures of your target (stars, galaxies, nebulas).
 - **Dark Frames:** Pictures taken with the camera covered. These capture thermal noise (heat) from the camera sensor so it can be subtracted from your light frames.
 - **Bias Frames:** Extremely short exposures taken with the camera covered. These capture the baseline electrical noise of the sensor.
 - **Flat Frames:** Pictures of an evenly illuminated surface (like a glowing panel or the twilight sky). These are used to correct vignetting (dark corners) and dust spots on your camera sensor.
 
 ### Image Processing
+
 - **Calibration:** The process of mathematically subtracting dark and bias frames, and dividing by flat frames, to clean the noise and artifacts from your light frames.
 - **Stacking:** The process of aligning and combining dozens or hundreds of light frames into a single master image. This dramatically reduces random noise and reveals faint details that are invisible in a single frame.
 
 ### Scientific Analysis
+
 - **Astrometry (Plate Solving):** The process of matching the stars in an image to a known star catalog. This determines the exact celestial coordinates the telescope is pointing at.
 - **Photometry:** The measurement of a star's brightness over time. This is used to create light curves to detect variable stars or exoplanet transits.
 - **Spectroscopy:** The process of splitting light into a spectrum using a diffraction grating. This allows for the identification of a star's chemical composition and temperature.
@@ -53,6 +57,7 @@ For a deep dive into the algorithms behind astrometry, photometry, and spectrosc
 ## 5. Next Steps
 
 Once the application is running, refer to the guides in the [Desktop Application section](user_interface/index.rst) to learn how to:
+
 - Connect to your hardware and align your telescope mount.
 - Process and stack your captured images.
 - Analyze your data using the photometry and spectroscopy tools.

@@ -13,6 +13,8 @@ on:
       # test_documentation_rules, test_validation_register and
       # test_pipeline_doc_parity) live in astrometricslib/ but read these
       # files, so a documentation-only change must run them too.
+      - 'documentation/*.md'
+      - 'documentation/how_to/**'
       - 'documentation/library_design/**'
       - 'documentation/evidence/**'
       - 'build/documentation/**'

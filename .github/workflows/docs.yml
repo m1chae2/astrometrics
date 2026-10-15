@@ -18,8 +18,9 @@ on:
       - 'pyproject.toml'
       - 'build/linux/build_docs.sh'
       - 'build/documentation/**'
-      - 'build/documentation/check_notebook_outputs.py'
       - '.github/workflows/docs.yml'
+      - '.vale.ini'
+      - '.markdownlint-cli2.jsonc'
   pull_request:
     branches: [ main, master ]
     paths: *paths
@@ -30,6 +31,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint-docs:
+    name: Lint Documentation (Vale and markdownlint)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Install Vale
+        run: pip install vale==3.22.0.0
+
+      - name: Lint Documentation
+        # Rules: documentation/Documentation_Conventions.md, .vale.ini,
+        # .markdownlint-cli2.jsonc and build/documentation/vale/styles/.
+        run: bash build/documentation/lint_docs.sh
+
   build-docs:
     name: Build Sphinx Docs
     runs-on: ubuntu-latest

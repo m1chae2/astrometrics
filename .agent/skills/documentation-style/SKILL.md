@@ -1,9 +1,11 @@
 ---
 name: documentation-style
-description: House documentation conventions for Coniglio Observatory docs. Use when writing, editing, restructuring, or reviewing any file under documentation/ (papers, guides) to apply the repo's structure, citation, numbering, admonition, and cross-reference rules.
+description: House documentation conventions for the Astrometrics documentation. Use when writing, editing, restructuring, or reviewing any file under documentation/ (papers, guides) to apply the repo's structure, citation, numbering, admonition, and cross-reference rules.
 ---
 
-# Coniglio Observatory Documentation Style
+# Astrometrics Documentation Style
+
+> **Source of truth.** The full conventions (where content lives, status labels, document layouts, US spelling, terms, units, Markdown mechanics, and which test or linter enforces each rule) are in `documentation/Documentation_Conventions.md`. This skill summarizes them; when the two differ, the conventions page wins and this skill should be updated to match.
 
 Conventions for everything under `documentation/`. Modeled on the Siril, Astropy, photutils,
 and specutils documentation ecosystems, adapted to a markdown-in-repo setting.
@@ -22,9 +24,10 @@ Match the document to its tier before writing; each tier has different rules.
    identifiers and the tuned values, in its "Tuned Parameters and Validation Status" tables.
    Evidence (data sets, dates, results) lives in the validation register, not in either paper —
    see "Where content lives" below.
-2. **User-guide tier (aspirational)** — task-oriented topic guides pairing prose with runnable
-   examples and their output, in the style of photutils/specutils topic pages. Does not exist
-   yet; when creating one, follow the template below.
+2. **User-guide tier** — task-oriented pages: the tutorials (`notebooks/`), the how-to guides
+   (`how_to/`) and the desktop-app guides (`user_interface/`). Pair prose with runnable examples
+   and their output, in the style of photutils/specutils topic pages; when creating one, follow
+   the template below.
 
 There is no specification/requirements tier — the project dropped requirements traceability, and
 `documentation/requirements/` does not exist. Do not recreate it or a numbered-requirement
@@ -111,7 +114,7 @@ Use MyST "colon fence" syntax for markdown documents and Sphinx reStructuredText
 ## Writing style
 
 - **Tone**: Strictly neutral, objective, and direct. Avoid conversational filler, marketing speak, and overly academic phrasing.
-- **Reading Level**: Accessible and clear. Write for a general technical reader or hobbyist, not necessarily someone with an engineering degree. Use plain English where possible.
+- **Reading Level**: First-year college engineering or science for the library documents; high school for the desktop-app guides (`user_interface/`). Plain words, short sentences, every term defined on first use.
 - **Clarity**: Sentences do one job. Use shorter, punchy sentences and avoid long, multi-clause paragraphs.
 - **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the glossary (`library_design/Astrometrics_Library_Architecture.md`, Appendix A) current when introducing new ones.
 - **Structure**: Rationale first, mechanism second. Explain *why* before *how*. Keep implementation pointers as terse trailing parentheticals or appendix rows, not the spine of the prose.
@@ -145,7 +148,7 @@ user-guide-tier docs.
 ## Verification checklist before committing a doc change
 
 - The documentation tests pass:
-  `.venv/bin/pytest astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_architecture_doc_claims.py astrometricslib/test/test_validation_register.py astrometricslib/pipelines/test/test_pipeline_doc_parity.py -q`
+  `.venv/bin/pytest astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_documentation_style.py astrometricslib/test/test_architecture_doc_claims.py astrometricslib/test/test_validation_register.py astrometricslib/pipelines/test/test_pipeline_doc_parity.py -q`
 - Every in-text `[n]` resolves to exactly one reference entry; no orphaned numbers.
 - Every published method or tool the paper names has a reference.
 - Equation/table/figure numbers are sequential with no gaps or duplicates.

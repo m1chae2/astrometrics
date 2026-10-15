@@ -71,17 +71,16 @@ Observatory control, sequence planning, and safety execution engine:
 
 ## Documentation Guide
 
-The full documentation is published at **[astrometrics.readthedocs.io](https://astrometrics.readthedocs.io/)** — rendered, searchable, and the recommended way to read it. User manuals, step-by-step processing tutorials, and technical architecture specifications also live as source files in the [`documentation/`](documentation/) directory, if you'd rather browse them directly on GitHub:
+The full documentation is published at **[astrometrics.readthedocs.io](https://astrometrics.readthedocs.io/)**. It is rendered, searchable and the recommended way to read it. The source files are in the [`documentation/`](documentation/) directory. [About these docs](documentation/About_These_Docs.md) maps every document. The site has these sections:
 
-### User Guides & Manuals
-* **[Desktop User Manual](documentation/user_interface/user_guides/User_Manual.md)**: Official user handbook covering all display workspaces with screenshots, control descriptions, status indicators, and keyboard shortcuts.
-* **[Observatory Control & Automation Guide](documentation/user_interface/user_guides/Observatory_Control_and_Automation_Guide.md)**: Operational guide for telescope setup, plate solving alignment, autofocusing, autoguider calibration, and weather safety interlocks.
-* **[Image Processing & Science Tutorial](documentation/user_interface/user_guides/Image_Processing_and_Analysis_Tutorial.md)**: Step-by-step tutorial for image calibration, frame stacking, exoplanet transit photometry, and 1D spectroscopy wavelength calibration.
+* **Get started.** [Installation](documentation/Installation.md), [Getting started](documentation/Getting_Started.md) and the [library quick start](documentation/how_to/library_quick_start.md).
+* **Tutorials.** The [desktop application guides](documentation/user_interface/user_guides/User_Manual.md) and the interactive notebook tutorials.
+* **How-to guides.** Task recipes in [`documentation/how_to/`](documentation/how_to/tune_for_your_setup.md), such as tuning the tool for your setup.
+* **Explanation.** The [Astrometrics library architecture](documentation/library_design/Astrometrics_Library_Architecture.md) and [Wayfinding library architecture](documentation/library_design/Wayfinding_Library_Architecture.md) papers, and the [pipeline review guides](documentation/library_design/pipelines/index.md).
+* **Reference.** The Python API reference and the [Astrometrics](documentation/library_design/Astrometrics_Library_Implementation.md) and [Wayfinding](documentation/library_design/Wayfinding_Library_Implementation.md) implementation papers.
+* **Evidence.** The [validation register](documentation/library_design/validation/index.md) and the [pipeline audit report](documentation/library_design/Pipeline_Audit_Report.md).
 
-### Scientific & Automation Specifications
-* **[Astrometrics Library Specifications](documentation/library_design/Astrometrics_Library_Architecture.md)**: Overview of observational data models, stacking algorithms, photometry, spectroscopy, and asteroid recovery.
-* **[Wayfinding Library Specifications](documentation/library_design/Wayfinding_Library_Architecture.md)**: Overview of observatory control architecture, capability delegation, safety interlocks, and automated session execution.
-* **[User Interface Technical Reference](documentation/user_interface/technical_reference/User_Interface_Architecture.md)**: Architecture details for the desktop application, data state management, 3D planetarium rendering, and API automation endpoints.
+To contribute, read [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

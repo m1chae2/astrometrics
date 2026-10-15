@@ -284,7 +284,8 @@ def extract_parameter_table_rows(
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("### "):
-            pipeline = stripped[4:].removesuffix(" settings")
+            heading = re.sub(r"^\d+(?:\.\d+)*\s+", "", stripped[4:])
+            pipeline = heading.removesuffix(" settings")
             continue
         if stripped.startswith("| Parameter | Default | Status |"):
             in_table = True
@@ -294,7 +295,7 @@ def extract_parameter_table_rows(
         if not stripped.startswith("|"):
             in_table = False
             continue
-        if stripped.startswith("|---"):
+        if re.match(r"^\|\s*:?-{3,}", stripped):
             continue
         parts = [p.strip() for p in stripped.split("|")[1:-1]]
         if len(parts) >= 4:

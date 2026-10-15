@@ -1,0 +1,14 @@
+# Storage
+
+This folder holds the generic storage plumbing that both libraries share. Nothing here knows about telescopes, targets or stars. It only knows about databases, locks and drives.
+
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+
+## What each file is for
+
+- `local_database.py` — opens and writes SQLite database files on this computer (`connect_db`), and holds the JSON encoder for values SQLite has no column type for (`safe_json_dumps`, `NumpyEncoder`).
+- `butler.py` — `Butler`, a generic keyed-model store. It records Pydantic model instances to SQLite tables by id, with get, put and exists operations. Both libraries instantiate it for their catalog and record data.
+- `process_locks.py` — file locks the operating system enforces, so two programs cannot use the same resource at once (`file_lock`, `acquire_resource_slot`). The resources include a telescope mount, a camera or a copy of Siril.
+- `mount.py` — `require_mounted_storage` refuses to write below the `frames_mount_point` setting unless a drive is mounted there. When the setting is empty, nothing is checked.
+
+For exact behavior, read the code.

@@ -1,18 +1,18 @@
 # Visualization
 
-This folder renders a target's or star's stored data as plots and interactive image views: light curves, spectra, star fields, and focus history. Nothing here computes new science results — it only displays results the pipelines already produced. A light curve is a star's brightness plotted against time; a spectrum is its light spread out by wavelength.
+This folder renders a target's or star's stored data as plots and interactive image views: light curves, spectra, star fields, and focus history. Nothing here computes new science results. It only displays results the pipelines already produced. A light curve is a star's brightness plotted against time. A spectrum is the star's light spread out by wavelength.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
 
 ## What each file is for
 
-- `helpers.py` — the high-level entry points other code calls: one function per plot type (astrometry star field, photometry light curve, spectroscopy spectrum, asteroid detection tracks, a combined target dashboard).
-- `focus_plots.py` — plots showing how well the telescope stayed in focus over a session, from each frame's focuser temperature and position. The focuser is the motor that moves the camera along the optical axis to bring stars into focus; each frame record keeps the focuser's position and temperature at the time of the exposure.
-- `star_field_visualization.py` — the internal orchestrator for the interactive 2D star field view, coordinating the overlay layers below.
+- `helpers.py` — the high-level entry points other code calls. It has one function per plot type: astrometry star field, photometry light curve, spectroscopy spectrum, asteroid detection tracks and a combined target dashboard.
+- `focus_plots.py` — plots showing how well the telescope stayed in focus over a session. They use each frame's focuser temperature and position. The focuser is the motor that moves the camera along the optical axis to bring stars into focus. Each frame record keeps the focuser's position and temperature at the time of the exposure.
+- `star_field_visualization.py` — the internal orchestrator for the interactive 2D star field view. It coordinates the overlay layers below.
 - `interaction_handler.py` — manages mouse events and interactive state for the star field view.
-- `layers/` — one file per overlay drawn on the star field: detected stars, photometry markers, spectroscopy dispersion traces (the lines along which a grating spreads each star's light) and extracted spectra, moving-object tracks, the underlying image itself, and the selected star (`star_selection_overlay.py`, which draws crosshair markers on the star the user picked).
-- `geometry.py` — geometry helpers for rotated visualization elements (drawing a box or line at an arbitrary angle).
-- `spectroscopy_field_access.py` — reads a single field off a star's spectroscopy result whether the star is a real `StellarObject` or a plain dict, so the plotting code does not need to know which.
-- `visualization_config.py` — shared configuration tokens (colors, sizes, default percentiles) for the whole suite. The percentiles set the display stretch: pixel values below the 1st percentile show as black and values above the upper percentile (default 99.5) show as white, so a few very bright stars do not leave the rest of the image dark.
+- `layers/` — one file per overlay drawn on the star field. The overlays show detected stars, photometry markers, spectroscopy dispersion traces and extracted spectra, moving-object tracks, the underlying image itself, and the selected star. A dispersion trace is a line along which a grating spreads each star's light. `star_selection_overlay.py` draws crosshair markers on the star the user picked. See [layers/README.md](layers/README.md).
+- `geometry.py` — geometry helpers for rotated visualization elements, such as a box or line drawn at an arbitrary angle.
+- `spectroscopy_field_access.py` — reads a single field off a star's spectroscopy result. It works whether the star is a real `StellarObject` or a plain dict, so the plotting code does not need to know which.
+- `visualization_config.py` — shared configuration tokens (colors, sizes, default percentiles) for the whole suite. The percentiles set the display stretch. Pixel values below the 1st percentile show as black. Values above the upper percentile (default 99.5) show as white. A few very bright stars therefore do not leave the rest of the image dark.
 
-For exact behavior, read the code — the code is always the source of truth.
+For exact behavior, read the code.

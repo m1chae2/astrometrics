@@ -5,6 +5,8 @@ description: House style for prose documentation everywhere in this repo except 
 
 # Repo Documentation Style
 
+> **Source of truth.** The full conventions (where content lives, status labels, document layouts, US spelling, terms, units, Markdown mechanics, and which test or linter enforces each rule) are in `documentation/Documentation_Conventions.md`. This skill summarizes them; when the two differ, the conventions page wins and this skill should be updated to match.
+
 Conventions for prose documentation outside `documentation/` — mainly `README.md` files under
 `astrometricslib/`, `wayfindinglib/`, `backend/`, `ui/`, and similar code-adjacent write-ups that
 explain what a module or pipeline does. Update the relevant README whenever you touch the code it
@@ -132,4 +134,4 @@ After (neutral, active, states current rationale):
   rather than promising to stay exhaustively in sync with it.
 - Each tuned value carries a status label and a register link; no dated results remain.
 - The documentation tests pass:
-  `.venv/bin/pytest astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_validation_register.py -q`
+  `.venv/bin/pytest astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_documentation_style.py astrometricslib/test/test_validation_register.py -q`

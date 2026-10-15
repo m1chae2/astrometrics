@@ -71,6 +71,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           lfs: true
+          # Full history, so each page shows the date it last changed.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7

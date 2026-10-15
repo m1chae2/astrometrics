@@ -157,7 +157,13 @@ nb_execution_mode = "off"  # Set to auto for live dynamic generation
 # lexer found" warning per cell. myst-nb has no config hook to supply a default
 # lexer (see the TODO in myst_nb.core.render._get_nb_source_code_lexer), so the
 # warning is suppressed.
-suppress_warnings = ["myst-nb.lexer"]
+suppress_warnings = [
+    "myst-nb.lexer",
+    # In a shallow clone (one commit, as CI checks out by default) git cannot
+    # date each page. The page then shows no date; that is no reason to fail
+    # the build. The docs workflow and Read the Docs fetch the full history.
+    "git.too_shallow",
+]
 
 myst_enable_extensions = [
     "dollarmath",

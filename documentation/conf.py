@@ -12,6 +12,10 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
 from pathlib import Path
 
+from docutils import nodes
+from sphinx import addnodes
+from sphinx.application import Sphinx
+
 # Insert root project path into sys.path to enable Sphinx autodoc reflection
 sys.path.insert(0, os.path.abspath(".."))
 sys.path.insert(0, os.path.abspath("../build/documentation"))
@@ -142,3 +146,40 @@ myst_heading_anchors = 4
 numpydoc_show_class_members = False
 numpydoc_attributes_as_param_list = True
 automodapi_toctreedirnm = "api/generated"
+
+
+def _builtin_type_xrefs(app: Sphinx, doctree: nodes.document) -> None:
+    """Point the builtin ``type`` in annotations at Python, not a field.
+
+    Constants such as ``DATA_ERRORS`` are annotated
+    ``tuple[type[Exception], ...]``. Sphinx looks such a name up with a
+    suffix search, which also matches every
+    provenance model field named ``type`` and fails the ``-W`` build as
+    ambiguous. An exact lookup finds no local ``type``, so intersphinx links it
+    to the Python documentation.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    doctree : `docutils.nodes.document`
+        The document just read.
+    """
+    for node in doctree.findall(addnodes.pending_xref):
+        if node.get("refdomain") == "py" and node.get("reftarget") == "type":
+            # The domain searches by suffix whenever the attribute exists, even
+            # when it is False, so it is removed rather than cleared.
+            node.attributes.pop("refspecific", None)
+            node["py:module"] = None
+            node["py:class"] = None
+
+
+def setup(app: Sphinx) -> None:
+    """Register the project's Sphinx event handlers.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    """
+    app.connect("doctree-read", _builtin_type_xrefs)

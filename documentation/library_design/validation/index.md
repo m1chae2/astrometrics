@@ -60,7 +60,7 @@ Each file ends with a table of design estimates. These are values that have not 
 - A retired entry keeps its heading and its other fields as the historical record. Its status line reads `**Status:** Retired. Superseded by [ID](link).`, with a link to the entry that replaces it.
 - A re-run of an entry's procedure adds a row to the entry's **Runs** table. The columns are Date, Code version, Verdict and Record. The other fields describe the current run, and **Our result** shows it. The table holds the history.
 - Only an entry that has been run more than once has a **Runs** table. So far these are MOV-01 and MOV-03.
-- The raw record of a re-run is a new file in `documentation/evidence/`. A saved record is never edited (see the [evidence README](../../evidence/README.md)).
+- The raw record of a re-run is a new file in `documentation/evidence/`. A saved record is never edited (see the [evidence README](https://github.com/m1chae2/astrometrics/blob/main/documentation/evidence/README.md)).
 
 ## 3. Status labels
 

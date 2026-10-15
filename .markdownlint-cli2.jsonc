@@ -22,7 +22,7 @@
     "astrometricslib/**/README.md",
     "documentation/*.md",
     "documentation/how_to/*.md",
-    "documentation/library_design/Astrometrics_Library_Implementation.md",
+    "documentation/library_design/Astrometrics_Library_*.md",
     "documentation/library_design/pipelines/*.md",
     "documentation/library_design/validation/*.md"
   ],

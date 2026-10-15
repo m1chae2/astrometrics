@@ -59,9 +59,21 @@ ALLOWED_QUANTITIES = frozenset({
     # Results of Chauvenet's criterion against a fixed 3-sigma cut (Eq. 2).
     "0.27%",
     "185 frames",
+    # Quantities that are part of the title of a cited paper.
+    "1 minute",
+    "25000 Å",
 })
-# Names of outside tools written in mixed case. Code names are not allowed.
-ALLOWED_MIXED_CASE = frozenset({"SkyBoT", "StarNet"})
+# Outside tools and authors written in mixed case. Code names are not allowed.
+ALLOWED_MIXED_CASE = frozenset({
+    "AstroImageJ",
+    "NumPy",
+    "PixInsight",
+    "SciPy",
+    "SkyBoT",
+    "StarNet",
+    "VanderPlas",
+    "VizieR",
+})
 
 UNIT = (
     r"(?:px|pixels?|arcsec|arcseconds?|arcminutes?|%|percent|σ|sigma|frames?|stars?|mag|"
@@ -86,7 +98,8 @@ def _visible_text(path: Path) -> str:
     -------
     text : `str`
         The file with HTML comments, LaTeX math, link targets and HTML anchors
-        removed. Line breaks are kept so line numbers still match.
+        removed. For the architecture paper, fenced diagrams are removed too.
+        Line breaks are kept so line numbers still match.
     """
 
     def blank(match: re.Match[str]) -> str:
@@ -105,6 +118,9 @@ def _visible_text(path: Path) -> str:
         return "\n" * match.group(0).count("\n")
 
     text = path.read_text(encoding="utf-8")
+    if path == ARCHITECTURE:
+        # A figure in the paper is a fenced Mermaid diagram, not prose.
+        text = re.sub(r"^```.*?^```[ \t]*$", blank, text, flags=re.DOTALL | re.MULTILINE)
     text = re.sub(r"<!--.*?-->", blank, text, flags=re.DOTALL)
     text = re.sub(r"\$\$.*?\$\$", blank, text, flags=re.DOTALL)
     text = re.sub(r"\$[^$\n]+\$", "", text)

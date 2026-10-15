@@ -139,10 +139,10 @@ jobs:
 
       - name: Compile PDF
         working-directory: documentation/_build/latex
-        run: latexmk -xelatex -interaction=nonstopmode -halt-on-error astrometrics.tex
+        run: latexmk -xelatex -interaction=nonstopmode -halt-on-error astrometrics-papers.tex
 
       - name: Upload PDF
         uses: actions/upload-artifact@v7
         with:
           name: astrometrics-pdf
-          path: documentation/_build/latex/astrometrics.pdf
+          path: documentation/_build/latex/astrometrics-papers.pdf

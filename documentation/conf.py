@@ -4,7 +4,7 @@ Includes PyData Sphinx Theme, numpydoc, sphinx-automodapi,
 MyST-NB notebook execution, and InterSphinx mappings to
 Astropy, NumPy, SciPy, and Matplotlib. It also sets up the site features a
 reader expects on Read the Docs: an "Edit on GitHub" button, the date each page
-last changed, a sitemap, a 404 page, and a PDF of the whole site.
+last changed, a sitemap, a 404 page, and a PDF of the four papers.
 """
 
 import os
@@ -20,6 +20,7 @@ from typing import ClassVar
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.application import Sphinx
+from sphinx.environment import BuildEnvironment
 from sphinx.util.docutils import SphinxDirective
 
 # Insert root project path into sys.path to enable Sphinx autodoc reflection
@@ -138,7 +139,9 @@ latex_engine = "xelatex"
 # makeindex builds the index everywhere; xindy needs language modules that not
 # every TeX installation ships.
 latex_use_xindy = False
-latex_documents = [("index", "astrometrics.tex", "Astrometrics documentation", author, "manual")]
+# The PDF holds the four papers only (papers.rst), not the whole site: the API
+# reference, the register and the guides are meant to be searched online.
+latex_documents = [("papers", "astrometrics-papers.tex", "Astrometrics papers", author, "manual")]
 
 # Intersphinx mapping for external scientific library links
 intersphinx_mapping = {
@@ -284,6 +287,28 @@ def _plain_equation_numbers_for_print(app: Sphinx, docname: str, source: list[st
         source[0] = re.sub(r"\\tag\{([^}]*)\}", r"\\qquad(\1)", source[0])
 
 
+def _papers_page_for_print_only(app: Sphinx, env: BuildEnvironment, docnames: list[str]) -> None:
+    """Leave the PDF's starting page out of every build except the PDF.
+
+    ``papers.rst`` lists the four papers so the PDF holds only them. The
+    website already lists the papers in its sections, so it must not read
+    this page.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    env : `sphinx.environment.BuildEnvironment`
+        The build environment.
+    docnames : `list` [`str`]
+        The documents about to be read, changed in place.
+    """
+    if app.builder.format != "latex":
+        env.found_docs.discard("papers")
+        if "papers" in docnames:
+            docnames.remove("papers")
+
+
 def setup(app: Sphinx) -> None:
     """Register the project's Sphinx event handlers.
 
@@ -295,3 +320,4 @@ def setup(app: Sphinx) -> None:
     app.connect("doctree-read", _builtin_type_xrefs)
     app.connect("builder-inited", _plain_mermaid_for_print)
     app.connect("source-read", _plain_equation_numbers_for_print)
+    app.connect("env-before-read-docs", _papers_page_for_print_only)

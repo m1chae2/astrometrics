@@ -24,9 +24,10 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE = REPO_ROOT / "documentation"
 SECTION_PAGES = ("get_started", "tutorials", "how_to/index", "explanation", "reference", "evidence", "about")
-# Folders and files Sphinx does not build (conf.py exclude_patterns), plus the
-# API pages sphinx-automodapi generates and links itself.
-SKIPPED = ("_build/", "plans/", "evidence/", "api/generated/", ".venv/")
+# Folders and files Sphinx does not build into the website (conf.py
+# exclude_patterns; papers.rst starts the PDF only), plus the API pages
+# sphinx-automodapi generates and links itself.
+SKIPPED = ("_build/", "plans/", "evidence/", "api/generated/", ".venv/", "papers.rst")
 SUFFIXES = (".md", ".rst", ".ipynb")
 RST_TOCTREE = re.compile(r"^\.\. toctree::\n((?:[ \t]+.*\n|\n)*)", re.MULTILINE)
 MYST_TOCTREE = re.compile(r"^```\{toctree\}\n(.*?)^```", re.MULTILINE | re.DOTALL)

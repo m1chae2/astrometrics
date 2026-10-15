@@ -2,10 +2,16 @@
 
 This step lines up and combines frames. Siril stacks the individual frames (see `stack_runner.py` one level up). The files here handle what Siril does not: stacks of different exposure lengths and spectral frames.
 
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+
+- **Exposure group**: the frames of one stack that share one exposure length. Each group is stacked on its own and the group stacks are then combined.
+- **Spectral frame**: a frame taken through a grating with no slit (a slitless spectrum), which spreads each star's light into a streak of colours. The **zero order** is the plain, undispersed image of the star that such a frame also records; it is defined in full below.
+- **Registration** or **alignment**: lining frames up so the same star falls on the same pixel.
+
 ## What it does
 
 - `exposure_groups.py` splits frames by exposure length, then combines the per-group stacks into one image. Each group is weighted by its noise, and a group is left out where it is saturated or clipped at zero. The step also puts every group on the brightness scale of the reference group (see "The brightness scale between exposure groups" below). `saturated_pixel_mask` marks those pixels, so a later check can tell which stars had their cores replaced.
-- `group_alignment.py` finds the shift between group stacks, by the zero-order star or by phase correlation, and moves them into line. For imaging stacks it then refines the shift: it matches the stars of the two stacks and fits a shift, a rotation and a scale about the image centre (`refine_alignment_with_stars`). Stacks from different nights differ by a small rotation and scale, which a shift cannot remove. On M 57 and M 27 the stars of two group stacks were 0.6 to 1.1 pixels apart on average after the best shift (up to 1.9 pixels toward the frame edges), and the fit brought that to 0.04 to 0.06 pixels. When correlation fails, or its shift is too far off for the stars to pair up, the stacks are lined up from patterns of stars instead (`find_alignment_from_star_patterns`, with `star_pattern_candidates.py`). Small triangles of stars have a shape that does not change with shift, rotation or scale, so matching triangles gives a first guess with no starting offset. The guess is kept only if it lines up at least 30 stars, with a scale within 0.5 % of one and a leftover under 1.5 pixels. Any rotation is allowed, including the half turn of a mount flip at the meridian. On 2026-10-13 this lined up the Nikon D5300 groups of M 106, NGC 7023, M 51, NGC 2024 and NGC 6992, which correlation had refused (correlation 0.01 to 0.26).
+- `group_alignment.py` finds the shift between group stacks, by the zero-order star or by phase correlation (a method that finds the shift between two images from their Fourier transforms), and moves them into line. For imaging stacks it then refines the shift: it matches the stars of the two stacks and fits a shift, a rotation and a scale about the image centre (`refine_alignment_with_stars`). Stacks from different nights differ by a small rotation and scale, which a shift cannot remove. On M 57 and M 27 the stars of two group stacks were 0.6 to 1.1 pixels apart on average after the best shift (up to 1.9 pixels toward the frame edges), and the fit brought that to 0.04 to 0.06 pixels. When correlation fails, or its shift is too far off for the stars to pair up, the stacks are lined up from patterns of stars instead (`find_alignment_from_star_patterns`, with `star_pattern_candidates.py`). Small triangles of stars have a shape that does not change with shift, rotation or scale, so matching triangles gives a first guess with no starting offset. The guess is kept only if it lines up at least 30 stars, with a scale within 0.5 % of one and a leftover under 1.5 pixels. Any rotation is allowed, including the half turn of a mount flip at the meridian (the telescope mount turns the camera over when the target crosses the north-south line overhead). On 2026-10-13 this lined up the Nikon D5300 groups of M 106, NGC 7023, M 51, NGC 2024 and NGC 6992, which correlation had refused (correlation 0.01 to 0.26).
 - `spectral_frame_alignment.py` aligns spectral frames that have no usable star pattern.
 - `group_derotation.py` turns spectral group stacks to one common trail tilt.
 
@@ -13,7 +19,7 @@ The refinement keeps the plain shift when it cannot trust the fit: fewer than 30
 
 Alignment accuracy matters most here. On the groups measured, these steps place frames within 0.05 pixels, while Siril's registration of the same groups was 0.06 to 3 pixels off. For that reason these steps stay in Python.
 
-Pixel rejection when Siril combines the frames is set before this step runs. The limits come from `rejection_bounds` in `utilities/rejection_thresholds.py`, and the stacking README ("Pixel rejection limits") describes them and the measurements behind them.
+Pixel rejection (throwing out a pixel's value in one frame when it disagrees strongly with the other frames) when Siril combines the frames is set before this step runs. The limits come from `rejection_bounds` in `utilities/rejection_thresholds.py`, and the stacking README ("Pixel rejection limits") describes them and the measurements behind them.
 
 ## Finding the zero-order target
 
@@ -34,13 +40,13 @@ The zero order is the undispersed image of the target in a slitless spectrum fra
 
 ## The brightness scale between exposure groups
 
-Siril leaves each group stack with its own overall brightness. Before the groups are averaged, `exposure_groups.py` divides each group's counts-per-second image by a gain (a single number) so that all groups read the same.
+Siril leaves each group stack with its own overall brightness. Before the groups are averaged, `exposure_groups.py` divides each group's counts-per-second image (the raw camera counts divided by the exposure time) by a gain (a single number) so that all groups read the same.
 
 **How the gain is measured.** The reference group is the group with the most weight. For every other group, the step measures the same isolated stars in both groups (`measure_star_flux_ratios`):
 
 1. It finds up to 3,000 stars in the reference and keeps those with no other detected star within 25 pixels.
-2. It leaves out a star with any pixel in its circle or sky ring that is uncovered, saturated, or above half the camera's clip ceiling (`star_clip_level`). The ceiling comes from the camera profile (`clip_ceiling_adu`). Stars near the ceiling read low, which biases the gain.
-3. It measures each star's flux with `measure_aperture_photometry`: the light inside a 14 pixel circle minus the sky median of the ring from 19 to 25 pixels. The circle is wide enough that a star a pixel wider in one group keeps the same share of its light.
+2. It leaves out a star with any pixel in its circle or sky ring that is uncovered, saturated, or above half the camera's clip ceiling (`star_clip_level`). The ceiling comes from the camera profile (`clip_ceiling_adu`, the highest raw count, in ADU or analog-to-digital units, that a saturated pixel reaches). Stars near the ceiling read low, which biases the gain.
+3. It measures each star's flux (its total light) with `measure_aperture_photometry` (aperture photometry sums the light in a circle around the star and subtracts the sky measured in a ring around it): the light inside a 14 pixel circle minus the sky median of the ring from 19 to 25 pixels. The circle is wide enough that a star a pixel wider in one group keeps the same share of its light.
 4. It measures the noise a flux ratio carries, from empty apertures on the difference of the two groups, and keeps stars at least 10 times above that noise (`STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE`). A faint star's ratio is noisy, and ranking by a noisy flux makes the faintest stars look too bright.
 5. The gain is the median of (group flux / reference flux) over the remaining stars. The step also takes the median over the faintest quarter and over the brightest quarter of the stars.
 

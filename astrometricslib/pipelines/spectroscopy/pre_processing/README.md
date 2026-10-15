@@ -4,12 +4,42 @@ This stage turns a raw image into a calibrated spectrum for each star and
 measures how good the raw data was. Nothing here depends on what the star
 turns out to be. The pipeline runs this stage the same way for every star.
 
+Terms are defined in the
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+This README also defines each term the first time it appears.
+
+## In plain words
+
+- **Slitless spectroscopy.** A transmission grating (a clear plate ruled with
+  fine lines, which bends light by an angle that depends on its wavelength)
+  sits in front of the camera with no slit. It spreads every star in the
+  field into a short rainbow at once.
+- **The trail and the zero order.** Each rainbow appears as a streak, the
+  trail. Part of the star's light passes the grating unbent and forms a
+  normal point-like image, the zero order, at one end of the trail. Distance
+  from the zero order along the trail maps to wavelength (the dispersion
+  direction is the direction along the trail).
+- **What this stage produces.** For each star, a calibrated spectrum:
+  brightness against wavelength, with a 1-sigma error (one standard
+  deviation of the expected random scatter) on every sample, cleaned of the
+  effects of the camera, the instrument and the air.
+- **Why it is hard.** With no slit, the sky and neighbouring trails sit right
+  beside each star's trail. The wavelength scale hangs on the zero order,
+  which can be saturated (pixels at the camera's maximum value) or pulled by
+  a neighbour. The air bends and dims blue light more than red, and the
+  camera and grating add their own colour tilt. The blur is large, so every
+  correction has to be small and honest about its errors.
+
+Units: wavelengths are in Angstroms (A; 1 A is 0.1 nm). ADU (analog-to-digital
+unit) is one step of the stored pixel value.
+
 ## The flow
 
 1. **Identify each star.** A spectral image spreads each star's light into
    a streak, so the pipeline cannot match its stars against the catalog the
    normal way. It names them from a normal (non-spectral) image of the same
-   field, where astrometry has already identified the stars
+   field, where astrometry (the measurement of star positions on the sky)
+   has already identified the stars
    (`spectral_star_registration.py`):
    - First, it uses the plate solution (the fitted map from pixel to sky
      position) of the target's solved normal stack. The solution places
@@ -19,7 +49,8 @@ turns out to be. The pipeline runs this stage the same way for every star.
      back to lining up the two images' star positions by their geometry and
      carrying the names across (`identify_spectral_stars_via_registration`).
    A session run instead projects the stars found once in the session's
-   reference frame through that frame's sky coordinate system.
+   reference frame through that frame's sky coordinate system (its WCS,
+   world coordinate system: the map from pixel to sky position).
 2. **Model the instrument.** The pipeline builds a digital model of the
    camera and grating to work out where each star's rainbow should fall on
    the sensor, using the physics of how a grating spreads light.
@@ -27,10 +58,11 @@ turns out to be. The pipeline runs this stage the same way for every star.
    `spectroscopy_instrument.py` applies it with the camera's configuration.
 3. **Extract each spectrum.** The pipeline measures the brightness along
    each star's streak. At each step along the streak it adds up the light in
-   a box across the streak, centred on the streak's fitted centre line, and
-   subtracts the sky background. See "Extraction box and sky" below.
+   a box (the extraction box) across the streak, centred on the streak's
+   fitted centre line, and subtracts the sky background. See "Extraction box and sky" below.
    `spectrum_extractor.py` does this. `_extractor_c.c` is an optional C
-   version of the per-step Gaussian fit, about 300 times faster than the
+   version of the per-step Gaussian fit (a bell curve fitted to the streak's
+   cross-section), about 300 times faster than the
    Python fallback, which the extractor uses when it is built.
 4. **Correct for crowding.** When two stars sit close together, a bright
    neighbour's streak can leak light into a faint star's reading. The
@@ -43,21 +75,23 @@ turns out to be. The pipeline runs this stage the same way for every star.
    each wavelength.
 5. **Convert pixels to wavelengths.** The pipeline converts each pixel
    position along the streak into a wavelength, using the grating's known
-   physics (`spectrum_calibrator.py`). It does not smooth the spectrum. It
-   then drops the
-   samples that landed off the image or below the camera's shortest
-   wavelength. For every sample it keeps, it records `sample_distances_px`:
-   the distance from the zero-order star (the undispersed image of the
-   star), in pixels, measured along the streak. A tilted streak is longer
-   than the number of columns it covers, so the flare-mask extraction
-   divides its column offset by the cosine of the tilt. The flare-mask
-   extraction measures that offset from its zero-order anchor, the centroid
-   (brightness-weighted average position) of the zero order. Light from the
-   spectrum trail would pull a plain centroid about 0.08 pixel toward the
-   trail, so the extractor subtracts the trail and the background from the
-   box first. Both extraction paths use this same definition. The distance is the one position the
-   grating equation expects, so a later step can place any sample on the
-   physical model without counting samples from the start.
+   physics (`spectrum_calibrator.py`). It does not smooth the spectrum.
+   - *Drop unusable samples.* It then drops the samples that landed off the
+     image or below the camera's shortest wavelength.
+   - *Record each sample's distance.* For every sample it keeps, it records
+     `sample_distances_px`: the distance from the zero-order star (the
+     undispersed image of the star), in pixels, measured along the streak.
+     The distance is the one position the grating equation expects, so a
+     later step can place any sample on the physical model without counting
+     samples from the start. Both extraction paths use this same definition.
+   - *Tilted streaks.* A tilted streak is longer than the number of columns
+     it covers, so the flare-mask extraction divides its column offset by the
+     cosine of the tilt.
+   - *The zero-order anchor.* The flare-mask extraction measures that offset
+     from its zero-order anchor, the centroid (brightness-weighted average
+     position) of the zero order. Light from the spectrum trail would pull a
+     plain centroid about 0.08 pixel toward the trail, so the extractor
+     subtracts the trail and the background from the box first.
 6. **Correct for atmospheric refraction.** Air lifts blue light toward
    the zenith (the point straight overhead) more than red light. The
    pipeline moves each sample's wavelength back by the part of that lift
@@ -69,15 +103,16 @@ turns out to be. The pipeline runs this stage the same way for every star.
    scale against known lines (see "Wavelength zero point" below).
 8. **Remove signals that are not the star.** The pipeline corrects for
    three things that are not properties of the star itself:
-   - the camera sensor's uneven sensitivity to different colours
-     (`quantum_efficiency_correction.py`, with the curve from the camera
+   - the camera sensor's uneven sensitivity to different colours (its
+     quantum efficiency, the fraction of arriving light it records;
+     `quantum_efficiency_correction.py`, with the curve from the camera
      profile),
    - the whole instrument's own tilt (the grating, the telescope's
      coatings, and every other optic between the star and the sensor;
      `instrument_response.py`),
    - the difference in how much the air dimmed the blue light compared with
      the red light, between this frame and the frame of the standard star
-     that the instrument's tilt was fitted to (see "Airmass extinction"
+     (a star of known spectrum) that the instrument's tilt was fitted to (see "Airmass extinction"
      below).
 
    The wavelengths where Earth's own atmosphere absorbs light (the
@@ -98,14 +133,15 @@ turns out to be. The pipeline runs this stage the same way for every star.
    reviewer can tell whether a later classification worked from strong data
    or weak data. `spectral_resolution.py` estimates the blur (the
    resolution element) from the trail width, or uses a fixed fallback when
-   it cannot. It also loads the stored line-spread profile
+   it cannot. It also loads the stored line-spread profile (the
+   instrument's blur at each wavelength)
    (`data/line_spread_*.json`) that the classifier blurs its references
    with.
 
 ## Extraction box and sky
 
-**The box.** The pipeline fits a Gaussian to the streak's cross-section at
-each step. The fit gives the streak's centre and its width (sigma, in
+**The box.** The pipeline fits a Gaussian (a bell curve) to the streak's
+cross-section at each step. The fit gives the streak's centre and its width (sigma, in
 pixels). The box reaches 2.5 sigma to each side of the centre.
 
 The fit's width is noisy from step to step. A box that followed each fit
@@ -132,7 +168,8 @@ in pixels, is in the extractor's `last_diagnostics.aperture_half_width_px`.
 of the box, separated from it by a 6-pixel gap and 10 pixels wide. It does
 this at every step:
 
-1. It removes pixels more than 3 sigma from the strip's median (hot pixels,
+1. It removes pixels more than 3 sigma (3 standard deviations) from the
+   strip's median (hot pixels,
    cosmic rays, the edge of a passing streak) and repeats until nothing more
    drops out, for at most `SKY_CLIP_MAX_PASSES` (5) passes. It takes the
    median of what is left.
@@ -164,22 +201,30 @@ empty (`None`) for an untraced extraction.
 
 ## Airmass extinction
 
+What and why: the instrument response (the colour tilt of the camera,
+grating and telescope) was measured on a standard star at one height in the
+sky. A target at another height had its light dimmed by a different amount
+of air, and that difference tilts its spectrum. This step removes the
+difference.
+
 Air dims blue light more than red light, and it dims both more at higher
 airmass (a measure of how much air the light crossed: 1.0 straight overhead,
 2.0 about 60 degrees from overhead). The instrument response already removes
 the dimming at the airmass of the standard star it was fitted to
 (`reference_airmass`, stored in the response file). A target observed at
 another airmass keeps a blue-to-red tilt from the difference. Between 4200 A
-and 8000 A the tilt is about 0.09 magnitudes for a change of 0.35 airmass.
+and 8000 A the tilt is about 0.09 magnitudes (on the logarithmic brightness
+scale; 0.09 mag is about 8 percent) for a change of 0.35 airmass.
 
 After it removes the instrument response, the pipeline multiplies the
 spectrum by `10 ** (0.4 * k * (target_airmass - reference_airmass))`. Here
-`k` is the extinction coefficient in magnitudes per airmass, read from
+`k` is the extinction coefficient (how much the air dims the light for each
+unit of airmass) in magnitudes per airmass, read from
 `data/atmospheric_extinction_kpno.txt` at each wavelength. The target
 airmass comes from the frame header's `AIRMASS` card.
 
-The pipeline skips the correction, and records why, when the header has no
-usable airmass (missing, below 1 or above 10) or the response file records
+**When it is skipped.** The pipeline skips the correction, and records why,
+when the header has no usable airmass (missing, below 1 or above 10) or the response file records
 no reference airmass. The result of the correction is an
 `ExtinctionCorrection` record: `is_applied`, `target_airmass`,
 `reference_airmass`, `curve_name` and `reason` (set only when skipped). The
@@ -216,7 +261,7 @@ has two effects:
   streak and changes no wavelength.
 
 At sea level, between 4200 A and 8000 A, the shift is about 1.6 arcseconds
-at airmass 1.5 and 2.5 arcseconds at airmass 2. One pixel covers 1.915
+(1 arcsecond is 1/3600 of a degree) at airmass 1.5 and 2.5 arcseconds at airmass 2. One pixel covers 1.915
 arcseconds, so the shift is roughly 0.8 to 1.3 pixels. At about 11.4 A per
 pixel, a streak that lies along the vertical gets a wavelength error of 10
 to 15 A between its ends.
@@ -228,8 +273,9 @@ The pipeline corrects the part along the streak (`differential_refraction.py`,
    plus half of `EXPTIME`, or halfway to `DATE-END` when the header has it.
    A header with no time of day gives no result.
 2. **Find the altitude and the parallactic angle.** With astropy and the
-   observatory site, it finds the target's altitude and the position angle
-   (measured on the sky from north toward east) of the direction from the
+   observatory site, it finds the target's altitude (its angle above the
+   horizon) and the position angle (measured on the sky from north toward
+   east) of the direction from the
    target to the zenith. That angle is the parallactic angle.
 3. **Find the direction of the dispersion on the sky.** The pipeline knows
    the direction in which wavelength grows along the streak as an angle on
@@ -245,7 +291,8 @@ The pipeline corrects the part along the streak (`differential_refraction.py`,
    wavelengths.
 5. **Find the refraction.** `R(L) = (n(L) - 1) * tan(z)`, where `z` is the
    zenith distance (the angle between the target and the zenith) and `n` is
-   the refractive index of air from the Ciddor (1996) equations. The index
+   the refractive index of air (how much slower light travels in air than in
+   vacuum, which sets how much it bends) from the Ciddor (1996) equations. The index
    depends on the air's pressure, temperature and humidity. The pipeline
    reads `pressure_hpa`, `temperature_c` and `relative_humidity_percent`
    from the `[Observatory.Location]` section of the config. Any of the three
@@ -281,8 +328,8 @@ response was derived without this correction. A response that
 `derive_instrument_response.py` derives with a site configured fits the
 shifted wavelengths.
 
-The result of the step is a `DifferentialRefraction` record. The pipeline
-copies it onto the star's saved result as
+**What it records.** The result of the step is a `DifferentialRefraction`
+record. The pipeline copies it onto the star's saved result as
 `SpectroscopyResult.differential_refraction` (a
 `DifferentialRefractionRecord`). It holds `is_computed`, `is_applied`
 (`dar_correction_applied`), `reason` (set when the pipeline skipped the
@@ -299,6 +346,11 @@ Checkpoint 0 reports the refraction metrics (see "Quality checkpoints 0 and
 
 ## Wavelength zero point
 
+What and why: if the zero-order anchor is off, every wavelength in the
+spectrum is off by the same amount. Lines with known wavelengths reveal that
+offset, so the pipeline looks for them and, when they agree, shifts the
+spectrum back.
+
 The wavelength scale is the grating equation with one fitted number, the
 grating distance, and an anchor at the centre of the star's zero-order image.
 A saturated or crowded zero order, or a centroid pulled toward a neighbour,
@@ -308,13 +360,15 @@ spectrum. `wavelength_zero_point.py` measures it and, when the evidence is
 enough, removes it.
 
 1. **Look for six known lines.** The pipeline tries H-alpha (6562.8 A),
-   H-beta (4861.3 A), H-gamma (4340.5 A), Na D (5892.9 A), Mg b (5175 A) and
+   H-beta (4861.3 A), H-gamma (4340.5 A) (three hydrogen lines, the Balmer
+   lines), Na D (5892.9 A, sodium), Mg b (5175 A, magnesium) and
    the oxygen A band (7605 A). All wavelengths are in air. It does not know
    the star's type yet, so it tries every line and keeps only the ones it
    finds. The oxygen A band comes from Earth's air, so every spectrum has it
    whatever the star is.
 2. **Fit each line.** The pipeline fits a smooth continuum on both sides of
-   the line and slides a Gaussian dip, as wide as the instrument blur at that
+   the line (the continuum, the brightness the star would have without the
+   line) and slides a Gaussian dip, as wide as the instrument blur at that
    wavelength (`load_line_spread_profile`), over plus or minus one blur width
    around the known wavelength. The dip's centre minus the known wavelength is
    the line's offset.
@@ -322,12 +376,17 @@ enough, removes it.
    widths deep (`MINIMUM_LINE_SIGNIFICANCE`) and its centre must lie inside
    the search range. A noise-only spectrum finds no line.
 4. **Combine the lines.** The spectrum's offset is the error-weighted mean of
-   the lines' offsets. Each line's error is its fit error and the uncertainty
-   of its own position (blended lines, stellar motion), added in quadrature.
+   the lines' offsets (a precise line counts more than a noisy one). Each
+   line's error is its fit error and the uncertainty of its own position
+   (blended lines, stellar motion), added in quadrature (the square root of
+   the sum of squares, as independent errors combine).
 5. **Apply or only record.** The pipeline subtracts the offset from every
    wavelength when at least two lines were found and they agree within their
-   errors (a chi-square test, p-value at least 0.01). Otherwise it records the
-   offset as measured only. One line cannot be told apart from a misidentified
+   errors (a chi-square test, p-value at least 0.01). The chi-square test
+   asks whether the lines' offsets differ by more than their errors allow;
+   the p-value is the chance that noise alone would make them differ this
+   much, so a small p-value means the lines truly disagree. Otherwise it
+   records the offset as measured only. One line cannot be told apart from a misidentified
    feature. Lines that disagree point to a stretched scale, not a shifted one.
 
 The shift happens in `_apply_result_to_stellar_object` right after the
@@ -340,7 +399,7 @@ Checkpoint 1 carries these metrics:
 
 | Metric | Unit | Limit | What it tells a reader |
 |---|---|---|---|
-| `wavelength_zero_point_offset_angstrom` | angstrom | 20, lower is better (designed) | The size of the offset before correction. The limit is half a resolution element at 5000 A (about 40 A). It is a designed value, not a measured one. |
+| `wavelength_zero_point_offset_angstrom` | angstrom | 20, lower is better (designed) | The size of the offset before correction. The limit is half a resolution element at 5000 A (the element is about 40 A wide, so half is 20 A). It is a designed value, not a measured one. |
 | `wavelength_zero_point_uncertainty_angstrom` | angstrom | none | The error of the offset. |
 | `wavelength_zero_point_line_count` | lines | none | How many lines passed the significance test. |
 | `wavelength_zero_point_applied` | flag | none | 1 when the pipeline removed the offset, 0 when it only measured it. |
@@ -357,13 +416,15 @@ Limits of the method: the correction is a constant shift, so it fixes an
 anchor error but not a wrong grating distance. A line can be measured only
 when the true offset is smaller than about one blur width. A different feature
 near a line can be mistaken for it, for example the CH G band at 4304 A beside
-H-gamma in G and K stars; the chi-square test catches that only when other
+H-gamma in G and K stars (stars about as warm as the Sun or cooler); the
+chi-square test catches that only when other
 lines are present to disagree with it.
 
 ## Per-sample uncertainty
 
 Every sample of the spectrum carries a 1-sigma error (the size of the random
-scatter that sample would show from one exposure to the next). The pipeline
+scatter that sample would show from one exposure to the next, one standard
+deviation). The pipeline
 needs it to say how much a later measurement, such as a line strength, can be
 trusted. The error comes from a model of the camera, not from the finished
 spectrum.
@@ -375,10 +436,11 @@ variance (the square of the error), in four terms:
 1. **Photon noise of the box.** Light arrives in separate particles, so a
    pixel that collected `N` electrons scatters by `sqrt(N)` electrons (Poisson
    noise). Each pixel holds star and sky together, so the term uses the whole
-   pixel value. The camera's gain (electrons per ADU, the step of the stored
-   pixel number) converts ADU to electrons.
-2. **Read noise of the box.** Every pixel gets the camera's read noise
-   (electrons, root mean square) each time the sensor is read.
+   pixel value. The camera's gain (electrons per ADU) converts ADU to
+   electrons.
+2. **Read noise of the box.** Every pixel gets the camera's read noise (the
+   scatter the electronics add; electrons, root mean square) each time the
+   sensor is read.
 3. **Edge weights.** A pixel at the box edge counts for the fraction of it
    inside the box. A pixel counted for a fraction `w` adds `w` times its value
    and so `w` squared times its variance. A box of whole pixels gives the
@@ -397,11 +459,15 @@ uses (`pipelines/photometry/pre_processing/detector_noise.py`): the camera
 profile first, then the `EGAIN` and `RDNOISE` header cards, then an assumption
 of 1 electron per ADU and no read noise. The result records which of the two
 was assumed (`SpectroscopyResult.intensity_noise_model`), and checkpoint 1
-carries the `gain_assumed` and `read_noise_assumed` flags. A Siril stack saved
+carries the `gain_assumed` and `read_noise_assumed` flags.
+
+A Siril (the stacking program) stack saved
 as fractions of full scale is converted to ADU (65535 per unit) and its
 variance is divided by the number of stacked frames (`STACKCNT`).
 
-**Pixels where the stacker threw frames away.** `STACKCNT` counts the frames
+**Pixels where the stacker threw frames away.**
+
+*What it does.* `STACKCNT` counts the frames
 submitted, but the stacker rejects some values at some pixels (cosmic rays,
 satellite trails, bad pixels), so a pixel may be the mean of fewer frames. The
 stack's rejection map (`<stem>_RejMap.fits`, beside the stack; also used for
@@ -412,9 +478,13 @@ never more than `N`. The box term of the variance multiplies each pixel's
 Poisson and read variance by that factor
 (`PixelNoiseModel.box_variance(..., pixel_scale)`). The sky term is not
 changed, because it uses the scatter measured in the sky bands, which already
-shows the local noise. `find_rejection_map` finds the map and the pipeline
+shows the local noise.
+
+*Where it lives.* `find_rejection_map` finds the map and the pipeline
 loads it (`SpectroscopyPipeline._noise_model_for`); without a map the factor is
-1, and the stored record says `rejection_map_used`. Measured on 19 real
+1, and the stored record says `rejection_map_used`.
+
+*How we know.* Measured on 19 real
 spectral stacks on 2026-10-11, the average factor over the brightest pixels
 (the star and its trail) is 1.02 to 1.28 for most targets. It is 1.27 for
 Alnath, 1.28 for Vega and 1.48 for Arcturus, where the reported variance was
@@ -431,9 +501,11 @@ sample by a factor, so each multiplies its error by the size of that factor
   brightness.
 - The quantum-efficiency correction multiplies by one over the sensitivity.
 - The instrument-response division multiplies by one over the response, and
-  gives NaN outside the response's range, like the brightness.
+  gives NaN ("not a number", a sample with no value) outside the
+  response's range, like the brightness.
 - The extinction correction multiplies by its factor when it was applied.
-- The sub-pixel position of a sample blends two image columns with weights
+- The sub-pixel position of a sample blends two image columns (a linear
+  interpolation) with weights
   `1 - u` and `u`. The two readings use different pixels, so the blend has the
   variance `(1 - u)^2 V1 + u^2 V2`.
 
@@ -445,11 +517,14 @@ units and order as `intensities`) and
 **Limits of the model.**
 
 - Neighbouring samples share an image column, so their errors are correlated.
-  The stored array holds each sample's own error and not the covariance. A
+  The stored array holds each sample's own error and not the covariance (how
+  the errors of two samples move together). A
   sum over several samples that treats them as independent understates the
   error of the sum.
-- The model assumes bias-subtracted and dark-subtracted pixels with one gain.
-  Flat-fielding, stacking and registration change the noise a little, and the
+- The model assumes bias-subtracted and dark-subtracted pixels with one gain
+  (bias is the fixed offset the camera adds; dark is the signal the sensor
+  makes from heat). Flat-fielding (correcting each pixel's sensitivity),
+  stacking and registration change the noise a little, and the
   model does not follow that.
 - The model takes the quantum-efficiency curve and the instrument response to
   be exact. Their own errors are not in the stored errors.
@@ -457,8 +532,10 @@ units and order as `intensities`) and
   uncertainty of that subtraction is not added to the errors.
 - The traced extraction places its box from fitted centers and widths. The
   variance covers the pixel noise inside the box it chose. It does not cover
-  the extra scatter from the box moving between exposures. Over 200 noise
-  realizations of one small synthetic frame, the median ratio of the reported
+  the extra scatter from the box moving between exposures.
+
+  How we know: over 200 noise
+  realizations (copies of the frame with fresh random noise) of one small synthetic frame, the median ratio of the reported
   error to the measured scatter is 1.00 for the flare-mask extraction (with
   sky subtraction), 0.97 for the dispersion-line extraction, and 0.96 for the
   traced dispersion line (60 realizations). The traced flare-mask extraction on
@@ -482,7 +559,8 @@ The input quality assessment answers one question: was this spectrum worth
 analyzing at all? It does not depend on what the classifier or the feature
 tests later conclude, only on the raw data itself. It records:
 
-- **Resolution**: how much the instrument blurred this spectrum, in
+- **Resolution**: how much the instrument blurred this spectrum (the
+  resolution element, the smallest wavelength difference it can separate), in
   Angstroms, and whether the pipeline measured that blur from this
   spectrum's own trail width or fell back to a fixed default. A finer
   resolution means later stages can trust smaller differences between
@@ -496,7 +574,7 @@ tests later conclude, only on the raw data itself. It records:
   the image, inside the camera's usable range. A value below one means part
   of the streak ran off the edge of the picture.
 - **Signal-to-noise**: how strongly the spectrum stands out from its own
-  noise.
+  noise (the signal divided by its random scatter; higher is cleaner).
 
 A reviewer can use this assessment to judge whether a later classification
 rests on strong data or weak data, before looking at the classification
@@ -534,11 +612,16 @@ shape (see "Quality checkpoints" in the [pipeline README](../README.md)).
   - `fraction_samples_snr_below_5`: the share of samples in that range whose
     brightness is below 5 times their own error.
   - `snr_estimate_ratio`: the variance-based signal-to-noise divided by the
-    post-hoc `signal_to_noise` above. Both estimate the same quantity, and the
+    post-hoc `signal_to_noise` above (post-hoc: estimated afterwards from the
+    finished spectrum's own scatter). Both estimate the same quantity, and the
     variance-based one cuts the spectrum into the same non-overlapping
-    resolution elements as the post-hoc one. A ratio far from 1 means one of
+    resolution elements as the post-hoc one.
+
+    What a value means: a ratio far from 1 means one of
     the two is wrong: the gain or read noise in the model, or scatter in the
-    spectrum that the model does not include. The post-hoc estimate is itself
+    spectrum that the model does not include.
+
+    How we know: the post-hoc estimate is itself
     noisy. On four synthetic frames run through the whole pipeline with the
     true gain and read noise, the ratio was 1.0 to 1.8, and the post-hoc
     estimate alone ranged from 29 to 69 (40 and 69 for two noise seeds of one
@@ -552,7 +635,7 @@ The four refraction metrics of checkpoint 0:
 
 | Metric | Unit | Limit | What it tells a reader |
 |---|---|---|---|
-| `dar_along_dispersion_angstrom` | angstrom | 20, lower is better. A design choice: half the resolution element at 5000 A (about 40 A). Not measured. | The spread of the wavelength error between 4200 A and 8000 A before the correction. The metric reports it whether or not the pipeline applied the correction. |
+| `dar_along_dispersion_angstrom` | angstrom | 20, lower is better. A design choice: half the resolution element at 5000 A (the element is about 40 A wide, so half is 20 A). Not measured. | The spread of the wavelength error between 4200 A and 8000 A before the correction. The metric reports it whether or not the pipeline applied the correction. |
 | `dar_across_dispersion_px` | pixel | none | How much refraction widens the streak between 4200 A and 8000 A. |
 | `target_altitude_degrees` | degree | 20, higher is better. A design choice for the plane-parallel model, not a measurement. | The target's altitude at mid-exposure. Below the limit the pipeline skips the correction. |
 | `parallactic_to_dispersion_angle_degrees` | degree | none | The angle from the zenith direction to the dispersion direction. 0 means the red end points at the zenith. |
@@ -569,7 +652,8 @@ them as the first two entries of `stage_quality`.
 ## Measured line spread
 
 `measured_line_spread.py` turns a spectrum's trail width into its own
-resolution profile: the full width at half maximum (FWHM) of the blur in 400 A
+resolution profile: the full width at half maximum (FWHM, the width where
+the blur profile drops to half its peak) of the blur in 400 A
 bands from 4200 to 8000 A, in pixels and in Angstroms, with each band's
 scatter. The pipeline stores it on the result as `measured_line_spread` and
 uses it for the checkpoint 1 metrics `trail_fwhm_blue_px`, `trail_fwhm_red_px`,

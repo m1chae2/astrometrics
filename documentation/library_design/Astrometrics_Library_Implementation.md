@@ -1,14 +1,22 @@
 # Astrometrics Library Implementation Overview
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-14 · Status: current*
 
 While the theoretical algorithms and data flow are covered in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
-Due to the internal nature of these modules, they are deliberately hidden from the public API Reference: they aren't meant to be imported directly. The one supported entry point is the package root: the names listed in `astrometricslib.__all__`, imported as `from astrometricslib import Astrometrics` (and the other names there). The root re-exports the facade from `api/` together with the driver interfaces, the job framework, the error types and a few constants. Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
+Terms are defined in the [glossary](./Astrometrics_Library_Architecture.md#appendix-b-glossary). Astronomy terms are also explained briefly where they first appear here.
+
+Due to the internal nature of these modules, they are deliberately hidden from the public API Reference: they aren't meant to be imported directly. The one supported entry point is the package root: the names listed in `astrometricslib.__all__`, imported as `from astrometricslib import Astrometrics` (and the other names there). The root re-exports the facade from `api/` together with the driver interfaces, the job framework, the error types and a few constants.
+
+Developers wishing to review or modify the core algorithms should refer to the following directories within `astrometricslib/`. The layout is layered, bottom to top:
 
 - `models/`, `utilities/`, `foundation/`: the shared vocabulary. Data shapes, small generic helpers, configuration, logging, the job framework and the generic storage layer. It imports no layer above it.
-- `drivers/`: wraps every external tool and service (Siril, Astrometry.net, SIMBAD, the Gaia catalog, Gaia XP spectra and Gaia reddening values) plus foundational, pipeline-agnostic primitives: FITS file access, the shared image container, the SQLite-backed target, star, catalog-cache, calibration and provenance stores, and the camera profiles.
-- `pipelines/shared/` and `pipelines/pipeline_base.py`: code every stellar or moving-object pipeline reuses: frame scanning and grouping, target-record CRUD, image format conversion, frame-quality/statistics primitives, provenance and camera-profile recording, and the common pipeline contract. It imports no specific pipeline.
+- `drivers/`: wraps every external tool and service plus foundational, pipeline-agnostic primitives: FITS file access, the shared image container, the SQLite-backed target, star, catalog-cache, calibration and provenance stores (provenance: the record of which run made each data product), and the camera profiles. The external tools and services are:
+  - Siril, an open-source program that calibrates, aligns and stacks images.
+  - Astrometry.net, a plate solver: it finds where an image points on the sky by matching its star patterns to an index.
+  - SIMBAD, an online database of named astronomical objects.
+  - The Gaia catalog, a space telescope's catalog of precise star positions and motions. Gaia XP spectra are its low-resolution spectra, and Gaia reddening values say how much interstellar dust has reddened each star.
+- `pipelines/shared/` and `pipelines/pipeline_base.py`: code every stellar or moving-object pipeline reuses: frame scanning and grouping, target-record CRUD (create, read, update and delete), image format conversion, frame-quality/statistics primitives, provenance and camera-profile recording, and the common pipeline contract. It imports no specific pipeline.
 - `pipelines/<name>/`: the five pipelines themselves (stacking, astrometry, photometry, spectroscopy, asteroid detection). One pipeline may import another (sideways), but none imports the runners above it.
 - `pipelines/tasks.py` and `pipelines/target_batch.py`: the dispatcher that ties the pipelines together and the many-target batch runner.
 - `api/` and the package root (`astrometricslib/__init__.py`): the public gate everything above calls through.
@@ -17,7 +25,11 @@ Due to the internal nature of these modules, they are deliberately hidden from t
 
 ## Implementation Matrix
 
-The library is organized into six layers across five specialized scientific pipelines and a shared orchestration spine. The "Ratchet Rule" forbids a layer from importing from a layer above it. This keeps the dependency graph one-directional: a lower layer never has to know a higher layer exists, so it can be tested, reused, or replaced without touching anything above it. When a lower layer needs work that belongs to a higher one, the higher layer passes it in. For example, the stacking pipeline hands its flat check and spectral frame alignment to the stacking driver as a `PipelineSteps` (`drivers/interfaces/stacking_driver.py`).
+The library is organized into six layers across five specialized scientific pipelines and a shared orchestration spine.
+
+The "Ratchet Rule" forbids a layer from importing from a layer above it. (A ratchet, in this repository, is a test whose list of allowed exceptions may only shrink, so the code can only move toward the rule.) This keeps the dependency graph one-directional: a lower layer never has to know a higher layer exists, so it can be tested, reused, or replaced without touching anything above it.
+
+When a lower layer needs work that belongs to a higher one, the higher layer passes it in. For example, the stacking pipeline hands its flat check and spectral frame alignment to the stacking driver as a `PipelineSteps` (`drivers/interfaces/stacking_driver.py`).
 
 A test enforces the rule (`astrometricslib/test/test_layer_boundaries.py`, `test_no_new_upward_imports`). It reads every import in the library's production files, including imports inside function bodies, and fails on a new upward one. Its exact rules are:
 
@@ -37,7 +49,7 @@ What the ratchet does not check:
 - Test modules are skipped.
 - Imports inside one layer (for example, one vocabulary module importing another, or one pipeline importing another) are allowed.
 
-Table columns are the five pipelines plus a column for code shared across all of them; rows are the six layers, numbered 1 (public-facing) down to 6 (the shared vocabulary). Rows 1 to 6 match the six bullets above, in reverse order. Each cell lists key modules that pipeline uses at that layer, with module paths relative to `astrometricslib/`. The note under each layer number says what it calls into.
+The table below maps the layers to the pipelines. Its columns are the five pipelines plus a column for code shared across all of them; rows are the six layers, numbered 1 (public-facing) down to 6 (the shared vocabulary). Rows 1 to 6 match the six bullets above, in reverse order. Each cell lists key modules that pipeline uses at that layer, with module paths relative to `astrometricslib/`. The note under each layer number says what it calls into.
 
 | Layer | Stacking | Astrometry | Photometry | Spectroscopy | Asteroid Detection | Shared by All |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -61,7 +73,7 @@ Table columns are the five pipelines plus a column for code shared across all of
 
 `astrometricslib/test/test_layer_boundaries.py` holds three more ratchets. Each keeps an allowlist that may only shrink; a stale entry fails the test too.
 
-- **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`): a new production file that calls `fits.open`, `getheader`, `getdata`, `writeto`, `getval` or `setval` fails the test. New code reads FITS files through `drivers/fits_access.py` or `drivers/image.py`, which apply the HDU0/HDU1 rule (the pixel data may sit in the primary HDU or in the next one).
+- **Raw FITS access** (`KNOWN_FITS_ACCESS_SITES`): a new production file that calls `fits.open`, `getheader`, `getdata`, `writeto`, `getval` or `setval` fails the test. New code reads FITS files through `drivers/fits_access.py` or `drivers/image.py`, which apply the HDU0/HDU1 rule. A FITS file (the standard astronomy image format) holds one or more HDUs (header-data units: a block of named header entries plus its data). The pixel data may sit in the primary HDU or in the next one.
 - **Wall clock** (`KNOWN_WALL_CLOCK_SITES`): no file under `pipelines/` may call `datetime.now()` or `datetime.utcnow()`. A frame's time comes from its own header. The one listed exception dates the quarantine move log.
 - **Unseeded randomness** (`KNOWN_UNSEEDED_RANDOM_SITES`, empty): no file under `pipelines/` may draw random numbers without a fixed seed (a bare `default_rng()`, a legacy `numpy.random` function, or the standard `random` module).
 
@@ -81,20 +93,20 @@ The `[tool.importlinter]` contracts in `pyproject.toml` check the boundaries bet
 - **Running the engine:** `stack_runner.py` (spectral registration fallback, stacking one exposure length at a time, and handing `PIPELINE_STEPS` to the `StackingDriver`)
 - **Dispatch for the batch run:** `astrometricslib/pipelines/tasks.py` (`stack_frames_with_timeout` runs the stacking stage as a tracked job with a hard timeout; `analyze_target` picks which analysis pipeline runs by name; `run_full_pipeline` runs a target's full stack-solve-photometry-spectroscopy sequence) and `astrometricslib/pipelines/target_batch.py` (runs many targets through that sequence in parallel)
 - **Calibration ingest:** `calibration_ingest.py` (the report of what a calibration-library rescan found), on top of `astrometricslib/drivers/calibration_library.py`
-- **Sub-exposure screening:** `pre_processing/frame_quarantine.py` (moves clouded or trailed frames to `_excluded`, and restores them), `pre_processing/frame_homogeneity.py` (gain), `pre_processing/background_homogeneity.py` (sky-level splits), `pre_processing/camera_selection.py` (one camera per stack) and `pre_processing/flat_calibration.py` (flat level and noise, and smoothing of a noisy master flat)
+- **Sub-exposure screening** (sub-exposure: one raw frame of a stack): `pre_processing/frame_quarantine.py` (moves clouded or trailed frames to `_excluded`, and restores them), `pre_processing/frame_homogeneity.py` (gain), `pre_processing/background_homogeneity.py` (sky-level splits), `pre_processing/camera_selection.py` (one camera per stack) and `pre_processing/flat_calibration.py` (flat level and noise, and smoothing of a noisy master flat)
 - **Other inputs:** `pre_processing/exposure_weighting.py` (weights for mixed exposure lengths) and `pre_processing/stack_inputs.py` (skips a restack whose inputs did not change)
-- **Pixel rejection and integration:** `astrometricslib/utilities/rejection_thresholds.py` (the floored Chauvenet cutoffs) and `stage.py`
+- **Pixel rejection and integration:** `astrometricslib/utilities/rejection_thresholds.py` (the floored Chauvenet cutoffs: how many standard deviations from the median a pixel may sit before the stack throws it out) and `stage.py`
 - **Frame-count-adaptive filtering:** `astrometricslib/utilities/stack_filter_floor.py` (loosens Siril's sharpness filter so enough frames survive)
 - **Exposure groups:** `processing/exposure_groups.py`, `processing/group_alignment.py`, `processing/group_derotation.py`, `processing/star_pattern_candidates.py` and `processing/spectral_frame_alignment.py`
 - **Quality checks after the stack:** `pre_processing/assess_input_quality.py` (flat and calibration gates), `post_processing/assess_output_quality.py` (the six output gates), `post_processing/stack_quality.py` (the limits behind them), `post_processing/exposure_group_report.py` (the three exposure-group gates) and `post_processing/stack_quality_report.py` (the stack reports the API returns)
-- **Previews:** `post_processing/stack_preview.py`, `post_processing/colour_calibration.py`, `post_processing/starnet_stretch.py`, `post_processing/sky_level.py`, `post_processing/star_tone.py`, `post_processing/bright_object.py`, `post_processing/stack_crop.py` and `post_processing/preview_remake.py`
+- **Previews** (screen pictures stretched from the stack's linear data, which looks almost black as stored): `post_processing/stack_preview.py`, `post_processing/colour_calibration.py`, `post_processing/starnet_stretch.py`, `post_processing/sky_level.py`, `post_processing/star_tone.py`, `post_processing/bright_object.py`, `post_processing/stack_crop.py` and `post_processing/preview_remake.py`
 - **Restacks:** `post_processing/previous_stack.py`, `post_processing/stack_comparison.py` and `post_processing/interrupted_jobs.py`
 
 ### Astrometry
 *Located in:* `astrometricslib/pipelines/astrometry/`
-- **Plate solving:** `astrometricslib/drivers/astrometry_net_driver.py`
-- **Star detection and centroiding:** `processing/star_identifier.py` and `pre_processing/source_detection.py`
-- **Star width:** `pre_processing/fwhm.py`
+- **Plate solving** (finding the WCS, or World Coordinate System: the FITS header entries that convert a pixel position into a sky position): `astrometricslib/drivers/astrometry_net_driver.py`
+- **Star detection and centroiding** (centroid: a star's brightness-weighted center): `processing/star_identifier.py` and `pre_processing/source_detection.py`
+- **Star width** (FWHM, the full width of a star's image at half its peak brightness): `pre_processing/fwhm.py`
 - **Refitting the solution to Gaia:** `processing/wcs_refinement.py`, called from `processing/star_identifier.py`
 - **Pipeline orchestration:** `pipeline.py`; the `AnalysisPipeline` adapter is `runner.py`
 - **Writing the WCS into the FITS header:** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`), called from `runner.py`
@@ -104,10 +116,13 @@ The `[tool.importlinter]` contracts in `pyproject.toml` check the boundaries bet
 ### Photometry
 *Located in:* `astrometricslib/pipelines/photometry/`
 - **Adapter and session handling:** `runner.py` (the `AnalysisPipeline` adapter) and `batch.py` (one run per observing session, cross-session matching and merging, and the period search)
-- **Aperture photometry:** `pre_processing/frame_photometry.py`, with `pre_processing/detector_noise.py` (gain and read noise) and `pre_processing/observation_times.py` (BJD_TDB times)
-- **Comparison stars and light curves:** `processing/comparison_ensemble.py` and `processing/variability_analyzer.py`
+- **Aperture photometry** (measuring a star's brightness by summing the pixels in a circle on it and subtracting the sky): `pre_processing/frame_photometry.py`, with `pre_processing/detector_noise.py` (gain, the electrons per stored pixel step, and read noise, the noise added each time the sensor is read) and `pre_processing/observation_times.py` (BJD_TDB times: the time the light would reach the solar system's center of mass, which removes the effect of Earth's orbit)
+- **Comparison stars and light curves** (a light curve is a star's brightness over time; the comparison ensemble is a group of steady stars whose combined signal cancels changes in the sky): `processing/comparison_ensemble.py` and `processing/variability_analyzer.py`
 - **Variability indices:** `processing/variability_indices.py`
 - **Period search:** `processing/periodicity_search.py` (Lomb-Scargle and box search, with false-alarm probabilities), `processing/period_checks.py` (hold-out and alias checks) and `processing/family_wise_correction.py` (correction for the number of searches)
+  - Lomb-Scargle fits sine waves of many periods to unevenly spaced data. The box search fits a repeating flat-bottomed dip, the shape of an eclipse.
+  - A false-alarm probability is the chance that noise alone gives a result at least as strong.
+  - The hold-out check leaves one night out and tests whether the period predicts it. The alias check looks for false echo periods caused by observing once a night.
 - **Quality checks:** `pre_processing/assess_input_quality.py`, `post_processing/run_gates.py`, `post_processing/variability_skill.py`, `post_processing/known_variability_labels.py` and `post_processing/assess_output_quality.py`
 
 ### Spectroscopy
@@ -115,25 +130,27 @@ The `[tool.importlinter]` contracts in `pyproject.toml` check the boundaries bet
 - **Orchestration:** `pipeline.py` (`SpectroscopyPipeline`; `_apply_result_to_stellar_object` sets the order of the calibration chain), `runner.py` (the `AnalysisPipeline` adapter) and `record_and_flag_spectroscopy_stars.py`
 - **Per-frame and per-session batch processing:** `frame_analysis.py` and `batch.py`
 - **Star identification:** `pre_processing/spectral_star_registration.py` (copies star names from a normal image when the plate solution cannot)
-- **Spectrum extraction:** `pre_processing/spectrum_extractor.py` and `pre_processing/_extractor_c.c`, with `pre_processing/neighbor_trail_deblending.py` and `pre_processing/neighbor_wing_correction.py` for crowded fields
+- **Spectrum extraction** (turning a star's trail, the streak its spread-out light makes on the image, into brightness at each step): `pre_processing/spectrum_extractor.py` and `pre_processing/_extractor_c.c`, with `pre_processing/neighbor_trail_deblending.py` and `pre_processing/neighbor_wing_correction.py` for crowded fields
 - **Wavelength calibration:** `pre_processing/spectrum_calibrator.py`, `pre_processing/optics_physics.py` and `utilities/calibration_tuner.py`
-- **Wavelength corrections:** `pre_processing/differential_refraction.py` and `pre_processing/atmospheric_refraction.py` (refraction), `pre_processing/wavelength_zero_point.py` (zero point)
-- **Flux calibration:** `pre_processing/quantum_efficiency_correction.py`, `pre_processing/instrument_response.py` and `pre_processing/atmospheric_extinction.py`
-- **Resolution:** `pre_processing/measured_line_spread.py` and `pre_processing/spectral_resolution.py`
-- **Classification and features:** `processing/spectral_classifier.py`, `processing/spectrum_analysis.py`, `processing/star_reddening.py` with `processing/interstellar_extinction.py` (dereddening), and the feature and line modules in `processing/`
+- **Wavelength corrections:** `pre_processing/differential_refraction.py` and `pre_processing/atmospheric_refraction.py` (refraction: the air bends blue light more than red), `pre_processing/wavelength_zero_point.py` (zero point: the offset of the whole wavelength scale)
+- **Flux calibration:** `pre_processing/quantum_efficiency_correction.py` (quantum efficiency: the share of light the sensor records at each wavelength), `pre_processing/instrument_response.py` (the colour tilt of the whole instrument, measured on a star of known spectrum) and `pre_processing/atmospheric_extinction.py` (dimming by the air, which grows with airmass, the amount of atmosphere the light crossed)
+- **Resolution** (line spread: how wide the instrument smears a single wavelength): `pre_processing/measured_line_spread.py` and `pre_processing/spectral_resolution.py`
+- **Classification and features:** `processing/spectral_classifier.py`, `processing/spectrum_analysis.py`, `processing/star_reddening.py` with `processing/interstellar_extinction.py` (dereddening: removing the reddening that interstellar dust adds to a star's light), and the feature and line modules in `processing/`
 - **Checks after extraction:** `post_processing/run_gates.py`, `post_processing/compare_to_gaia_xp.py`, `post_processing/compare_to_catalog.py` and `post_processing/wavelength_scale.py`
-- **Registration quality of spectral stacks:** `utilities/registration_quality.py`, called by the stacking stage and by the processing API
+- **Registration quality of spectral stacks** (registration: aligning frames so each star falls on the same pixel): `utilities/registration_quality.py`, called by the stacking stage and by the processing API
 
 ### Asteroid Detection (Moving Objects)
 *Located in:* `astrometricslib/pipelines/asteroid_detection/`
-- **Blink analysis and tracking:** `detection.py` and `pipeline.py`; the `AnalysisPipeline` adapter is `runner.py`
+- **Blink analysis and tracking** (comparing frames taken at different times to find dots that move): `detection.py` and `pipeline.py`; the `AnalysisPipeline` adapter is `runner.py`
 - **Per-frame WCS from the mount's pointing:** `frame_wcs_composer.py`
-- **Known-object matching against IMCCE SkyBoT:** `ephemeris.py`
+- **Known-object matching against IMCCE SkyBoT** (an online service that lists the known asteroids and comets in a patch of sky at a given time): `ephemeris.py`
 - **Run gates:** `run_gates.py`
-- **Not yet called by any pipeline step:** `mpc_report.py` writes MPC 80-column and ADES text for a track, and `rotation_period.py` runs the photometry period search on a track's brightness. Both are tested, but no run uses them yet.
+- **Not yet called by any pipeline step:** `mpc_report.py` writes MPC 80-column and ADES text for a track (the two report formats of the Minor Planet Center, which collects asteroid and comet positions), and `rotation_period.py` runs the photometry period search on a track's brightness. Both are tested, but no run uses them yet.
 
 ### Shared Pipeline Code
-*Located in:* `astrometricslib/pipelines/shared/`, unless noted otherwise. This is where the plain, non-analysis reads and writes the public API calls directly (scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG) live alongside the frame-quality primitives every stellar pipeline shares.
+*Located in:* `astrometricslib/pipelines/shared/`, unless noted otherwise.
+
+This is where the plain, non-analysis reads and writes the public API calls directly (scanning a folder for FITS files, target CRUD, converting a FITS file to a PNG) live alongside the frame-quality primitives every stellar pipeline shares.
 - **Frame selection and grouping by camera/optic:** `frame_grouping.py` and `quality/frame_selection.py`
 - **Filesystem frame scanning:** `frame_scanning.py`
 - **Target catalog CRUD:** `target_records.py`
@@ -169,11 +186,13 @@ The `[tool.importlinter]` contracts in `pyproject.toml` check the boundaries bet
 - **SIMBAD star lookups:** `astroquery_simbad_driver.py` (`AstroquerySimbadDriver`)
 - **Calibration frame library (darks/bias/flats):** `calibration_library.py`
 - **Camera profiles, read from the configuration file:** `camera_profile_store.py`
-- **IVOA provenance records in `astrometrics_log.db`:** `provenance_store.py` (`ProvenanceStore`)
+- **IVOA provenance records in `astrometrics_log.db`** (records in the International Virtual Observatory Alliance's data-lineage format): `provenance_store.py` (`ProvenanceStore`)
 - **Target reads and writes, and database backups, for `astrometrics.db`:** `local_database.py`
 - **Target/stellar-catalog repository (`CatalogAccess`), the front door every other layer reaches for the database through:** `catalog_access.py`
 
-`catalog_access.py` doesn't execute SQL itself. Most of its reads and writes go through a generic, keyed-record SQLite store (the Butler below) that it shares with wayfindinglib. Two paths do not: reading the target catalog goes through `local_database.load_targets`, which owns the targets table's read path, and raw frames and stacked images are resolved to file paths on disk rather than stored in the database.
+`catalog_access.py` doesn't execute SQL itself. Most of its reads and writes go through a generic, keyed-record SQLite store (the Butler below) that it shares with wayfindinglib.
+
+Two paths do not: reading the target catalog goes through `local_database.load_targets`, which owns the targets table's read path, and raw frames and stacked images are resolved to file paths on disk rather than stored in the database.
 
 ### Shared Storage Backend
 *Located in:* `astrometricslib/foundation/storage/`
@@ -198,10 +217,10 @@ The `[tool.importlinter]` contracts in `pyproject.toml` check the boundaries bet
 - **Finding 7 (cross-session star identity matching):**
   - The matching itself is implemented per Architecture §5.2 (concept 6), in `pipelines/photometry/batch.py` (`_match_and_merge_across_sessions`).
   - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point, the same one "astrometry"/"spectroscopy" use, when only the already-solved WCS was actually needed. Photometry now builds a `StarIdentifier()` directly and passes it to `resolve_frame_wcs` (`pipelines/shared/session_identification.py`), which reuses a WCS already in the file and solves only when there is none.
-  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session. It was replaced with a KD-tree-backed `search_around_sky` call.
+  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session. It was replaced with a KD-tree-backed `search_around_sky` call. A KD-tree is a search structure that splits space into boxes, so finding the near neighbors of a point does not require checking every other point.
   - Repeatability was verified by checking that two consecutive runs produced a byte-for-byte identical `stellar_catalog` row set.
   - One session was excluded from matching: a light frame in it actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error. This was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.
-- **Finding 5 (star/track linkage speedup):** An RA/Dec bounding-box pre-filter, applied before computing angular separations (`MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py`), skips the exact distance calculation for almost every pair. The search is still $O(N \times M)$: the box test itself looks at every pair, but as one vectorized NumPy comparison instead of a Python loop. Tested on M 81's ~150,000 detected sources across 46 frames.
+- **Finding 5 (star/track linkage speedup):** An RA/Dec (Right Ascension and Declination, the sky's longitude and latitude) bounding-box pre-filter, applied before computing angular separations (`MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py`), skips the exact distance calculation for almost every pair. The search is still $O(N \times M)$ (its work grows with the product of the two list sizes): the box test itself looks at every pair, but as one vectorized NumPy comparison instead of a Python loop. Tested on M 81's ~150,000 detected sources across 46 frames.
 
 ## Batch Processing & Maintenance Scripts
 

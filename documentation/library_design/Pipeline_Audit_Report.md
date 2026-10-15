@@ -4,8 +4,8 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 171
-- **Resolved Code Symbols:** 171
+- **Implementation References Checked:** 172
+- **Resolved Code Symbols:** 172
 - **Broken / Stale Implementation Links:** 0
 - **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
 - **Documented Design Parameters (Table A1):** 41
@@ -104,6 +104,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_measurements_for_star` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.detrend_light_curves_airmass` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection` | RESOLVED | Resolves; a test module |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.FALSE_DISCOVERY_LEVEL` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_indices.assess_variability` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_indices.fit_noise_model` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.processing.variability_indices.reduced_chi_square` | RESOLVED | Resolves; used by library code |

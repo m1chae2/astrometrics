@@ -10,6 +10,13 @@ maths, its processing flow, its tuned limits, its fallback paths and its
 quality gates. The gate lists and counts are read from the code when the
 guides are generated.
 
+A pipeline here is a fixed series of processing steps that turns telescope
+images into a scientific result. A quality gate is an automatic check on a
+run that passes, fails, or is not checked when its data are missing.
+
+Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary). Each guide also
+defines its terms where they first appear, so it can be read on its own.
+
 ## 1. Pipeline Architecture
 
 Four analysis pipelines share the `AnalysisPipeline` interface
@@ -36,13 +43,26 @@ implementation runs `ImageProcessing` in `siril_interface.py`.
 
 ```mermaid
 flowchart LR
-    A["1. process_input"] -- "has_work" --> B["2. run"]
-    A -- "nothing to do" --> C["3. validate_output"]
+    A["1. process_input: is there work?"] -- "work to do" --> B["2. run: do the science"]
+    A -- "nothing to do" --> C["3. validate_output: build the quality summary"]
     B --> C
-    C --> D["4. to_result_dict"]
+    C --> D["4. to_result_dict: return the result"]
 ```
 
 ## 2. Pipeline Portfolio Overview
+
+In plain words, the five pipelines do this:
+
+- **Astrometry** finds where an image points on the sky, pixel by pixel, and
+  names its stars.
+- **Photometry** measures how each star's brightness changes over time and
+  picks out the variable stars.
+- **Spectroscopy** spreads each star's light into its colours and classifies
+  the star from that spectrum.
+- **Asteroid Detection** finds objects that move between images and checks
+  them against known asteroids and comets.
+- **Image Stacking** removes camera flaws from many exposures and combines
+  them into one deeper image.
 
 | Pipeline | Review Guide | Entry Point | Quality Summary | Gates |
 | :--- | :--- | :--- | :--- | :--- |
@@ -61,10 +81,14 @@ When auditing the pipelines, check:
 
 1. **Input metadata contracts.** Which header cards each pipeline reads and
    what happens when one is missing.
-2. **Mathematical formulations.** The CCD equation, $\text{BJD}_\text{TDB}$
-   times, Stetson $J$, the grating equation and the stack FWHM prediction.
-3. **Degraded states.** Sparse fields, tracking drift, saturated zero orders
-   and catalog outages.
+2. **Mathematical formulations.** The CCD equation (the error of a measured
+   brightness), $\text{BJD}_\text{TDB}$ times (times measured at the solar
+   system's center of mass), Stetson $J$ (a test for smooth, real brightness
+   changes), the grating equation (position along a spectrum to wavelength)
+   and the stack FWHM prediction (how sharp the stars of a stack should be).
+3. **Degraded states.** Sparse fields, tracking drift (the field sliding
+   across the sensor during a run), saturated zero orders (clipped point
+   images beside the spectra) and catalog outages.
 4. **Empirical status.** Which limits were measured on real data and which are
    design estimates.
 

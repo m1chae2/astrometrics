@@ -7,7 +7,9 @@ the test fails and names the number that moved. If the change is intended, the a
 the JSON file, and the diff shows the reviewer exactly which measurements moved and why.
 
 The suite checks results, not code paths. A change that keeps every unit test green can still move
-a star count or a flux, and this suite catches that.
+a star count or a flux (the total light measured from a star), and this suite catches that.
+
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
 
 ## Input data
 
@@ -15,16 +17,19 @@ The suite reads the frames in `documentation/notebooks/astrometrics/sample_data/
 Git LFS files (Git Large File Storage keeps big files outside the normal Git history). The suite
 uses:
 
-- Five luminance lights, `M_13_Light_Luminance_019` to `023`: 3008 x 3008 pixels, 16 bits, 30 s,
+- Five luminance lights (light frames, that is, pictures of the sky, taken through a clear
+  luminance filter), `M_13_Light_Luminance_019` to `023`: 3008 x 3008 pixels, 16 bits, 30 s,
   ZWO ASI533MM Pro camera at about -10 C.
 - One spectroscopy light, `M_13_Light_Spectroscopy_024`: same camera and exposure, with a grating
-  that spreads the light into a vertical streak.
+  that spreads the light into a vertical streak (a spectrum). The zero order is the plain,
+  undispersed image of the target that the grating also leaves on the frame.
 
 In a checkout without `git lfs pull`, each file is a small text pointer that starts with
 `version https://git-lfs.github.com/spec/v1`. The `sample_frames_present` fixture in `conftest.py`
 detects this and skips every test with a message that names the file and the fix.
 
-Stacking needs Siril and plate solving needs astrometry.net. Neither program is installed on the
+Stacking (aligning and averaging frames) needs Siril and plate solving (working out where in the
+sky a frame points) needs astrometry.net. Neither program is installed on the
 machines that run this suite, so nothing that depends on them is pinned.
 
 ## Running the suite
@@ -44,7 +49,7 @@ the change that last set the number.
 
 | Section | Frame | Numbers | Measured by |
 | --- | --- | --- | --- |
-| `raw_frame_quality` | each of the 5 lights | star count, median FWHM, roundness, longest star streak, sky median, saturated pixel count, background level, background noise, saturated fraction, shift from the previous frame and the number of stars matched to measure it, number of quality flags | `QualityDiagnostics.frame_quality(kind="raw_check")`, `measure_frame_input_quality`, and a sigma-clipped standard deviation for the noise |
+| `raw_frame_quality` | each of the 5 lights | star count, median FWHM, roundness, longest star streak, sky median, saturated pixel count, background level, background noise, saturated fraction, shift from the previous frame and the number of stars matched to measure it, number of quality flags | `QualityDiagnostics.frame_quality(kind="raw_check")`, `measure_frame_input_quality`, and a sigma-clipped standard deviation (one computed after dropping values far from the rest) for the noise |
 | `raw_frame_quality` | `batch` | median star count, median FWHM, flagged frame count | the same raw check |
 | `source_detection` | `020` | source count; x, y and flux of the 10 brightest sources | `SourceDetector.detect` |
 | `fwhm_top5` | `020` | median FWHM of a Gaussian fit to the 5 brightest stars | `measure_fwhm_from_data` |
@@ -59,7 +64,8 @@ Two terms in the table:
   pixels. A smaller value means sharper stars.
 - ADU (analog-to-digital unit) is one count of the camera's output.
 
-The raw check's FWHM comes from image moments of up to 150 stars. The `fwhm_top5` value comes from
+The raw check's FWHM comes from image moments (brightness-weighted averages of position and its
+square over each star's pixels) of up to 150 stars. The `fwhm_top5` value comes from
 a Gaussian fit of 5 stars. The two methods give different numbers on purpose, and each has its own
 pin.
 
@@ -111,7 +117,7 @@ same source list on every run. The pins can therefore use exact tolerances for c
   above 1.4 times the batch median (934 against 624), and once for the faint straight trail (about
   3220 pixels long at 57 degrees). It is the one flagged frame of the batch. The photometry pins in `photometry_sequence` are not affected, because
   no measured star lies within 25 pixels of the trail.
-- `photometry_sequence` copies how `VariabilityAnalyzer` sets up a run. `SourceDetector` (3 sigma,
+- `photometry_sequence` copies how `VariabilityAnalyzer` sets up a run. `SourceDetector` (3 sigma, that is, three times the background noise,
   FWHM 4 px) runs on light `019`. Detections ranked 10 to 69, at least 50 pixels from every edge,
   are the measured stars (58 of them). Detections ranked 50 to 99 are the `(x, y, flux)`
   alignment anchors. Light `019` is measured in the test process, and lights `020` to `023` go
@@ -120,7 +126,8 @@ same source list on every run. The pins can therefore use exact tolerances for c
   The gain and read noise come from the camera profile through `resolve_detector_noise`, as in
   the pipeline. Only the fluxes are pinned, not their errors.
 - `photometry_pre_S2` reproduces the whole-pixel aperture centres that the pipeline used before
-  review item S2 (sub-pixel apertures). It rounds each position before calling
+  review item S2 (sub-pixel apertures; an aperture is the circle of pixels whose light is summed
+  to measure a star). It rounds each position before calling
   `_measure_aperture_flux`. `photometry_sub_pixel` passes the exact positions. The difference
   between the two blocks is the effect of S2 on these ten stars.
 

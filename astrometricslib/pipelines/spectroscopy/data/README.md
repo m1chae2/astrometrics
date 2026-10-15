@@ -1,7 +1,18 @@
 # Spectroscopy data files
 
 This folder holds the data files the spectroscopy pipeline reads at run
-time:
+time.
+
+Terms are defined in the
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+This README also defines each term the first time it appears. Wavelengths
+are in Angstroms (A; 1 A is 0.1 nm). A spectral type such as G0V names the
+star's place on the O-B-A-F-G-K-M temperature ladder (hottest to coolest,
+each letter split into subtypes 0 to 9) and its luminosity class (V for a
+dwarf or main-sequence star, III for a giant, II for a bright giant, I for a
+supergiant).
+
+The files:
 
 - Ninety reference spectra (`<type>.txt`) that `spectral_classifier.py` uses
   to estimate a star's broad spectral type by comparing an observed
@@ -10,11 +21,13 @@ time:
   references" below). The sections up to "Instrument response" describe
   them.
 - `instrument_response_zwo_asi_533mm_pro.json`, the instrument's measured
-  tilt (see "Instrument response").
+  tilt: how much more or less light the camera, grating and telescope pass at
+  each wavelength (see "Instrument response").
 - `line_spread_zwo_asi_533mm_pro.json`, the instrument's blur at each
   wavelength (see "Line spread").
 - `cross_trail_blur_zwo_asi_533mm_pro.json`, the shape of a streak across
-  the dispersion (see "Cross-streak blur").
+  the dispersion direction, the direction in which the grating spreads the
+  light (see "Cross-streak blur").
 - `atmospheric_extinction_kpno.txt`, the air's dimming at each wavelength
   (see "Atmospheric extinction").
 
@@ -35,7 +48,8 @@ matching original `<type>.dat.gz` file in the source catalog:
 
 1. The conversion parses the original fixed-width columns: wavelength in
    Angstroms in columns 1-7, and the component-averaged normalized flux
-   (`nflam`) in columns 8-17. Hot stars have a flux value wider than the
+   (`nflam`, brightness per unit wavelength scaled to 1 at a reference
+   wavelength) in columns 8-17. Hot stars have a flux value wider than the
    usual field width, so the columns cannot be split on whitespace.
 2. The conversion trims each spectrum to 3000-10000 A, the wavelength range
    of the ZWO ASI 533MM Pro sensor (`sensor_min_wavelength` and
@@ -59,7 +73,7 @@ library reports them, rather than replacing them with an estimate.
 
 These files use a plain comma-separated `.txt` extension rather than
 `.csv`. The repository's `.gitattributes` routes `*.csv` files through Git
-LFS, and continuous-integration checkouts do not fetch LFS content; keeping
+LFS (Large File Storage, which keeps big files outside the normal history), and continuous-integration checkouts do not fetch LFS content; keeping
 these small bundled tables as plain blobs ensures CI can read them.
 
 Flux values stay normalized to 1.0 at 5556 A, the source library's own
@@ -77,12 +91,13 @@ library offers for solar-abundance dwarfs, from hottest to coolest.
 Including every rung avoids the case where a star's true type falls between
 two widely-spaced reference templates: with only every fifth subtype
 sampled, such a star would sit roughly equidistant from its two nearest
-templates, and the classifier would report the match as ambiguous (the
+templates (reference spectra), and the classifier would report the match as ambiguous (the
 `is_classification_ambiguous` flag in the quality summary) more often than
 necessary. With every rung present, a star between two adjacent types still
 has one template that is clearly closer than the rest.
 
 The full Pickles library also includes metal-weak and metal-rich variants
+(stars with less or more of the elements heavier than helium than the Sun)
 of several F-K dwarf types (e.g. `wg5v.dat`, `rk0v.dat`) and subgiants
 (luminosity class IV). This directory does not bundle those. It also omits
 two library types that duplicate the standard rungs above: `b57v.dat`, a
@@ -127,9 +142,11 @@ instrument response and for the catalog-type lookup used with dwarfs.
 `instrument_response_zwo_asi_533mm_pro.json` records the smooth tilt that
 this instrument (the ZWO ASI 533MM Pro camera, grating, and telescope)
 applies to every spectrum it captures. This file does not come from the
-Pickles library; the project derives it from an observation. Correcting
-for this tilt is necessary for the reference comparison to be meaningful:
-without this correction, every reference spectrum correlates at 0.95 or
+Pickles library; the project derives it from an observation.
+
+Why it is needed: correcting
+for this tilt is necessary for the reference comparison to be meaningful.
+Without this correction, every reference spectrum correlates at 0.95 or
 higher with every observed star, and the classifier matched a Vega spectrum
 to type F6V instead of its correct type, A0V.
 
@@ -140,15 +157,16 @@ builds this file:
 
 1. The script extracts the brightest star from Vega's master spectral stack
    (spectral type A0V) and corrects it for the sensor's quantum
-   efficiency.
+   efficiency (the fraction of arriving light the sensor records at each
+   wavelength).
 2. The script divides that corrected spectrum by the bundled `a0v.txt`
    reference spectrum, after blurring the reference to the instrument's
-   resolution. The blur follows `line_spread_zwo_asi_533mm_pro.json`, which
+   resolution (its blur). The blur follows `line_spread_zwo_asi_533mm_pro.json`, which
    grows from 42 A at 4200 A to 148 A at H-alpha. A single width measured
    from the trail is used only for a camera with no line-spread file.
 3. The script fits the logarithm of that ratio with a degree-4 polynomial
    over the range 4200-8000 A. The fit skips a band around each strong
-   Balmer and Ca H line, so Vega's own absorption dips do not become part
+   Balmer (hydrogen) and Ca H (ionized calcium) line, so Vega's own absorption dips do not become part
    of the recorded instrument response. Each band reaches 1.5 times the
    instrument's line spread (a full width at half maximum, in Angstroms)
    at that line's wavelength, and at least 60 A, to each side of the line.
@@ -160,21 +178,26 @@ builds this file:
 The resulting JSON file stores the polynomial's coefficients (highest power
 first), evaluated against `(wavelength - 6000) / 2000`; the wavelength
 range over which the fit is valid; a note identifying the observation used;
-and `reference_airmass`, the airmass of that observation (unitless).
+and `reference_airmass`, the airmass of that observation (unitless; how much
+air the light crossed, 1.0 straight overhead).
 Dividing an observed spectrum by this response removes the instrument's
 tilt, along with the air's dimming at the reference airmass.
 
-The stored file records `reference_airmass` 1.15. That value is the airmass
+**The stored values.** The stored file records `reference_airmass` 1.15. That value is the airmass
 that `cross_trail_blur_zwo_asi_533mm_pro.json` logs for the 40 Vega frames of
 0.25 s taken on 2026-09-25. The response's own `source` note describes the
-same set of frames. The stored coefficients came from a fit that blurred the
+same set of frames.
+
+**Known error in the stored coefficients.** The stored coefficients came from a fit that blurred the
 reference to one width and skipped a fixed 60 A band around every line, so
 they carry some of Vega's line wings. A synthetic Vega observed through the
 stored line spread measures the size of that error: blurring to one 45 A
 width leaves the fitted response up to 0.5 percent wrong (0.3 percent
 red-to-blue tilt), and one 119 A width up to 2.6 percent wrong, while the
 wavelength-dependent blur recovers it exactly; `test/test_response_template_blur.py`
-holds the fit to that. Re-running the
+holds the fit to that.
+
+**Re-deriving.** Re-running the
 derivation script on Vega's stack replaces the coefficients. The script
 writes `reference_airmass` into the JSON. It reads the value from the
 stack's `AIRMASS` header card, or from the `--reference-airmass` option when
@@ -198,19 +221,21 @@ the full catalog.
 The reference spectra cover the camera's entire sensitive range, but the
 classifier compares an observed spectrum against them only within the
 range where the instrument response is valid: 4200-8000 A by default.
-Three effects make wavelengths above 8000 A less reliable: the sensor's
-quantum efficiency falls from 27% to 6% in that range, which multiplies
-noise by a factor of 4 to 16 when the pipeline corrects for it; water and
-oxygen absorption bands from Earth's atmosphere appear; and blue light
-begins arriving in second order. (A grism sends light of wavelength L to a
+Three effects make wavelengths above 8000 A less reliable:
+
+- the sensor's quantum efficiency falls from 27% to 6% in that range, which
+  multiplies noise by a factor of 4 to 16 when the pipeline corrects for it;
+- water and oxygen absorption bands from Earth's atmosphere appear;
+- blue light begins arriving in second order. (A grism sends light of wavelength L to a
 second position on the sensor that overlaps first-order light of
 wavelength 2 x L. Because extraction starts at 3800 A, second-order light
 from that wavelength reaches 7600 A and beyond.)
 
-Extending the comparison range to 10000 A and re-fitting the response
+How we know: extending the comparison range to 10000 A and re-fitting the response
 changes the match quality unevenly. For three stars with relatively little
 blue light — Vega (A0V), HD 151023 (K2V), and Alcor's second star (A7V) —
-the match residual stays about the same (0.08, 0.11, and 0.08). For stars
+the match residual (the relative RMS difference from the best reference;
+0 is perfect) stays about the same (0.08, 0.11, and 0.08). For stars
 with more blue light, such as HD 150679 (spectral type A2), the residual
 rises substantially, from a range of 0.19-0.28 up to a range of 0.5-1.8.
 Weighting each wavelength by the sensor's sensitivity does not correct
@@ -226,8 +251,9 @@ blocking filter to remove second-order light, can request the full range:
 ## Line spread
 
 `line_spread_zwo_asi_533mm_pro.json` records the resolution element (the
-full width at half maximum of the instrument's blur along the spectrum, in
-Angstroms) at a few wavelengths: `wavelength_angstrom` and
+full width at half maximum, FWHM, of the instrument's blur along the
+spectrum, in Angstroms; the FWHM is the width where the blur profile drops
+to half its peak) at a few wavelengths: `wavelength_angstrom` and
 `resolution_element_angstrom`. The blur grows from 42 A at 4200 A to 148 A
 at H-alpha (6563 A), and the file holds that value out to 9000 A. The
 `source` field says how it was measured: the Gaussian blur that makes each
@@ -246,7 +272,8 @@ fallback.
 
 `cross_trail_blur_zwo_asi_533mm_pro.json` records the shape of an isolated
 bright star's streak across the dispersion direction. It comes from 40 short
-Vega frames, aligned on the zero order and averaged (the `source` field gives
+Vega frames, aligned on the zero order (the star's undispersed, point-like
+image) and averaged (the `source` field gives
 the date, the airmass and the focuser state). It holds `offsets_px`, the
 distance from the streak's centre in pixels (-75 to +75), `band_edges_px`,
 eight bands along the streak from 340 to 680 pixels beyond the zero order
@@ -263,7 +290,8 @@ airmass from this file's log.
 `atmospheric_extinction_kpno.txt` lists how much the air dims starlight at
 each wavelength. The columns are `wavelength_angstrom` (Angstroms) and
 `extinction_mag_per_airmass` (magnitudes per airmass; one magnitude is a
-factor of 2.512 in brightness). The file has 78 rows from 3200 A to 8370 A.
+factor of 2.512 in brightness). Extinction is the dimming of starlight by
+the air. The file has 78 rows from 3200 A to 8370 A.
 The extinction coefficient falls from 1.017 at 3200 A to 0.31 at 4190 A,
 0.148 at 5556 A and 0.052 at 8000 A.
 
@@ -273,7 +301,8 @@ spectrum from one airmass to another (see the pre-processing README).
 ### Source
 
 Mean extinction curve for Kitt Peak National Observatory, from the file
-`noao/lib/onedstds/kpnoextinct.dat` of the IRAF distribution
+`noao/lib/onedstds/kpnoextinct.dat` of the IRAF distribution (a long-standing
+astronomy data-reduction package)
 (<https://github.com/iraf-community/iraf>). The IRAF `onedstds` README
 describes it as the KPNO extinction table for ONEDSPEC. It does not give a
 journal reference for the KPNO values. The file here keeps rows up to 8370 A

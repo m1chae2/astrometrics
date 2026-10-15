@@ -1,5 +1,25 @@
 # Pipeline architecture
 
+A pipeline is a fixed sequence of steps that turns a target's raw telescope
+images into a scientific result. This folder holds five pipelines:
+
+- **Stacking** aligns many short exposures of one target and averages them
+  into one image with less noise.
+- **Astrometry** works out where in the sky an image points (plate solving:
+  matching its stars to a reference star catalogue) and names its stars.
+- **Photometry** measures how bright each star is, and how that changes over
+  time.
+- **Spectroscopy** spreads a star's light into its colours (a spectrum) and
+  uses the spectrum to classify the star.
+- **Asteroid detection** finds dots that move between frames and checks them
+  against known asteroids.
+
+This README describes the rules every pipeline follows, so that a reader who
+knows one pipeline can find their way around the others.
+
+Terms are defined in the
+[glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+
 Every pipeline under `astrometricslib/pipelines/` follows two independent
 conventions. `pipeline_base.py`'s `AnalysisPipeline` governs how a pipeline
 talks to the batch/session runner from the *outside*; this doc describes how
@@ -23,13 +43,14 @@ in `runner.py`, and so on) owns the algorithm instance and reshapes its calls
 to fit.
 
 `validate_output` builds a batch-wide `*QualitySummary` (`models/quality_summary.py`),
-which already has its own shared-base-class convention:
+a record of how well a whole batch run went, which already has its own
+shared-base-class convention:
 `PipelineQualitySummaryBase` for fields every pipeline's summary carries, and
 a `StarIdentificationMetrics` mixin for the ones that identify stars against
 a catalog. This doc's convention operates one level lower than that summary —
 per star, not per batch — and composes underneath it, not instead of it.
 
-**Gates.** A summary also carries `gates`: one `GateResult`
+**Gates.** A gate is a pass/fail quality check on a run. A summary also carries `gates`: one `GateResult`
 (`models/gate_result.py`) for each run-level quality check. A gate is
 `passed`, `failed` or `not_checked`. A check that could not run (for example, a
 session with too few frames to judge) is `not_checked` and never reads as a
@@ -78,8 +99,9 @@ stays limited to the actual orchestration chain.
 
 ### The structured-object pattern
 
-Before this pattern, two kinds of results tended to end up as scattered
-fields or free-text notes with no home: "is this classification any good"
+This pattern gives two kinds of results a fixed home: a judgement of
+quality, and a comparison with a catalogue. Without it, they tend to end up
+as scattered fields or free-text notes. Before this pattern, for example, "is this classification any good"
 lived across three unrelated functions in `spectral_classifier.py`, and "does
 this agree with the catalog" was a string built inline inside the middle of
 classification, not a value on its own.
@@ -98,23 +120,27 @@ The pattern instead:
    existing per-object result model (`SpectroscopyResult.catalog_comparison`,
    `.input_quality`, `.output_quality`) — never a required field, so existing
    stored data and existing readers are unaffected.
-4. **Codegen registration is part of the work, not a follow-up** — a new
+4. **Codegen registration is part of the work, not a follow-up** (codegen
+   is the build step that writes matching TypeScript types for the user
+   interface from the Python models) — a new
    model in `models/` must be added to `build/codegen/generate_types.py`'s
    `interfaces = [...]` list in the same change, or `npm run type-check`
    fails against the regenerated `ui/common/types/backendTypes.ts`.
 
 ## Stacking
 
-`stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingDriver` contract in `drivers/interfaces/stacking_driver.py`, so the pipeline does not depend on Siril's commands or files.
+`stacking/` follows the three-folder split (`pre_processing/`, `processing/`, `post_processing/`) and the structured-object pattern: `StackingInputQuality` and `StackingOutputQuality` live in `models/stacking_quality.py`, are built by `pre_processing/assess_input_quality.py` and `post_processing/assess_output_quality.py`, and are stored on `StackQualitySummary` as `inputQuality` and `outputQuality`. The pixel work runs behind the `StackingDriver` contract in `drivers/interfaces/stacking_driver.py`, so the pipeline does not depend on the commands or files of Siril (the external image-processing program that does the stacking).
 
 ## Astrometry and photometry
 
 Both follow the three-folder split. `astrometry/` has `pre_processing/`
 (source detection, star width), `processing/` (catalog star identification,
-WCS refinement) and `post_processing/` (match quality, gates), with
+WCS refinement; the WCS, World Coordinate System, is the formula in the image
+header that converts a pixel position to a sky position) and `post_processing/` (match quality, gates), with
 `pipeline.py` and `runner.py` at the root and a `utilities/` folder for
 catalog seeding. `photometry/` has `pre_processing/` (per-frame photometry,
 noise, observation times, input quality), `processing/` (comparison stars,
+that is, steady stars used as a brightness reference;
 variability indices, period search) and `post_processing/` (gates, output
 quality, variability labels), with `batch.py` and `runner.py` at the root.
 Each stage folder has its own README.

@@ -7,6 +7,19 @@ sensitivity, the instrument's tilt and the difference in the air's dimming
 between this frame and the standard star's frame are already removed (see
 the [pre-processing README](../pre_processing/README.md)).
 
+Terms are defined in the
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+This README also defines each term the first time it appears.
+
+In plain words: a spectrum is a star's brightness at each wavelength. Its
+overall slope says how hot the star is (hot stars are bluer), and dark dips
+at fixed wavelengths (absorption lines, light absorbed by atoms in the
+star's outer layers) say which atoms are present and at what temperature.
+Bright bumps (emission lines) come from glowing gas. This stage reads those
+clues and names the closest spectral type on the O-B-A-F-G-K-M ladder
+(hottest to coolest, each letter split into subtypes 0 to 9). Wavelengths
+are in Angstroms (A; 1 A is 0.1 nm).
+
 ## The flow
 
 `analyze_spectrum` in `spectrum_analysis.py` runs steps 1 to 7 for every
@@ -30,11 +43,16 @@ it.
    lines is labelled as glowing gas.
 3. **Look for named features.** The pipeline checks the spectrum at the
    known wavelengths of standard absorption features, such as the hydrogen
-   series and the Ca II H&K blend, and asks at each one whether the dip is
-   deep enough that noise alone is unlikely to have produced it.
+   series (the Balmer lines) and the Ca II H&K blend (two lines of ionized
+   calcium), and asks at each one whether the dip is
+   deep enough that noise alone is unlikely to have produced it. The answer
+   is a p-value (the chance that noise alone gives a dip this strong; small
+   means unlikely to be noise) and a verdict such as detected or possible.
 4. **Remove interstellar reddening, when the catalog gives it.** Dust
    between us and a star makes the star look redder than it is. When the
-   star has a Gaia DR3 id and Gaia gives a colour excess E(B-V) for it, the
+   star has a Gaia DR3 id (its number in the third data release of the Gaia
+   satellite survey) and Gaia gives a colour excess E(B-V) for it (how much
+   redder dust has made the star, in magnitudes), the
    pipeline removes the reddening from the spectrum (see "Dereddening"
    below). Without an E(B-V), the pipeline classifies the spectrum as
    observed.
@@ -52,14 +70,15 @@ it.
    below). This estimate ignores the continuum slope. It does not change
    the type from step 5. It reports how far the two types are apart.
 7. **Measure the spectrum's own colour.** The pipeline measures the star's
-   blue-versus-visual brightness ratio, its B-V colour, directly from the
+   blue-versus-visual brightness ratio, its B-V colour (in magnitudes, the
+   logarithmic brightness scale; a larger B-V is redder), directly from the
    spectrum, independent of every other step in this stage. It measures the
    observed spectrum, because the catalog colour it is later checked
    against is also reddened. Post-processing checks this measurement
    against the star's catalog colour.
 8. **Flag possible second-order contamination.** A grating sends a small
    amount of a star's blue light to a second position further along the
-   sensor, where it lands on top of the star's own red light. For a hot
+   sensor (the second order), where it lands on top of the star's own red light. For a hot
    star this can account for a meaningful share of the reported red
    brightness, so the pipeline flags the risk instead of ignoring it
    (`second_order_risk.py`). It computes this ratio after the analysis
@@ -73,7 +92,8 @@ reads the star's Gaia DR3 id and asks the driver for E(B-V).
 `analyze_spectrum` stores the airmass extinction record that
 pre-processing produced in `SpectrumAnalysis.extinction_correction`. The
 record holds `is_applied` (true or false), `target_airmass` and
-`reference_airmass` (both unitless), `curve_name`, and `reason` (why the
+`reference_airmass` (both unitless; airmass measures how much air the light
+crossed, 1 straight overhead), `curve_name`, and `reason` (why the
 correction was skipped, if it was). The analysis does not apply the
 correction itself. A reviewer reads the record to see whether the
 classifier compared a spectrum that was scaled to the standard star's
@@ -106,7 +126,8 @@ is a probability.
 
 The classifier also returns `ranked_types`, the list of every reference it
 compared, closest first. Each entry holds the type, its `rms` and its
-Pearson correlation. The correlation is kept for comparison only, because
+Pearson correlation (from -1 to 1; how closely the two spectra rise and
+fall together). The correlation is kept for comparison only, because
 it barely separates neighbouring types.
 
 A best match above `NO_GOOD_MATCH_RMS` (0.15) gets `match_quality` of
@@ -144,17 +165,22 @@ from outside the spectrum.
 2. **Ask the reddening driver.** `ReddeningDriver.get_reddening` returns an
    E(B-V) and a note on where it came from. The built-in driver
    (`drivers/astroquery_gaia_reddening_driver.py`) reads Gaia DR3
-   `ebpminrp_gspphot`, the colour excess E(BP-RP) in magnitudes, and divides
+   `ebpminrp_gspphot`, the colour excess E(BP-RP) in magnitudes (the same
+   idea measured in Gaia's own blue and red bands), and divides
    it by 1.339 to get E(B-V). If that value is missing, it reads
    `ag_gspphot`, the dimming in Gaia's G band, and divides it by 2.740. Both
    ratios come from Casagrande and VandenBerg (2018, MNRAS 479, L102) for a
-   typical star. A failed lookup is logged and the spectrum is classified as
+   typical star.
+
+   A failed lookup is logged and the spectrum is classified as
    observed. A caller replaces the driver with `Astrometrics(...,
    reddening_driver=...)`.
 3. **Remove the reddening.** `interstellar_extinction.deredden_spectrum`
    multiplies the spectrum by 10 to the power of 0.4 A(wavelength), where
    A(wavelength) is the dimming from the Cardelli, Clayton and Mathis (1989)
-   law with R_V = 3.1 (the formula is in the module's docstring).
+   law with R_V = 3.1 (the formula is in the module's docstring). The law
+   gives how dust dimming changes with wavelength; R_V sets its shape, and 3.1
+   is the usual value for dust in our galaxy.
 4. **Classify twice.** `analyze_spectrum` classifies the observed and the
    dereddened spectrum. The reported type, its RMS scores and the candidates
    come from the dereddened spectrum. If the dereddened spectrum cannot be
@@ -166,7 +192,9 @@ The result keeps `SpectroscopyResult.reddening`: `ebv`, `ebv_source`,
 negative when dereddening gives a hotter type). The stored spectrum stays
 as observed.
 
-Measured on the bundled templates blurred to the stored line spread: a G0V
+How we know it helps: measured on the bundled templates (reference spectra)
+blurred to the stored line spread (the instrument's blur at each
+wavelength): a G0V
 template reddened with E(B-V) = 0.3 classifies as K2V (12 subtypes too late)
 without dereddening, and as G0V with the known E(B-V). With E(B-V) 0.25 for a
 star that has 0.30, the type still moves closer to G0V. The catalog value is
@@ -174,9 +202,15 @@ itself an estimate, so a real star improves by less than a template does.
 
 ## Line-index cross-check
 
+What and why: the template fit leans on the spectrum's overall slope, which
+dust and calibration errors can tilt. Line depths measured against the
+brightness right next to each line do not depend on that slope, so they give
+an independent second opinion on the type.
+
 `spectral_line_indices.py` estimates the type from six line depths. Each
 depth is how far the spectrum sits below a local continuum at the line, as a
-fraction of that continuum. The local continuum is the quadratic curve the
+fraction of that continuum (the brightness the star would have without the
+line). The local continuum is the quadratic curve the
 feature detector uses (`spectral_feature_detector.measure_local_dip_depth`),
 so a smooth tilt cancels. Measured on a G0V template, adding E(B-V) = 0.3
 moves every index by under 0.01.
@@ -193,7 +227,8 @@ moves every index by under 0.01.
 The module measures the same indices on every main-sequence reference,
 blurred to the instrument's line spread. It divides each index by its spread
 (standard deviation) across the references and picks the reference nearest in
-that space. The result is `SpectroscopyResult.line_index_classification`:
+that space (the smallest root-mean-square difference over the six scaled
+indices). The result is `SpectroscopyResult.line_index_classification`:
 `best_type`, `distance` (unitless, root-mean-square in spread units),
 `indices`, `template_fit_type` and `steps_from_template_fit`.
 
@@ -202,7 +237,8 @@ ZWO ASI 533MM Pro line spread (34 templates):
 
 - Each template given as input, with itself among the references: 34 of 34
   exact. This only shows that the six indices tell the templates apart.
-- Each template with itself removed from the references: 50% within two
+- Each template with itself removed from the references (a leave-one-out
+  test, which mimics a star whose exact type is not in the library): 50% within two
   subtypes, 71% within five, and the worst miss is 19 subtypes (B3 read as
   F2). The ladder has gaps of three to five subtypes in places, so even a
   perfect method could not reach two subtypes everywhere.
@@ -215,6 +251,9 @@ few subtypes. It is not a replacement for the template fit, and it cannot
 separate the hot side of A from the cool side without the continuum.
 
 ## Equivalent widths and their errors
+
+What and why: the pipeline needs a measure of line strength that does not
+depend on the instrument's blur, and an honest error on it.
 
 The depth of a feature depends on how much the instrument blurred it. The
 equivalent width (EW) does not. It is the width, in Angstroms, of a rectangle
@@ -234,7 +273,9 @@ were):
   on each side of the feature
 
 They are `None` when the spectrum carries no errors or the window is not
-covered. The EW is measured at the center of the dip the detector chose. The
+covered.
+
+How it is measured: the EW is measured at the center of the dip the detector chose. The
 integral runs over 1.5 times the line spread (the width of the instrument's
 blur at that wavelength) on each side. The continuum is the same quadratic the
 detector fits to the bands beside the feature. When the integration window is
@@ -242,28 +283,35 @@ wider than the detector's inner band edge, which happens in the red where the
 blur is wider, the bands start at the window edge instead, so they never hold
 the line's own wings.
 
-The error has two independent parts, added in quadrature (as a variance sum):
+The error has two independent parts, added in quadrature (as a variance sum,
+the square root of the sum of squares):
 
 - the sample errors inside the window, each scaled by the width of the sample
   and divided by the continuum;
 - the error of the continuum fit, from the covariance of the fitted
-  coefficients, which the pipeline computes from the sample errors in the
+  coefficients (how their errors move together), which the pipeline computes from the sample errors in the
   bands and propagates to the EW through the slope of the EW with respect to
   each coefficient.
 
 When the band samples scatter about the fitted curve by clearly more than their
-errors say (more than 3 standard deviations above a reduced chi-square of 1),
+errors say (more than 3 standard deviations above a reduced chi-square of 1;
+the reduced chi-square is the mean squared residual in units of the error
+bars, about 1 when the scatter matches the errors),
 the continuum part is multiplied by the square root of that reduced
 chi-square. `equivalent_width.py` holds the details and its limits. The
 verdicts and p-values do not use the errors.
 
-On a synthetic Gaussian line (EW 9.6 A, blur 45 A, 200 noise realizations),
+How we know: on a synthetic Gaussian line (EW 9.6 A, blur 45 A, 200 noise
+realizations, copies with fresh random noise),
 the mean EW is within one standard error of the truth, and the mean reported
 error is 0.95 times the scatter of the 200 results (0.99 with noise only in
 the window, and 1.01 with noise only in the continuum bands). With the center
 chosen by the detector's best-dip search, a faint line's EW reads about 3% high.
 
 ## Reduced chi-square next to the RMS
+
+The RMS says how far a reference is from the spectrum, but not whether that
+distance is larger than the noise. The reduced chi-square answers that.
 
 When the spectrum carries errors, the classifier gives every reference a
 second score: the reduced chi-square. It is the sum of the squared residuals,

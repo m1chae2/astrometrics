@@ -5,16 +5,32 @@ what the pipeline already knew about the star and produces an overall trust
 score for the classification. Nothing here changes the classification
 itself. This stage only evaluates it.
 
+Terms are defined in the
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+This README also defines each term the first time it appears.
+
+In plain words: the classifier always names some closest reference spectrum,
+even when none fits well. This stage asks whether the answer deserves trust:
+does it agree with what star catalogs already say, is the best match close,
+and is it clearly better than the runner-up? It also checks the calibration
+against an independent spectrum of the same star from the Gaia satellite.
+
 ## The flow
 
 1. **Compare against the catalog.** Most stars already have a spectral type
-   and a B-V colour on record, from SIMBAD or Gaia, measured by a different
+   and a B-V colour (a blue-minus-visual brightness ratio in magnitudes;
+   larger is redder) on record, from SIMBAD (a general star database) or
+   Gaia (a satellite survey of over a billion stars), measured by a different
    method. The pipeline checks the star's self-determined type and measured
    colour against those catalog values. A disagreement can mean the
    spectrum belongs to a bright neighbour or that the pipeline measured the
    wrong object, so the pipeline records it as a flag rather than
-   discarding it. A catalog giant or supergiant is a known special case:
-   the classifier only compares against ordinary, dwarf, reference stars,
+   discarding it.
+
+   A catalog giant or supergiant (a large, evolved star; luminosity class
+   III or I) is a known special case:
+   the classifier only compares against ordinary, dwarf (main-sequence,
+   class V), reference stars,
    so a giant not matching a dwarf reference is an expected outcome, not a
    contradiction.
 2. **Check the classification's own match numbers.** Independent of the
@@ -52,7 +68,8 @@ it does not, a short note explaining why:
 
 - **Spectral type agreement**: whether the self-determined type is within
   `DIFFERS_FROM_CATALOG_SUBTYPES` (20) subtype steps of the catalog type. A
-  step is a tenth of a letter class on the O-to-M ladder (B0 is 10, A5 is
+  step is a tenth of a letter class on the O-to-M ladder (the spectral types
+  O, B, A, F, G, K, M, from hottest to coolest) (B0 is 10, A5 is
   25), so 20 steps is two whole classes. The star's `differsFromCatalog`
   field uses the same rule, so the two cannot disagree.
 - **Luminosity class**: whether the catalog calls the star a giant or

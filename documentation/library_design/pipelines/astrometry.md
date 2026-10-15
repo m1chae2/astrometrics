@@ -10,44 +10,77 @@ pipeline reads, its detection and solving methods, the Gaia DR3 refit of the
 solution, how stars are named, the run flow, the tuned limits, the fallback
 paths and the quality-summary fields.
 
+Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary). This guide also defines each term where it first appears, so it can be read on its own.
+
 ## 1. Overview & Scientific Objective
 
-**Statement of need.** Astrometry finds the World Coordinate System (WCS) of
-an image: the map from detector pixels $(x, y)$ to sky coordinates
-$(\alpha, \delta)$ in the International Celestial Reference System (ICRS).
-Photometry needs it to match stars across sessions. Spectroscopy needs it to
-name the stars whose spectra it extracts. Asteroid detection needs it to place
-every frame on the sky.
+### 1.1 In Plain Words
+
+A telescope image shows stars, but it does not say where on the sky it
+points. This pipeline works that out. For every pixel it finds the matching
+sky direction, given as right ascension and declination (the sky's longitude
+and latitude). Finding this pixel-to-sky map is called a plate solve.
+
+The image carries no labels, so the map must come from the stars themselves.
+The mount's reported pointing can be off, the optics bend the field slightly,
+and stars drift slowly across the sky over the years. The pipeline finds the
+stars in the image and matches their pattern against a star catalog. It then
+fine-tunes the map against Gaia DR3 (the third data release of the Gaia
+space mission, the most accurate star positions available).
+
+The result is the map, written into the image file, a name for each star, and
+a quality summary that says how accurate the map is.
+
+### 1.2 Statement of Need
+
+Astrometry (the measurement of star positions) finds the World Coordinate
+System (WCS) of an image: the map from detector pixels $(x, y)$ to sky
+coordinates $(\alpha, \delta)$ in the International Celestial Reference
+System (ICRS, the standard sky coordinate frame). Photometry needs it to match
+stars across sessions. Spectroscopy needs it to name the stars whose spectra
+it extracts. Asteroid detection needs it to place every frame on the sky.
+
+The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
-    A["FITS image (usually the target's stack)"] --> B["Star detection (DAOStarFinder, 2-D background)"]
-    B --> C["Scale and position hints (header, then configuration)"]
-    C --> D{"At least 4 detections?"}
-    D -- yes --> E["Astrometry.net solve"]
-    D -- no --> F["Image header WCS, if it has one"]
-    E --> G["Refit to Gaia DR3 stars (SIP, order 2)"]
-    G --> H["Name stars: SIMBAD, then Gaia DR3, then position"]
+    A["Image file (usually the target's stacked image)"] --> B["Find stars against the sky background"]
+    B --> C["Gather scale and position hints (image file, then settings)"]
+    C --> D{"At least 4 stars found?"}
+    D -- yes --> E["Match the star pattern to a catalog (Astrometry.net)"]
+    D -- no --> F["Use the sky map already in the file, if any"]
+    E --> G["Fine-tune the map against Gaia star positions"]
+    G --> H["Name stars: SIMBAD, then Gaia, then sky position"]
     F --> H
-    H --> I["Quality gates"]
-    I --> J["AstrometryQualitySummary"]
+    H --> I["Quality checks"]
+    I --> J["Quality summary"]
 ```
 
+Astrometry.net is an open-source plate solver. SIMBAD is an online database of
+named stars and other objects. The fine-tuning step fits SIP distortion terms
+of order 2 (Section 3.3), and the quality summary is an
+`AstrometryQualitySummary` (Section 7).
+
 ## 2. Input Requirements & FITS Header Specification
+
+A FITS file (the standard file format for astronomy images) starts with a
+header: a list of named cards, each a keyword and a value, that describe the
+exposure. The table lists the cards this pipeline reads. "When Missing" says
+what the pipeline does if a card is absent.
 
 No card is strictly required: a missing card weakens a hint or a correction,
 and the run says so in its flags.
 
 | FITS Keyword | Requirement | Data Type | What It Is Used For | When Missing |
 | :--- | :--- | :--- | :--- | :--- |
-| `DATE-OBS` | Recommended | `str` (ISO-8601, UTC) | Time the shutter opened. Moves Gaia DR3 positions to the image date (Eq. 3). | Gaia positions stay at epoch 2016.0 and the run is flagged. |
-| `FOCALLEN` | Recommended | `float` (mm) | Focal length for the pixel-scale hint (Eq. 2). | The configured focal length. |
-| `XPIXSZ` / `YPIXSZ` | Recommended | `float` (μm) | Binned pixel size, used as written. Two different values are averaged and flagged. | `PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`. |
-| `PIXSIZE1` / `PIXSIZE2` | Optional | `float` (μm) | Unbinned pixel size, multiplied by the binning. | `PIXSCAL`. |
-| `XBINNING` / `YBINNING` | Optional | `int` | Binning factor applied to `PIXSIZE1` / `PIXSIZE2`. | 1. |
-| `PIXSCAL` | Optional | `float` (arcsec/px) | Pixel scale, read only when no pixel size is given. | No scale hint: the solver searches all scales. |
-| `RA` / `DEC` (or `OBJCTRA` / `OBJCTDEC`) | Optional | `float` or sexagesimal `str` | Pointing hint when the target record has no coordinates. | No position hint. |
-| `OBJECT` | Optional | `str` | Target name, used for the extended-source hint. | Guessed from the file name. |
+| `DATE-OBS` | Recommended | `str` (ISO-8601, UTC) | Time the shutter opened. Used to move Gaia DR3 star positions from the catalog date to the image date (Eq. 3). | Gaia positions stay at the catalog date (epoch 2016.0) and the run is flagged. |
+| `FOCALLEN` | Recommended | `float` (mm) | Telescope focal length, used for the pixel-scale hint (Eq. 2). | The focal length set in the configuration. |
+| `XPIXSZ` / `YPIXSZ` | Recommended | `float` (μm) | Pixel size after binning (binning joins neighbouring sensor pixels into one), used as written. If the two values differ, they are averaged and the run is flagged. | `PIXSIZE1` / `PIXSIZE2` times `XBINNING` / `YBINNING`. |
+| `PIXSIZE1` / `PIXSIZE2` | Optional | `float` (μm) | Pixel size before binning; multiplied by the binning factor. | `PIXSCAL`. |
+| `XBINNING` / `YBINNING` | Optional | `int` | Binning factor: how many sensor pixels are joined along each axis. Applied to `PIXSIZE1` / `PIXSIZE2`. | 1. |
+| `PIXSCAL` | Optional | `float` (arcsec/px) | Pixel scale (the sky angle one pixel covers), read only when no pixel size is given. | No scale hint: the solver searches all scales. |
+| `RA` / `DEC` (or `OBJCTRA` / `OBJCTDEC`) | Optional | `float` or sexagesimal `str` (base-60, such as hours, minutes, seconds) | Where the telescope pointed, as right ascension and declination (the sky's longitude and latitude). A search hint when the target record has no coordinates. | No position hint. |
+| `OBJECT` | Optional | `str` | Target name, used for the extended-source hint (whether the target is spread out, like a galaxy, rather than a point). | Guessed from the file name. |
 
 The pixel-scale hint is the scale from Eq. 2 with a window of ±5%. The solver
 driver widens that window to 0.8 times its lower edge and 1.2 times its upper
@@ -56,48 +89,79 @@ scale hint is sent.
 
 ## 3. Mathematical & Algorithmic Formulation
 
+This section covers, in order: finding stars, estimating how much sky a pixel
+covers, solving and refining the map, moving catalog stars to the image date,
+naming stars, and judging the map's accuracy.
+
 ### 3.1 Point Source Detection
 
-The background is a 2-D map (photutils `Background2D`, median estimator,
-3σ clipping). A small image falls back to one sigma-clipped median. A source
-is kept when its peak stands above the background by the threshold $k$:
+A point source is anything in the image that looks like a single star. To find
+them, the pipeline first estimates the sky background: the faint glow behind
+the stars. The background is a 2-D map (photutils `Background2D`, median
+estimator, 3σ clipping). Sigma clipping repeatedly drops pixels more than
+3 standard deviations from the median, so stars do not inflate the sky
+estimate. A small image falls back to one sigma-clipped median.
+
+The test below asks how many noise units a pixel stands above the local sky.
+A large value means a real source; a value near zero means only sky. A source
+is kept when its peak stands above the background $B$ by the threshold $k$,
+where $\sigma_B$ is the noise of the background:
 
 $$\frac{I(x, y) - B(x, y)}{\sigma_B} \ge k = 5 \tag{1}$$
 
-`DAOStarFinder` keeps sharpness in $[0.2, 1.0]$ and roundness in
-$[-0.6, +0.6]$, which rejects hot pixels and filament structure. The kernel
-width is the measured blob width: the second moment of the light in a 30-pixel
-box around the brightest sources. It counts faint wings and neighbours, so it
-reads about twice the stellar FWHM (full width at half maximum). Detections
-closer than 15 px are merged. Colour frames are block-averaged before
-detection.
+`DAOStarFinder` (a standard star finder from photutils) also checks shape.
+Sharpness compares a peak's height with its spread; roundness compares its
+width along the two axes, with 0 meaning round. It keeps sharpness in
+$[0.2, 1.0]$ and roundness in $[-0.6, +0.6]$, which rejects hot pixels
+(single pixels that always read high) and filament structure.
+
+The finder looks for blobs of a set width, the kernel width. That width is the
+measured blob width: the second moment (the spread) of the light in a
+30-pixel box around the brightest sources. It counts faint wings and
+neighbours, so it reads about twice the stellar FWHM (full width at half
+maximum: the width of a star's light profile at half its peak height).
+Detections closer than 15 px are merged. Colour frames are block-averaged
+before detection.
 
 ### 3.2 Pixel-Scale Hint
 
+The plate scale is the sky angle one pixel covers. A longer focal length or a
+smaller pixel gives a smaller (finer) scale. The solver runs much faster when
+it knows the scale in advance:
+
 $$s = 206.265 \, \frac{p}{f} \tag{2}$$
 
-where $s$ is the scale in arcsec per pixel, $p$ the binned pixel size in μm
-and $f$ the focal length in mm.
+where $s$ is the scale in arcsec per pixel (1 arcsec is 1/3600 of a degree),
+$p$ the binned pixel size in μm and $f$ the focal length in mm.
 
 ### 3.3 Plate Solve and Gaia DR3 Refit
 
-The brightest 100 detections go to Astrometry.net. The
-solver fits only the bright stars of its index files, so its solution can be
-a pixel or more off. The pipeline then refits the solution to the field's
-Gaia DR3 stars (`wcs_refinement.py`). Each detection is matched to the nearest
-Gaia star within 4 px, then 1.5 px on later passes. A
-tangent-plane solution with SIP distortion of order 2 is fitted
-with `astropy.wcs.utils.fit_wcs_from_points`. Stars more than
-3 robust standard deviations off are dropped, and the fit repeats
-until the matched set stops changing. The refit needs at least
-40 matches. It is kept only when it fits Gaia better than
-the solver's solution and moves the field by at most 30 arcsec.
+**What it does.** The brightest 100 detections go to
+Astrometry.net. The solver fits only the bright stars of its index files, so
+its solution can be a pixel or more off. The pipeline then refits the
+solution to the field's Gaia DR3 stars (`wcs_refinement.py`).
+
+**How.** Each detection is matched to the nearest Gaia star within
+4 px, then 1.5 px on later passes. The map is fitted with
+`astropy.wcs.utils.fit_wcs_from_points` as a tangent-plane solution (the sky
+projected onto a flat plane touching it at the field center) plus SIP
+distortion of order 2. SIP (Simple Imaging Polynomial) adds small
+polynomial terms that model the bending of the field by the optics. Stars more
+than 3 robust standard deviations off are dropped, and the fit
+repeats until the matched set stops changing. A robust standard deviation is a
+measure of spread that a few wild points cannot inflate.
+
+**When it is kept.** The refit needs at least 40 matches. It
+is kept only when it fits Gaia better than the solver's solution and moves the
+field by at most 30 arcsec.
 
 ### 3.4 Proper Motion Epoch Propagation
 
-Gaia DR3 positions are given at epoch J2016.0. Before matching, they
-are moved to the image time with astropy's `SkyCoord.apply_space_motion`. To
-first order this is
+Stars move slowly across the sky; this drift is their proper motion. Gaia DR3
+gives each position at one date, the epoch J2016.0. Before matching,
+each position is moved to the image time with astropy's
+`SkyCoord.apply_space_motion`. The move grows with the star's speed and with
+the years since 2016. To first order it is
 
 $$\alpha(t) = \alpha_0 + \frac{\mu_{\alpha*} \, \Delta t}{\cos \delta_0}, \qquad
 \delta(t) = \delta_0 + \mu_\delta \, \Delta t, \qquad \Delta t = t_\text{obs} - 2016.0 \tag{3}$$
@@ -109,18 +173,28 @@ $\cos \delta$) and $\mu_\delta$ is `pmdec`.
 
 With a solution, each star is named from SIMBAD first, within
 10 arcsec. Stars SIMBAD does not know are matched against a
-Gaia DR3 cone, whose faint limit is set from the frame's own zero point. Stars
-neither catalog knows get a position-based name such as
-`FIELD_J123.4+45.6`. Separations are great-circle distances from
-`SkyCoord.separation`. The catalog match separation is
+Gaia DR3 cone (all catalog stars within a circle around the field). The
+cone's faint limit is set from the frame's own zero point (the brightness
+that one count per second corresponds to, which sets how faint the frame
+reaches). Stars neither catalog knows get a position-based name such as
+`FIELD_J123.4+45.6`.
+
+Separations are great-circle distances (the shortest angle between two points
+on the sky) from `SkyCoord.separation`. The catalog match separation is the
+typical distance between a detected star and its catalog match. Small means
+the map is accurate:
 
 $$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N} \sum_{i=1}^N \Delta \theta_i^2} \tag{4}$$
 
-over the $N$ stars matched within the radius.
+over the $N$ stars matched within the radius. RMS (root mean square) is the
+square root of the mean squared distance.
 
 ### 3.6 Residual Gate
 
-The residual $r$ (arcsec) is judged against the star width:
+The residual $r$ (arcsec) is the map's typical position error. A position
+error matters in proportion to the size of a star in the image, so the gate
+divides it by the star width in arcsec. A ratio of 0.1 means the error is a
+tenth of a star width; above 0.5 the map is too loose:
 
 $$\frac{r}{s \cdot \text{FWHM}} \le 0.5 \tag{5}$$
 
@@ -150,27 +224,37 @@ target and records the run's provenance.
 
 ### 4.1 Quality Gates
 
+A quality gate is an automatic check on a run. It passes, fails, or is
+"not checked" when the data it needs are missing. A failed gate marks the run
+as flagged (the `flagged` field in Section 7) so a person can look at it. The
+list below is read from the code when this guide is generated.
+
 | Gate | Role | Defined in | What it checks |
 | :--- | :--- | :--- | :--- |
 | `source_detection` | run gate | `post_processing/run_gates.py` | Fails when no star was detected. |
-| `astrometric_residual` | run gate | `post_processing/run_gates.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of a star's width (Eq. 5). Not checked when the residual, plate scale or star width is missing. |
+| `astrometric_residual` | run gate | `post_processing/run_gates.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of a star's width (FWHM, Eq. 5). Not checked when the residual (position error), plate scale (sky angle per pixel) or star width is missing. |
 | `catalog_matches` | run gate | `post_processing/run_gates.py` | Fails when fewer than `MINIMUM_MATCHED_STARS` stars were matched to a catalog. Not checked when the image was not solved. |
-| `catalog_lookup` | run gate | `post_processing/run_gates.py` | Fails when the remote-catalog circuit breaker tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
-| `plate_solve` | run gate | `runner.py` | Fails when the image ends the run with no sky solution, from the solver or from the image's own header WCS. |
+| `catalog_lookup` | run gate | `post_processing/run_gates.py` | Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries after repeated failures) tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
+| `plate_solve` | run gate | `runner.py` | Fails when the image ends the run with no sky solution (pixel-to-sky map, or WCS), from the solver or from the image's own header. |
 
 ## 5. Tuned Calibration Parameters
 
+These are the fixed limits and settings the pipeline uses. "Live Value" is
+read from the code when this guide is generated. "Empirical Status" says where
+the value came from: measured on real data (the data set is named in
+brackets), or set by design.
+
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | `0.5` | Design estimate | Largest residual, as a share of the star FWHM. 8 saved solves gave 0.14 to 0.44. |
-| `MINIMUM_MATCHED_STARS` (`run_gates`) | `20` | Design estimate | Fewest catalog-matched stars for the residual to mean anything. |
-| `MAXIMUM_FAILED_LOOKUP_FRACTION` | `0.5` | Design estimate | Share of failed catalog lookups that fails `catalog_lookup`. |
-| `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Designed | Radius for pairing a detected star with a SIMBAD or Gaia DR3 star. |
-| `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Designed | The brightest detections sent to the solver. |
+| `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | `0.5` | Design estimate | Largest allowed residual (position error of the sky map), as a share of a star's width (FWHM). 8 saved solves gave 0.14 to 0.44. |
+| `MINIMUM_MATCHED_STARS` (`run_gates`) | `20` | Design estimate | Fewest stars matched to a catalog for the residual to mean anything. |
+| `MAXIMUM_FAILED_LOOKUP_FRACTION` | `0.5` | Design estimate | Share of failed online catalog lookups at which `catalog_lookup` fails. |
+| `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Designed | Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star. |
+| `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Designed | How many of the brightest detected stars are sent to the solver. |
 | Solve minimum | 4 sources | Designed | Fewest detections for a solve to be tried (`process_image`). |
-| `SourceDetector` threshold | `5` σ | Designed | Detection threshold above the background RMS. |
-| `MINIMUM_MATCHED_STARS` (`wcs_refinement`) | `40` | Design value | Fewest Gaia matches for the SIP refit. |
-| `MAXIMUM_SHIFT_ARCSEC` | `30.0` arcsec | Designed | Largest field shift a refit may make and still be kept. |
+| `SourceDetector` threshold | `5` σ | Designed | How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1). |
+| `MINIMUM_MATCHED_STARS` (`wcs_refinement`) | `40` | Design value | Fewest Gaia star matches needed for the refit with distortion terms (SIP). |
+| `MAXIMUM_SHIFT_ARCSEC` | `30.0` arcsec | Designed | Largest move of the whole field a refit may make and still be kept. |
 
 ## 6. Degraded States & Fallback Pathways
 
@@ -186,31 +270,34 @@ target and records the run's provenance.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's
    solution is kept. Without `DATE-OBS`, or with a cache that has no proper
    motions, Gaia positions stay at epoch 2016.0 with a flag.
-5. **Catalog outages.** Repeated failures trip a process-wide circuit breaker.
-   Unnamed stars keep position-based names, and `catalog_lookup` reports the
-   outage.
+5. **Catalog outages.** Repeated failures trip a process-wide circuit
+   breaker: a shared switch that stops further online catalog queries.
+   Unnamed stars keep position-based names, and `catalog_lookup`
+   reports the outage.
 
 ## 7. Quality Summary Data Models
+
+Every run saves a quality summary: a record of what the run measured and how each quality gate came out. Section 7.1 lists the fields every pipeline shares. Section 7.2 lists the measurements that belong to this pipeline. The tables are read from the data models in the code.
 
 ### 7.1 Pipeline Execution Envelope (`AstrometryQualitySummary`)
 
 | Field Name | Type | Description |
 | :--- | :--- | :--- |
-| `pipeline_name` | `str` | Unique pipeline domain identifier (e.g., astrometry, photometry). |
-| `pipeline_version` | `str` | Semantic version of the pipeline processing contract. |
-| `target_id` | `str` | Target celestial object identifier. |
-| `target_session_ids` | `list[str]` | List of observing session IDs included in the analysis. |
-| `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | Per-session frame counts and contribution breakdown. |
-| `upstream_quality_summary_reference` | `str \| None` | Category name of prerequisite pipeline. |
-| `resolved_parameters` | `dict[str, Any]` | Effective configuration parameters used during execution. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | Camera sensor parameters and clipping thresholds applied. |
-| `quality_processing_applied` | `bool` | Indicates whether QA gates and checks were executed. |
-| `flagged` | `bool` | True if one or more quality gates failed, indicating data concerns. |
-| `flag_reasons` | `list[str]` | Human-readable sentences describing reasons for quality flags. |
-| `gates` | `list[astrometricslib.models.gate_result.GateResult]` | Complete collection of passed, failed, and unchecked GateResults. |
-| `created_at` | `datetime.datetime` | UTC timestamp when the quality summary was generated. |
-| `provenance_activity_id` | `str \| None` | IVOA provenance activity / job tracking identifier. |
-| `upstream_entity_id` | `str \| None` | Exact upstream database entity consumed by this run. |
+| `pipeline_name` | `str` | Which pipeline made this summary (for example astrometry or photometry). |
+| `pipeline_version` | `str` | Version number of the pipeline's processing rules. |
+| `target_id` | `str` | Identifier of the target (the sky object being studied). |
+| `target_session_ids` | `list[str]` | Identifiers of the observing sessions (usually one night each) used in the run. |
+| `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
+| `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
+| `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
+| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as gain and the level at which pixels clip. |
+| `quality_processing_applied` | `bool` | Whether the quality gates and checks were run. |
+| `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
+| `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
+| `gates` | `list[astrometricslib.models.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
+| `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
+| `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
+| `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
 | `astrometry_metrics` | `astrometricslib.models.quality_summary.AstrometryPipelineQualityMetrics` | The astrometry measurements (Section 7.2). |
 
 ### 7.2 Domain Scientific Metrics Schema (`AstrometryPipelineQualityMetrics`)
@@ -220,21 +307,21 @@ target and records the run's provenance.
 | `catalog_matched_star_count` | `int` | Stars matched to a SIMBAD or Gaia DR3 entry. |
 | `position_only_star_count` | `int` | Stars named only by their sky position. |
 | `unresolved_star_count` | `int` | Stars with no catalog match and no sky position; not saved. |
-| `sources_detected` | `int` | Total point sources detected above background threshold. |
-| `solve_attempted` | `bool` | Whether a plate solve was attempted on the frame. |
-| `plate_solve_succeeded` | `bool` | Whether the image ended the run with a WCS solution. |
-| `simbad_matched_count` | `int` | Count of detected stars matched with SIMBAD catalog entries. |
-| `catalog_match_separation_rms_arcsec` | `float \| None` | RMS separation to the nearest SIMBAD or Gaia DR3 star. |
-| `plate_solve_fit_residual_rms_arcsec` | `float \| None` | Internal solver fit residual from Astrometry.net. |
-| `plate_solve_matched_star_count` | `int \| None` | Number of stars used by solver to compute WCS. |
-| `gaia_fit_rms_arcsec` | `float \| None` | RMS distance to Gaia DR3 stars under the kept solution. |
-| `gaia_fit_rms_before_arcsec` | `float \| None` | RMS distance to the same Gaia stars under the solver's solution. |
+| `sources_detected` | `int` | Number of star-like sources found above the sky background threshold. |
+| `solve_attempted` | `bool` | Whether a plate solve (finding the pixel-to-sky map) was tried. |
+| `plate_solve_succeeded` | `bool` | Whether the image ended the run with a WCS (pixel-to-sky map). |
+| `simbad_matched_count` | `int` | Number of detected stars matched to an entry in SIMBAD (an online database of named objects). |
+| `catalog_match_separation_rms_arcsec` | `float \| None` | Typical (RMS) distance, in arcsec, from each star to its nearest SIMBAD or Gaia DR3 catalog star. |
+| `plate_solve_fit_residual_rms_arcsec` | `float \| None` | The Astrometry.net solver's own measure of its fit error, in arcsec. |
+| `plate_solve_matched_star_count` | `int \| None` | Number of stars the solver used to build the WCS (pixel-to-sky map). |
+| `gaia_fit_rms_arcsec` | `float \| None` | Typical (RMS) distance to Gaia DR3 stars under the kept solution. |
+| `gaia_fit_rms_before_arcsec` | `float \| None` | Typical (RMS) distance to the same Gaia stars under the solver's solution. |
 | `gaia_fit_star_count` | `int \| None` | Stars used in the Gaia refit. |
 | `wcs_refinement_shift_arcsec` | `float \| None` | Largest move of the field made by the Gaia refit. |
-| `astrometry_flags` | `list[str]` | Warning flags for conditions that limit coordinate accuracy. |
-| `plate_scale_arcsec_per_pixel` | `float \| None` | Calculated plate scale in arcseconds per detector pixel. |
-| `star_fwhm_px` | `float \| None` | Median stellar Full-Width at Half-Maximum across the image in pixels. |
-| `remote_catalog_queries_attempted` | `int` | Number of remote catalog requests initiated. |
-| `remote_catalog_queries_failed` | `int` | Number of remote catalog queries that timed out or failed. |
-| `remote_catalog_circuit_breaker_tripped` | `bool` | True if network outages halted catalog queries. |
-| `plate_solve_attempts` | `int` | Number of plate solve iterations attempted. |
+| `astrometry_flags` | `list[str]` | Warnings about conditions that limit the accuracy of the sky positions. |
+| `plate_scale_arcsec_per_pixel` | `float \| None` | Plate scale: the sky angle one pixel covers, in arcsec. |
+| `star_fwhm_px` | `float \| None` | Median star width (FWHM, full width at half maximum) across the image, in pixels. |
+| `remote_catalog_queries_attempted` | `int` | Number of online catalog requests started. |
+| `remote_catalog_queries_failed` | `int` | Number of online catalog requests that timed out or failed. |
+| `remote_catalog_circuit_breaker_tripped` | `bool` | True if repeated network failures switched off further online catalog requests. |
+| `plate_solve_attempts` | `int` | Number of plate-solve tries. |

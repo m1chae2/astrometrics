@@ -2,6 +2,13 @@
 
 This step judges the finished stack and makes a picture of it for people. It never changes the stack file.
 
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+
+- **Stack**: the single image made by aligning and averaging many frames (sub-exposures) of one target. It is saved as a FITS file, the standard astronomy image format.
+- **Linear and stretched data**: a stack's pixel values are proportional to the light collected (linear), so it looks almost black on a screen. A **stretch** is a non-linear brightness curve that lifts the faint detail for display.
+- **Siril** is the external image-processing program that stacks and stretches the images. **GraXpert**, **Cosmic Clarity** and **StarNet** are external tools for removing sky gradients, removing noise and separating stars from the background.
+- **Rejection map**: an image, saved beside the stack, of how many values the stacker threw out at each pixel.
+
 ## What it does
 
 1. **Output judgement** (`assess_output_quality.py`). Turns the measurements made on the stack into a `StackingOutputQuality` (`models/stacking_quality.py`).
@@ -16,9 +23,9 @@ This step judges the finished stack and makes a picture of it for people. It nev
 ## The quality metrics
 
 - **Rejected pixel fraction.** The share of pixel values the stacker threw out, 0 to 1. A high value means many artifacts or a poor alignment.
-- **Saturated pixel fraction.** The share of pixels at the camera's saturation level.
+- **Saturated pixel fraction.** The share of pixels at the camera's saturation level (the highest value it can record, where the true brightness is lost).
 - **Zero pixel fraction.** The share of exactly-zero pixels. For a colour stack it is the share in the worst channel. A mostly-zero stack is blank, because calibration removed more than the sky.
-- **Negative pixel maximum percent.** The worst "many negative pixels" warning Siril printed after dark subtraction.
+- **Negative pixel maximum percent.** The worst "many negative pixels" warning Siril printed after dark subtraction (removing the heat signal measured in dark frames, which are taken with the shutter closed).
 - **Stacked, median input and expected FWHM.** Star width (full width at half maximum, in pixels, from a Gaussian fit to each star) in the stack and in a sample of the input frames spread over the whole set, images only. The expected width is the root mean square of the sampled frame widths, which is the width a stack of those frames should have. A stack more than 1.2 times wider than expected means alignment blurred it. A stack combined from exposure groups is measured without the stars whose cores were replaced by a shorter group's data. Those patched cores are the brightest stars in the combined image, because it has no saturated plateau left for the check to skip, and measured alone they read too wide. On the M 57 stack of 2026-10-03 they read 3.40 px against 2.38 px for the other stars.
 - **Spectral registration concern count.** Spectral frames the registration check questioned.
 - **Flag reasons.** One sentence per failed threshold. They feed the summary's flag reasons.
@@ -27,11 +34,11 @@ For exact thresholds, read the code.
 
 ## Colour calibration compared with Siril's
 
-The preview uses Siril's PCC by default and falls back to the star-based method when PCC cannot run. The comparison below is why PCC was chosen as the default: it was the user's choice, made after seeing the pictures, not the most accurate method. SPCC is more accurate in principle, because it uses the camera's own sensitivity curves, but it takes about 45 seconds and the pictures differed little. The difference between PCC and SPCC pictures comes mostly from the white reference each assumes, and SPCC can be set to a warmer white reference.
+The preview uses Siril's PCC (photometric colour calibration, which balances the colour channels by matching the image's stars to a star catalogue) by default and falls back to the star-based method when PCC cannot run. The comparison below is why PCC was chosen as the default: it was the user's choice, made after seeing the pictures, not the most accurate method. SPCC (spectrophotometric colour calibration) is more accurate in principle, because it uses the camera's own sensitivity curves, but it takes about 45 seconds and the pictures differed little. The difference between PCC and SPCC pictures comes mostly from the white reference each assumes, and SPCC can be set to a warmer white reference.
 
 `colour_calibration.py` balances the colours of a colour stack from its own stars. Siril has two calibrations of its own, both run here through `siril-cli` on the same gradient-flattened data (Siril 1.4.4):
 
-- `pcc` (photometric colour calibration) matches the stars to the Gaia DR3 catalogue.
+- `pcc` (photometric colour calibration) matches the stars to the Gaia DR3 catalogue (the star catalogue from the European Space Agency's Gaia satellite, third data release). It needs a plate solution: the mapping from pixel position to sky coordinates.
 - `spcc` (spectrophotometric colour calibration) also uses the camera's measured sensitivity curves. It was run with the "Nikon D5300" sensor and the "Average Spiral Galaxy" white reference.
 
 Gains are the factors for red and blue with green fixed at 1 (Siril reports factors for all three channels, so its red and blue are divided by its green).

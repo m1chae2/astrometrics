@@ -5,6 +5,8 @@ advance. A test can run a measurement on a generated frame and compare the
 result with the truth that went in. They give a test a fixed target, so a
 bug fix can prove that it recovers the truth within a stated tolerance.
 
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+
 All code is in this folder. Import from the package:
 
 ```python
@@ -32,7 +34,8 @@ from astrometricslib.test.synthetic import (
   on what a pixel holds. That module also holds `FWHM_TO_SIGMA`.
 - **Noise model.** The generator first builds the clean image plus the sky.
   It then multiplies by the gain (electrons per ADU), draws a Poisson number
-  for each pixel (photon counting noise), and divides by the gain. Last, it
+  for each pixel (photon counting noise: the random scatter in the count of
+  discrete photons, whose variance equals the mean count), and divides by the gain. Last, it
   adds Gaussian read noise. The result is clipped at the saturation level.
   Read noise can make faint pixels slightly negative.
 - **Seed convention.** Every generator takes an integer `seed` and builds
@@ -83,7 +86,8 @@ Frame `k` starts at frame 0 (the input stars) and applies these rules:
 ## Spectroscopy: `spectral_frame.py`
 
 `make_spectral_frame(...)` returns a `SyntheticSpectralFrame`. The frame
-holds a bright zero-order star, a tilted trail of light running away from
+holds a bright zero-order star (the plain, undispersed image of the star
+that a slitless grating also records), a tilted trail of light running away from
 it (the dispersed spectrum), and Gaussian absorption lines (dips in the
 trail) at chosen wavelengths.
 
@@ -154,7 +158,9 @@ approximation only near the zero order.
 ## Gaia XP spectra: `gaia_xp_spectra.py`
 
 These helpers test the comparison of a calibrated spectrum with the star's Gaia
-DR3 XP spectrum. They build both spectra from one Pickles template, so the true
+DR3 XP spectrum (the low-resolution spectrum measured by the European Space
+Agency's Gaia satellite, third data release). They build both spectra from one Pickles template (a reference spectrum from
+the Pickles library of stellar spectra), so the true
 tilt and shift between them are known. They are not re-exported by the package;
 import them from the module.
 
@@ -169,11 +175,11 @@ import them from the module.
 `make_variability_field(...)` returns a `SyntheticVariabilityField`: the raw
 light curves of a field of stars, with the answer for each. It does not
 render pixels. A test can pass its stars to `VariabilityAnalyzer` (normalize,
-detrend, flag) and compare the result with the truth.
+detrend, that is, remove slow trends shared by all stars, and flag) and compare the result with the truth.
 
 | Field | Meaning |
 | --- | --- |
-| `stars` | `StellarObject` list with raw light curves: `fluxes` (ADU per second), `flux_errors`, `airmasses`, `timestamps`. |
+| `stars` | `StellarObject` list with raw light curves: `fluxes` (ADU per second), `flux_errors`, `airmasses` (how much atmosphere the light passed through, 1 straight overhead), `timestamps`. |
 | `true_magnitudes` | The true instrumental magnitude, `-2.5 log10(flux)`, of each star. |
 | `is_variable` | `True` for each star with an injected signal. |
 | `injected` | One `InjectedVariable` per signal: kind, amplitude in magnitudes, period in frames. |
@@ -181,7 +187,7 @@ detrend, flag) and compare the result with the truth.
 - **Brightness.** The true magnitudes are evenly spaced over
   `magnitude_span` (default 6) magnitudes.
 - **Noise per point.** Photon noise plus a fixed background variance, as the
-  CCD equation gives it. That value is written to `flux_errors`. A
+  CCD equation (the standard noise budget for a camera measurement) gives it. That value is written to `flux_errors`. A
   systematic term (`systematic_fraction`, default 0.3 percent of the flux)
   is added to the flux and not to `flux_errors`, so bright stars scatter
   above their stated errors. `outlier_fraction` makes a share of points
@@ -190,7 +196,7 @@ detrend, flag) and compare the result with the truth.
   transparency change in each frame. Normalization removes both.
 - **Variables.** `variable_fraction` (default 5 percent) of the stars get a
   sinusoid (two thirds) or an eclipsing dip (one third). Amplitudes are
-  log-uniform over `amplitude_range_mag` (default 0.01 to 0.3 mag) and do
+  log-uniform (uniform in their logarithm, so each factor of ten is equally likely) over `amplitude_range_mag` (default 0.01 to 0.3 mag) and do
   not depend on brightness. A sinusoid's amplitude is its semi-amplitude.
   An eclipse's amplitude is its depth. Periods are log-uniform from 4
   frames to the length of the run.

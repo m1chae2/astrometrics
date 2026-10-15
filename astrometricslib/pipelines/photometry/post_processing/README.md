@@ -2,7 +2,7 @@
 
 This step judges how much to trust a star's variability result and the run as a whole. It runs after processing has already decided whether a star's brightness varies more than the rest of the field.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). This README also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This README also defines each term the first time it appears.
 
 In plain words: processing gives each star a yes-or-no "variable" answer. This step adds two things. For each star, it records how far the star's coefficient of variation sits from the field's CV cutoff (the fallback boundary described below). For the run, it builds gates (pass, fail or not-checked tests on the whole run) and checks whether the variability score can tell known variable stars from the rest at all.
 

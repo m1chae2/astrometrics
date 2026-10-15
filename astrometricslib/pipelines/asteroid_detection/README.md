@@ -2,7 +2,7 @@
 
 This pipeline searches a sequence of images of the same field for objects that move against the fixed background stars — asteroids and other minor planets (small bodies that orbit the Sun: asteroids, comets and dwarf planets). It works by tracking dots of light that shift position, frame to frame, in a way a fixed star never does. A confirmed mover that no known asteroid explains is worth a person's look, and a matched one gives positions that can be reported to the Minor Planet Center.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). This README also defines each term the first time it appears. The terms used most here:
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This README also defines each term the first time it appears. The terms used most here:
 
 - **Sky coordinates.** Right Ascension (RA) is the east-west sky coordinate, like longitude; declination (Dec) is the north-south coordinate, like latitude. Small angles are given in arcminutes (1/60 degree) and arcseconds (arcsec, 1/3600 degree). A mover's rate is given in arcseconds per hour.
 - **Plate solving** works out where in the sky an image points by matching its stars to a star catalogue. Its result is a **WCS** (defined in step 1).

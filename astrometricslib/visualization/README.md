@@ -2,7 +2,7 @@
 
 This folder renders a target's or star's stored data as plots and interactive image views: light curves, spectra, star fields, and focus history. Nothing here computes new science results — it only displays results the pipelines already produced. A light curve is a star's brightness plotted against time; a spectrum is its light spread out by wavelength.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 ## What each file is for
 

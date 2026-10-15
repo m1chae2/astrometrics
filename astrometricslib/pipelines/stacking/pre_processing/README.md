@@ -2,7 +2,7 @@
 
 This step checks the frames and calibration data before any pixels are combined. It does not stack anything. It decides which frames go in and whether the calibration data can be trusted.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). The terms used most here:
 
 - **Light frame**: one picture of the target. **Stacking** averages many aligned light frames into one image with less noise.
 - **Calibration frames**: pictures that measure the camera rather than the sky. A **bias** frame is a zero-length exposure (the camera's fixed electronic offset), a **dark** is taken with the shutter closed (the signal heat adds over the exposure), and a **flat** is a picture of an evenly lit surface (how sensitive each pixel is). A **master** is the average of many such frames.

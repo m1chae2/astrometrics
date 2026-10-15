@@ -9,7 +9,7 @@ the JSON file, and the diff shows the reviewer exactly which measurements moved 
 The suite checks results, not code paths. A change that keeps every unit test green can still move
 a star count or a flux (the total light measured from a star), and this suite catches that.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 M 13 is a globular cluster, a dense ball of hundreds of thousands of stars, listed as number 13 in
 the Messier catalogue. Its crowded centre makes it a demanding test for star detection.
 

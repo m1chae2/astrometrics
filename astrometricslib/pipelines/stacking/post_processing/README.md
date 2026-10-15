@@ -2,7 +2,7 @@
 
 This step judges the finished stack and makes a picture of it for people. It never changes the stack file.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). The terms used most here:
 
 - **Stack**: the single image made by aligning and averaging many frames (sub-exposures) of one target. It is saved as a FITS file, the standard astronomy image format.
 - **Linear and stretched data**: a stack's pixel values are proportional to the light collected (linear), so it looks almost black on a screen. A **stretch** is a non-linear brightness curve that lifts the faint detail for display.

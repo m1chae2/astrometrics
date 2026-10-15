@@ -2,7 +2,7 @@
 
 Processing takes the star-like points that pre-processing found and turns them into named, identified stars with known sky positions. This is where the pipeline moves from "points in an image" to "specific stars we can look up."
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). The terms used most here:
 
 - **Plate solving**: working out where in the sky an image points, and how it is turned and scaled, by matching its pattern of stars to a reference star catalogue.
 - **SIMBAD**: an online database of named astronomical objects. **Gaia**: the European Space Agency's star-mapping satellite, whose catalogue lists precise positions for over a billion stars.

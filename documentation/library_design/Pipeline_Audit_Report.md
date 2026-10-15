@@ -4,11 +4,11 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 220
-- **Resolved Code Symbols:** 220
+- **Implementation References Checked:** 221
+- **Resolved Code Symbols:** 221
 - **Broken / Stale Implementation Links:** 0
 - **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
-- **Documented Design Parameters (Table A1):** 71
+- **Documented Tuned Parameters:** 72
 
 ---
 
@@ -28,7 +28,7 @@ The four analysis pipelines each have an adapter that implements the 4-phase lif
 
 ## 3. Implementation Link Integrity Audit
 
-Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_Library_Architecture.md` against live Python code. The Notes column says whether any other production module of the library imports the symbol's module. A symbol can resolve and still be code that no pipeline step calls.
+Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_Library_Architecture.md` and `Astrometrics_Library_Implementation.md` against live Python code. The Notes column says whether any other production module of the library imports the symbol's module. A symbol can resolve and still be code that no pipeline step calls.
 
 | Documented Symbol | Resolution Status | Notes |
 | :--- | :--- | :--- |
@@ -178,42 +178,6 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_BRIGHTEST_FRACTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.DEFAULT_MAXIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.EXCESS_SCATTER_THRESHOLD` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_LINE_SIGNIFICANCE` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CONTAMINATION_SIGMA` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_MINIMUM_SAMPLE_COUNT` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.SESSION_GAP_SECONDS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MINIMUM_FRAMES_TO_JUDGE` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_STAR_FRACTION` | RESOLVED | Resolves; used by library code |
@@ -223,14 +187,17 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.stack_runner.MINIMUM_REGISTERED_FRACTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.post_processing.run_gates.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.photometry.processing.periodicity_search.FALSE_ALARM_FOR_DETECTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.COLOUR_CAMERA_ROUNDNESS_DROP_BELOW_MEDIAN` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.STAR_GAIN_MINIMUM_STARS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.SKY_RATIO_LIMIT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.INITIAL_MATCH_RADIUS_PIXELS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.REFINED_MATCH_RADIUS_PIXELS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.wcs_refinement.CLIP_SIGMAS` | RESOLVED | Resolves; used by library code |
@@ -250,85 +217,120 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.POINTING_ERROR_SEARCH_RADIUS_ARCSEC` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.CENTRE_STAR_SEARCH_RADIUS_FRACTION` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.CENTRE_STAR_MINIMUM_PEAK_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.DEFAULT_MAXIMUM_COMPARISON_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.EXCESS_SCATTER_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.run_gates.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.FALSE_ALARM_FOR_DETECTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.MINIMUM_LINE_SIGNIFICANCE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CONTAMINATION_SIGMA` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_MINIMUM_SAMPLE_COUNT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask.ATMOSPHERIC_BANDS_ANGSTROM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Resolves; used by library code |
 
 ---
 
-## 4. Documented Design Parameters (Table A1 Audit)
+## 4. Documented Tuned Parameters
 
-Audit of parameters and validation declarations from Table A1:
+Parameters and validation declarations from the tuned-parameter tables of `Astrometrics_Library_Implementation.md`:
 
-| Pipeline | Parameter | Documented Default | Empirical Status |
-| :--- | :--- | :--- | :--- |
-| Stacking | Floor on the high rejection cutoff | 2.5 $\sigma$ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only |
-| Stacking | Margin of the low cutoff above the high one | 0.5 $\sigma$ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only |
-| Stacking | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) |
-| Stacking | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) |
-| Stacking | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) |
-| Stacking | Frame screening: star count for a clouded frame; roundness for a trailed frame (0 to 1 scale) | below 0.5 of the session median; below 0.80 and at least 0.15 under the session median | Partly measured ([STK-01](validation/stacking.md#stk-01)) |
-| Stacking | Frame screening: roundness drop for a colour camera | at least 0.20 under the session median | Measured ([STK-02](validation/stacking.md#stk-02)) |
-| Stacking | Largest share of a session moved aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) |
-| Stacking | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) |
-| Stacking | Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) |
-| Stacking | Brightness scale: fewest shared stars before the pixel fallback | 16 | Measured ([STK-19](validation/stacking.md#stk-19)) |
-| Stacking | Brightness scale, pixel fallback: pixels between percentiles; bright-end fraction | 20th to 80th; 1% of pixels | Design estimate ([stacking table](validation/stacking.md#design-estimates)) |
-| Stacking | Linearity tolerance between exposure groups | 5% | Partly measured ([STK-20](validation/stacking.md#stk-20)) |
-| Stacking | Brightest sky allowed for an exposure group, relative to the reference | 3 times | Partly measured ([STK-21](validation/stacking.md#stk-21)) |
-| Stacking | Noise penalty of equal weights above which frames are noise-weighted | 1.05 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); the benefit of weighting is in [STK-07](validation/stacking.md#stk-07) |
-| Stacking | Share of spectral frames that must register before the alignment fallback | 0.9 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); registration counts are in [STK-12](validation/stacking.md#stk-12) |
-| Stacking | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) |
-| Stacking | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) |
-| Astrometry | Star detection threshold; sharpness and roundness ranges | 5 $\sigma$; 0.2 to 1.0; $\pm$0.6 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Minimum stars to attempt a solve | 4 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Minimum stars for a local solve | 10 | Partly measured ([AST-13](validation/astrometry.md#ast-13)) |
-| Astrometry | Pixel-scale window; further widening by the solver | $\pm$5%; 20% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Brightest stars sent to the online solver | 100 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Gaia refit: fewest matched stars | 40 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Gaia refit: largest allowed shift of the field | 30 arcsec | Partly measured ([AST-02](validation/astrometry.md#ast-02)) |
-| Astrometry | Gaia refit: first and later match radius; outlier clip; most passes; distortion order | 4 px and 1.5 px; 3 $\sigma$; 5; second-order SIP | Partly measured ([AST-02](validation/astrometry.md#ast-02)); used, not varied |
-| Astrometry | Gaia query time limits; depth steps on a time-out | 45 s and 60 s for the two services; 2 steps of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) |
-| Astrometry | Gaia search depth: margin; limits; default | 1.0 mag; G 14 to 20; G 18 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Catalog match radius | 10 arcsec | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Astrometry | Same-star position tolerance between catalogs | 2 arcsec | Measured ([AST-11](validation/astrometry.md#ast-11)) |
-| Astrometry | Radius for unresolved catalog companions | 3 arcsec | Partly measured ([AST-10](validation/astrometry.md#ast-10)) |
-| Astrometry | Variable-star catalog match radius | 3 arcsec | Partly measured ([AST-12](validation/astrometry.md#ast-12)) |
-| Astrometry | Centre star of an unsolved spectral frame: pointing search radius; search area; faintest peak | 5 arcmin; 0.10 of the shorter side; 0.10 of the brightest pixel | Partly measured ([AST-09](validation/astrometry.md#ast-09)) |
-| Astrometry | Minimum catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) |
-| Astrometry | Residual limit | 0.5 of a star width | Partly measured ([AST-04](validation/astrometry.md#ast-04)) |
-| Astrometry | Failed catalog lookups allowed | under 50% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) |
-| Photometry | Aperture radius; sky ring radii | 4 px; 7 to 12 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Re-centering box; refinement passes; largest allowed move | 11 px; 3; 1.5 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Comparison band: brightest skipped; band ends at | 2%; 30% of candidates | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Vetting consistency limit; share of typical stars for a usable frame | 3 $\sigma$; one half | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Frame outlier clip; per-star outlier clip | 3 $\sigma$ (at least 5 frames); 5 $\sigma$ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Share of frames rejected before the run is flagged | 25% | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust $\sigma$ | Partly measured ([PHO-06](validation/photometry.md#pho-06)); synthetic fields only |
-| Photometry | Small-field cutoff on the coefficient of variation | median + 7.4 MAD (unscaled; about 5 robust $\sigma$, since 7.4 / 1.4826 = 5.0), never below 0.02 | Measured ([PHO-10](validation/photometry.md#pho-10)) |
-| Photometry | Period verdicts: false-alarm limit for "possible"; for "detected"; shuffles | 0.05; 0.01 with at least 3 cycles; 300 | Partly measured ([PHO-12](validation/photometry.md#pho-12)); synthetic only |
-| Photometry | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Discrimination AUC floor | 0.7 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) |
-| Photometry | Largest acceptable value of the smallest detectable change (peak to peak) | 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); the smallest change found on a real field is in [PHO-09](validation/photometry.md#pho-09) |
-| Spectroscopy | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)); the effect of smoothing is in [SPE-04](validation/spectroscopy.md#spe-04) |
-| Spectroscopy | Minimum signal-to-noise for analysing a spectrum | 1.5 | Partly measured ([SPE-10](validation/spectroscopy.md#spe-10)) |
-| Spectroscopy | Line significance for the wavelength zero point | 6 | Partly measured ([SPE-11](validation/spectroscopy.md#spe-11)); synthetic only |
-| Spectroscopy | Sky strip gap and width | 6 px; 10 px | Partly measured ([SPE-01](validation/spectroscopy.md#spe-01)) |
-| Spectroscopy | Sky contamination limit | 3 $\sigma$ | Partly measured ([SPE-03](validation/spectroscopy.md#spe-03)); simulation only |
-| Spectroscopy | Fewest pixels in a sky strip | 4 | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) |
-| Spectroscopy | Poor-match limit | 0.15 relative RMS | Partly measured ([SPE-16](validation/spectroscopy.md#spe-16)) |
-| Spectroscopy | No-type limit | 0.45 relative RMS | Partly measured ([SPE-17](validation/spectroscopy.md#spe-17)) |
-| Spectroscopy | Ambiguity gap | 0.02 relative RMS | Measured ([SPE-18](validation/spectroscopy.md#spe-18)) |
-| Spectroscopy | Catalog disagreement | 20 subtype steps (two whole letter classes) | Partly measured ([SPE-19](validation/spectroscopy.md#spe-19)) |
-| Spectroscopy | Wavelength-fit rejection tolerance | 10 nm RMS | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) |
-| Spectroscopy | Wavelength-scale limit (scatter of the corrected offsets) | 11 Å (one pixel of dispersion) | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) |
-| Spectroscopy | Gaia XP agreement: largest median tilt | 3% per 1000 Å | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) |
-| Spectroscopy | Processing quality: largest share of spectra failing a metric | 50% | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) |
-| Moving objects | Frames needed for a track | 3 | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) |
-| Moving objects | Rate range; chaining radius cap | 1 to 300 arcsec/h; 300 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) |
-| Moving objects | Stationary tolerances | 1.5 px; 3 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)); their effect on slow movers is in [MOV-02](validation/asteroid_detection.md#mov-02) |
-| Moving objects | Residual multiple; displacement multiple | 2; 3 times the position error | Partly measured ([MOV-03](validation/asteroid_detection.md#mov-03)); synthetic only |
-| Moving objects | Assumed position error; centroid error | 10 arcsec; 0.5 px | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) |
-| Moving objects | Ephemeris match radius | 10 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)); close to a single frame's position error ([MOV-06](validation/asteroid_detection.md#mov-06)) |
-| Moving objects | Detection threshold; detection width | 5 $\sigma$; 4 px | Partly measured ([MOV-01](validation/asteroid_detection.md#mov-01)); synthetic only |
+| Pipeline | Parameter | Documented Default | Empirical Status | Architecture Section |
+| :--- | :--- | :--- | :--- | :--- |
+| Stacking | Floor on the high rejection cutoff | 2.5 $\sigma$ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
+| Stacking | Margin of the low cutoff above the high one | 0.5 $\sigma$ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
+| Stacking | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
+| Stacking | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.4.1 |
+| Stacking | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
+| Stacking | Frame screening: star count for a clouded frame; roundness for a trailed frame (0 to 1 scale) | below 0.5 of the session median; below 0.80 and at least 0.15 under the session median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
+| Stacking | Frame screening: roundness drop for a colour camera | at least 0.20 under the session median | Measured ([STK-02](validation/stacking.md#stk-02)) | §3.4.1 |
+| Stacking | Largest share of a session moved aside | 25% | Partly measured ([STK-03](validation/stacking.md#stk-03)) | §3.4.1 |
+| Stacking | Dark temperature slot width | 3 °C | Partly measured ([STK-06](validation/stacking.md#stk-06)) | §3.2 |
+| Stacking | Minimum frames kept after quality filtering | 5 | Partly measured ([STK-10](validation/stacking.md#stk-10)) | §3.3 (Table 3, step 3) and §3.4.1 |
+| Stacking | Brightness scale: fewest shared stars before the pixel fallback | 16 | Measured ([STK-19](validation/stacking.md#stk-19)) | §3.2 |
+| Stacking | Brightness scale, pixel fallback: pixels between percentiles; bright-end fraction | 20th to 80th; 1% of pixels | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
+| Stacking | Linearity tolerance between exposure groups | 5% | Partly measured ([STK-20](validation/stacking.md#stk-20)) | §3.2 |
+| Stacking | Brightest sky allowed for an exposure group, relative to the reference | 3 times | Partly measured ([STK-21](validation/stacking.md#stk-21)) | §3.2 |
+| Stacking | Noise penalty of equal weights above which frames are noise-weighted | 1.05 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); the benefit of weighting is in [STK-07](validation/stacking.md#stk-07) | §3.2 |
+| Stacking | Share of spectral frames that must register before the alignment fallback | 0.9 | Design estimate ([stacking table](validation/stacking.md#design-estimates)); registration counts are in [STK-12](validation/stacking.md#stk-12) | §3.3 |
+| Stacking | Rejected pixel share that flags a stack | 15% | Partly measured ([STK-24](validation/stacking.md#stk-24)) | §3.4.2 |
+| Stacking | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
+| Astrometry | Star detection threshold; sharpness and roundness ranges | 5 $\sigma$; 0.2 to 1.0; $\pm$0.6 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 (step 1) |
+| Astrometry | Minimum stars to attempt a solve | 4 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.4.1 |
+| Astrometry | Minimum stars for a local solve | 10 | Partly measured ([AST-13](validation/astrometry.md#ast-13)) | §4.4.1 |
+| Astrometry | Pixel-scale window; further widening by the solver | $\pm$5%; 20% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.4.1 |
+| Astrometry | Brightest stars sent to the online solver | 100 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 (step 2) |
+| Astrometry | Gaia refit: fewest matched stars | 40 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 (step 6) |
+| Astrometry | Gaia refit: largest allowed shift of the field | 30 arcsec | Partly measured ([AST-02](validation/astrometry.md#ast-02)) | §4.2 (step 6) |
+| Astrometry | Gaia refit: first and later match radius; outlier clip; most passes; distortion order | 4 px and 1.5 px; 3 $\sigma$; 5; second-order SIP | Partly measured ([AST-02](validation/astrometry.md#ast-02)); used, not varied | §4.2 (step 6) |
+| Astrometry | Gaia query time limits; depth steps on a time-out | 45 s and 60 s for the two services; 2 steps of 1 mag | Partly measured ([AST-08](validation/astrometry.md#ast-08)) | §4.2 (step 4) |
+| Astrometry | Gaia search depth: margin; limits; default | 1.0 mag; G 14 to 20; G 18 | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Astrometry | Catalog match radius | 10 arcsec | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.2 (step 4) |
+| Astrometry | Same-star position tolerance between catalogs | 2 arcsec | Measured ([AST-11](validation/astrometry.md#ast-11)) | §4.2 (step 4) |
+| Astrometry | Radius for unresolved catalog companions | 3 arcsec | Partly measured ([AST-10](validation/astrometry.md#ast-10)) | §4.2 (step 4) |
+| Astrometry | Variable-star catalog match radius | 3 arcsec | Partly measured ([AST-12](validation/astrometry.md#ast-12)) | §5.2 (concept 4) |
+| Astrometry | Centre star of an unsolved spectral frame: pointing search radius; search area; faintest peak | 5 arcmin; 0.10 of the shorter side; 0.10 of the brightest pixel | Partly measured ([AST-09](validation/astrometry.md#ast-09)) | §6.2 (concept 6) |
+| Astrometry | Minimum catalog-matched stars | 20 | Partly measured ([AST-05](validation/astrometry.md#ast-05)) | §4.4.2 |
+| Astrometry | Residual limit | 0.5 of a star width | Partly measured ([AST-04](validation/astrometry.md#ast-04)) | §4.4.2 |
+| Astrometry | Failed catalog lookups allowed | under 50% | Design estimate ([astrometry table](validation/astrometry.md#design-estimates)) | §4.4.2 |
+| Photometry | Aperture radius; sky ring radii | 4 px; 7 to 12 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
+| Photometry | Re-centering box; refinement passes; largest allowed move | 11 px; 3; 1.5 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
+| Photometry | Comparison band: brightest skipped; band ends at | 2%; 30% of candidates | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Photometry | Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Photometry | Vetting consistency limit; share of typical stars for a usable frame | 3 $\sigma$; one half | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Photometry | Frame outlier clip; per-star outlier clip | 3 $\sigma$ (at least 5 frames); 5 $\sigma$ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Photometry | Share of frames rejected before the run is flagged | 25% | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
+| Photometry | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 5) |
+| Photometry | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust $\sigma$ | Partly measured ([PHO-06](validation/photometry.md#pho-06)); synthetic fields only | §5.2 (concept 5) |
+| Photometry | Small-field cutoff on the coefficient of variation | median + 7.4 MAD (unscaled; about 5 robust $\sigma$, since 7.4 / 1.4826 = 5.0), never below 0.02 | Measured ([PHO-10](validation/photometry.md#pho-10)) | §5.2 (concept 5) |
+| Photometry | Period verdicts: false-alarm limit for "possible"; for "detected"; shuffles | 0.05; 0.01 with at least 3 cycles; 300 | Partly measured ([PHO-12](validation/photometry.md#pho-12)); synthetic only | §5.2 (concept 8) |
+| Photometry | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 6) |
+| Photometry | Discrimination AUC floor | 0.7 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
+| Photometry | Largest acceptable value of the smallest detectable change (peak to peak) | 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); the smallest change found on a real field is in [PHO-09](validation/photometry.md#pho-09) | §5.4.2 |
+| Spectroscopy | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)); the effect of smoothing is in [SPE-04](validation/spectroscopy.md#spe-04) | §6.2 (concept 2) |
+| Spectroscopy | Minimum signal-to-noise for analysing a spectrum | 1.5 | Partly measured ([SPE-10](validation/spectroscopy.md#spe-10)) | §6.2 (concept 5) |
+| Spectroscopy | Line significance for the wavelength zero point | 6 | Partly measured ([SPE-11](validation/spectroscopy.md#spe-11)); synthetic only | §6.2 (concept 4) |
+| Spectroscopy | Sky strip gap and width | 6 px; 10 px | Partly measured ([SPE-01](validation/spectroscopy.md#spe-01)) | §6.2 (concept 2) |
+| Spectroscopy | Sky contamination limit | 3 $\sigma$ | Partly measured ([SPE-03](validation/spectroscopy.md#spe-03)); simulation only | §6.2 (concept 2) |
+| Spectroscopy | Fewest pixels in a sky strip | 4 | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) | §6.2 (concept 2) |
+| Spectroscopy | Atmospheric (telluric) bands left out of classification | oxygen B 6860 to 6940 Å; oxygen A 7490 to 7720 Å; water 8100 to 8320 Å | Partly measured ([SPE-15](validation/spectroscopy.md#spe-15)) | §6.2 (concept 5) |
+| Spectroscopy | Poor-match limit | 0.15 relative RMS | Partly measured ([SPE-16](validation/spectroscopy.md#spe-16)) | §6.2 (concept 5) |
+| Spectroscopy | No-type limit | 0.45 relative RMS | Partly measured ([SPE-17](validation/spectroscopy.md#spe-17)) | §6.2 (concept 5) |
+| Spectroscopy | Ambiguity gap | 0.02 relative RMS | Measured ([SPE-18](validation/spectroscopy.md#spe-18)) | §6.2 (concept 5) and §6.4.2 |
+| Spectroscopy | Catalog disagreement | 20 subtype steps (two whole letter classes) | Partly measured ([SPE-19](validation/spectroscopy.md#spe-19)) | §6.4.2 |
+| Spectroscopy | Wavelength-fit rejection tolerance | 10 nm RMS | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) | §6.2 (concept 3) and §6.4.2 |
+| Spectroscopy | Wavelength-scale limit (scatter of the corrected offsets) | 11 Å (one pixel of dispersion) | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) | §6.4.2 |
+| Spectroscopy | Gaia XP agreement: largest median tilt | 3% per 1000 Å | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) | §6.4.2 |
+| Spectroscopy | Processing quality: largest share of spectra failing a metric | 50% | Design estimate ([spectroscopy table](validation/spectroscopy.md#design-estimates)) | §6.4.2 |
+| Moving object detection | Frames needed for a track | 3 | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) | §7.2 (concept 2) |
+| Moving object detection | Rate range; chaining radius cap | 1 to 300 arcsec/h; 300 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) | §7.2 (concepts 2 and 4) |
+| Moving object detection | Stationary tolerances | 1.5 px; 3 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)); their effect on slow movers is in [MOV-02](validation/asteroid_detection.md#mov-02) | §7.2 (concept 3) |
+| Moving object detection | Residual multiple; displacement multiple | 2; 3 times the position error | Partly measured ([MOV-03](validation/asteroid_detection.md#mov-03)); synthetic only | §7.2 (concept 4) |
+| Moving object detection | Assumed position error; centroid error | 10 arcsec; 0.5 px | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)) | §7.2 (concept 1) and §7.4.2 |
+| Moving object detection | Ephemeris match radius | 10 arcsec | Design estimate ([asteroid detection table](validation/asteroid_detection.md#design-estimates)); close to a single frame's position error ([MOV-06](validation/asteroid_detection.md#mov-06)) | §7.2 (concept 5) |
+| Moving object detection | Detection threshold; detection width | 5 $\sigma$; 4 px | Partly measured ([MOV-01](validation/asteroid_detection.md#mov-01)); synthetic only | §7.4.1 |

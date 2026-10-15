@@ -2,7 +2,7 @@
 
 *Version 1.0 · 2026-10-15 · Status: current*
 
-This file records how the tuned values of the moving-object (asteroid) detection pipeline were checked. Each entry names the library calls that were made, so you can repeat the check on your own frames and keep or change a value. It is written for a reader who wants to audit a number and for one who wants to tune the detector for another telescope or camera. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary), and the status labels are explained in [the register index](index.md).
+This file records how the tuned values of the moving-object (asteroid) detection pipeline were checked. Each entry names the library calls that were made, so you can repeat the check on your own frames and keep or change a value. It is written for a reader who wants to audit a number and for one who wants to tune the detector for another telescope or camera. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary), and the status labels are explained in [the register index](index.md).
 
 A few terms recur below. A *mover* is a moving object, such as an asteroid. A *track* (or *chain*) is a set of detections, one per frame, that the detector links as one object. A track is *confirmed* when it passes every test and reaches the stage `rate_linearity_confirmed` or `ephemeris_matched`. *Peak brightness in sigma* is a mover's brightest pixel above the sky, divided by the standard deviation of the sky noise. The *position error* is how far a measured position on the sky may be from the true one, in arcseconds (arcsec, 1/3600 of a degree).
 

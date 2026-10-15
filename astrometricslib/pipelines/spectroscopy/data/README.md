@@ -4,7 +4,7 @@ This folder holds the data files the spectroscopy pipeline reads at run
 time.
 
 Terms are defined in the
-[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 This README also defines each term the first time it appears. Wavelengths
 are in Angstroms (A; 1 A is 0.1 nm). A spectral type such as G0V names the
 star's place on the O-B-A-F-G-K-M temperature ladder (hottest to coolest,

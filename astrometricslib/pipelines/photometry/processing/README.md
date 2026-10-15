@@ -2,7 +2,7 @@
 
 This step takes the raw, per-picture brightness measurements from pre-processing and turns them into a decision: is this star variable, and does its brightness show a repeating pattern?
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). This README also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This README also defines each term the first time it appears.
 
 In plain words, the step does three things:
 

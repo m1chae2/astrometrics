@@ -2,7 +2,7 @@
 
 This folder holds code that more than one pipeline (astrometry, photometry, spectroscopy, asteroid detection, stacking) depends on. Nothing here runs on its own — it is called from inside a pipeline's own `pipeline.py`/`runner.py`/`batch.py`.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). The terms used most here:
 
 - **Frame**: one picture from the camera. **Light** frames show the sky; **dark**, **flat** and **bias** frames measure the camera itself (its heat signal, its pixel-to-pixel sensitivity and its fixed electronic offset) and are used to correct the lights. A **stack** is the image made by aligning and averaging many light frames.
 - **FITS**: the standard astronomy image file format. Its text header holds named cards (keywords) such as `DATE-OBS` and `INSTRUME`.

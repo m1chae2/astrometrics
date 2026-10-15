@@ -5,7 +5,7 @@ advance. A test can run a measurement on a generated frame and compare the
 result with the truth that went in. They give a test a fixed target, so a
 bug fix can prove that it recovers the truth within a stated tolerance.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 All code is in this folder. Import from the package:
 

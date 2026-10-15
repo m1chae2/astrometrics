@@ -2,7 +2,7 @@
 
 This folder holds the library's pydantic data structures (pydantic is a Python package for classes with typed, validated fields): the shapes of the data the pipelines produce, store, and hand back to callers. Nothing here does any calculation — a model file defines fields and validation, not behavior.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 ## What each file is for
 

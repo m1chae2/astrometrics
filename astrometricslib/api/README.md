@@ -2,7 +2,7 @@
 
 This folder holds the library's front door: the classes and functions that scripts, backend services and the MCP tools actually call. MCP (Model Context Protocol) tools are the adapters through which AI agents call the library. Each file wraps the pipelines and drivers underneath in a stateful, easy-to-use interface. Nothing outside `astrometricslib` should import from this folder directly. Import from the top-level `astrometricslib` package instead, which re-exports the public names.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). A target is one sky object the library tracks, with its raw frames (individual camera pictures) and results. A stack is the image made by aligning and averaging many frames.
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). A target is one sky object the library tracks, with its raw frames (individual camera pictures) and results. A stack is the image made by aligning and averaging many frames.
 
 ## What each file is for
 

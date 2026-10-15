@@ -2,7 +2,7 @@
 
 Pre-processing works directly on image pixels. It does not know about star catalogs, sky coordinates, or star identities — it only finds bright points and measures how sharp they look. This keeps the pixel-level work separate from the catalog-lookup work that happens later, in processing.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 ## What happens here
 

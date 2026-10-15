@@ -2,7 +2,7 @@
 
 This folder holds standalone command-line scripts: batch processing over the whole catalog, one-time data migrations and cleanups, backups, and empirical validation and analysis of pipeline behavior against real stored data. Each script is meant to be run directly (`python <script>.py [args]`), not imported by the library or the backend.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 ## Import rule
 

@@ -5,7 +5,7 @@ measures how good the raw data was. Nothing here depends on what the star
 turns out to be. The pipeline runs this stage the same way for every star.
 
 Terms are defined in the
-[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 This README also defines each term the first time it appears.
 
 ## In plain words

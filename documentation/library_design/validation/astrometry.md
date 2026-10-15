@@ -2,7 +2,7 @@
 
 *Version 1.0 · 2026-10-15 · Status: current*
 
-This file records how the tuned values of the astrometry pipeline were checked. The astrometry pipeline finds the stars in an image, works out where the image points on the sky (plate solving) and names the stars from the SIMBAD and Gaia DR3 catalogues. Each entry gives the library calls behind a number, so you can repeat the check on your own frames and keep or change the value. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary), and the status labels in [index.md](index.md).
+This file records how the tuned values of the astrometry pipeline were checked. The astrometry pipeline finds the stars in an image, works out where the image points on the sky (plate solving) and names the stars from the SIMBAD and Gaia DR3 catalogues. Each entry gives the library calls behind a number, so you can repeat the check on your own frames and keep or change the value. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary), and the status labels in [index.md](index.md).
 
 Two quantities appear in many entries. A *residual* is the distance left between where a plate solution puts a star and where a catalogue puts it. An *RMS* (root mean square) of distances is the square root of the mean of their squares. Both are in arcseconds (1/3600 of a degree). Our frames come from a ZWO ASI 533MM Pro camera at 1.92 arcseconds per pixel.
 

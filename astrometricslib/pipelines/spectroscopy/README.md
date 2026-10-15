@@ -6,7 +6,7 @@ each star. It describes the stages, not the code. Read the modules
 themselves for exact methods and thresholds.
 
 Terms are defined in the
-[glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 This README also defines each term the first time it appears.
 
 ## In plain words

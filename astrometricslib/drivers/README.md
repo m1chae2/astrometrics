@@ -2,7 +2,7 @@
 
 This folder holds the code that talks to something outside the pipeline logic itself: disk files, external processes, external databases, and external astronomy services. Pipelines and the API layer call into these drivers rather than opening files or databases themselves, so there is one place responsible for each outside dependency.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). Several terms recur below:
+Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). Several terms recur below:
 
 - FITS is the standard astronomy image file format. Its text header holds named cards such as `CCD-TEMP` (the sensor temperature).
 - A light frame (a "light") is a picture of the sky. Siril is the external program that stacks lights (aligns and averages many frames into one).

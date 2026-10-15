@@ -18,7 +18,7 @@ This README describes the rules every pipeline follows, so that a reader who
 knows one pipeline can find their way around the others.
 
 Terms are defined in the
-[glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 
 ## Two conventions, and which pipelines follow them
 

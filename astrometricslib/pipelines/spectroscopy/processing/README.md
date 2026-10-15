@@ -8,7 +8,7 @@ between this frame and the standard star's frame are already removed (see
 the [pre-processing README](../pre_processing/README.md)).
 
 Terms are defined in the
-[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 This README also defines each term the first time it appears.
 
 In plain words: a spectrum is a star's brightness at each wavelength. Its

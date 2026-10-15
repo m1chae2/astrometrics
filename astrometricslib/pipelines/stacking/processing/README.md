@@ -2,7 +2,7 @@
 
 This step lines up and combines frames. Siril stacks the individual frames (see `stack_runner.py` one level up). The files here handle what Siril does not: stacks of different exposure lengths and spectral frames.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). The terms used most here:
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). The terms used most here:
 
 - **Exposure group**: the frames of one stack that share one exposure length. Each group is stacked on its own and the group stacks are then combined.
 - **Spectral frame**: a frame taken through a grating with no slit (a slitless spectrum), which spreads each star's light into a streak of colours. The **zero order** is the plain, undispersed image of the star that such a frame also records; it is defined in full below.

@@ -2,7 +2,7 @@
 
 This step turns a raw picture into one brightness measurement per star, and checks how good that raw measurement was. It does not decide whether a star is variable; it only produces the numbers that later steps depend on.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). This README also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This README also defines each term the first time it appears.
 
 In plain words: the step lines up every picture of a session with the first one, puts a small circle on each star, adds up the light inside it, and subtracts the sky. The result for each star is one point of its light curve (its brightness against time) per picture, with an error bar and a time stamp. The hard parts are keeping the circle exactly on the star as the telescope drifts, and getting honest error bars and times.
 

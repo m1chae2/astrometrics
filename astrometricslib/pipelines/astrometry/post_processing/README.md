@@ -2,7 +2,7 @@
 
 Post-processing does not do any new matching or lookup work. It takes the outcome of a star's catalog match, already computed during processing, and records it as a clear, structured quality record. Without this step, that information would only ever be used once and then discarded.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary). SIMBAD is an online database of named astronomical objects, and Gaia is the European Space Agency's catalogue of precise positions for over a billion stars.
+Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). SIMBAD is an online database of named astronomical objects, and Gaia is the European Space Agency's catalogue of precise positions for over a billion stars.
 
 ## What happens here
 

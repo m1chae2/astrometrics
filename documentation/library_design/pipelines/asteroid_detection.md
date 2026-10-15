@@ -9,7 +9,7 @@ This document reviews the moving-object detection pipeline
 detection, per-night chaining, the stationary and straight-line tests, and the
 SkyBoT cross-match.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary). This guide also defines each term where it first appears, so it can be read on its own.
+Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This guide also defines each term where it first appears, so it can be read on its own.
 
 ## 1. Overview & Scientific Objective
 

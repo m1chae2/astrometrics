@@ -854,7 +854,7 @@ order. It skips `run` only when `process_input` returns a `Result` with
 target and records the run's provenance."""
 
 # The relative link from a guide to the shared glossary.
-GLOSSARY_LINK = "../Astrometrics_Library_Architecture.md#appendix-b-glossary"
+GLOSSARY_LINK = "../Astrometrics_Library_Architecture.md#appendix-a-glossary"
 
 # The sentence near the top of every guide that points to the glossary.
 GLOSSARY_LINE = (

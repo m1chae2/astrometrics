@@ -6,7 +6,7 @@ score for the classification. Nothing here changes the classification
 itself. This stage only evaluates it.
 
 Terms are defined in the
-[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+[glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary).
 This README also defines each term the first time it appears.
 
 In plain words: the classifier always names some closest reference spectrum,

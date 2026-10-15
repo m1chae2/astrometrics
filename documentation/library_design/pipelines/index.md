@@ -16,7 +16,7 @@ exposure length), its maths, its processing flow, its tuned limits, its
 fallback paths and its quality gates. The gate lists and counts are read from
 the code when the guides are generated.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-b-glossary). Each guide also
+Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). Each guide also
 defines its terms where they first appear, so it can be read on its own.
 
 ## 1. Pipeline Architecture

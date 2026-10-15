@@ -10,7 +10,8 @@
 # Usage: build/documentation/lint_docs.sh [--fix]
 #   --fix   let markdownlint repair what it can (list markers, blank lines).
 #
-# Needs: vale (pip install vale) and npx (Node.js). CI installs both.
+# Needs: vale (in the dev extra: pip install -e ".[dev]") and npx (Node.js).
+# CI installs both.
 # ==============================================================================
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -39,7 +40,7 @@ echo "== vale =="
 if [[ -x "${VALE}" ]]; then
     "${VALE}" --no-wrap "${FILES[@]}" || status=1
 else
-    echo "vale not found; install it with: .venv/bin/pip install vale" >&2
+    echo "vale not found; install it with: .venv/bin/pip install vale==3.22.0.0 (or the dev extra)" >&2
     status=1
 fi
 exit "${status}"

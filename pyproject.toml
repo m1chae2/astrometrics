@@ -99,6 +99,9 @@ dev = [
     # Runs the hooks in .pre-commit-config.yaml. Activate them in a clone with
     # `pre-commit install`; the hook is per-clone and not carried by git.
     "pre-commit>=4.0.0",
+    # Prose linter run by build/documentation/lint_docs.sh and the
+    # documentation-lint pre-commit hook. Same pin as .github/workflows/docs.yml.
+    "vale==3.22.0.0",
 ]
 docs = [
     "sphinx>=7.0.0",

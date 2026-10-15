@@ -48,8 +48,10 @@ rm -f .venv/.ready
 PYTHON_BIN="$PY314" ./build/linux/setup_venv.sh
 
 # The lint pins match .github/workflows/lint.yml. setup_venv.sh installs the
-# mcp extra only, so ruff and import-linter are added here.
-.venv/bin/pip install --quiet ruff==0.16.1 import-linter==2.15
+# mcp extra only, so ruff, import-linter and Vale (the prose linter run by
+# build/documentation/lint_docs.sh; same pin as .github/workflows/docs.yml)
+# are added here.
+.venv/bin/pip install --quiet ruff==0.16.1 import-linter==2.15 vale==3.22.0.0
 
 # ---------------------------------------------------------------------------
 # 3. Front-end packages (best effort; the Python suites do not need them)

@@ -50,6 +50,7 @@ jobs:
           node-version: '24'
 
       - name: Install Vale
+        # Same pin as the dev extra in pyproject.toml.
         run: pip install vale==3.22.0.0
 
       - name: Lint Documentation

@@ -2,7 +2,7 @@
 
 This stage finds things in a star's calibrated spectrum. Everything here takes a spectrum that pre-processing already cleaned up and works out what that spectrum shows about the star. "Cleaned up" means the camera's sensitivity, the instrument's tilt and the difference in the air's dimming between this frame and the standard star's frame are already removed (see the [pre-processing README](../pre_processing/README.md)).
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

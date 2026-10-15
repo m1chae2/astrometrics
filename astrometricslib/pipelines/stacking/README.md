@@ -2,7 +2,7 @@
 
 This pipeline combines many individual frames (light frames, also called sub-exposures) of the same target into one master image. Adding aligned frames makes real stars and galaxies brighter, while noise that occurs randomly in each frame (camera read noise, heat noise) tends to cancel out. Before combining, the pipeline also rejects temporary artifacts such as satellite streaks, cosmic rays and hot pixels (single pixels that read bright in every frame because of a sensor defect).
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

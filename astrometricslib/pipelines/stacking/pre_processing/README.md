@@ -2,7 +2,7 @@
 
 This stage checks the frames and calibration data before any pixels are combined. It does not stack anything. It decides which frames go in and whether the calibration data can be trusted.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

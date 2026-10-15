@@ -2,7 +2,7 @@
 
 This pipeline searches a sequence of frames of the same field for moving objects that move against the fixed background stars: asteroids and other minor planets (small bodies that orbit the Sun: asteroids, comets and dwarf planets). It works by tracking dots of light that shift position, frame to frame, in a way a fixed star never does. A confirmed mover that no known asteroid explains is worth a person's look, and a matched one gives positions that can be reported to the Minor Planet Center.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

@@ -159,7 +159,7 @@ def _documentation_files() -> list[Path]:
 def test_readme_has_glossary_line_and_code_pointer(path: Path) -> None:
     """Every library README links the glossary and points back to the code."""
     text = path.read_text(encoding="utf-8")
-    assert "#appendix-a-glossary" in text and GLOSSARY_SENTENCE in text, (
+    assert "Glossary.md" in text and GLOSSARY_SENTENCE in text, (
         f"{path.relative_to(REPO_ROOT)} lacks the glossary line (Documentation_Conventions.md §6.5)"
     )
     last_line = text.rstrip().splitlines()[-1].strip()

@@ -6,7 +6,7 @@
 
 This document reviews the stacking pipeline (`astrometricslib.pipelines.stacking`): frame tests, calibration-frame selection, the Siril run, exposure groups, stack quality gates and the steps after the stack.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Overview and scientific objective
 
@@ -114,7 +114,7 @@ The limits are set in one of three ways. A limit passed by the caller always win
 
 ### 3.5 Notation
 
-Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-a-notation). The table lists only the symbols this guide adds.
 
 | Symbol | Meaning | Unit |
 | --- | --- | --- |

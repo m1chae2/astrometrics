@@ -6,7 +6,7 @@
 
 This index is the entry point for scientific review of the Astrometrics processing pipelines. A pipeline here is a fixed series of processing steps that turns telescope images into a scientific result. A quality gate is an automatic test on a run that passes, fails, or is not checked when its data are missing. Each guide covers the header cards a pipeline reads, its math, its processing flow, its tuned limits, its fallback paths and its quality gates. Header cards are the named keyword and value entries at the top of a FITS image file, such as `EXPTIME` for the exposure length. The gate lists and counts are read from the code when the guides are generated.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Pipeline architecture
 

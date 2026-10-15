@@ -2,7 +2,7 @@
 
 This folder holds code that more than one pipeline (astrometry, photometry, spectroscopy, asteroid detection, stacking) depends on. Nothing here runs on its own. A pipeline's own `pipeline.py`, `runner.py` or `batch.py` calls it.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

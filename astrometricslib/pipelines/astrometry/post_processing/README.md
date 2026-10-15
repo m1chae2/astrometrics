@@ -2,7 +2,7 @@
 
 This stage does no new matching or lookup work. It takes the outcome of a star's catalog match, already computed during processing, and records it as a clear, structured quality record. Without this stage, that information would be used once and then discarded.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears. SIMBAD is an online database of named astronomical objects, and Gaia is the European Space Agency's catalog of precise positions for over a billion stars.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears. SIMBAD is an online database of named astronomical objects, and Gaia is the European Space Agency's catalog of precise positions for over a billion stars.
 
 ## What this stage does, in order
 

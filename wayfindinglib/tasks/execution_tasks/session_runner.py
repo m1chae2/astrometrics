@@ -2,7 +2,7 @@
 
 Description: `advance_session` runs one queue-advancement cycle against
 an `ObservationSession`, per `Wayfinding_Library_Architecture.md`
-Section 5.3 and Table 5: safety gate, entry selection, readiness check,
+Section 5.3 and Table 4: safety gate, entry selection, readiness check,
 meridian check, disposition, outcome capture, status transition,
 checkpoint. The readiness check comes after entry selection because a
 device's *relevance* is scoped to the entry that needs it, so the check
@@ -21,7 +21,7 @@ state, checking device readiness, detecting a meridian crossing,
 running a flip, computing/issuing/observing an action, capturing
 outcomes, checkpointing -- is injected via `SessionRunnerDependencies`,
 so this module carries no hardware import and no capture-orchestration
-logic of its own; it is the state machine that Table 5 of
+logic of its own; it is the state machine that Table 4 of
 `Wayfinding_Library_Architecture.md` specifies, not the astronomy or
 hardware behind each step.
 """
@@ -135,7 +135,7 @@ class SessionRunnerDependencies:
 def advance_session(session: ObservationSession, deps: SessionRunnerDependencies) -> ObservationSession:
     """Run one queue-advancement cycle on `session`, in place.
 
-    The cycle follows Table 5 of `Wayfinding_Library_Architecture.md`.
+    The cycle follows Table 4 of `Wayfinding_Library_Architecture.md`.
 
     Parameters
     ----------

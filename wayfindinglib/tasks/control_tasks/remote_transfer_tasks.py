@@ -3,7 +3,7 @@
 Description: Remote telescope connection, folder synchronization,
 directory listing, and FITS file download operations over the
 StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`
-Section 6.1 (the Remote group of observatory control).
+Section 6.1 (the remote file transfer group of observatory control).
 
 Pulling files off a telescope host needs a telescope, so this code
 belongs in the observatory-control library rather than the science

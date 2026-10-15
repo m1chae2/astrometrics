@@ -116,7 +116,7 @@ Use MyST "colon fence" syntax for markdown documents and Sphinx reStructuredText
 - **Tone**: Strictly neutral, objective, and direct. Avoid conversational filler, marketing speak, and overly academic phrasing.
 - **Reading Level**: First-year college engineering or science for the library documents; high school for the desktop-app guides (`user_interface/`). Plain words, short sentences, every term defined on first use.
 - **Clarity**: Sentences do one job. Use shorter, punchy sentences and avoid long, multi-clause paragraphs.
-- **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the glossary (`library_design/Astrometrics_Library_Architecture.md`, Appendix A) current when introducing new ones.
+- **Terminology**: Define domain-specific terms at first use (ADU, zero order) and keep the site glossary (`Glossary.md`) current when introducing new ones.
 - **Structure**: Rationale first, mechanism second. Explain *why* before *how*. Keep implementation pointers as terse trailing parentheticals or appendix rows, not the spine of the prose.
 - **Formatting**: No bold-for-emphasis mid-sentence (italics at most). No adverb-ly hyphenation ("locally installed", not "locally-installed").
 

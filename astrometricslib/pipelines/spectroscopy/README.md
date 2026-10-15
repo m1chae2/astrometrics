@@ -2,7 +2,7 @@
 
 This document describes what happens when the pipeline turns a spectroscopy image, or a whole observing session of them, into a classified spectrum for each star. It describes the stages, not the code.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

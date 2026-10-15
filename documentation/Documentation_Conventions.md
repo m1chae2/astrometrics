@@ -12,7 +12,8 @@ Each kind of content has one home, so a fact is written once.
 
 | Content | Home | Reader |
 | --- | --- | --- |
-| Theory: what each step does and why, equations, the glossary | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
+| Theory: what each step does and why, and its equations | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
+| Definitions of terms, for the whole site | `Glossary.md` | Everyone |
 | Code names, tuned values and their status | `library_design/<Library>_Library_Implementation.md` | Developers and reviewers |
 | Evidence: data sets, dates, results, and the library calls to repeat each check | `library_design/validation/` (the validation register) | Reviewers and anyone tuning the tool |
 | Per-pipeline review summaries | `library_design/pipelines/` (generated) | Reviewers |
@@ -85,7 +86,9 @@ H1, a purpose sentence, the glossary line, then one bullet per file or file grou
 
 ### 3.4 Papers and register files
 
-Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. An architecture paper puts the glossary line under its abstract and points to its glossary and notation appendices. Register files follow the entry template in `library_design/validation/index.md`.
+Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. An architecture paper puts the glossary line under its abstract and points to its notation appendix. The glossary is the site's own page, not part of a paper.
+
+**Length.** An architecture paper has at most 10,000 words and an implementation paper at most 3,500, not counting references or hidden comments. A journal paper on scientific software runs 5,000 to 10,000 words, and an implementation paper is an index into the code, not a second paper. When a paper reaches its limit, tighten it or move detail to the review guides, the READMEs or the glossary; do not raise the limit. Register files follow the entry template in `library_design/validation/index.md`.
 
 ### 3.5 Site pages
 
@@ -159,7 +162,7 @@ Measures of a detector or classifier:
 
 ### 6.4 Symbols
 
-The architecture paper's Appendix B is the one list of symbols, and each symbol in it has one meaning. The index letters are those Appendix B declares ($i$ a star, $c$ a comparison star, $j$ an item of a sequence, $q$ a pixel).
+The architecture paper's Appendix A is the one list of symbols, and each symbol in it has one meaning. The index letters are those Appendix A declares ($i$ a star, $c$ a comparison star, $j$ an item of a sequence, $q$ a pixel).
 
 - A review guide writes its equations in the paper's symbols and names the paper equation it restates. A symbol the paper does not define goes in the guide's Notation subsection, which the generator builds from `GUIDE_NOTATION`. A guide never gives a paper symbol a new meaning, and a symbol two guides define means the same in both.
 - A README sits next to the code and may write a formula with the code's variable names, in code format (for example `variance = F + n_pix (S + RN^2 + D)`), with a table of what each name means.
@@ -173,7 +176,7 @@ The architecture paper's Appendix B is the one list of symbols, and each symbol 
 
 Near the top of every README, review guide and register file:
 
-> Terms are defined in the [glossary](<relative path>/documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+> Terms are defined in the [glossary](<relative path>/documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## 7. Voice and reading level
 
@@ -194,11 +197,11 @@ Near the top of every README, review guide and register file:
 
 | Rule | Enforced by |
 | --- | --- |
-| Theory-only architecture papers; evidence only in the register | `astrometricslib/test/test_documentation_rules.py`, `wayfindinglib/test/test_documentation_papers.py` |
+| Theory-only architecture papers; evidence only in the register; paper length limits | `astrometricslib/test/test_documentation_rules.py`, `wayfindinglib/test/test_documentation_papers.py` |
 | Seven sections, one place and one name per page | `astrometricslib/test/test_documentation_site.py` |
 | Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching skill copies | `astrometricslib/test/test_documentation_style.py` |
 | Register entries complete, cited and resolvable | `astrometricslib/test/test_validation_register.py` |
-| Guide symbols defined in Appendix B or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
+| Guide symbols defined in Appendix A or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
 | Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py`, `wayfindinglib/test/test_documentation_papers.py` |
 | Generated review guides up to date | `astrometricslib/pipelines/test/test_pipeline_doc_parity.py` |
 | Spelling, terms, units, labels, voice | Vale (`.vale.ini`, `build/documentation/vale/`) |

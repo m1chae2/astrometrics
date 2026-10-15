@@ -7,7 +7,7 @@ failure-prone moment in an unattended night -- producing a
 `MeridianFlipOutcome`. Every step is attempted in order; the first
 failure stops the sequence immediately with `resumed=False` and a
 `failure_detail` rather than proceeding, per
-`Wayfinding_Library_Architecture.md` Section 5.5 and Table 5 (step 4):
+`Wayfinding_Library_Architecture.md` Section 5.5 and Table 4 (step 4):
 a flip that does not resume fails the entry rather than letting the
 cycle advance to the next queue entry.
 

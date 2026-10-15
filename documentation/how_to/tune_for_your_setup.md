@@ -6,7 +6,7 @@
 
 The tuned limits in `astrometricslib` were chosen on one telescope, one camera and one sky. This guide gives the order in which to check them on your own equipment. Each step links to the register entries that say which setting to change and what to run again. The settings and their code names are in `Astrometrics_Library_Implementation.md`; the evidence is in the [validation register](../library_design/validation/index.md).
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Before you start
 

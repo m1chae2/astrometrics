@@ -2,7 +2,7 @@
 
 This folder holds measurement records. Code comments and the [validation register](../library_design/validation/index.md) cite them as the source of a number, for example a threshold or a default value.
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## Rules for records
 

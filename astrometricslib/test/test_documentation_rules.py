@@ -20,9 +20,18 @@ checks the register itself.
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DESIGN_DIR = REPO_ROOT / "documentation" / "library_design"
 ARCHITECTURE = DESIGN_DIR / "Astrometrics_Library_Architecture.md"
+IMPLEMENTATION = DESIGN_DIR / "Astrometrics_Library_Implementation.md"
+# Length limits for the papers (documentation/Documentation_Conventions.md,
+# Section 3.4). A journal paper on scientific software runs 5,000 to 10,000
+# words; the implementation paper is an index into the code, not a second
+# paper. References and hidden <!-- impl: --> comments do not count.
+ARCHITECTURE_WORD_LIMIT = 10_000
+IMPLEMENTATION_WORD_LIMIT = 3_500
 
 # Numbers with units that are physics, definitions or worked illustrations, not
 # tuned settings. Adding a value here asserts that it is not a tuned setting;
@@ -221,6 +230,43 @@ def assert_states_no_tuned_values(paper: Path) -> None:
     )
 
 
+def paper_word_count(paper: Path) -> int:
+    """Count the words a reader sees in a paper, without its references.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        A paper.
+
+    Returns
+    -------
+    words : `int`
+        The number of words outside HTML comments and outside the
+        ``## References`` section.
+    """
+    text = re.sub(r"<!--.*?-->", "", paper.read_text(encoding="utf-8"), flags=re.DOTALL)
+    text = re.sub(r"^## References\n.*?(?=^## |\Z)", "", text, flags=re.MULTILINE | re.DOTALL)
+    return len(text.split())
+
+
+def assert_within_word_limit(paper: Path, limit: int) -> None:
+    """Check that a paper stays within its length limit.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        A paper. The calling test fails when it has more than ``limit``
+        words.
+    limit : `int`
+        The most words the paper may have.
+    """
+    words = paper_word_count(paper)
+    assert words <= limit, (
+        f"{paper.name} has {words} words; the limit is {limit}. Tighten the prose, cut repetition, "
+        "or move detail to the review guides, the READMEs or the glossary instead of raising the limit."
+    )
+
+
 def test_architecture_names_no_code() -> None:
     """The architecture paper shows no file, class, function or config name."""
     assert_names_no_code(ARCHITECTURE)
@@ -246,3 +292,13 @@ def test_validation_evidence_lives_in_the_register() -> None:
         "documentation/library_design/validation/ and cite the entry from here "
         f"(for example '(partly measured; see [STK-08](...#stk-08))'): {problems}"
     )
+
+
+@pytest.mark.parametrize(
+    ("paper", "limit"),
+    [(ARCHITECTURE, ARCHITECTURE_WORD_LIMIT), (IMPLEMENTATION, IMPLEMENTATION_WORD_LIMIT)],
+    ids=lambda value: value.stem if isinstance(value, Path) else str(value),
+)
+def test_papers_stay_within_their_length(paper: Path, limit: int) -> None:
+    """Each Astrometrics paper is no longer than its limit."""
+    assert_within_word_limit(paper, limit)

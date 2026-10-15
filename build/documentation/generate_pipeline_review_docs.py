@@ -867,7 +867,7 @@ SECTION_HEADINGS: dict[int, str] = {
 }
 
 # The relative link from a guide to the shared glossary.
-GLOSSARY_LINK = "../Astrometrics_Library_Architecture.md#appendix-a-glossary"
+GLOSSARY_LINK = "../../Glossary.md"
 
 # The sentence right after the Abstract paragraph of every guide.
 GLOSSARY_LINE = (
@@ -1059,13 +1059,13 @@ COMMON_VALUES: dict[str, str] = {
 
 
 # The anchor of the architecture paper's list of symbols.
-NOTATION_LINK = "../Astrometrics_Library_Architecture.md#appendix-b-notation"
+NOTATION_LINK = "../Astrometrics_Library_Architecture.md#appendix-a-notation"
 
-# Symbols a guide uses that the architecture paper's Appendix B does not
+# Symbols a guide uses that the architecture paper's Appendix A does not
 # define, as (symbol, meaning, unit). Every other symbol in a guide has the
 # paper's meaning. A symbol listed for two guides has the same meaning in
 # both. test_documentation_style.py checks each guide's equations against
-# Appendix B and this table.
+# Appendix A and this table.
 GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
     "astrometry": [
         (r"$B_\text{sky}(x, y)$", "Background (sky) level at a pixel", "ADU"),

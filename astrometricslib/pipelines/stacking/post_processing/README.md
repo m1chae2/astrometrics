@@ -2,7 +2,7 @@
 
 This stage judges the finished stack and makes a preview image of it for people. It never changes the stack file.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

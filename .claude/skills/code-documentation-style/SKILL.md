@@ -101,7 +101,7 @@ A README describes the method. It does not hold the evidence for it.
   matching row of the "Tuned Parameters and Validation Status" tables in
   `Astrometrics_Library_Implementation.md`.
 - Link the glossary
-  (`documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary`) near the
+  (`documentation/Glossary.md`) near the
   top, and still define each term on first use.
 
 ## What this looks like in practice

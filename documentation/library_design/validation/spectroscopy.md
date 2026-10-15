@@ -2,7 +2,7 @@
 
 *Version 1.0 · 2026-10-15 · Status: current*
 
-This file holds the evidence behind the tuned values of the slitless spectroscopy pipeline: what was checked, on what kind of data, with which library calls, and what came out. It is written for a reader who wants to repeat a check on their own grating spectra and tune the pipeline to their own camera, grating and sky. The method itself is described in the pipeline READMEs under `astrometricslib/pipelines/spectroscopy/`. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary), and the status labels (Measured, Partly measured, Design estimate) are explained in [index.md](index.md).
+This file holds the evidence behind the tuned values of the slitless spectroscopy pipeline: what was checked, on what kind of data, with which library calls, and what came out. It is written for a reader who wants to repeat a check on their own grating spectra and tune the pipeline to their own camera, grating and sky. The method itself is described in the pipeline READMEs under `astrometricslib/pipelines/spectroscopy/`. Terms are defined in the [glossary](../../Glossary.md), and the status labels (Measured, Partly measured, Design estimate) are explained in [index.md](index.md).
 
 Wavelengths are in ångströms (Å; 1 Å is 0.1 nm). Most procedures below call internal functions of the spectroscopy pipeline. The public API (`from astrometricslib import Astrometrics`) runs whole pipelines, but it does not expose the single steps that a check needs. Every call marked "internal" may change between versions; the impl markers in this file let a test confirm that each named function still exists.
 

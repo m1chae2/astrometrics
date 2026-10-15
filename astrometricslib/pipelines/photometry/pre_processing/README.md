@@ -2,7 +2,7 @@
 
 This stage turns a raw frame into one brightness measurement per star, and checks how good that raw measurement was. It does not decide whether a star is variable; it only produces the numbers that later steps depend on.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

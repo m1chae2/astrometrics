@@ -2,7 +2,7 @@
 
 This folder holds the infrastructure that both libraries, the backend, the MCP servers and the scripts all share, so none of them has to own it. The code here imports nothing else from `astrometricslib`, `wayfindinglib` or the backend. Other code imports its names from the top-level `astrometricslib` package.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

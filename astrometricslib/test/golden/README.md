@@ -2,7 +2,7 @@
 
 This folder holds a regression suite that measures the real sample frames of M 13 with the library's pure-Python code and compares the results with numbers saved in `golden_values.json`. A "golden" value is a measurement accepted as correct at a known time. If a refactor changes the measurement, the test fails and names the number that moved. If the change is intended, the author regenerates the JSON file, and the diff shows the reviewer exactly which measurements moved and why.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 The suite checks results, not code paths. A change that keeps every unit test green can still move a star count or a flux (the total light measured from a star), and this suite catches that.
 

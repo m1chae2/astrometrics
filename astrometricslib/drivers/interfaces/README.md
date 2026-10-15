@@ -2,7 +2,7 @@
 
 This folder holds one abstract base class (`*Driver`) for each outside program or service the library uses. The rest of the library depends on these interfaces, and each concrete driver in `drivers/` implements one.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

@@ -6,7 +6,7 @@
 
 This document reviews the asteroid detection pipeline (`astrometricslib.pipelines.asteroid_detection`): per-frame pointing, detection, chaining within each session (one observing night, from local noon to local noon), the stationary and straight-line tests, and the SkyBoT cross-match.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Overview and scientific objective
 
@@ -110,7 +110,7 @@ SkyBoT's prediction of where a known body is at a given time is its ephemeris. S
 
 ### 3.6 Notation
 
-Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-a-notation). The table lists only the symbols this guide adds.
 
 | Symbol | Meaning | Unit |
 | --- | --- | --- |

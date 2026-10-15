@@ -6,7 +6,7 @@
 
 This document reviews the slitless spectroscopy pipeline (`astrometricslib.pipelines.spectroscopy`): extraction, wavelength calibration, refraction, zero-point, response and extinction corrections, dereddening, classification, the Gaia XP comparison, and the quality checkpoints.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Overview and scientific objective
 
@@ -118,7 +118,7 @@ The Gaia space mission measured low-resolution spectra, called XP spectra, for m
 
 ### 3.6 Notation
 
-Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-a-notation). The table lists only the symbols this guide adds.
 
 | Symbol | Meaning | Unit |
 | --- | --- | --- |

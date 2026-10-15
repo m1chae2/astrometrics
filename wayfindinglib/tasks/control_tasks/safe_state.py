@@ -1,7 +1,7 @@
 """Purpose: Safe-State Sequencing.
 
 Description: `execute(trigger, steps)` runs the six ordered steps of
-`Wayfinding_Library_Architecture.md` Table 7 (Section 6.6) -- abandon
+`Wayfinding_Library_Architecture.md` Table 5 (Section 6.6) -- abandon
 exposure, stop guiding, park mount, close enclosure, warm sensor, close
 session -- recording each into a `SafeStateOutcome`.
 

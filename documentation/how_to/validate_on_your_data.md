@@ -6,7 +6,7 @@
 
 Every tuned value in the library has a register entry that gives the library calls to repeat its check. This guide shows how to read an entry and run its procedure on your own frames. The entry format is defined in the [validation register](../library_design/validation/index.md).
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Steps
 

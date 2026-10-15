@@ -2,7 +2,7 @@
 
 This stage takes the star-like points that pre-processing found and turns them into named, identified stars with known sky positions. This is where the pipeline moves from points in an image to specific stars that it can look up.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

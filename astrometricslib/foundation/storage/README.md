@@ -2,7 +2,7 @@
 
 This folder holds the generic storage plumbing that both libraries share. Nothing here knows about telescopes, targets or stars. It only knows about databases, locks and drives.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

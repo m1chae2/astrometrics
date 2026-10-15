@@ -2,7 +2,7 @@
 
 This folder holds small, generic helpers that several parts of the library use and that belong to no one pipeline: parsing, domain-independent algorithms, and the library's own error subclasses. The infrastructure both libraries share (configuration, enums, camera names, logging, storage, jobs) lives in `astrometricslib/foundation/` instead.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

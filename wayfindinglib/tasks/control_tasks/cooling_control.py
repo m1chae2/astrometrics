@@ -3,7 +3,7 @@
 Description: Ramps sensor temperature toward `CoolingPolicy.target_temp_c`
 at no more than the configured rate, and reports settled only once the
 reading holds within tolerance, per
-`Wayfinding_Library_Architecture.md` Section 2.5 (Table 3, camera
+`Wayfinding_Library_Architecture.md` Section 2.5 (Table 2, camera
 cooling arithmetic). Warm-up is the same ramp
 run toward a warmer target (ambient, typically) rather than a distinct
 algorithm, and is a step in the safe-state sequence

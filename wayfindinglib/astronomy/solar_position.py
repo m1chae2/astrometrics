@@ -3,7 +3,7 @@
 Description: Pure Astropy-backed solar altitude at a given location and
 time -- the raw input `night_window.py`'s twilight-threshold policy
 brackets a usable night against
-(`Wayfinding_Library_Architecture.md` Section 4.3, Table 4, step 1).
+(`Wayfinding_Library_Architecture.md` Section 4.3, Table 3, step 1).
 """
 
 from astropy.coordinates import AltAz, EarthLocation, get_sun

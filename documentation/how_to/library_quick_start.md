@@ -6,7 +6,7 @@
 
 This guide shows how to install the `astrometricslib` Python package, set up its configuration file, and make a first call to the public API. It is for programmers who want to use the library without the desktop application. The calls in Section 3 were checked against the library's signatures with `inspect.signature`. They were not executed for this guide, because they need a frame library on disk and Siril installed.
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Install
 

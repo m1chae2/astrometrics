@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This register records how the tuned values in `astrometricslib` were checked. Each entry gives the library calls that were made, the kind of data needed, what was measured, the result on our data, and which setting to change to tune the tool for another telescope or camera. The method documents, meaning the READMEs, the [pipeline review guides](../pipelines/index.md) and `Astrometrics_Library_Architecture.md`, describe what each step does and why. They cite an entry here by its ID instead of repeating its numbers. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary).
+This register records how the tuned values in `astrometricslib` were checked. Each entry gives the library calls that were made, the kind of data needed, what was measured, the result on our data, and which setting to change to tune the tool for another telescope or camera. The method documents, meaning the READMEs, the [pipeline review guides](../pipelines/index.md) and `Astrometrics_Library_Architecture.md`, describe what each step does and why. They cite an entry here by its ID instead of repeating its numbers. Terms are defined in the [glossary](../../Glossary.md).
 
 ## 1. Introduction
 

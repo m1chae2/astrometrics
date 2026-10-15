@@ -6,7 +6,7 @@
 
 A gate is a run-level pass or fail entry in a pipeline's quality record. The review guides list every gate, and they are generated from the code. This guide lists the steps to add a gate so the guides and tests stay in step. The generator is `build/documentation/generate_pipeline_review_docs.py`.
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Steps
 

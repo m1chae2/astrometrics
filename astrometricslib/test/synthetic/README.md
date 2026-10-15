@@ -2,7 +2,7 @@
 
 These generators build artificial images where the right answer is known in advance. A test can run a measurement on a generated frame and compare the result with the truth that went in. They give a test a fixed target, so a bug fix can prove that it recovers the truth within a stated tolerance.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 All code is in this folder. Import from the package:
 

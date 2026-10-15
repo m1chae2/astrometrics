@@ -1,15 +1,15 @@
 r"""Purpose: Keep the mathematical notation of the review guides consistent.
 
-Description: The architecture paper's Appendix B is the one list of symbols
+Description: The architecture paper's Appendix A is the one list of symbols
 for the documentation set (``documentation/Documentation_Conventions.md``,
 Section 6.4). Each pipeline review guide restates some of the paper's
 equations and adds symbols of its own, which it lists in a "Notation"
 subsection generated from ``GUIDE_NOTATION`` in
 ``build/documentation/generate_pipeline_review_docs.py``. These tests check:
 
-- every symbol in a guide's math is in Appendix B or in that guide's table;
+- every symbol in a guide's math is in Appendix A or in that guide's table;
 - every row of a guide's table is used by the guide;
-- no guide's table redefines a symbol Appendix B already defines;
+- no guide's table redefines a symbol Appendix A already defines;
 - a symbol two guides both define means the same thing in both;
 - a one-letter lowercase subscript on a guide's own symbol is one of the
   paper's index letters.
@@ -244,15 +244,15 @@ def _show(symbol: Symbol) -> str:
 
 
 def _appendix_b() -> str:
-    """Return the text of the architecture paper's Appendix B.
+    """Return the text of the architecture paper's Appendix A.
 
     Returns
     -------
     text : `str`
-        From the Appendix B heading to the next heading of the same level.
+        From the Appendix A heading to the next heading of the same level.
     """
     text = ARCHITECTURE.read_text(encoding="utf-8")
-    start = text.index("## Appendix B")
+    start = text.index("## Appendix A")
     end = text.find("\n## ", start + 1)
     return text[start : end if end != -1 else len(text)]
 
@@ -263,7 +263,7 @@ def paper_symbols() -> dict[Symbol, str]:
     Returns
     -------
     defined : `dict` [`tuple` [`str`, `str`], `str`]
-        Each symbol in the first column of Appendix B, with its meaning.
+        Each symbol in the first column of Appendix A, with its meaning.
     """
     defined: dict[Symbol, str] = {}
     for row in _appendix_b().splitlines():
@@ -282,10 +282,10 @@ def index_letters() -> frozenset[str]:
     Returns
     -------
     letters : `frozenset` [`str`]
-        The letters named in Appendix B's sentence "The index symbols ...".
+        The letters named in Appendix A's sentence "The index symbols ...".
     """
     sentence = re.search(r"The index symbols (.+?) run over", _appendix_b())
-    assert sentence is not None, "Appendix B no longer says which letters are indices"
+    assert sentence is not None, "Appendix A no longer says which letters are indices"
     return frozenset(re.findall(r"\$([a-z])\$", sentence.group(1)))
 
 
@@ -374,14 +374,14 @@ def _is_paper_symbol(symbol: Symbol, paper: dict[Symbol, str], indices: frozense
     symbol : `tuple` [`str`, `str`]
         The (base, subscript) pair.
     paper : `dict`
-        The symbols of Appendix B (`paper_symbols`).
+        The symbols of Appendix A (`paper_symbols`).
     indices : `frozenset` [`str`]
         The paper's index letters.
 
     Returns
     -------
     defined : `bool`
-        True when Appendix B has the symbol, or has its base bare or with an
+        True when Appendix A has the symbol, or has its base bare or with an
         index, and the symbol's subscript is an index (``\lambda_j`` is the
         ``j``-th ``\lambda``).
     """
@@ -416,15 +416,15 @@ def test_symbols_are_read_in_one_standard_form(latex: str, expected: list[Symbol
 
 
 def test_guides_have_notation_tables_to_check() -> None:
-    """The guides and Appendix B are where the tests expect them."""
+    """The guides and Appendix A are where the tests expect them."""
     assert GUIDES, "no review guides found"
-    assert len(paper_symbols()) > 50, "Appendix B was not read"
+    assert len(paper_symbols()) > 50, "Appendix A was not read"
     assert {"i", "c", "j"} <= index_letters()
 
 
 @pytest.mark.parametrize("path", GUIDES, ids=lambda path: path.stem)
 def test_every_guide_symbol_is_defined(path: Path) -> None:
-    """Each guide symbol is in Appendix B or in the guide's notation table."""
+    """Each guide symbol is in Appendix A or in the guide's notation table."""
     paper, indices, local = paper_symbols(), index_letters(), guide_notation(path)
     problems = [
         f"line {lines[0]}: {_show(symbol)}"
@@ -432,7 +432,7 @@ def test_every_guide_symbol_is_defined(path: Path) -> None:
         if symbol not in local and not _is_paper_symbol(symbol, paper, indices)
     ]
     assert not problems, (
-        f"{path.name} uses symbols that neither the architecture paper's Appendix B nor the "
+        f"{path.name} uses symbols that neither the architecture paper's Appendix A nor the "
         "guide's Notation table defines. Use the paper's symbol if it has one; otherwise add "
         "a row to GUIDE_NOTATION in build/documentation/generate_pipeline_review_docs.py and "
         f"regenerate: {problems}"
@@ -455,7 +455,7 @@ def test_every_notation_row_is_used(path: Path) -> None:
 
 @pytest.mark.parametrize("path", GUIDES, ids=lambda path: path.stem)
 def test_notation_does_not_redefine_paper_symbols(path: Path) -> None:
-    """A guide's table never gives a new meaning to a symbol of Appendix B."""
+    """A guide's table never gives a new meaning to a symbol of Appendix A."""
     paper = paper_symbols()
     clashes = [
         f"line {line}: {_show(symbol)} is already '{paper[symbol]}'"

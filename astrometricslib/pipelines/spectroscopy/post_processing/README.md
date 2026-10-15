@@ -2,7 +2,7 @@
 
 This stage evaluates the result of processing: it checks the result against what the pipeline already knew about the star and produces an overall trust score for the classification. Nothing here changes the classification itself. This stage only evaluates it.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

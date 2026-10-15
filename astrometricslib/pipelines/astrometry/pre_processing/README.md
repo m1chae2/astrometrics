@@ -2,7 +2,7 @@
 
 This stage works directly on image pixels. It does not know about star catalogs, sky coordinates or star identities. It only finds bright points and measures how sharp they look. This keeps the pixel-level work separate from the catalog-lookup work that happens later, in processing.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

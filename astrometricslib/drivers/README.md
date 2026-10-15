@@ -2,7 +2,7 @@
 
 This folder holds the code that talks to something outside the pipeline logic itself: disk files, external processes, external databases, and external astronomy services. Pipelines and the API layer call into these drivers rather than opening files or databases themselves, so there is one place responsible for each outside dependency.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 Several terms recur below:
 

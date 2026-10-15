@@ -2,7 +2,7 @@
 
 This folder holds the five analysis pipelines and the rules every pipeline follows, so that a reader who knows one pipeline can find their way around the others. A pipeline is a fixed sequence of steps that turns a target's raw telescope frames into a scientific result.
 
-Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 The five pipelines are:
 

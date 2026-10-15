@@ -6,7 +6,7 @@
 
 A tuned value appears in the code, the implementation paper, the READMEs, the review guides and the validation register. This guide lists what to update so they agree. Changing a value or the method behind it means updating its register entry.
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Steps
 

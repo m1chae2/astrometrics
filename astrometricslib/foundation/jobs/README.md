@@ -2,7 +2,7 @@
 
 This folder holds the job framework that every part of the repository shares. A job is a slow piece of work, such as stacking a target or running an analysis, that the app lists with its progress and its own log.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

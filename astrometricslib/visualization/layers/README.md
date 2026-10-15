@@ -2,7 +2,7 @@
 
 This folder holds the overlays drawn on top of a plotted image in the interactive star field view. Each file is one overlay class.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

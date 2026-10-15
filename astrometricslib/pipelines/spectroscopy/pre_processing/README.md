@@ -2,7 +2,7 @@
 
 This stage turns a raw image into a calibrated spectrum for each star and measures how good the raw data was. Nothing here depends on what the star turns out to be. The pipeline runs this stage the same way for every star.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

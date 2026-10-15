@@ -6,7 +6,7 @@
 
 This document reviews the plate solving and astrometric calibration pipeline (`astrometricslib.pipelines.astrometry`). It covers the header cards the pipeline reads, its detection and solving methods, the Gaia DR3 refit of the solution, how stars are named, the run flow, the tuned limits, the fallback paths and the quality-summary fields.
 
-Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Overview and scientific objective
 
@@ -141,7 +141,7 @@ The gate detail names the one used.
 
 ### 3.7 Notation
 
-Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-a-notation). The table lists only the symbols this guide adds.
 
 | Symbol | Meaning | Unit |
 | --- | --- | --- |

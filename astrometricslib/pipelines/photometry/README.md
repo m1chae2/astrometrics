@@ -2,7 +2,7 @@
 
 The photometry pipeline measures how bright stars are in a series of frames and checks whether any of them change brightness over time. That second part is called *variability*, and a star that changes brightness in a real way is a *variable star*.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

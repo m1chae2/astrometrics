@@ -3,7 +3,7 @@
 Description: Verifies the six steps run in order even when earlier
 ones fail, enclosure closure is skipped (not attempted) when the mount
 did not park, and `failed_step` records the first failure -- the behavior
-`Wayfinding_Library_Architecture.md` Section 6.6 (Table 7) describes.
+`Wayfinding_Library_Architecture.md` Section 6.6 (Table 5) describes.
 """
 
 from collections.abc import Callable

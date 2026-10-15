@@ -2,7 +2,7 @@
 
 *Version 1.0 · 2026-10-15 · Status: current*
 
-This file lists the evidence behind the tuned numbers of the stacking pipeline: the limits, thresholds and defaults that the method documents state without proof. Each entry names the setting, the data you need, the library calls that produce the number, what we measured, and how to tune the setting on your own equipment. It is written for two readers: a learner who wants to see how a number was found, and a reviewer who wants to repeat the check. Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appendix-a-glossary), and the status labels (Measured, Partly measured, Design estimate) are explained in [index.md](index.md).
+This file lists the evidence behind the tuned numbers of the stacking pipeline: the limits, thresholds and defaults that the method documents state without proof. Each entry names the setting, the data you need, the library calls that produce the number, what we measured, and how to tune the setting on your own equipment. It is written for two readers: a learner who wants to see how a number was found, and a reviewer who wants to repeat the check. Terms are defined in the [glossary](../../Glossary.md), and the status labels (Measured, Partly measured, Design estimate) are explained in [index.md](index.md).
 
 Every Python example assumes the library is installed and configured with your own frame library. `astro = Astrometrics()` reads your configuration, and target names such as `"M 27"` stand for targets in your library. Functions marked "internal" are not part of the public API: they are named so you can repeat a measurement exactly, and they may change. FITS files are opened with `memmap=False` so that no file handle stays open.
 

@@ -2,7 +2,7 @@
 
 This stage takes the raw, per-frame brightness measurements from pre-processing and turns them into a decision: is this star variable, and does its brightness show a repeating pattern?
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

@@ -2,7 +2,7 @@
 
 Astrometry is the measurement of where things are on the sky. This pipeline answers two questions about a single image: where in the sky is it pointing, and which stars does it contain? Later pipelines (photometry, spectroscopy, asteroid detection) need both answers, so this one runs first. It runs in three stages, in order: pre-processing, processing and post-processing. Each stage has its own folder and its own README with more detail.
 
-Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## Terms used here
 

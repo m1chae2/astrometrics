@@ -2,7 +2,7 @@
 
 This folder holds standalone spectroscopy tools used outside the per-run pipeline. Nothing here runs as part of processing a target's spectra.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What each file is for
 

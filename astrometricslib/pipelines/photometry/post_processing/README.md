@@ -2,7 +2,7 @@
 
 This stage judges how much to trust a star's variability result and the run as a whole. It runs after processing has already decided whether a star's brightness varies more than the rest of the field.
 
-Terms are defined in the [glossary](../../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
 ## What this stage does, in order
 

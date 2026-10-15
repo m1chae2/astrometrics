@@ -7,7 +7,7 @@ because several gate criteria are established outside any observing
 night -- a device summary survey, an envelope-rejection check, an
 enclosure cycling drill -- producing evidence with no `ObservationSession`
 to attach to (`Wayfinding_Library_Architecture.md` Section 7.2 and the
-"Commissioning run" entry of its Appendix A, the glossary).
+"Commissioning run" entry of the site glossary, `documentation/Glossary.md`).
 
 Append-only rather than configuration: unlike every other model in this
 subsystem, a `CommissioningRun` is written once at drill completion and

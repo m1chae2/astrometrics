@@ -6,7 +6,7 @@
 
 A register entry records the evidence for one tuned value. This guide lists the steps to add one. The entry template and the status labels are in the [validation register](../library_design/validation/index.md), and `astrometricslib/test/test_validation_register.py` enforces the format.
 
-Terms are defined in the [glossary](../library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Steps
 

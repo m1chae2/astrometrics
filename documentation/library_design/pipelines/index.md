@@ -63,7 +63,7 @@ A run gate is recorded on the run's quality summary. A period check is recorded 
 When auditing the pipelines, check:
 
 1. **Input metadata contracts.** Which header cards each pipeline reads and what happens when one is missing.
-2. **Mathematical formulations.** The CCD equation (the error of a measured brightness) and $\text{BJD}_\text{TDB}$ times (times measured at the solar system's center of mass). Stetson $J$ (a test for smooth, real brightness changes) and the grating equation (position along a spectrum to wavelength). The prediction of the stack's FWHM (full width at half maximum, the width of a star's light profile at half its peak), which says how sharp the stars of a stack should be.
+2. **Mathematical formulations.** The CCD equation (the error of a measured brightness) and $\text{BJD}_\text{TDB}$ times (times measured at the solar system's center of mass). Stetson J (a test for smooth, real brightness changes) and the grating equation (position along a spectrum to wavelength). The prediction of the stack's FWHM (full width at half maximum, the width of a star's light profile at half its peak), which says how sharp the stars of a stack should be.
 3. **Degraded states.** Sparse fields, tracking drift (the field sliding across the sensor during a run), saturated zero orders (clipped point images beside the spectra) and catalog outages.
 4. **Status labels.** Which limits were measured on real data and which are design estimates. The Status column in Section 5 of every guide labels each limit "Measured", "Partly measured" or "Design estimate", and links the label to the [validation register](../validation/index.md). The register gives the evidence for each value and the library calls to repeat the test on other data.
 

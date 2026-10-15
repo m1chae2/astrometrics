@@ -69,9 +69,9 @@ This section covers, in order: finding stars, estimating how much sky a pixel co
 
 A point source is anything in the image that looks like a single star. To find them, the pipeline first estimates the sky background: the faint glow behind the stars. The background is a 2-D map (photutils `Background2D`, median estimator, 3σ clipping). Sigma clipping repeatedly drops pixels more than 3 standard deviations from the median, so stars do not inflate the sky estimate. A small image falls back to one sigma-clipped median.
 
-The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B$ by the threshold $k$, where $\sigma_B$ is the noise of the background:
+The test below asks how many noise units a pixel stands above the local sky. A large value means a real source; a value near zero means only sky. A source is kept when its peak stands above the background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
 
-$$\frac{I(x, y) - B(x, y)}{\sigma_B} \ge k = 5 \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = 5 \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a peak's height with its spread; roundness compares its width along the two axes, with 0 meaning round. It keeps sharpness in $[0.2, 1.0]$ and roundness in $[-0.6, +0.6]$, which rejects hot pixels (single pixels that always read high) and filament structure.
 
@@ -83,9 +83,9 @@ $$\frac{I(x, y) - B(x, y)}{\sigma_B} \ge k = 5 \tag{1}$$
 
 The pixel scale is the sky angle one pixel covers. A longer focal length or a smaller pixel gives a smaller (finer) scale. The solver runs much faster when it knows the scale in advance:
 
-$$s = 206.265 \, \frac{p}{f} \tag{2}$$
+$$s = 206.265 \, \frac{p_\text{px}}{f_\text{tel}} \tag{2}$$
 
-where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p$ the binned pixel size in μm and $f$ the focal length in mm. The constant is the number of arcseconds in a radian (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
+where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p_\text{px}$ the binned pixel size in μm and $f_\text{tel}$ the focal length in mm. The constant is the number of arcseconds in a radian (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
 
 ### 3.3 Plate solve and Gaia DR3 refit
 
@@ -120,9 +120,10 @@ The cone's faint limit is set from the frame's magnitude zero point: the catalog
 
 Separations are great-circle distances (the shortest angle between two points on the sky) from `SkyCoord.separation`. The catalog match separation is the typical distance between a detected star and its catalog match:
 
-$$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N} \sum_{i=1}^N \Delta \theta_i^2} \tag{4}$$
+$$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N_\text{match}} \sum_{i=1}^{N_\text{match}} \Delta
+\theta_i^2} \tag{4}$$
 
-over the $N$ stars matched within the radius. RMS (root mean square) is the square root of the mean squared distance. It is a rough test, not a measure of the fit: wrong matches and SIMBAD's uneven position precision raise it, and the match radius caps it.
+over the $N_\text{match}$ stars matched within the radius. RMS (root mean square) is the square root of the mean squared distance. It is a rough test, not a measure of the fit: wrong matches and SIMBAD's uneven position precision raise it, and the match radius caps it.
 
 ### 3.6 Residual gate
 
@@ -137,6 +138,25 @@ The residual is the first of these that was measured:
 3. the catalog match separation of Eq. 4.
 
 The gate detail names the one used.
+
+### 3.7 Notation
+
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $B_\text{sky}(x, y)$ | Background (sky) level at a pixel | ADU |
+| $\sigma_\text{sky}$ | Noise of the background | ADU |
+| $k$ | Detection threshold, in units of the background noise | none |
+| $s$ | Pixel scale | arcsec/px |
+| $p_\text{px}$ | Pixel pitch (binned pixel size) | μm |
+| $f_\text{tel}$ | Focal length of the telescope | mm |
+| $\mu_{\alpha*}$, $\mu_\delta$ | Proper motion in right ascension (times cos δ) and in declination | mas/yr |
+| $t_\text{obs}$ | Observation date | yr |
+| $\Delta t$ | Elapsed time | yr |
+| $\Delta \theta_i$ | Separation of star $i$ from its catalog match | arcsec |
+| $N_\text{match}$ | Number of matched stars | stars |
+| $r$ | Residual of the plate solution | arcsec |
 
 ## 4. Processing flow
 

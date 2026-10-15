@@ -75,16 +75,16 @@ With no site configured, the observer is placed at Earth's center. With no targe
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and subtracts the sky that falls in the same circle. The radius is a fixed 4 pixels for every star, not scaled to the star's width. The net flux is
 
-$$F_\text{net} = \sum_{p \in \text{ap}} I_p - n_\text{pix} \bar{B} \tag{1}$$
+$$F_\text{net} = \sum_{q \in \text{ap}} I_q - n_\text{pix} \bar{B} \tag{1}$$
 
-where $I_p$ is the value of pixel $p$ in ADU (analog-to-digital units, raw camera counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring (annulus) from 7 to 12 pixels. Divided by the exposure, it becomes a flux in ADU per second.
+where $I_q$ is the value of pixel $q$ in ADU (analog-to-digital units, raw camera counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring (annulus) from 7 to 12 pixels. Divided by the exposure, it becomes a flux in ADU per second.
 
-**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$ means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error (one standard deviation) in ADU is $\sigma_{\text{ap}} / g$, where
+**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$ means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error (one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
 
 $$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
   + \frac{n_\text{pix}^2}{n_\text{sky}}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right) \tag{2}$$
 
-Here $g$ is the gain in electrons per ADU, $S_\star = g F_\text{net}$ the star's net counts, and $s_\text{sky} = g \bar{B}$ the sky per pixel, all in electrons. $\sigma_\text{rd}$ is the read noise (the electronic noise of reading the sensor). $D$ is the dark current per pixel (a signal the sensor builds up from heat); no source records it, so it is taken as zero. $n_\text{sky}$ is the number of sky pixels. The last term is the error of the sky level itself. This predicted noise is compared later with the scatter the light curves actually show (Section 3.4).
+Here $G$ is the gain in electrons per ADU, $S_\star = G F_\text{net}$ the star's net counts, and $s_\text{sky} = G \bar{B}$ the sky per pixel, all in electrons. $\sigma_\text{rd}$ is the read noise (the electronic noise of reading the sensor). $D$ is the dark current per pixel (a signal the sensor builds up from heat); no source records it, so it is taken as zero. $n_\text{sky}$ is the number of sky pixels. The last term is the error of the sky level itself. This predicted noise is compared later with the scatter the light curves actually show (Section 3.4).
 
 ### 3.3 Differential ensemble normalization
 
@@ -109,9 +109,9 @@ Normalization needs at least 2 comparison stars. With fewer, the raw light curve
 
 **Why several tests.** Every light curve scatters a little from noise alone. A variable star scatters more than its error bars allow, and its changes are smooth from one point to the next. Three indices each catch one of these signs.
 
-**Units.** The indices are computed on each star's normalized fluxes $\hat{F}_i(t)$ (Section 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a larger number means fainter; 1 mag is a factor of about 2.5). A fractional scatter $s$ is $1.0857\,s$ magnitudes, where $1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m = -2.5 \log_{10} \bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the camera's own scale, not calibrated to a catalog.
+**Units.** The indices are computed on each star's normalized fluxes $\hat{F}_i(t)$ (Section 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a larger number means fainter; 1 mag is a factor of about 2.5). A fractional scatter $s_\text{frac}$ is $1.0857\,s_\text{frac}$ magnitudes, where $1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m_\text{inst} = -2.5 \log_{10} \bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the camera's own scale, not calibrated to a catalog.
 
-**The noise model.** A noise model gives the scatter a constant star of instrumental magnitude $m$ shows in this field, $\sigma_\text{model}(m)$. It is the median measured scatter in brightness bins, so it includes noise the CCD equation leaves out (centroid jitter, flat-field errors). It needs at least 20 stars.
+**The noise model.** A noise model gives the scatter a constant star of instrumental magnitude $m_\text{inst}$ shows in this field, $\sigma_\text{model}(m_\text{inst})$. It is the median measured scatter in brightness bins, so it includes noise the CCD equation leaves out (centroid jitter, flat-field errors). It needs at least 20 stars.
 
 **The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of points, as in the paper's Equation (9). When a star's errors are smaller than the noise model's scatter, they are scaled up to it, so a constant star gives the values below.
 
@@ -126,21 +126,22 @@ $$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{
 \qquad J = \frac{1}{n_\text{pts}-1}\sum_{j=1}^{n_\text{pts}-1}\operatorname{sgn}(P_j)
 \sqrt{|P_j|}, \qquad P_j = \delta_j \, \delta_{j+1} \tag{6}$$
 
-The excess scatter $E$ compares the star's measured scatter (in magnitudes) with what the noise model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
+The excess scatter $E_\sigma$ compares the star's measured scatter (in magnitudes) with what the noise model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
-$$E = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m)} \tag{7}$$
+$$E_\sigma = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
 
 Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also defines a version that pairs points taken in two filters), with consecutive pairs and unit weights (Stetson 1996, PASP 108, 851).
 
-**Thresholds and score.** The thresholds on $\chi^2_\nu$ and $J$ are the field median plus 2.326 robust standard deviations. A robust standard deviation is 1.4826 times the median absolute deviation (MAD), a spread measure that a few variable stars barely move. For normal data it equals the standard deviation. 2.326 is the one-sided 99% point of a normal distribution, so a constant star clears a threshold by chance about 1% of the time. For $\chi^2_\nu$ the threshold is set on its logarithm, because its spread grows with its level. The threshold on $E$ is fixed at 1.5.
+**Thresholds and score.** The thresholds on $\chi^2_\nu$ and $J$ are the field median plus 2.326 robust standard deviations. A robust standard deviation is 1.4826 times the median absolute deviation (MAD), a spread measure that a few variable stars barely move. For normal data it equals the standard deviation. 2.326 is the one-sided 99% point of a normal distribution, so a constant star clears a threshold by chance about 1% of the time. For $\chi^2_\nu$ the threshold is set on its logarithm, because its spread grows with its level. The threshold on $E_\sigma$ is fixed at 1.5.
 
 The ranking score divides each index by its threshold, so a score above 1 means the star clears its tests. Without a high $J$, the score is capped at 1, so it cannot pass:
 
-$$S = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr}\right) & J > J_\text{thr}\\
-\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr},\; 1\right) & \text{otherwise}
+$$S_\text{rank} = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E_\sigma /
+E_{\sigma,\text{thr}}\right) & J > J_\text{thr}\\
+\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E_\sigma / E_{\sigma,\text{thr}},\; 1\right) & \text{otherwise}
 \end{cases} \tag{8}$$
 
-**Limiting false positives.** Testing thousands of stars makes some pass by chance. A star is a candidate when $S > 1$ and its q-value is below 0.01. The chi-square false-alarm probability is the chance that noise alone gives a $\chi^2$ this large (the upper tail of the chi-square distribution with $n_\text{pts} - 1$ degrees of freedom). The Benjamini–Hochberg method turns these probabilities into q-values that control the false discovery rate (FDR): the expected share of false positives among the stars flagged. A q-value of 0.05 means about 1 in 20 such picks is expected to be noise.
+**Limiting false positives.** Testing thousands of stars makes some pass by chance. A star is a candidate when $S_\text{rank} > 1$ and its q-value is below 0.01. The chi-square false-alarm probability is the chance that noise alone gives a $\chi^2$ this large (the upper tail of the chi-square distribution with $n_\text{pts} - 1$ degrees of freedom). The Benjamini–Hochberg method turns these probabilities into q-values that control the false discovery rate (FDR): the expected share of false positives among the stars flagged. A q-value of 0.05 means about 1 in 20 such picks is expected to be noise.
 
 **Small fields.** A field too small for a noise model falls back to a cutoff on the coefficient of variation (CV, standard deviation over mean). The cutoff is the typical CV plus a multiple of its spread, and never below 2%:
 
@@ -163,19 +164,44 @@ where MAD is the unscaled median absolute deviation (the median distance of the 
 
 A light curve too short to search gets "insufficient data" instead.
 
-**Many searches.** Searching many stars raises the chance that one passes by luck. For $m$ independent searches, the chance that at least one reaches probability $p$ by luck is the family-wise false-alarm probability
+**Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$ independent searches, the chance that at least one reaches probability $p$ by luck is the family-wise false-alarm probability (Equation (11) of the architecture paper)
 
-$$p_\text{family} = 1 - (1 - p)^m \tag{10}$$
+$$p_\text{corr} = 1 - (1 - p)^{N_s} \tag{10}$$
 
-The Šidák correction holds that family-wise rate at the verdict limit $\alpha$ (0.01 for "detected"). Each search's $p$ is turned into $p_\text{family}$ and judged against $\alpha$. That is the same as asking each search for $p \le 1 - (1 - \alpha)^{1/m}$ (`family_wise_correction.py`). The correction can only lower a verdict.
+The Šidák correction holds that family-wise rate at the verdict limit $p_\text{lim}$ (0.01 for "detected"). Each search's $p$ is turned into $p_\text{corr}$ and judged against $p_\text{lim}$. That is the same as asking each search for $p \le 1 - (1 - p_\text{lim})^{1/N_s}$ (`family_wise_correction.py`). The correction can only lower a verdict.
 
-**Enough shuffles.** A shuffle test with $n$ copies cannot report a probability below about $1/(n+1)$. With many searches, that floor can sit above the corrected limit, so no verdict could pass. Searches that need it are run again with more copies, up to 5000.
+**Enough shuffles.** A shuffle test with $N_\text{sh}$ copies cannot report a probability below about $1/(N_\text{sh}+1)$. With many searches, that floor can sit above the corrected limit, so no verdict could pass. Searches that need it are run again with more copies, up to 5000.
 
 **Period checks.** Two period checks (Section 4.1) then test each "detected" or "possible" result. Each failed check lowers the verdict one step on the ladder. A check that could not run lowers nothing and marks the result "unconfirmed".
 
 ### 3.6 Cross-session merge and labels
 
 With two or more sessions, each star's light curves are matched by sky position and merged (`batch.py`). Each session keeps its own normalized level. Stars whose level changes between sessions become long-term candidates. Candidates are then labeled from SIMBAD (a database of named objects), Gaia DR3 (the Gaia space mission's third catalog) and VSX (the International Variable Star Index) as listed, not listed, or unknown (`known_variability_labels.py`).
+
+### 3.7 Notation
+
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $F_\text{net}$ | Sky-subtracted aperture sum | ADU |
+| $I_q$ | Value of pixel $q$ | ADU |
+| $\bar{B}$ | Sky level per pixel, the median of the sky ring | ADU/px |
+| $G$ | Gain | e⁻/ADU |
+| $\sigma_{F,i}(t)$, $\sigma_{F,c}(t)$ | Uncertainty of the raw brightness of star $i$ and of comparison star $c$ | ADU/s |
+| $\sigma_\text{ens}(t)$ | Uncertainty of the ensemble signal | ADU/s |
+| $e_i(t)$ | Uncertainty of the normalized brightness of star $i$ | none |
+| $s_\text{frac}$ | Fractional scatter | none |
+| $m_\text{inst}$ | Instrumental magnitude | mag |
+| $\bar{F}_\star$ | Mean raw brightness of a star | ADU/s |
+| $\sigma_\text{model}(m_\text{inst})$ | Scatter of a constant star in the field's noise model | mag |
+| $\sigma_\text{measured}$ | Measured scatter of a star | mag |
+| $\delta_j$, $P_j$ | Normalized residual of point $j$, and the product of neighboring residuals | none |
+| $J$, $J_\text{thr}$ | Stetson J index, and its threshold | none |
+| $E_\sigma$, $E_{\sigma,\text{thr}}$ | Excess scatter, and its threshold | none |
+| $\chi^2$, $\chi^2_\text{thr}$ | Chi-square, and the threshold on reduced chi-square | none |
+| $S_\text{rank}$ | Ranking score of a candidate | none |
+| $p_\text{lim}$ | Verdict limit on the corrected false-alarm probability | none |
 
 ## 4. Processing flow
 

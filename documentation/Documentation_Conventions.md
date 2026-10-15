@@ -144,7 +144,10 @@ Measures of a detector or classifier:
 
 ### 6.4 Symbols
 
-The architecture paper's Appendix B is the one list of symbols. A review guide or README that writes an equation uses the paper's symbols and indices, and names the paper's equation it restates.
+The architecture paper's Appendix B is the one list of symbols, and each symbol in it has one meaning. The index letters are those Appendix B declares ($i$ a star, $c$ a comparison star, $j$ an item of a sequence, $q$ a pixel).
+
+- A review guide writes its equations in the paper's symbols and names the paper equation it restates. A symbol the paper does not define goes in the guide's Notation subsection, which the generator builds from `GUIDE_NOTATION`. A guide never gives a paper symbol a new meaning, and a symbol two guides define means the same in both.
+- A README sits next to the code and may write a formula with the code's variable names, in code format (for example `variance = F + n_pix (S + RN^2 + D)`), with a table of what each name means.
 
 ### 6.5 Links
 
@@ -179,6 +182,7 @@ Near the top of every README, review guide and register file:
 | Theory-only architecture paper; evidence only in the register | `astrometricslib/test/test_documentation_rules.py` |
 | Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching skill copies | `astrometricslib/test/test_documentation_style.py` |
 | Register entries complete, cited and resolvable | `astrometricslib/test/test_validation_register.py` |
+| Guide symbols defined in Appendix B or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
 | Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py` |
 | Generated review guides up to date | `astrometricslib/pipelines/test/test_pipeline_doc_parity.py` |
 | Spelling, terms, units, labels, voice | Vale (`.vale.ini`, `build/documentation/vale/`) |

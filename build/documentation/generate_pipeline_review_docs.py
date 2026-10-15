@@ -1058,6 +1058,135 @@ COMMON_VALUES: dict[str, str] = {
 }
 
 
+# The anchor of the architecture paper's list of symbols.
+NOTATION_LINK = "../Astrometrics_Library_Architecture.md#appendix-b-notation"
+
+# Symbols a guide uses that the architecture paper's Appendix B does not
+# define, as (symbol, meaning, unit). Every other symbol in a guide has the
+# paper's meaning. A symbol listed for two guides has the same meaning in
+# both. test_documentation_style.py checks each guide's equations against
+# Appendix B and this table.
+GUIDE_NOTATION: dict[str, list[tuple[str, str, str]]] = {
+    "astrometry": [
+        (r"$B_\text{sky}(x, y)$", "Background (sky) level at a pixel", "ADU"),
+        (r"$\sigma_\text{sky}$", "Noise of the background", "ADU"),
+        (r"$k$", "Detection threshold, in units of the background noise", "none"),
+        (r"$s$", "Pixel scale", "arcsec/px"),
+        (r"$p_\text{px}$", "Pixel pitch (binned pixel size)", "μm"),
+        (r"$f_\text{tel}$", "Focal length of the telescope", "mm"),
+        (
+            r"$\mu_{\alpha*}$, $\mu_\delta$",
+            "Proper motion in right ascension (times cos δ) and in declination",
+            "mas/yr",
+        ),
+        (r"$t_\text{obs}$", "Observation date", "yr"),
+        (r"$\Delta t$", "Elapsed time", "yr"),
+        (r"$\Delta \theta_i$", "Separation of star $i$ from its catalog match", "arcsec"),
+        (r"$N_\text{match}$", "Number of matched stars", "stars"),
+        (r"$r$", "Residual of the plate solution", "arcsec"),
+    ],
+    "photometry": [
+        (r"$F_\text{net}$", "Sky-subtracted aperture sum", "ADU"),
+        (r"$I_q$", "Value of pixel $q$", "ADU"),
+        (r"$\bar{B}$", "Sky level per pixel, the median of the sky ring", "ADU/px"),
+        (r"$G$", "Gain", "e⁻/ADU"),
+        (
+            r"$\sigma_{F,i}(t)$, $\sigma_{F,c}(t)$",
+            "Uncertainty of the raw brightness of star $i$ and of comparison star $c$",
+            "ADU/s",
+        ),
+        (r"$\sigma_\text{ens}(t)$", "Uncertainty of the ensemble signal", "ADU/s"),
+        (r"$e_i(t)$", "Uncertainty of the normalized brightness of star $i$", "none"),
+        (r"$s_\text{frac}$", "Fractional scatter", "none"),
+        (r"$m_\text{inst}$", "Instrumental magnitude", "mag"),
+        (r"$\bar{F}_\star$", "Mean raw brightness of a star", "ADU/s"),
+        (
+            r"$\sigma_\text{model}(m_\text{inst})$",
+            "Scatter of a constant star in the field's noise model",
+            "mag",
+        ),
+        (r"$\sigma_\text{measured}$", "Measured scatter of a star", "mag"),
+        (
+            r"$\delta_j$, $P_j$",
+            "Normalized residual of point $j$, and the product of neighboring residuals",
+            "none",
+        ),
+        (r"$J$, $J_\text{thr}$", "Stetson J index, and its threshold", "none"),
+        (r"$E_\sigma$, $E_{\sigma,\text{thr}}$", "Excess scatter, and its threshold", "none"),
+        (r"$\chi^2$, $\chi^2_\text{thr}$", "Chi-square, and the threshold on reduced chi-square", "none"),
+        (r"$S_\text{rank}$", "Ranking score of a candidate", "none"),
+        (r"$p_\text{lim}$", "Verdict limit on the corrected false-alarm probability", "none"),
+    ],
+    "spectroscopy": [
+        (r"$p_\text{px}$", "Pixel pitch (binned pixel size)", "μm"),
+        (r"$\rho(\lambda)$", r"Refraction (bending) of light of wavelength $\lambda$", "arcsec"),
+        (r"$\lambda_\text{eff}$", "Reference (effective) wavelength of the refraction shift", "Å"),
+        (r"$w(x)$", "Width of the extraction box", "px"),
+        (r"$\sigma_\text{trail}(x)$", "Width (standard deviation) of the trail profile", "px"),
+        (r"$\Phi_\text{corr}(\lambda)$", "Spectral flux corrected for airmass extinction", "relative"),
+        (r"$R_V$", "Ratio of total to selective extinction of the dust", "none"),
+        (r"$T_\text{ref}(\lambda)$", "Reference (template) spectrum", "relative"),
+        (r"$a$", "Best-fit scale factor of the reference spectrum", "none"),
+        (r"$M$", "Number of wavelengths in the match score", "none"),
+        (r"$\bar{\Phi}$", "Mean spectral flux", "relative"),
+    ],
+    "asteroid_detection": [
+        (r"$\Delta t$", "Elapsed time", "h"),
+        (r"$v_\text{max}$", "Fastest allowed rate of motion", "arcsec/h"),
+        (r"$r_\text{search}$, $r_\text{cap}$", "Search radius, and its cap", "arcsec"),
+        (
+            r"$\mathbf{p}_j$, $\bar{\mathbf{p}}$",
+            "Pixel position of detection $j$, and the chain's mean pixel position",
+            "px",
+        ),
+        (
+            r"$\mathbf{s}_j$, $\bar{\mathbf{s}}$",
+            "Sky position of detection $j$, and the chain's mean sky position",
+            "arcsec",
+        ),
+        (r"$\theta$", "Angle between two sky positions", "arcsec"),
+        (r"$\alpha_\text{ref}$, $\delta_\text{ref}$", "Reference point of the tangent plane", "°"),
+        (r"$\xi_0$, $\eta_0$", "Offsets at the reference time", "arcsec"),
+        (r"$\dot{\xi}$, $\dot{\eta}$", "Rates of motion along the tangent-plane axes", "arcsec/h"),
+        (r"$t_0$", "Reference time of the straight-line fit", "h"),
+    ],
+    "stacking": [
+        (
+            r"$T_\text{light}$, $\bar{T}_\text{dark}$",
+            "Sensor temperature of a light frame, and the mean sensor temperature of the darks",
+            "°C",
+        ),
+    ],
+}
+
+
+def notation_section(number: str, pipeline: str) -> str:
+    """Write a guide's notation subsection, the symbols the paper lacks.
+
+    Parameters
+    ----------
+    number : `str`
+        The subsection number, such as ``"3.7"``.
+    pipeline : `str`
+        The key of the guide in `GUIDE_NOTATION`.
+
+    Returns
+    -------
+    section : `str`
+        A heading, one sentence, and a table of symbol, meaning and unit.
+    """
+    rows = "\n".join(
+        f"| {symbol} | {meaning} | {unit} |" for symbol, meaning, unit in GUIDE_NOTATION[pipeline]
+    )
+    return (
+        f"### {number} Notation\n\n"
+        f"Symbols follow the architecture paper's [list of symbols]({NOTATION_LINK}). The table "
+        "lists only the symbols this guide adds.\n\n"
+        "| Symbol | Meaning | Unit |\n| --- | --- | --- |\n"
+        f"{rows}"
+    )
+
+
 def unwrap_paragraphs(text: str) -> str:
     """Join hard-wrapped prose lines so each paragraph is one line.
 
@@ -1375,9 +1504,9 @@ estimate. A small image falls back to one sigma-clipped median.
 
 The test below asks how many noise units a pixel stands above the local sky. A large value means
 a real source; a value near zero means only sky. A source is kept when its peak stands above the
-background $B$ by the threshold $k$, where $\sigma_B$ is the noise of the background:
+background $B_\text{sky}$ by the threshold $k$, where $\sigma_\text{sky}$ is the noise of the background:
 
-$$\frac{I(x, y) - B(x, y)}{\sigma_B} \ge k = <<threshold>> \tag{1}$$
+$$\frac{I(x, y) - B_\text{sky}(x, y)}{\sigma_\text{sky}} \ge k = <<threshold>> \tag{1}$$
 
 `DAOStarFinder` (a standard star finder from photutils) also checks shape. Sharpness compares a
 peak's height with its spread; roundness compares its width along the two axes, with 0 meaning
@@ -1404,10 +1533,10 @@ stars.
 The pixel scale is the sky angle one pixel covers. A longer focal length or a smaller pixel
 gives a smaller (finer) scale. The solver runs much faster when it knows the scale in advance:
 
-$$s = 206.265 \, \frac{p}{f} \tag{2}$$
+$$s = 206.265 \, \frac{p_\text{px}}{f_\text{tel}} \tag{2}$$
 
-where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p$ the binned pixel
-size in μm and $f$ the focal length in mm. The constant is the number of arcseconds in a radian
+where $s$ is the scale in arcsec/pixel (1 arcsec is 1/3600 of a degree), $p_\text{px}$ the binned pixel
+size in μm and $f_\text{tel}$ the focal length in mm. The constant is the number of arcseconds in a radian
 (206,265) times $10^{-3}$, which turns μm over mm into the same unit.
 
 ### 3.3 Plate solve and Gaia DR3 refit
@@ -1473,9 +1602,10 @@ Separations are great-circle distances (the shortest angle between two points on
 `SkyCoord.separation`. The catalog match separation is the typical distance between a detected
 star and its catalog match:
 
-$$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N} \sum_{i=1}^N \Delta \theta_i^2} \tag{4}$$
+$$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N_\text{match}} \sum_{i=1}^{N_\text{match}} \Delta
+\theta_i^2} \tag{4}$$
 
-over the $N$ stars matched within the radius. RMS (root mean square) is the square root of the
+over the $N_\text{match}$ stars matched within the radius. RMS (root mean square) is the square root of the
 mean squared distance. It is a rough test, not a measure of the fit: wrong matches and SIMBAD's
 uneven position precision raise it, and the match radius caps it.
 
@@ -1495,6 +1625,8 @@ The residual is the first of these that was measured:
 3. the catalog match separation of Eq. 4.
 
 The gate detail names the one used.
+
+<<notation_section>>
 
 <<heading_4>>
 
@@ -1545,6 +1677,7 @@ The gate detail names the one used.
         "AstrometryQualitySummary", "AstrometryPipelineQualityMetrics"
     )
     values["readme_note"] = readme_note("astrometry")
+    values["notation_section"] = notation_section("3.7", "astrometry")
     return fill(template, {**COMMON_VALUES, **values})
 
 
@@ -1866,9 +1999,9 @@ rounded to whole pixels.
 subtracts the sky that falls in the same circle. The radius is a fixed <<radius>> pixels for
 every star, not scaled to the star's width. The net flux is
 
-$$F_\text{net} = \sum_{p \in \text{ap}} I_p - n_\text{pix} \bar{B} \tag{1}$$
+$$F_\text{net} = \sum_{q \in \text{ap}} I_q - n_\text{pix} \bar{B} \tag{1}$$
 
-where $I_p$ is the value of pixel $p$ in ADU (analog-to-digital units, raw camera counts),
+where $I_q$ is the value of pixel $q$ in ADU (analog-to-digital units, raw camera counts),
 $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring
 (annulus) from <<r_in>> to <<r_out>> pixels. Divided by the exposure, it becomes a flux in ADU
 per second.
@@ -1876,13 +2009,13 @@ per second.
 **Its error.** The CCD equation adds up every noise source in electrons: the star's own photon
 noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$
 means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error
-(one standard deviation) in ADU is $\sigma_{\text{ap}} / g$, where
+(one standard deviation) in ADU is $\sigma_{\text{ap}} / G$, where
 
 $$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
   + \frac{n_\text{pix}^2}{n_\text{sky}}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right) \tag{2}$$
 
-Here $g$ is the gain in electrons per ADU, $S_\star = g F_\text{net}$ the star's net counts, and
-$s_\text{sky} = g \bar{B}$ the sky per pixel, all in electrons. $\sigma_\text{rd}$ is the read
+Here $G$ is the gain in electrons per ADU, $S_\star = G F_\text{net}$ the star's net counts, and
+$s_\text{sky} = G \bar{B}$ the sky per pixel, all in electrons. $\sigma_\text{rd}$ is the read
 noise (the electronic noise of reading the sensor). $D$ is the dark current per pixel (a signal
 the sensor builds up from heat); no source records it, so it is taken as zero. $n_\text{sky}$ is
 the number of sky pixels. The last term is the error of the sky level itself. This predicted
@@ -1934,13 +2067,15 @@ Three indices each catch one of these signs.
 
 **Units.** The indices are computed on each star's normalized fluxes $\hat{F}_i(t)$ (Section
 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a larger number means fainter;
-1 mag is a factor of about 2.5). A fractional scatter $s$ is $1.0857\,s$ magnitudes, where
-$1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m = -2.5 \log_{10}
-\bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the
+1 mag is a factor of about 2.5). A fractional scatter $s_\text{frac}$ is
+$1.0857\,s_\text{frac}$ magnitudes, where
+$1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m_\text{inst} = -2.5
+\log_{10} \bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the
 camera's own scale, not calibrated to a catalog.
 
 **The noise model.** A noise model gives the scatter a constant star of instrumental magnitude
-$m$ shows in this field, $\sigma_\text{model}(m)$. It is the median measured scatter in
+$m_\text{inst}$ shows in this field, $\sigma_\text{model}(m_\text{inst})$. It is the median
+measured scatter in
 brightness bins, so it includes noise the CCD equation leaves out (centroid jitter, flat-field
 errors). It needs at least <<noise_model_stars>> stars.
 
@@ -1962,10 +2097,10 @@ $$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{
 \qquad J = \frac{1}{n_\text{pts}-1}\sum_{j=1}^{n_\text{pts}-1}\operatorname{sgn}(P_j)
 \sqrt{|P_j|}, \qquad P_j = \delta_j \, \delta_{j+1} \tag{6}$$
 
-The excess scatter $E$ compares the star's measured scatter (in magnitudes) with what the noise
+The excess scatter $E_\sigma$ compares the star's measured scatter (in magnitudes) with what the noise
 model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
-$$E = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m)} \tag{7}$$
+$$E_\sigma = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m_\text{inst})} \tag{7}$$
 
 Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also defines a version
 that pairs points taken in two filters), with consecutive pairs and unit weights (Stetson 1996,
@@ -1977,17 +2112,18 @@ median absolute deviation (MAD), a spread measure that a few variable stars bare
 normal data it equals the standard deviation. <<cal_sigmas>> is the one-sided 99% point of a
 normal distribution, so a constant star clears a threshold by chance about 1% of the time. For
 $\chi^2_\nu$ the threshold is set on its logarithm, because its spread grows with its level. The
-threshold on $E$ is fixed at <<excess>>.
+threshold on $E_\sigma$ is fixed at <<excess>>.
 
 The ranking score divides each index by its threshold, so a score above 1 means the star clears
 its tests. Without a high $J$, the score is capped at 1, so it cannot pass:
 
-$$S = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr}\right) & J > J_\text{thr}\\
-\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr},\; 1\right) & \text{otherwise}
+$$S_\text{rank} = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E_\sigma /
+E_{\sigma,\text{thr}}\right) & J > J_\text{thr}\\
+\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E_\sigma / E_{\sigma,\text{thr}},\; 1\right) & \text{otherwise}
 \end{cases} \tag{8}$$
 
 **Limiting false positives.** Testing thousands of stars makes some pass by chance. A star is a
-candidate when $S > 1$ and its q-value is below <<fdr>>. The chi-square false-alarm probability
+candidate when $S_\text{rank} > 1$ and its q-value is below <<fdr>>. The chi-square false-alarm probability
 is the chance that noise alone gives a $\chi^2$ this large (the upper tail of the chi-square
 distribution with $n_\text{pts} - 1$ degrees of freedom). The Benjamini–Hochberg method turns these
 probabilities into q-values that control the false discovery rate (FDR): the expected share of
@@ -2024,19 +2160,19 @@ period) that do as well.
 
 A light curve too short to search gets "insufficient data" instead.
 
-**Many searches.** Searching many stars raises the chance that one passes by luck. For $m$
+**Many searches.** Searching many stars raises the chance that one passes by luck. For $N_s$
 independent searches, the chance that at least one reaches probability $p$ by luck is the
-family-wise false-alarm probability
+family-wise false-alarm probability (Equation (11) of the architecture paper)
 
-$$p_\text{family} = 1 - (1 - p)^m \tag{10}$$
+$$p_\text{corr} = 1 - (1 - p)^{N_s} \tag{10}$$
 
-The Šidák correction holds that family-wise rate at the verdict limit $\alpha$ (<<fap_detect>>
-for "detected"). Each search's $p$ is turned into $p_\text{family}$ and judged against $\alpha$.
-That is the same as asking each search for $p \le 1 - (1 - \alpha)^{1/m}$
+The Šidák correction holds that family-wise rate at the verdict limit $p_\text{lim}$ (<<fap_detect>>
+for "detected"). Each search's $p$ is turned into $p_\text{corr}$ and judged against $p_\text{lim}$.
+That is the same as asking each search for $p \le 1 - (1 - p_\text{lim})^{1/N_s}$
 (`family_wise_correction.py`). The correction can only lower a verdict.
 
-**Enough shuffles.** A shuffle test with $n$ copies cannot report a probability below about
-$1/(n+1)$. With many searches, that floor can sit above the corrected limit, so no verdict could
+**Enough shuffles.** A shuffle test with $N_\text{sh}$ copies cannot report a probability below about
+$1/(N_\text{sh}+1)$. With many searches, that floor can sit above the corrected limit, so no verdict could
 pass. Searches that need it are run again with more copies, up to <<max_shuffles>>.
 
 **Period checks.** Two period checks (Section 4.1) then test each "detected" or "possible"
@@ -2050,6 +2186,8 @@ With two or more sessions, each star's light curves are matched by sky position 
 sessions become long-term candidates. Candidates are then labeled from SIMBAD (a database of
 named objects), Gaia DR3 (the Gaia space mission's third catalog) and VSX (the International
 Variable Star Index) as listed, not listed, or unknown (`known_variability_labels.py`).
+
+<<notation_section>>
 
 <<heading_4>>
 
@@ -2104,6 +2242,7 @@ Run gates are recorded on the quality summary. Period checks are recorded on eac
         "PhotometryQualitySummary", "PhotometryPipelineQualityMetrics"
     )
     values["readme_note"] = readme_note("photometry")
+    values["notation_section"] = notation_section("3.7", "photometry")
     return fill(template, {**COMMON_VALUES, **values})
 
 
@@ -2365,10 +2504,10 @@ The dispersion is this spreading of light by wavelength, and its direction on th
 measured from the image. A sample's distance $x$ from the zero-order center, along the
 dispersion, becomes a wavelength through the first-order grating equation (`optics_physics.py`):
 
-$$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p}{L}\right) \tag{1}$$
+$$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p_\text{px}}{L_g}\right) \tag{1}$$
 
-where $d$ is the groove spacing (1 / lines per mm), $p$ the pixel pitch and $L$ the
-grating-to-sensor distance. A larger $L$ spreads the spectrum over more pixels. $L$ is the one
+where $d$ is the groove spacing (1 / lines per mm), $p_\text{px}$ the pixel pitch and $L_g$ the
+grating-to-sensor distance. A larger $L_g$ spreads the spectrum over more pixels. $L_g$ is the one
 fitted number. It is fitted once, from the hydrogen (Balmer) absorption lines of a bright
 reference star such as Vega (`calibration_tuner.py`), and saved for later runs.
 
@@ -2421,15 +2560,16 @@ corrections undo this in turn.
   spectrum over the Pickles A0V template. A0V is Vega's own type: spectral type A0 with
   luminosity class V, a main-sequence (ordinary, hydrogen-burning) star.
 - **Airmass extinction.** The air dims light more at blue wavelengths, and more when the star is
-  low. The extinction curve $k(\lambda)$ gives the dimming in magnitudes per airmass (a
+  low. The extinction curve $k_\text{ext}(\lambda)$ gives the dimming in magnitudes per airmass (a
   magnitude is a logarithmic brightness unit; 1 mag is a factor of about 2.5). Only the airmass
-  difference $X - X_\text{ref}$ from the response's spectroscopic standard star (the star of
+  difference $X_\text{target} - X_\text{ref}$ from the response's spectroscopic standard star (the star of
   known spectrum that set the response) is removed, because the response already holds that
   star's own dimming:
 
-$$F_\text{corr}(\lambda) = F(\lambda)\; 10^{0.4\, k(\lambda)\, (X - X_\text{ref})} \tag{3}$$
+$$\Phi_\text{corr}(\lambda) = \Phi(\lambda)\; 10^{0.4\, k_\text{ext}(\lambda)\,
+(X_\text{target} - X_\text{ref})} \tag{3}$$
 
-The result is a relative $F_\lambda$ (energy flux per unit wavelength) up to one constant: the
+The result is a relative $\Phi(\lambda)$ (energy flux per unit wavelength) up to one constant: the
 shape of the spectrum is right, its overall level is not known.
 
 **Dereddening.** Dust between the stars dims blue light more than red, so a star seen through
@@ -2442,12 +2582,12 @@ interstellar reddening is removed with the Cardelli, Clayton and Mathis (1989) l
 
 Each reference spectrum is blurred to the instrument's resolution (the smallest wavelength
 detail it can separate) and scaled to the observation by a best-fit factor $a$. The match score
-is the relative RMS (root mean square) difference between the observed spectrum $F$ and the
-scaled reference $T$. It is taken over $M$ wavelengths and divided by the mean flux $\bar{F}$. A
+is the relative RMS (root mean square) difference between the observed spectrum $\Phi$ and the
+scaled reference $T_\text{ref}$. It is taken over $M$ wavelengths and divided by the mean flux $\bar{\Phi}$. A
 score of 0 is a perfect match; 0.1 means a typical misfit of 10% of the flux:
 
-$$\text{RMS} = \frac{1}{\bar{F}}
-  \sqrt{\frac{1}{M}\sum_{i=1}^{M}\left[F(\lambda_i) - a\,T(\lambda_i)\right]^2} \tag{4}$$
+$$\text{RMS} = \frac{1}{\bar{\Phi}}
+  \sqrt{\frac{1}{M}\sum_{j=1}^{M}\left[\Phi(\lambda_j) - a\,T_\text{ref}(\lambda_j)\right]^2} \tag{4}$$
 
 The references are ranked by this score, and the lowest wins. Above <<no_good>> the match is
 poor. Above <<unreliable>> no type is given.
@@ -2466,6 +2606,8 @@ the star, both spectra are brought to the same resolution and divided by their m
 to 5600 Å (1 Å, an ångström, is 0.1 nm). If the calibration is right, their ratio is flat. The
 tilt of their ratio tests the response, the extinction correction and the wavelength scale
 together.
+
+<<notation_section>>
 
 <<heading_4>>
 
@@ -2527,6 +2669,7 @@ leaves too large an error, happens when the instrument is calibrated (`calibrati
         "SpectroscopyQualitySummary", "SpectroscopyPipelineQualityMetrics"
     )
     values["readme_note"] = readme_note("spectroscopy")
+    values["notation_section"] = notation_section("3.6", "spectroscopy")
     return fill(template, {**COMMON_VALUES, **values})
 
 
@@ -2776,11 +2919,12 @@ root mean square (RMS) of its detections' errors.
 ### 3.2 Chaining
 
 Detections are linked only within one session. Frames are taken in time order, and each open
-chain may claim the nearest detection in the next frame. The search radius is the distance the
+chain may claim the nearest detection in the next frame. The search radius $r_\text{search}$ is
+the distance the
 fastest allowed mover could travel in the time between frames $\Delta t$, capped so it never
 grows too large:
 
-$$r = \min\left(v_\text{max}\, \Delta t,\; r_\text{cap}\right) \tag{1}$$
+$$r_\text{search} = \min\left(v_\text{max}\, \Delta t,\; r_\text{cap}\right) \tag{1}$$
 
 with $v_\text{max}$ = <<cfg_rate_max_arcsec_per_hour>> arcsec/h and $r_\text{cap}$ =
 <<cfg_chain_match_radius_max_arcsec>> arcsec. Claims go nearest-first over all chains. A chain
@@ -2793,12 +2937,13 @@ A chain that does not move is not an asteroid. If it stays put on the sensor, it
 if it stays put on the sky, it is a star. Both spreads are the largest distance of any detection
 from the chain's mean position. A small spread means the chain did not move:
 
-$$\max_i \left\lVert \mathbf{p}_i - \bar{\mathbf{p}} \right\rVert
+$$\max_j \left\lVert \mathbf{p}_j - \bar{\mathbf{p}} \right\rVert
   < <<cfg_pixel_match_tolerance_px>>\ \text{px} \;\Rightarrow\; \text{hot pixel}, \qquad
-\max_i \theta\left(\mathbf{s}_i, \bar{\mathbf{s}}\right)
+\max_j \theta\left(\mathbf{s}_j, \bar{\mathbf{s}}\right)
   < <<cfg_sky_match_tolerance_arcsec>>\ \text{arcsec} \;\Rightarrow\; \text{fixed star} \tag{2}$$
 
-where $\mathbf{p}_i$ is a pixel position and $\mathbf{s}_i$ a sky position on the tangent plane
+where $\mathbf{p}_j$ is the pixel position of detection $j$ and $\mathbf{s}_j$ its sky position
+on the tangent plane
 (the sky projected onto a flat plane that touches it at the field center), and $\theta$ is the
 angle between two sky positions.
 
@@ -2838,6 +2983,8 @@ SkyBoT's prediction of where a known body is at a given time is its ephemeris. S
 twice per mover: at its first and at its last detection. Checking both ends makes sure the known
 body also moves the same way. A known body matches only if it is within
 <<cfg_ephemeris_cross_match_radius_arcsec>> arcsec at both moments.
+
+<<notation_section>>
 
 <<heading_4>>
 
@@ -2893,6 +3040,7 @@ of `pipeline.py`. The configuration can change the defaults.
         "AsteroidDetectionQualitySummary", "AsteroidDetectionPipelineQualityMetrics"
     )
     values["readme_note"] = readme_note("asteroid_detection")
+    values["notation_section"] = notation_section("3.6", "asteroid_detection")
     return fill(template, {**COMMON_VALUES, **values})
 
 
@@ -3197,12 +3345,12 @@ stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$
 $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the
 inputs:
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\text{FWHM}_i^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
 
-The ratio $R$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means
+The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means
 the alignment or the combination blurred the stars. The stack passes when
 
-$$R = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le <<degrade>> \tag{3}$$
+$$\rho_\text{FWHM} = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le <<degrade>> \tag{3}$$
 
 ### 3.3 Weighting and rejection
 
@@ -3214,9 +3362,10 @@ gives the best combination.
 **The penalty of equal weights.** $P$ is how much noisier an equal-weight stack is than the
 best-weighted one, for sky-limited frames. It follows from the exposure times alone:
 
-$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \tag{4}$$
+$$P = \sqrt{\langle 1/\tau_j \rangle \, \langle \tau_j \rangle} \tag{4}$$
 
-where $t$ are the frame exposures and a bar is the mean over frames. $P$ is 1 when all exposures
+where $\tau_j$ is the exposure of frame $j$ and $\langle \cdot \rangle$ is the mean over
+frames. $P$ is 1 when all exposures
 are equal and grows as they differ; 1.17 means 17% more noise.
 
 **The rule.** A configured weighting always wins. With none configured, an imaging stack uses
@@ -3270,6 +3419,8 @@ brightest pixels does.
 **Combining.** The rest are combined with inverse-variance weights: each group counts in
 proportion to $1/\sigma^2$, where $\sigma$ is the background noise of its stack, so less noisy
 groups count more. All groups are used, not only the largest one.
+
+<<notation_section>>
 
 <<heading_4>>
 
@@ -3330,6 +3481,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
 <<quality_section>>"""
     values["quality_section"] = quality_section("StackQualitySummary", "StackingPipelineQualityMetrics")
     values["readme_note"] = readme_note("stacking")
+    values["notation_section"] = notation_section("3.5", "stacking")
     return fill(template, {**COMMON_VALUES, **values})
 
 
@@ -3459,7 +3611,7 @@ When auditing the pipelines, check:
    one is missing.
 2. **Mathematical formulations.** The CCD equation (the error of a measured brightness) and
    $\text{BJD}_\text{TDB}$ times (times measured at the solar system's center of mass). Stetson
-   $J$ (a test for smooth, real brightness changes) and the grating equation (position along a
+   J (a test for smooth, real brightness changes) and the grating equation (position along a
    spectrum to wavelength). The prediction of the stack's FWHM (full width at half maximum, the
    width of a star's light profile at half its peak), which says how sharp the stars of a stack
    should be.

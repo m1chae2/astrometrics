@@ -66,9 +66,9 @@ This section follows one spectrum: turning position along the spectrum trail int
 
 **The grating equation.** The grating bends each color by a different angle, so distance along the spectrum trail measures wavelength: the farther from the zero order, the redder the light. The dispersion is this spreading of light by wavelength, and its direction on the sensor is measured from the image. A sample's distance $x$ from the zero-order center, along the dispersion, becomes a wavelength through the first-order grating equation (`optics_physics.py`):
 
-$$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p}{L}\right) \tag{1}$$
+$$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p_\text{px}}{L_g}\right) \tag{1}$$
 
-where $d$ is the groove spacing (1 / lines per mm), $p$ the pixel pitch and $L$ the grating-to-sensor distance. A larger $L$ spreads the spectrum over more pixels. $L$ is the one fitted number. It is fitted once, from the hydrogen (Balmer) absorption lines of a bright reference star such as Vega (`calibration_tuner.py`), and saved for later runs.
+where $d$ is the groove spacing (1 / lines per mm), $p_\text{px}$ the pixel pitch and $L_g$ the grating-to-sensor distance. A larger $L_g$ spreads the spectrum over more pixels. $L_g$ is the one fitted number. It is fitted once, from the hydrogen (Balmer) absorption lines of a bright reference star such as Vega (`calibration_tuner.py`), and saved for later runs.
 
 **Refraction shift.** The air bends light slightly, and bends blue light more than red. Differential atmospheric refraction is this color-dependent bending. It moves each wavelength along the spectrum trail by $\rho(\lambda) - \rho(\lambda_\text{eff})$, projected onto the dispersion direction, where $\rho(\lambda)$ is the bending at wavelength $\lambda$ and $\lambda_\text{eff}$ is a reference (effective) wavelength. It needs the site, a WCS (a pixel-to-sky map) and the exposure time.
 
@@ -92,20 +92,21 @@ where $\sigma_\text{trail}$ is the fitted Gaussian sigma, smoothed over 61 steps
 
 - **QE.** The counts are divided by the sensor's quantum efficiency (QE: the share of arriving light the sensor records, which depends on color).
 - **Instrument response.** The counts are then divided by the instrument response: everything else about the optics and grating that favours some colors. The response is Vega's observed spectrum over the Pickles A0V template. A0V is Vega's own type: spectral type A0 with luminosity class V, a main-sequence (ordinary, hydrogen-burning) star.
-- **Airmass extinction.** The air dims light more at blue wavelengths, and more when the star is low. The extinction curve $k(\lambda)$ gives the dimming in magnitudes per airmass (a magnitude is a logarithmic brightness unit; 1 mag is a factor of about 2.5). Only the airmass difference $X - X_\text{ref}$ from the response's spectroscopic standard star (the star of known spectrum that set the response) is removed, because the response already holds that star's own dimming:
+- **Airmass extinction.** The air dims light more at blue wavelengths, and more when the star is low. The extinction curve $k_\text{ext}(\lambda)$ gives the dimming in magnitudes per airmass (a magnitude is a logarithmic brightness unit; 1 mag is a factor of about 2.5). Only the airmass difference $X_\text{target} - X_\text{ref}$ from the response's spectroscopic standard star (the star of known spectrum that set the response) is removed, because the response already holds that star's own dimming:
 
-$$F_\text{corr}(\lambda) = F(\lambda)\; 10^{0.4\, k(\lambda)\, (X - X_\text{ref})} \tag{3}$$
+$$\Phi_\text{corr}(\lambda) = \Phi(\lambda)\; 10^{0.4\, k_\text{ext}(\lambda)\,
+(X_\text{target} - X_\text{ref})} \tag{3}$$
 
-The result is a relative $F_\lambda$ (energy flux per unit wavelength) up to one constant: the shape of the spectrum is right, its overall level is not known.
+The result is a relative $\Phi(\lambda)$ (energy flux per unit wavelength) up to one constant: the shape of the spectrum is right, its overall level is not known.
 
 **Dereddening.** Dust between the stars dims blue light more than red, so a star seen through dust looks redder, and cooler, than it is. $E(B-V)$ is the size of this reddening, given as the extra difference between blue and visual magnitudes. When a catalog gives the star's $E(B-V)$, interstellar reddening is removed with the Cardelli, Clayton and Mathis (1989) law with $R_V = 3.1$ ($R_V$ sets how the dimming changes with wavelength).
 
 ### 3.4 Classification
 
-Each reference spectrum is blurred to the instrument's resolution (the smallest wavelength detail it can separate) and scaled to the observation by a best-fit factor $a$. The match score is the relative RMS (root mean square) difference between the observed spectrum $F$ and the scaled reference $T$. It is taken over $M$ wavelengths and divided by the mean flux $\bar{F}$. A score of 0 is a perfect match; 0.1 means a typical misfit of 10% of the flux:
+Each reference spectrum is blurred to the instrument's resolution (the smallest wavelength detail it can separate) and scaled to the observation by a best-fit factor $a$. The match score is the relative RMS (root mean square) difference between the observed spectrum $\Phi$ and the scaled reference $T_\text{ref}$. It is taken over $M$ wavelengths and divided by the mean flux $\bar{\Phi}$. A score of 0 is a perfect match; 0.1 means a typical misfit of 10% of the flux:
 
-$$\text{RMS} = \frac{1}{\bar{F}}
-  \sqrt{\frac{1}{M}\sum_{i=1}^{M}\left[F(\lambda_i) - a\,T(\lambda_i)\right]^2} \tag{4}$$
+$$\text{RMS} = \frac{1}{\bar{\Phi}}
+  \sqrt{\frac{1}{M}\sum_{j=1}^{M}\left[\Phi(\lambda_j) - a\,T_\text{ref}(\lambda_j)\right]^2} \tag{4}$$
 
 The references are ranked by this score, and the lowest wins. Above 0.15 the match is poor. Above 0.45 no type is given.
 
@@ -114,6 +115,24 @@ Two gaps measure how clearly the best reference wins. The gap to the second-best
 ### 3.5 Gaia XP comparison
 
 The Gaia space mission measured low-resolution spectra, called XP spectra, for many stars, independently of this instrument. Where Gaia DR3 (its third data release) has an XP spectrum for the star, both spectra are brought to the same resolution and divided by their median over 5400 to 5600 Å (1 Å, an ångström, is 0.1 nm). If the calibration is right, their ratio is flat. The tilt of their ratio tests the response, the extinction correction and the wavelength scale together.
+
+### 3.6 Notation
+
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $p_\text{px}$ | Pixel pitch (binned pixel size) | μm |
+| $\rho(\lambda)$ | Refraction (bending) of light of wavelength $\lambda$ | arcsec |
+| $\lambda_\text{eff}$ | Reference (effective) wavelength of the refraction shift | Å |
+| $w(x)$ | Width of the extraction box | px |
+| $\sigma_\text{trail}(x)$ | Width (standard deviation) of the trail profile | px |
+| $\Phi_\text{corr}(\lambda)$ | Spectral flux corrected for airmass extinction | relative |
+| $R_V$ | Ratio of total to selective extinction of the dust | none |
+| $T_\text{ref}(\lambda)$ | Reference (template) spectrum | relative |
+| $a$ | Best-fit scale factor of the reference spectrum | none |
+| $M$ | Number of wavelengths in the match score | none |
+| $\bar{\Phi}$ | Mean spectral flux | relative |
 
 ## 4. Processing flow
 

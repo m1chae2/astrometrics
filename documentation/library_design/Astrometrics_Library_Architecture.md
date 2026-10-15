@@ -1030,7 +1030,7 @@ Terms used across the Astrometrics library documents, in alphabetical order.
 
 ## Appendix B. Notation
 
-Each symbol has one meaning in this paper. The index symbols $i$, $c$, and $j$ run over stars, comparison stars, and the items of a sequence. Equations are numbered in order of appearance.
+Each symbol has one meaning in this paper. The index symbols $i$, $c$, $j$, and $q$ run over stars, comparison stars, the items of a sequence, and pixels. Equations are numbered in order of appearance.
 
 | Symbol | Meaning | Unit | Where used |
 | --- | --- | --- | --- |
@@ -1067,7 +1067,7 @@ Each symbol has one meaning in this paper. The index symbols $i$, $c$, and $j$ r
 | $D$ | Dark current collected per pixel | e⁻/px | Eq. (7) |
 | $n_{\text{pix}}$, $n_{\text{sky}}$ | Number of pixels in the aperture and in the sky ring | px | Eq. (7) |
 | $t$ | Mid-exposure time of a frame, on the BJD$_{\text{TDB}}$ scale | days | Eqs. (8), (9), (10) |
-| $i$, $c$, $j$ | Index of a star, of a comparison star, and of an item in a sequence (a frame, a light-curve point, or a detection) | none | Section 5.2, Eqs. (4), (8), (9), (15) |
+| $i$, $c$, $j$ | Index of a star, of a comparison star, and of an item in a sequence (a frame, a light-curve point, or a detection); $q$ indexes pixels (Eq. (12)) | none | Section 5.2, Eqs. (4), (8), (9), (15) |
 | $F_i(t)$, $F_c(t)$ | Raw brightness of star $i$ and of comparison star $c$ | ADU/s | Eq. (8) |
 | $\hat{F}_i(t)$, $\hat{F}_j$ | Normalized brightness (light curve) of a star | none | Eqs. (8), (9), (10) |
 | $L_{\text{ens}}(t)$ | Ensemble signal built from the comparison stars | ADU/s | Eq. (8) |

@@ -80,11 +80,11 @@ The dark is still applied; the flag makes `calibration_metadata` fail. When no d
 
 FWHM (full width at half maximum) is the width of a star's light profile at half its peak height; a smaller FWHM means a sharper image. Averaging aligned frames adds no blur of its own, so the stack's FWHM follows from the input FWHMs. The pipeline predicts that FWHM and checks the stack against it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are $\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root mean square of the inputs:
 
-$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\text{FWHM}_i^2} \tag{2}$$
+$$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^2} \tag{2}$$
 
-The ratio $R$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means the alignment or the combination blurred the stars. The stack passes when
+The ratio $\rho_\text{FWHM}$ of measured to expected FWHM is 1 for a perfect stack. A ratio well above 1 means the alignment or the combination blurred the stars. The stack passes when
 
-$$R = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le 1.2 \tag{3}$$
+$$\rho_\text{FWHM} = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le 1.2 \tag{3}$$
 
 ### 3.3 Weighting and rejection
 
@@ -92,9 +92,9 @@ $$R = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le 1.2 \tag{
 
 **The penalty of equal weights.** $P$ is how much noisier an equal-weight stack is than the best-weighted one, for sky-limited frames. It follows from the exposure times alone:
 
-$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \tag{4}$$
+$$P = \sqrt{\langle 1/\tau_j \rangle \, \langle \tau_j \rangle} \tag{4}$$
 
-where $t$ are the frame exposures and a bar is the mean over frames. $P$ is 1 when all exposures are equal and grows as they differ; 1.17 means 17% more noise.
+where $\tau_j$ is the exposure of frame $j$ and $\langle \cdot \rangle$ is the mean over frames. $P$ is 1 when all exposures are equal and grows as they differ; 1.17 means 17% more noise.
 
 **The rule.** A configured weighting always wins. With none configured, an imaging stack uses Siril's noise weighting when $P \ge 1.05$. Spectral stacks are left to the exposure-group handling of Section 3.4.
 
@@ -111,6 +111,14 @@ The limits are set in one of three ways. A limit passed by the caller always win
 **Putting groups on one scale.** Each group's stack is turned into counts per second. That alone does not line the groups up, because Siril's normalization leaves each group's stack on the brightness scale of its own reference frame. Each group therefore gets a group scale factor that puts it on the scale of the reference group (the group with the most weight). On an imaging stack the factor is the median ratio of the aperture brightness of isolated, unsaturated stars found in both groups. A group with too few such stars, and every spectral stack, uses pixels instead: the median ratio over mid-range pixels, with saturated pixels left out. A group that one factor does not describe is left out, because its brightness does not grow in step with exposure. With stars, that is when the ratio of its faintest quarter or its brightest quarter of stars sits more than a set tolerance from the factor; with pixels, when the ratio over its brightest pixels does.
 
 **Combining.** The rest are combined with inverse-variance weights: each group counts in proportion to $1/\sigma^2$, where $\sigma$ is the background noise of its stack, so less noisy groups count more. All groups are used, not only the largest one.
+
+### 3.5 Notation
+
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $T_\text{light}$, $\bar{T}_\text{dark}$ | Sensor temperature of a light frame, and the mean sensor temperature of the darks | °C |
 
 ## 4. Processing flow
 

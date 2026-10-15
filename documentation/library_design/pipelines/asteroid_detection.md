@@ -68,9 +68,9 @@ This section follows the frames from pointing, through linking detections into c
 
 ### 3.2 Chaining
 
-Detections are linked only within one session. Frames are taken in time order, and each open chain may claim the nearest detection in the next frame. The search radius is the distance the fastest allowed mover could travel in the time between frames $\Delta t$, capped so it never grows too large:
+Detections are linked only within one session. Frames are taken in time order, and each open chain may claim the nearest detection in the next frame. The search radius $r_\text{search}$ is the distance the fastest allowed mover could travel in the time between frames $\Delta t$, capped so it never grows too large:
 
-$$r = \min\left(v_\text{max}\, \Delta t,\; r_\text{cap}\right) \tag{1}$$
+$$r_\text{search} = \min\left(v_\text{max}\, \Delta t,\; r_\text{cap}\right) \tag{1}$$
 
 with $v_\text{max}$ = 300 arcsec/h and $r_\text{cap}$ = 300 arcsec. Claims go nearest-first over all chains. A chain may skip frames; it is not limited to consecutive ones. A chain needs at least 3 detections.
 
@@ -78,12 +78,12 @@ with $v_\text{max}$ = 300 arcsec/h and $r_\text{cap}$ = 300 arcsec. Claims go ne
 
 A chain that does not move is not an asteroid. If it stays put on the sensor, it is a hot pixel; if it stays put on the sky, it is a star. Both spreads are the largest distance of any detection from the chain's mean position. A small spread means the chain did not move:
 
-$$\max_i \left\lVert \mathbf{p}_i - \bar{\mathbf{p}} \right\rVert
+$$\max_j \left\lVert \mathbf{p}_j - \bar{\mathbf{p}} \right\rVert
   < 1.5\ \text{px} \;\Rightarrow\; \text{hot pixel}, \qquad
-\max_i \theta\left(\mathbf{s}_i, \bar{\mathbf{s}}\right)
+\max_j \theta\left(\mathbf{s}_j, \bar{\mathbf{s}}\right)
   < 3\ \text{arcsec} \;\Rightarrow\; \text{fixed star} \tag{2}$$
 
-where $\mathbf{p}_i$ is a pixel position and $\mathbf{s}_i$ a sky position on the tangent plane (the sky projected onto a flat plane that touches it at the field center), and $\theta$ is the angle between two sky positions.
+where $\mathbf{p}_j$ is the pixel position of detection $j$ and $\mathbf{s}_j$ its sky position on the tangent plane (the sky projected onto a flat plane that touches it at the field center), and $\theta$ is the angle between two sky positions.
 
 ### 3.4 Straight-line and rate tests
 
@@ -107,6 +107,23 @@ A chain passes when all of these hold:
 ### 3.5 Known-body match
 
 SkyBoT's prediction of where a known body is at a given time is its ephemeris. SkyBoT is asked twice per mover: at its first and at its last detection. Checking both ends makes sure the known body also moves the same way. A known body matches only if it is within 10 arcsec at both moments.
+
+### 3.6 Notation
+
+Symbols follow the architecture paper's [list of symbols](../Astrometrics_Library_Architecture.md#appendix-b-notation). The table lists only the symbols this guide adds.
+
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $\Delta t$ | Elapsed time | h |
+| $v_\text{max}$ | Fastest allowed rate of motion | arcsec/h |
+| $r_\text{search}$, $r_\text{cap}$ | Search radius, and its cap | arcsec |
+| $\mathbf{p}_j$, $\bar{\mathbf{p}}$ | Pixel position of detection $j$, and the chain's mean pixel position | px |
+| $\mathbf{s}_j$, $\bar{\mathbf{s}}$ | Sky position of detection $j$, and the chain's mean sky position | arcsec |
+| $\theta$ | Angle between two sky positions | arcsec |
+| $\alpha_\text{ref}$, $\delta_\text{ref}$ | Reference point of the tangent plane | ° |
+| $\xi_0$, $\eta_0$ | Offsets at the reference time | arcsec |
+| $\dot{\xi}$, $\dot{\eta}$ | Rates of motion along the tangent-plane axes | arcsec/h |
+| $t_0$ | Reference time of the straight-line fit | h |
 
 ## 4. Processing flow
 

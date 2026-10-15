@@ -1,6 +1,7 @@
-"""Purpose: Unit tests for the guiding-log ingestion pipeline (M7a).
+"""Purpose: Unit tests for the guiding-log ingestion pipeline.
 
-Description: Verifies the fetch -> parse -> persist -> refit chain in
+Description: Verifies (`Wayfinding_Library_Architecture.md` Section 6.7)
+the fetch -> parse -> persist -> refit chain in
 `guiding_log_ingestion.py`, using fake `ObservatoryControl`/
 `ControlRecordStore`/`RemoteTransferDriver` stand-ins rather than a real
 database or SSH-reachable host.

@@ -2,19 +2,25 @@
 
 Includes PyData Sphinx Theme, numpydoc, sphinx-automodapi,
 MyST-NB notebook execution, and InterSphinx mappings to
-Astropy, NumPy, SciPy, and Matplotlib.
+Astropy, NumPy, SciPy, and Matplotlib. It also sets up the site features a
+reader expects on Read the Docs: an "Edit on GitHub" button, the date each page
+last changed, a sitemap, a 404 page, and a PDF of the whole site.
 """
 
 import os
+import re
 import sys
 import tomllib
+from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as installed_version
 from pathlib import Path
+from typing import ClassVar
 
 from docutils import nodes
 from sphinx import addnodes
 from sphinx.application import Sphinx
+from sphinx.util.docutils import SphinxDirective
 
 # Insert root project path into sys.path to enable Sphinx autodoc reflection
 sys.path.insert(0, os.path.abspath(".."))
@@ -51,6 +57,9 @@ extensions = [
     "sphinx_copybutton",
     "sphinx_design",
     "sphinxcontrib.mermaid",
+    "sphinx_sitemap",
+    "notfound.extension",
+    "sphinx_last_updated_by_git",
     "ui_autodoc",
     "tutorial_indexer",
     "audit_pipelines",
@@ -78,12 +87,19 @@ html_css_files = ["custom.css"]
 html_theme = "pydata_sphinx_theme"
 html_logo = "_static/logo.png"
 html_favicon = "_static/logo.png"
-html_title = "Astrometrics Documentation"
+html_title = "Astrometrics documentation"
+# The light or dark theme follows the reader's system setting (the theme's
+# default). "github_*" and "doc_path" feed the "Edit on GitHub" button.
 html_context = {
-    "default_mode": "dark",
+    "github_user": "m1chae2",
+    "github_repo": "astrometrics",
+    "github_version": "main",
+    "doc_path": "documentation",
 }
+# The root toctree lists the seven section pages (index.rst), so all seven
+# fit in the navigation bar without a "More" menu.
 html_theme_options = {
-    "header_links_before_dropdown": 4,
+    "header_links_before_dropdown": 7,
     "navbar_align": "left",
     "logo": {
         "image_light": "_static/logo.png",
@@ -102,7 +118,27 @@ html_theme_options = {
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-button", "theme-switcher", "navbar-icon-links"],
     "navbar_persistent": [],
+    "use_edit_page_button": True,
+    "article_footer_items": ["last-updated"],
 }
+
+# Each page shows the date of the last commit that changed it
+# (sphinx-last-updated-by-git). Read the Docs fetches the full history first.
+html_last_updated_fmt = "%Y-%m-%d"
+# Generated pages have no history of their own; they are not given a date.
+git_untracked_show_sourcelink = False
+
+# The sitemap and the 404 page need the site's address. Read the Docs sets
+# READTHEDOCS_CANONICAL_URL for each version it builds.
+html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "https://astrometrics.readthedocs.io/en/latest/")
+sitemap_url_scheme = "{link}"
+
+# PDF. XeLaTeX handles the Greek letters and symbols (σ, Å, ≤) used throughout.
+latex_engine = "xelatex"
+# makeindex builds the index everywhere; xindy needs language modules that not
+# every TeX installation ships.
+latex_use_xindy = False
+latex_documents = [("index", "astrometrics.tex", "Astrometrics documentation", author, "manual")]
 
 # Intersphinx mapping for external scientific library links
 intersphinx_mapping = {
@@ -174,6 +210,74 @@ def _builtin_type_xrefs(app: Sphinx, doctree: nodes.document) -> None:
             node["py:class"] = None
 
 
+class _MermaidAsSource(SphinxDirective):
+    """Show a Mermaid diagram as its source text, for print builders.
+
+    The HTML site draws Mermaid diagrams in the reader's browser. A PDF has
+    no browser, and drawing them ahead of time needs the Mermaid command-line
+    tool, which Read the Docs does not have. The PDF shows each diagram's
+    source as a captioned code block instead, and points to the web version.
+    """
+
+    has_content = True
+    optional_arguments = 1
+    final_argument_whitespace = True
+    option_spec: ClassVar[dict[str, Callable[[str], str]]] = {
+        "caption": str,
+        "align": str,
+        "alt": str,
+        "name": str,
+        "zoom": str,
+        "config": str,
+    }
+
+    def run(self) -> list[nodes.Node]:
+        """Turn the diagram into a literal block with a short note.
+
+        Returns
+        -------
+        result : `list` [`docutils.nodes.Node`]
+            A paragraph naming the diagram and the code block of its source.
+        """
+        caption = self.options.get("caption", "Diagram")
+        note = nodes.paragraph(text=f"{caption} (drawn as a diagram in the web version of this page):")
+        source = nodes.literal_block("\n".join(self.content), "\n".join(self.content))
+        return [note, source]
+
+
+def _plain_mermaid_for_print(app: Sphinx) -> None:
+    """Swap in `_MermaidAsSource` when the builder writes a PDF or plain text.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    """
+    if app.builder.format != "html":
+        app.add_directive("mermaid", _MermaidAsSource, override=True)
+
+
+def _plain_equation_numbers_for_print(app: Sphinx, docname: str, source: list[str]) -> None:
+    r"""Write ``\tag{n}`` as a plain ``(n)`` in the PDF.
+
+    The papers number their display equations with ``\tag{n}``. The web
+    version draws these with MathJax, but the LaTeX writer puts each display
+    equation inside a ``split`` block, where LaTeX forbids ``\tag``. For the
+    PDF the number is set at the right of the line instead.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    docname : `str`
+        The document being read.
+    source : `list` [`str`]
+        The document's text, changed in place.
+    """
+    if app.builder.format == "latex":
+        source[0] = re.sub(r"\\tag\{([^}]*)\}", r"\\qquad(\1)", source[0])
+
+
 def setup(app: Sphinx) -> None:
     """Register the project's Sphinx event handlers.
 
@@ -183,3 +287,5 @@ def setup(app: Sphinx) -> None:
         The running Sphinx application.
     """
     app.connect("doctree-read", _builtin_type_xrefs)
+    app.connect("builder-inited", _plain_mermaid_for_print)
+    app.connect("source-read", _plain_equation_numbers_for_print)

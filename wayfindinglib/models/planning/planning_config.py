@@ -3,7 +3,7 @@
 Description: Design-estimate parameters governing night-window
 resolution, advisory priority boosts, and mosaic generation. None has
 been validated against a full observing night
-(`Wayfinding_Library_Architecture.md` Appendix A) -- each is a design
+(values in `Wayfinding_Library_Implementation.md` Table 4) -- each is a design
 estimate rather than a tuned value, with the exception of the twilight
 threshold, which is a standard astronomical definition.
 """

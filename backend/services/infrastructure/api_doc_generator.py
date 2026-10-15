@@ -563,41 +563,29 @@ def generate_user_interface_index() -> str:
         Markdown content for the desktop user interface index.
     """
     lines = [
-        "# Astrometrics Desktop Application",
+        "# Desktop app",
         "",
         (
-            "The **Astrometrics Desktop Application** is a specialized workstation for "
-            "astrophotography, photometry, spectroscopy, and automated observatory control. "
-            "It provides a visual interface to manage targets, capture and process celestial images, "
-            "and inspect astronomical data."
+            "The Astrometrics desktop app captures and analyzes images of the night sky. "
+            "It gives you a visual way to control observatory equipment and to process "
+            "astronomy images."
         ),
         "",
-        "---",
+        "## The desktop app's pages",
         "",
-        "## User Guides",
-        "",
+        "- **[Getting started](../Getting_Started.md)**: a first session with the app.",
         (
-            "- **[Desktop User Manual](user_interface/user_guides/User_Manual.md)**: "
-            "Comprehensive guide covering the navigation modes, target database, and workstation layout."
+            "- **[Image processing tutorial](user_guides/Image_Processing_and_Analysis_Tutorial.md)**: "
+            "one guided path from raw frames to a measured result."
         ),
         (
-            "- **[Hardware Control & Automation Guide]"
-            "(user_interface/user_guides/Observatory_Control_and_Automation_Guide.md)**: "
-            "Instructions for connecting to INDI devices, configuring mounts, and managing equipment."
+            "- **[Observatory control guide](user_guides/Observatory_Control_and_Automation_Guide.md)**: "
+            "recipes for connecting and running the telescope."
         ),
+        "- **[User manual](user_guides/User_Manual.md)**: every view and control of the app.",
         (
-            "- **[Image Processing & Science Analysis Tutorial]"
-            "(user_guides/Image_Processing_and_Analysis_Tutorial.md)**: "
-            "Walkthrough for image calibration, FITS frame stacking, photometry, and spectroscopy."
-        ),
-        "",
-        "---",
-        "",
-        "## Technical Architecture",
-        "",
-        (
-            "- **[User Interface Architecture](technical_reference/User_Interface_Architecture.md)**: "
-            "Deep dive into the Electron multi-window architecture, React state management, and WebSockets."
+            "- **[Desktop app architecture](technical_reference/User_Interface_Architecture.md)**: "
+            "how the app is built."
         ),
     ]
     return "\n".join(lines)
@@ -632,7 +620,7 @@ def get_api_topics() -> list[dict[str, str]]:
         },
         {
             "id": "user_interface/index",
-            "title": "Astrometrics Desktop Application",
+            "title": "Desktop app",
             "path": "user_interface/index.rst",
             "category": "Desktop Application",
         },
@@ -672,7 +660,7 @@ def get_api_topic_content(topic_id: str) -> dict[str, Any] | None:
         title = "Wayfinding Library (wayfindinglib)"
         content = generate_wayfindinglib_docs()
     elif normalized_id in ("user_interface/index", "user_interface"):
-        title = "Astrometrics Desktop Application"
+        title = "Desktop app"
         content = generate_user_interface_index()
     elif "generated/" in normalized_id or normalized_id.startswith("api/generated/"):
         entity_name = normalized_id.split("generated/")[-1]

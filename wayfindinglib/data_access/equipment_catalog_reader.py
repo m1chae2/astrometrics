@@ -4,7 +4,7 @@ Description: Resolves the configured `Telescope`/`Camera` specifications
 and which of each is active, from `astrometrics.config.toml`. Foundation
 concern -- both peer functions need the active specifications; changing
 which entry is active is a Control operation
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Sections 3.2 and 6.1).
 
 Cameras and telescopes share one multi-section config pattern. For
 telescopes, an `[Observatory.Telescope]` base section carries a
@@ -14,8 +14,9 @@ back through `Telescope.<Name>`, `Observatory.Telescope`, then
 `Telescope`, mirroring `AppConfiguration.get_camera_config`'s exact
 fallback chain.
 
-Per `Wayfinding_Library_Architecture.md` ("Documented Safety
-Fallback"): a per-rig altitude limit is preferred when present; when
+Per `Wayfinding_Library_Implementation.md` Section 6.2 (the slew limit
+checks; the architecture's rule is Section 6.10, "Configured envelope
+respected"): a per-rig altitude limit is preferred when present; when
 absent, resolution falls back to the single global
 `[Observatory.Constraints]` section this library previously used
 exclusively, so a rig that has not yet been given its own section does
@@ -113,7 +114,7 @@ def _build_telescope(
 
     Per-rig altitude limits fall back to the global
     `[Observatory.Constraints]` section when absent, per the
-    "Documented Safety Fallback" invariant.
+    `Wayfinding_Library_Implementation.md` Section 6.2.
 
     Returns
     -------

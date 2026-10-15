@@ -4,7 +4,8 @@ Description: Verifies telescope/camera catalog resolution against a
 real `AppConfiguration` backed by a temporary config file (real
 parsing, not a mock), including the multi-telescope case, the
 single-telescope fallback for today's unconfigured state, and the
-per-rig-altitude-falls-back-to-global-constraint safety invariant.
+per-rig-altitude-falls-back-to-global-constraint rule
+(`Wayfinding_Library_Implementation.md` Section 6.2).
 """
 
 from pathlib import Path
@@ -102,9 +103,9 @@ def test_per_rig_altitude_limit_preferred_when_present(app_config: AppConfigurat
 def test_altitude_limit_falls_back_to_global_constraint_when_absent(app_config: AppConfiguration) -> None:
     """Verify a rig with no per-rig section uses [Observatory.Constraints].
 
-    This is the "Documented Safety Fallback" invariant: a safety-relevant
-    check must not silently change behavior for a rig that has not yet
-    been given its own section.
+    This is the fallback described in `Wayfinding_Library_Implementation.md`
+    Section 6.2: a safety-relevant check must not silently change
+    behavior for a rig that has not yet been given its own section.
     """
     app_config.update_config({
         "Observatory.Constraints": {"min_altitude": "5.0", "max_altitude": "85.0"},

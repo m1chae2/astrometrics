@@ -2,12 +2,13 @@
 
 Description: Remote telescope connection, folder synchronization,
 directory listing, and FITS file download operations over the
-StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`'s
-Observatory Control module list.
+StellarMateInterface driver, per `Wayfinding_Library_Architecture.md`
+Section 6.1 (the Remote group of observatory control).
 
 Pulling files off a telescope host needs a telescope, so this code
 belongs in the observatory-control library rather than the science
-library (`Wayfinding_Library_Architecture.md`, Design Invariant 4). Frame
+library (`Wayfinding_Library_Architecture.md` Section 2.1, rule 4, the
+litmus test). Frame
 indexing goes through astrometricslib's public API
 (`Astrometrics.targets.reindex_frames`), never its internal modules.
 """

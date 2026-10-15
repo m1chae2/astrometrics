@@ -1,7 +1,8 @@
 """Purpose: Telemetry Domain Models.
 
 Description: Guiding samples, alignment attempts, and live guiding
-status (`Wayfinding_Library_Architecture.md`). Once `AUTOGUIDING`
+status (`Wayfinding_Library_Architecture.md` Sections 5.7 and 6.8).
+Once `AUTOGUIDING`
 reaches `AUTHORITATIVE`, `GuidingSample` records are produced by this
 library's own guiding correction computation rather than parsed from
 the incumbent guider, with identical fields, so downstream consumers
@@ -248,11 +249,12 @@ class GuidingSpectrumAnalysis(BaseModel):
     """Periodic error, worm harmonic spectrum, and backlash diagnostics.
 
     `id`/`telescope_id`/`schema_version` support this model's other use
-    (M7a): as standing, cross-night mount-mechanical Foundation state
-    persisted via `DiskButler`, refit cumulatively each time
-    `guiding_log_ingestion.py` processes a new guide log, the same
-    status as `GuiderCalibration`/`FocusModel`
-    (`Wayfinding_Library_Architecture.md`). All
+    (`Wayfinding_Library_Architecture.md` Section 6.7): as standing,
+    cross-night mount-mechanical Foundation state persisted via
+    `DiskButler`, refit cumulatively each time `guiding_log_ingestion.py`
+    processes a new guide log, the same status as
+    `GuiderCalibration`/`FocusModel` (`Wayfinding_Library_Architecture.md`
+    Section 3.2). All
     three default so existing ad hoc, non-persisted analysis results
     (e.g. `GuidingService.analyze_guiding_spectrum`'s live RPC response)
     are unaffected.

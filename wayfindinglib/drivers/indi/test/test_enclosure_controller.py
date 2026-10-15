@@ -3,9 +3,10 @@
 Description: Verifies `get_state`/`open`/`close` read and write the
 standard INDI Dome Interface's `DOME_SHUTTER` switch correctly --
 motion state (`IPS_BUSY`/`IPS_ALERT`), settled open/closed state, and
-the `Unknown Is Unsafe` fallback when the device or property is
-unavailable -- against a fake INDI device, matching this codebase's
-established fake-device testing discipline (`test_mount_controller.py`).
+the `UNKNOWN` fallback (`Wayfinding_Library_Architecture.md` Section 6.5)
+when the device or property is unavailable -- against a fake INDI
+device, matching this codebase's established fake-device testing
+discipline (`test_mount_controller.py`).
 """
 
 from wayfindinglib.drivers.indi.enclosure_controller import EnclosureController

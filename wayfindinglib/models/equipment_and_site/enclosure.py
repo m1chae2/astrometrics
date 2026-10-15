@@ -4,7 +4,8 @@ Description: The observatory's roof or dome, specified alongside the
 equipment rather than as part of it, because its constraint is
 geometric and mutual: a roof may only close when the mount is within
 positions that clear it, and the mount may only leave park when the
-enclosure is open (`Wayfinding_Library_Architecture.md`). Recording
+enclosure is open (`Wayfinding_Library_Architecture.md` Sections 3.2 and
+6.6). Recording
 the permitted closure positions as configuration rather than deriving
 them makes the interlock checkable without commanding anything.
 """
@@ -25,8 +26,9 @@ class EnclosureState(StrEnum):
     """A device's motion state, published uniformly for the interlock.
 
     `UNKNOWN` is treated as unsafe for both mount motion and enclosure
-    motion, per `Wayfinding_Library_Architecture.md`'s "Unknown
-    Is Unsafe" invariant applied to enclosure state.
+    motion, per `Wayfinding_Library_Architecture.md` Section 6.6 (an
+    unknown enclosure state blocks mount motion; see also Section 6.5,
+    "Absence of information is not safety").
     """
 
     OPEN = "open"
@@ -43,8 +45,7 @@ class Enclosure(BaseModel):
     `present=False` distinguishes an observatory with no enclosure from
     one whose enclosure is offline -- a distinction that matters because
     the first permits unattended operation under the remaining safety
-    actions while the second is a fault
-    (`Wayfinding_Library_Architecture.md`).
+    actions while the second is a fault.
     """
 
     model_config = ConfigDict(populate_by_name=True)

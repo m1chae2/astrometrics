@@ -4,5 +4,6 @@ Description: Who is in charge and under what constraints -- capability
 delegation state, environmental safety rules and verdicts, fault
 recovery policy, device lifecycle state, and commissioning evidence
 gating delegation-phase promotion. Foundation-layer pure Pydantic
-schema, no behavior, per `Wayfinding_Library_Architecture.md` Figure 1.
+schema, no behavior, per `Wayfinding_Library_Architecture.md`
+Section 2.1 (Figure 1).
 """

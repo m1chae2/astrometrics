@@ -2,7 +2,7 @@
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
 instantiated once per role (main/guide), per
-`Wayfinding_Library_Architecture.md`.
+`Wayfinding_Library_Architecture.md` Section 6.2.
 """
 
 import asyncio
@@ -105,7 +105,7 @@ class IndiCameraDriver(CameraDriver):
     async def get_sensor_temperature_c(self) -> float | None:
         """Return this camera's sensor temperature.
 
-        Bug fixed from an earlier version of this method (M4): only the
+        Bug fixed from an earlier version of this method: only the
         main camera's sensor temperature is tracked by `IndiInterface`
         today (`TelescopeStatus.camera_temperature`, read from
         `CCD_TEMPERATURE` on the main camera device, formatted like

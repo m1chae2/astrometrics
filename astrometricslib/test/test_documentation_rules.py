@@ -52,6 +52,8 @@ ALLOWED_QUANTITIES = frozenset({
     "30°",
     "90°",
     "360°",
+    # Sidereal rate: the sky turns 15° of hour angle per hour (physics).
+    "15°",
     # Light-travel time across the Earth's orbit (barycentric correction).
     "8 minutes",
     # Worked illustration of a flat field.
@@ -118,8 +120,8 @@ def _visible_text(path: Path) -> str:
         return "\n" * match.group(0).count("\n")
 
     text = path.read_text(encoding="utf-8")
-    if path == ARCHITECTURE:
-        # A figure in the paper is a fenced Mermaid diagram, not prose.
+    if path.name.endswith("_Library_Architecture.md"):
+        # A figure in a paper is a fenced Mermaid diagram, not prose.
         text = re.sub(r"^```.*?^```[ \t]*$", blank, text, flags=re.DOTALL | re.MULTILINE)
     text = re.sub(r"<!--.*?-->", blank, text, flags=re.DOTALL)
     text = re.sub(r"\$\$.*?\$\$", blank, text, flags=re.DOTALL)
@@ -163,9 +165,16 @@ def _method_documents() -> list[Path]:
     return sorted(readmes) + guides + [ARCHITECTURE]
 
 
-def test_architecture_names_no_code() -> None:
-    """The architecture paper shows no file, class, function or config name."""
-    text = _visible_text(ARCHITECTURE)
+def assert_names_no_code(paper: Path) -> None:
+    """Check that an architecture paper shows no code names.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        An architecture paper. The calling test fails when its visible text
+        names a file, class, function or config key.
+    """
+    text = _visible_text(paper)
     problems = []
     for match in re.finditer(r"`([^`]+)`", text):
         span = match.group(1)
@@ -181,26 +190,45 @@ def test_architecture_names_no_code() -> None:
             problems.append(f"line {_line_of(text, match.start())}: {match.group(0)}")
     for match in re.finditer(r"\b[\w/]+\.(?:py|json|toml|fits)\b|\[[A-Z][a-z]+\.[A-Z]\w*\]", text):
         problems.append(f"line {_line_of(text, match.start())}: {match.group(0)}")
+    implementation = paper.name.replace("Architecture", "Implementation")
     assert not problems, (
-        "The architecture paper explains the theory and names no code. Move these names to "
-        f"Astrometrics_Library_Implementation.md (outside tools may be named in plain text): {problems}"
+        f"{paper.name} explains the theory and names no code. Move these names to "
+        f"{implementation} (outside tools may be named in plain text): {problems}"
     )
 
 
-def test_architecture_states_no_tuned_values() -> None:
-    """The architecture paper describes each setting's idea, not its value."""
-    text = _visible_text(ARCHITECTURE)
+def assert_states_no_tuned_values(paper: Path) -> None:
+    """Check that an architecture paper states no tuned values.
+
+    Parameters
+    ----------
+    paper : `pathlib.Path`
+        An architecture paper. The calling test fails when its visible text
+        holds a quantity that is not in `ALLOWED_QUANTITIES`.
+    """
+    text = _visible_text(paper)
     problems = [
         f"line {_line_of(text, match.start())}: {match.group(0)!r}"
         for match in QUANTITY.finditer(text)
         if re.sub(r"\s", " ", match.group(0)) not in ALLOWED_QUANTITIES
     ]
+    implementation = paper.name.replace("Architecture", "Implementation")
     assert not problems, (
-        "The architecture paper states no tuned values. Describe the idea instead "
+        f"{paper.name} states no tuned values. Describe the idea instead "
         "(for example 'a fixed share of the session median') and put the value in "
-        "Astrometrics_Library_Implementation.md. If a quantity is physics or a definition, "
+        f"{implementation}. If a quantity is physics or a definition, "
         f"add it to ALLOWED_QUANTITIES with a comment: {problems}"
     )
+
+
+def test_architecture_names_no_code() -> None:
+    """The architecture paper shows no file, class, function or config name."""
+    assert_names_no_code(ARCHITECTURE)
+
+
+def test_architecture_states_no_tuned_values() -> None:
+    """The architecture paper describes each setting's idea, not its value."""
+    assert_states_no_tuned_values(ARCHITECTURE)
 
 
 def test_validation_evidence_lives_in_the_register() -> None:

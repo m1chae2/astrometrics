@@ -3,14 +3,16 @@
 Description: What counts as visible given a telescope's pointing
 envelope, a site's avoidance zones, and a package's own visibility
 floor -- the *policy* built on top of `wayfindinglib.astronomy`'s pure
-altitude/azimuth calculation (`Wayfinding_Library_Architecture.md`).
+altitude/azimuth calculation (`Wayfinding_Library_Architecture.md`
+Section 4.2).
 
 Deliberately altitude- and avoidance-zone-only: hour-angle limits and
 meridian-flip handling are captured as `Telescope` configuration but not
-yet enforced as a placement constraint (`Wayfinding_Library_Architecture.md`),
-which is why `InfeasibilityReasonCode` has no hour-angle-specific
-value -- this module's visibility check must not silently start
-enforcing a constraint the diagnosis vocabulary cannot yet explain.
+yet enforced as a placement constraint (`Wayfinding_Library_Architecture.md`
+Sections 4.2 and 8), which is why `InfeasibilityReasonCode` has no
+hour-angle-specific value -- this module's visibility check must not
+silently start enforcing a constraint the diagnosis vocabulary cannot
+yet explain.
 """
 
 from datetime import datetime, timedelta

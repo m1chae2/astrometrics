@@ -1,4 +1,4 @@
-"""Purpose: Unit tests for the M7b calibration/polar-alignment-assist routines.
+"""Purpose: Unit tests for the calibration and polar-alignment-assist routines.
 
 Description: Verifies `run_guider_calibration`/`run_backlash_calibration`
 sequence their injected steps correctly (mirroring `SafeStateSteps`'s

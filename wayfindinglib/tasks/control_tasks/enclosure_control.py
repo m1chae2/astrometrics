@@ -1,16 +1,17 @@
 """Purpose: Enclosure/Mount Motion Interlock.
 
 Description: Validates enclosure and mount motion against each other
-before commanding either, per `Wayfinding_Library_Architecture.md`. The
+before commanding either, per `Wayfinding_Library_Architecture.md`
+Section 6.6. The
 interlock is mutual and geometric: the enclosure may close
 only when the mount sits within `clearance_tolerance_deg` of the
 configured park position, and the mount may leave park only when the
 enclosure is `OPEN`. `UNKNOWN` enclosure state blocks mount motion,
 following the same fail-closed posture as the safety verdict
-("Unknown Is Unsafe" applied here to enclosure state). Every
-function here is a pure check over already-known state -- exercisable
-with no hardware or Execution package present ("Safety Runs
-Without Execution").
+(Section 6.5, "Absence of information is not safety", applied here to
+enclosure state). Every function here is a pure check over
+already-known state -- exercisable with no hardware or Execution
+package present (Section 7.1, "Safety runs without execution").
 """
 
 from datetime import datetime

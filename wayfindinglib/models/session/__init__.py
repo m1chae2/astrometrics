@@ -5,5 +5,5 @@ record itself, its guiding/alignment telemetry, and the outcome
 records a running session produces (correction results, divergence,
 guide-star loss, meridian flip, safe-state). Foundation-layer pure
 Pydantic schema, no behavior, per `Wayfinding_Library_Architecture.md`
-Figure 1.
+Section 2.1 (Figure 1).
 """

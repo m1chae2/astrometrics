@@ -2,7 +2,7 @@
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
 backed by `wayfindinglib/drivers/indi/switch_controller.py`'s
-`SwitchController` (M12) -- the heuristically-discovered powerbox
+`SwitchController` -- the heuristically-discovered powerbox
 device's `POWER_CONTROL`/`DEW_PWM`/`POWER_SENSORS` properties.
 """
 

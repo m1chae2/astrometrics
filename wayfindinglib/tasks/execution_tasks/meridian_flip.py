@@ -2,14 +2,14 @@
 
 Description: `execute_meridian_flip` runs the ordered, bounded
 interrupt-flip-reacquire-resume sequence of
-`Wayfinding_Library_Architecture.md` -- the single most
+`Wayfinding_Library_Architecture.md` Section 5.5 -- the single most
 failure-prone moment in an unattended night -- producing a
 `MeridianFlipOutcome`. Every step is attempted in order; the first
 failure stops the sequence immediately with `resumed=False` and a
 `failure_detail` rather than proceeding, per
-`Wayfinding_Library_Architecture.md`'s "Flip Failure Is Not
-Skippable": an unrecovered flip escalates rather than advancing to the
-next queue entry.
+`Wayfinding_Library_Architecture.md` Section 5.5 and Table 5 (step 4):
+a flip that does not resume fails the entry rather than letting the
+cycle advance to the next queue entry.
 
 Every hardware-facing step is injected (`MeridianFlipSteps`), so this
 module carries no hardware import. The bounded steps -- realigning by

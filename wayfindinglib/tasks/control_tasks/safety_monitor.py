@@ -2,24 +2,26 @@
 
 Description: Evaluates a configured `SafetyRuleSet` against sensor
 readings and publishes a `SafetyAssessment`, per
-`Wayfinding_Library_Architecture.md`. Readings are passed in
+`Wayfinding_Library_Architecture.md` Section 6.5. Readings are passed in
 as a plain mapping rather than read from a live driver directly, so
 rule evaluation is exercisable with no hardware or Execution package
-present ("Safety Runs Without Execution") -- gathering the
+present (Section 7.1, "Safety runs without execution") -- gathering the
 mapping from `drivers/indi/weather_controller.py` is a thin, separate
 step layered on top.
 
 Three properties are architectural rather than incidental
-(`Wayfinding_Library_Architecture.md`):
+(`Wayfinding_Library_Architecture.md` Section 6.5):
 
-* **Unknown is unsafe.** A reading that is missing, stale, or whose
-  rule set is itself unconfigured yields `UNKNOWN`, which
-  `permits_observing()` treats identically to `UNSAFE`.
-* **Worst verdict wins.** Among rules that did produce a definite
-  reading, the most severe verdict determines the outcome.
-* **Asymmetric hysteresis.** An unsafe verdict takes effect
-  immediately; returning to safe requires every rule to have read safe
-  continuously for `settling_period_sec`.
+* **Absence of information is not safety.** A reading that is missing,
+  stale, or whose rule set is itself unconfigured yields `UNKNOWN`,
+  which `permits_observing()` treats identically to `UNSAFE`. Among
+  rules that did produce a definite reading, the most severe verdict
+  determines the outcome.
+* **Reopening is not the inverse of closing.** An unsafe verdict takes
+  effect immediately; returning to safe requires every rule to have read
+  safe continuously for `settling_period_sec`.
+* **Safety authority is not observing authority.** The assessment is
+  computed here, in Control, whether or not a session exists.
 """
 
 from datetime import datetime

@@ -2,11 +2,12 @@
 
 Description: Design-estimate parameters for the pointing, guiding, and
 focus correction algorithms, and the divergence tolerances the delegation
-phase gates (`Wayfinding_Library_Architecture.md`) are
+phase gates (`Wayfinding_Library_Architecture.md` Table 8) are
 evaluated against. None has been validated against a full observing
 night -- the guiding and focus parameters in particular are expected to
 be revised from the first real distribution of Phase 2 divergence data
-(`Wayfinding_Library_Architecture.md` Appendix A).
+(values in `Wayfinding_Library_Implementation.md` Table 7; the gates are
+design estimates, per `Wayfinding_Library_Architecture.md` Section 7.2).
 """
 
 from pydantic import BaseModel, ConfigDict, Field

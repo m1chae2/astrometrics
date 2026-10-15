@@ -19,7 +19,8 @@ export const useSettingsLogic = (open: boolean, closing: boolean, onClose: () =>
 
     // Monitoring/controller mode: an immediate action, not part of the
     // deferred config-patch/save flow -- the real backing for the retired
-    // "Safe Mode" config checkbox (Wayfinding_Library_Architecture.md M8).
+    // "Safe Mode" config checkbox (Wayfinding_Library_Architecture.md Section 6.7,
+    // bulk delegation modes).
     // This local flag reflects only the last action taken in this session,
     // not a persisted status the backend can be queried for yet.
     const [controllerModeEnabled, setControllerModeEnabled] = useState(false);

@@ -1,4 +1,4 @@
-# Scientific analysis pipelines review index
+# Pipeline review guides
 
 *Version 1.2 · 2026-10-15 · Status: current*
 

@@ -24,7 +24,8 @@ mapfile -t FILES < <(git ls-files \
     'astrometricslib/**/README.md' \
     ':(glob)documentation/*.md' \
     ':(glob)documentation/how_to/*.md' \
-    'documentation/library_design/Astrometrics_Library_*.md' \
+    'documentation/library_design/*_Library_*.md' \
+    'documentation/user_interface/**/*.md' \
     'documentation/library_design/pipelines/*.md' \
     'documentation/library_design/validation/*.md')
 

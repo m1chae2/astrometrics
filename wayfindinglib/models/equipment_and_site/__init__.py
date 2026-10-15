@@ -4,5 +4,5 @@ Description: What the rig is and where it observes from -- telescope
 and camera specs, site coordinates and avoidance zones, the enclosure,
 and their calibration data (guider calibration, focus model).
 Foundation-layer pure Pydantic schema, no behavior, per
-`Wayfinding_Library_Architecture.md` Figure 1.
+`Wayfinding_Library_Architecture.md` Section 2.1 (Figure 1).
 """

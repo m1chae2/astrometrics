@@ -1,8 +1,8 @@
 """Purpose: Unit tests for compute_guider_calibration.
 
 Description: Verifies guider/focus calibration recovers known values
-from simulated sequences -- the case
-`Wayfinding_Library_Architecture.md` calls out.
+from simulated sequences -- the behavior
+`Wayfinding_Library_Architecture.md` Section 6.7 describes.
 """
 
 import pytest

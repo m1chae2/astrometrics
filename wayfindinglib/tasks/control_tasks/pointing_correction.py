@@ -1,16 +1,18 @@
 """Purpose: Plate-Solve Pointing Correction.
 
 Description: `compute_pointing_correction` per
-`Wayfinding_Library_Architecture.md` -- a pure function of a
+`Wayfinding_Library_Architecture.md` Section 6.4 and Equation (5) -- a
+pure function of a
 commanded position and a plate-solve result (astrometricslib's plate
 solve driver, frame-only and therefore science-side per the litmus
 test) that returns the angular separation and the per-axis correction
 that closes it. Issues nothing: syncing the mount and re-slewing are
 a separate, delegation-gated orchestration step layered on top of this
-computation, not part of it ("Corrections Are Pure").
+computation, not part of it (`Wayfinding_Library_Architecture.md`
+Section 6.10, "Corrections are pure").
 
-The optional `pointing_model` parameter ( the architecture document's
-extension, M7b)
+The optional `pointing_model` parameter
+(`Wayfinding_Library_Architecture.md` Sections 6.4 and 6.7)
 tells a genuinely new pointing failure apart from one already explained
 by tonight's fitted polar-alignment/index-error model: it predicts the
 systematic error `pointing_model` implies at this exact commanded
@@ -62,8 +64,9 @@ def compute_pointing_correction(
     pointing_model : `MountPointingModel` | `None`, optional
         Tonight's session-scoped fitted model
         (`control.history.query(kind="pointing_model")`). `None` (default)
-        disables the feedforward, reproducing the pre-M7b behavior
-        exactly: `converged` is judged against the raw measured error.
+        disables the feedforward, reproducing the behavior without a
+        pointing model exactly: `converged` is judged against the raw
+        measured error.
         Skipped even when supplied if its `confidence` is
         ``"insufficient_data"`` -- an unfit model predicts nothing.
     latitude_deg : `float`, optional

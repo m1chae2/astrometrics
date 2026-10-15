@@ -3528,7 +3528,7 @@ def build_index_doc() -> str:
             ["Asteroid detection", "No-op: returns an empty `Result`."],
         ],
     )
-    template = r"""# Scientific analysis pipelines review index
+    template = r"""# Pipeline review guides
 
 <<version_line>>
 

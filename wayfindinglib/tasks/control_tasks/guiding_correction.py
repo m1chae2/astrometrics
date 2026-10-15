@@ -1,18 +1,19 @@
 """Purpose: Autoguiding Pulse Correction.
 
 Description: `compute_guiding_correction` per
-`Wayfinding_Library_Architecture.md` -- a pure function of a
+`Wayfinding_Library_Architecture.md` Section 6.4 -- a pure function of a
 guide-star pixel drift (astrometricslib's centroid measurement,
 frame-only and therefore science-side per the litmus test) and the
 active `GuiderCalibration`, returning signed per-axis pulse durations
-via one clearly stated control law (Eq. 2) rather than a tuned
+via one clearly stated control law (Equation (6)) rather than a tuned
 multi-mode controller. Issues nothing: sending the pulse through
-`pulse_guide` is a separate, delegation-gated step ("Corrections
-Are Pure").
+`pulse_guide` is a separate, delegation-gated step
+(`Wayfinding_Library_Architecture.md` Section 6.10, "Corrections are
+pure").
 
 The optional `mount_model`/`elapsed_guiding_seconds`/
-`dec_direction_reversal` parameters ( the architecture document's extension,
-M7b) add
+`dec_direction_reversal` parameters (`Wayfinding_Library_Architecture.md`
+Section 6.4, Equation (7), and Section 6.7) add
 a feedforward component on top of the reactive pulse above, learned
 from `guiding_log_ingestion.py`'s persisted, cross-night
 `GuidingSpectrumAnalysis`:
@@ -33,7 +34,7 @@ from `guiding_log_ingestion.py`'s persisted, cross-night
   correction has to fight it.
 
 Both remain optional and default to no feedforward (identical output
-to the pre-M7b behavior) when `mount_model` is `None`.
+to the behavior without a mount model) when `mount_model` is `None`.
 """
 
 import math
@@ -178,7 +179,7 @@ def compute_guiding_correction(
         backlash model (the ``spectrum_analysis`` section of
         `control.guiding.status`).
         `None` (default) disables all feedforward, reproducing the
-        pre-M7b reactive-only behavior exactly.
+        reactive-only behavior exactly.
     elapsed_guiding_seconds : `float` | `None`, optional
         Seconds since this guiding run began, needed to locate the
         current phase of the worm cycle for the periodic-error

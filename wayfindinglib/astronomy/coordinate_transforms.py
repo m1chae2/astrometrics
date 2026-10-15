@@ -5,8 +5,9 @@ plain latitude/longitude/elevation triple rather than a `SkyEngine` or
 a connected device -- so a placement calculation performed with no
 hardware present and a safety check performed mid-slew agree by
 construction, both resolving position from the same `SiteProfile`
-(`Wayfinding_Library_Architecture.md`, "Single Source Of Observer
-Position").
+(`Wayfinding_Library_Architecture.md` Section 3.3, "One source of site
+position for planning"; Section 8 says where control reads the position
+differently).
 
 It also converts between the two equatorial frames the app meets. Star
 catalogs, plate solutions and library targets use ICRS, which agrees

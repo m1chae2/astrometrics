@@ -1,6 +1,6 @@
-# Documentation Conventions
+# Documentation conventions
 
-*Version 1.0 · 2026-10-15 · Status: current*
+*Version 1.1 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -12,28 +12,39 @@ Each kind of content has one home, so a fact is written once.
 
 | Content | Home | Reader |
 | --- | --- | --- |
-| Theory: what each step does and why, equations, the glossary | `library_design/Astrometrics_Library_Architecture.md` | Anyone learning the methods |
-| Code names, tuned values and their status | `library_design/Astrometrics_Library_Implementation.md` | Developers and reviewers |
+| Theory: what each step does and why, equations, the glossary | `library_design/<Library>_Library_Architecture.md` (Astrometrics and Wayfinding) | Anyone learning the methods |
+| Code names, tuned values and their status | `library_design/<Library>_Library_Implementation.md` | Developers and reviewers |
 | Evidence: data sets, dates, results, and the library calls to repeat each check | `library_design/validation/` (the validation register) | Reviewers and anyone tuning the tool |
 | Per-pipeline review summaries | `library_design/pipelines/` (generated) | Reviewers |
 | How a module or pipeline stage works, step by step | `README.md` next to the code | Developers |
-| Step-by-step learning | `notebooks/` (tutorials) | New users |
-| Task recipes | `how_to/` (how-to guides) | Users with a goal |
+| Step-by-step learning | `notebooks/` and the desktop app's image processing tutorial | New users |
+| Task recipes | `how_to/` and the desktop app's observatory control guide | Users with a goal |
+| Every view and control of the desktop app | `user_interface/user_guides/User_Manual.md` | Observers |
 | Function and class reference | `api/` (generated from docstrings) | Programmers |
 
 Rules:
 
-- The architecture paper names no code and states no tuned values. It explains the idea behind each setting.
+- An architecture paper names no code and states no tuned values. It explains the idea behind each setting.
 - A README or review guide gives a tuned value with its status label and a link to its register entry. It does not repeat the evidence.
 - Generated files are never edited by hand. The review guides come from `build/documentation/generate_pipeline_review_docs.py` and `library_design/Pipeline_Audit_Report.md` from `build/documentation/audit_pipelines.py`. Edit the generator and run it again.
 
+### 1.1 The site's sections
+
+The Sphinx site has seven sections: Get started, Tutorials, How-to guides, Explanation, Reference, Evidence and About the docs. Each has a section page (`get_started.md`, `tutorials.md`, `how_to/index.md`, `explanation.md`, `reference.md`, `evidence.md`, `about.md`) that introduces the section and lists its pages; the root `index.rst` lists only the section pages.
+
+- Each page belongs to exactly one section, chosen by its kind, and appears in exactly one toctree. A page reached only by links is marked `:orphan:`.
+- A page has one name. Toctree entries are bare paths, so the navigation shows the page's own title, and a section page links each page by that exact title.
+- Files stay where they are when they change section. The desktop app's built-in viewer opens them by path.
+
 ## 2. Status labels
 
-Every tuned value carries exactly one of three labels, defined in `library_design/validation/index.md`:
+Every tuned value of the Astrometrics library carries exactly one of three labels, defined in `library_design/validation/index.md`:
 
 - **Measured.** Chosen or confirmed by a measurement on real data, recorded in a register entry.
 - **Partly measured.** Backed by an incomplete measurement (synthetic data only, one target, a small sample, or a model of an outside tool).
 - **Design estimate.** Chosen by reasoning and not yet measured.
+
+The Wayfinding library has no validation register yet. Its implementation paper says once that its settings are design choices not yet measured, and its values carry no labels.
 
 No other labels are used (for example `designed`, `design value`, `empirical` or `provisional`). Plain qualifiers after a label, such as "not validated on real fields", are fine.
 
@@ -74,7 +85,11 @@ H1, a purpose sentence, the glossary line, then one bullet per file or file grou
 
 ### 3.4 Papers and register files
 
-Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. Register files follow the entry template in `library_design/validation/index.md`.
+Papers follow `.claude/skills/documentation-style/SKILL.md`: title, metadata line, Abstract, numbered sections, Acknowledgments, References, Appendices. An architecture paper puts the glossary line under its abstract and points to its glossary and notation appendices. Register files follow the entry template in `library_design/validation/index.md`.
+
+### 3.5 Site pages
+
+Every hand-written page of the site starts with its title and a metadata line (`*Version n.m · date · Status: current*`). A page is one kind of document: a tutorial teaches one path from start to finish, a how-to guide gives one recipe per heading, a reference page describes everything in a fixed layout, and an explanation says how and why. Desktop app pages are written at the high-school reading level (Section 7).
 
 ## 4. Spelling
 
@@ -131,7 +146,7 @@ Measures of a detector or classifier:
 
 ### 6.2 Headings and paragraphs
 
-- Sentence case in headings, with `&` written as "and".
+- Sentence case in headings and page titles, with `&` written as "and". A page title is short, because it is also the page's name in the navigation.
 - One line per paragraph; no hard wrapping.
 - A lead-in is `**Label.**` followed by the text. No `**Label**:` and no plain "Settings:".
 - Italics mark a term where it is defined. Bold is for lead-ins only, never for emphasis mid-sentence.
@@ -179,11 +194,12 @@ Near the top of every README, review guide and register file:
 
 | Rule | Enforced by |
 | --- | --- |
-| Theory-only architecture paper; evidence only in the register | `astrometricslib/test/test_documentation_rules.py` |
+| Theory-only architecture papers; evidence only in the register | `astrometricslib/test/test_documentation_rules.py`, `wayfindinglib/test/test_documentation_papers.py` |
+| Seven sections, one place and one name per page | `astrometricslib/test/test_documentation_site.py` |
 | Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching skill copies | `astrometricslib/test/test_documentation_style.py` |
 | Register entries complete, cited and resolvable | `astrometricslib/test/test_validation_register.py` |
 | Guide symbols defined in Appendix B or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
-| Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py` |
+| Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py`, `wayfindinglib/test/test_documentation_papers.py` |
 | Generated review guides up to date | `astrometricslib/pipelines/test/test_pipeline_doc_parity.py` |
 | Spelling, terms, units, labels, voice | Vale (`.vale.ini`, `build/documentation/vale/`) |
 | Markdown mechanics | markdownlint (`.markdownlint-cli2.jsonc`) |

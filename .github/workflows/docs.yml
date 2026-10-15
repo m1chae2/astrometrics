@@ -1,5 +1,5 @@
 # ==============================================================================
-# Purpose: GitHub Actions workflow to build and verify Sphinx documentation.
+# Purpose: GitHub Actions workflow to build and verify Sphinx documentation (HTML and PDF).
 # Runs on push/pull_request to main/master, builds Sphinx HTML documentation from
 # documentation/, and uploads compiled HTML as a downloadable build artifact.
 # ==============================================================================
@@ -104,3 +104,43 @@ jobs:
         with:
           name: sphinx-docs-html
           path: documentation/_build/html
+
+  build-pdf:
+    name: Build PDF
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+
+      - name: Install TeX
+        # The same engine Read the Docs uses for its PDF download (see
+        # .readthedocs.yaml and latex_engine in documentation/conf.py).
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends latexmk texlive-xetex \
+            texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended \
+            fonts-freefont-otf tex-gyre
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[docs]
+
+      - name: Build LaTeX
+        run: sphinx-build -W -b latex documentation documentation/_build/latex
+
+      - name: Compile PDF
+        working-directory: documentation/_build/latex
+        run: latexmk -xelatex -interaction=nonstopmode -halt-on-error astrometrics.tex
+
+      - name: Upload PDF
+        uses: actions/upload-artifact@v7
+        with:
+          name: astrometrics-pdf
+          path: documentation/_build/latex/astrometrics.pdf

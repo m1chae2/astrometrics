@@ -20,7 +20,7 @@ The script installs the package into `.venv` and copies the configuration templa
 
 ## 2. Configure
 
-The template is `astrometricslib/astrometrics.config.example.toml`. Edit the copy in `~/.config/astrometrics`, not the template. Set `frames_path` under `["Image Library"]` to the folder that holds your raw frames, and set the plate-solver and Siril entries described in [Installation](../Installation.md#4-configuration). The environment variable `ASTROMETRICS_CONFIG_PATH` points the library at a different file.
+The template is `astrometricslib/astrometrics.config.example.toml`. Edit the copy in `~/.config/astrometrics`, not the template. Set `frames_path` under `["Image Library"]` to the folder that holds your raw frames, and set the plate-solver and Siril entries described in [Installation](../Installation.md#configure-the-app). The environment variable `ASTROMETRICS_CONFIG_PATH` points the library at a different file.
 
 ## 3. Make a first call
 

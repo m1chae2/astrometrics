@@ -1,230 +1,434 @@
-# Astrometrics User Interface: Desktop User Manual
+# User manual
 
-*Version 2.2 · 2026-08-21 · Status: current*
+*Version 2.0 · 2026-10-15 · Status: current*
 
-## Overview
+This manual describes every view and panel of the Astrometrics desktop app. Use it to look up what a control does. It does not teach a task. To learn by doing, follow the [image processing tutorial](Image_Processing_and_Analysis_Tutorial.md). To run the telescope, use the [observatory control guide](Observatory_Control_and_Automation_Guide.md).
 
-This manual is the desktop user guide for the Astrometrics application. The application provides real-time telescope telemetry, image inspection, science-grade calibration and stacking, photometric and 1D spectroscopic analysis, observation planning, and planetarium navigation.
+Each view has its own section. Every view section uses the same layout: **Purpose**, **Layout**, **Controls**, **Related settings** and **Related guides**. Button and label names appear in the same spelling as in the app.
 
----
+## Views at a glance
 
-## Table of Contents
+The app has seven views. You switch between them with the mode button in the status header.
 
-- [1. Introduction](#1-introduction)
-- [2. Getting Started & Setup](#2-getting-started--setup)
-- [3. Interface Topology & Global Navigation](#3-interface-topology--global-navigation)
-  - [3.1 Top Status Bar](#31-top-status-bar)
-- [4. Image Viewer & Target Inspector (`ImageViewerDisplay`)](#4-image-viewer--target-inspector-imageviewerdisplay)
-  - [4.1 Step-by-Step Instructions](#41-step-by-step-instructions)
-- [5. Image Processing & Stacking (`ImageProcessingDisplay`)](#5-image-processing--stacking-imageprocessingdisplay)
-  - [5.1 Step-by-Step Stacking Workflow](#51-step-by-step-stacking-workflow)
-- [6. Astronomy Manager (`AstronomyManager`)](#6-astronomy-manager-astronomymanager)
-  - [6.1 Photometry & Transit Search](#61-photometry--transit-search)
-  - [6.2 1D Spectroscopy Analysis](#62-1d-spectroscopy-analysis)
-- [7. Observatory Manager (`ObservatoryManager`)](#7-observatory-manager-observatorymanager)
-  - [7.1 Control Panels & Operations](#71-control-panels--operations)
-- [8. Planetarium & 3D Sky Map (`PlanetariumDisplay`)](#8-planetarium--3d-sky-map-planetariumdisplay)
-  - [8.1 Sky Map Navigation & Controls](#81-sky-map-navigation--controls)
-- [Appendices](#appendices)
-  - [Appendix A: Telemetry Status Badges](#appendix-a-telemetry-status-badges)
-  - [Appendix B: Display Capability Reference](#appendix-b-display-capability-reference)
+| View | Use it to | Section |
+| --- | --- | --- |
+| Image Viewer | Look at the finished image of a target and edit its name and coordinates | [Image Viewer](#image-viewer) |
+| Image Processing | Check frames, stack them, and run star analysis | [Image Processing](#image-processing) |
+| Command Console | Run Python commands and scripts, and read the documentation | [Command Console](#command-console) |
+| Astronomy Manager | Inspect the light curve and spectrum of each star | [Astronomy Manager](#astronomy-manager) |
+| Planetarium | See the sky, find objects, and send the telescope to them | [Planetarium](#planetarium) |
+| Observatory Manager | Run the mount, focuser and filter wheel, and watch guiding | [Observatory Manager](#observatory-manager) |
+| Observation Manager | Plan exposures and run a queue of them | [Observation Manager](#observation-manager) |
 
----
+A light frame is one camera exposure file of the sky. A stack is the one image made by combining many frames. FITS is the standard file format for astronomy images.
 
-## 1. Introduction
+## Window frame and status header
 
-Astrometrics is an application that allows for the control of an observatory, the planning of imaging sessions, and the processing of astronomy photos in a single location. This manual provides a guide for using all of its features.
+The top of every window has two bars. The title bar is the first. The status header is the second.
 
----
+### Title bar
 
-## 2. Getting Started & Setup
+The title bar shows the Astrometrics name and icon. It appears only when the window uses the app's own frame, and it hides in full-screen mode.
 
-To launch the application, open a terminal and run:
+| Control | What it does |
+| --- | --- |
+| Minimize window | Hides the window in the task bar |
+| Maximize window or Restore window | Switches between full size and the earlier size. Double-clicking the bar does the same |
+| Close window | Closes the window |
 
-```bash
-./build/linux/run_astrometrics.sh start
-```
+### Status header
 
-This script will automatically start the interface, the backend engines, and connect to the observatory hardware.
+The status header stays on screen in every view. It shows the state of the mount and lets you change view.
 
----
+| Item | What it shows or does |
+| --- | --- |
+| Open settings button (three lines, left side) | Opens the [System Configuration dialog](#settings-dialog) |
+| Mode button | Shows the name of the current view. Click it to open a menu of the enabled views |
+| Pop-out button next to each view in the menu | Opens that view in a new window. It appears only in the desktop app |
+| Colored dot and status text | The dot shows the mount connection. Green means connected. The text beside it reads, for example, Tracking, Not Tracking or Parked. The dot reads Checking… while the app is still connecting |
+| TARGET | Name of the target the mount points at. It appears only when the mount reports one |
+| CAM | Camera state, such as Idle or an exposure countdown, and the camera temperature when known |
+| RA and DEC | Right ascension and declination: where the mount points on the sky |
+| ALT and AZ | Altitude and azimuth: the same point as height above the horizon and compass direction |
+| Thermometer and drop readouts | Outside temperature in °C and relative humidity in % |
 
-## 3. Interface Topology & Global Navigation
+A window narrower than 820 pixels hides CAM, ALT, AZ, temperature and humidity.
 
-The desktop workspace is divided into a persistent top **Status Bar** and a main viewport containing 6 displays.
+### Tray panel
 
-### 3.1 Top Status Bar
+The Astrometrics icon in the system tray opens a small panel. Click the icon again to close it.
 
-![Top Status Bar](./assets/observatory_manager.png)
+| Item | What it does |
+| --- | --- |
+| Mount | Shows the tracking status, or Disconnected |
+| RA / Dec and Alt / Az | Show where the mount points |
+| Workspaces buttons | Switch the main window to Image Viewer, Astronomy Manager, Planetarium, Image Processing, Observatory or Observation Mgr |
+| Park | Sends the park command to the mount at once. If it fails, an error message tells you to park the mount by hand |
+| Open App | Brings the main window forward |
+| Quit | Quits Astrometrics |
 
-The top bar is visible across all modes and provides instant system telemetry and navigation:
+## Shared controls
 
-- **Settings Drawer (Gear Icon)**: Opens global configuration options (module toggles, backend URIs, logging verbosity).
-- **Mode Dropdown Menu**: Click the current mode name (e.g., `Observatory Manager`) to switch between workspaces.
-- **Connection Status**:
-  - `Connected` (Green): Backend engine online.
-  - `Disconnected` (Red): Engine offline; auto-reconnecting.
-- **Tracking Status**: Shows live telescope motion (`Tracking`, `Slewing`, `Parked`, `Not Tracking`).
-- **Telemetry Readouts**: Real-time Telescope Altitude/Azimuth, Target RA/Dec, Temperature (°C), and Humidity (%).
+Several views use the same lists and dialogs.
 
----
+### Target list
 
-## 4. Image Viewer & Target Inspector (`ImageViewerDisplay`)
+The Image Viewer, Image Processing, Observatory Manager and Observation Manager each have a target list on the left. It is made of two panels.
 
-The **Image Viewer** is the primary workspace for reviewing captured target packages, inspecting FITS image headers, adjusting visual stretching, and identifying catalog stars.
+| Control | What it does |
+| --- | --- |
+| By catalog tab in Filter Targets | Lists the catalog choices: All Targets, Messier Catalog, NGC IC Catalog, Stars, Planets and No Image |
+| By camera tab in Filter Targets | Lists your configured cameras with the number of targets each one imaged, plus All Cameras. The catalog and camera choices work together |
+| A–Z and Newest | Sorts the list by name or by the most recently imaged |
+| Search box | Filters the list by name or ID. Its hint reads Enter name or ID... |
+| List rows | Click a row to select the target. A highlighted row means the telescope has a folder with the same name, which holds frames you have not downloaded |
 
-![Image Viewer Workspace](./assets/image_viewer.png)
+### Add New Target dialog
 
-### 4.1 Step-by-Step Instructions
+The Observatory Manager and the Observation Manager open this dialog from their Add Target buttons.
 
-#### Opening and Selecting Images
-1. Select a target from the **Targets** list in the left sidebar (e.g., `NGC 6992`, `M 16`, `M 42`).
-2. Use the filter toggle buttons (`L`, `R`, `G`, `B`, `Ha`, `SPEC`) to filter frames by optical channel.
-3. Click any image filename in the file tree to display it in the central canvas viewport.
+| Field | What it holds |
+| --- | --- |
+| Target Name | Required. For example M42 |
+| RA (Optional) | Right ascension, for example 05h 35m 17s |
+| DEC (Optional) | Declination, for example -05d 23m 28s |
 
-#### Adjusting Canvas Stretch & Zoom
-- **Pan**: Click and drag inside the main image canvas.
-- **Zoom**: Scroll the mouse wheel or click the **Zoom Toolbar** buttons.
-- **Stretch Algorithms**:
-  - `Linear`: Standard raw pixel display.
-  - `Asinh`: Preserves star color saturation in bright nebula cores.
-  - `Logarithmic`: Enhances faint outer nebulosity.
-  - `Histogram Equalization`: Maximizes contrast across dim fields.
-- **Black / White Point Sliders**: Drag sliders under the viewport to adjust background clipping and saturation ceilings.
+### FITS Header dialog
 
-#### Inspecting FITS Headers & Star Profiles
-- **FITS Header Inspector**: Type a keyword (e.g., `EXPTIME`, `GAIN`, `CRVAL1`) into the search bar in the right panel to view FITS header values.
-- **Star Identification & PSF**: Click **Star ID** to overlay SIMBAD/Gaia catalog labels over detected stars and view measured Full-Width Half-Maximum (FWHM) values.
+The Header Info buttons in Image Processing open this dialog. It lists the header of the chosen file. The header holds the notes the camera saved with the image, such as the exposure time. The table has the columns Keyword, Value and Comment. A Filter... box narrows the rows.
 
-:::{tip}
-Use the **Invert** function to flip black and white levels, which dramatically highlights faint satellite trails and cosmic ray strikes that may require rejection prior to stacking.
-:::
+### Ingest From Telescope dialog
 
----
+The Download Frames button in Image Processing and the refresh button in the Observation Manager calibration panel open this dialog. It copies frames from the telescope's storage to your image library.
 
-## 5. Image Processing & Stacking (`ImageProcessingDisplay`)
+| Item | What it does |
+| --- | --- |
+| Target Name | The target the frames belong to. The name Calibration is for dark, bias and flat frames |
+| Telescope | The telescope the frames came from |
+| Files Found | Number of files in the matching folder on the telescope |
+| File Selection | One check box per file. Select All and Deselect All change every box. Refresh reads the file list again |
+| Dark Only, Bias Only and Flat Only | Appear when the target name is Calibration. Each one selects only that frame type |
+| Start Ingestion | Starts the copy. It is hidden while a copy runs and after one finishes |
+| Ingest Status | Shows Status, a progress line and a log |
+| Start New | Appears after a copy finishes. It clears the dialog for another copy |
+| Close | Closes the dialog |
 
-The **Image Processing** workbench provides calibration, alignment, quality selection, and frame stacking.
+When a copy finishes, the dialog closes by itself after about 1 s and the target is selected in the list.
 
-![Image Processing Workspace](./assets/image_processing.png)
+## Image Viewer
 
-### 5.1 Step-by-Step Stacking Workflow
+![Image Viewer](./assets/image_viewer.png)
 
-#### Step 1: Load Target & Calibration Frames
-1. Select a science target from the left sidebar.
-2. In the right panel under **Session Frames**, verify the light sub-exposures are loaded.
-3. Under **Calibration Assets**, select matching Master Dark, Master Flat, and Master Bias files.
+**Purpose.** Look at the finished image of a target and keep its catalog details up to date.
 
-#### Step 2: Set Quality Filters
-Use the **Frame Analysis** sliders to filter out degraded sub-exposures prior to stacking:
-- **FWHM Cutoff**: Set maximum acceptable star width in arcseconds.
-- **Roundness Floor**: Set minimum star roundness to reject wind-shaken frames.
-- **Background Ceiling**: Exclude sub-exposures affected by satellite passes or cloud glow.
+**Layout.** Three columns. The left column is the [target list](#target-list). The center column shows the image. The right column shows target details and actions.
 
-#### Step 3: Run Stacking Engine
+**Controls.**
 
-Click **Process Target** to initiate stacking. Progress is shown on the live progress bar.
+| Control | What it does |
+| --- | --- |
+| Image Viewer panel, center | Shows the processed image of the selected target. The image is already stretched, so the viewer does not stretch it again. Drag to move the image. Scroll the mouse wheel to zoom |
+| + and - | Zoom in and zoom out |
+| Fit | Fits the whole image in the panel |
+| 1:1 | Shows the image at actual size |
+| Image Processing button | Opens the same target in the Image Processing view |
+| Information panel, right | Shows Catalog ID, Common Name, Coordinates, Exposure Time, the camera and telescope, and the frame count for each filter and exposure length. Catalog ID and Common Name can be edited |
+| Send to Phone | Opens LocalSend with the target's JPEG image ready to send |
+| Save Target | Saves your edits to the target's Catalog ID and Common Name |
+| Delete Target | Deletes the target after you confirm in the Delete Target dialog |
 
----
+**Related settings.** The Displays boxes in Settings > General turn this view on or off. See [General tab](#general-tab).
 
-## 6. Astronomy Manager (`AstronomyManager`)
+**Related guides.** The [image processing tutorial](Image_Processing_and_Analysis_Tutorial.md) makes the image this view shows.
 
-The **Astronomy Manager** provides tools for stellar photometry light curves and 1D spectroscopy analysis.
+## Image Processing
 
-![Astronomy Manager Workspace](./assets/astronomy_manager.png)
+![Image Processing](./assets/image_processing.png)
 
-### 6.1 Photometry & Transit Search
-1. **Load Target Data**: Select an identified variable star or exoplanet target from the sidebar list.
-2. **Differential Photometry**: Choose up to 5 comparison stars in the field to normalize target brightness against atmospheric extinction.
-3. **Exoplanet Transit Search (BLS)**:
-   - Click **Run BLS Search**.
-   - Enter min/max period bounds (e.g., 0.5 to 10.0 days).
-   - The engine plots the folded phase light curve and displays the detected period, transit depth, and transit epoch.
+**Purpose.** Check the frames of a target, stack them, and run star analysis on them.
 
-### 6.2 1D Spectroscopy Analysis
-1. Select a target with spectroscopic sub-exposures (`SPEC` filter tag).
-2. **Aperture Extraction**: Click **Extract Profile** to trace the 1D spectrum from the 2D frame.
-3. **Wavelength Calibration**: Match emission lines against Neon/Argon arc lamp lines to establish wavelength scaling (Å).
-4. **Continuum Fitting & Line Identification**:
-   - Fit spline/polynomial continuum baseline.
-   - Identify Balmer absorption lines (e.g., H-alpha 6563 Å, H-beta 4861 Å).
-5. **Equivalent Width**: Highlight an absorption or emission line to automatically calculate its equivalent width (line strength).
+**Layout.** Three columns. The left column is the [target list](#target-list). The center column holds the FITS Viewer above the File Browser. The right column holds the Frame Analysis panel above the Image Controls panel.
 
----
+**Controls.**
 
-## 7. Observatory Manager (`ObservatoryManager`)
+The left column has two buttons under Target Controls.
 
-The **Observatory Manager** gives direct manual control over the telescope mount, focuser, filter wheel, autoguider, and weather safety systems.
+| Control | What it does |
+| --- | --- |
+| Save Target | Saves edits to the selected target |
+| Delete Target | Deletes the selected target after you confirm |
 
-![Observatory Manager Workspace](./assets/observatory_manager.png)
+The FITS Viewer header has these controls.
 
-### 7.1 Control Panels & Operations
+| Control | What it does |
+| --- | --- |
+| FWHM and Rejected badge | Appears after analysis. FWHM is the width of a star's image at half its peak brightness, in pixels. The badge also shows how many frames were rejected |
+| Stretch or Linear | Switches between the auto-stretched view and the linear view. The label shows the view in use. A stretch brightens faint detail |
+| Astrometry | Shows or hides star labels drawn over the image. The labels exist only after a plate solve. If none exist, a message tells you to run plate solving first |
+| + and - | Zoom in and zoom out |
+| Fit and 1:1 | Fit the image to the panel, or show actual size |
+| Image Viewer button | Opens the same target in the Image Viewer |
 
-#### Telescope Mount Control
-- **Nudge Keypad**: Click `↑`, `↓`, `←`, `→` to manual nudge the mount. Adjust the **Slew Speed** slider from 1x (guide speed) to 600x (max slew).
-- **Tracking Mode**: Toggle tracking `ON` or `OFF`. Select rate (`Sidereal`, `Lunar`, `Solar`).
-- **Park / Unpark**: Click **PARK** to stow the mount in its home position; click **UNPARK** to enable slewing.
+Drag the image to move it. Scroll to zoom. Click a star label to open that star in the Astronomy Manager.
 
-#### Mount Alignment & Iterative Solve History
-- Inspect the **Alignment Status** log table to track iterative plate solving cycles.
-- View status indicators (`solving` ⟳, `aligned` ✓, `warning` ⚠, `failed` ✗) along with coordinate deltas in arcseconds.
+The File Browser toolbar and table have these controls.
 
-#### Focuser Step Control & Autofocus
-- **Manual Nudge**: Click `Focus IN (-)` or `Focus OUT (+)` with step buttons (`10`, `50`, `100`, `500`, `1000`).
-- **Autofocus Run**: Click **Start Autofocus** to measure stellar size across a V-curve and determine exact focus.
+| Control | What it does |
+| --- | --- |
+| Camera box | Shows only the frames of one camera. All Cameras shows everything |
+| Search box | Filters frames. The ? button explains the syntax. Examples are `cam: zwo`, `iso > 800`, `exp >= 30`, `name includes dark` and `(iso > 100 && exp > 60)` |
+| Header Info | Opens the FITS Header dialog for the selected file |
+| Trash button with a count | Appears when frames are ticked. It deletes the ticked files after you confirm. Deleting cannot be undone |
+| Header check box | Ticks or clears every listed frame |
+| Row check box | Ticks one frame. Shift-click ticks a range |
+| Column headings Filename, Date, Camera, Filter and Exp (s) | Click a heading to sort by it |
+| FWHM column | Star width of the frame, in pixels, when known |
+| Status column | Shows Included, Rejected or Outlier |
+| Row click | Shows that frame in the FITS Viewer |
+| Row right-click | Turns the Outlier flag on or off. Use it for a frame with cosmic ray hits or a satellite streak |
 
-#### Guider Monitoring (PHD2)
-- Inspect the live **Guiding Trends** chart to view real-time RA/Dec RMS errors in arcseconds.
+The Frame Analysis panel has two tabs, Analysis and Data.
 
-:::{warning}
-**Safety Interlock.** Click the red **EMERGENCY STOP** button to immediately halt all hardware motion, park the mount, and force enclosure closure in case of imminent weather or mechanical failure.
-:::
+| Item | What it shows or does |
+| --- | --- |
+| Analysis tab, status box | Reads Idle, Processing Active, Processing Successful or Processing Complete. It streams the log of the running job. Cancel stops a running stack |
+| Analysis tab, Recent Jobs | Lists earlier jobs for the target with a type, a status and a date. Click a job to read its log. Console opens the Command Console. × dismisses the job after you confirm |
+| Data tab, Final Stack and Spectral Stack | One row for each stack that exists. Header Info opens its header. View shows it in the FITS Viewer, and the button then reads Viewing |
+| Data tab, Total Exposure | The exposure time of the stack |
+| Data tab, analysis results | Counts from the last analysis. A star analysis shows Total Images, Stars Found and Frames Processed. A spectrum analysis shows Total Images, Stars Processed and Spectra Extracted |
+| Data tab, Session Frames | One row for each filter and exposure length. Session is the number of light frames. Library Match is the number of matching dark frames in the library, or Missing. The camera box narrows the table |
 
-### 7.2 Remote Target Ingestion
+The Image Controls panel has these buttons.
 
-The Observatory Manager allows for discovering and downloading images captured by the remote hardware into the local library.
+| Control | What it does |
+| --- | --- |
+| Analyze Target | Starts a star analysis. It uses the ticked frames. With none ticked, it uses the final stack, then the shown file, then every listed frame. Spectral frames get spectrum extraction. Other frames get plate solving and photometry |
+| Analyze Temporal Variation | Appears only for spectral frames that already have a spectral stack. It follows how each star's spectrum changes across the raw frames |
+| Cancel | Replaces Analyze Target while an analysis runs |
+| Download Frames | Opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog) |
+| Stack Frames | Calibrates, aligns and combines the ticked frames. With none ticked, it uses every listed frame. Stack Frames is off when the frames come from more than one camera. The label then reads Stacking requires matching cameras. Right-click opens a Custom Stacking Parameters dialog, but in this version the dialog starts the same standard stack whatever you choose |
+| Open Siril | Opens Siril for the target. Siril is the outside program that does the stacking |
+| Summary lines | Show the selected Target, its Name and its Catalog ID |
 
-1. **Check for New Images**: Click the **Discover Remote Captures** button. The system will scan the telescope's onboard storage for new FITS files.
-2. **Review Targets**: A list of unassociated remote targets will appear, displaying the target name, filter type, and number of sub-exposures.
-3. **Download & Sync**: Select the desired targets and click **Download Selected**. The files will be transferred to the local machine and automatically registered into the Library Sidebar, ready for Image Processing.
+**Related settings.** In Settings > Processing, set the astrometry.net API Key and the Siril Executable. In Settings > Advanced, set the local solver, the Siril Stack Weight and the Parallelism limits. See [Processing tab](#processing-tab) and [Advanced tab](#advanced-tab).
 
-*(For technical details on how the remote file protocols and target synchronizations are managed under the hood, see the {py:class}`~wayfindinglib.api.control.remote.RemoteControl` API Reference)*
+**Related guides.** Follow the [image processing tutorial](Image_Processing_and_Analysis_Tutorial.md). The pipeline steps are in the [pipeline review guides](../../library_design/pipelines/index.md).
 
----
+## Command Console
 
-## 8. Planetarium & 3D Sky Map (`PlanetariumDisplay`)
+**Purpose.** Run Python commands and scripts against the app's data and hardware, and read the documentation.
 
-The **Planetarium** renders a 3D celestial sphere view of the sky above the observatory.
+**Layout.** Three resizable columns. The left column holds a tab panel and the Workspace table. The center column is a code editor. The right column holds the Terminal and Documentation tabs.
 
-![Planetarium Workspace](./assets/planetarium.png)
+**Controls.**
 
-### 8.1 Sky Map Navigation & Controls
-- **Rotate & Tilt**: Left-click and drag anywhere on the sky canvas.
-- **Zoom**: Scroll the mouse wheel to zoom in or out.
-- **Layer Checkboxes**: Toggle visible sky layers (Stars, Grid, Constellations, FOV Outline, Telescope).
-- **Right-Click Context Menu**: Right-click any celestial object in the sky to slew the telescope.
-- **Date & Time Controls**: Use the bottom time slider to simulate sky positions for future dates.
+| Control | What it does |
+| --- | --- |
+| Scripts & Recipes tab | Lists your saved User Scripts and the built-in recipes. Click one to load it in the editor. + New starts a new script |
+| Docs tab | Lists the documentation topics, with a filter box that reads Filter documentation & APIs... |
+| Workspace table | Lists the variables in the console: Name, Type, Shape / Size and Value / Description. The refresh button reads them again. Built-in objects are pinned at the top |
+| Editor toolbar: Clear | Empties the editor |
+| Editor toolbar: Save Script | Saves the script under its file name |
+| Editor toolbar: Run Script (Ctrl+Enter) | Runs the script. The button reads Running... until it ends |
+| Terminal tab | Runs one Python line at a time. Press Enter to run. Tab completes a name. Up and Down recall earlier lines |
+| Terminal: Clear | Clears the history on screen. Variables are kept |
+| Terminal: Reset Workspace | Discards your variables and restores the built-in objects. History is kept |
+| Documentation tab | Shows the selected topic. Links between topics open inside the tab |
 
----
+The terminal starts with these names ready: `targets` (target catalog), `stars` (star catalog), `jobs` (job logs), `telescope` (mount control), `imaging` (camera sequencer), `np` (NumPy), `plt` (Matplotlib), and `help` and `doc(obj)` for help.
 
-## Appendices
+**Related settings.** The Displays box for Command Console in Settings > General turns this view on or off.
 
-### Appendix A: Telemetry Status Badges
+**Related guides.** The [pipeline review guides](../../library_design/pipelines/index.md) and the library documentation open from the Documentation tab.
 
-| Badge | Color | Meaning |
-|---|---|---|
-| `Connected` | Green | INDI hardware driver bus active and responsive. |
-| `Disconnected` | Red | Server connection lost; auto-retrying. |
-| `Tracking` | Green | Mount actively tracking at sidereal rate. |
-| `Slewing` | Amber | Mount moving to new target coordinates. |
-| `Parked` | Blue | Mount parked in safe home position. |
-| `Safe State` | Red / Flashing | Emergency interlock active; motion suspended. |
+## Astronomy Manager
 
-### Appendix B: Display Capability Reference
+![Astronomy Manager](./assets/astronomy_manager.png)
 
-| UI Display | Primary Functional Capabilities |
-|---|---|
-| `PlanetariumDisplay` | 3D WebGL Sky Map, Constellation overlays, FOV rectangle projection, object context slews. |
-| `ObservatoryManager` | INDI device manager, mount slew/track/park keypad, alignment status attempt tracking, focuser steps, autofocus V-curves, PHD2 RMS guider plots, weather interlocks. |
-| `ImageProcessingDisplay` & `ImageViewerDisplay` | FITS image inspection, header search, star FWHM/HFR measurement, Master Dark/Flat/Bias calibration, star alignment, Winsorized Sigma Clipping stacking. |
-| `AstronomyManager` | 1D stellar profile extraction, neon/argon arc lamp wavelength calibration, continuum baseline fitting, Balmer line identification, Equivalent Width, and BLS exoplanet transit light curve fitting. |
+**Purpose.** Inspect the brightness history (light curve) and the spectrum of each star the app has identified.
+
+**Layout.** Three columns. The left column picks a star. The center column shows the star summary and two plots. The right column holds the Timeline and Stellar Analysis panels.
+
+**Controls.**
+
+| Control | What it does |
+| --- | --- |
+| By target and By spectral class | Choose how to browse. By target lists your targets. By spectral class lists star classes from O (hottest) to M (coolest) |
+| Targets or Spectral classes list | Pick a target or a class. Each has a search box |
+| Star list | Lists the stars for that pick. Its title reads Stars in the target, Class and a letter, or All stars. S marks a star with a spectrum. P marks a star with photometry, which means brightness measurements. Prev and Next page through long lists |
+| Star summary card | Shows the star name, spectral type and pattern badges, RA / Dec, Mag (smaller means brighter) and the Targets that contain the star. Click a target name to open it in Image Processing with the Astrometry labels on |
+| Locate in Planetarium | On the summary card. Centers the Planetarium on the star |
+| Spectrum panel | Plots flux against wavelength. Click the plot to place a marker that shows the wavelength λ in Å (ångström, a unit of length: 1 Å is 0.1 nm). × removes a marker. A note appears when the measured range is smaller than the range asked for |
+| Hide Feature Lines | Shows or hides the labeled lines for features found in the spectrum. It appears when the spectrum has features |
+| Photometry panel | Plots brightness over time. Brighter is up when the data are magnitudes |
+| Time Series and Phase-Folded | Appear when a period is known. Phase-Folded stacks the cycles on top of each other |
+| Timeline panel | Two sliders set the start and end of the time range. The plots show only that range. Text shows the range and how many time points it holds |
+| Stellar Analysis panel | Shows the results as sections: Light Curve, Stellar Classification, Glowing Gas, Emission Lines, Absorption Features and Repeating Patterns. Hover a result to read what it means |
+| Run period analysis | In the Period Search section. Searches the light curve for a regular rise and fall or a repeating dip. It shows only when the star has no result yet and has enough measurements |
+
+A plot that has no data collapses to a one-line note. The notes read No spectrum has been recorded for this star and No photometry has been recorded for this star.
+
+**Related settings.** None. Results come from the analysis you ran in Image Processing.
+
+**Related guides.** The [image processing tutorial](Image_Processing_and_Analysis_Tutorial.md) ends in this view. The method behind each result is in the [pipeline review guides](../../library_design/pipelines/index.md).
+
+## Planetarium
+
+![Planetarium](./assets/planetarium.png)
+
+**Purpose.** See the sky from your site, find objects, and send the telescope to them.
+
+**Layout.** The left column lists targets and stars. The center is the sky map with a toolbar at the top right and a time bar at the bottom.
+
+**Controls.**
+
+| Control | What it does |
+| --- | --- |
+| By target and By spectral class | Work as in the [Astronomy Manager](#astronomy-manager). Picking a star centers the map on it and zooms to a 1° field |
+| Layers menu | Opens check boxes for Stars, Constellations, Coordinate Grid, Deep Catalog, Ground Horizon and Tracking Risk Heatmap. The heatmap colors the sky by how likely stars are to trail in your mount's tracking |
+| Telescope and FOV Outline check boxes | Show the mount's pointing mark, and the outline of the camera's field of view |
+| Session menu | Shows No Session Selected, All Sessions (Cumulative), or one dated session. A session draws its alignment points on the map. Click a point to open a card with the pointing error, the frame count, the exposure total and charts of drift |
+| Date & Time button | Opens the Date and Time dialog. Its Date and Time tab has arrows for year, month, day, hour, minute and second. Its Julian Day tab moves in steps of 1.0 day. Reset to Now returns to the live sky |
+| FOV readout | Shows the field of view of the map in degrees |
+| Mouse drag | Moves the view |
+| Mouse wheel | Zooms between 0.05° and 135° |
+| Arrow keys | Move the view by 10% of the field of view. Ctrl+Up and Ctrl+Down zoom |
+| Click on an object | Selects it and opens an information card |
+| Right-click on an object | Opens a menu with the star ID and coordinates. Open in Astronomy Manager appears when the object has a spectrum or photometry. Slew Telescope Here appears when a mount is connected |
+| Information card | Lists Magnitude and Spectral Type for stars, then RA/Dec in degrees and in hours-minutes-seconds, Alt/Az, Hour Angle and Rise/Set. View in Astronomy Manager appears for stars with data |
+| Time bar: play button | Starts and pauses the turning of the sky. While it plays, a menu sets the speed: 1x, 5x, 25x, 100x or 1000x |
+| Time bar: slider | Moves the time from 12 h before now to 12 h after. The label reads Live Time or the offset in hours |
+| Equipment button | Shows the camera name. It opens a panel with Telescope, Focal Length, Camera, Pixel Size, Sensor, `Plate Scale` and FOV. Only the camera can be changed there |
+| Deep catalog prompt | Appears when the Gaia DR3 star catalog is missing or incomplete on this computer. It shows a command to run in a terminal. Copy copies it. Not now and Don't remind me hide the prompt |
+
+**Related settings.** The Equipment tab in Settings holds the cameras and optics that the Equipment button lists. The Mount Hostname in the Observatory tab sets where the mount is.
+
+**Related guides.** The [observatory control guide](Observatory_Control_and_Automation_Guide.md) has the recipe for slewing to an object.
+
+## Observatory Manager
+
+![Observatory Manager](./assets/observatory_manager.png)
+
+**Purpose.** Run the mount, focuser and filter wheel by hand, and watch guiding and the connected INDI devices. INDI is the open standard that lets software talk to astronomy hardware.
+
+**Layout.** The left column is the target list. The center column holds the control panels. The right column holds the Devices and Device Properties panels.
+
+**Controls.**
+
+| Control | What it does |
+| --- | --- |
+| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog) |
+| Slew to Target | Moves the mount to the coordinates of the selected target. A message appears if the target has none |
+| Start Alignment and Stop Alignment | Start and stop centering on the selected target by plate solving. The run repeats up to 10 times. Plate solving matches the stars in an image to a star catalog |
+| Tracking ON and Tracking OFF | Turn the mount's star tracking on or off |
+| PARK and UNPARK | Send the mount to its parked position, or free it for use |
+| Alignment and Guiding fields in Tracking Settings | Alignment holds Accuracy, Settle and Exposure (s). Guiding holds Exposure (s) and Gain. The alignment run does not read the Alignment fields. This view has no button that starts guiding, so the Guiding fields are not used here |
+| Focuser | Shows the focuser Position. Focus IN (-) and Focus OUT (+) move it by the step chosen under Steps: 10, 50, 100, 500 or 1000 |
+| Manual Guide | Eight arrow buttons move the mount while you hold them, and stop when you let go. STOP halts all mount motion. The Slew Speed slider has four steps, from Min to Max: Guide, Centering, Find and Max |
+| Safety Limits | Has check boxes for Enable Altitude Limits and Enable Hour Angle Limits, and fields Min. Altitude, Max. Altitude, Max. Hour Angle and Flip if HA >. The panel has no Apply button, and no control sends these values to the mount in this version |
+| Alignment Status | A table of centering rounds with Status, dRA and dDEC in arcseconds. The symbols are ⟳ solving, ✓ aligned, ⚠ warning, ✗ failed and — idle |
+| Guiding Trends | Plots guiding error over time. The check boxes dRA, dDEC, SNR, RMS and Pulses choose the lines. The History slider sets 10 to 100 points |
+| Guiding Target | A bullseye chart of dRA against dDEC. Points near the center mean good guiding |
+| Filter Wheel | One button for each of L, R, G, B, Ha, OIII, SII and Spect. The active filter is highlighted |
+| Devices | One button for each INDI device. It reads No INDI devices connected. when none are found |
+| Device Properties | Lists the properties of the chosen device, and lets you edit them |
+
+**Related settings.** The Observatory tab in Settings holds the Mount Hostname, the INDI Port, the Available Filters and the Allow Telescope Commands (Disable Safe Mode) box. Without that box ticked, the app only watches the telescope. See [Observatory tab](#observatory-tab).
+
+**Related guides.** Every recipe for this view is in the [observatory control guide](Observatory_Control_and_Automation_Guide.md).
+
+## Observation Manager
+
+![Observation Manager](./assets/observation_manager.png)
+
+**Purpose.** Plan the exposures for a target and run a queue of plans.
+
+**Layout.** The left column is the target list. The center area holds the planning panels and the Image List. The right column holds the Execution Queue and the Visible Targets table.
+
+**Controls.**
+
+| Control | What it does |
+| --- | --- |
+| Add Target | Opens the [Add New Target dialog](#add-new-target-dialog) |
+| Image Planner: Type | Light, Dark, Flat or Bias |
+| Image Planner: Count, Filter, Exposure and Delay | The number of frames, the filter (L, R, G, B, Ha, OIII or SII), the exposure time in seconds and the pause between frames in seconds |
+| Add to List | Adds the row to the Image List. While you edit a row, the button pair reads Update and Cancel |
+| Test Image | Takes one frame now with the current Type, Exposure and Filter. The Last Image panel then shows it |
+| Dither Settings | Dither shifts the pointing slightly between frames. The check box reads Enabled or Disabled. Every sets how many frames pass between shifts. Scale sets the size of the shift. The settings apply to the panels made by Create Mosaic |
+| Mosaic Planner | Grid Size sets rows and columns, from 1 to 10. Overlap sets how much neighboring panels overlap, up to 80. Create Mosaic adds one row to the Image List for each panel |
+| Calibration Library | The Camera box picks a camera. The refresh button opens the [Ingest From Telescope dialog](#ingest-from-telescope-dialog). Lists show the Darks with Exposure, Offset and Count, and the counts of Biases and Flat Frames |
+| Target Status | Shows RA, DEC, Altitude, Azimuth, Rise and Set for the selected target. Reindex Target scans the folders again for that target's files |
+| Image List | Lists planned rows with Type / Info, Count, Exposure, Delay, Filter and Actions. The Actions edit and remove a row |
+| Add to Sequence | Moves the Image List into the Execution Queue as one plan for the selected target. While you edit a queued plan, Cancel and Modify replace this button |
+| Last Image | Shows the newest captured frame. A button switches between the linear and the stretched view. The frame updates when a capture ends |
+| Execution Queue | One card for each plan, with the target name and TTL: the exposure minutes over the total run minutes. Click a card to open its rows. Drag cards to reorder them. The pencil edits a plan. The × removes it after you confirm. The Timing Point box shows Soonest or Start At..., and changing it does not change the queue |
+| Start Imaging Session | Runs the queue. The button is off when the queue is empty. The view has no pause or stop button |
+| Visible Targets | A table with Target, Alt, Az and Visible Until for the targets now above the horizon |
+
+**Related settings.** The Available Filters in Settings > Observatory should match the filters the wheel holds. The Allow Telescope Commands (Disable Safe Mode) box must be ticked for the app to run hardware.
+
+**Related guides.** The [observatory control guide](Observatory_Control_and_Automation_Guide.md) has the recipes for test frames and sequences.
+
+## Settings dialog
+
+The Open settings button in the status header opens the System Configuration dialog. It has five tabs on the left. Revert reloads the saved values. Save writes your changes and closes the dialog. Click outside the dialog or use the close button to leave without saving.
+
+### General tab
+
+| Setting | What it holds |
+| --- | --- |
+| Enable Secondary Window | Opens a second window |
+| Secondary Window Display | The view the second window shows |
+| Displays check boxes | One box for each view. Clear a box to hide that view from the mode menu |
+| Library Path | The folder of your image library. Captured frames live in a `frames` folder inside it |
+| Reindex Library | Scans all local folders of lights, darks, flats and biases, and brings the index files up to date |
+
+### Observatory tab
+
+| Setting | What it holds |
+| --- | --- |
+| Mount Hostname | The computer name or address where the INDI server runs |
+| INDI Port | The port of the INDI server |
+| `Remote Pictures Path` | The folder on the telescope computer that holds captured frames |
+| Minimum Altitude (deg) and Maximum Altitude (deg) | Altitude limits for observing |
+| Available Filters | Filter names separated by commas. They should match what the filter wheel holds |
+| Allow Telescope Commands (Disable Safe Mode) | Lets the app command the telescope (controller mode). Without it the app only watches and computes (monitoring mode). It acts at once when ticked. Save is not needed. A message lists any part that is not yet eligible |
+
+### Equipment tab
+
+Each list has an Add box and a Remove button for every entry.
+
+| List | Fields |
+| --- | --- |
+| Optics | Focal Length (mm), Focal Ratio |
+| Setups | Camera, Optic |
+| Cameras | Name, Name Aliases, Record Name, Pixel Size (μm), Sensor Width (px), Sensor Height (px), Grating Distance (mm), Sensor Min Wavelength (nm), Sensor Max Wavelength (nm), Default ISO |
+
+Each camera also shows read-only Calibration Data: Clip Ceiling (ADU), Saturation Threshold (ADU) and Photometric Linearity Limit (ADU). They come from running calibration. ADU is the unit of a pixel's raw value.
+
+### Processing tab
+
+| Setting | What it holds |
+| --- | --- |
+| astrometry.net API Key | Key for the online plate solver. Plate solving needs it or a local solver that you install separately |
+| Siril Executable | The Siril command, for example `siril-cli` for an apt install |
+
+### Advanced tab
+
+These are install-time and speed settings. Most users do not change them.
+
+| Setting | What it holds |
+| --- | --- |
+| Index Path | Folder of the index files for the local plate solver |
+| Autoindex | Turns on automatic index choice for the local solver |
+| CPU Limit (seconds) | Time limit for the local solver |
+| Stack Weight | Leave blank unless Siril came from Flatpak. The value `wfwhm` weights frames by measured star sharpness |
+| Target Workers, Photometry Workers and Worker Niceness | How many worker processes run, and how much they yield to other programs |
+| Max Concurrent Jobs | Most heavy jobs at once, shared by stacking and by photometry and spectroscopy analysis |
+
+## See also
+
+- [Image processing tutorial](Image_Processing_and_Analysis_Tutorial.md)
+- [Observatory control guide](Observatory_Control_and_Automation_Guide.md)
+- [Getting started](../../Getting_Started.md)
+- [Pipeline review guides](../../library_design/pipelines/index.md)

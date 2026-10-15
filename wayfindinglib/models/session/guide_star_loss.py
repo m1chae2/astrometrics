@@ -3,13 +3,15 @@
 Description: One episode where this system's own guiding, under
 `AUTHORITATIVE` control, could not measure a valid star-centroid drift
 for a guide frame, and the bounded reacquisition attempted in response
-(`Wayfinding_Library_Architecture.md`'s "recovery is
-deliberately shallow" precedent, applied here to guiding rather than
-device lifecycle). Distinct from `MeridianFlipOutcome
+(`Wayfinding_Library_Architecture.md` Section 5.5, which applies the
+bounded pattern of a flip to a lost guide star, and Section 5.8,
+"Recovery is bounded").
+Distinct from `MeridianFlipOutcome
 .guide_reacquire_attempts` -- that field is a bounded reacquisition
 triggered specifically by a meridian flip; this model covers a standing
 loss during otherwise normal guiding, the case the commissioning gate
-criterion "zero unrecovered guide-star losses" actually measures.
+criterion "zero unrecovered guide-star losses" (Phase 4 in Table 12 of
+`Wayfinding_Library_Implementation.md`) actually measures.
 """
 
 from datetime import UTC, datetime

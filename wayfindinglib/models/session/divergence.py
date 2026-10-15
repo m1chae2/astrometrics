@@ -3,14 +3,15 @@
 Description: One measured comparison between an action this system
 computed and the action the delegated system took, for one capability
 at one moment -- the evidence a promotion gate is decided on
-(`Wayfinding_Library_Architecture.md`). Records are written
-whether or not the comparison agreed, since a promotion gate is an
+(`Wayfinding_Library_Architecture.md` Sections 5.4 and 7.2). Records
+are written whether or not the comparison agreed, since a promotion gate is an
 agreement *rate*, which cannot be computed from disagreements alone
-(the "Evidence Is Symmetric" invariant). Pairing is by
+(`Wayfinding_Library_Architecture.md` Section 5.8, "Evidence is
+symmetric"). Pairing is by
 `comparison_input_id` -- the identifier of the shared measurement both
 systems responded to -- rather than by timestamp proximity, which would
 silently pair a computed correction against an unrelated one under load
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Section 5.4).
 """
 
 from datetime import UTC, datetime

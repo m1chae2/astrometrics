@@ -3,7 +3,7 @@
 Description: Verifies enclosure closure is refused when the mount is
 outside clearance, mount motion is refused for every non-OPEN
 enclosure state including UNKNOWN, and a motion timeout yields FAULT
--- the cases `Wayfinding_Library_Architecture.md` calls out.
+-- the behavior `Wayfinding_Library_Architecture.md` Section 6.6 describes.
 """
 
 from datetime import UTC, datetime, timedelta

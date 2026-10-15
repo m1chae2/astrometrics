@@ -2,7 +2,7 @@
 
 Description: Maps each device's raw presence/connection/alert signals
 onto the five-state `DeviceSummaryState` vocabulary, per
-`Wayfinding_Library_Architecture.md`: `OFFLINE` where not
+`Wayfinding_Library_Architecture.md` Section 6.3: `OFFLINE` where not
 present on the server, `STANDBY` where present but not connected,
 `DISABLED` where connected with commands withheld, `ENABLED` where
 connected and commandable, `FAULT` where the driver reports an alert
@@ -10,14 +10,12 @@ property state or a command failed in a way requiring attention.
 
 Takes already-read raw signals rather than a live driver, so the
 mapping is exercisable with no hardware or Execution package present
-("Safety Runs Without Execution"). Gathering those signals per
-device is a separate, thin step: `IndiInterface` currently exposes
-device finders for `MOUNT`/`FOCUSER`/`FILTER_WHEEL`/`GUIDE_CAMERA`
-only -- `PRIMARY_CAMERA`, `ENCLOSURE`, and `WEATHER` summary state
-requires the new `drivers/indi/enclosure_controller.py` and
-`weather_controller.py` this milestone's Table 6 calls for, which are
-not yet built, so gathering those roles' signals is deferred rather
-than stubbed against nothing to verify it against.
+(`Wayfinding_Library_Architecture.md` Section 6.3: the library supplies
+the mapping and the caller reads the signals). Gathering those signals
+per device is a separate, thin step. No caller gathers them for every
+`DeviceRole` yet (`Wayfinding_Library_Architecture.md` Section 8, "Device
+summary state"), so that step is deferred rather than stubbed against
+nothing to verify it against.
 """
 
 from wayfindinglib.models.policy.device_state import DeviceRole, DeviceState, DeviceSummaryState

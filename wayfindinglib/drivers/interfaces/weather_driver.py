@@ -4,8 +4,9 @@ Mirrors ASCOM's `IObservingConditions`. Returns exactly the
 `SensorReadings` shape (defined in `wayfindinglib.models.policy.safety`)
 that `wayfindinglib.tasks.control_tasks.safety_monitor.assess_safety`
 accepts. This driver is the live feed of readings, not new safety logic
-(`Wayfinding_Library_Architecture.md`). `SensorReadings` is re-exported
-here because it is part of this interface's signature.
+(`Wayfinding_Library_Architecture.md` Sections 6.5 and 6.6).
+`SensorReadings` is re-exported here because it is part of this
+interface's signature.
 """
 
 import abc

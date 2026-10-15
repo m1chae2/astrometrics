@@ -4,7 +4,7 @@
 .. the automodapi directives on those pages. This is a top-level navbar entry.
 .. ==============================================================================
 
-API Reference
+API reference
 =============
 
 Comprehensive Python API reference for ``astrometricslib`` and ``wayfindinglib``, automatically generated from docstrings.

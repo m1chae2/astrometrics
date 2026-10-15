@@ -3,14 +3,15 @@
 Description: Counts of previously captured calibration frames, grouped
 by camera, exposure, and filter. Foundation-level reference data: they
 describe what exists and are consulted by Observation Planning, never
-written by a running session (`Wayfinding_Library_Architecture.md`).
+written by a running session (`Wayfinding_Library_Architecture.md`
+Section 3.3, "Configuration, not telemetry").
 `CalibrationAdvisory` is the computed-on-demand view surfaced
 during package authoring -- informational only, never adjusting
 placement or priority.
 
 `post_session_reconciliation` is the writer that updates
 `CalibrationEntry`/`CalibrationStats` after a session
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Section 5.7).
 """
 
 from datetime import UTC, datetime
@@ -48,8 +49,8 @@ class CalibrationAdvisory(BaseModel):
     """Computed-on-demand inventory lookup for one requested calibration entry.
 
     Never recorded; purely informational
-    (`Wayfinding_Library_Architecture.md`, "Advisory, Not
-    Authority").
+    (`Wayfinding_Library_Architecture.md` Section 4.4, "Advisory, not
+    authority").
     """
 
     model_config = ConfigDict(populate_by_name=True)

@@ -1,245 +1,72 @@
 .. ==============================================================================
 .. Purpose: Main entry point of the Astrometrics Sphinx documentation portal.
-.. Provides the landing page with one row of cards per documentation group, and
-.. the captioned toctrees that build the navigation bar and sidebar. The groups
-.. are Get started, Tutorials, How-to guides, Explanation, Reference, Evidence
-.. and About the docs. Every page must be in a toctree (sphinx-build -W).
+.. Shows one card per documentation section and holds the root toctree. The
+.. root toctree lists only the seven section pages (get_started, tutorials,
+.. how_to/index, explanation, reference, evidence, about), so the top
+.. navigation bar shows the sections and each section page lists its own pages.
+.. Every page must be in exactly one toctree (sphinx-build -W and
+.. astrometricslib/test/test_documentation_site.py).
 .. ==============================================================================
 
-Astrometrics Documentation
+Astrometrics documentation
 ==========================
 
-Welcome to the Astrometrics documentation.
+Astrometrics is a desktop application and a pair of Python libraries for astrophotography, photometry, spectroscopy and observatory control. It captures images of the night sky, processes them into measurements, and records how reliable each measurement is.
 
-Astrometrics is a desktop application for astrophotography, photometry, spectroscopy, and automated observatory control. It provides a complete set of tools to capture and process images of the night sky. The documentation is grouped by what you want to do. :doc:`About_These_Docs` maps every document.
-
-Get started
------------
+The documentation is grouped by what you want to do. :doc:`About_These_Docs` maps every document.
 
 .. grid:: 1 2 2 3
     :gutter: 3
 
-    .. grid-item-card:: Installation
-        :link: Installation
+    .. grid-item-card:: Get started
+        :link: get_started
         :link-type: doc
 
-        Install Astrometrics and its requirements on your computer.
+        Install the application, take a first tour of the desktop app, or make a first call to the Python library.
 
-    .. grid-item-card:: Getting Started
-        :link: Getting_Started
+    .. grid-item-card:: Tutorials
+        :link: tutorials
         :link-type: doc
 
-        Core concepts, hardware requirements, and launching the application.
+        Learn by doing: one guided path through image processing, and runnable notebooks.
 
-    .. grid-item-card:: Library quick start
-        :link: how_to/library_quick_start
+    .. grid-item-card:: How-to guides
+        :link: how_to/index
         :link-type: doc
 
-        Install the Python library, set up the configuration file, and make a first call.
+        Recipes for one task each: control the observatory, tune the processing for your setup, change a tuned value.
 
-Tutorials
----------
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: Desktop application
-        :link: user_interface/index
+    .. grid-item-card:: Explanation
+        :link: explanation
         :link-type: doc
 
-        User manual and step-by-step guides for learning how to use the application.
+        How the software works and why: the theory of each library, and how the desktop app is built.
 
-    .. grid-item-card:: Interactive tutorials
-        :link: notebooks/index
+    .. grid-item-card:: Reference
+        :link: reference
         :link-type: doc
 
-        Step-by-step Jupyter Notebook guides covering FITS frame calibration, star detection, photometry, spectroscopy, and telescope control.
+        Look things up: the Python API, the user manual, the pipeline review guides and the implementation papers.
 
-How-to guides
--------------
-
-.. grid:: 1 2 2 3
-    :gutter: 3
-
-    .. grid-item-card:: Tune for your setup
-        :link: how_to/tune_for_your_setup
+    .. grid-item-card:: Evidence
+        :link: evidence
         :link-type: doc
 
-        An ordered checklist for checking the tuned limits on your own camera and telescope.
+        How each tuned value was checked, and a generated check that the documents agree with the code.
 
-    .. grid-item-card:: Validate on your data
-        :link: how_to/validate_on_your_data
+    .. grid-item-card:: About the docs
+        :link: about
         :link-type: doc
 
-        Run a validation-register procedure on your own frames.
-
-    .. grid-item-card:: Change a tuned value
-        :link: how_to/change_a_tuned_value
-        :link-type: doc
-
-        Update the code, the register and the guides together.
-
-    .. grid-item-card:: Add a register entry
-        :link: how_to/add_a_register_entry
-        :link-type: doc
-
-        Record the evidence for a tuned value.
-
-    .. grid-item-card:: Add a quality gate
-        :link: how_to/add_a_quality_gate
-        :link-type: doc
-
-        Add a gate so the review guides and tests stay in step.
-
-Explanation
------------
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: Image Processing Architecture
-        :link: library_design/Astrometrics_Library_Architecture
-        :link-type: doc
-
-        Theoretical framework and mathematical derivations for astrometry, photometry, and spectroscopy.
-
-    .. grid-item-card:: Wayfinding Architecture
-        :link: library_design/Wayfinding_Library_Architecture
-        :link-type: doc
-
-        Logic models for target selection, INDI hardware abstraction, and dynamic observation planning.
-
-    .. grid-item-card:: Pipeline review guides
-        :link: library_design/pipelines/index
-        :link-type: doc
-
-        One guide per pipeline for scientific review: inputs, math, flow, tuned limits, fallbacks and quality gates.
-
-    .. grid-item-card:: Desktop application architecture
-        :link: user_interface/technical_reference/User_Interface_Architecture
-        :link-type: doc
-
-        How the desktop application is built: data flow, state, rendering and the backend interface.
-
-Reference
----------
-
-.. grid:: 1 2 2 3
-    :gutter: 3
-
-    .. grid-item-card:: Python API reference
-        :link: api/index
-        :link-type: doc
-
-        Complete API reference for the astrometricslib and wayfindinglib Python packages.
-
-    .. grid-item-card:: Image Processing Implementation
-        :link: library_design/Astrometrics_Library_Implementation
-        :link-type: doc
-
-        Code names, tuned values and their status labels.
-
-    .. grid-item-card:: Wayfinding Implementation
-        :link: library_design/Wayfinding_Library_Implementation
-        :link-type: doc
-
-        Code names and settings for the observatory control library.
-
-Evidence
---------
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: Validation register
-        :link: library_design/validation/index
-        :link-type: doc
-
-        How each tuned value was checked: data, library calls, results and how to repeat them.
-
-    .. grid-item-card:: Pipeline audit report
-        :link: library_design/Pipeline_Audit_Report
-        :link-type: doc
-
-        A generated check that the architecture paper, the implementation paper and the code agree.
-
-About the docs
---------------
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: About these docs
-        :link: About_These_Docs
-        :link-type: doc
-
-        A map of every document: its kind, audience, and what checks it.
-
-    .. grid-item-card:: Documentation conventions
-        :link: Documentation_Conventions
-        :link-type: doc
-
-        Where content lives, document layouts, spelling, terms and units.
+        How the documentation is organized and the rules it follows.
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Get started
    :hidden:
 
-   Installation <Installation>
-   Getting Started <Getting_Started>
-   Library Quick Start <how_to/library_quick_start>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Tutorials
-   :hidden:
-
-   Desktop App <user_interface/index>
-   Notebook Tutorials <notebooks/index>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: How-to guides
-   :hidden:
-
-   Tune for Your Setup <how_to/tune_for_your_setup>
-   Validate on Your Data <how_to/validate_on_your_data>
-   Change a Tuned Value <how_to/change_a_tuned_value>
-   Add a Register Entry <how_to/add_a_register_entry>
-   Add a Quality Gate <how_to/add_a_quality_gate>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Explanation
-   :hidden:
-
-   Image Processing Architecture <library_design/Astrometrics_Library_Architecture>
-   Wayfinding Architecture <library_design/Wayfinding_Library_Architecture>
-   Pipeline Review Guides <library_design/pipelines/index>
-   Desktop App Architecture <user_interface/technical_reference/User_Interface_Architecture>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Reference
-   :hidden:
-
-   API <api/index>
-   Image Processing Implementation <library_design/Astrometrics_Library_Implementation>
-   Wayfinding Implementation <library_design/Wayfinding_Library_Implementation>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Evidence
-   :hidden:
-
-   Validation Register <library_design/validation/index>
-   Pipeline Audit Report <library_design/Pipeline_Audit_Report>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: About the docs
-   :hidden:
-
-   About These Docs <About_These_Docs>
-   Documentation Conventions <Documentation_Conventions>
+   get_started
+   tutorials
+   how_to/index
+   explanation
+   reference
+   evidence
+   about

@@ -1,4 +1,4 @@
-# Astrometrics Library: Architecture and Design
+# Astrometrics library architecture
 
 *Version 3.1 · 2026-10-15 · Status: current*
 
@@ -7,6 +7,8 @@
 Cooled cameras and small telescopes let amateur astronomers and small observatories collect data of scientific value, but the software that reduces these data is split into separate tools. Each tool uses its own settings and gives no common record of how reliable its output is. This paper describes the architecture of the Astrometrics library, which reduces telescope data in five pipelines: stacking, astrometry, photometry, spectroscopy, and asteroid detection. The pipelines share one data model built around the observation target. They also share records of camera properties and data provenance, and they check their own work with recorded pass, fail, or not-checked gates before and after each run. The paper states the governing equations of each step. They cover calibration, sigma clipping with a cutoff that follows the number of frames, a plate-solution model with distortion terms, and a noise budget for aperture photometry. They also cover ensemble differential photometry, variability indices, grating-based wavelength calibration, and straight-line motion fitting. Tuned settings are not given here. Three kinds of evidence back them: synthetic data with known truth, real observing sessions, and surveys of every stored product. The paper also lists the assumptions and limits of its methods.
 
 Terms are defined in the [glossary](Astrometrics_Library_Architecture.md#appendix-a-glossary). This document also defines each term the first time it appears.
+
+Symbols and their units are listed in the [notation appendix](#appendix-b-notation). The [implementation paper](Astrometrics_Library_Implementation.md) names the code behind each section and gives the tuned values.
 
 ## 1. Introduction
 

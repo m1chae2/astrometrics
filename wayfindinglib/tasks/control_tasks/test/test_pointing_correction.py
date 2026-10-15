@@ -2,8 +2,8 @@
 
 Description: Verifies zero correction for a matching solve, a correctly
 signed correction for a known offset, and that convergence is judged
-against the configured tolerance -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+against the configured tolerance -- the behavior
+`Wayfinding_Library_Architecture.md` Section 6.4 describes.
 """
 
 import pytest
@@ -44,7 +44,7 @@ def test_large_offset_does_not_converge() -> None:
 
 
 def test_no_pointing_model_leaves_prediction_fields_none() -> None:
-    """Verify omitting pointing_model reproduces the pre-M7b output exactly."""
+    """Verify omitting pointing_model leaves the prediction fields None."""
     config = CorrectionConfig()
     correction = compute_pointing_correction("frame-4", 180.0, 0.0, 180.1, 0.0, iteration=1, config=config)
     assert correction.model_predicted_error_arcsec is None

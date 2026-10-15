@@ -43,5 +43,8 @@ sphinx:
   # autosummary stubs from silently returning.
   fail_on_warning: true
 
+# The PDF gives readers the papers and guides to download, print and cite.
+# conf.py builds it with XeLaTeX and shows Mermaid diagrams as their source.
 formats:
+  - pdf
   - htmlzip

@@ -1,8 +1,9 @@
 """Purpose: Check at run time that Execution stays optional.
 
 Description: Two of the library-wide structural checks in
-`Wayfinding_Library_Architecture.md` (§3, "Library-wide structural
-checks"):
+`Wayfinding_Library_Architecture.md` (Section 7.1, "Library-wide
+structural checks"; the tests are listed in
+`Wayfinding_Library_Implementation.md` Section 7.1):
 
 - **Execution is optional.** Importing and using the Control and
   Planning sub-APIs loads no Execution module.

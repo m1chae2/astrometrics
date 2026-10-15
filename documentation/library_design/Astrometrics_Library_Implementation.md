@@ -1,4 +1,4 @@
-# Astrometrics Library: Implementation
+# Astrometrics library implementation
 
 *Version 1.6 · 2026-10-15 · Status: current*
 

@@ -1,4 +1,4 @@
-// markdownlint for the library documentation (see documentation/Documentation_Conventions.md §6).
+// markdownlint for the documentation site and the library READMEs (see documentation/Documentation_Conventions.md §6).
 // Run: build/documentation/lint_docs.sh
 {
   "config": {
@@ -22,7 +22,8 @@
     "astrometricslib/**/README.md",
     "documentation/*.md",
     "documentation/how_to/*.md",
-    "documentation/library_design/Astrometrics_Library_*.md",
+    "documentation/library_design/*_Library_*.md",
+    "documentation/user_interface/**/*.md",
     "documentation/library_design/pipelines/*.md",
     "documentation/library_design/validation/*.md"
   ],

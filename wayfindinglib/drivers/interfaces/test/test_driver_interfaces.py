@@ -153,7 +153,7 @@ def anyio_backend() -> str:
 async def test_indi_mount_driver_set_slew_rate_delegates_to_session() -> None:
     """Verify `set_slew_rate` delegates to the session's real implementation.
 
-    M2 fixed the verified gap where the real `IndiInterface` had no
+    This guards a fixed gap: the real `IndiInterface` once had no
     `set_slew_rate` at all (only the simulator did).
     """
 
@@ -184,7 +184,7 @@ async def test_indi_mount_driver_set_slew_rate_delegates_to_session() -> None:
 async def test_indi_camera_driver_main_role_reads_camera_temperature_field() -> None:
     """Verify the main-camera role reads `camera_temperature`.
 
-    Regression test for an M1 bug fixed in M4: `TelescopeStatus.temperature`
+    Regression test for a fixed bug: `TelescopeStatus.temperature`
     is the *ambient* powerbox/weather reading, not a camera's own sensor --
     `TelescopeStatus.camera_temperature` (from `CCD_TEMPERATURE` on the main
     camera device) is the correct source for the main camera's temperature.
@@ -227,12 +227,12 @@ async def test_indi_camera_driver_guide_role_has_no_temperature_source() -> None
 
 @pytest.mark.anyio
 async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() -> None:
-    """Verify `IndiEnclosureDriver` delegates to the session's M6 methods.
+    """Verify `IndiEnclosureDriver` delegates to the session's methods.
 
-    Regression test for M6: earlier (M1-scaffolded) versions of these
+    Regression test: earlier (scaffolded) versions of these
     methods raised `NotImplementedError` -- this confirms they now
     delegate to `IndiInterface.get_enclosure_state`/`open_enclosure`/
-    `close_enclosure`, backed by `EnclosureController` (M6).
+    `close_enclosure`, backed by `EnclosureController`.
     """
     from wayfindinglib.models.equipment_and_site.enclosure import EnclosureState
 
@@ -277,7 +277,7 @@ async def test_indi_enclosure_driver_delegates_to_session_enclosure_methods() ->
 
 @pytest.mark.anyio
 async def test_indi_switch_driver_delegates_to_session_switch_methods() -> None:
-    """Verify `IndiSwitchDriver` delegates to the session's M12 methods."""
+    """Verify `IndiSwitchDriver` delegates to the session's switch methods."""
 
     class _FakeSession:
         """A stand-in session recording switch command calls."""
@@ -336,7 +336,7 @@ async def test_indi_switch_driver_delegates_to_session_switch_methods() -> None:
 
 @pytest.mark.anyio
 async def test_indi_weather_driver_delegates_to_session_weather_method() -> None:
-    """Verify `IndiWeatherDriver` delegates to the session's M12 method."""
+    """Verify `IndiWeatherDriver` delegates to the session's weather method."""
     from datetime import UTC, datetime
 
     fixed_reading = {"WEATHER_TEMPERATURE": (12.5, datetime.now(UTC))}

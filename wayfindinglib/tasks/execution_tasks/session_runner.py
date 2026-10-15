@@ -1,15 +1,12 @@
-"""Purpose: Queue Advancement — The Nine-Step Execution Cycle.
+"""Purpose: Queue Advancement — The Eight-Step Execution Cycle.
 
 Description: `advance_session` runs one queue-advancement cycle against
-an `ObservationSession`, per `Wayfinding_Library_Architecture.md`: safety
-gate, readiness check, entry selection,
-meridian check, intent computation, disposition, outcome capture,
-status transition, checkpoint. Table 5 lists readiness check (step 2)
-before entry selection (step 3), but a device's *relevance* is scoped
-to the entry that needs it, so this implementation selects the
-candidate entry first and then checks readiness against exactly the
-devices that entry requires -- the only order in which "no device
-required by the entry" (the table's own step-2 wording) is answerable.
+an `ObservationSession`, per `Wayfinding_Library_Architecture.md`
+Section 5.3 and Table 5: safety gate, entry selection, readiness check,
+meridian check, disposition, outcome capture, status transition,
+checkpoint. The readiness check comes after entry selection because a
+device's *relevance* is scoped to the entry that needs it, so the check
+covers exactly the devices that entry requires.
 
 **Disposition, not mode**: for each computed action,
 `dispose_action` asks the `DelegationPolicy` for that action's
@@ -24,8 +21,9 @@ state, checking device readiness, detecting a meridian crossing,
 running a flip, computing/issuing/observing an action, capturing
 outcomes, checkpointing -- is injected via `SessionRunnerDependencies`,
 so this module carries no hardware import and no capture-orchestration
-logic of its own; it is the state machine Table 5 specifies, not the
-astronomy or hardware behind each step.
+logic of its own; it is the state machine that Table 5 of
+`Wayfinding_Library_Architecture.md` specifies, not the astronomy or
+hardware behind each step.
 """
 
 from collections.abc import Callable
@@ -135,7 +133,9 @@ class SessionRunnerDependencies:
 
 
 def advance_session(session: ObservationSession, deps: SessionRunnerDependencies) -> ObservationSession:
-    """Run one queue-advancement cycle (Table 5) against `session`, in place.
+    """Run one queue-advancement cycle on `session`, in place.
+
+    The cycle follows Table 5 of `Wayfinding_Library_Architecture.md`.
 
     Parameters
     ----------

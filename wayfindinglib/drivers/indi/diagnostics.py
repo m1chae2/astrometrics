@@ -3,7 +3,8 @@
 `get_indi_devices`/`indi_properties`/`set_indi_property` never belonged
 on the generic `ObservatoryControl` facade -- no ASCOM Alpaca equivalent
 exists for "list every arbitrary property on every device," since this
-is inherently INDI-specific (`Wayfinding_Library_Architecture.md`).
+is inherently INDI-specific (`Wayfinding_Library_Architecture.md`
+Section 6.2).
 `IndiStatusPanel` (the UI this backs) is, by its own
 requirement tags, a raw INDI-only inspector -- exactly the narrow
 escape hatch this class provides, wrapping the shared `IndiInterface`

@@ -3,8 +3,8 @@
 Description: Verifies divergence records are written for agreeing and
 disagreeing comparisons alike, the sign of divergence_magnitude
 reflects intended-minus-observed, and the three uncomparable
-capabilities are rejected -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+capabilities are rejected -- the behavior
+`Wayfinding_Library_Architecture.md` Sections 5.4 and 5.8 describe.
 """
 
 import pytest

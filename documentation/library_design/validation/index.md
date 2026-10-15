@@ -1,4 +1,4 @@
-# Astrometrics Validation and Tuning
+# Validation register
 
 *Version 1.2 · 2026-10-15 · Status: current*
 

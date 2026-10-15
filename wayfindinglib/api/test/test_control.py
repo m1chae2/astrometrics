@@ -391,7 +391,8 @@ def test_compute_guiding_correction_auto_resolves_persisted_mount_model(
     Unlike `pointing_model` (session-scoped, never auto-resolved), the
     active telescope's `GuidingSpectrumAnalysis` is standing state this
     object already holds, so `compute_guiding_correction` must resolve
-    it automatically without the caller passing it explicitly (M7b).
+    it automatically without the caller passing it explicitly
+    (`Wayfinding_Library_Architecture.md` Section 6.7).
     """
     from wayfindinglib.models.session.telemetry import GuidingSpectrumAnalysis
 
@@ -649,9 +650,9 @@ def test_assess_safety_hysteresis_persists_across_calls_on_same_astrometrics(
 def test_refresh_safety_assessment_reflects_a_live_weather_reading(control: ObservatoryControl) -> None:
     """Verify refresh_safety_assessment's verdict tracks a fed weather reading.
 
-    Proof the M12 wiring is live, not just that `WeatherDriver` and
+    Proof the weather wiring is live, not just that `WeatherDriver` and
     `assess_safety` each exist independently
-    (`Wayfinding_Library_Architecture.md`'s verification note):
+    (`Wayfinding_Library_Architecture.md` Section 6.6):
     changing what the injected driver reports changes the verdict
     `refresh_safety_assessment` returns.
     """
@@ -746,10 +747,10 @@ def test_enter_monitoring_mode_always_fully_succeeds(control: ObservatoryControl
 def test_enter_controller_mode_reports_partial_success(control: ObservatoryControl) -> None:
     """Verify controller mode surfaces a partial BulkDelegationOutcome.
 
-    Plan Verification (M8): from a fresh policy, only OBSERVATORY_SAFETY
-    and MOUNT_CONTROL can legally reach AUTHORITATIVE without first
-    passing through SHADOWED -- the rest must be visibly rejected, not
-    silently skipped or forced.
+    Per `Wayfinding_Library_Architecture.md` Section 6.7: from a fresh
+    policy, only OBSERVATORY_SAFETY and MOUNT_CONTROL can legally reach
+    AUTHORITATIVE without first passing through SHADOWED -- the rest must
+    be visibly rejected, not silently skipped or forced.
     """
     outcome = control.safety.enter_controller_mode()
 
@@ -811,7 +812,7 @@ def test_connect_lazily_initializes_every_configured_driver(
 ) -> None:
     """Verify connect() lazily initializes the shared driver and succeeds.
 
-    `._driver` (a bare alias for `.driver`) was retired in M5: nothing
+    `._driver` (a bare alias for `.driver`) was retired: nothing
     in production reads it anymore -- `connect()` now loops over the
     five per-device-type driver properties, each of which lazily
     builds the shared session via `.driver` on its own.
@@ -1065,9 +1066,8 @@ def test_mount_driver_slew_end_to_end_against_simulator(control: ObservatoryCont
 
     `control.mount.slew()` -> `hardware_operations` ->
     the `MountDriver` ABC -> `IndiMountDriver` -> `SimulatorIndiInterface`,
-    confirming parity with pre-redesign behavior end to end (per the
-    plan's Verification section) rather than only against a
-    duck-typed fake manager.
+    confirming parity with pre-redesign behavior end to end rather than
+    only against a duck-typed fake manager.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
 
@@ -1104,8 +1104,7 @@ def test_focuser_and_filter_wheel_end_to_end_against_simulator(control: Observat
 
     `control.imaging.focus_move()`/`.set_filter()` -> `hardware_operations`
     -> the `FocuserDriver`/`FilterWheelDriver` ABCs -> the INDI adapters ->
-    `SimulatorIndiInterface`, confirming parity with pre-redesign behavior
-    (per the plan's Verification section).
+    `SimulatorIndiInterface`, confirming parity with pre-redesign behavior.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
@@ -1180,8 +1179,7 @@ def test_capture_image_and_guide_camera_end_to_end_against_simulator(control: Ob
 
     `control.imaging.capture_image()`/`control.guiding.expose()`/`control.mount.sync()`
     -> `hardware_operations` -> the `CameraDriver`/`MountDriver` ABCs ->
-    the INDI adapters -> `SimulatorIndiInterface` (per the plan's
-    Verification section for M2-M4).
+    the INDI adapters -> `SimulatorIndiInterface`.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
     from wayfindinglib.models.policy.delegation import CapabilityDelegation, DelegationPolicy
@@ -1233,9 +1231,10 @@ def test_enclosure_state_and_commands_against_simulator(control: ObservatoryCont
 
     `control.safety.status(include=["enclosure_state"])`/`.open_enclosure()`/
     `.close_enclosure()` -> `hardware_operations` -> `EnclosureDriver` ->
-    `IndiEnclosureDriver` -> `SimulatorIndiInterface` (M6). No dome/roof
+    `IndiEnclosureDriver` -> `SimulatorIndiInterface`. No dome/roof
     device is simulated today, so the enclosure state honestly
-    reports `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than a
+    reports `UNKNOWN` (`Wayfinding_Library_Architecture.md` Section 6.5,
+    "Absence of information is not safety") rather than a
     fabricated open/closed value.
     """
     from wayfindinglib.drivers.simulators.indi_simulator import SimulatorIndiInterface
@@ -1263,7 +1262,8 @@ def test_close_enclosure_refuses_when_mount_outside_clearance(
 ) -> None:
     """Verify close_enclosure refuses rather than closing on the mount.
 
-    Plan Verification (M6): asserts refusal, not just the happy path --
+    Per `Wayfinding_Library_Architecture.md` Section 6.6 (the interlock before
+    closing): asserts refusal, not just the happy path --
     a mount position far from the configured park position must reject
     the close through the real `control.safety.close_enclosure` ->
     `hardware_operations.close_enclosure` ->

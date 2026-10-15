@@ -9,8 +9,8 @@ capability records divergence and issues zero calls, an AUTHORITATIVE
 capability issues and records nothing, a DELEGATED capability does
 neither, AUTHORITATIVE issues exactly what a SHADOWED run would have
 recorded for the same input, and abort_session skips remaining pending
-entries -- the cases `Wayfinding_Library_Architecture.md`
-calls out.
+entries -- the behavior `Wayfinding_Library_Architecture.md` Sections
+5.3 and 2.3 describe.
 """
 
 from datetime import UTC, datetime, timedelta

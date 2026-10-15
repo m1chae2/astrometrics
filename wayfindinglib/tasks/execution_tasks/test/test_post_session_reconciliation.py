@@ -5,8 +5,8 @@ calibration-type requests on terminal sessions, is idempotent when
 recomputed, target_session_ids attach only for completed entries whose
 target has matching frames, and reconcile_session raises for a
 non-terminal session and records both results for a terminal one --
-the cases `Wayfinding_Library_Architecture.md` calls out
-("reconciliation run twice yields identical CalibrationStats").
+the behavior `Wayfinding_Library_Architecture.md` Section 5.7 describes
+(running the reconciliation twice yields identical CalibrationStats).
 """
 
 from dataclasses import dataclass

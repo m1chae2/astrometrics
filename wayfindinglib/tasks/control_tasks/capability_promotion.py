@@ -2,7 +2,7 @@
 
 Description: Summarizes recorded `DivergenceRecord` evidence against a
 phase gate and applies an operator's decision, per
-`Wayfinding_Library_Architecture.md`. Building on
+`Wayfinding_Library_Architecture.md` Section 7.2. Building on
 `data_access/delegation_policy_reader.py`'s `promote_capability` (which
 already re-validates shadow precedence and every snapshot-checkable
 policy rule before returning a candidate policy), this module adds the
@@ -52,7 +52,7 @@ class BulkDelegationOutcome:
     A capability that could not legally reach `target_state` is
     recorded in `rejected` with the validation error explaining why,
     never silently skipped or forced -- see
-    `Wayfinding_Library_Architecture.md`'s `set_all_capabilities`.
+    `Wayfinding_Library_Architecture.md` Section 6.7 (bulk delegation modes).
     """
 
     applied: dict[ObservatoryCapability, DelegationState] = field(default_factory=dict)

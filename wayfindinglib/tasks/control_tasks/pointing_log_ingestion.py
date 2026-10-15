@@ -1,9 +1,9 @@
 """Purpose: Event-driven pointing-model ingestion pipeline.
 
 Description: The analyze -> expose chain for plate-solve alignment
-attempts, per `Wayfinding_Library_Architecture.md`. Unlike guiding
-(`guiding_log_ingestion.py`), this half needs
-no remote fetch and no `RemoteTransferDriver` (M7) dependency:
+attempts, per `Wayfinding_Library_Architecture.md` Section 6.7. Unlike
+guiding (`guiding_log_ingestion.py`), this half needs
+no remote fetch and no `RemoteTransferDriver` dependency:
 `AlignmentService.compute_pointing_model` already reads plate-solve
 attempts from the *local* database as they happen -- there is no file
 on a remote host to sync, unlike PHD2's guide log.
@@ -17,9 +17,8 @@ longer has that error -- unlike `guiding_log_ingestion.py`'s spectrum
 analysis, which *is* mount-mechanical and correctly persists cumulatively.
 
 Rewiring `AlignmentService.compute_pointing_model` to call this instead
-of importing `fit_pointing_model` directly is
-`Wayfinding_Library_Architecture.md` M9's backend-cleanup scope, paired
-with this milestone but not part of it.
+of importing `fit_pointing_model` directly is a separate backend
+cleanup, not part of this module.
 """
 
 from __future__ import annotations

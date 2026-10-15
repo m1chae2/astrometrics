@@ -3,7 +3,7 @@
 Description: Passively records PHD2 guiding telemetry and periodic INDI
 weather/status snapshots into an ObservationSession for the duration of
 an Ekos-run night, until interrupted, per
-`Wayfinding_Library_Architecture.md` §2.4.7-§2.4.8. Attaches to an
+`Wayfinding_Library_Architecture.md` Sections 5.7 and 5.8. Attaches to an
 existing, already-planned session where one exists (created by
 Observation Planning); otherwise creates a minimal session against the
 active telescope/camera and a seeded default site profile, so this

@@ -11,6 +11,10 @@ on:
     - cron: '17 6 * * 1'
   workflow_dispatch:
 
+# The job only reads the repository and uploads its report.
+permissions:
+  contents: read
+
 jobs:
   linkcheck:
     name: Check External Links

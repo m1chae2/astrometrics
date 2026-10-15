@@ -27,9 +27,7 @@ counts = np.asarray(raw["intensities"])
 # (b) The fully calibrated result for one star (response corrected, classified,
 #     with its quality checkpoints).
 context = AstrometryPipeline().process("stack.fits", attempt_plate_solving=False)
-context.stellar_objects = [
-    select_standard_star(context.stellar_objects, context.image.data.shape, (x0, y0))
-]
+context.stellar_objects = [select_standard_star(context.stellar_objects, context.image.data.shape, (x0, y0))]
 star = SpectroscopyPipeline().process(context, limit=1)[0]
 spectrum = star.spectroscopy  # a SpectroscopyResult
 ```
@@ -68,11 +66,15 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   image = AstrometricsImage("isolated_star_stack.fits")
   base = SpectroscopyPipeline().config
   no_sky = base.model_copy(update={"subtract_sky_background": False})
-  total = np.nansum(SpectroscopyPipeline(no_sky).process_image(image, target_stars=[(x0, y0)])[0]["intensities"])
+  total = np.nansum(
+      SpectroscopyPipeline(no_sky).process_image(image, target_stars=[(x0, y0)])[0]["intensities"]
+  )
   for gap, width in [(2, 4), (3, 6), (5, 6), (6, 10), (8, 10), (12, 10), (20, 10), (30, 10)]:
       spectrum_extractor.SKY_BAND_GAP_PX = gap
       spectrum_extractor.SKY_BAND_WIDTH_PX = width
-      kept = np.nansum(SpectroscopyPipeline(base).process_image(image, target_stars=[(x0, y0)])[0]["intensities"])
+      kept = np.nansum(
+          SpectroscopyPipeline(base).process_image(image, target_stars=[(x0, y0)])[0]["intensities"]
+      )
       print(gap, width, 100.0 * (1.0 - kept / total))
   ```
   <!-- impl: astrometricslib.utilities.spectroscopy_models.SpectroscopyConfig -->
@@ -130,7 +132,9 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids):
       own = star.spectroscopy.self_determined_spectral_type
       if star.spectral_type and own not in ("", "Unknown"):
-          print(star.id, star.spectral_type, own, abs(ladder_position(own) - ladder_position(star.spectral_type)))
+          print(
+              star.id, star.spectral_type, own, abs(ladder_position(own) - ladder_position(star.spectral_type))
+          )
   ```
   <!-- impl: astrometricslib.Astrometrics -->
   <!-- impl: astrometricslib.ProcessingPipelines.process_target -->
@@ -271,13 +275,16 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
       estimate_resolution_element_angstrom,
       estimate_resolution_profile,
   )
-  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import classify_spectral_type  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
+      classify_spectral_type,
+  )  # internal
 
   print(estimate_resolution_element_angstrom(wavelength, raw["trail_width_px"]))
   print(estimate_resolution_profile(wavelength, raw["trail_width_px"]))
   for width in (30.0, 45.0):
       result = classify_spectral_type(
-          np.asarray(spectrum.wavelengths_angstrom), np.asarray(spectrum.response_corrected_intensities),
+          np.asarray(spectrum.wavelengths_angstrom),
+          np.asarray(spectrum.response_corrected_intensities),
           resolution_element_angstrom=width,
       )
       print(width, result["spectral_type"], result["classification_rms"])
@@ -329,14 +336,20 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   4. On the held-out stars, read `measured_vs_stored_line_spread_ratio_halpha` from checkpoint 1.
 
   ```python
-  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import blurred_reference_spectrum  # internal
-  from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import measure_local_dip_depth  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
+      blurred_reference_spectrum,
+  )  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectral_feature_detector import (
+      measure_local_dip_depth,
+  )  # internal
 
   observed_wl = np.asarray(spectrum.wavelengths_angstrom)
   observed = np.asarray(spectrum.response_corrected_intensities)
   for line in (4861.0, 5175.0, 5893.0, 6563.0):
       for width in np.arange(30.0, 200.0, 5.0):
-          ref_wl, ref = blurred_reference_spectrum(catalog_type, resolution_element_angstrom=width)  # e.g. "K0III"
+          ref_wl, ref = blurred_reference_spectrum(
+              catalog_type, resolution_element_angstrom=width
+          )  # e.g. "K0III"
           ref_depth = measure_local_dip_depth(ref_wl, ref, line, 0.5 * width, width)
           obs_depth = measure_local_dip_depth(observed_wl, observed, line, 0.5 * width, width)
           print(line, width, ref_depth, obs_depth)
@@ -473,14 +486,22 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
   ```python
   from astrometricslib import Astrometrics
-  from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import estimate_spectrum_signal_to_noise  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectrum_signal import (
+      estimate_spectrum_signal_to_noise,
+  )  # internal
 
   astrometrics = Astrometrics()
   ids = [s.id for s in astrometrics.catalog_access.list_star_summaries() if s.has_spectra]
   for star in astrometrics.catalog_access.get_by_ids("stellar_catalog", ids):
       s = star.spectroscopy
-      print(star.id, estimate_spectrum_signal_to_noise(
-          np.asarray(s.wavelengths_angstrom), np.asarray(s.intensities), s.resolution_element_angstrom or 45.0))
+      print(
+          star.id,
+          estimate_spectrum_signal_to_noise(
+              np.asarray(s.wavelengths_angstrom),
+              np.asarray(s.intensities),
+              s.resolution_element_angstrom or 45.0,
+          ),
+      )
   ```
   <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectrum_signal.estimate_spectrum_signal_to_noise -->
 - **Acceptance criterion:** Pure-noise spectra fall below the cut and real ones above it, with a gap between them.
@@ -585,17 +606,24 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
       apply_instrument_response,
       derive_instrument_response,
   )
-  from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import load_line_spread_profile  # internal
+  from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
+      load_line_spread_profile,
+  )  # internal
 
   response = derive_instrument_response(
       np.asarray(spectrum.wavelengths_angstrom),
       np.asarray(spectrum.quantum_efficiency_corrected_intensities),
-      "A0V", "ZWO ASI 533MM Pro", source="check",
+      "A0V",
+      "ZWO ASI 533MM Pro",
+      source="check",
       line_spread_profile=load_line_spread_profile("ZWO ASI 533MM Pro"),
   )
   other = check_star.spectroscopy  # the calibrated result of a check star, taken as in call (b)
-  corrected = apply_instrument_response(np.asarray(other.wavelengths_angstrom),
-                                        np.asarray(other.quantum_efficiency_corrected_intensities), response)
+  corrected = apply_instrument_response(
+      np.asarray(other.wavelengths_angstrom),
+      np.asarray(other.quantum_efficiency_corrected_intensities),
+      response,
+  )
   ```
   <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.derive_instrument_response -->
   <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.apply_instrument_response -->
@@ -766,7 +794,9 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   2. For each pair of neighbors, scale one to the other by least squares over 4200 to 8000 Å and take the RMS difference over the mean.
 
   ```python
-  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import REFERENCE_SPECTRAL_TYPES  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
+      REFERENCE_SPECTRAL_TYPES,
+  )  # internal
 
   gaps = []
   for first, second in zip(REFERENCE_SPECTRAL_TYPES, REFERENCE_SPECTRAL_TYPES[1:]):
@@ -878,7 +908,9 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **Procedure:** For each template, blur it to the line spread, add noise if wanted, and call `classify_by_line_indices` (internal), optionally with `reference_types` that leave the template out.
 
   ```python
-  from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices import classify_by_line_indices  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.spectral_line_indices import (
+      classify_by_line_indices,
+  )  # internal
 
   # profile = load_line_spread_profile(camera name), as in SPE-21
   for true_type in REFERENCE_SPECTRAL_TYPES:
@@ -910,7 +942,9 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **Procedure:** Build a noisy Gaussian dip many times and call `measure_equivalent_width` (internal) on each; compare the mean with the truth and the mean error with the scatter.
 
   ```python
-  from astrometricslib.pipelines.spectroscopy.processing.equivalent_width import measure_equivalent_width  # internal
+  from astrometricslib.pipelines.spectroscopy.processing.equivalent_width import (
+      measure_equivalent_width,
+  )  # internal
 
   wl = np.arange(4000.0, 6000.0, 11.0)
   sigma = 45.0 / 2.355
@@ -1011,7 +1045,9 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   ```python
   from astrometricslib.pipelines.spectroscopy.processing.synthetic_colour import synthetic_b_minus_v  # internal
 
-  colour = synthetic_b_minus_v(np.asarray(spectrum.wavelengths_angstrom), np.asarray(spectrum.response_corrected_intensities))
+  colour = synthetic_b_minus_v(
+      np.asarray(spectrum.wavelengths_angstrom), np.asarray(spectrum.response_corrected_intensities)
+  )
   print(colour - float(star.b_minus_v))
   ```
   <!-- impl: astrometricslib.pipelines.spectroscopy.processing.synthetic_colour.synthetic_b_minus_v -->
@@ -1042,14 +1078,22 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   ```python
   from astrometricslib.drivers.driver_set import Drivers  # internal
   from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of  # internal
-  from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import compare_to_gaia_xp  # internal
+  from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
+      compare_to_gaia_xp,
+  )  # internal
 
   comparison = compare_to_gaia_xp(
-      Drivers().gaia_xp_or_default(), gaia_dr3_source_id_of(star),
-      np.asarray(spectrum.wavelengths_angstrom), np.asarray(spectrum.response_corrected_intensities),
+      Drivers().gaia_xp_or_default(),
+      gaia_dr3_source_id_of(star),
+      np.asarray(spectrum.wavelengths_angstrom),
+      np.asarray(spectrum.response_corrected_intensities),
       line_spread=load_line_spread_profile("ZWO ASI 533MM Pro"),
   )
-  print(comparison.slope_percent_per_1000_angstrom, comparison.residual_rms_fraction, comparison.wavelength_shift_angstrom)
+  print(
+      comparison.slope_percent_per_1000_angstrom,
+      comparison.residual_rms_fraction,
+      comparison.wavelength_shift_angstrom,
+  )
   ```
   <!-- impl: astrometricslib.GaiaXpDriver -->
   <!-- impl: astrometricslib.drivers.driver_set.Drivers.gaia_xp_or_default -->

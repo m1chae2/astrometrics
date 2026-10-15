@@ -42,8 +42,13 @@ astrometrics = Astrometrics()
 target = astrometrics.targets.get("NGC 2403")
 answer = astrometrics.processing.process_target(target, stages=["astrometry"])
 metrics = answer.quality.astrometry.astrometry_metrics
-print("solver fit residual", metrics.plate_solve_fit_residual_rms_arcsec, "arcsec over",
-      metrics.plate_solve_matched_star_count, "stars")
+print(
+    "solver fit residual",
+    metrics.plate_solve_fit_residual_rms_arcsec,
+    "arcsec over",
+    metrics.plate_solve_matched_star_count,
+    "stars",
+)
 
 wcs = answer.results["astrometry"]["wcs"]
 path = target.stacking.stacked_image
@@ -65,8 +70,9 @@ centres = np.array(centres)
 
 centre = wcs.pixel_to_world(data.shape[1] / 2, data.shape[0] / 2)
 gaia = query_gaia_cone_vizier(centre.ra.deg, centre.dec.deg, 1.0, 16.0, 50_000, 60)
-ra, dec = propagate_gaia_positions(gaia["ra"], gaia["dec"], gaia["pmra"], gaia["pmdec"],
-                                   read_observation_time(header))
+ra, dec = propagate_gaia_positions(
+    gaia["ra"], gaia["dec"], gaia["pmra"], gaia["pmdec"], read_observation_time(header)
+)
 gaia_coords = SkyCoord(ra * u.deg, dec * u.deg)
 
 sky = wcs.pixel_to_world(centres[:, 0], centres[:, 1])
@@ -315,11 +321,13 @@ with fits.open(path, memmap=False) as hdul:
 print("blob width", fwhm.measure_blob_width_from_data(data), "px")
 print("fitted FWHM", fwhm.measure_fwhm_from_data(data), "px")
 
+
 def run(label):
     identifier = StarIdentifier()
     stars, wcs = identifier.process_image(path)
     matched = [star for star in stars if star.catalog_match_quality is not None]
     print(label, len(matched), "matched,", identifier.get_catalog_match_separation_rms_arcsec(), "arcsec")
+
 
 run("blob width:")
 with mock.patch.object(star_identifier, "measure_blob_width_from_data", fwhm.measure_fwhm_from_data):
@@ -573,7 +581,9 @@ from astrometricslib.pipelines.shared.variable_star_catalogs import (
 stars = [("Sirius", 101.2872, -16.7161), ("Mira", 34.8366, -2.9776)]  # (id, RA deg, Dec deg)
 positions = build_position_table(stars)
 at_library_radius = run_crossmatch(XMatch.query, positions, GAIA_CATALOG)
-wider = XMatch.query(cat1=positions, cat2=GAIA_CATALOG, max_distance=10 * u.arcsec, colRA1="ra", colDec1="dec")
+wider = XMatch.query(
+    cat1=positions, cat2=GAIA_CATALOG, max_distance=10 * u.arcsec, colRA1="ra", colDec1="dec"
+)
 ids = [star_id for star_id, _, _ in stars]
 print(gaia_flags_from_matches(ids, at_library_radius, {"Sirius": -1.46, "Mira": 6.5}))
 print(wider["id", "angDist", "Gmag"])

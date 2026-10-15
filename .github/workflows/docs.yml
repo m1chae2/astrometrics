@@ -26,6 +26,10 @@ on:
     paths: *paths
   workflow_dispatch:
 
+# Both jobs only read the repository and upload an artifact.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

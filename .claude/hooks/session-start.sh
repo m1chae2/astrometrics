@@ -51,7 +51,7 @@ PYTHON_BIN="$PY314" ./build/linux/setup_venv.sh
 # mcp extra only, so ruff, import-linter and Vale (the prose linter run by
 # build/documentation/lint_docs.sh; same pin as .github/workflows/docs.yml)
 # are added here.
-.venv/bin/pip install --quiet ruff==0.16.1 import-linter==2.15 vale==3.22.0.0
+.venv/bin/pip install --quiet ruff==0.17.0 import-linter==2.15 vale==3.22.0.0
 
 # ---------------------------------------------------------------------------
 # 3. Front-end packages (best effort; the Python suites do not need them)

@@ -129,6 +129,7 @@ for target_id in ("M 13", "M 81", "NGC 2403"):
 import numpy as np
 from astropy.io import fits
 
+
 def single_frame_variance(path_a, path_b, box=500):
     """Half the variance of the difference of two frames, in their central box."""
     a = fits.getdata(path_a, memmap=False).astype(float)
@@ -136,6 +137,7 @@ def single_frame_variance(path_a, path_b, box=500):
     cy, cx = a.shape[0] // 2, a.shape[1] // 2
     window = (slice(cy - box, cy + box), slice(cx - box, cx + box))
     return 0.5 * np.var(a[window] - b[window]), 0.5 * (a[window].mean() + b[window].mean())
+
 
 flat_pairs, bias_pairs = [], []  # lists of (path, path) for your own frames
 read_variance = np.mean([single_frame_variance(a, b)[0] for a, b in bias_pairs]) if bias_pairs else 0.0
@@ -266,8 +268,11 @@ analyzer.timestamp_to_path = {stamp: f"frame_{i:03d}.fits" for i, stamp in enume
 analyzer.normalize_light_curves()
 analyzer.detrend_light_curves_airmass()
 candidates = {star.id for star in analyzer.identify_variable_stars()}
-scores = [(star.photometry.variability_score, truth) for star, truth in zip(field.stars, field.is_variable)
-          if star.photometry.variability_score is not None]
+scores = [
+    (star.photometry.variability_score, truth)
+    for star, truth in zip(field.stars, field.is_variable)
+    if star.photometry.variability_score is not None
+]
 print(area_under_curve([s for s, t in scores if t], [s for s, t in scores if not t]))
 ```
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.identify_variable_stars --> <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.area_under_curve -->
@@ -316,7 +321,9 @@ from astrometricslib.pipelines.photometry.processing import variability_indices 
 
 generator = np.random.default_rng(41)
 probabilities = [
-    vi.false_alarm_probability(vi.reduced_chi_square(1.0 + generator.normal(0.0, 0.01, 40), np.full(40, 0.01)), points=40)
+    vi.false_alarm_probability(
+        vi.reduced_chi_square(1.0 + generator.normal(0.0, 0.01, 40), np.full(40, 0.01)), points=40
+    )
     for _ in range(4000)
 ]
 print(np.mean(np.asarray(probabilities) < 0.01))
@@ -357,7 +364,10 @@ python -m astrometricslib.scripts.backfill_variable_star_flags --target "M 13" -
 ```python
 from astrometricslib import Astrometrics
 from astrometricslib.models.known_variability import KnownVariability
-from astrometricslib.pipelines.photometry.post_processing.variability_skill import area_under_curve, required_auc
+from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
+    area_under_curve,
+    required_auc,
+)
 
 astrometrics = Astrometrics()
 result = astrometrics.processing.process_target("M 13", stages=["photometry"])
@@ -368,7 +378,9 @@ scored = [s for s in stars if s.photometry and s.photometry.variability_score is
 listed = [s for s in scored if s.known_variability == KnownVariability.KNOWN_VARIABLE]
 unlisted = [s for s in scored if s.known_variability == KnownVariability.NOT_LISTED]
 for name in ("variability_score", "reduced_chi_square", "stetson_j", "coefficient_of_variation"):
-    auc = area_under_curve([getattr(s.photometry, name) for s in listed], [getattr(s.photometry, name) for s in unlisted])
+    auc = area_under_curve(
+        [getattr(s.photometry, name) for s in listed], [getattr(s.photometry, name) for s in unlisted]
+    )
     print(name, auc)
 print("beats chance above", required_auc(len(listed), len(unlisted)))
 ```
@@ -585,7 +597,9 @@ passed = validate_period_searches(25)
 from astrometricslib import Astrometrics
 
 astrometrics = Astrometrics()
-result = astrometrics.processing.process_target("NGC 2244", stages=["photometry"], photometry={"filter_type": "Luminance"})
+result = astrometrics.processing.process_target(
+    "NGC 2244", stages=["photometry"], photometry={"filter_type": "Luminance"}
+)
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```
 

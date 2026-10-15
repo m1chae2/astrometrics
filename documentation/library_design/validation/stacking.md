@@ -141,7 +141,12 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   # One night, one exposure length: narrow the selection with filter_name, since and until.
   check = astro.processing.diagnostics.frame_quality(
-      "NGC 2403", kind="raw_check", filter_name="L", since="2026-03-14T18:00", until="2026-03-15T06:00", limit=300
+      "NGC 2403",
+      kind="raw_check",
+      filter_name="L",
+      since="2026-03-14T18:00",
+      until="2026-03-15T06:00",
+      limit=300,
   )
   levels = [row["sky_median_adu"] for row in check.frames if row.get("sky_median_adu") is not None]
   print(detect_background_split(levels, gap_ratio_threshold=0.0))
@@ -309,10 +314,16 @@ Every Python example assumes the library is installed and configured with your o
      subset = [frame for frame in target.frames if frame.filter.name == "L"][:8]
      for limits in (None, (chauvenet_sigma(8), chauvenet_sigma(8))):
          result = astro.processing.stack(
-             target, frames=subset, rejection_sigma=limits, generate_rejmap=True, force=True,
+             target,
+             frames=subset,
+             rejection_sigma=limits,
+             generate_rejmap=True,
+             force=True,
              output_file="/tmp/m13_n8.fits",
          )
-         quality = astro.processing.diagnostics.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
+         quality = astro.processing.diagnostics.stack_quality(
+             result.stacked_path, include=["fwhm", "rejected_fraction"]
+         )
          print(limits, quality.fwhm_px, quality.rejected_fraction)
      ```
 
@@ -393,7 +404,9 @@ Every Python example assumes the library is installed and configured with your o
       result = astro.processing.stack(
           target, frames=frames[:count], generate_rejmap=True, force=True, output_file=f"/tmp/m13_{count}.fits"
       )
-      quality = astro.processing.diagnostics.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
+      quality = astro.processing.diagnostics.stack_quality(
+          result.stacked_path, include=["fwhm", "rejected_fraction"]
+      )
       print(count, quality.fwhm_px, quality.rejected_fraction)
   ```
 
@@ -530,7 +543,10 @@ Every Python example assumes the library is installed and configured with your o
   import numpy as np
   from astropy.io import fits
 
-  from astrometricslib.pipelines.stacking.processing.group_alignment import measure_alignment, refine_alignment_with_stars
+  from astrometricslib.pipelines.stacking.processing.group_alignment import (
+      measure_alignment,
+      refine_alignment_with_stars,
+  )
 
   reference = np.asarray(fits.getdata("/path/to/groups/M_27_127.8s.fits", memmap=False), dtype=float)
   other = np.asarray(fits.getdata("/path/to/groups/M_27_60s.fits", memmap=False), dtype=float)
@@ -829,11 +845,13 @@ Every Python example assumes the library is installed and configured with your o
   image = np.asarray(fits.getdata("/path/to/M_27_Stacked.fits", memmap=False), dtype=float)
   plane = image if image.ndim == 2 else image.mean(axis=0)
 
+
   def strip_noise(strip):
       """Return the neighbour-difference noise of a strip over its median."""
       differences = np.diff(strip, axis=1).ravel()
       spread = 1.4826 * np.median(np.abs(differences - np.median(differences))) / np.sqrt(2)
       return spread / np.median(strip)
+
 
   rows = slice(plane.shape[0] // 5, 4 * plane.shape[0] // 5)
   interior = strip_noise(plane[rows, plane.shape[1] // 2 - 12 : plane.shape[1] // 2 + 13])
@@ -903,7 +921,12 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   result = astro.processing.stack("M 27", force=True)
   metrics = result.quality_summary.stacking_metrics
-  print(metrics.stacked_fwhm_px, metrics.median_input_fwhm_px, metrics.expected_stack_fwhm_px, metrics.fwhm_degraded)
+  print(
+      metrics.stacked_fwhm_px,
+      metrics.median_input_fwhm_px,
+      metrics.expected_stack_fwhm_px,
+      metrics.fwhm_degraded,
+  )
   print(metrics.stacked_fwhm_px / metrics.expected_stack_fwhm_px)
   ```
 
@@ -1173,7 +1196,9 @@ Every Python example assumes the library is installed and configured with your o
 - **Procedure:**
 
   ```python
-  from astrometricslib.pipelines.stacking.post_processing.bright_object import choose_bright_object_stretch_for_file
+  from astrometricslib.pipelines.stacking.post_processing.bright_object import (
+      choose_bright_object_stretch_for_file,
+  )
 
   for path in ["/path/to/Moon_Stacked.fits", "/path/to/M_45_Stacked.fits"]:
       stretch = choose_bright_object_stretch_for_file(path)

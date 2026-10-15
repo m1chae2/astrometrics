@@ -13,8 +13,9 @@ search-path = [
     ".venv/lib/python3.14/site-packages",
 ]
 
-# build/documentation/ holds Sphinx extension modules (docutils/numpydoc/
-# sphinx imports) that only ever run under the docs build's own environment,
-# never imported by the application. The Pyrefly CI job installs base deps
-# only, not the `docs` extra, so these imports are unresolvable there.
-project-excludes = ["**/build/documentation/**"]
+# build/documentation/ and documentation/conf.py hold Sphinx extension and
+# configuration code (docutils/numpydoc/sphinx imports) that only ever runs
+# under the docs build's own environment, never imported by the application.
+# The Pyrefly CI job installs base deps only, not the `docs` extra, so these
+# imports are unresolvable there.
+project-excludes = ["**/build/documentation/**", "documentation/conf.py"]

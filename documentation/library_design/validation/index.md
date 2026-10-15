@@ -1,6 +1,6 @@
 # Astrometrics Validation and Tuning
 
-*Version 1.1 · 2026-10-15 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -37,6 +37,15 @@ Every entry has the same fields, in this order:
 9. **To tune for your setup.** Which setting to change, in which direction, and what to run again.
 10. **Automated by.** The script in `astrometricslib/scripts/` or the test that runs the procedure, and the raw record in `documentation/evidence/` when one exists.
 
+New and updated entries also record four facts a reader needs to judge a result. They go in **Our result**, or as their own fields:
+
+- **Code version.** The git commit (or release) the result was produced with. A result made before a later change to the method says so.
+- **Sample size.** How many frames, stars, sessions or synthetic trials the number rests on.
+- **Uncertainty.** The spread or confidence interval of the result, with how it was estimated (for example, the binomial interval on a recovery rate, or the scatter across sessions). When none was estimated, the entry says so.
+- **Data split.** Whether the result was measured on the same data the value was tuned on (in-sample) or on data kept aside for the check (held out). An in-sample result shows the value fits the data it came from, not that it carries over to new data.
+
+Entries written before these fields were added hold them only where the original record had them. A missing field is written as "not recorded", never guessed.
+
 Each file ends with a table of design estimates. These are values that have not been measured, with a note on how they could be.
 
 ## 3. Status labels
@@ -62,13 +71,19 @@ A test, `astrometricslib/test/test_validation_register.py`, checks the register 
 - a method document cites an entry ID that does not exist;
 - an entry is not cited by any method document.
 
-The test cannot check that a number is still true. When the code behind an entry changes, run the procedure again and update **Our result** and the date.
+A second test, `astrometricslib/test/test_documentation_rules.py`, keeps evidence in the register: it fails when a README or a pipeline review guide carries a dated result. The same checks run before each commit (the `documentation-rules` pre-commit hook) and in continuous integration whenever the documentation changes.
 
-## 5. Validation sessions
+Neither test can check that a number is still true. When the code behind an entry changes, run the procedure again and update **Our result** and the date.
+
+## 5. Data availability
+
+The frames and catalogs behind the results are not in the repository: they are large, and some are observing data from one private observatory. Each entry names its data set (target, camera and date) so the owner can identify it. Raw records small enough to keep are in `documentation/evidence/`. A reviewer who needs a data set should ask the repository owner. The procedures are written so that a reviewer can repeat each check on their own data instead.
+
+## 6. Validation sessions
 
 The architecture paper (`Astrometrics_Library_Architecture.md`, Section 8) describes how the library is validated and why. This section records the data the evidence came from.
 
-### 5.1 Data and coverage
+### 6.1 Data and coverage
 
 Three kinds of evidence are used: synthetic data with a known answer, real sessions from the observatory's library, and library-wide surveys that repeat one measurement over every stored stack or light curve. The real sessions were taken mostly with a ZWO ASI 533MM Pro monochrome camera ($3.76\,\mu\text{m}$ pixels). Some stacking checks also use a Nikon D5300 colour camera.
 
@@ -84,7 +99,7 @@ Table 3 lists what each register file covers.
 | Spectroscopy | [spectroscopy.md](spectroscopy.md) | Sky subtraction, the reading box, resolution and errors, wavelength calibration, the instrument response, classification limits and the Gaia XP comparison |
 | Moving objects | [asteroid_detection.md](asteroid_detection.md) | Recovery of injected movers, false tracks, real fields far from the ecliptic, the pointing correction and the chaining step |
 
-### 5.2 The first validation campaign
+### 6.2 The first validation campaign
 
 The first campaign ran eight real observing sessions through the pipelines named for each, and ran each result through its pipeline's own after-the-fact quality check (Table 4). A session here means one target's data set, which for M 81 later grew to several nights. One further target, M 45 (the Pleiades), was plate-solved as an extra astrometry check; its frame count is not recorded.
 
@@ -105,7 +120,7 @@ The first campaign ran eight real observing sessions through the pipelines named
 **The first campaign predates the current algorithms.** Its results were measured with earlier versions of the stacking rejection cutoffs and sharpness check, the plate-solve gates, the comparison ensemble and variability flag, the spectrum extraction, and the track tests. The plate solves in particular predate the matched-star minimum and the residual check described in `Astrometrics_Library_Architecture.md`, Section 4.4.2. Each register entry says whether its result has been repeated with the current algorithms. Treat a result that has not been repeated as evidence about the data and the shape of the method, not as current performance.
 :::
 
-### 5.3 Recommended future targets
+### 6.3 Recommended future targets
 
 The following target types are recommended for future testing:
 

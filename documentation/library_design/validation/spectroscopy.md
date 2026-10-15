@@ -487,7 +487,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   - the fit's rejection tolerance of 10 nm RMS (a literal in `SpectroscopyCalibrationTuner._fit_grating_distance`, `astrometricslib/pipelines/spectroscopy/utilities/calibration_tuner.py`) <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance -->
   - code constant `_MAX_DIP_CANDIDATES` = 12 in the same file <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._MAX_DIP_CANDIDATES -->
   - the result is written to config key `[Observatory.Camera.<camera name>] grating_distance_mm` (fallback 0, which the pipeline reports as a missing hardware setting; 16.49 in the example config for the ASI 533MM Pro)
-- **Status:** Partly measured: the accuracy claims are synthetic; the one real fit was made with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#5-validation-sessions) Section 5).
+- **Status:** Partly measured: the accuracy claims are synthetic; the one real fit was made with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A spectral stack of a bright A-type star with strong Balmer lines (Vega is ideal), its trail unsaturated, and the zero-order position if the star is not the one nearest the frame centre.
 - **Procedure:**
   1. Back up the config file: the tuner writes the fitted distance into it.
@@ -935,7 +935,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
 - **Claim:** On the M 13 grating session, all 86 frames were extracted with no zero-order tracking failure, and the zero-order position was stable to ±0.2 px.
 - **Settings it supports:** the registration-quality thresholds (Designed; see the table below), reached through `QualityDiagnostics.spectral_registration_thresholds` <!-- impl: astrometricslib.QualityDiagnostics.spectral_registration_thresholds -->
-- **Status:** Partly measured: one session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#5-validation-sessions) Section 5).
+- **Status:** Partly measured: one session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A session of 30 or more grating frames of one field, and Siril installed.
 - **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs, a high fit RMSE, or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.
 - **What to look at:** The count of flagged frames and the zero-order position scatter (pixels).

@@ -80,6 +80,28 @@ subordinate clauses. This matters more, not less, at the UI-tier's high school l
 - For a directory of files rather than a single flow (e.g. `utilities/`, a data directory), state
   what each file or file group is and why it lives there, rather than exact procedural steps.
 
+## Tuned values and evidence
+
+A README describes the method. It does not hold the evidence for it.
+
+- State the rule and the setting that controls it (config key or code constant, with its default),
+  then give its status label and a link to its validation-register entry, in one clause:
+  "The floor is 2.5 sigma (partly measured; see
+  [STK-08](../../../documentation/library_design/validation/stacking.md#stk-08))." A value with no
+  evidence links to its file's design-estimate table (`...validation/stacking.md#design-estimates`).
+- The status labels are Measured, Partly measured and Design estimate
+  (`documentation/library_design/validation/index.md`). Use no others.
+- Run results, data-set names used as evidence, measurement dates and result tables go in the
+  register entry, not the README. `astrometricslib/test/test_documentation_rules.py` fails on a
+  dated result in a README. READMEs that describe shipped data files (`data/` folders) may give
+  download dates, because those are provenance.
+- Changing a tuned value, or the method behind it, means updating its register entry and the
+  matching row of the "Tuned Parameters and Validation Status" tables in
+  `Astrometrics_Library_Implementation.md`.
+- Link the glossary
+  (`documentation/library_design/Astrometrics_Library_Architecture.md#appendix-a-glossary`) near the
+  top, and still define each term on first use.
+
 ## What this looks like in practice
 
 Before (anecdotal, passive, narrates history):
@@ -108,3 +130,6 @@ After (neutral, active, states current rationale):
   who or what reads it next.
 - If the file documents runtime behavior in detail, it points to the code as the source of truth
   rather than promising to stay exhaustively in sync with it.
+- Each tuned value carries a status label and a register link; no dated results remain.
+- The documentation tests pass:
+  `.venv/bin/pytest astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_validation_register.py -q`

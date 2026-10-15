@@ -229,7 +229,7 @@ Two paths do not: reading the target catalog goes through `local_database.load_t
 
 ## Validation — Implementation Notes
 
-The evidence behind every tuned value is kept in the validation register, [validation/index.md](./validation/index.md), not here. Each entry names the library calls that were made, the script or test that repeats them, and the result on our data. This section maps a few behaviours that the first validation campaign ([validation/index.md](./validation/index.md#5-validation-sessions), Section 5) relies on to the code that implements them.
+The evidence behind every tuned value is kept in the validation register, [validation/index.md](./validation/index.md), not here. Each entry names the library calls that were made, the script or test that repeats them, and the result on our data. This section maps a few behaviours that the first validation campaign ([validation/index.md](./validation/index.md#6-validation-sessions), Section 6) relies on to the code that implements them.
 
 - **Validation scripts:** `astrometricslib/scripts/run_empirical_validation.py` runs the campaign's targets through the public API. Each register entry names the script, command line and test that automate it.
 - **Per-session photometry tracking:** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` once per `TargetSession`, each with its own reference frame, because a star's pixel position is stable only within one session (see [PHO-14](./validation/photometry.md#pho-14)).

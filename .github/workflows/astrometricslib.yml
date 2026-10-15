@@ -9,6 +9,13 @@ on:
     branches: [ main, master ]
     paths: &paths
       - 'astrometricslib/**'
+      # The library's documentation tests (test_architecture_doc_claims,
+      # test_documentation_rules, test_validation_register and
+      # test_pipeline_doc_parity) live in astrometricslib/ but read these
+      # files, so a documentation-only change must run them too.
+      - 'documentation/library_design/**'
+      - 'documentation/evidence/**'
+      - 'build/documentation/**'
       - 'pyproject.toml'
       - 'build/linux/run_tests.sh'
       - 'build/linux/setup_venv.sh'

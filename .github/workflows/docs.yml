@@ -17,6 +17,7 @@ on:
       - 'wayfindinglib/**'
       - 'pyproject.toml'
       - 'build/linux/build_docs.sh'
+      - 'build/documentation/**'
       - 'build/documentation/check_notebook_outputs.py'
       - '.github/workflows/docs.yml'
   pull_request:

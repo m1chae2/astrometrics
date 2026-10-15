@@ -6,7 +6,7 @@ Terms are defined in the [glossary](../../../../documentation/library_design/Ast
 
 - **Light frame**: one picture of the target. **Stacking** averages many aligned light frames into one image with less noise.
 - **Calibration frames**: pictures that measure the camera rather than the sky. A **bias** frame is a zero-length exposure (the camera's fixed electronic offset), a **dark** is taken with the shutter closed (the signal heat adds over the exposure), and a **flat** is a picture of an evenly lit surface (how sensitive each pixel is). A **master** is the average of many such frames.
-- **Gain** is the camera's amplification setting, **offset** a constant the camera adds so that no reading falls below zero, and **binning** the combining of neighbouring pixels (for example 2 by 2) into one.
+- The **gain setting** is the camera's amplifier setting (a unitless number in the FITS `GAIN` card), **offset** a constant the camera adds to every pixel so that noise below zero is still recorded, and **binning** the combining of neighbouring pixels (for example 2 by 2) into one.
 - **Siril** is the external program that builds the masters and stacks the frames.
 
 ## What it does
@@ -26,7 +26,7 @@ Before the numbered checks, the stage keeps the stack to one camera (`camera_sel
 
 The check works on a batch: the light frames of one camera, filter and exposure length taken less than four hours apart. It measures each frame with `shared/quality/raw_frame_check.py` and judges the frame against its batch.
 
-- **Few stars (cloud or heavy trailing).** A frame with fewer detected stars than half the batch median moves. The reason names the star count and the sky level. A sky level more than 1.15 times the median reads as cloud; a normal sky level reads as trailing.
+- **Few stars (cloud or heavy trailing).** A frame with fewer detected stars than half the batch median moves. The reason names the star count and the sky level. A sky level more than 1.15 times the median reads as cloud; a normal sky level reads as trailing. The 1.15 sits between clean frames (at most 1.09 times the median sky, with the moon rising) and clouded ones (2.25 and 3.52 times). It changes only the wording of the reason, not whether the frame moves.
 - **Elongated stars (trailing).** A frame moves when its median star roundness is below 0.80 and at least 0.15 below the batch median (0.20 for a colour camera, whose small, coarsely sampled stars measure less steadily). Roundness is a star's narrow width divided by its wide width (1.0 for a circle). A session that is mildly elongated throughout keeps its mildly elongated frames.
 - **Left alone.** A satellite or aircraft trail leaves the median roundness and star count unchanged, so that frame stays; the stacker's pixel rejection (throwing out a pixel's value in one frame when it disagrees strongly with the other frames) removes the trail.
 - **Safeguards.** A batch of fewer than eight frames is not judged. If more than a quarter of a batch would move, none do, and the stage logs why. Frames that cannot be read stay where they are.
@@ -37,13 +37,13 @@ The limits are in `frame_quarantine.py`, each with the measurements it was check
 
 ## The quality metrics
 
-- **Frames submitted and accepted.** How many frames the stage got and how many passed the two checks.
+- **Frames submitted and accepted.** How many frames the stage got, and how many were left after the gain, frame-quality and background checks (checks 1 to 3) and so went to the stacking engine.
 - **Frames excluded for gain or background.** Counts of the frames set aside by each check.
 - **Frames quarantined.** How many frames with clouds or trailed stars the frame-quality check moved into `_excluded`. A non-zero count adds a flag reason to the stack, so a reader sees that the stack used fewer frames than the target holds.
 - **Background split detected and detail.** Set when the frames fell into two sky-brightness groups. The detail gives each group's size and level.
 - **Flat frame count, noise fraction and smoothing width.** The flat set's size, the master flat's relative noise (0.005 is 0.5%), and the Gaussian width in pixels used to blur it, empty when none was applied.
-- **Flat calibration issues and calibration mismatch flags.** One sentence per problem.
-- **Calibration match flags.** One sentence per mismatch between the lights and the calibration frames. The library writes each sentence, naming the settings it applied and the lights it applied them to (for a dark, the lights' temperature, the master's temperature and the tolerance). The `calibrationMismatchFlags` field of the quality summary holds the soft ones. The blocking ones (binning) appear in the flag reasons and in the `calibration_metadata` gate.
+- **Flat calibration issues.** One sentence per problem with the flats.
+- **Calibration match flags.** One sentence per mismatch between the lights and the calibration frames. The library writes each sentence, naming the settings it applied and the lights it applied them to (for a dark, the lights' temperature, the master's temperature and the tolerance). There are two kinds. A soft flag means the nearest calibration frames were still applied despite a gain, offset or temperature mismatch; the `calibrationMismatchFlags` field of the quality summary holds these. A blocking flag means a kind of calibration frame was not applied at all, because its binning differs; these appear in the flag reasons and in the `calibration_metadata` gate. Both kinds fail that gate.
 - **Calibration frame-count flags.** One sentence per master bias, dark or flat built from fewer frames than the minimum. They appear in the flag reasons and in the `calibration_frame_count` gate, and nothing else reads them.
 - **Flag reasons.** One sentence per problem found in any check above. They feed the summary's flag reasons.
 

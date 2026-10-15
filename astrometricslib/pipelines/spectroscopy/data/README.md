@@ -25,9 +25,9 @@ The files:
   each wavelength (see "Instrument response").
 - `line_spread_zwo_asi_533mm_pro.json`, the instrument's blur at each
   wavelength (see "Line spread").
-- `cross_trail_blur_zwo_asi_533mm_pro.json`, the shape of a streak across
-  the dispersion direction, the direction in which the grating spreads the
-  light (see "Cross-streak blur").
+- `cross_trail_blur_zwo_asi_533mm_pro.json`, the shape of a spectrum trail
+  (a star's spread-out spectrum on the image) across the dispersion direction, the direction in which the grating spreads the
+  light (see "Cross-trail blur").
 - `atmospheric_extinction_kpno.txt`, the air's dimming at each wavelength
   (see "Atmospheric extinction").
 
@@ -49,7 +49,8 @@ matching original `<type>.dat.gz` file in the source catalog:
 1. The conversion parses the original fixed-width columns: wavelength in
    Angstroms in columns 1-7, and the component-averaged normalized flux
    (`nflam`, brightness per unit wavelength scaled to 1 at a reference
-   wavelength) in columns 8-17. Hot stars have a flux value wider than the
+   wavelength; Pickles built each template from several published spectra,
+   its components, and this column is their average) in columns 8-17. Hot stars have a flux value wider than the
    usual field width, so the columns cannot be split on whitespace.
 2. The conversion trims each spectrum to 3000-10000 A, the wavelength range
    of the ZWO ASI 533MM Pro sensor (`sensor_min_wavelength` and
@@ -104,7 +105,7 @@ two library types that duplicate the standard rungs above: `b57v.dat`, a
 merged B5-7V spectrum, and `m2p5v.dat`, halfway between M2V and M3V. None
 of these additions would improve this classifier's task of placing an
 unknown star on the O-B-A-F-G-K-M sequence; including them would only add
-reference correlations to compute for each star.
+more reference comparisons to compute for each star.
 
 ## Giant and supergiant references
 
@@ -188,7 +189,7 @@ that `cross_trail_blur_zwo_asi_533mm_pro.json` logs for the 40 Vega frames of
 0.25 s taken on 2026-09-25. The response's own `source` note describes the
 same set of frames.
 
-**Known error in the stored coefficients.** The stored coefficients came from a fit that blurred the
+**Known error in the stored coefficients.** The shipped file still holds these coefficients (its `source` note dates them 2026-09-25); re-deriving replaces them. They came from a fit that blurred the
 reference to one width and skipped a fixed 60 A band around every line, so
 they carry some of Vega's line wings. A synthetic Vega observed through the
 stored line spread measures the size of that error: blurring to one 45 A
@@ -210,8 +211,10 @@ refuses a value outside 1 to 10.
 This response is specific to one instrument setup. Re-derive it after any
 change to the camera, grating, or telescope. Validation against two stars
 with an independently known catalog type confirms the response's
-usefulness: the classifier matches Alcor's second star to type A5V
-(catalog type A5V) and HD 151023 to type K2V (catalog type K0). Most other
+usefulness: the classifier matches Alcor's second star (catalog type A5V)
+to type A5V, or to A7V, two subtypes away, in the score-calibration check
+of 2026-09-19 (`documentation/evidence/spectral_score_calibration_20260919.json`),
+and HD 151023 (catalog type K0) to type K2V. Most other
 spectra in this project's catalog do not yet match any reference closely;
 `validate_spectral_and_period_analysis.py` reports the current numbers for
 the full catalog.
@@ -226,18 +229,18 @@ Three effects make wavelengths above 8000 A less reliable:
 - the sensor's quantum efficiency falls from 27% to 6% in that range, which
   multiplies noise by a factor of 4 to 16 when the pipeline corrects for it;
 - water and oxygen absorption bands from Earth's atmosphere appear;
-- blue light begins arriving in second order. (A grism sends light of wavelength L to a
+- blue light begins arriving in second order. (The grating sends light of wavelength L to a
 second position on the sensor that overlaps first-order light of
 wavelength 2 x L. Because extraction starts at 3800 A, second-order light
 from that wavelength reaches 7600 A and beyond.)
 
 How we know: extending the comparison range to 10000 A and re-fitting the response
-changes the match quality unevenly. For three stars with relatively little
-blue light — Vega (A0V), HD 151023 (K2V), and Alcor's second star (A7V) —
-the match residual (the relative RMS difference from the best reference;
-0 is perfect) stays about the same (0.08, 0.11, and 0.08). For stars
-with more blue light, such as HD 150679 (spectral type A2), the residual
-rises substantially, from a range of 0.19-0.28 up to a range of 0.5-1.8.
+changes the match quality unevenly. For three stars — Vega (catalog type
+A0V), HD 151023 (catalog type K0), and Alcor's second star (catalog type
+A5V) — the match residual (the relative RMS difference from the best
+reference; 0 is perfect) stays about the same (0.08, 0.11, and 0.08). For
+other stars, such as HD 150679 (spectral type A2, a star bright in the
+blue), the residual rises substantially, from a range of 0.19-0.28 up to a range of 0.5-1.8.
 Weighting each wavelength by the sensor's sensitivity does not correct
 this: under that weighting, HD 150679 matches type F6V, which is
 incorrect. Based on this result, 8000 A remains the default upper limit
@@ -268,20 +271,20 @@ profile. For a camera with no file, they use one width for the whole
 spectrum: the resolution element measured from the trail, or a fixed
 fallback.
 
-## Cross-streak blur
+## Cross-trail blur
 
 `cross_trail_blur_zwo_asi_533mm_pro.json` records the shape of an isolated
-bright star's streak across the dispersion direction. It comes from 40 short
+bright star's trail across the dispersion direction. It comes from 40 short
 Vega frames, aligned on the zero order (the star's undispersed, point-like
 image) and averaged (the `source` field gives
 the date, the airmass and the focuser state). It holds `offsets_px`, the
-distance from the streak's centre in pixels (-75 to +75), `band_edges_px`,
-eight bands along the streak from 340 to 680 pixels beyond the zero order
+distance from the trail's centre in pixels (-75 to +75), `band_edges_px`,
+eight bands along the trail from 340 to 680 pixels beyond the zero order
 (about 3800 to 7700 A), and one normalized profile per band in `profiles`.
 
 `load_cross_trail_blur` in `pre_processing/neighbor_wing_correction.py`
 reads it. The neighbour-wing correction fits this stored shape to a crowded
-star's streak to work out how much of a bright neighbour's light falls in
+star's trail to work out how much of a bright neighbour's light falls in
 its box. The instrument response section above also takes its reference
 airmass from this file's log.
 

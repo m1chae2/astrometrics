@@ -167,7 +167,7 @@ import them from the module.
 | Name | What it produces |
 | --- | --- |
 | `make_xp_spectrum(spectral_type, relative_error)` | The template blurred to Gaia's resolution, sampled every 20 Å from 3360 to 10200 Å, as `(wavelength_angstrom, flux, flux_error)`. |
-| `make_calibrated_spectrum(spectral_type, tilt_percent_per_1000_angstrom, shift_angstrom, noise_fraction, seed)` | The template blurred to the instrument's line spread, sampled every 11.2 Å, with a straight tilt that is 1 at 5500 Å, a redward shift, and optional noise. NaN outside 4200-8000 Å. |
+| `make_calibrated_spectrum(spectral_type, tilt_percent_per_1000_angstrom, shift_angstrom, noise_fraction, seed)` | The template blurred to the instrument's line spread and sampled every 11.2 Å (one pixel of the instrument). It is multiplied by a straight-line tilt factor, `1 + (tilt_percent_per_1000_angstrom / 100) * (wavelength - 5500 Å) / 1000 Å`, which is 1 at 5500 Å. Its features are shifted redward (toward longer wavelengths) by `shift_angstrom`, and optional noise is added. NaN outside 4200-8000 Å. |
 | `FakeGaiaXpDriver(spectra)` | A `GaiaXpDriver` that serves the given spectra by source id and records the ids asked for. |
 
 ## Variability field: `variability_field.py`
@@ -180,7 +180,7 @@ detrend, that is, remove slow trends shared by all stars, and flag) and compare 
 | Field | Meaning |
 | --- | --- |
 | `stars` | `StellarObject` list with raw light curves: `fluxes` (ADU per second), `flux_errors`, `airmasses` (how much atmosphere the light passed through, 1 straight overhead), `timestamps`. |
-| `true_magnitudes` | The true instrumental magnitude, `-2.5 log10(flux)`, of each star. |
+| `true_magnitudes` | The true instrumental magnitude of each star: `-2.5 log10(flux)`, a magnitude on the camera's own uncalibrated scale, with no magnitude zero point (the offset that ties it to a catalog scale). |
 | `is_variable` | `True` for each star with an injected signal. |
 | `injected` | One `InjectedVariable` per signal: kind, amplitude in magnitudes, period in frames. |
 

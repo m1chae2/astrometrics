@@ -229,14 +229,16 @@ GATE_DESCRIPTIONS: dict[str, str] = {
     # Spectroscopy
     "spectra_extracted": "Fails when no star produced a spectrum.",
     "zero_order_saturation": (
-        "Fails when any star's zero-order image (its undispersed point image beside the "
-        "spectrum) holds a significant share of saturated pixels (pixels clipped at the "
-        "sensor's maximum)."
+        "Fails when, for the worst star, at least `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.1%) of "
+        "the pixels around its zero order (its undispersed point image beside the spectrum) are "
+        "saturated: at or above the camera's saturation threshold, where pixels clip. Not checked "
+        "when no zero order was measured."
     ),
     "spectral_classification": (
         "Fails when a classification is a poor match (best misfit, the relative RMS of Eq. 4, "
-        "above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the next "
-        "reference below `AMBIGUOUS_RMS_GAP`)."
+        "above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the best "
+        "reference of another spectral class below `AMBIGUOUS_RMS_GAP`). A tie between "
+        "neighbouring subtypes alone does not fail it; such ties are counted in the detail."
     ),
     "catalog_agreement": (
         "Fails when a measured spectral type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` "
@@ -253,8 +255,9 @@ GATE_DESCRIPTIONS: dict[str, str] = {
     ),
     "processing_quality": (
         "Fails when more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of classified spectra "
-        "fail a metric of the processing checkpoint (one of four quality checkpoints on each "
-        "spectrum)."
+        "fail a limit of the processing checkpoint, the second of four quality checkpoints on "
+        "each spectrum. Its limits judge the classification: a poor match, an ambiguous match, "
+        "or a type from line strengths far from the template-fit type (Section 4)."
     ),
     "wavelength_scale": (
         "Fails when the run's wavelength zero points (offsets of each spectrum's wavelength "
@@ -276,33 +279,43 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "reached for confirmed movers. Not checked when no mover reached it."
     ),
     "unmatched_movers": (
-        "Fails when a confirmed straight-line mover matched no known solar-system body: a lead "
-        "worth a manual look."
+        "Fails when a confirmed straight-line mover matched no known solar-system body. The "
+        "failure is a prompt, not an error: it flags the run so a person checks what may be a "
+        "new object. Not checked when no mover was confirmed."
     ),
     "track_residuals": (
-        "Reports how the straight-line test went and whether it used measured or assumed position errors."
+        "Fails when any chain that reached the straight-line test used the assumed position "
+        "error (`astrometric_error_default_arcsec`) for a detection, since the verdict then rests "
+        "on a number nobody measured. Passes otherwise, and its detail counts the chains tested "
+        "and rejected. Not checked when no chain reached the test."
     ),
     # Stacking
     "gain_homogeneity": (
-        "Frames taken at a less common gain (camera amplification) setting are set aside, which "
-        "corrects the stack. Not checked when no frame records its gain."
+        "Frames taken at a less common gain setting (the camera's amplifier setting) are set "
+        "aside, which corrects the stack. Not checked when no frame records its gain setting."
     ),
     "frame_quarantine": (
         "Fails when a batch had more bad frames (too few stars, or stars not round) than "
         "`MAXIMUM_QUARANTINED_FRACTION`, so none were moved."
     ),
     "background_homogeneity": (
-        "Fails when the frames of one exposure length split into groups with different sky "
-        "background levels. Not checked when turned off or with too few measured frames."
+        "Fails when the sky-background levels of the frames of one exposure length split into "
+        "two groups with a sudden jump between them (a gap at least `DEFAULT_GAP_RATIO_THRESHOLD` "
+        "times the spread within a group), as when clouds arrive. Slow changes leave no such gap. "
+        "Not checked when turned off or with too few measured frames."
     ),
     "flat_level": (
         "Fails when the level of the master flat (the averaged image of an evenly lit surface) "
-        "is outside the allowed share of the sensor's full scale."
+        "is outside `MINIMUM_FLAT_LEVEL_FRACTION` to `MAXIMUM_FLAT_LEVEL_FRACTION` of the "
+        "sensor's full scale (the largest value a pixel can record)."
     ),
-    "flat_noise": ("Fails when the master flat (the averaged image of an evenly lit surface) is too noisy."),
+    "flat_noise": (
+        "Fails when the relative noise of the master flat (the averaged image of an evenly lit "
+        "surface) is above `MAXIMUM_FLAT_NOISE_FRACTION`."
+    ),
     "calibration_metadata": (
-        "Fails when a calibration frame (dark, bias or flat) was applied with a different gain, "
-        "offset or temperature, or refused for a binning mismatch."
+        "Fails when a calibration frame (dark, bias or flat) was applied with a different gain "
+        "setting, offset or temperature, or refused for a binning mismatch."
     ),
     "calibration_frame_count": (
         "Fails when a master bias, dark or flat was built from fewer frames than the configured minimum."
@@ -320,12 +333,16 @@ GATE_DESCRIPTIONS: dict[str, str] = {
         "Fails when the registration (alignment) check of a spectral stack raised a concern. "
         "Not checked for an imaging stack."
     ),
-    "saturated_pixel_fraction": "Fails when the stack holds a significant share of saturated pixels.",
+    "saturated_pixel_fraction": (
+        "Fails when at least `DEFAULT_SATURATION_FLAG_THRESHOLD` of the stack's pixels are "
+        "saturated (clipped at the sensor's maximum)."
+    ),
     "zero_pixel_fraction": "Fails when too many stack pixels are exactly zero (over-subtraction).",
     "negative_pixels": "Fails when the stacking engine (Siril) reports too high a share of negative pixels.",
     "exposure_group_linearity": (
-        "Fails when the bright end of an exposure group (the frames of one exposure length) is "
-        "not one scale factor of the reference group; that group is left out of the combination."
+        "Fails when the bright end of an exposure group (the frames of one exposure length) does "
+        "not follow the group scale factor that puts it on the reference group's brightness "
+        "scale; that group is left out of the combination."
     ),
     "raw_frame_clipping": "Fails when raw frames of an exposure group are clipped at zero.",
     "exposure_groups_combined": (
@@ -485,7 +502,9 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "target_session_breakdown": "For each session, how many frames it had and how many the run used.",
     "upstream_quality_summary_reference": "Name of the pipeline that had to run first, if any.",
     "resolved_parameters": "The settings the run actually used, after defaults were filled in.",
-    "camera_profile": "The camera settings applied, such as gain and the level at which pixels clip.",
+    "camera_profile": (
+        "The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip."
+    ),
     "quality_processing_applied": "Whether the quality gates and checks were run.",
     "flagged": "True if one or more quality gates failed, so a person should look at the run.",
     "flag_reasons": "One plain sentence for each reason the run was flagged.",
@@ -519,7 +538,9 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "plate_solve_attempts": "Number of plate-solve tries.",
     "stars_processed": "Number of stars tracked through the light curves (brightness over time).",
-    "stars_found": "Number of reference stars found in the reference exposure.",
+    "stars_found": (
+        "Number of stars detected on the reference frame (the frame every other frame is aligned to)."
+    ),
     "frames_processed": "Number of calibrated frames measured.",
     "rejected_frames": "Frames rejected because their comparison-star level was out of line with the rest.",
     "frame_ensemble_composition": "For each frame, which comparison stars were used.",
@@ -529,11 +550,16 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     ),
     "cross_session_match_count": "Number of stars matched across sessions from different nights.",
     "noise_model_curve": (
-        "The noise model: typical measured scatter (RMS) against instrumental magnitude, in brightness bins."
+        "The noise model: typical measured scatter (RMS) against instrumental magnitude "
+        "(-2.5 log10 of the mean raw flux in ADU per second), in brightness bins."
     ),
     "sessions_missing_wcs": "Sessions with no plate-solved WCS (pixel-to-sky map).",
     "long_term_variable_candidate_count": "Number of stars flagged as long-term variable candidates.",
-    "astrometry_identified_star_count": "Number of stars matched to catalog stars from the astrometry seed.",
+    "astrometry_identified_star_count": (
+        "Stars matched to a SIMBAD or Gaia DR3 catalog star on each session's reference frame, "
+        "summed over sessions (a star seen in two sessions counts twice). 0 when catalog "
+        "identification is turned off."
+    ),
     "sessions_with_reused_header_wcs": (
         "Sessions whose existing header WCS (pixel-to-sky map) was checked and used."
     ),
@@ -543,7 +569,9 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
         " its spectrum)."
     ),
     "zero_order_saturation_flagged": (
-        "True if the zero order went beyond the range where the sensor responds in proportion to light."
+        "True if, for the worst star, at least 0.1% (`DEFAULT_SATURATION_FLAG_THRESHOLD`) of the "
+        "pixels around its zero order are at or above the camera's saturation threshold. It is "
+        "the same test as the `zero_order_saturation` gate. False when no zero order was measured."
     ),
     "dispersion_angle_deg": (
         "Angle of the spectra (the direction light is spread by colour) relative to the sensor rows."
@@ -585,15 +613,21 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "excluded_frames": "Input frames set aside before stacking, each with its reason.",
     "rejected_pixel_fraction": "Share of pixel values rejected (clipped) while building the stack.",
     "rejected_fraction_flagged": "True if pixel rejection was above the warning threshold.",
-    "background_split_detected": "True if a gradient or a jump in the sky background was found.",
+    "background_split_detected": (
+        "True if the frames' sky-background levels split into two groups with a sudden jump "
+        "between them (gap at least 4 times the spread within a group, checked for each exposure "
+        "length), for example clouds arriving. The frames outside the larger group are set aside."
+    ),
     "background_split_detail": "Description of the sky-background jump.",
     "calibration_mismatch_flags": (
-        "Soft flags for calibration frames applied with a different gain, offset or temperature."
+        "Soft flags for calibration frames applied with a different gain setting, offset or temperature."
     ),
     "flat_frame_count": "Number of flat exposures (images of an evenly lit surface) in the master flat.",
     "flat_noise_fraction": "Relative noise level measured in the master flat.",
     "flat_smoothing_sigma_px": (
-        "Gaussian smoothing (sigma, in pixels) applied to the master flat if it was noisy."
+        "Gaussian smoothing width (sigma, in pixels) applied to the master flat because its "
+        "relative noise was above 0.5% (`MAXIMUM_FLAT_NOISE_FRACTION`). None when no smoothing "
+        "was applied, including on colour sensors."
     ),
     "flat_calibration_issues": "Messages about problems with the flat calibration.",
     "saturated_pixel_fraction": (
@@ -622,7 +656,10 @@ KNOWN_FIELD_DESCRIPTIONS: dict[str, str] = {
     "stacking_metrics": "The stacking measurements (Section 7.2).",
     "catalog_matched_star_count": "Stars matched to a SIMBAD or Gaia DR3 entry.",
     "position_only_star_count": "Stars named only by their sky position.",
-    "unresolved_star_count": "Stars with no catalog match and no sky position; not saved.",
+    "unresolved_star_count": (
+        "Stars with no catalog match whose sky position could not be worked out (as when the "
+        "image has no pixel-to-sky map); not saved."
+    ),
     "gaia_fit_rms_arcsec": "Typical (RMS) distance to Gaia DR3 stars under the kept solution.",
     "gaia_fit_rms_before_arcsec": (
         "Typical (RMS) distance to the same Gaia stars under the solver's solution."
@@ -833,11 +870,26 @@ GATE_INTRO = """A quality gate is an automatic check on a run. It passes, fails,
 as flagged (the `flagged` field in Section 7) so a person can look at it. The
 list below is read from the code when this guide is generated."""
 
+# The labels of the "Empirical Status" column. Every guide uses only these
+# three, so a reader can compare limits across pipelines. The data set and
+# any measurement go in the Notes column, not in the label.
+STATUS_MEASURED = "Measured"
+STATUS_PARTLY_MEASURED = "Partly measured"
+STATUS_DESIGN_ESTIMATE = "Design estimate"
+
 # Words that open section 5 of every guide, before the parameter table.
-PARAM_INTRO = """These are the fixed limits and settings the pipeline uses. "Live Value" is
-read from the code when this guide is generated. "Empirical Status" says where
-the value came from: measured on real data (the data set is named in
-brackets), or set by design."""
+PARAM_INTRO = f"""These are the fixed limits and settings the pipeline uses. "Live Value" is
+read from the code when this guide is generated. "Empirical Status" says how
+far real data back the value, with one of three labels:
+
+- **{STATUS_MEASURED}.** The value was set from, or checked against, real
+  observations. The Notes column names the data and the result.
+- **{STATUS_PARTLY_MEASURED}.** Real observations support the value but do not
+  pin it down, for example because no failure was found to set it against.
+- **{STATUS_DESIGN_ESTIMATE}.** The value was chosen by reasoning about the
+  method, not tuned on real data. Where it was checked only on synthetic
+  (simulated) data, or picked with a margin over a few observed values, the
+  Notes column says so."""
 
 # Placeholder values shared by every guide.
 COMMON_VALUES: dict[str, str] = {
@@ -861,6 +913,8 @@ def build_astrometry_doc() -> str:
     run_gates_module = "astrometricslib.pipelines.astrometry.post_processing.run_gates"
     identifier_module = "astrometricslib.pipelines.astrometry.processing.star_identifier"
     refine_module = "astrometricslib.pipelines.astrometry.processing.wcs_refinement"
+    driver_module = "astrometricslib.drivers.astrometry_net_driver"
+    fwhm_module = "astrometricslib.pipelines.astrometry.pre_processing.fwhm"
     detector = require_symbol(
         "astrometricslib.pipelines.astrometry.pre_processing.source_detection", "SourceDetector"
     )
@@ -874,7 +928,13 @@ def build_astrometry_doc() -> str:
         ),
         "solver_sources": require_symbol(identifier_module, "MAXIMUM_PLATE_SOLVE_SOURCES"),
         "gaia_epoch": require_symbol(identifier_module, "GAIA_DR3_REFERENCE_EPOCH"),
+        "depth_stars": require_symbol(identifier_module, "MINIMUM_STARS_FOR_DEPTH_ESTIMATE"),
+        "local_minimum": require_symbol(driver_module, "MINIMUM_SOURCES_FOR_LOCAL_SOLVE"),
+        "blind_cutoff": f"{require_symbol(driver_module, 'HINTED_SOLVE_NEAR_TIMEOUT_FRACTION'):.0%}",
+        "blob_stars": require_symbol(fwhm_module, "FWHM_MEASUREMENT_STAR_COUNT"),
+        "blob_box": 2 * require_symbol(fwhm_module, "BLOB_WIDTH_BOX_RADIUS_PX"),
         "threshold": float(default_of(detector.__init__, "threshold_sigma")),
+        "merge_px": float(default_of(detector.deduplicate, "separation_px")),
         "refit_min_stars": require_symbol(refine_module, "MINIMUM_MATCHED_STARS"),
         "refit_sip": require_symbol(refine_module, "SIP_DEGREE"),
         "refit_clip": require_symbol(refine_module, "CLIP_SIGMAS"),
@@ -951,57 +1011,67 @@ def build_astrometry_doc() -> str:
         [
             "`MAXIMUM_RESIDUAL_FRACTION_OF_FWHM`",
             f"`{values['max_res']}`",
-            "Design estimate",
+            STATUS_DESIGN_ESTIMATE,
             "Largest allowed residual (position error of the sky map), as a share of a star's "
-            "width (FWHM). 8 saved solves gave 0.14 to 0.44.",
+            "width (FWHM). Set against 8 saved solves whose catalog match separations were 0.14 "
+            "to 0.44 of a star width; not re-measured on fit residuals, which are usually smaller.",
         ],
         [
             "`MINIMUM_MATCHED_STARS` (`run_gates`)",
             f"`{values['min_match']}`",
-            "Design estimate",
+            STATUS_DESIGN_ESTIMATE,
             "Fewest stars matched to a catalog for the residual to mean anything.",
         ],
         [
             "`MAXIMUM_FAILED_LOOKUP_FRACTION`",
             f"`{values['max_fail']}`",
-            "Design estimate",
+            STATUS_DESIGN_ESTIMATE,
             "Share of failed online catalog lookups at which `catalog_lookup` fails.",
         ],
         [
             "`CATALOG_MATCH_RADIUS_ARCSEC`",
             f"`{values['match_radius']}` arcsec",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star.",
         ],
         [
             "`MAXIMUM_PLATE_SOLVE_SOURCES`",
             f"`{values['solver_sources']}`",
-            "Designed",
-            "How many of the brightest detected stars are sent to the solver.",
+            STATUS_DESIGN_ESTIMATE,
+            "How many of the brightest detected stars are sent to the online solver.",
         ],
         [
             "Solve minimum",
             "4 sources",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Fewest detections for a solve to be tried (`process_image`).",
+        ],
+        [
+            "`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`",
+            f"`{values['local_minimum']}`",
+            STATUS_PARTLY_MEASURED,
+            "Fewest detections for the local solver to be tried; with fewer, the run goes "
+            "straight to the online solver. Confirmed on one underexposed M 13 frame.",
         ],
         [
             "`SourceDetector` threshold",
             f"`{values['threshold']:g}` σ",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1).",
         ],
         [
             "`MINIMUM_MATCHED_STARS` (`wcs_refinement`)",
             f"`{values['refit_min_stars']}`",
-            "Design value",
-            "Fewest Gaia star matches needed for the refit with distortion terms (SIP).",
+            STATUS_DESIGN_ESTIMATE,
+            "Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit "
+            "has about a dozen terms per axis, and 40 stars leaves a wide margin.",
         ],
         [
             "`MAXIMUM_SHIFT_ARCSEC`",
             f"`{values['refit_shift']}` arcsec",
-            "Designed",
-            "Largest move of the whole field a refit may make and still be kept.",
+            STATUS_DESIGN_ESTIMATE,
+            "Largest move of the whole field a refit may make and still be kept. More than ten "
+            "times the largest error seen (2.7 arcsec).",
         ],
     ])
     template = r"""# Astrometry and Plate Solving Pipeline Review Guide
@@ -1053,19 +1123,24 @@ flowchart TD
     A["Image file (usually the target's stacked image)"] --> B["Find stars against the sky background"]
     B --> C["Gather scale and position hints (image file, then settings)"]
     C --> D{"At least 4 stars found?"}
-    D -- yes --> E["Match the star pattern to a catalog (Astrometry.net)"]
     D -- no --> F["Use the sky map already in the file, if any"]
-    E --> G["Fine-tune the map against Gaia star positions"]
+    D -- yes --> L{"At least <<local_minimum>> stars?"}
+    L -- yes --> E["Local solver reads the image file (with hints, then blind)"]
+    L -- no --> O["Online solver: the brightest <<solver_sources>> stars, then the whole image"]
+    E -- "no solution" --> O
+    E -- solved --> G["Fine-tune the map against Gaia star positions"]
+    O -- solved --> G
     G --> H["Name stars: SIMBAD, then Gaia, then sky position"]
     F --> H
     H --> I["Quality checks"]
     I --> J["Quality summary"]
 ```
 
-Astrometry.net is an open-source plate solver. SIMBAD is an online database of
-named stars and other objects. The fine-tuning step fits SIP distortion terms
-of order 2 (Section 3.3), and the quality summary is an
-`AstrometryQualitySummary` (Section 7).
+Astrometry.net is an open-source plate solver, used both as a program
+installed on this computer (the local solver) and as an online service.
+SIMBAD is an online database of named stars and other objects. The
+fine-tuning step fits SIP distortion terms of order 2 (Section 3.3), and the
+quality summary is an `AstrometryQualitySummary` (Section 7).
 
 ## 2. Input Requirements & FITS Header Specification
 
@@ -1109,13 +1184,23 @@ width along the two axes, with 0 meaning round. It keeps sharpness in
 $[0.2, 1.0]$ and roundness in $[-0.6, +0.6]$, which rejects hot pixels
 (single pixels that always read high) and filament structure.
 
-The finder looks for blobs of a set width, the kernel width. That width is the
-measured blob width: the second moment (the spread) of the light in a
-30-pixel box around the brightest sources. It counts faint wings and
-neighbours, so it reads about twice the stellar FWHM (full width at half
-maximum: the width of a star's light profile at half its peak height).
-Detections closer than 15 px are merged. Colour frames are block-averaged
-before detection.
+**The kernel width.** The finder looks for blobs of a set width, the kernel
+width. On a single-colour (monochrome) frame that width is measured from the
+image. It is the spread (second moment) of all the light in a
+<<blob_box>>-pixel box around each of the <<blob_stars>> brightest sources,
+written as the FWHM of a Gaussian with the same spread (2.355 times its
+standard deviation). FWHM (full width at half maximum) is the width of a
+star's light profile at half its peak height. Because the box also holds
+faint wings and neighbours, this blob width reads about twice the star's
+fitted FWHM: 4.9 px against 2.5 px on the Bubble Nebula stack. It is used
+because it detects better. On that stack it gave 335 catalog matches and a
+1.04 arcsec residual, against 181 matches and 5.0 arcsec with the kernel
+sized from the fitted FWHM. It is never reported as a star width.
+
+**Clean-up.** Detections closer than <<merge_px>> px are merged into one,
+because the finder can split one large star into two. Colour frames are
+averaged in 2×2 blocks before detection: colour interpolation leaves clumps
+of noise that would otherwise be found as thousands of false stars.
 
 ### 3.2 Pixel-Scale Hint
 
@@ -1126,12 +1211,29 @@ it knows the scale in advance:
 $$s = 206.265 \, \frac{p}{f} \tag{2}$$
 
 where $s$ is the scale in arcsec per pixel (1 arcsec is 1/3600 of a degree),
-$p$ the binned pixel size in μm and $f$ the focal length in mm.
+$p$ the binned pixel size in μm and $f$ the focal length in mm. The constant
+is the number of arcseconds in a radian (206 265) times $10^{-3}$, which
+turns μm over mm into the same unit.
 
 ### 3.3 Plate Solve and Gaia DR3 Refit
 
-**What it does.** The brightest <<solver_sources>> detections go to
-Astrometry.net. The solver fits only the bright stars of its index files, so
+**Local, then online.** Astrometry.net is tried in up to three ways, in order:
+
+1. The local solver reads the image file and finds its own stars. It is
+   tried only when the pipeline found at least <<local_minimum>> stars; with
+   fewer, a local attempt would spend its whole time limit on a near-certain
+   failure. It runs first with the scale and position hints. If that fails
+   quickly, it retries blind (no hints), because a wrong hint, such as a
+   forgotten focal reducer, can block the right answer. If the hinted run used
+   at least <<blind_cutoff>> of its time limit, the blind retry is skipped.
+2. The online service is sent the brightest <<solver_sources>> of the
+   pipeline's own detections.
+3. As a last resort, the whole image is uploaded to the online service.
+
+Only the local solver reports its fit statistics; an online solve has none
+(Section 3.6).
+
+**Why refit.** The solver fits only the bright stars of its index files, so
 its solution can be a pixel or more off. The pipeline then refits the
 solution to the field's Gaia DR3 stars (`wcs_refinement.py`).
 
@@ -1142,8 +1244,9 @@ projected onto a flat plane touching it at the field center) plus SIP
 distortion of order <<refit_sip>>. SIP (Simple Imaging Polynomial) adds small
 polynomial terms that model the bending of the field by the optics. Stars more
 than <<refit_clip>> robust standard deviations off are dropped, and the fit
-repeats until the matched set stops changing. A robust standard deviation is a
-measure of spread that a few wild points cannot inflate.
+repeats until the matched set stops changing. A robust standard deviation is
+1.4826 times the median absolute deviation, a measure of spread that a few
+wild points cannot inflate.
 
 **When it is kept.** The refit needs at least <<refit_min_stars>> matches. It
 is kept only when it fits Gaia better than the solver's solution and moves the
@@ -1161,27 +1264,35 @@ $$\alpha(t) = \alpha_0 + \frac{\mu_{\alpha*} \, \Delta t}{\cos \delta_0}, \qquad
 \delta(t) = \delta_0 + \mu_\delta \, \Delta t, \qquad \Delta t = t_\text{obs} - 2016.0 \tag{3}$$
 
 where $\mu_{\alpha*}$ is Gaia's `pmra` (which already includes
-$\cos \delta$) and $\mu_\delta$ is `pmdec`.
+$\cos \delta$) and $\mu_\delta$ is `pmdec`. Both are in milliarcseconds per
+year and $\Delta t$ is in years, so each product is an angle in
+milliarcseconds; it is turned into degrees (1 degree is $3.6 \times 10^6$
+milliarcseconds) before it is added to $\alpha_0$ or $\delta_0$.
 
 ### 3.5 Star Naming
 
 With a solution, each star is named from SIMBAD first, within
 <<match_radius>> arcsec. Stars SIMBAD does not know are matched against a
-Gaia DR3 cone (all catalog stars within a circle around the field). The
-cone's faint limit is set from the frame's own zero point (the brightness
-that one count per second corresponds to, which sets how faint the frame
-reaches). Stars neither catalog knows get a position-based name such as
+Gaia DR3 cone (all catalog stars within a circle around the field).
+
+The cone's faint limit is set from the frame's magnitude zero point: the
+catalog magnitude a star of flux 1 would have. Each SIMBAD-named star with a
+catalog V magnitude gives $V + 2.5 \log_{10}(\text{flux})$, and the median over
+at least <<depth_stars>> stars is the frame's zero point. With it, the flux of
+the faintest detection gives the faintest magnitude the Gaia search needs.
+Stars neither catalog knows get a position-based name such as
 `FIELD_J123.4+45.6`.
 
 Separations are great-circle distances (the shortest angle between two points
 on the sky) from `SkyCoord.separation`. The catalog match separation is the
-typical distance between a detected star and its catalog match. Small means
-the map is accurate:
+typical distance between a detected star and its catalog match:
 
 $$\text{RMS}_\text{sep} = \sqrt{\frac{1}{N} \sum_{i=1}^N \Delta \theta_i^2} \tag{4}$$
 
 over the $N$ stars matched within the radius. RMS (root mean square) is the
-square root of the mean squared distance.
+square root of the mean squared distance. It is a rough check, not a measure
+of the fit: wrong matches and SIMBAD's uneven position precision raise it,
+and the match radius caps it.
 
 ### 3.6 Residual Gate
 
@@ -1192,9 +1303,14 @@ tenth of a star width; above <<max_res>> the map is too loose:
 
 $$\frac{r}{s \cdot \text{FWHM}} \le <<max_res>> \tag{5}$$
 
-The residual is the first of these that was measured: the RMS against Gaia
-from the refit, then the solver's own fit residual, then the catalog match
-separation of Eq. 4. The gate detail names the one used.
+The residual is the first of these that was measured:
+
+1. the RMS distance to Gaia stars under the kept solution, when the Gaia
+   refit ran (it does not depend on the solver);
+2. the solver's own fit residual, which only a local solve reports;
+3. the catalog match separation of Eq. 4.
+
+The gate detail names the one used.
 
 ## 4. Processing Flow
 
@@ -1234,8 +1350,10 @@ through `run_pipeline`. <<analysis_note>>
 2. **Too few detections (fewer than 4).** No solve is tried. A celestial WCS
    already in the image header is used instead. Without one, `plate_solve`
    fails.
-3. **Solver failure.** A tried solve that finds no solution raises
-   `PlateSolveFailedError`, and the adapter does not catch it.
+3. **Solver failure.** A tried solve that finds no solution, locally or
+   online, raises `PlateSolveFailedError`. The adapter does not catch it, so
+   the error reaches the caller: `validate_output` never runs, and no quality
+   summary or gate is saved for that run.
 4. **No Gaia stars.** The refit is skipped with a flag and the solver's
    solution is kept. Without `DATE-OBS`, or with a cache that has no proper
    motions, Gaia positions stay at epoch 2016.0 with a flag.
@@ -1265,6 +1383,7 @@ def build_photometry_doc() -> str:
     ensemble_module = "astrometricslib.pipelines.photometry.processing.comparison_ensemble"
     indices_module = "astrometricslib.pipelines.photometry.processing.variability_indices"
     analyzer_module = "astrometricslib.pipelines.photometry.processing.variability_analyzer"
+    periodicity_module = "astrometricslib.pipelines.photometry.processing.periodicity_search"
     aperture = require_symbol(
         "astrometricslib.pipelines.photometry.pre_processing.frame_photometry", "measure_aperture_photometry"
     )
@@ -1276,6 +1395,7 @@ def build_photometry_doc() -> str:
         "corner": require_symbol(run_gates_module, "MAXIMUM_CORNER_DISPLACEMENT_PX"),
         "ens_scatter": require_symbol(run_gates_module, "MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED"),
         "scatter_pop": require_symbol(run_gates_module, "MINIMUM_STARS_FOR_SCATTER_POPULATION"),
+        "fallback": require_symbol(run_gates_module, "MAXIMUM_CENTROID_FALLBACK_FRACTION"),
         "drift": require_symbol(
             "astrometricslib.pipelines.photometry.pre_processing.assess_input_quality",
             "UNSTABLE_TRACKING_DRIFT_PX",
@@ -1287,8 +1407,11 @@ def build_photometry_doc() -> str:
         "excess": require_symbol(indices_module, "EXCESS_SCATTER_THRESHOLD"),
         "cal_sigmas": require_symbol(indices_module, "CALIBRATION_SIGMAS"),
         "cv_sigma": require_symbol(analyzer_module, "DEFAULT_VARIABILITY_SIGMA_THRESHOLD"),
-        "fap_detect": require_symbol(
-            "astrometricslib.pipelines.photometry.processing.periodicity_search", "FALSE_ALARM_FOR_DETECTION"
+        "fap_detect": require_symbol(periodicity_module, "FALSE_ALARM_FOR_DETECTION"),
+        "fap_possible": require_symbol(periodicity_module, "_FALSE_ALARM_FOR_POSSIBLE"),
+        "max_shuffles": require_symbol(
+            "astrometricslib.pipelines.photometry.processing.family_wise_correction",
+            "MAXIMUM_REPEAT_SHUFFLES",
         ),
         "radius": float(default_of(aperture, "radius")),
         "r_in": float(default_of(aperture, "annulus_inner")),
@@ -1296,6 +1419,7 @@ def build_photometry_doc() -> str:
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }
+    values["cv_robust_sigmas"] = f"{values['cv_sigma'] / 1.4826:.1f}"
     values["fits_table"] = header_table([
         [
             "`DATE-OBS`",
@@ -1316,8 +1440,9 @@ def build_photometry_doc() -> str:
             "`EGAIN`",
             "Optional",
             "`float` (e-/ADU)",
-            "Gain: electrons per ADU (analog-to-digital unit, one camera count). Used for the "
-            "flux errors when the camera profile has none. `GAIN` is never read.",
+            "Gain (e-/ADU): electrons per ADU (analog-to-digital unit, one camera count). Used "
+            "for the flux errors when the camera profile has none. `GAIN`, the camera's gain "
+            "setting, is a different number and is never read.",
             "1 e-/ADU is assumed; `flux_uncertainty` is not checked.",
         ],
         [
@@ -1332,8 +1457,10 @@ def build_photometry_doc() -> str:
             "`AIRMASS` (or `CENTAIRM`, `AIRM`, or altitude `CENTALT`, `ALTITUDE`, `ALT`)",
             "Optional",
             "`float`",
-            "Airmass (how much atmosphere the light passed through; 1 straight overhead), for the "
-            "optional airmass correction of the comparison-star level.",
+            "Airmass (how much atmosphere the light passed through; 1 straight overhead). Used "
+            "only by the optional ensemble airmass correction, which is off by default: the "
+            "median trend of the comparison stars' normalized flux against airmass is removed "
+            "from every star. No star's own flux is fitted against airmass.",
             "1.0.",
         ],
     ])
@@ -1341,89 +1468,119 @@ def build_photometry_doc() -> str:
         [
             "`MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`",
             f"`{values['rej_frac']}`",
-            "Empirical (7.2% baseline)",
+            STATUS_PARTLY_MEASURED,
             "Share of frames rejected as ensemble outliers (frames whose comparison-star level "
-            "is out of line with the rest) that fails the gate.",
+            "is out of line with the rest) that fails the gate. Past runs rejected about 7.2% "
+            "of frames; the limit sits well above that.",
         ],
         [
             "`MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG`",
             f"`{values['rej_cnt']}`",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Fewest rejected frames that can fail the gate, so one frame of a short run cannot.",
         ],
         [
             "Aperture radius",
             f"`{values['radius']:g}` px",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Radius of the circle in which a star's light is summed. Default of "
-            "`measure_aperture_photometry`.",
+            "`measure_aperture_photometry`. It is fixed, not scaled to each star's width.",
         ],
         [
             "Sky annulus radii",
             f"`{values['r_in']:g}` to `{values['r_out']:g}` px",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Inner and outer radius of the sky ring (annulus) around each star, where the sky "
             "level is measured.",
         ],
         [
             "`MINIMUM_COMPARISON_STARS`",
             f"`{values['min_comp']}`",
-            "Design choice",
+            STATUS_DESIGN_ESTIMATE,
             "Comparison-star vetting stops at this size; fewer fails `comparison_ensemble`.",
         ],
         [
             "`DEFAULT_MAXIMUM_COMPARISON_STARS`",
             f"`{values['max_comp']}`",
-            "Design choice",
-            "Most comparison stars kept in the set.",
+            STATUS_DESIGN_ESTIMATE,
+            "Most comparison stars kept in the set. More stars lower the ensemble noise, but the "
+            "extra ones are fainter, so the benefit shrinks quickly.",
         ],
         [
             "`MINIMUM_STARS_FOR_NOISE_MODEL`",
             f"`{values['noise_model_stars']}`",
-            "Designed",
-            "Fewest stars for a noise model (expected scatter against brightness). With fewer, "
-            "the CV cutoff (Eq. 9) picks candidates.",
+            STATUS_DESIGN_ESTIMATE,
+            "Fewest stars for a noise model (expected scatter against brightness): two "
+            "brightness bins of 10 stars. With fewer, the CV cutoff (Eq. 9) picks candidates.",
         ],
         [
             "`FALSE_DISCOVERY_LEVEL`",
             f"`{values['fdr']}`",
-            "Design value (synthetic fields)",
-            "Largest Benjamini-Hochberg q-value a candidate may have. The q-value is the smallest "
-            "expected share of false alarms among the picks at which the star would be picked.",
+            STATUS_DESIGN_ESTIMATE,
+            "Largest Benjamini-Hochberg q-value a candidate may have (Section 3.4). The level "
+            "journals usually ask for; checked only on synthetic fields.",
         ],
         [
             "`EXCESS_SCATTER_THRESHOLD`",
             f"`{values['excess']}`",
-            "Design value",
-            "Fixed threshold on the excess scatter: measured scatter over the scatter the noise "
-            "model predicts (Eq. 7).",
+            STATUS_DESIGN_ESTIMATE,
+            "Fixed threshold on the excess scatter (Eq. 7). A 50% excess, which the ordinary "
+            "spread of a constant star's scatter (10 to 20% for 25 to 50 points) rarely reaches.",
+        ],
+        [
+            "`CALIBRATION_SIGMAS`",
+            f"`{values['cal_sigmas']}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Robust standard deviations above the field median for the chi-square and J "
+            "thresholds: the one-sided 99% point of a normal distribution.",
         ],
         [
             "`DEFAULT_VARIABILITY_SIGMA_THRESHOLD`",
             f"`{values['cv_sigma']}`",
-            "Measured (flags 5.2%)",
-            "Multiplier of the MAD (median absolute deviation, a spread measure) in the CV cutoff (Eq. 9).",
+            STATUS_MEASURED,
+            "Multiplier of the unscaled MAD in the CV cutoff (Eq. 9), about "
+            f"{values['cv_robust_sigmas']} robust standard deviations. Chosen to flag about the "
+            "top 3% of stars. Measured on the library: it flags 5.2% of stars, and separates "
+            "catalogued variables from other stars no better than chance.",
         ],
         [
             "`MAXIMUM_DETECTABLE_AMPLITUDE_MAG`",
             f"`{values['max_amp']}` mag",
-            "Design estimate",
+            STATUS_DESIGN_ESTIMATE,
             "If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic "
-            "brightness scale) is larger, the run is called blind to most variables.",
+            "brightness scale) is larger, the run is called blind to most variables. Most "
+            "pulsating and rotating variables change by less than this.",
+        ],
+        [
+            "`UNSTABLE_TRACKING_DRIFT_PX`",
+            f"`{values['drift']:g}` px",
+            STATUS_DESIGN_ESTIMATE,
+            "Largest shift of the field between frames before `registration_drift` fails. Half "
+            "of the ±40 px box in which a star's center is searched, so stars are caught "
+            "before they leave the box.",
         ],
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",
             f"`{values['corner']}` px",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Largest shift of an image corner caused by rotation and scale change between frames "
-            "(95th percentile).",
+            "(95th percentile). Measured values for comparison: M 13 0.2 px, M 81 0.9 px, "
+            "NGC 2403 1.8 px.",
+        ],
+        [
+            "`MAXIMUM_CENTROID_FALLBACK_FRACTION`",
+            f"`{values['fallback']:g}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Largest share of star measurements that may keep the aligned position because the "
+            "star's own centroid was refused.",
         ],
         [
             "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`",
             f"`{values['ens_scatter']}`",
-            "Design value (3 fields)",
+            STATUS_PARTLY_MEASURED,
             "Largest ratio of the comparison stars' measured scatter to the scatter their error "
-            "bars predict.",
+            "bars predict. Set between three fields: 1.27 on M 13 and 1.66 on M 81, against 18 "
+            "on a cloudy NGC 2403 night.",
         ],
     ])
     template = r"""# Differential Photometry and Light Curve Pipeline Review Guide
@@ -1449,9 +1606,9 @@ plot of a star's brightness against time is its light curve.
 The difficulty is that the air changes too. Thin cloud, haze and a star
 sinking toward the horizon dim every star at once, often by more than the
 real changes. The main idea is to compare each star with a set of steady
-stars in the same image. The shared dimming cancels in the ratio. Statistical
-tests then separate real variation from noise, and a period search looks for
-patterns that repeat.
+stars in the same image, the comparison stars. The shared dimming cancels in
+the ratio. Statistical tests then separate real variation from noise, and a
+period search looks for patterns that repeat.
 
 The result is a light curve for every star, a list of candidate variable
 stars, any periods found, and a quality summary.
@@ -1466,13 +1623,18 @@ through; 1 straight overhead) change every star's flux together. Differential
 photometry removes that shared change by dividing each star by an ensemble (a
 combined set) of constant comparison stars in the same frames.
 
+A session here is the frames of one night (noon to noon) taken with the same
+gain setting and offset; the run uses only the frames of the requested
+filter. Each session has a reference frame: the frame every other frame is
+aligned to, and on which the stars to measure are found.
+
 The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
     A["Frames in the requested filter (spectral frames left out)"] --> B["Group into observing sessions"]
-    B --> C["Per session: pick reference stars, optionally seeded from a catalog"]
-    C --> D["Per frame: read capture time, align to the reference, find star centers"]
+    B --> C["Per session: find the stars to measure on the reference frame, optionally named from a catalog"]
+    C --> D["Per frame: read capture time, align to the reference frame, find star centers"]
     D --> E["Sum each star's light in a circle, subtract sky, estimate the error"]
     E --> F["Convert times to a common solar-system clock"]
     F --> G["Divide by a fixed set of steady comparison stars"]
@@ -1521,26 +1683,30 @@ is the mid-exposure Barycentric Julian Date, $\text{BJD}_\text{TDB}$ (a day
 count measured at the barycenter).
 
 With no site configured, the observer is placed at Earth's center. With no
-target position, the times stay as UTC start times. The time basis is quoted
-in the `capture_timestamps` gate.
+target position, no barycentric time can be computed, and the times stay as
+the UTC exposure-start times (not mid-exposure). The `capture_timestamps`
+gate quotes which time basis was used.
 
 ### 3.2 Centroid and Aperture Photometry
 
-**Placing each star.** Each star is placed at its reference position moved by
-the frame's fitted shift, rotation and scale change. It is then re-centered on
-its centroid (the brightness-weighted center of its light, photutils
-`centroid_com`). When the centroid is not trustworthy, the aligned position is
-kept and the reason is recorded. Apertures are never rounded to whole pixels.
+**Placing each star.** Each star is placed at its position on the reference
+frame, moved by the frame's fitted shift, rotation and scale change. It is
+then re-centered on its centroid (the brightness-weighted center of its
+light, photutils `centroid_com`). When the centroid is not trustworthy, the
+aligned position is kept and the reason is recorded. Apertures are never
+rounded to whole pixels.
 
 **Measuring its light.** Aperture photometry sums the light inside a circle
-(the aperture) and subtracts the sky that falls in the same circle. The net
-flux in a circle of radius <<radius>> px is
+(the aperture) and subtracts the sky that falls in the same circle. The
+radius is a fixed <<radius>> px for every star, not scaled to the star's
+width. The net flux is
 
 $$F_\text{net} = \sum_{i \in \text{ap}} I_i - n_\text{pix} \bar{B} \tag{1}$$
 
 where $I_i$ are the pixel values in ADU (analog-to-digital units, raw camera
 counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the
-median of a sky ring (annulus) from <<r_in>> to <<r_out>> px.
+median of a sky ring (annulus) from <<r_in>> to <<r_out>> px. Divided by the
+exposure, it becomes a flux in ADU per second.
 
 **Its error.** The CCD equation adds up every noise source in electrons: the
 star's own photon noise, the sky, the read noise and the dark current. A
@@ -1550,40 +1716,57 @@ large $\sigma_F$ compared with $F_\text{net}$ means a noisy measurement. Its
 $$\sigma_F = \frac{1}{g}\sqrt{F_e + n_\text{pix}\left(S_e + R^2 + D_e\right)
   + \frac{n_\text{pix}^2}{n_\text{sky}}\left(S_e + R^2\right)} \tag{2}$$
 
-Here $g$ is the gain (electrons per ADU), $F_e = g F_\text{net}$,
+Here $g$ is the gain in electrons per ADU, $F_e = g F_\text{net}$,
 $S_e = g \bar{B}$ is the sky per pixel, $R$ the read noise (e-, the
 electronic noise of reading the sensor), $D_e$ the dark current per pixel (a
 signal the sensor builds up from heat), and $n_\text{sky}$ the number of sky
 pixels. The last term is the error of the sky level itself. $\sigma_F$ is in
-ADU, like $F_\text{net}$.
+ADU, like $F_\text{net}$. This predicted noise is compared later with the
+scatter the light curves actually show (Section 3.4).
 
 ### 3.3 Differential Ensemble Normalization
 
 **Choosing the comparison stars.** A fixed comparison set is chosen per
 session. Candidates are measured, unsaturated (not clipped at the sensor's
 maximum) and positive in every usable frame and not listed as variable. The
-brightest 2% are skipped, the band reaches the brightest 30%, and candidates
-that scatter more than their errors allow are dropped until <<min_comp>>
-remain. At most <<max_comp>> are kept.
+brightest 2% are skipped, and the band reaches the brightest 30%. Candidates
+that scatter more than their errors allow are then dropped one at a time,
+worst first. Dropping stops when no candidate is out of line, or when only
+<<min_comp>> remain. At most <<max_comp>> are kept.
 
-**The ensemble level.** Each member's flux is divided by its own session mean,
-so a value of 1 means "normal". The frame's ensemble level $L_k$ is the
-average of those ratios in frame $k$; a value of 0.9 means the comparison
-stars were 10% fainter than their session average in that frame. The average
-is inverse-variance weighted: each star
-counts in proportion to $1/\sigma^2$, so precise stars count more than noisy
-ones:
+**The ensemble level.** Each member's flux is divided by its own mean over
+the session, so a ratio of 1 means "normal". The frame's ensemble level $L_k$
+is the average of those ratios in frame $k$. It has no unit: 0.9 means the
+comparison stars were 10% fainter than their session average in that frame.
+The average is inverse-variance weighted: each star counts in proportion to
+$1/\sigma^2$, so precise stars count more than noisy ones. With $j$ the
+comparison star and $k$ the frame:
 
-$$L_k = \frac{\sum_j w_j \, F_{j,k} / \langle F_j \rangle}{\sum_j w_j}, \qquad
-w_j = \frac{1}{\sigma_j^2}, \qquad \sigma_{L} = \frac{1}{\sqrt{\sum_j w_j}} \tag{3}$$
+$$L_k = \frac{\sum_j w_{j,k} \, F_{j,k} / \langle F_j \rangle}{\sum_j w_{j,k}}, \qquad
+w_{j,k} = \frac{1}{\sigma_{j,k}^2}, \qquad \sigma_{L,k} = \frac{1}{\sqrt{\sum_j w_{j,k}}} \tag{3}$$
 
-**Normalizing a star.** A comparison star is divided by the level built from
-the other members only (leave one out), so its own changes never enter its
-divisor. A star's normalized flux is $f_k = F_k / N_k$, with $N_k$ the level
-in ADU per second. Its error combines the star's own error and the level's
-error; either one being large makes the result noisy:
+Here $F_{j,k}$ is the star's flux (ADU per second), $\langle F_j \rangle$ its
+session mean, and $\sigma_{j,k} = \sigma_{F,j,k} / \langle F_j \rangle$ its
+fractional error in that frame. $\sigma_{L,k}$ is the fractional error of the
+level.
 
-$$\sigma_{f} = \sqrt{\left(\frac{\sigma_F}{N}\right)^2 + \left(\frac{F \sigma_N}{N^2}\right)^2} \tag{4}$$
+**Back to flux units.** To divide a star's flux by the level, the level is
+scaled back to flux units:
+
+$$N_k = \bar{F}\, L_k, \qquad \sigma_{N,k} = \bar{F}\, \sigma_{L,k}$$
+
+where $\bar{F}$ is the mean of the comparison stars' session means, in ADU
+per second. $N_k$ is the flux of an "average comparison star" in frame $k$.
+A star as bright as that average star then has a normalized flux near 1.
+
+**Normalizing a star.** A star's normalized flux in frame $k$ is
+$f_k = F_k / N_k$. A comparison star is divided by the level built from the
+other members only (leave one out), so its own changes never enter its
+divisor. The error combines the star's own error and the level's error;
+either one being large makes the result noisy:
+
+$$\sigma_{f,k} = \sqrt{\left(\frac{\sigma_{F,k}}{N_k}\right)^2
+  + \left(\frac{F_k \, \sigma_{N,k}}{N_k^2}\right)^2} \tag{4}$$
 
 Normalization needs at least 2 comparison stars. With fewer, the raw light
 curves are kept.
@@ -1593,15 +1776,26 @@ curves are kept.
 **Why several tests.** Every light curve scatters a little from noise alone.
 A variable star scatters more than its error bars allow, and its changes are
 smooth from one point to the next. Three indices each catch one of these
-signs. Brightness here is in magnitudes $m$ (a logarithmic scale where a
-larger number means fainter; 1 mag is a factor of about 2.5).
+signs.
+
+**Units.** The indices are computed on each star's normalized fluxes $f_k$
+(Section 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a
+larger number means fainter; 1 mag is a factor of about 2.5). A fractional
+scatter $s$ is $1.0857\,s$ magnitudes, where $1.0857 = 2.5 / \ln 10$. A star's
+brightness is its instrumental magnitude $m = -2.5 \log_{10} \bar{F}_\star$,
+with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the
+camera's own scale, not calibrated to a catalog.
 
 **The noise model.** A noise model gives the scatter a constant star of
-magnitude $m$ shows in this field, $\sigma_\text{model}(m)$, from the median
-scatter in brightness bins. It needs at least <<noise_model_stars>> stars.
+instrumental magnitude $m$ shows in this field, $\sigma_\text{model}(m)$. It
+is the median measured scatter in brightness bins, so it includes noise the
+CCD equation leaves out (centroid jitter, flat-field errors). It needs at
+least <<noise_model_stars>> stars.
 
-**The three indices.** In each, $x_i$ are the star's $n$ measurements,
-$\sigma_i$ their errors and $\bar{x}_w$ their weighted mean.
+**The three indices.** In each, $x_i$ are the star's $n$ normalized fluxes,
+$\sigma_i$ their errors and $\bar{x}_w$ their weighted mean. When a star's
+errors are smaller than the noise model's scatter, they are scaled up to it,
+so a constant star gives the values below.
 
 The reduced chi-square $\chi^2_\nu$ asks whether the points scatter more than
 their error bars allow. A value near 1 means noise only; well above 1 means
@@ -1617,21 +1811,29 @@ $$\delta_i = \sqrt{\frac{n}{n-1}}\,\frac{x_i - \bar{x}_w}{\sigma_i}, \qquad
 J = \frac{1}{n-1}\sum_{i=1}^{n-1}\operatorname{sgn}(P_i)\sqrt{|P_i|}, \qquad
 P_i = \delta_i \, \delta_{i+1} \tag{6}$$
 
-The excess scatter $E$ compares the star's measured scatter with what the
-noise model expects for a star of its brightness. 1 means typical; 2 means
-twice the usual scatter:
+The excess scatter $E$ compares the star's measured scatter (in magnitudes)
+with what the noise model expects for a star of its brightness. 1 means
+typical; 2 means twice the usual scatter:
 
 $$E = \frac{\sigma_\text{measured}}{\sigma_\text{model}(m)} \tag{7}$$
 
-Eq. 6 is the single-band Stetson J with consecutive pairs and unit weights
-(Stetson 1996, PASP 108, 851).
+Eq. 6 is the single-band Stetson J (all points in one filter; Stetson also
+defines a version that pairs points taken in two filters), with consecutive
+pairs and unit weights (Stetson 1996, PASP 108, 851).
 
 **Thresholds and score.** The thresholds on $\chi^2_\nu$ and $J$ are the
-field median plus <<cal_sigmas>> robust standard deviations (a spread measure
-that a few wild values cannot inflate). The threshold on $E$ is fixed at
-<<excess>>. The ranking score divides each index by its threshold, so a score
-above 1 means the star clears its tests. Without a high $J$, the score is
-capped at 1, so it cannot pass:
+field median plus <<cal_sigmas>> robust standard deviations. A robust
+standard deviation is 1.4826 times the median absolute deviation (MAD), a
+spread measure that a few variable stars barely move; for normal data it
+equals the standard deviation. <<cal_sigmas>> is the one-sided 99% point of a
+normal distribution, so a constant star clears a threshold by chance about
+1% of the time. For $\chi^2_\nu$ the threshold is set on its logarithm,
+because its spread grows with its level. The threshold on $E$ is fixed at
+<<excess>>.
+
+The ranking score divides each index by its threshold, so a score above 1
+means the star clears its tests. Without a high $J$, the score is capped at 1,
+so it cannot pass:
 
 $$S = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr}\right) & J > J_\text{thr}\\
 \min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr},\; 1\right) & \text{otherwise}
@@ -1654,7 +1856,8 @@ $$\text{CV}_\text{cut} = \max\left(0.02,\;
   \text{median}(\text{CV}) + <<cv_sigma>> \times \text{MAD}(\text{CV})\right) \tag{9}$$
 
 where MAD is the unscaled median absolute deviation (the median distance of
-the values from their median, a spread measure that ignores outliers).
+the values from their median). <<cv_sigma>> unscaled MADs are about
+<<cv_robust_sigmas>> robust standard deviations (<<cv_sigma>> / 1.4826).
 
 ### 3.5 Period Search
 
@@ -1664,16 +1867,42 @@ of many trial periods to unevenly spaced data and finds smooth cycles. Box
 least squares fits a flat-bottomed dip that repeats, and finds eclipses and
 transits.
 
-**False alarms.** The false-alarm probability (FAP) is the share of
+**False alarms.** The false-alarm probability (FAP) $p$ is the share of
 block-shuffled copies of the light curve (the data cut into blocks and put
-back in random order, which destroys any real period) that do as well. A
-"detected" verdict needs a FAP below <<fap_detect>>.
+back in random order, which destroys any real period) that do as well.
+
+**The verdict ladder.** Each search result gets one verdict. From strongest
+to weakest:
+
+1. "detected": FAP at most <<fap_detect>>, with enough repeats (cycles, or
+   dips) seen;
+2. "possible": FAP at most <<fap_possible>> (a dip search also needs at least
+   two dips);
+3. "not detected".
+
+A light curve too short to search gets "insufficient data" instead.
 
 **Many searches.** Searching many stars raises the chance that one passes by
-luck. The Šidák correction, $1 - (1 - p)^m$ for $m$ searches, is the chance
-of at least one false pass among $m$ tries. It keeps the chance of a false
-detection across the whole run at that level (`family_wise_correction.py`).
-Two period checks (Section 4.1) can lower the verdict.
+luck. For $m$ independent searches, the chance that at least one reaches
+probability $p$ by luck is the family-wise false-alarm rate
+
+$$p_\text{family} = 1 - (1 - p)^m \tag{10}$$
+
+The Šidák correction holds that family-wise rate at the verdict limit
+$\alpha$ (<<fap_detect>> for "detected"). Each search's $p$ is turned into
+$p_\text{family}$ and judged against $\alpha$. That is the same as asking each
+search for $p \le 1 - (1 - \alpha)^{1/m}$
+(`family_wise_correction.py`). The correction can only lower a verdict.
+
+**Enough shuffles.** A shuffle test with $n$ copies cannot report a
+probability below about $1/(n+1)$. With many searches, that floor can sit
+above the corrected limit, so no verdict could pass. Searches that need it
+are run again with more copies, up to <<max_shuffles>>.
+
+**Period checks.** Two period checks (Section 4.1) then test each "detected"
+or "possible" result. Each failed check lowers the verdict one step on the
+ladder. A check that could not run lowers nothing and marks the result
+"unconfirmed".
 
 ### 3.6 Cross-Session Merge and Labels
 
@@ -1777,6 +2006,10 @@ def build_spectroscopy_doc() -> str:
             "astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp",
             "GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM",
         ),
+        "processing_fraction": require_symbol(
+            "astrometricslib.pipelines.spectroscopy.post_processing.run_gates",
+            "PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION",
+        ),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
     }
@@ -1825,71 +2058,89 @@ def build_spectroscopy_doc() -> str:
             "Optional",
             "`float` (deg)",
             "Field center (right ascension and declination, the sky's longitude and latitude). "
-            "Used to match stars when there is no solved stack (a stack with a sky map).",
-            "No registration reference by position.",
+            "When there is no solved stack (a stack with a sky map), the catalog stars offered "
+            "for naming the spectra are limited to this field.",
+            "The catalog stars are not limited to the field, so a star from elsewhere on the "
+            "sky can be matched by its pixel pattern alone.",
         ],
     ])
     values["param_table"] = parameter_table([
         [
             "`NO_GOOD_MATCH_RMS`",
             f"`{values['no_good']}`",
-            "Measured (14 stars)",
+            STATUS_MEASURED,
             "Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a "
-            "classification is a poor match.",
+            "classification is a poor match. On 14 stars of known type, right matches scored "
+            "0.046 to 0.105 and wrong ones 0.181 to 0.283.",
         ],
         [
             "`UNRELIABLE_MATCH_RMS`",
             f"`{values['unreliable']}`",
-            "Measured (55 stars)",
-            "Misfit (relative RMS, Eq. 4) above which no spectral type is given at all.",
+            STATUS_MEASURED,
+            "Misfit (relative RMS, Eq. 4) above which no spectral type is given at all. Of 55 "
+            "stars, 19 scored above it, and 18 of those had no catalog type.",
         ],
         [
             "`AMBIGUOUS_RMS_GAP`",
             f"`{values['gap']}`",
-            "Measured (reference ladder spacing)",
-            "Smallest misfit gap between the best reference and the next one; a smaller gap "
-            "makes the match ambiguous.",
+            STATUS_MEASURED,
+            "Smallest misfit gap to the best reference of another spectral class; a smaller gap "
+            "makes the match ambiguous. It is the smallest spacing between neighbouring "
+            "reference spectra (A0V and A2V are 0.019 apart).",
         ],
         [
             "`DIFFERS_FROM_CATALOG_SUBTYPES`",
             f"`{values['subtypes']}`",
-            "Measured (29 stars)",
-            "Subtype steps (the finer divisions of a spectral class) beyond which the measured "
-            "type disagrees with the catalog type.",
+            STATUS_MEASURED,
+            "Subtype steps (ten to a class, so 20 is two whole classes, such as B to F) beyond "
+            "which the measured type disagrees with the catalog type. Of 29 stars with a catalog "
+            "type, 27 were within 12 steps; the other two were wrong for other reasons.",
         ],
         [
             "`APERTURE_SIGMA_MULTIPLIER`",
             f"`{values['box']}`",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Half-width of the extraction box, in units of the trail's Gaussian sigma (its "
-            "width measure, Eq. 2).",
+            "width measure, Eq. 2). ±2.5 sigma holds about 99% of a Gaussian's light.",
         ],
         [
             "`SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX`",
             f"`{values['sky_gap']}` px / `{values['sky_width']}` px",
-            "Measured (Vega, one frame)",
-            "Gap between the box and each sky band, and the band's width, on each side of the box.",
+            STATUS_PARTLY_MEASURED,
+            "Gap between the box and each sky band, and the band's width, on each side of the "
+            "box. Swept on one Vega frame of a sparse field; used unswept on the crowded M 13 "
+            "stack.",
+        ],
+        [
+            "`MINIMUM_LINE_SIGNIFICANCE`",
+            f"`{values['zp_sig']:g}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Depth, in units of the local noise, a line needs to count for the zero-point "
+            "shift. On synthetic noise-only spectra no fake line reached 6; real lines in a "
+            "clean spectrum reach 20 or more.",
         ],
         [
             "`WAVELENGTH_SCALE_LIMIT_ANGSTROM`",
             f"`{values['wl_limit']}` Å",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Largest scatter of the run's wavelength zero points (offsets of the wavelength "
-            "scale) after correction.",
+            "scale) after correction. It is one pixel of dispersion (11.0 to 11.4 Å per pixel): "
+            "a larger error puts a line in the wrong sample.",
         ],
         [
             "`GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM`",
             f"`{values['xp_limit']}`",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own "
-            "low-resolution spectra), in percent per 1000 Å.",
+            "low-resolution spectra), in percent per 1000 Å. About the error the extinction "
+            "correction makes at 0.3 airmass.",
         ],
         [
-            "Flux calibration",
-            "Relative F_λ",
-            "Calibrated to a constant",
-            "Energy flux per unit wavelength (F_λ), corrected for sensor sensitivity (QE), "
-            "instrument response and atmospheric dimming, up to one unknown scale factor.",
+            "`PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION`",
+            f"`{values['processing_fraction']:g}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Largest share of classified spectra that may fail a limit of the processing "
+            "checkpoint before `processing_quality` fails.",
         ],
     ])
     template = r"""# Slitless Spectroscopy Extraction and Classification Pipeline Review Guide
@@ -1913,14 +2164,15 @@ checkpoints.
 This pipeline spreads each star's light into its colours, a spectrum, and
 uses the spectrum to classify the star. The class, or spectral type, mainly
 tells the star's surface temperature. The types run O, B, A, F, G, K, M from
-hottest to coolest, each split into finer subtypes.
+hottest to coolest, each split into ten finer subtypes (A0 to A9, for
+example).
 
 There is no slit, so every star in the field makes its own short rainbow
-trail at once. Trails can overlap, the sky adds light, and the camera, the
-optics and the air each dim some colours more than others. The pipeline
-traces each trail, sums its light, and turns position along the trail into
-wavelength. It then removes each known colour effect in turn and finds the
-reference spectrum that matches best.
+trail, its spectrum trail, at once. Trails can overlap, the sky adds light,
+and the camera, the optics and the air each dim some colours more than
+others. The pipeline traces each trail, sums its light, and turns position
+along the trail into wavelength. It then removes each known colour effect in
+turn and finds the reference spectrum that matches best.
 
 The result is a corrected spectrum and a spectral type for each star, with
 checks against star catalogs and against spectra from the Gaia space mission.
@@ -1928,18 +2180,20 @@ checks against star catalogs and against spectra from the Gaia space mission.
 ### 1.2 Statement of Need
 
 A transmission grating (a clear plate ruled with many fine parallel lines) in
-front of the camera, for example a Star Analyser 100 or 200, spreads each
-star's light into a first-order spectrum on the sensor. The spectrum lies next
-to the star's undispersed point image, the zero order. The pipeline turns
-those trails into calibrated spectra and classifies them against the Pickles
-(1998) stellar library (a set of reference spectra of known types).
+front of the camera, for example a Star Analyser 100 or 200, splits each
+star's light into a few beams called orders. The zero order passes straight
+through: it is the star's undispersed point image. The first order is the
+first spread-out copy beside it, the first-order spectrum, and it is the one
+measured. The pipeline turns those spectrum trails into calibrated spectra and
+classifies them against the Pickles (1998) stellar library (a set of
+reference spectra of known types).
 
 The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
     A["Stacked spectral image"] --> B["Find stars (detection only, no sky map)"]
-    B --> C["Name stars from the matching normal image's sky map, else by geometry"]
+    B --> C["Name stars from the matching normal image's sky map, else by their pixel pattern"]
     C --> D["Find the spectrum direction and trace each trail"]
     D --> E["Sum light across each trail; subtract sky from two side bands"]
     E --> F["Remove light spilling over from bright neighbours"]
@@ -1959,8 +2213,10 @@ Section 3 names the steps in the usual terms: the grating equation, differential
 refraction and the zero-point shift (Section 3.1); QE, instrument response,
 airmass extinction and dereddening (Section 3.3); and the Pickles and Gaia XP
 comparisons (Sections 3.4 and 3.5). The normal image is the target's solved
-standard stack, whose WCS (pixel-to-sky map) names the stars. The quality
-summary is a `SpectroscopyQualitySummary` (Section 7).
+standard stack, whose WCS (pixel-to-sky map) names the stars. Without it, the
+stars are named by matching the pattern of their pixel positions to catalog
+stars (Section 6). The quality summary is a `SpectroscopyQualitySummary`
+(Section 7).
 
 ## 2. Input Requirements & FITS Header Specification
 
@@ -1990,22 +2246,26 @@ becomes a wavelength through the first-order grating equation
 $$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p}{L}\right) \tag{1}$$
 
 where $d$ is the groove spacing (1 / lines per mm), $p$ the pixel pitch and
-$L$ the grating-to-sensor distance, the one fitted number. A larger $L$
-spreads the spectrum over more pixels.
+$L$ the grating-to-sensor distance. A larger $L$ spreads the spectrum over
+more pixels. $L$ is the one fitted number. It is fitted once, from the
+hydrogen (Balmer) absorption lines of a bright reference star such as Vega
+(`calibration_tuner.py`), and saved for later runs.
 
 **Refraction shift.** The air bends light slightly, and bends blue light more
 than red. Differential atmospheric refraction is this colour-dependent
 bending. It moves each wavelength along the trail by
-$R(\lambda) - R(\lambda_\text{eff})$, projected onto the dispersion
-direction, where $R(\lambda)$ is the bending at wavelength $\lambda$ and
+$\rho(\lambda) - \rho(\lambda_\text{eff})$, projected onto the dispersion
+direction, where $\rho(\lambda)$ is the bending at wavelength $\lambda$ and
 $\lambda_\text{eff}$ is a reference (effective) wavelength.
 It needs the site, a WCS (a pixel-to-sky map) and the exposure time.
 
 **Zero-point shift.** If the zero-order center is misplaced, the whole
-wavelength scale slides by a fixed amount, its zero point. A zero-point shift
-corrects that offset. It is measured from known absorption lines (dark lines
-where the star's atmosphere absorbs light), each at least <<zp_sig>> noise
-widths deep, and is applied when at least <<zp_lines>> lines agree.
+wavelength scale slides by a fixed amount, its wavelength zero point. A
+zero-point shift corrects that offset. It is measured from known absorption
+lines (dark lines where the star's atmosphere absorbs light). Each line must
+be at least <<zp_sig>> times the local noise deep, and the shift is applied
+when at least <<zp_lines>> lines agree, since one line could be a
+misidentified feature.
 
 ### 3.2 Extraction and Background Subtraction
 
@@ -2041,13 +2301,15 @@ some colours better than others. Three corrections undo this in turn.
 - **Instrument response.** The counts are then divided by the instrument
   response: everything else about the optics and grating that favours some
   colours. The response is Vega's observed spectrum over the Pickles A0V
-  template (a reference spectrum for Vega's type).
+  template. A0V is Vega's own type: spectral type A0 with luminosity class V,
+  a main-sequence (ordinary, hydrogen-burning) star.
 - **Airmass extinction.** The air dims light more at blue wavelengths, and
   more when the star is low. The extinction curve $k(\lambda)$ gives the
   dimming in magnitudes per airmass (a magnitude is a logarithmic brightness
   unit; 1 mag is a factor of about 2.5). Only the airmass difference $X -
-  X_\text{ref}$ from the response's reference star is removed, because the
-  response already holds the reference star's own dimming:
+  X_\text{ref}$ from the response's spectroscopic standard star (the star of
+  known spectrum that set the response) is removed, because the response
+  already holds that star's own dimming:
 
 $$F_\text{corr}(\lambda) = F(\lambda)\; 10^{0.4\, k(\lambda)\, (X - X_\text{ref})} \tag{3}$$
 
@@ -2075,8 +2337,14 @@ $$\text{RMS} = \frac{1}{\bar{F}}
   \sqrt{\frac{1}{M}\sum_{i=1}^{M}\left[F(\lambda_i) - a\,T(\lambda_i)\right]^2} \tag{4}$$
 
 The references are ranked by this score, and the lowest wins. Above
-<<no_good>> the match is poor. Above <<unreliable>> no type is given. A gap
-below <<gap>> to the next reference makes the match ambiguous.
+<<no_good>> the match is poor. Above <<unreliable>> no type is given.
+
+Two gaps measure how clearly the best reference wins. The gap to the
+second-best reference (often a neighbouring subtype) and the gap to the best
+reference of another spectral class are each compared with <<gap>>. A gap
+below it makes the match ambiguous at that level. Only a class-level ambiguity
+fails `spectral_classification`; subtype-level ties are counted in the gate
+detail.
 
 ### 3.5 Gaia XP Comparison
 
@@ -2098,7 +2366,10 @@ through `run_pipeline`. <<analysis_note>>
   names them from the target's solved stack, and runs
   `SpectroscopyPipeline.process`. Each spectrum carries four quality
   checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and
-  `post_processing`.
+  `post_processing`. Each checkpoint is a set of measured values (metrics),
+  some with a limit. The `processing` checkpoint judges the classification:
+  a poor match, an ambiguous match, and a type from line strengths that is
+  more than <<subtypes>> subtype steps from the template-fit type.
 - **Stage 3 (`validate_output`):** Builds the summary, records the eight
   `spectroscopy_run_gates`, then `gaia_xp_agreement` (<<gate_count>> in all).
 - **Stage 4 (`to_result_dict`):** Returns only `context` and
@@ -2111,6 +2382,12 @@ parallel workers, and builds the same gates from the same plain counts.
 ### 4.1 Quality Gates
 
 <<gate_intro>>
+
+The count covers only these run gates. Some checks are not gates. Two travel
+with each spectrum: the extinction record (whether the airmass correction ran,
+and why not) and the share of sky readings disturbed by a neighbour. The
+third, the rejection of a wavelength fit that leaves too large an error,
+happens when the instrument is calibrated (`calibration_tuner.py`).
 
 <<gate_table>>
 
@@ -2126,8 +2403,7 @@ parallel workers, and builds the same gates from the same plain counts.
    maximum value, so their true brightness is lost. When a star's zero order
    holds a significant share of them, `zero_order_saturation` fails. A
    saturated center can offset the wavelength scale; the zero-point shift
-   corrects it
-   when enough lines agree.
+   corrects it when enough lines agree.
 2. **Missing header data.** No `DATE-OBS`, site or WCS skips the refraction
    correction. No `AIRMASS` skips the extinction correction. Each skip is
    recorded on the spectrum.
@@ -2136,8 +2412,9 @@ parallel workers, and builds the same gates from the same plain counts.
    ambiguity or a poor match.
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends
    to read about one subtype cool.
-5. **No solved stack.** Stars are named by matching point patterns, which can
-   fail on sparse fields.
+5. **No solved stack.** Stars are named by matching the pattern of their pixel
+   positions to catalog stars ("by geometry"), which can fail on sparse
+   fields.
 
 <<quality_section>>"""
     values["analysis_note"] = ANALYSIS_STAGES_NOTE
@@ -2158,12 +2435,11 @@ def build_asteroid_detection_doc() -> str:
     gates = discover_gate_names("asteroid_detection")
     config_cls = require_symbol("astrometricslib.models.moving_object_config", "MovingObjectConfig")
     defaults = {name: field.default for name, field in config_cls.model_fields.items()}
+    pipeline_module = "astrometricslib.pipelines.asteroid_detection.pipeline"
     values = {
         "version_line": VERSION_LINE,
-        "pointing_radius": require_symbol(
-            "astrometricslib.pipelines.asteroid_detection.pipeline",
-            "_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC",
-        ),
+        "pointing_radius": require_symbol(pipeline_module, "_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC"),
+        "vote_bin": require_symbol(pipeline_module, "_POINTING_CORRECTION_VOTE_BIN_ARCSEC"),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
         **{f"cfg_{name}": value for name, value in defaults.items()},
@@ -2226,65 +2502,74 @@ def build_asteroid_detection_doc() -> str:
         [
             "`min_frames_for_persistence`",
             cfg("min_frames_for_persistence"),
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Fewest detections in a chain (detections linked across frames as one object).",
         ],
         [
             "`pixel_match_tolerance_px`",
             cfg("pixel_match_tolerance_px"),
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high).",
         ],
         [
             "`sky_match_tolerance_arcsec`",
             cfg("sky_match_tolerance_arcsec"),
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Sky spread below which a chain is a fixed star (Eq. 2).",
         ],
         [
             "`rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour`",
             f"{cfg('rate_min_arcsec_per_hour')} / {cfg('rate_max_arcsec_per_hour')} arcsec/h",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Allowed range of the total speed across the sky.",
         ],
         [
             "`chain_match_radius_max_arcsec`",
             f"{cfg('chain_match_radius_max_arcsec')} arcsec",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Cap on how far a chain may reach for its next detection (Eq. 1).",
         ],
         [
             "`residual_rms_max_multiple`",
             cfg("residual_rms_max_multiple"),
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Largest RMS (root mean square) distance from the fitted straight line on each axis, "
-            "in units of the position error.",
+            "in units of that axis's position error.",
         ],
         [
             "`min_displacement_error_multiple`",
             cfg("min_displacement_error_multiple"),
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Smallest total distance moved, in units of the position error.",
         ],
         [
             "`astrometric_error_default_arcsec`",
             f"{cfg('astrometric_error_default_arcsec')} arcsec",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Position error assumed for a detection with none measured.",
         ],
         [
             "`ephemeris_cross_match_radius_arcsec`",
             f"{cfg('ephemeris_cross_match_radius_arcsec')} arcsec",
-            "Designed",
+            STATUS_DESIGN_ESTIMATE,
             "Match radius for a known body from SkyBoT (an online service that lists known "
             "solar-system bodies), at both the first and last detection.",
         ],
         [
             "`_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC`",
             f"`{values['pointing_radius']:g}` arcsec",
-            "Unvalidated (NGC 2403)",
+            STATUS_PARTLY_MEASURED,
             "Pairing radius between stack stars and frame detections in the per-frame "
-            "pointing-offset vote (Section 3.1).",
+            "pointing-offset vote (Section 3.1). Chosen on NGC 2403 only, not on a range of "
+            "mount pointing errors.",
+        ],
+        [
+            "`_POINTING_CORRECTION_VOTE_BIN_ARCSEC`",
+            f"`{values['vote_bin']:g}` arcsec",
+            STATUS_PARTLY_MEASURED,
+            "Bin width of the offset vote. Small enough to separate the true offset from the "
+            "spacing of NGC 2403's stars (median 48 arcsec), and well above the star finder's "
+            "sub-arcsec centering noise.",
         ],
     ])
     template = r"""# Asteroid and Moving Object Detection Pipeline Review Guide
@@ -2376,8 +2661,17 @@ of arcseconds off.
 
 **How.** The stack's own stars are therefore matched to each frame's
 detections within <<pointing_radius>> arcsec. Every pair votes for an offset
-in 5-arcsec bins, and the winning offset is removed from the frame's
-positions. True pairs agree on one offset; chance pairs scatter their votes.
+in <<vote_bin>>-arcsec bins, and the winning offset is removed from the
+frame's positions. True pairs agree on one offset; chance pairs scatter their
+votes. A plain nearest-star match was tried first and failed: on NGC 2403 the
+stars are about as far apart as the mount's error, so many detections were
+paired with the wrong star.
+
+**Position error.** The same vote measures each frame's position error: the
+scatter of the matched stack stars about the winning offset, on each axis,
+combined with the error of finding a faint dot's center. This is the
+"position error" the tests below use. A chain's error is the root mean
+square (RMS) of its detections' errors.
 
 ### 3.2 Chaining
 
@@ -2414,26 +2708,37 @@ the field center), and $\theta$ is the angle between two sky positions.
 ### 3.4 Straight-Line and Rate Tests
 
 Over one night, an asteroid moves in a nearly straight line at a nearly steady
-speed. Noise linked by chance does not. RA and Dec (right ascension and
-declination, the sky's longitude and latitude) offsets on the tangent plane
-are each fitted against time. The slopes $\dot{\alpha}$ and $\dot{\delta}$
-are the speeds along the two axes:
+speed. Noise linked by chance does not. Each detection's RA and Dec (right
+ascension and declination, the sky's longitude and latitude) are turned into
+offsets $\xi, \eta$ in arcsec on the tangent plane, measured from a reference
+point $(\alpha_\text{ref}, \delta_\text{ref})$:
 
-$$\alpha(t) = \alpha_0 + \dot{\alpha}\,(t - t_0), \qquad
-  \delta(t) = \delta_0 + \dot{\delta}\,(t - t_0) \tag{3}$$
+$$\xi = (\alpha - \alpha_\text{ref}) \cos \delta_\text{ref}, \qquad
+  \eta = \delta - \delta_\text{ref} \tag{3}$$
+
+The $\cos \delta$ factor is needed because lines of equal RA meet at the
+poles: away from the equator, a step in RA covers a smaller angle on the sky.
+Each offset is fitted against time with a straight line. The slopes
+$\dot{\xi}$ and $\dot{\eta}$ are the true speeds across the sky along the two
+axes:
+
+$$\xi(t) = \xi_0 + \dot{\xi}\,(t - t_0), \qquad
+  \eta(t) = \eta_0 + \dot{\eta}\,(t - t_0) \tag{4}$$
 
 A chain passes when all of these hold:
 
-- The total rate $\sqrt{\dot\alpha^2 + \dot\delta^2}$ is between
+- The total rate $\sqrt{\dot\xi^2 + \dot\eta^2}$ is between
   <<cfg_rate_min_arcsec_per_hour>> and <<cfg_rate_max_arcsec_per_hour>>
   arcsec/h.
 - On each axis, the RMS distance from the line is at most
   <<cfg_residual_rms_max_multiple>> times that axis's position error.
 - The total displacement is at least <<cfg_min_displacement_error_multiple>>
-  times the position error.
+  times the position error, so a star that only jitters by its error does
+  not pass.
 - The positions never move back along the fitted direction by more than the
-  position error (otherwise `REJECTED_NON_MONOTONIC`, meaning the motion is
-  not one-way).
+  combined position error of the two detections compared (the square root of
+  the sum of their squared errors). Otherwise the chain is
+  `REJECTED_NON_MONOTONIC`, meaning the motion is not one-way.
 
 ### 3.5 Known-Body Match
 
@@ -2467,14 +2772,20 @@ period search; the pipeline does not call it either.
 
 <<gate_intro>>
 
+A failed gate here does not always mean the run went wrong. `unmatched_movers`
+fails on purpose when a confirmed mover matches no known body: the failure
+flags the run so that a person looks at what may be a new object, or at a
+known one the match missed.
+
 <<gate_table>>
 
 ## 5. Tuned Calibration Parameters
 
 <<param_intro>>
 
-The values below are the defaults of `MovingObjectConfig`. The configuration
-can change them.
+The values below are the defaults of `MovingObjectConfig`, plus the two
+pointing-vote constants of `pipeline.py`. The configuration can change the
+defaults.
 
 <<param_table>>
 
@@ -2485,11 +2796,11 @@ can change them.
 2. **Missing pointing cards.** Frames without `RA`, `DEC`, `NAXIS1` or
    `NAXIS2` are excluded and `pointing_metadata` fails.
 3. **Weak pointing vote.** When too few pairs agree on an offset, the frame
-   keeps its raw mount pointing.
+   keeps its raw mount pointing and has no measured position error.
 4. **SkyBoT outages.** Confirmed movers stay as candidates and
    `ephemeris_cross_match` fails.
-5. **No measured position error.** The default error is assumed and
-   `track_residuals` says how many detections used it.
+5. **No measured position error.** The default error is assumed, and
+   `track_residuals` fails and says how many detections used it.
 
 <<quality_section>>"""
     values["analysis_note"] = ANALYSIS_STAGES_NOTE
@@ -2509,6 +2820,7 @@ def build_stacking_doc() -> str:
     """
     gates = discover_gate_names("stacking")
     quality_module = "astrometricslib.pipelines.stacking.post_processing.stack_quality"
+    flat_module = "astrometricslib.pipelines.stacking.pre_processing.flat_calibration"
     values = {
         "version_line": VERSION_LINE,
         "dark_tol": require_symbol(
@@ -2529,6 +2841,20 @@ def build_stacking_doc() -> str:
         ),
         "registered": require_symbol(
             "astrometricslib.pipelines.stacking.stack_runner", "MINIMUM_REGISTERED_FRACTION"
+        ),
+        "group_minimum": require_symbol(
+            "astrometricslib.pipelines.stacking.processing.exposure_groups",
+            "MINIMUM_FRAMES_PER_EXPOSURE_GROUP",
+        ),
+        "gap_ratio": require_symbol(
+            "astrometricslib.pipelines.stacking.pre_processing.background_homogeneity",
+            "DEFAULT_GAP_RATIO_THRESHOLD",
+        ),
+        "flat_noise": require_symbol(flat_module, "MAXIMUM_FLAT_NOISE_FRACTION"),
+        "flat_low": require_symbol(flat_module, "MINIMUM_FLAT_LEVEL_FRACTION"),
+        "flat_high": require_symbol(flat_module, "MAXIMUM_FLAT_LEVEL_FRACTION"),
+        "saturation": require_symbol(
+            "astrometricslib.pipelines.shared.quality.saturation", "DEFAULT_SATURATION_FLAG_THRESHOLD"
         ),
         "gate_count": gate_count_text(gates),
         "gate_table": gate_table(gates),
@@ -2553,15 +2879,17 @@ def build_stacking_doc() -> str:
             "`GAIN` (or `ISOSPEED`)",
             "Recommended",
             "`float`",
-            "Gain setting (the camera's amplification). Used for the minority-gain check and to "
-            "file calibration frames.",
+            "Gain setting: the camera's amplifier setting, a unitless number (not the gain in "
+            "electrons per ADU). `ISOSPEED` is a DSLR camera's ISO setting, its counterpart of a "
+            "gain setting. Used for the minority-gain check and to file calibration frames.",
             "Frames fall into one unknown-gain group; `gain_homogeneity` is not checked.",
         ],
         [
             "`OFFSET` (or `BLKLEVEL`)",
             "Recommended",
             "`int`",
-            "Camera offset (a fixed level added to every pixel), used to file calibration frames.",
+            "Camera offset: a constant the camera adds to every pixel so that noise below zero "
+            "is still recorded. Used to file calibration frames.",
             "Offset 0 is assumed.",
         ],
         [
@@ -2592,46 +2920,96 @@ def build_stacking_doc() -> str:
         [
             "`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`",
             f"`{values['dark_tol']}` °C",
-            "Designed",
+            STATUS_PARTLY_MEASURED,
             "Width of a dark temperature slot, and the largest temperature gap before a soft "
-            "flag (a warning that does not stop the dark being used).",
+            "flag (a warning that does not stop the dark being used). A deliberately loose first "
+            "estimate, not checked against this camera's dark-current curve. One real case backs "
+            "it: Arcturus darks near 0 °C and -10 °C, against lights that drifted from -2.9 °C "
+            "to -10.7 °C, left 57-64% negative pixels.",
         ],
         [
             "`DEFAULT_MINIMUM_SURVIVING_FRAMES`",
             f"`{values['min_surviving']}` frames",
-            "Measured (M 13)",
-            "Fewest frames that must be left after Siril's percentage-based frame filters.",
+            STATUS_PARTLY_MEASURED,
+            "Fewest frames that must be left after Siril's percentage-based frame filters. On "
+            "one M 13 session, stacks of 5 to 20 frames got steadily worse with fewer frames, "
+            "with no failure at 5 to set the value against.",
         ],
         [
             "`DEFAULT_FWHM_DEGRADATION_RATIO`",
             f"`{values['degrade']}`",
-            "Measured (6 stacks)",
-            "Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3).",
+            STATUS_MEASURED,
+            "Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Six "
+            "real stacks gave 0.77 to 1.16, so a normal stack stays below it. Whether it catches "
+            "a real alignment failure is untested: no such session exists.",
         ],
         [
             "`DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`",
             f"`{values['rej']}`",
-            "Measured (3 sessions)",
+            STATUS_MEASURED,
             "Share of pixels rejected as outliers during stacking above which "
-            "`rejected_pixel_fraction` fails.",
+            "`rejected_pixel_fraction` fails. On three real sessions the share stayed below "
+            "about 10%, even on a cloud-affected NGC 2403 session.",
         ],
         [
             "`MAXIMUM_QUARANTINED_FRACTION`",
             f"`{values['quarantine']}`",
-            "Designed",
-            "Largest share of a batch the quarantine (setting bad frames aside) may move.",
+            STATUS_PARTLY_MEASURED,
+            "Largest share of a batch the quarantine (setting bad frames aside) may move. A "
+            "dry run on the library picked at most 13% of a batch; a quarter is about twice that.",
         ],
         [
             "`MINIMUM_PENALTY_TO_WEIGHT`",
             f"`{values['penalty']}`",
-            "Measured (M 27)",
-            "Noise penalty of giving every frame equal weight (Eq. 4), above which noise weighting is used.",
+            STATUS_DESIGN_ESTIMATE,
+            "Noise penalty $P$ of equal weights (Eq. 4) at or above which noise weighting is "
+            "used. The value is designed; the benefit was measured on the M 27 imaging stack, "
+            "where $P$ = 1.17 and noise weighting lowered its pixel noise by 13%.",
         ],
         [
             "`MINIMUM_REGISTERED_FRACTION`",
             f"`{values['registered']}`",
-            "Unvalidated (Vega)",
-            "Share of spectral frames that must register (align on each other); fewer triggers a retry.",
+            STATUS_DESIGN_ESTIMATE,
+            "Share of spectral frames that must register (align on each other); fewer triggers a "
+            "retry. Chosen to tolerate one lost frame in ten; seen only on the Vega session.",
+        ],
+        [
+            "`MINIMUM_FRAMES_PER_EXPOSURE_GROUP`",
+            f"`{values['group_minimum']}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Fewest frames an exposure length needs to be stacked on its own; a smaller set joins "
+            "the group with the nearest exposure length. Not tested at this value.",
+        ],
+        [
+            "`DEFAULT_GAP_RATIO_THRESHOLD`",
+            f"`{values['gap_ratio']:g}`",
+            STATUS_PARTLY_MEASURED,
+            "Smallest gap between two groups of sky-background levels, as a multiple of the "
+            "spread within a group, that counts as a split. In tests, normal nights gave below 1 "
+            "and sudden cloud above 6.",
+        ],
+        [
+            "`MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION`",
+            f"`{values['flat_low']:g}` / `{values['flat_high']:g}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Allowed level of the master flat, as a share of the sensor's full scale (the "
+            "largest value a pixel can record). Common practice, not checked on this "
+            "observatory's data.",
+        ],
+        [
+            "`MAXIMUM_FLAT_NOISE_FRACTION`",
+            f"`{values['flat_noise']:g}`",
+            STATUS_MEASURED,
+            "Largest relative noise (standard deviation over mean) of the master flat before it "
+            "is smoothed and `flat_noise` fails. A 4.5% flat caused 86% of the fine-scale noise of "
+            "the M 101 stack, and smoothing it halved that stack's noise.",
+        ],
+        [
+            "`DEFAULT_SATURATION_FLAG_THRESHOLD`",
+            f"`{values['saturation']:g}`",
+            STATUS_DESIGN_ESTIMATE,
+            "Share of saturated pixels at or above which the stack is flagged "
+            "(`saturated_pixel_fraction`). Not checked against real stacks.",
         ],
     ])
     template = r"""# Astronomical Stacking and Image Calibration Pipeline Review Guide
@@ -2656,32 +3034,37 @@ cleaner image, called a stack.
 
 Each raw exposure carries flaws from the camera and the optics: a fixed
 electronic level, a glow that builds up with exposure time, and darker corners
-and dust shadows. Each exposure is also noisy, and some catch satellite trails
-or cosmic-ray hits. The pipeline first removes the camera and optics flaws
-using reference exposures taken for the purpose (calibration frames). It then
-lines the exposures up on their stars and averages them, rejecting pixels that
-disagree with the rest.
+and dust shadows. Each exposure is also noisy, and some catch satellite or
+meteor streaks or cosmic-ray hits. The pipeline first removes the camera and
+optics flaws using reference exposures taken for the purpose (calibration
+frames). It then lines the exposures up on their stars and averages them,
+rejecting pixels that disagree with the rest.
 
 The result is the stacked image, a preview picture, and a quality summary that
 checks both the inputs and the result.
 
 ### 1.2 Statement of Need
 
-Raw frames carry dark current (a signal the sensor builds up from heat, which
-grows with exposure time), a bias level (the fixed electronic level of an
-empty exposure), and vignetting (darker corners from the optics) and dust
-shadows. Master darks, biases and flats (averaged calibration frames taken
-with the shutter closed, with the shortest exposure, and of an evenly lit
-surface) remove them. Stacking many aligned frames raises the signal-to-noise
-ratio by about $\sqrt{N}$ for $N$ frames and rejects satellite trails and
-cosmic rays.
+Raw frames carry three kinds of flaw:
+
+- dark current: a signal the sensor builds up from heat, which grows with
+  exposure time;
+- a bias level: the fixed electronic level of an empty exposure;
+- vignetting (darker corners from the optics) and dust shadows.
+
+Three kinds of master calibration frame remove them. Each master is the
+average of many frames. A master dark is taken with the shutter closed, a
+master bias with the shortest exposure the camera allows, and a master flat
+of an evenly lit surface. Stacking many aligned frames raises the
+signal-to-noise ratio by about $\sqrt{N}$ for $N$ frames and rejects
+streaks and cosmic rays.
 
 The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
     A["Start a stack for a target"] --> B["Select frames: one camera, no mix of spectra and normal images"]
-    B --> C["Set aside frames taken at a less common gain"]
+    B --> C["Set aside frames taken at a less common gain setting"]
     C --> D["Set bad frames aside (too few stars, stars not round)"]
     D --> E["Check the sky background for each exposure length"]
     E --> F["Choose weighting"]
@@ -2696,11 +3079,12 @@ flowchart TD
     N --> O["Preview picture and inputs record"]
 ```
 
+Siril is an open-source astronomy image processor that does the pixel work.
 In code terms the run starts at `stage.stack_frames(target)`, splits frames in
-`stack_runner.run_stack`, and stacks through a `StackingDriver`, whose Siril
-version runs `ImageProcessing` (Section 4). Siril is an open-source
-astronomy image processor. Setting bad frames aside is the frame quarantine,
-and the quality summary is a `StackQualitySummary` (Section 7).
+`stack_runner.run_stack`, and stacks through a `StackingDriver` (the interface
+for a stacking program), whose Siril version runs `ImageProcessing`
+(Section 4). Setting bad frames aside is the frame quarantine, and the quality
+summary is a `StackQualitySummary` (Section 7).
 
 ## 2. Input Requirements & FITS Header Specification
 
@@ -2718,9 +3102,10 @@ lengths.
 
 A dark only cancels the heat signal if it was taken at about the same sensor
 temperature as the light frames (the exposures of the target). The
-calibration library files each frame under its gain, offset and binning, and
-each dark also under a temperature slot <<dark_tol>> °C wide. Lights use the
-darks of their own slot. With none, the nearest-temperature dark is used.
+calibration library files each frame under its gain setting, offset and
+binning, and each dark also under a temperature slot <<dark_tol>> °C wide.
+Lights use the darks of their own slot. With none, the nearest-temperature
+dark is used.
 
 The master's temperature is the mean of its darks. A soft flag (a warning
 that does not stop the dark being used) is raised when the gap between the
@@ -2729,8 +3114,8 @@ light's temperature and the master's is too large:
 $$\left|T_\text{light} - \bar{T}_\text{dark}\right| > <<dark_tol>>\,^\circ\text{C} \tag{1}$$
 
 The dark is still applied; the flag makes `calibration_metadata` fail. When
-no dark records a temperature, the match is not judged. A gain or offset
-mismatch falls back the same way. A binning mismatch never falls back.
+no dark records a temperature, the match is not judged. A gain-setting or
+offset mismatch falls back the same way. A binning mismatch never falls back.
 
 ### 3.2 Expected Stack FWHM
 
@@ -2738,46 +3123,89 @@ FWHM (full width at half maximum) is the width of a star's light profile at
 half its peak height; a smaller FWHM means a sharper image. Averaging aligned
 frames adds no blur of its own, so the stack's star width follows from the
 input widths. The pipeline predicts that width and checks the stack against
-it. For round Gaussian (bell-shaped) stars of widths $w_1, \dots, w_N$, the
-stacked star's FWHM is the root mean square of the inputs:
+it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are
+$\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root
+mean square of the inputs:
 
 $$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\text{FWHM}_i^2} \tag{2}$$
 
 The ratio $R$ of measured to expected width is 1 for a perfect stack. A ratio
-well above 1 means the alignment or the combination blurred the stars:
+well above 1 means the alignment or the combination blurred the stars. The
+stack passes when
 
 $$R = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le <<degrade>> \tag{3}$$
 
 ### 3.3 Weighting and Rejection
 
-**Weighting.** Frames of different exposure lengths have different noise, so
-giving them equal weight can waste the better frames. The configured weighting
-always wins. With none configured, an imaging stack uses Siril's noise
-weighting when equal weights would cost at least <<penalty>> in noise. The
-penalty $P$ is 1 when all exposures are equal and grows as they differ:
+**Why weight.** For frames limited by the noise of the sky, a frame's
+signal-to-noise squared grows in step with its exposure. A 30 s frame then
+carries less information than a 120 s frame, and giving both the same weight
+wastes the better one. Weighting each frame by its own noise gives the best
+combination.
 
-$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \ge <<penalty>> \tag{4}$$
+**The penalty of equal weights.** $P$ is how much noisier an equal-weight
+stack is than the best-weighted one, for sky-limited frames. It follows from
+the exposure times alone:
 
-where $t$ are the frame exposures and a bar is the mean over frames. Frames
-of one exposure length give $P = 1$, so such a stack is unweighted unless a
-weighting is configured.
+$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \tag{4}$$
+
+where $t$ are the frame exposures and a bar is the mean over frames. $P$ is 1
+when all exposures are equal and grows as they differ; 1.17 means 17% more
+noise.
+
+**The rule.** A configured weighting always wins. With none configured, an
+imaging stack uses Siril's noise weighting when $P \ge <<penalty>>$. Spectral
+stacks are left to the exposure-group handling of Section 3.4.
+
+**When P is not 1.** $P$ is computed over all of a stack's frames before they
+are split by exposure length (Section 3.4). So a stack whose exposure lengths
+differ enough to reach the limit gets noise weighting, and that setting is
+passed to the Siril stack of every group. Inside one group the exposures are
+equal, so the weighting then evens out other differences in noise between
+frames. Frames of different lengths share one Siril stack only when a length
+has fewer than <<group_minimum>> frames and joins the group with the nearest
+length, or when no length has that many frames, or a frame has no readable
+exposure, and all frames are stacked together. Between groups, the
+inverse-variance combination of Section 3.4 does the weighting.
 
 **Rejection.** Siril stacks with `-norm=addscale` (each frame's level and
-spread are matched to the reference before combining) and sigma rejection
-(`rej`). Sigma rejection drops, at each pixel, values more than a set number
-of standard deviations from the rest, which removes satellite trails and
-cosmic rays. The low and high limits are either fixed or set from the frame
-count.
+spread are matched to the group's reference frame before combining) and
+sigma rejection (`rej`). Sigma rejection drops, at each pixel, values more
+than a set number of standard deviations from the rest, which removes
+streaks and cosmic rays.
+
+The limits are set in one of three ways. A limit passed by the caller always
+wins. In the default "adaptive" mode the high limit comes from Chauvenet's
+criterion: reject a value when fewer than half a frame of a stack of $N$
+frames would stray that far by chance, which gives a limit that grows slowly
+with $N$. The high limit is kept at or above a configured floor, and the low
+limit is set a little looser, because the bad values in sky images (streaks,
+cosmic rays, hot pixels) are brighter than the truth. A "fixed" mode uses one
+configured pair of limits for every stack.
 
 ### 3.4 Exposure Groups
 
-Every stack with more than one exposure length is stacked one length at a
-time. Each group's stack is turned into counts per second and put on the
-reference group's brightness scale using mid-range pixels. A group whose
-bright end disagrees is left out, because its brightest pixels no longer grow
-in step with exposure. The rest are combined with inverse-variance weights:
-each group counts in proportion to $1/\sigma^2$, so less noisy groups count
-more. All groups are used, not only the largest one.
+**Why groups.** Siril's usual recipe matches every frame to one noise level
+and then clips outliers. With several exposure lengths, a 5 s frame and a
+0.5 s frame hold very different amounts of light in the same pixel, and the
+clipping throws away the best frames' values. Each length also needs darks of
+its own length. So every stack with more than one exposure length is stacked
+one length at a time. A spectral stack is also split by night, because the
+zero order (the star's undispersed image) sits on a different pixel each night
+and aligning two nights together can lose most frames.
+
+**Putting groups on one scale.** Each group's stack is turned into counts per
+second. That alone does not line the groups up, because Siril's normalization
+leaves each group's stack on the brightness scale of its own reference frame.
+Each group therefore gets a group scale factor that puts it on the reference
+group's scale, measured on mid-range pixels with saturated pixels left out. A
+group whose bright end disagrees with that factor is left out, because its
+brightest pixels no longer grow in step with exposure.
+
+**Combining.** The rest are combined with inverse-variance weights: each
+group counts in proportion to $1/\sigma^2$, where $\sigma$ is the background
+noise of its stack, so less noisy groups count more. All groups are used, not
+only the largest one.
 
 ## 4. Processing Flow
 
@@ -2785,7 +3213,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is
 `stage.stack_frames`:
 
 1. **Frame selection and checks.** One camera only, no mix of spectral and
-   imaging frames, minority-gain frames set aside, frames set aside by an
+   imaging frames, frames at a less common gain setting set aside, frames set aside by an
    earlier run dropped, the quarantine (imaging only), and the background
    check.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames,
@@ -2798,14 +3226,23 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length
    (and by night for spectra) and calls the `StackingDriver`. The Siril driver
    (`siril_stacking_driver.py`) runs `ImageProcessing` in `siril_interface.py`:
-   masters, calibration, registration (alignment) and stacking. Spectral registration that
-   loses too many frames is retried with relaxed detection, then with phase
-   correlation (aligning whole images by their overall pattern rather than by
-   single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). The
-   quality summary and its gates are built (<<gate_count>>). A preview
-   picture is made with the GraXpert and Cosmic Clarity image tools and star
-   toning, and the inputs record is written last.
+   masters, calibration, registration (alignment) and stacking. Spectral
+   registration that loses too many frames is retried with relaxed detection,
+   then with phase correlation (aligning whole images by their overall
+   pattern rather than by single stars).
+5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames
+   never line up exactly, so the edges of a stack are covered by fewer frames
+   than the middle and are noisier. The trim measures the noise and cuts each
+   side back to where it matches the interior; a stack with clean edges is
+   left alone. The quality summary and its gates are built (<<gate_count>>).
+6. **Preview picture.** A JPEG for people to look at is made from a copy of
+   the stack; the stack itself is never changed. GraXpert, an AI tool, removes
+   the sky's brightness gradient. Siril stretches the brightness so faint parts
+   show. Cosmic Clarity, another AI tool, removes noise. Star toning dims the
+   stars in proportion to their brightness, because the stretch makes nearly
+   every star the same white dot. GraXpert and Cosmic Clarity run only when
+   configured, and a failed step never fails the stack. The inputs record is
+   written last.
 
 ### 4.1 Quality Gates
 
@@ -2842,8 +3279,8 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is
     return fill(template, {**COMMON_VALUES, **values})
 
 
-# The class each pipeline's run goes through, for the index table.
-PIPELINE_ENTRY_POINTS: dict[str, tuple[str, str, str]] = {
+# The adapter class each pipeline's run goes through, for the index table.
+PIPELINE_ADAPTERS: dict[str, tuple[str, str, str]] = {
     "astrometry": ("Astrometry", "`AstrometryPipelineAdapter`", "`AstrometryQualitySummary`"),
     "photometry": ("Photometry", "`PhotometryPipelineAdapter`", "`PhotometryQualitySummary`"),
     "spectroscopy": ("Spectroscopy", "`SpectroscopyPipelineAdapter`", "`SpectroscopyQualitySummary`"),
@@ -2852,7 +3289,7 @@ PIPELINE_ENTRY_POINTS: dict[str, tuple[str, str, str]] = {
         "`AsteroidDetectionPipelineAdapter`",
         "`AsteroidDetectionQualitySummary`",
     ),
-    "stacking": ("Image Stacking", "`stage.stack_frames` (no adapter)", "`StackQualitySummary`"),
+    "stacking": ("Image Stacking", "None (runs from `stage.stack_frames`)", "`StackQualitySummary`"),
 }
 
 
@@ -2865,15 +3302,17 @@ def build_index_doc() -> str:
         Markdown content for index.md.
     """
     rows = []
-    for key, (title, entry, summary) in PIPELINE_ENTRY_POINTS.items():
+    for key, (title, adapter, summary) in PIPELINE_ADAPTERS.items():
         rows.append([
             f"**{title}**",
             f"[{title}]({key}.md)",
-            entry,
+            adapter,
             summary,
             gate_count_text(discover_gate_names(key)),
         ])
-    overview_table = make_table(["Pipeline", "Review Guide", "Entry Point", "Quality Summary", "Gates"], rows)
+    overview_table = make_table(
+        ["Pipeline", "Review Guide", "Adapter Class", "Quality Summary", "Gates"], rows
+    )
     stage_rows = make_table(
         ["Pipeline", "Stage 1 (`process_input`)"],
         [
@@ -2890,36 +3329,44 @@ def build_index_doc() -> str:
 ## Abstract
 
 This index is the entry point for scientific review of the Astrometrics
-processing pipelines. Each guide covers the header cards a pipeline reads, its
-maths, its processing flow, its tuned limits, its fallback paths and its
-quality gates. The gate lists and counts are read from the code when the
-guides are generated.
+processing pipelines. A pipeline here is a fixed series of processing steps
+that turns telescope images into a scientific result. A quality gate is an
+automatic check on a run that passes, fails, or is not checked when its data
+are missing.
 
-A pipeline here is a fixed series of processing steps that turns telescope
-images into a scientific result. A quality gate is an automatic check on a
-run that passes, fails, or is not checked when its data are missing.
+Each guide covers the header cards a pipeline reads (the named keyword and
+value entries at the top of a FITS image file, such as `EXPTIME` for the
+exposure length), its maths, its processing flow, its tuned limits, its
+fallback paths and its quality gates. The gate lists and counts are read from
+the code when the guides are generated.
 
 Terms are defined in the [glossary](<<glossary_link>>). Each guide also
 defines its terms where they first appear, so it can be read on its own.
 
 ## 1. Pipeline Architecture
 
-Four analysis pipelines share the `AnalysisPipeline` interface
-(`pipeline_base.py`). `run_pipeline` calls four methods in order:
+There are five pipelines. Four of them (astrometry, photometry, spectroscopy
+and asteroid detection) are analysis pipelines that share one Python
+interface, `AnalysisPipeline` (`pipeline_base.py`). Each has an adapter: a
+class that wraps the pipeline's own code in that interface. The function
+`run_pipeline` drives an adapter by calling four of its methods in order.
+Each guide calls these the four stages of a run:
 
 1. **`process_input`:** decides whether there is work to do.
 2. **`run`:** does the science.
 3. **`validate_output`:** builds the quality summary and records the gates.
 4. **`to_result_dict`:** returns the result the caller expects.
 
-`run` is skipped only when `process_input` returns `has_work=False`. Stage 1
-does real work only in photometry:
+Stage 1 returns a `Result` object. `run` is skipped only when that object
+says `has_work=False`. Stage 1 does real work only in photometry:
 
 <<stage_rows>>
 
-Stacking does not use this interface. It runs from `stage.stack_frames`
-through `stack_runner.run_stack` to a `StackingDriver`, whose Siril
-implementation runs `ImageProcessing` in `siril_interface.py`.
+The fifth pipeline, stacking, does not use this interface and has no adapter.
+It runs from `stage.stack_frames` through `stack_runner.run_stack` to a
+`StackingDriver`: the interface for a program that calibrates, aligns and
+combines frames. The one implementation uses Siril, an open-source astronomy
+image processor, through the `ImageProcessing` class in `siril_interface.py`.
 
 ```mermaid
 flowchart LR
@@ -2944,10 +3391,18 @@ In plain words, the five pipelines do this:
 - **Image Stacking** removes camera flaws from many exposures and combines
   them into one deeper image.
 
+Code outside the library calls the pipelines through the package root (see
+`Astrometrics_Library_Implementation.md`). The "Adapter Class" column names
+the class each analysis run goes through inside the library.
+
 <<overview_table>>
 
 A run gate is recorded on the run's quality summary. A period check is
-recorded on each period-search result and can lower its verdict.
+recorded on each period-search result and can lower its verdict. The counts
+cover only these recorded gates. The Architecture paper also describes checks
+that are not gates: the spectroscopy extinction record and sky-contamination
+share, kept with each spectrum, and the rejection of a poor wavelength fit
+when the instrument is calibrated.
 
 ## 3. Reviewer Checklist
 
@@ -2964,7 +3419,8 @@ When auditing the pipelines, check:
    across the sensor during a run), saturated zero orders (clipped point
    images beside the spectra) and catalog outages.
 4. **Empirical status.** Which limits were measured on real data and which are
-   design estimates.
+   design estimates. Section 5 of every guide labels each limit
+   "<<status_measured>>", "<<status_partly>>" or "<<status_design>>".
 
 ```{toctree}
 :maxdepth: 1
@@ -2984,6 +3440,9 @@ stacking
             "glossary_link": GLOSSARY_LINK,
             "stage_rows": stage_rows,
             "overview_table": overview_table,
+            "status_measured": STATUS_MEASURED,
+            "status_partly": STATUS_PARTLY_MEASURED,
+            "status_design": STATUS_DESIGN_ESTIMATE,
         },
     )
 

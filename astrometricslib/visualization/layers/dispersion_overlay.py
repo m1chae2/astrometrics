@@ -1,6 +1,6 @@
 """DispersionOverlay: Renders rotated dispersion extraction boxes.
 
-For slitless grism frames.
+For slitless grating frames.
 """
 
 from matplotlib.patches import Rectangle
@@ -10,7 +10,7 @@ from astrometricslib.visualization.spectroscopy_field_access import get_spectros
 
 
 class DispersionOverlay:
-    """Renders dispersion extraction boxes for slitless grism frames.
+    """Renders dispersion extraction boxes for slitless grating frames.
 
     Parameters
     ----------

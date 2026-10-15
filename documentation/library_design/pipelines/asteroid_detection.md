@@ -96,8 +96,17 @@ of arcseconds off.
 
 **How.** The stack's own stars are therefore matched to each frame's
 detections within 300 arcsec. Every pair votes for an offset
-in 5-arcsec bins, and the winning offset is removed from the frame's
-positions. True pairs agree on one offset; chance pairs scatter their votes.
+in 5-arcsec bins, and the winning offset is removed from the
+frame's positions. True pairs agree on one offset; chance pairs scatter their
+votes. A plain nearest-star match was tried first and failed: on NGC 2403 the
+stars are about as far apart as the mount's error, so many detections were
+paired with the wrong star.
+
+**Position error.** The same vote measures each frame's position error: the
+scatter of the matched stack stars about the winning offset, on each axis,
+combined with the error of finding a faint dot's center. This is the
+"position error" the tests below use. A chain's error is the root mean
+square (RMS) of its detections' errors.
 
 ### 3.2 Chaining
 
@@ -134,26 +143,37 @@ the field center), and $\theta$ is the angle between two sky positions.
 ### 3.4 Straight-Line and Rate Tests
 
 Over one night, an asteroid moves in a nearly straight line at a nearly steady
-speed. Noise linked by chance does not. RA and Dec (right ascension and
-declination, the sky's longitude and latitude) offsets on the tangent plane
-are each fitted against time. The slopes $\dot{\alpha}$ and $\dot{\delta}$
-are the speeds along the two axes:
+speed. Noise linked by chance does not. Each detection's RA and Dec (right
+ascension and declination, the sky's longitude and latitude) are turned into
+offsets $\xi, \eta$ in arcsec on the tangent plane, measured from a reference
+point $(\alpha_\text{ref}, \delta_\text{ref})$:
 
-$$\alpha(t) = \alpha_0 + \dot{\alpha}\,(t - t_0), \qquad
-  \delta(t) = \delta_0 + \dot{\delta}\,(t - t_0) \tag{3}$$
+$$\xi = (\alpha - \alpha_\text{ref}) \cos \delta_\text{ref}, \qquad
+  \eta = \delta - \delta_\text{ref} \tag{3}$$
+
+The $\cos \delta$ factor is needed because lines of equal RA meet at the
+poles: away from the equator, a step in RA covers a smaller angle on the sky.
+Each offset is fitted against time with a straight line. The slopes
+$\dot{\xi}$ and $\dot{\eta}$ are the true speeds across the sky along the two
+axes:
+
+$$\xi(t) = \xi_0 + \dot{\xi}\,(t - t_0), \qquad
+  \eta(t) = \eta_0 + \dot{\eta}\,(t - t_0) \tag{4}$$
 
 A chain passes when all of these hold:
 
-- The total rate $\sqrt{\dot\alpha^2 + \dot\delta^2}$ is between
+- The total rate $\sqrt{\dot\xi^2 + \dot\eta^2}$ is between
   1 and 300
   arcsec/h.
 - On each axis, the RMS distance from the line is at most
   2 times that axis's position error.
 - The total displacement is at least 3
-  times the position error.
+  times the position error, so a star that only jitters by its error does
+  not pass.
 - The positions never move back along the fitted direction by more than the
-  position error (otherwise `REJECTED_NON_MONOTONIC`, meaning the motion is
-  not one-way).
+  combined position error of the two detections compared (the square root of
+  the sum of their squared errors). Otherwise the chain is
+  `REJECTED_NON_MONOTONIC`, meaning the motion is not one-way.
 
 ### 3.5 Known-Body Match
 
@@ -193,36 +213,51 @@ A quality gate is an automatic check on a run. It passes, fails, or is
 as flagged (the `flagged` field in Section 7) so a person can look at it. The
 list below is read from the code when this guide is generated.
 
+A failed gate here does not always mean the run went wrong. `unmatched_movers`
+fails on purpose when a confirmed mover matches no known body: the failure
+flags the run so that a person looks at what may be a new object, or at a
+known one the match missed.
+
 | Gate | Role | Defined in | What it checks |
 | :--- | :--- | :--- | :--- |
 | `search_frames` | run gate | `run_gates.py` | Not checked when fewer frames could be searched than a track (a chain of detections of one object) needs, so no mover could have been found. |
 | `pointing_metadata` | run gate | `run_gates.py` | Fails when any frame was left out for missing `RA`, `DEC` or `NAXIS` cards. |
 | `ephemeris_cross_match` | run gate | `run_gates.py` | Fails when SkyBoT (the online service listing known solar-system bodies) could not be reached for confirmed movers. Not checked when no mover reached it. |
-| `unmatched_movers` | run gate | `run_gates.py` | Fails when a confirmed straight-line mover matched no known solar-system body: a lead worth a manual look. |
-| `track_residuals` | run gate | `run_gates.py` | Reports how the straight-line test went and whether it used measured or assumed position errors. |
+| `unmatched_movers` | run gate | `run_gates.py` | Fails when a confirmed straight-line mover matched no known solar-system body. The failure is a prompt, not an error: it flags the run so a person checks what may be a new object. Not checked when no mover was confirmed. |
+| `track_residuals` | run gate | `run_gates.py` | Fails when any chain that reached the straight-line test used the assumed position error (`astrometric_error_default_arcsec`) for a detection, since the verdict then rests on a number nobody measured. Passes otherwise, and its detail counts the chains tested and rejected. Not checked when no chain reached the test. |
 
 ## 5. Tuned Calibration Parameters
 
 These are the fixed limits and settings the pipeline uses. "Live Value" is
-read from the code when this guide is generated. "Empirical Status" says where
-the value came from: measured on real data (the data set is named in
-brackets), or set by design.
+read from the code when this guide is generated. "Empirical Status" says how
+far real data back the value, with one of three labels:
 
-The values below are the defaults of `MovingObjectConfig`. The configuration
-can change them.
+- **Measured.** The value was set from, or checked against, real
+  observations. The Notes column names the data and the result.
+- **Partly measured.** Real observations support the value but do not
+  pin it down, for example because no failure was found to set it against.
+- **Design estimate.** The value was chosen by reasoning about the
+  method, not tuned on real data. Where it was checked only on synthetic
+  (simulated) data, or picked with a margin over a few observed values, the
+  Notes column says so.
+
+The values below are the defaults of `MovingObjectConfig`, plus the two
+pointing-vote constants of `pipeline.py`. The configuration can change the
+defaults.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `min_frames_for_persistence` | `3` | Designed | Fewest detections in a chain (detections linked across frames as one object). |
-| `pixel_match_tolerance_px` | `1.5` | Designed | Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high). |
-| `sky_match_tolerance_arcsec` | `3` | Designed | Sky spread below which a chain is a fixed star (Eq. 2). |
-| `rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour` | `1` / `300` arcsec/h | Designed | Allowed range of the total speed across the sky. |
-| `chain_match_radius_max_arcsec` | `300` arcsec | Designed | Cap on how far a chain may reach for its next detection (Eq. 1). |
-| `residual_rms_max_multiple` | `2` | Designed | Largest RMS (root mean square) distance from the fitted straight line on each axis, in units of the position error. |
-| `min_displacement_error_multiple` | `3` | Designed | Smallest total distance moved, in units of the position error. |
-| `astrometric_error_default_arcsec` | `10` arcsec | Designed | Position error assumed for a detection with none measured. |
-| `ephemeris_cross_match_radius_arcsec` | `10` arcsec | Designed | Match radius for a known body from SkyBoT (an online service that lists known solar-system bodies), at both the first and last detection. |
-| `_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC` | `300` arcsec | Unvalidated (NGC 2403) | Pairing radius between stack stars and frame detections in the per-frame pointing-offset vote (Section 3.1). |
+| `min_frames_for_persistence` | `3` | Design estimate | Fewest detections in a chain (detections linked across frames as one object). |
+| `pixel_match_tolerance_px` | `1.5` | Design estimate | Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high). |
+| `sky_match_tolerance_arcsec` | `3` | Design estimate | Sky spread below which a chain is a fixed star (Eq. 2). |
+| `rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour` | `1` / `300` arcsec/h | Design estimate | Allowed range of the total speed across the sky. |
+| `chain_match_radius_max_arcsec` | `300` arcsec | Design estimate | Cap on how far a chain may reach for its next detection (Eq. 1). |
+| `residual_rms_max_multiple` | `2` | Design estimate | Largest RMS (root mean square) distance from the fitted straight line on each axis, in units of that axis's position error. |
+| `min_displacement_error_multiple` | `3` | Design estimate | Smallest total distance moved, in units of the position error. |
+| `astrometric_error_default_arcsec` | `10` arcsec | Design estimate | Position error assumed for a detection with none measured. |
+| `ephemeris_cross_match_radius_arcsec` | `10` arcsec | Design estimate | Match radius for a known body from SkyBoT (an online service that lists known solar-system bodies), at both the first and last detection. |
+| `_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC` | `300` arcsec | Partly measured | Pairing radius between stack stars and frame detections in the per-frame pointing-offset vote (Section 3.1). Chosen on NGC 2403 only, not on a range of mount pointing errors. |
+| `_POINTING_CORRECTION_VOTE_BIN_ARCSEC` | `5` arcsec | Partly measured | Bin width of the offset vote. Small enough to separate the true offset from the spacing of NGC 2403's stars (median 48 arcsec), and well above the star finder's sub-arcsec centering noise. |
 
 ## 6. Degraded States & Fallback Pathways
 
@@ -231,11 +266,11 @@ can change them.
 2. **Missing pointing cards.** Frames without `RA`, `DEC`, `NAXIS1` or
    `NAXIS2` are excluded and `pointing_metadata` fails.
 3. **Weak pointing vote.** When too few pairs agree on an offset, the frame
-   keeps its raw mount pointing.
+   keeps its raw mount pointing and has no measured position error.
 4. **SkyBoT outages.** Confirmed movers stay as candidates and
    `ephemeris_cross_match` fails.
-5. **No measured position error.** The default error is assumed and
-   `track_residuals` says how many detections used it.
+5. **No measured position error.** The default error is assumed, and
+   `track_residuals` fails and says how many detections used it.
 
 ## 7. Quality Summary Data Models
 
@@ -252,7 +287,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as gain and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates and checks were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |

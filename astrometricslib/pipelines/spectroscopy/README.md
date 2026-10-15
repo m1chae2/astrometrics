@@ -17,9 +17,10 @@ This README also defines each term the first time it appears.
   on its wavelength) sits in front of the camera with no slit. Every star in
   the field is spread into its own short rainbow at once, with nothing to
   block the sky or neighbouring stars.
-- **The trail.** Each star's rainbow appears as a streak on the image, the
-  trail (or streak). Distance along the trail maps to wavelength; the
-  direction along it is the dispersion direction.
+- **The spectrum trail.** Each star's rainbow appears on the image as a
+  short band of light, the spectrum trail (in this README, "the trail").
+  Distance along the trail maps to wavelength; the direction along it is the
+  dispersion direction.
 - **The zero order.** The grating also lets part of the star's light through
   unbent. That light forms an ordinary point-like image of the star, the zero
   order, at one end of the trail. The pipeline measures every wavelength as a
@@ -27,14 +28,19 @@ This README also defines each term the first time it appears.
   wavelength scale.
 - **What the pipeline produces.** For each star: a calibrated spectrum
   (brightness against wavelength, with an error on every sample), a spectral
-  type, the absorption and emission features it found, the star's B-V colour
-  (a blue-minus-visual brightness ratio in magnitudes; larger is redder), and
-  quality records at every stage. For each run: gates, yes-or-no checks on the
-  run as a whole.
+  type, the absorption and emission features it found, the star's B-V colour,
+  and quality records at every stage. For each run: gates, yes-or-no checks
+  on the run as a whole. B-V is the star's magnitude through a blue (B)
+  filter minus its magnitude through a visual, yellow-green (V) filter.
+  Magnitudes are a logarithmic brightness scale on which a larger number is
+  fainter, so a larger B-V means a redder star.
 - **Spectral types.** Stars are sorted by temperature on the O-B-A-F-G-K-M
   ladder, hottest (O) to coolest (M), with each letter split into ten
-  subtypes 0 to 9 (G0 is hotter than G9). A luminosity class follows: V for a
-  dwarf (a main-sequence star), III for a giant, I for a supergiant.
+  subtypes 0 to 9 (G0 is hotter than G9). "Early" types are the hot end of
+  the ladder and "late" types the cool end. A luminosity class follows the
+  type and says how large and bright the star is for its temperature: V for
+  a dwarf (a main-sequence star: an ordinary star in the long, stable middle
+  of its life, like the Sun), III for a giant, I for a supergiant.
 - **Why it is hard.** The blur is large: one resolution element (the smallest
   wavelength difference the instrument can separate) is about 40 to 150 A
   (Angstroms; 1 A is 0.1 nm), so neighbouring subtypes look alike. The
@@ -61,6 +67,120 @@ final classification along with the input quality and output trust score
 behind it. A quality checkpoint sits before the first stage and after each
 stage, so a reviewer can also see where quality was lost (see "Quality
 checkpoints" below).
+
+## How a spectrum is made
+
+This section follows one star from the image to its classified spectrum and
+defines the terms that the quality checkpoints use. Each stage README gives
+the detail.
+
+1. **Find the star.** The pipeline names the stars in the spectral image from
+   a normal (non-spectral) image of the same field (see "How this runs in
+   practice"). Each star's zero order marks where its trail begins.
+2. **Extract the trail.** At each one-pixel step along the trail, the
+   pipeline adds up the light in a short box across the trail (the
+   extraction box) and subtracts the sky, measured in strips on both sides of
+   the box. The result is a list of brightness samples, each at a known
+   distance in pixels from the zero order. Two settings choose the
+   extraction path:
+   - *Where the box runs.*
+     - **Dispersion-line extraction** (the default,
+       `use_flare_mask_extraction = false`): the box starts at the distance
+       from the star that the instrument model predicts and runs in a
+       straight line along the predicted dispersion direction.
+     - **Flare-mask extraction** (`use_flare_mask_extraction = true`): the
+       pipeline first re-centres the zero order in a 21 by 21 pixel box. It
+       then starts the box a set distance past it (`dispersion_start_px`, 120
+       pixels by default), so the bright flare around a bright star's zero
+       order (its glare and astigmatism, a blur from imperfect optics) stays
+       out of the box, and follows the trail's measured tilt column by
+       column. `utilities/calibration_tuner.py` turns this on for a camera
+       when the star's own flare saturates the pixels where the spectrum
+       should start.
+   - *How the box follows the trail.*
+     - **Traced extraction** (the default, `extraction_method = "traced"`):
+       at each step the pipeline fits a Gaussian (a bell curve) across the
+       trail, fits a smooth curve (a degree-2 polynomial) through the fitted
+       centres, and sizes the box from the fitted widths. It records the
+       trail's width at each step.
+     - **Fixed-box extraction** (`extraction_method = "fixed"`, also called
+       untraced): a straight box of fixed half-width (`extraction_radius`, 10
+       pixels by default). It fits no width.
+
+   The two settings combine, so there are four paths, such as the traced
+   flare-mask extraction.
+3. **Turn distance into wavelength.** The grating equation,
+   `wavelength = d sin(arctan(x / L))`, gives the wavelength of a sample at
+   distance `x` from the zero order (`d` is the spacing of the grating's
+   lines and `L` the distance from the grating to the sensor, fitted once
+   per camera; see "Calibration tuning"). The scale is anchored at the zero
+   order, so an error in the zero order's measured position shifts every
+   wavelength of that spectrum by the same amount. That shift is the
+   wavelength zero point (a constant wavelength offset; not the magnitude
+   zero point of photometry). Pre-processing first corrects the shift that
+   atmospheric refraction causes, then measures the wavelength zero point
+   from known lines and removes it when the lines agree.
+4. **Remove what is not the star.** The pipeline divides the spectrum by the
+   sensor's quantum efficiency (the fraction of arriving light it records at
+   each wavelength) and by the instrument response (the smooth colour tilt
+   that the grating, telescope and camera add together, measured once on a
+   standard star, a star of known spectrum). It then corrects for the
+   difference in the air's dimming between this frame and the standard
+   star's frame (atmospheric extinction).
+5. **Know the blur.** The instrument blurs every spectrum. The line spread is
+   that blur at each wavelength, given as a FWHM (full width at half
+   maximum: the width of a blurred profile where it drops to half its peak)
+   in Angstroms. One FWHM is one resolution element. The pipeline has two
+   measures of it:
+   - *From the trail width.* The width of the trail across the dispersion,
+     in pixels, times the Angstroms per pixel. On Vega's stack this gives
+     about 35 to 43 A across the middle of the spectrum, about 40 A at
+     5000 A. A spectrum with no trail width (the fixed-box extraction) uses
+     a fixed 45 A.
+   - *The stored line-spread profile* (`data/line_spread_*.json`). It was
+     fitted to the depths of real absorption lines on three stars: 42 A at
+     4200 A, about 100 to 110 A from 4861 to 5175 A, and 148 A at H-alpha
+     (6563 A). It is wider than the trail width above about 4400 A. A fit to
+     line depths may include scattered light that the trail width does not
+     see. The classifier, the wavelength zero-point fit, the equivalent
+     widths and the Gaia XP comparison use this stored profile.
+
+   Two design limits are set at "half a resolution element at 5000 A",
+   20 A: the wavelength zero-point limit and the refraction limit. Both use
+   the trail-width figure of about 40 A, not the stored profile's 105 A,
+   so they are stricter than half of the stored profile.
+6. **Watch for second-order light.** The grating also sends a fainter copy
+   of the spectrum, twice as spread out, further along the sensor (the
+   second order). Its blue light lands on top of the first-order red light
+   at twice its wavelength. The pipeline does not remove it; it flags where
+   it could matter.
+7. **Read the spectrum (processing).** A few terms:
+   - The *continuum* is the smooth brightness the star would have without
+     its lines. Line depths are measured against it.
+   - The *equivalent width* of a line is the width, in Angstroms, of a fully
+     dark band that would remove the same light as the line. Unlike the
+     depth, it does not depend on the blur.
+   - The *Balmer lines* are the visible lines of hydrogen (H-alpha at
+     6563 A, H-beta at 4861 A, H-gamma at 4340 A, and so on).
+   - *Control windows*: to judge whether a dip at a named feature is real,
+     the feature detector runs the same dip test at many other positions
+     along the spectrum. The spread of those results shows how strong a
+     "feature" this spectrum's own noise produces, and gives the p-value
+     (the chance that noise alone gives a result at least this strong).
+     With fewer than 20 usable positions, it assumes Gaussian noise
+     instead and the p-value counts as uncalibrated.
+   - The classifier compares the whole spectrum with reference spectra
+     (templates) of known type. Its score is the *relative RMS*: the
+     root-mean-square (typical) difference between the spectrum and a
+     template, as a fraction of the spectrum's average brightness. 0 is a
+     perfect match.
+   - *E(B-V)* (colour excess) is how much redder dust has made the star, in
+     magnitudes of B-V. When a catalog gives it, dereddening removes that
+     effect before the classifier compares the spectrum.
+8. **Judge the result (post-processing).** The pipeline compares the type
+   and colour with star catalogs, combines its checks into a trustworthy
+   verdict, and compares the calibrated spectrum with an independent
+   spectrum of the same star from the Gaia satellite.
 
 ## How this runs in practice
 
@@ -117,7 +237,7 @@ session does not lose the frames already saved.
     call it.
 - `pre_processing/spectral_frame_check.py` measures raw slitless-spectrum
   frames for `QualityDiagnostics.spectral_frame_check`, outside any run:
-  the zero-order position, the streak's tilt and width, and the saturated
+  the zero-order position, the trail's tilt and width, and the saturated
   patches along the spectrum. It finds the zero order with the stacking
   stage's point-source search, then its extended-target search for targets
   such as globular clusters, or accepts a position from the caller. It
@@ -145,7 +265,7 @@ A checkpoint is a `StageQualityCheckpoint` (in `models/spectroscopy_quality.py`)
 It holds the stage name (`raw_frame`, `pre_processing`, `processing` or
 `post_processing`), a list of `StageQualityMetric` records, and a list of
 `flags`. A flag is a short label for a condition worth a reader's attention,
-such as `zero_order_saturated`. Each checkpoint below lists its flags.
+such as `zero_order_saturated`. Each stage README lists its checkpoint's flags.
 
 Each `StageQualityMetric` has these fields:
 
@@ -166,358 +286,36 @@ numbers.
 
 ### The four checkpoints
 
-| Checkpoint | Stage name | Built by | Built from |
-|---|---|---|---|
-| 0 | `raw_frame` | `assess_raw_frame_quality` in `pre_processing/assess_raw_frame_quality.py` | The numbers the extraction already measured for the star |
-| 1 | `pre_processing` | `input_quality_checkpoint` in `pre_processing/assess_input_quality.py` | The `InputQualityAssessment` |
-| 2 | `processing` | `assess_processing_quality` in `processing/assess_processing_quality.py` | The classification, features, colour, emission lines and second-order ratio |
-| 3 | `post_processing` | `output_quality_checkpoint` in `post_processing/assess_output_quality.py` | The `OutputQualityAssessment` and the catalog comparison |
+| Checkpoint | Stage name | Built by | Built from | Metrics listed in |
+|---|---|---|---|---|
+| 0 | `raw_frame` | `assess_raw_frame_quality` in `pre_processing/assess_raw_frame_quality.py` | The numbers the extraction already measured for the star | [Pre-processing](pre_processing/README.md), "Quality checkpoint 0" |
+| 1 | `pre_processing` | `input_quality_checkpoint` in `pre_processing/assess_input_quality.py` | The `InputQualityAssessment` | [Pre-processing](pre_processing/README.md), "Quality checkpoint 1" |
+| 2 | `processing` | `assess_processing_quality` in `processing/assess_processing_quality.py` | The classification, features, colour, emission lines and second-order ratio | [Processing](processing/README.md), "Quality checkpoint 2" |
+| 3 | `post_processing` | `output_quality_checkpoint` in `post_processing/assess_output_quality.py` | The `OutputQualityAssessment` and the catalog comparison | [Post-processing](post_processing/README.md), "Quality checkpoint 3" |
 
 `_apply_result_to_stellar_object` in `pipeline.py` calls the four builders and
 stores the list. Each builder only gathers numbers that earlier code already
 produced. None of them changes a spectrum or a classification.
 
-### Metrics each checkpoint carries today
+### Where the limits come from
 
 Limits come from the places that define them: `NO_GOOD_MATCH_RMS`,
 `AMBIGUOUS_RMS_GAP` and `DIFFERS_FROM_CATALOG_SUBTYPES` in
 `models/stellar_source.py`, `DEFAULT_SATURATION_FLAG_THRESHOLD` in
 `pipelines/shared/quality/saturation.py`, and
-`MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` in `processing/spectrum_signal.py`. The new
-modules import these limits and define none of their own. A metric with no
-limit is reported for measurement only.
+`MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` in `processing/spectrum_signal.py`. The
+checkpoint builders import these shared limits and keep no copy of them. A
+few limits belong to one measurement and live with it: the refraction limit
+(`DAR_ALONG_DISPERSION_LIMIT_ANGSTROM` in
+`pre_processing/assess_raw_frame_quality.py`), the wavelength zero-point
+limit (`ZERO_POINT_OFFSET_LIMIT_ANGSTROM` in
+`pre_processing/wavelength_zero_point.py`), the defocus limit
+(`CHROMATIC_DEFOCUS_RATIO_LIMIT` in `pre_processing/measured_line_spread.py`)
+and the Gaia XP limits (in `post_processing/compare_to_gaia_xp.py`). A metric
+with no limit is reported for measurement only.
 
-Terms used in the tables below:
-
-- *Signal-to-noise*: the signal divided by its random scatter. Higher is
-  cleaner.
-- *FWHM* (full width at half maximum): the width of a blurred profile,
-  measured where it drops to half its peak.
-- *Line spread*: the instrument's blur at each wavelength, as a FWHM in
-  Angstroms. The stored line-spread profile is the one kept on file for the
-  camera.
-- *Quantum efficiency*: the fraction of arriving light the sensor records, at
-  each wavelength.
-- *Relative RMS*: the root-mean-square (typical) difference between the
-  spectrum and a reference spectrum, as a fraction of the spectrum's average
-  brightness. 0 is a perfect match.
-- *p-value*: the chance that noise alone would give a result at least this
-  strong. Small means unlikely to be noise.
-- *Chi-square test*: a test of whether values differ from each other by more
-  than their error bars allow. A reduced chi-square (chi-square per degree of
-  freedom) near 1 means "within the noise".
-- *Second order*: a fainter, twice-as-spread copy of the spectrum that the
-  grating also makes. Its blue light lands on top of the first-order red.
-- *E(B-V)* (colour excess): how much redder dust has made the star, in
-  magnitudes of B-V. Dereddening removes that effect.
-- *Equivalent width*: the strength of a spectral line, as the width in
-  Angstroms of a fully dark band with the same missing light. It does not
-  depend on the blur.
-- *Balmer lines*: the visible lines of hydrogen (H-alpha at 6563 A, H-beta at
-  4861 A, and so on).
-
-**Checkpoint 0, raw frame.** The pipeline re-measures nothing from the pixels
-here. It reuses what the extraction computed for this star, and adds the
-refraction numbers, which come from the target's position and the time.
-
-| Metric | Unit | Limit | What it tells a reader |
-|---|---|---|---|
-| `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.001), lower is better; a value at the limit fails | The share of the zero-order image (the star's undispersed image) at the camera's saturation level. A high value means the star's brightest part is unreliable. |
-| `valid_fraction` | fraction | none | The share of the requested spectrum that landed on the image. Below 1, part of the trail ran off the image. |
-| `median_trail_width` | pixel | none | The median fitted width of the trail across the dispersion direction. A wide trail means a blurrier spectrum. |
-| `contaminated_sky_fraction` | fraction | none | The share of sky readings that had to drop a sky band because a neighbouring star's light fell in it. The note names the dominant sky mode. |
-| `dar_along_dispersion_angstrom` | angstrom | 20, lower is better. DAR is atmospheric differential refraction: the air bends blue light more than red. A design choice (half the resolution element at 5000 A), not a measurement | The spread of the wavelength error that atmospheric refraction causes between 4200 A and 8000 A, before the correction. Flag `dar_large` when over the limit. |
-| `dar_across_dispersion_px` | pixel | none | How much refraction widens the trail between 4200 A and 8000 A. |
-| `target_altitude_degrees` | degree | 20, higher is better. A design choice, not a measurement | The target's altitude at mid-exposure. Below the limit the pipeline refuses the refraction model and sets the flags `target_altitude_low` and `dar_not_computed`. |
-| `parallactic_to_dispersion_angle_degrees` | degree | none | The angle from the direction of the zenith (the point straight overhead) to the direction of the dispersion on the sky. 0 means the red end of the spectrum points at the zenith. |
-
-Checkpoint 0 raises these flags: `zero_order_saturated` (the saturation metric
-fails), `trail_partly_off_image` (`valid_fraction` below 1),
-`sky_band_contaminated` (at least one sky reading dropped a band), and the
-three refraction flags `dar_large`, `dar_not_computed` and
-`target_altitude_low`.
-
-The four refraction metrics have no value, and the checkpoint carries the flag
-`dar_not_computed`, when the pipeline has no observatory site, WCS (world
-coordinate system, the map from pixel to sky position stored with the image)
-or mid-exposure time. The refraction correction itself runs in pre-processing
-(see "Atmospheric differential refraction" in
-[pre-processing](pre_processing/README.md)).
-
-When the caller supplies the frame-level result of `measure_spectral_frame_file`
-under `result["frame_check"]`, the checkpoint also carries `streak_tilt`
-(degree) and `peak_above_sky` (ADU, analog-to-digital units, the steps of
-the stored pixel value), and the saturation note names the
-saturation level's source. The spectroscopy pipeline does not run that
-frame-level check, so a pipeline-built checkpoint 0 normally lacks tilt,
-peak-to-sky and saturation source.
-
-**Checkpoint 1, calibrated spectrum.** It carries the five numbers of
-`InputQualityAssessment`, the four wavelength zero-point metrics, three
-metrics built from the per-sample errors and four line-spread numbers (see
-"Measured line spread" below).
-
-| Metric | Unit | Limit | What it tells a reader |
-|---|---|---|---|
-| `resolution_element` | angstrom | none | How much the instrument blurred the spectrum. A smaller value separates nearby spectral types better. |
-| `resolution_measured` | flag | none | 1 when the blur came from the spectrum's own trail width, 0 when a fixed fallback was used. |
-| `zero_order_saturated_fraction` | fraction | `DEFAULT_SATURATION_FLAG_THRESHOLD`, lower is better | The same saturation share as checkpoint 0, kept so the assessment's numbers are all here. |
-| `valid_fraction` | fraction | none | The same coverage as checkpoint 0. |
-| `signal_to_noise` | per resolution element | `MINIMUM_SPECTRUM_SIGNAL_TO_NOISE` (1.5), higher is better | How strongly the spectrum stands out from its own scatter. Below the limit the pipeline does not classify the spectrum. |
-| `wavelength_zero_point_offset_angstrom` | angstrom | 20, lower is better (designed) | The size of the wavelength zero-point offset measured from known lines, before correction. The limit is half a resolution element at 5000 A. It is a designed value, not a measured one. |
-| `wavelength_zero_point_uncertainty_angstrom` | angstrom | none | The error of that offset. |
-| `wavelength_zero_point_line_count` | lines | none | How many of the six lines passed the significance test. |
-| `wavelength_zero_point_applied` | flag | none | 1 when the pipeline shifted the wavelengths by the offset, 0 when it only measured it. |
-| `median_snr_per_resolution_element` | per resolution element | none | The median, over 4200 to 8000 A, of the brightness summed over one resolution element divided by the error of that sum (from the per-sample errors; the element width comes from the line-spread profile). |
-| `fraction_samples_snr_below_5` | fraction | none | The share of samples in that range whose brightness is below 5 times their own error. |
-| `snr_estimate_ratio` | ratio | none | The variance-based signal-to-noise divided by `signal_to_noise`. A ratio far from 1 means one of the two is wrong. |
-| `trail_fwhm_blue_px` | pixel | none | The median full width at half maximum (FWHM) of the trail across the dispersion from 4200 to 5000 A. |
-| `trail_fwhm_red_px` | pixel | none | The same width from 6200 to 7000 A. |
-| `chromatic_defocus_ratio` | ratio | 1.3, lower is better; designed, not measured | `trail_fwhm_red_px` divided by `trail_fwhm_blue_px`. Above the limit the red end is out of focus compared with the blue end. A spectrum in focus end to end gives about 0.92. |
-| `measured_vs_stored_line_spread_ratio_halpha` | ratio | none (reported only) | The spectrum's own measured FWHM at 6563 A divided by the stored line-spread profile's value there (148 A). A value far from 1 means the trail width and the stored profile disagree about the blur. |
-
-The checkpoint 1 flags are `resolution_assumed`, `low_signal_to_noise`,
-`zero_order_saturated`, `gain_assumed` and `read_noise_assumed` (the
-per-sample errors used an assumed camera gain or read noise),
-`chromatic_defocus` (`chromatic_defocus_ratio` above its limit),
-`wavelength_zero_point_unconstrained` (fewer than two
-lines found), `wavelength_zero_point_lines_disagree` (two or more lines that
-fail the chi-square test) and `wavelength_zero_point_large` (offset over its
-limit). The pipeline applies the offset before the quantum-efficiency,
-response and extinction corrections; see "Wavelength zero point" in the
-[pre-processing README](pre_processing/README.md).
-
-**Checkpoint 2, processing result.** It judges the processing results on their
-own, before the catalog comparison. For an unclassified spectrum the
-classification and colour metrics have no value, and the checkpoint carries the
-`unclassified` flag.
-
-| Metric | Unit | Limit | What it tells a reader |
-|---|---|---|---|
-| `classification_rms` | relative RMS | `NO_GOOD_MATCH_RMS` (0.15), lower is better | How far the best reference spectrum is from this spectrum. |
-| `rms_gap_to_second_best` | relative RMS | none (reported only) | How much closer the best reference is than the runner-up. Below `AMBIGUOUS_RMS_GAP` (0.02) the subtype is uncertain, which is common at this resolution, so it fails nothing. |
-| `rms_gap_to_next_class` | relative RMS | `AMBIGUOUS_RMS_GAP`, higher is better | The same gap to the best reference of another class letter. A small gap means the class is uncertain. |
-| `synthetic_colour_measured` | flag | 1, higher is better | 1 when the pipeline measured a B-V colour from the spectrum. |
-| `synthetic_b_minus_v` | magnitude | none | The B-V colour measured from the spectrum. |
-| `significant_feature_count` | features | none | How many named features have a detected or possible verdict. |
-| `best_feature_p_value` | probability | none | The smallest feature p-value (the chance that noise like this spectrum's gives a feature this strong). Lower is stronger. |
-| `uncalibrated_feature_count` | features | 0, lower is better | How many p-values assumed Gaussian noise because too few control windows were available. |
-| `second_order_risky_fraction` | fraction | none | The share of samples where second-order light could add a tenth of the signal. |
-| `second_order_max_blue_to_red_ratio` | ratio | none | The largest ratio of the brightness at half a wavelength to the brightness at that wavelength. |
-| `emission_lines_detected` | lines | none | How many named emission lines or blends have a detected verdict. The `emission_line_source` flag marks two or more. |
-| `ebv_used` | magnitude | none (reported only) | The colour excess E(B-V) the pipeline removed from the spectrum before classifying. The note names the catalog and the conversion. No value when the star has no Gaia DR3 id or Gaia gives none. |
-| `dereddening_type_shift_steps` | subtype steps | none (reported only) | How many steps on the O-to-M ladder the best type moved because of dereddening (ten steps to a letter class). A large shift means the observed colour was mostly dust. No value without an E(B-V). |
-| `index_vs_template_type_steps` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance between the type that six line strengths point to and the template-fit type. A designed limit, the one used for two types that disagree. |
-| `median_equivalent_width_relative_error` | fraction | none | The median of the equivalent-width error over its size, for features with a detected or possible verdict. |
-| `hbeta_equivalent_width_angstrom`, `halpha_equivalent_width_angstrom` | angstrom | none | The equivalent width of each Balmer line (positive for a dip). The note holds its error. |
-| `best_template_reduced_chi_square` | reduced chi-square | none | The chi-square per degree of freedom of the best reference by RMS, using the per-sample errors. Near 1 means a fit within the noise. It decides nothing. |
-
-The processing flags are `unclassified`, `emission_line_source`,
-`second_order_risk` and `slope_and_lines_disagree`. The last one marks a
-spectrum whose `index_vs_template_type_steps` is above its limit: the
-continuum slope and the line strengths point to different types. The two
-second-order metrics have no limit because their 2 percent and 10 percent
-figures are not validated.
-
-**Checkpoint 3, final result.** It carries the verdicts of
-`OutputQualityAssessment` and the catalog distance. Each verdict is 1 (yes) or
-0 (no). For an unclassified spectrum every value is `None` and the checkpoint
-carries the `unclassified` flag.
-
-| Metric | Unit | Limit | What it tells a reader |
-|---|---|---|---|
-| `catalog_type_steps_apart` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance on the O-to-M ladder between the measured and the catalog type (B0 is 10, A5 is 25). |
-| `poor_match` | flag | 0, lower is better | 1 when `classification_rms` is above `NO_GOOD_MATCH_RMS`. |
-| `subtype_ambiguous` | flag | 0, lower is better | 1 when the gap to the second best is below `AMBIGUOUS_RMS_GAP`. Common, because neighbouring subtypes often fit about equally well. |
-| `class_ambiguous` | flag | 0, lower is better | 1 when the gap to the next class is below `AMBIGUOUS_RMS_GAP`. |
-| `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
-| `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
-| `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`: 0 when the match is poor, the subtype is ambiguous or the type disagrees with the catalog. |
-| `gaia_xp_residual_rms_fraction` | fraction | 0.05, lower is better (designed) | The RMS of (observed / Gaia XP - 1) over 4200-8000 Å. See "Check against Gaia XP". Empty when the spectrum was not compared. |
-| `gaia_xp_slope_percent_per_1000_angstrom` | percent per 1000 Å | 3, lower is better (designed) | The absolute tilt of observed / Gaia XP. A tilt points at the instrument response or the airmass correction. |
-| `gaia_xp_wavelength_shift_angstrom` | Å | 11, lower is better (designed) | The absolute shift of the spectrum's features against Gaia XP's. 11 Å is one pixel of dispersion. A shift points at the wavelength scale. |
-| `gaia_xp_available` | flag | none (reported only) | 1 when the spectrum was compared with Gaia XP, 0 when not. The note gives the reason. |
-
-The Gaia XP metrics are filled for classified and unclassified spectra alike,
-because they test the calibration, not the classification. When a Gaia XP metric
-fails, the checkpoint carries the `gaia_xp_disagrees` flag.
-
-For a classified spectrum, checkpoint 3 also raises one flag for each failed
-verdict: `poor_match`, `subtype_ambiguous`, `class_ambiguous`,
-`catalog_disagrees` (the measured type is too far from the catalog type),
-`colour_disagrees` (the B-V colour disagrees with the catalog) and
-`not_trustworthy`. The `trustworthy` verdict is
-`not (poor_match or subtype_ambiguous or catalog_disagrees)`. Class
-ambiguity and colour disagreement raise their own flags but do not change it.
-
-### Check against Gaia XP
-
-What and why: an independent spectrum of the same star, taken from space,
-shows whether this pipeline's calibration is right. A tilt in the ratio of
-the two spectra points at the colour correction; a sideways shift points at
-the wavelength scale.
-
-The Gaia satellite measured a low-resolution spectrum, the XP spectrum, for about
-220 million stars. Its resolving power (wavelength divided by the smallest
-resolvable wavelength difference) is about 30 to 100, close to the Star
-Analyser's (the grating this instrument uses). It comes from a different
-instrument above the atmosphere. The
-pipeline compares each calibrated spectrum with the XP spectrum of the same star.
-The comparison tests the instrument response (the colour tilt the camera and
-grating add), the airmass correction (for the air's dimming) and the
-wavelength scale together. The code is in
-`post_processing/compare_to_gaia_xp.py`.
-
-1. **Find the Gaia DR3 source id.** The pipeline reads `StellarObject.gaia_dr3_source_id`
-   through `catalog_star_identity.gaia_dr3_source_id_of`, the same function the
-   reddening lookup uses.
-   The star identifier fills it from the `Gaia DR3 <number>` name in SIMBAD's list
-   of identifiers, or from a star that was named from Gaia. If the star has none
-   (the brightest stars are not in Gaia DR3), the comparison is `not_checked`
-   with that reason.
-2. **Fetch the XP spectrum** through the `GaiaXpDriver` (`drivers/gaia_xp_driver.py`).
-   The driver caches each spectrum on disk. A source with no XP spectrum, or a
-   failed download, gives `not_checked` and never stops the pipeline.
-3. **Put both on the same quantity.** The response-corrected spectrum is the
-   counts divided by the response, which is Vega observed over the Pickles A0V
-   template (a published reference spectrum of a star of Vega's type, from the
-   Pickles 1998 library). Pickles fluxes are energy per unit wavelength, so the
-   corrected spectrum is a relative F-lambda (energy per unit time, area and
-   wavelength) above the atmosphere. Gaia's sampled flux is
-   also F-lambda, in W m⁻² nm⁻¹. The two differ by one constant, which the
-   normalization removes. A difference between Vega and the A0V template stays
-   inside every corrected spectrum, so it appears as an offset common to all stars.
-4. **Match the resolutions.** XP's blur is a Gaussian of 95 Å full width at half
-   maximum (FWHM) at 4340 Å, 130 Å at 4861 Å, 70 Å at 6563 Å and 185 Å at 8800 Å,
-   with straight lines between. A fit of the Pickles A0V template to the XP
-   spectra of 12 A0V stars (G 6.0 to 6.6) gave these medians on 2026-10-10. The
-   spread between stars was 20 to 40 percent. The instrument's stored line
-   spread is sharper than XP's below about 5000 Å and broader above it. Where
-   the instrument is broader, the pipeline blurs XP to it. Where XP is broader,
-   the pipeline blurs the observed spectrum to XP. The blur width is the
-   quadrature difference, `sqrt(broad² - narrow²)` (Gaussian blurs add as the
-   square root of the sum of their squares, so this is the extra blur that
-   turns the narrow one into the broad one).
-5. **Compare.** The pipeline keeps 4200 to 8000 Å outside the atmospheric bands,
-   divides each spectrum by its median over 5400 to 5600 Å, and computes
-   - the RMS of observed / XP - 1;
-   - the slope of a straight line fitted to observed / XP, in percent of the flux
-     at 5500 Å per 1000 Å. The fit weights samples by XP's errors, the spectrum's
-     own errors when `response_corrected_intensity_errors` exists, and a 1 percent
-     floor;
-   - the median ratio and the RMS in four bands: 4200-5000, 5000-6000, 6000-7000
-     and 7000-8000 Å;
-   - the wavelength shift that best correlates the two spectra's logarithmic
-     derivatives (d ln F / dλ, which emphasizes the lines and edges and ignores
-     the overall slope). The sign is positive when the observed features sit
-     at longer wavelengths than XP's. The search covers ±60 Å. A correlation below
-     0.3 gives no shift.
-
-The result is stored on `SpectroscopyResult.gaia_xp_comparison`
-(`GaiaXpComparison`, in `models/gaia_xp_comparison.py`), together with the
-normalization levels and whether either spectrum was blurred.
-
-Settings: all three limits are designed, not measured: 0.05 is above XP's own 1 to 2
-percent calibration error, 3 percent per 1000 Å is an 11 percent change across the
-compared range, and 11 Å is one pixel.
-
-How we know: synthetic tests recover a 5 percent per
-1000 Å tilt to within 0.2 and a 20 Å shift to within 1 Å. Against real data, a
-shift measured between a real XP spectrum and a template of a different star ranged
-from -23 to +36 Å over 12 A0V stars (median +11 Å). That number measures
-differences between stars, not the instrument. The shift's noise floor for a real
-spectrum of the same star is not known yet.
-`scripts/compare_spectra_with_gaia_xp.py` measures it on a processed target.
-
-At the run level, the summary's `gaiaXpSummary` (`GaiaXpRunSummary`) gives, for
-each of the four bands, the median over the compared stars of observed / XP and
-its scatter (1.4826 times the median absolute deviation, MAD: the median
-distance from the median, scaled to match a standard deviation for normal
-data while ignoring a few wild values). A star with several
-spectra counts once. That median ratio is the measured residual instrument
-response: dividing the corrected spectra by it makes them agree with Gaia.
-
-### Measured line spread
-
-A slitless spectrum is blurred, and the blur can differ from one end of the
-spectrum to the other. The pipeline measures that blur for each spectrum from
-its own trail width, and reports it. The code is in
-`pre_processing/measured_line_spread.py`.
-
-What the pipeline does:
-
-1. It takes the width (sigma, the standard deviation of a Gaussian fitted to
-   the cross-section) of the trail across the dispersion at every step
-   along the spectrum. The extractor already measures it. A failed fit counts
-   as no measurement.
-2. It groups the steps into bands 400 A wide from 4200 to 8000 A. The last band
-   stops at 8000 A, so it is 200 A wide. A band needs at least 10 working fits.
-3. In each band, it takes the median sigma, multiplies it by 2.355 to get a FWHM
-   in pixels, and multiplies that by the band's median local dispersion (the
-   Angstroms one pixel covers, from the wavelength calibration) to get a FWHM
-   in Angstroms.
-4. It records the band's scatter: 1.4826 times the median absolute deviation of
-   the per-step FWHM values. A few bad fits cannot inflate it.
-
-The result is stored as `SpectroscopyResult.measured_line_spread`
-(`measuredLineSpread` in the saved JSON), a `MeasuredLineSpread` record with
-these lists, one entry per band:
-
-| Field | Unit | Meaning |
-|---|---|---|
-| `wavelength_angstrom` | A | The centre of the band. |
-| `fwhm_angstrom` | A | The blur in the band. |
-| `fwhm_px` | pixel | The same blur in pixels. |
-| `scatter_px` | pixel | The band's robust scatter. A large value means a less certain median. |
-| `sample_count` | steps | How many working fits the median uses. |
-
-The field is `None` when the trail width is missing (the fixed-box extraction
-does not fit one) or fewer than two bands have enough fits.
-
-The method assumes that a star's image is round, so the width across the
-dispersion equals the blur along it. Tracking errors, coma (a comet-shaped
-blur toward the edge of the field) and a bright neighbour all break this. The
-stored line-spread profile (`data/line_spread_*.json`) was fitted to line
-depths on other stars, so it may include scattered light that the trail width
-does not see. `measured_vs_stored_line_spread_ratio_halpha` shows how far the
-two disagree on one spectrum.
-
-**Why the pipeline compares the red end with the blue end.** A grating in a
-converging beam does not put the first-order spectrum (the main rainbow) in a
-flat plane. If the camera is focused on the zero order, the red end can be out
-of focus. That widens the red lines and limits how well the classifier can
-separate nearby spectral types there.
-
-**Settings.** The limit of 1.3 on `chromatic_defocus_ratio` is a designed
-value.
-
-**How we know what "in focus" looks like.** A spectrum that is in focus
-changes width with wavelength only through seeing (the blur from the air),
-roughly as wavelength to the power -0.2. From 4600 A to 6600 A that gives a
-red-to-blue ratio of about 0.92. The limit sits well above that, and no real
-focus sweep has set it. The focus-sweep script (below) is the tool to check it.
-
-**The option to blur with the measured profile.** The classifier blurs its
-reference spectra to the instrument's resolution before it compares them with
-a spectrum. By default it uses the stored profile. Build the pipeline with
-`SpectroscopyPipeline(config, use_measured_line_spread=True)` to blur with this
-spectrum's own measured profile instead.
-
-The option is off by default. It changes only the profile that the classification and feature tests use, and
-only for a spectrum that has a measured profile. It does not change the
-instrument response, which was fitted with the stored profile, so switching it
-on makes the two blurs disagree. Do not switch it on until a real-data check
-has compared the classifications with and without it on spectra of stars of
-known type.
-
-Two scripts support this work (see the [scripts README](../../scripts/README.md)):
-
-- `scripts/spectral_focus_sweep.py` reads spectral frames of one star taken at
-  several focuser positions and reports the best focus for each wavelength band
-  and the position that suits mid-spectrum.
-- `scripts/compare_instrument_responses.py` compares two instrument-response
-  files. Use it to check that two standard stars from the same night give the
-  same response.
+Each stage README lists its checkpoint's metrics in a table, with the unit,
+the limit and what a value tells a reader.
 
 ### Adding a metric
 
@@ -658,7 +456,9 @@ steps:
    RMS error is above 10 nm. The report lists each line's pixel offset,
    calibrated wavelength and deviation in nanometers.
 6. Save the fitted distance and the start of the spectrum to the camera's
-   configuration, together with the flare-mask and extraction-length checks.
+   configuration, together with two checks: whether the camera needs the
+   flare-mask extraction (see "How a spectrum is made") and whether the
+   extraction must stop short to stay on the image.
 
 How we know it works: `utilities/test/test_calibration_tuner_sample_distances.py`
 builds frames with the Balmer lines at known positions and checks that:
@@ -669,8 +469,8 @@ builds frames with the Balmer lines at known positions and checks that:
   counted light) gives at most 12 candidates including the three true lines
   and finishes the search in under 10 seconds;
 - the refined positions bring the fitted distance within 0.02 percent of the
-  truth on both extraction paths, with zero-order positions that fall between
-  pixels;
+  truth on both the dispersion-line and the flare-mask extraction, with
+  zero-order positions that fall between pixels;
 - each flare-mask sample distance lands within 0.01 pixel of the true
   distance from the zero order.
 
@@ -696,7 +496,7 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 
 The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path.
 
-Second-order contamination and the emission-line detector have no run-level gate yet: their limits (2% and 10%, and 5σ on M 57) are not validated, which is Gap 2 of the audit plan.
+Second-order contamination and the emission-line detector have no run-level gate yet, because their limits are not validated: the 2% and 10% second-order figures (see [processing](processing/README.md), "Quality checkpoint 2") and the emission detector's 5σ, set on M 57 only.
 
 ## What the emission-line detector can see
 

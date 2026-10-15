@@ -1,6 +1,6 @@
 # Golden-data regression suite (M 13)
 
-This folder holds a regression suite that measures the real M 13 sample frames with the library's
+This folder holds a regression suite that measures the real sample frames of M 13 with the library's
 pure-Python code and compares the results with numbers saved in `golden_values.json`. A "golden"
 value is a measurement accepted as correct at a known time. If a refactor changes the measurement,
 the test fails and names the number that moved. If the change is intended, the author regenerates
@@ -10,6 +10,8 @@ The suite checks results, not code paths. A change that keeps every unit test gr
 a star count or a flux (the total light measured from a star), and this suite catches that.
 
 Terms are defined in the [glossary](../../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
+M 13 is a globular cluster, a dense ball of hundreds of thousands of stars, listed as number 13 in
+the Messier catalogue. Its crowded centre makes it a demanding test for star detection.
 
 ## Input data
 
@@ -47,9 +49,28 @@ Each pinned number lives in `golden_values.json` as `section -> frame -> name ->
 `value`, `tolerance`, `tolerance_type` (`absolute` or `relative`) and `why`. The `why` string names
 the change that last set the number.
 
+Terms used in the table:
+
+- FWHM (full width at half maximum) is the width of a star's profile at half its peak height, in
+  pixels. A smaller value means sharper stars.
+- ADU (analog-to-digital unit) is one count of the camera's output.
+- Roundness is a star's narrow width divided by its wide width: 1 for a circle, smaller for an
+  elongated star.
+- The raw check counts stars as connected bright regions. The longest star streak is the length,
+  in pixels, of the longest such region. A trailed star (one smeared into a short line) makes a long region; the raw check flags a frame whose longest region is far longer than the batch's typical one.
+- The zero-order finder first looks for one clear point source. When that fails, it runs an
+  extended-target search, which looks for a bright extended patch such as a cluster core instead.
+- The streak tilt is the angle of the spectrum on the sensor. The tilt contrast is the typical
+  height of the spectrum above the background, in units of the background noise. A visible
+  spectrum scores in the hundreds; 0 means no spectrum could be followed.
+- An aperture is the circle of pixels whose light is summed to measure a star. Review item S2 (in
+  `documentation/plans/REVIEW_ACTION_PLAN.md`) moved the aperture centres from whole pixels to the exact detected
+  positions. `photometry_pre_S2` keeps the old whole-pixel centres so the effect of that change
+  stays visible.
+
 | Section | Frame | Numbers | Measured by |
 | --- | --- | --- | --- |
-| `raw_frame_quality` | each of the 5 lights | star count, median FWHM, roundness, longest star streak, sky median, saturated pixel count, background level, background noise, saturated fraction, shift from the previous frame and the number of stars matched to measure it, number of quality flags | `QualityDiagnostics.frame_quality(kind="raw_check")`, `measure_frame_input_quality`, and a sigma-clipped standard deviation (one computed after dropping values far from the rest) for the noise |
+| `raw_frame_quality` | each of the 5 lights | star shape and count (star count, median FWHM, roundness, longest star streak); sky and saturation (sky median, saturated pixel count, background level, background noise, saturated fraction); shift from the previous frame and the number of stars matched to measure it; number of quality flags | `QualityDiagnostics.frame_quality(kind="raw_check")` and `measure_frame_input_quality`; the noise is a sigma-clipped standard deviation (one computed after dropping values far from the rest) |
 | `raw_frame_quality` | `batch` | median star count, median FWHM, flagged frame count | the same raw check |
 | `source_detection` | `020` | source count; x, y and flux of the 10 brightest sources | `SourceDetector.detect` |
 | `fwhm_top5` | `020` | median FWHM of a Gaussian fit to the 5 brightest stars | `measure_fwhm_from_data` |
@@ -57,12 +78,6 @@ the change that last set the number.
 | `photometry_pre_S2` | `020` | flux (ADU per second) and saturated flag of the 10 brightest stars, apertures on whole-pixel centres | `_measure_aperture_flux` |
 | `photometry_sub_pixel` | `020` | the same ten stars, apertures on the exact detected positions | `_measure_aperture_flux` |
 | `photometry_sequence` | `019` to `023` | shift (x, y) of lights `020` to `023` from `019`, number of measured stars, number that stayed unsaturated in all five lights, median flux scatter (coefficient of variation) of those stars | `_process_single_frame_worker` |
-
-Two terms in the table:
-
-- FWHM (full width at half maximum) is the width of a star's profile at half its peak height, in
-  pixels. A smaller value means sharper stars.
-- ADU (analog-to-digital unit) is one count of the camera's output.
 
 The raw check's FWHM comes from image moments (brightness-weighted averages of position and its
 square over each star's pixels) of up to 150 stars. The `fwhm_top5` value comes from
@@ -79,7 +94,7 @@ pin.
 | Sky and background levels (ADU) | 0.5 ADU |
 | Positions (pixels), shifts and the streak tilt (degrees) | 0.05 |
 | Zero-order row and column (pixels) | 0.5 |
-| Flux scatter of a light curve (coefficient of variation, in percent) | 5 percent |
+| Flux scatter of a light curve (coefficient of variation, in percent) | 5 percent of the value (relative), not 5 percentage points |
 | FWHM, flux, roundness, noise, saturated fraction, spectrum width, peaks, contrast | 1 percent |
 
 A name that no rule covers raises `KeyError`, so a new number cannot enter the file with a guessed
@@ -95,10 +110,9 @@ same source list on every run. The pins can therefore use exact tolerances for c
 
 ### Notes on specific pins
 
-- `zero_order_found` is pinned at 1. The finder is `group_alignment.locate_zero_order`. It first
-  looks for one clear point source. M 13 is a crowded cluster, so that search sees rival bright
-  spots and finds nothing. The finder then runs its extended-target search, which finds the
-  cluster core. `zero_order_extended` (pinned at 1) records that the extended search answered, and
+- `zero_order_found` is pinned at 1. The finder is `group_alignment.locate_zero_order`. Its
+  point-source search sees rival bright spots in the crowded cluster and finds nothing. Its
+  extended-target search then finds the cluster core. `zero_order_extended` (pinned at 1) records that the extended search answered, and
   `zero_order_row` and `zero_order_column` pin where it put the core (about row 1492, column 1488).
   The extended search places a target only to within a few pixels, so these two pins allow 0.5
   pixel, not the 0.05 pixel of the other positions.
@@ -108,26 +122,40 @@ same source list on every run. The pins can therefore use exact tolerances for c
   from the shipped config template, so the result does not depend on the local settings file.
   The cross-streak FWHM is large (about 43 pixels) because the zero order is an extended cluster
   and not a point star.
-- Frame `020` has 934 detected bright regions, against 602 to 635 in the other four lights. The
-  suite pins the value as measured. The cause is a faint, straight trail that crosses the whole
-  frame, from about (x, y) = (1268, 0) to (3007, 2703). It is about 4 pixels wide and adds about
-  50 to 70 ADU per pixel, which is too faint to form a region of its own. It lifts faint stars
-  that lie under it just above the raw check's cut-off, and about 360 of them appear as extra
-  small regions. The raw check flags the frame twice, so `flag_count` is 2: once for a star count
-  above 1.4 times the batch median (934 against 624), and once for the faint straight trail (about
-  3220 pixels long at 57 degrees). It is the one flagged frame of the batch. The photometry pins in `photometry_sequence` are not affected, because
-  no measured star lies within 25 pixels of the trail.
-- `photometry_sequence` copies how `VariabilityAnalyzer` sets up a run. `SourceDetector` (3 sigma, that is, three times the background noise,
-  FWHM 4 px) runs on light `019`. Detections ranked 10 to 69, at least 50 pixels from every edge,
-  are the measured stars (58 of them). Detections ranked 50 to 99 are the `(x, y, flux)`
-  alignment anchors. Light `019` is measured in the test process, and lights `020` to `023` go
-  through `_process_single_frame_worker` one after the other. The whole run takes about 8 seconds.
+- Frame `020` has a star count (connected bright regions) of 934, against 602 to 635 in the other
+  four lights. The suite pins the value as measured.
+  - *Cause.* A faint, straight streak crosses the whole frame, from about (x, y) = (1268, 0) to
+    (3007, 2703). It is about 4 pixels wide and adds about 50 to 70 ADU per pixel, which is too
+    faint to form a region of its own. It lifts faint stars that lie under it just above the raw
+    check's cut-off, and about 360 of them appear as extra small regions. The raw check's flag
+    names the likely source of such a streak: a satellite or aircraft.
+  - *Flags.* The raw check flags the frame twice, so `flag_count` is 2: once for a star count
+    above 1.4 times the batch median (934 against 624), and once for the faint straight streak
+    (about 3220 pixels long at 57 degrees). It is the one flagged frame of the batch.
+  - *Effect on photometry.* The pins in `photometry_sequence` are not affected, because no
+    measured star lies within 25 pixels of the streak.
+- `photometry_sequence` pins the photometry pipeline's per-frame worker,
+  `_process_single_frame_worker`, on fixed inputs.
+  - *Detection.* `SourceDetector` runs on light `019` with `VariabilityAnalyzer`'s first setting:
+    3 sigma (three times the background noise) and FWHM 4 px. Detections come out brightest first.
+  - *Measured stars.* Detections ranked 10 to 69, at least 50 pixels from every edge, are the
+    measured stars (58 of them). The ten brightest are skipped because they come closest to
+    saturating.
+  - *Alignment anchors.* Detections ranked 50 to 99 are the alignment anchors: `(x, y, flux)`
+    stars the worker matches in each later light to measure how far that light is shifted from
+    `019`. The anchor range may overlap the measured range, because the anchors only measure the
+    shift.
+  - These two selections are fixed choices of the test. The pipeline itself measures detections
+    from the brightest down and picks its anchors with `select_alignment_anchors` (unsaturated
+    stars with a high signal-to-noise ratio), so this pin checks the worker, not the pipeline's
+    star selection.
+  - *Run.* Light `019` is measured in the test process, and lights `020` to `023` go through
+    `_process_single_frame_worker` one after the other. The whole run takes about 8 seconds.
   Each light's shift agrees with the independent shift from the raw check to within 0.05 pixel (largest gap 0.043).
   The gain and read noise come from the camera profile through `resolve_detector_noise`, as in
   the pipeline. Only the fluxes are pinned, not their errors.
 - `photometry_pre_S2` reproduces the whole-pixel aperture centres that the pipeline used before
-  review item S2 (sub-pixel apertures; an aperture is the circle of pixels whose light is summed
-  to measure a star). It rounds each position before calling
+  review item S2 (see "Terms used in the table" above). It rounds each position before calling
   `_measure_aperture_flux`. `photometry_sub_pixel` passes the exact positions. The difference
   between the two blocks is the effect of S2 on these ten stars.
 

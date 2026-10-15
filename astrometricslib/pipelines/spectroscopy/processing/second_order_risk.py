@@ -1,6 +1,6 @@
 """Warns where a spectrum's red end could be polluted by second-order light.
 
-A grism sends light of wavelength L to a second position as well, the one
+A grating sends light of wavelength L to a second position as well, the one
 where first-order light of wavelength 2 x L lands (see
 `instrument_response` for the full story). So a spectrum's brightness at
 9000 A can include a little blue light that started out at 4500 A. How much

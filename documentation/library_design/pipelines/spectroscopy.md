@@ -19,14 +19,15 @@ Terms are defined in the [glossary](../Astrometrics_Library_Architecture.md#appe
 This pipeline spreads each star's light into its colours, a spectrum, and
 uses the spectrum to classify the star. The class, or spectral type, mainly
 tells the star's surface temperature. The types run O, B, A, F, G, K, M from
-hottest to coolest, each split into finer subtypes.
+hottest to coolest, each split into ten finer subtypes (A0 to A9, for
+example).
 
 There is no slit, so every star in the field makes its own short rainbow
-trail at once. Trails can overlap, the sky adds light, and the camera, the
-optics and the air each dim some colours more than others. The pipeline
-traces each trail, sums its light, and turns position along the trail into
-wavelength. It then removes each known colour effect in turn and finds the
-reference spectrum that matches best.
+trail, its spectrum trail, at once. Trails can overlap, the sky adds light,
+and the camera, the optics and the air each dim some colours more than
+others. The pipeline traces each trail, sums its light, and turns position
+along the trail into wavelength. It then removes each known colour effect in
+turn and finds the reference spectrum that matches best.
 
 The result is a corrected spectrum and a spectral type for each star, with
 checks against star catalogs and against spectra from the Gaia space mission.
@@ -34,18 +35,20 @@ checks against star catalogs and against spectra from the Gaia space mission.
 ### 1.2 Statement of Need
 
 A transmission grating (a clear plate ruled with many fine parallel lines) in
-front of the camera, for example a Star Analyser 100 or 200, spreads each
-star's light into a first-order spectrum on the sensor. The spectrum lies next
-to the star's undispersed point image, the zero order. The pipeline turns
-those trails into calibrated spectra and classifies them against the Pickles
-(1998) stellar library (a set of reference spectra of known types).
+front of the camera, for example a Star Analyser 100 or 200, splits each
+star's light into a few beams called orders. The zero order passes straight
+through: it is the star's undispersed point image. The first order is the
+first spread-out copy beside it, the first-order spectrum, and it is the one
+measured. The pipeline turns those spectrum trails into calibrated spectra and
+classifies them against the Pickles (1998) stellar library (a set of
+reference spectra of known types).
 
 The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
     A["Stacked spectral image"] --> B["Find stars (detection only, no sky map)"]
-    B --> C["Name stars from the matching normal image's sky map, else by geometry"]
+    B --> C["Name stars from the matching normal image's sky map, else by their pixel pattern"]
     C --> D["Find the spectrum direction and trace each trail"]
     D --> E["Sum light across each trail; subtract sky from two side bands"]
     E --> F["Remove light spilling over from bright neighbours"]
@@ -65,8 +68,10 @@ Section 3 names the steps in the usual terms: the grating equation, differential
 refraction and the zero-point shift (Section 3.1); QE, instrument response,
 airmass extinction and dereddening (Section 3.3); and the Pickles and Gaia XP
 comparisons (Sections 3.4 and 3.5). The normal image is the target's solved
-standard stack, whose WCS (pixel-to-sky map) names the stars. The quality
-summary is a `SpectroscopyQualitySummary` (Section 7).
+standard stack, whose WCS (pixel-to-sky map) names the stars. Without it, the
+stars are named by matching the pattern of their pixel positions to catalog
+stars (Section 6). The quality summary is a `SpectroscopyQualitySummary`
+(Section 7).
 
 ## 2. Input Requirements & FITS Header Specification
 
@@ -85,7 +90,7 @@ are not read. The observatory site comes from the configuration.
 | `EXPTIME` | Recommended | `float` (s) | Exposure length. Turns counts into counts per second and gives the mid-exposure time. | The intensity scale is left unknown, never guessed. |
 | `BITPIX` / `STACKCNT` | Optional | `int` | `BITPIX` is the pixel data type (negative means decimal numbers) and `STACKCNT` the number of stacked frames. Together they mark a Siril float stack, whose mean frame exposure is `EXPTIME` / `STACKCNT`. | Treated as a raw frame when `BITPIX` > 0 and there is no `STACKCNT`. |
 | `AIRMASS` | Recommended | `float` | Airmass (how much atmosphere the light passed through; 1 straight overhead), for the extinction correction (Eq. 3) that undoes dimming by the air. | The extinction correction is skipped, and the skip is recorded. |
-| `RA` / `DEC` | Optional | `float` (deg) | Field center (right ascension and declination, the sky's longitude and latitude). Used to match stars when there is no solved stack (a stack with a sky map). | No registration reference by position. |
+| `RA` / `DEC` | Optional | `float` (deg) | Field center (right ascension and declination, the sky's longitude and latitude). When there is no solved stack (a stack with a sky map), the catalog stars offered for naming the spectra are limited to this field. | The catalog stars are not limited to the field, so a star from elsewhere on the sky can be matched by its pixel pattern alone. |
 
 ## 3. Mathematical & Algorithmic Formulation
 
@@ -106,22 +111,26 @@ becomes a wavelength through the first-order grating equation
 $$\lambda(x) = d \, \sin\left(\arctan\frac{x \, p}{L}\right) \tag{1}$$
 
 where $d$ is the groove spacing (1 / lines per mm), $p$ the pixel pitch and
-$L$ the grating-to-sensor distance, the one fitted number. A larger $L$
-spreads the spectrum over more pixels.
+$L$ the grating-to-sensor distance. A larger $L$ spreads the spectrum over
+more pixels. $L$ is the one fitted number. It is fitted once, from the
+hydrogen (Balmer) absorption lines of a bright reference star such as Vega
+(`calibration_tuner.py`), and saved for later runs.
 
 **Refraction shift.** The air bends light slightly, and bends blue light more
 than red. Differential atmospheric refraction is this colour-dependent
 bending. It moves each wavelength along the trail by
-$R(\lambda) - R(\lambda_\text{eff})$, projected onto the dispersion
-direction, where $R(\lambda)$ is the bending at wavelength $\lambda$ and
+$\rho(\lambda) - \rho(\lambda_\text{eff})$, projected onto the dispersion
+direction, where $\rho(\lambda)$ is the bending at wavelength $\lambda$ and
 $\lambda_\text{eff}$ is a reference (effective) wavelength.
 It needs the site, a WCS (a pixel-to-sky map) and the exposure time.
 
 **Zero-point shift.** If the zero-order center is misplaced, the whole
-wavelength scale slides by a fixed amount, its zero point. A zero-point shift
-corrects that offset. It is measured from known absorption lines (dark lines
-where the star's atmosphere absorbs light), each at least 6 noise
-widths deep, and is applied when at least 2 lines agree.
+wavelength scale slides by a fixed amount, its wavelength zero point. A
+zero-point shift corrects that offset. It is measured from known absorption
+lines (dark lines where the star's atmosphere absorbs light). Each line must
+be at least 6 times the local noise deep, and the shift is applied
+when at least 2 lines agree, since one line could be a
+misidentified feature.
 
 ### 3.2 Extraction and Background Subtraction
 
@@ -157,13 +166,15 @@ some colours better than others. Three corrections undo this in turn.
 - **Instrument response.** The counts are then divided by the instrument
   response: everything else about the optics and grating that favours some
   colours. The response is Vega's observed spectrum over the Pickles A0V
-  template (a reference spectrum for Vega's type).
+  template. A0V is Vega's own type: spectral type A0 with luminosity class V,
+  a main-sequence (ordinary, hydrogen-burning) star.
 - **Airmass extinction.** The air dims light more at blue wavelengths, and
   more when the star is low. The extinction curve $k(\lambda)$ gives the
   dimming in magnitudes per airmass (a magnitude is a logarithmic brightness
   unit; 1 mag is a factor of about 2.5). Only the airmass difference $X -
-  X_\text{ref}$ from the response's reference star is removed, because the
-  response already holds the reference star's own dimming:
+  X_\text{ref}$ from the response's spectroscopic standard star (the star of
+  known spectrum that set the response) is removed, because the response
+  already holds that star's own dimming:
 
 $$F_\text{corr}(\lambda) = F(\lambda)\; 10^{0.4\, k(\lambda)\, (X - X_\text{ref})} \tag{3}$$
 
@@ -191,8 +202,14 @@ $$\text{RMS} = \frac{1}{\bar{F}}
   \sqrt{\frac{1}{M}\sum_{i=1}^{M}\left[F(\lambda_i) - a\,T(\lambda_i)\right]^2} \tag{4}$$
 
 The references are ranked by this score, and the lowest wins. Above
-0.15 the match is poor. Above 0.45 no type is given. A gap
-below 0.02 to the next reference makes the match ambiguous.
+0.15 the match is poor. Above 0.45 no type is given.
+
+Two gaps measure how clearly the best reference wins. The gap to the
+second-best reference (often a neighbouring subtype) and the gap to the best
+reference of another spectral class are each compared with 0.02. A gap
+below it makes the match ambiguous at that level. Only a class-level ambiguity
+fails `spectral_classification`; subtype-level ties are counted in the gate
+detail.
 
 ### 3.5 Gaia XP Comparison
 
@@ -217,7 +234,10 @@ target and records the run's provenance.
   names them from the target's solved stack, and runs
   `SpectroscopyPipeline.process`. Each spectrum carries four quality
   checkpoints, in order: `raw_frame`, `pre_processing`, `processing` and
-  `post_processing`.
+  `post_processing`. Each checkpoint is a set of measured values (metrics),
+  some with a limit. The `processing` checkpoint judges the classification:
+  a poor match, an ambiguous match, and a type from line strengths that is
+  more than 20 subtype steps from the template-fit type.
 - **Stage 3 (`validate_output`):** Builds the summary, records the eight
   `spectroscopy_run_gates`, then `gaia_xp_agreement` (9 run gates in all).
 - **Stage 4 (`to_result_dict`):** Returns only `context` and
@@ -234,36 +254,51 @@ A quality gate is an automatic check on a run. It passes, fails, or is
 as flagged (the `flagged` field in Section 7) so a person can look at it. The
 list below is read from the code when this guide is generated.
 
+The count covers only these run gates. Some checks are not gates. Two travel
+with each spectrum: the extinction record (whether the airmass correction ran,
+and why not) and the share of sky readings disturbed by a neighbour. The
+third, the rejection of a wavelength fit that leaves too large an error,
+happens when the instrument is calibrated (`calibration_tuner.py`).
+
 | Gate | Role | Defined in | What it checks |
 | :--- | :--- | :--- | :--- |
 | `gaia_xp_agreement` | run gate | `post_processing/compare_to_gaia_xp.py` | Fails when the median tilt of observed / Gaia XP spectra (low-resolution spectra from the Gaia space mission) is above `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM`. Not checked with too few stars. |
 | `spectra_extracted` | run gate | `post_processing/run_gates.py` | Fails when no star produced a spectrum. |
-| `zero_order_saturation` | run gate | `post_processing/run_gates.py` | Fails when any star's zero-order image (its undispersed point image beside the spectrum) holds a significant share of saturated pixels (pixels clipped at the sensor's maximum). |
-| `spectral_classification` | run gate | `post_processing/run_gates.py` | Fails when a classification is a poor match (best misfit, the relative RMS of Eq. 4, above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the next reference below `AMBIGUOUS_RMS_GAP`). |
+| `zero_order_saturation` | run gate | `post_processing/run_gates.py` | Fails when, for the worst star, at least `DEFAULT_SATURATION_FLAG_THRESHOLD` (0.1%) of the pixels around its zero order (its undispersed point image beside the spectrum) are saturated: at or above the camera's saturation threshold, where pixels clip. Not checked when no zero order was measured. |
+| `spectral_classification` | run gate | `post_processing/run_gates.py` | Fails when a classification is a poor match (best misfit, the relative RMS of Eq. 4, above `NO_GOOD_MATCH_RMS`) or ambiguous at the class level (misfit gap to the best reference of another spectral class below `AMBIGUOUS_RMS_GAP`). A tie between neighbouring subtypes alone does not fail it; such ties are counted in the detail. |
 | `catalog_agreement` | run gate | `post_processing/run_gates.py` | Fails when a measured spectral type is more than `DIFFERS_FROM_CATALOG_SUBTYPES` subtype steps from the type a catalog lists for the star. |
 | `feature_significance` | run gate | `post_processing/run_gates.py` | Fails when a star's feature p-values (the chance that noise alone makes a feature this strong) could not be calibrated against control windows (stretches of its own spectrum used as a noise reference). |
 | `resolution_measured` | run gate | `post_processing/run_gates.py` | Not checked when no spectrum had its resolution (smallest wavelength detail it can separate) measured. |
-| `processing_quality` | run gate | `post_processing/run_gates.py` | Fails when more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of classified spectra fail a metric of the processing checkpoint (one of four quality checkpoints on each spectrum). |
+| `processing_quality` | run gate | `post_processing/run_gates.py` | Fails when more than `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` of classified spectra fail a limit of the processing checkpoint, the second of four quality checkpoints on each spectrum. Its limits judge the classification: a poor match, an ambiguous match, or a type from line strengths far from the template-fit type (Section 4). |
 | `wavelength_scale` | run gate | `post_processing/wavelength_scale.py` | Fails when the run's wavelength zero points (offsets of each spectrum's wavelength scale) scatter by more than `WAVELENGTH_SCALE_LIMIT_ANGSTROM` after correction. |
 
 ## 5. Tuned Calibration Parameters
 
 These are the fixed limits and settings the pipeline uses. "Live Value" is
-read from the code when this guide is generated. "Empirical Status" says where
-the value came from: measured on real data (the data set is named in
-brackets), or set by design.
+read from the code when this guide is generated. "Empirical Status" says how
+far real data back the value, with one of three labels:
+
+- **Measured.** The value was set from, or checked against, real
+  observations. The Notes column names the data and the result.
+- **Partly measured.** Real observations support the value but do not
+  pin it down, for example because no failure was found to set it against.
+- **Design estimate.** The value was chosen by reasoning about the
+  method, not tuned on real data. Where it was checked only on synthetic
+  (simulated) data, or picked with a margin over a few observed values, the
+  Notes column says so.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `NO_GOOD_MATCH_RMS` | `0.15` | Measured (14 stars) | Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a classification is a poor match. |
-| `UNRELIABLE_MATCH_RMS` | `0.45` | Measured (55 stars) | Misfit (relative RMS, Eq. 4) above which no spectral type is given at all. |
-| `AMBIGUOUS_RMS_GAP` | `0.02` | Measured (reference ladder spacing) | Smallest misfit gap between the best reference and the next one; a smaller gap makes the match ambiguous. |
-| `DIFFERS_FROM_CATALOG_SUBTYPES` | `20.0` | Measured (29 stars) | Subtype steps (the finer divisions of a spectral class) beyond which the measured type disagrees with the catalog type. |
-| `APERTURE_SIGMA_MULTIPLIER` | `2.5` | Designed | Half-width of the extraction box, in units of the trail's Gaussian sigma (its width measure, Eq. 2). |
-| `SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX` | `6` px / `10` px | Measured (Vega, one frame) | Gap between the box and each sky band, and the band's width, on each side of the box. |
-| `WAVELENGTH_SCALE_LIMIT_ANGSTROM` | `11.0` Å | Designed | Largest scatter of the run's wavelength zero points (offsets of the wavelength scale) after correction. |
-| `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | `3.0` | Designed | Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own low-resolution spectra), in percent per 1000 Å. |
-| Flux calibration | Relative F_λ | Calibrated to a constant | Energy flux per unit wavelength (F_λ), corrected for sensor sensitivity (QE), instrument response and atmospheric dimming, up to one unknown scale factor. |
+| `NO_GOOD_MATCH_RMS` | `0.15` | Measured | Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a classification is a poor match. On 14 stars of known type, right matches scored 0.046 to 0.105 and wrong ones 0.181 to 0.283. |
+| `UNRELIABLE_MATCH_RMS` | `0.45` | Measured | Misfit (relative RMS, Eq. 4) above which no spectral type is given at all. Of 55 stars, 19 scored above it, and 18 of those had no catalog type. |
+| `AMBIGUOUS_RMS_GAP` | `0.02` | Measured | Smallest misfit gap to the best reference of another spectral class; a smaller gap makes the match ambiguous. It is the smallest spacing between neighbouring reference spectra (A0V and A2V are 0.019 apart). |
+| `DIFFERS_FROM_CATALOG_SUBTYPES` | `20.0` | Measured | Subtype steps (ten to a class, so 20 is two whole classes, such as B to F) beyond which the measured type disagrees with the catalog type. Of 29 stars with a catalog type, 27 were within 12 steps; the other two were wrong for other reasons. |
+| `APERTURE_SIGMA_MULTIPLIER` | `2.5` | Design estimate | Half-width of the extraction box, in units of the trail's Gaussian sigma (its width measure, Eq. 2). ±2.5 sigma holds about 99% of a Gaussian's light. |
+| `SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX` | `6` px / `10` px | Partly measured | Gap between the box and each sky band, and the band's width, on each side of the box. Swept on one Vega frame of a sparse field; used unswept on the crowded M 13 stack. |
+| `MINIMUM_LINE_SIGNIFICANCE` | `6` | Design estimate | Depth, in units of the local noise, a line needs to count for the zero-point shift. On synthetic noise-only spectra no fake line reached 6; real lines in a clean spectrum reach 20 or more. |
+| `WAVELENGTH_SCALE_LIMIT_ANGSTROM` | `11.0` Å | Design estimate | Largest scatter of the run's wavelength zero points (offsets of the wavelength scale) after correction. It is one pixel of dispersion (11.0 to 11.4 Å per pixel): a larger error puts a line in the wrong sample. |
+| `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | `3.0` | Design estimate | Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own low-resolution spectra), in percent per 1000 Å. About the error the extinction correction makes at 0.3 airmass. |
+| `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | `0.5` | Design estimate | Largest share of classified spectra that may fail a limit of the processing checkpoint before `processing_quality` fails. |
 
 ## 6. Degraded States & Fallback Pathways
 
@@ -271,8 +306,7 @@ brackets), or set by design.
    maximum value, so their true brightness is lost. When a star's zero order
    holds a significant share of them, `zero_order_saturation` fails. A
    saturated center can offset the wavelength scale; the zero-point shift
-   corrects it
-   when enough lines agree.
+   corrects it when enough lines agree.
 2. **Missing header data.** No `DATE-OBS`, site or WCS skips the refraction
    correction. No `AIRMASS` skips the extinction correction. Each skip is
    recorded on the spectrum.
@@ -281,8 +315,9 @@ brackets), or set by design.
    ambiguity or a poor match.
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends
    to read about one subtype cool.
-5. **No solved stack.** Stars are named by matching point patterns, which can
-   fail on sparse fields.
+5. **No solved stack.** Stars are named by matching the pattern of their pixel
+   positions to catalog stars ("by geometry"), which can fail on sparse
+   fields.
 
 ## 7. Quality Summary Data Models
 
@@ -299,7 +334,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as gain and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates and checks were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
@@ -315,9 +350,9 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | :--- | :--- | :--- |
 | `catalog_matched_star_count` | `int` | Stars matched to a SIMBAD or Gaia DR3 entry. |
 | `position_only_star_count` | `int` | Stars named only by their sky position. |
-| `unresolved_star_count` | `int` | Stars with no catalog match and no sky position; not saved. |
+| `unresolved_star_count` | `int` | Stars with no catalog match whose sky position could not be worked out (as when the image has no pixel-to-sky map); not saved. |
 | `zero_order_saturated_pixel_fraction` | `float \| None` | Share of saturated (clipped) pixels in the zero order (the star's undispersed point image beside its spectrum). |
-| `zero_order_saturation_flagged` | `bool` | True if the zero order went beyond the range where the sensor responds in proportion to light. |
+| `zero_order_saturation_flagged` | `bool` | True if, for the worst star, at least 0.1% (`DEFAULT_SATURATION_FLAG_THRESHOLD`) of the pixels around its zero order are at or above the camera's saturation threshold. It is the same test as the `zero_order_saturation` gate. False when no zero order was measured. |
 | `dispersion_angle_deg` | `float \| None` | Angle of the spectra (the direction light is spread by colour) relative to the sensor rows. |
 | `trail_width_profile_available` | `bool` | Whether the width profile across the spectrum trail was measured. |
 | `median_trail_width_px` | `float \| None` | Median Gaussian sigma (not FWHM) of the trail cross-section, in pixels. |

@@ -10,30 +10,26 @@ A few terms appear throughout:
 - **Calibrating** a light frame means subtracting the master bias and dark and dividing by the master flat.
 - **Registration** means lining frames up pixel-for-pixel so the same star falls on the same pixel in every frame.
 - **Pixel rejection** means throwing out a pixel's value in one frame when it disagrees strongly with the same pixel's values in the other frames, before averaging.
-- **Siril** is the external image-processing program that this pipeline uses to calibrate, register and combine frames. **FITS** is the standard astronomy image file format.
-- **Gain** is the camera's amplification setting, and **offset** is a constant the camera adds to every pixel so that no reading falls below zero. **Binning** combines blocks of neighbouring pixels (for example 2 by 2) into one larger pixel.
+- **Siril** is the external image-processing program that this pipeline uses to calibrate, register and combine frames. **FITS** is the standard astronomy image file format. **CMOS** is the type of image sensor in the cameras used here.
+- The **gain setting** is the camera's amplifier setting, a unitless number stored in the FITS `GAIN` card. (Elsewhere, "gain" in e-/ADU means the number of electrons that make one raw count; this README does not use that meaning.) **Offset** is a constant the camera adds to every pixel so that noise below zero is still recorded. **Binning** combines blocks of neighbouring pixels (for example 2 by 2) into one larger pixel.
 
 ## What the pipeline does, in order
 
-The steps below are numbered as the code and other READMEs refer to them.
+`stage.py` runs the steps below in this order for one target. Steps 3 to 5 run inside one call to `stack_runner.py`, which drives the stacking engine. Other READMEs refer to these step numbers.
 
-### Step 1. Group frames by exposure length
-
-Frames taken with different exposure times cannot be combined directly, since a longer exposure collects more light per pixel. The pipeline sorts frames into exposure groups, stacks each group on its own, then combines the group stacks so no frame's light is wasted.
-
-### Step 2. Check that frames within a group agree
+### Step 1. Check that the frames agree
 
 Three checks run before stacking:
 
-- `frame_homogeneity.py` checks that gain settings match across the group's frames.
+- `frame_homogeneity.py` checks that the gain settings match across the frames.
 - `frame_quarantine.py` measures each light frame's stars and moves a frame with clouds or trailed stars into an `_excluded` folder beside it. Spectral frames (frames taken through a grating, which spreads each star into a streak of colours) are skipped, because their streaks are the spectra. The step is described below.
-- `background_homogeneity.py` compares each frame's background brightness against the rest of the group to catch a frame taken through cloud or twilight. It finds one sudden jump in sky level, so a gradual build-up of cloud can pass it.
+- `background_homogeneity.py` compares each frame's background brightness with the other frames of the same exposure length to catch a frame taken through cloud or twilight. It finds one sudden jump in sky level, so a gradual build-up of cloud can pass it.
 
-A frame that disagrees with the group is excluded rather than stacked.
+A frame that disagrees with the others is excluded rather than stacked. Each check is recorded as a gate (see "The gate record" below).
 
 #### The quarantine step
 
-**What it does.** It compares each frame with the other frames of its own session (frames of one camera, filter and exposure length less than four hours apart) and moves a frame when:
+**What it does.** It compares each frame with the other frames of its own session. A session here means frames of one camera, filter and exposure length taken less than four hours apart. The step moves a frame when:
 
 - it has fewer stars than half the session's median star count (cloud, or heavy trailing); or
 - its stars are much less round than the session's: roundness (a star's narrow width divided by its wide width, 1.0 for a circle) is below 0.80 and at least 0.15 below the session median (0.20 for a colour camera).
@@ -55,33 +51,7 @@ A satellite or aircraft trail does not trigger it, because the stacker's pixel r
 - `failed` when a session had too many bad frames to move (the bad frames are still in the stack);
 - `not_checked` when no session had enough readable frames, or when the step is off or the stack is spectral.
 
-#### The gate record
-
-A gate is a pass/fail check on the stack. Every check below is recorded in the stack's `gates` as `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. The red-team tests in `test/test_stack_gates.py` and `test/test_frame_quarantine_gate.py` feed each gate input that must fail it.
-
-| Gate | Fails when | Not checked when |
-|---|---|---|
-| `frame_quarantine` | A session had too many bad frames to move, so they stay in the stack | No session had enough readable frames; the step is off; the stack is spectral |
-| `gain_homogeneity` | Never. Setting aside a minority gain corrects the stack | No frame records its gain |
-| `background_homogeneity` | An exposure length shows a sudden change of sky background | The check is off, or no exposure length has three frames with a measured background |
-| `flat_level`, `flat_noise` | The flats are too faint, too bright or too noisy, or cannot be read | The stack used no flats; the noise could not be estimated |
-| `calibration_metadata` | A calibration frame was applied although its gain, offset or temperature does not match the lights, or a kind of calibration frame was left out because its binning does not match | No calibration frame was applied and none was left out |
-| `calibration_frame_count` | A master bias, dark or flat was built from fewer frames than `minimum_calibration_frames` (default 3) | No calibration frame was applied |
-| `exposure_group_linearity` | A group's brightness is not one scale factor of the reference group's: measured on the same isolated, unclipped stars in both groups, its faint-star or bright-star flux ratio differs from the median ratio by more than `exposure_group_gain_tolerance` (default 0.05). Spectral stacks, and imaging stacks with too few clean stars, compare mid-range and bright-end pixels instead. The pipeline leaves that group out of the combined image | The stack has one exposure length, or no group could be compared with the reference |
-| `exposure_groups_combined` | An exposure group that had frames is missing from the combined stack, because it failed to stack, could not be lined up or was nonlinear. The message names each group, why, and how many frames it holds; the stack's `frames_stacked`, session breakdown and sharpness sample then count only the groups that were combined | The stack has fewer than two exposure groups |
-| `rejected_pixel_fraction` | The stacker threw out 15% or more of the pixels | The stacker did not report a count |
-| `stack_sharpness` | The stack is more than 1.2 times wider than its input frames predict | The stack is spectral or a single frame, or a width could not be measured |
-| `spectral_registration` | A frame's zero-order star moved or faded | The stack is not spectral, or the check did not run |
-| `saturated_pixel_fraction` | 0.1% or more of the stack's pixels are saturated | The saturation could not be measured |
-| `zero_pixel_fraction` | Half or more of an image stack's pixels are exactly zero, or 5% or more of a spectral stack's (the cleanest library spectra read 0.4% or less; the bad ones, Sirius and Alnath, 32% and 35%) | The file could not be read |
-| `raw_frame_clipping` | The raw frames of any exposure group have more than 20% of their pixels at exactly zero (a camera offset below the read noise cuts the faint sky off). A stack where only some groups are clipped fails too; its message says the longer groups replace the faint pixels. A stack where every group is clipped cannot replace them. One-length stacks are measured as well | The raw frames could not be read |
-| `negative_pixels` | Siril warns that 50% or more of a frame went negative | Never: no warning is the measurement |
-
-Terms in the table: the **zero-order star** is the plain, undispersed image of the star that a slitless spectrum frame records beside its spectrum. A pixel is **saturated** when it has reached the highest value the camera can record, so its true brightness is lost. **Flux** is the total light measured from a star.
-
-Two limits are known. `gain_homogeneity` cannot see a missing gain, because a frame with no recorded gain is given the default `800`. `negative_pixels` trusts that Siril's log was read, so an unreadable log would pass.
-
-### Step 2b. Skip a stack that would come out the same
+### Step 2. Skip a stack that would come out the same
 
 **What it does.** Stacking a target rebuilds every stack it has: one per filter and one for spectra. Before it stacks, `stack_inputs.py` writes down what the stack is made from:
 
@@ -90,7 +60,7 @@ Two limits are known. `gain_homogeneity` cannot see a missing gain, because a fr
 - the settings that change the pixels;
 - a version number of the stacking code.
 
-It saves that record, with a hash of it, next to the stack as `<stack name>_inputs.json`. On the next run it builds the record again. If the hash matches and the stack file is still there, the stage keeps the stack and returns its path. If not, it logs what changed (for example `3 frame(s) added`, `the flat frames changed`, `settings changed: get_stack_weight`) and rebuilds. Adding luminance frames to a target no longer rebuilds its spectral stack. Only the stacking step is skipped: astrometry, photometry and spectroscopy still run on the stack that is there.
+It saves that record, with a hash of it (a short fingerprint that changes whenever the record changes), next to the stack as `<stack name>_inputs.json`. On the next run it builds the record again. If the hash matches and the stack file is still there, the stage keeps the stack and returns its path. If not, it logs what changed (for example `3 frame(s) added`, `the flat frames changed`, `settings changed: get_stack_weight`) and rebuilds. Adding luminance frames (imaging frames taken through a clear filter that passes all visible colours) to a target does not rebuild its spectral stack. Only the stacking step is skipped: astrometry, photometry and spectroscopy still run on the stack that is there.
 
 **When it never skips.** The skip never triggers when the stack has no record (a stack made before the records existed is rebuilt once) or when the inputs cannot be read. The record travels with the stack into the `_previous` folder.
 
@@ -98,15 +68,21 @@ It saves that record, with a hash of it, next to the stack as `<stack name>_inpu
 
 **For developers.** The version number is `STACKING_ALGORITHM_VERSION` in `stack_inputs.py`; raise it whenever a code change would give a different stack from the same inputs, or old stacks will be called up to date.
 
-### Step 3. Line up the frames
+### Step 3. Group frames by exposure length
 
-Frames must be aligned pixel-for-pixel before combining.
+Frames taken with different exposure times cannot be combined directly, since a longer exposure collects more light per pixel. `stack_runner.py` sorts the frames into exposure groups. It stacks each group on its own (step 4), then lines up and combines the group stacks (step 5), so no frame's light is wasted.
 
-- `group_alignment.py` aligns each exposure group's stack (for images by matching stars, which also removes the small rotation and scale between nights).
-- `spectral_frame_alignment.py` aligns a batch of already-calibrated spectral frames without star detection, since a dispersed spectrum has no normal point-source star pattern to align on.
-- `group_derotation.py` lines up spectral exposure-group stacks onto one common trail tilt.
+### Step 4. Run the stacking engine on each group
 
-### Step 4. Check the flat frames
+**What it does.** `stack_runner.py` hands each batch of frames to a stacking engine, the program that calibrates, registers (lines up) and combines them with pixel rejection. Siril is the engine in use. The runner adds two safeguards. It stacks frames of different exposure lengths one length at a time (step 3). For spectral frames, whose dispersed images cannot use Siril's normal star-based registration, it retries a registration that loses too many frames with a different star detection.
+
+**The engine contract.** The engine's contract is in `drivers/interfaces/stacking_driver.py`: a `StackSettings` goes in and a `StackRunResult` comes out, so nothing else in the pipeline reads Siril's commands or files. Two steps in the middle of an engine run are this pipeline's own science: the flat check (`flat_calibration.assess_flats`) and the phase-correlation alignment of spectral frames (`spectral_frame_alignment.align_calibrated_frames`), both described below. Phase correlation finds the shift between two images from their Fourier transforms. A driver may not import pipeline code, so the runner hands both to the engine on every run as a `PipelineSteps` (`stack_runner.PIPELINE_STEPS`). The quality summary records the engine's name and version (`stackingEngine`, `stackingEngineVersion`). To use another program, write a subclass of `StackingDriver` (see `drivers/siril_stacking_driver.py`); the runner and stage need no change.
+
+**Weighting mixed exposure lengths.** When the frames of an imaging stack have different exposure lengths, `exposure_weighting.py` asks Siril to weight each frame by its noise (`-weight=noise`) unless a weight is configured. A short frame carries less information than a long one, so equal weights add noise. The exposure times alone predict how much: equal weights leave the stack's noise higher than the best weighting by the factor √(mean(1/t) × mean(t)), for exposure times t. For the 30, 60, 120 and 300 second frames of the M 27 stack that factor is 1.17, about 17% more noise. On that stack the weighting lowered the measured pixel noise by 13%.
+
+**Keeping the previous stack.** A restack first moves the stack it replaces, with its pictures, into a `_previous` folder (see `previous_stack.py`), and puts it back if the restack fails.
+
+#### Checking the flat frames
 
 **Why it matters.** A flat frame is a picture of an evenly lit surface. Dividing each light frame by the master flat (the combined flats) removes vignetting (darker corners) and dust shadows. The division also copies the master flat's noise into every light frame. That noise is the same pattern in each frame, so stacking does not average it away unless the frames were dithered (moved a few pixels between exposures).
 
@@ -146,15 +122,9 @@ Siril builds each master (bias, dark, flat) from the frames the library picked, 
 
 **What it records.** The sentences go into the run's `calibration_blocking_flags` diagnostic. `assess_input_quality.py` reads them, adds them to the input quality's flag reasons and fails the `calibration_frame_count` gate, so the stack is flagged. The pipeline still builds the stack, because the library can legitimately hold one flat or dark. A person reading the quality summary, and the UI that shows it, sees which master was short. The setting does not change any pixel, so changing it does not trigger a rebuild.
 
-### Step 5. Run the stacking engine
+#### Aligning spectral frames
 
-**What it does.** `stack_runner.py` hands each batch of frames to a stacking engine, the program that calibrates, registers (lines up) and combines them with pixel rejection. Siril is the engine in use. The runner adds the two safeguards spectroscopy needs (its dispersed images cannot use Siril's normal star-based registration).
-
-**The engine contract.** The engine's contract is in `drivers/interfaces/stacking_driver.py`: a `StackSettings` goes in and a `StackRunResult` comes out, so nothing else in the pipeline reads Siril's commands or files. Two steps in the middle of an engine run are this pipeline's own science: the flat check (`flat_calibration.assess_flats`, step 4) and the phase-correlation alignment of spectral frames (`spectral_frame_alignment.align_calibrated_frames`, step 3). Phase correlation finds the shift between two images from their Fourier transforms. A driver may not import pipeline code, so the runner hands both to the engine on every run as a `PipelineSteps` (`stack_runner.PIPELINE_STEPS`). The quality summary records the engine's name and version (`stackingEngine`, `stackingEngineVersion`). To use another program, write a subclass of `StackingDriver` (see `drivers/siril_stacking_driver.py`); the runner and stage need no change.
-
-**Weighting mixed exposure lengths.** When the frames of an imaging stack have different exposure lengths, `exposure_weighting.py` asks Siril to weight each frame by its noise (`-weight=noise`) unless a weight is configured. A short frame carries less information than a long one, so equal weights add noise: about 17% for the 30, 60, 120 and 300 second frames of the M 27 stack, where the weighting lowered the measured pixel noise by 13%.
-
-**Keeping the previous stack.** A restack first moves the stack it replaces, with its pictures, into a `_previous` folder (see `previous_stack.py`), and puts it back if the restack fails.
+`spectral_frame_alignment.py` aligns a batch of already-calibrated spectral frames without star detection, since a dispersed spectrum has no normal point-source star pattern to align on. It uses phase correlation.
 
 #### Optional pre-fetch
 
@@ -163,14 +133,6 @@ Siril builds each master (bias, dark, flat) from the frames the library picked, 
 **Settings.** `prefetch_frames` in `[Processing]` turns it on (`true`). It is off by default because it downloads files. `prefetch_workers` sets the number of parallel readers; the default of 4 workers matches the mount's `--transfers 4` and is not tuned.
 
 **What it records.** A failed read is logged and counted, not raised, and the job log gets one `Pre-fetch:` line with the file, byte, failure and time counts.
-
-#### Trimming noisy edges
-
-**Why it matters.** Frames shift between nights, so the edges of a stack of several nights are covered by fewer frames and are noisier: on the M 27 stack the first 100 columns and 400 rows had 18% to 33% more noise.
-
-**What it does.** After the engine finishes, `stack_crop.py` trims the stack and its rejection map back to where the pixel noise falls to within 15% of the interior's. The trim measures the noise in 25-pixel strips and finds the noisy run on each side. It then cuts out the largest box with the original proportions (a square stack stays square) that fits in what is left, as near the image centre as the clean area allows. It changes nothing on a stack with clean edges (the Bubble Nebula, M 81 and M 13 stacks), it refuses a trim of more than a quarter of a side, and it moves the sky-coordinate reference with the crop.
-
-**Setting.** `trim_noisy_stack_edges_enabled` (default `true`) turns it off.
 
 #### Pixel rejection limits
 
@@ -183,9 +145,9 @@ Siril builds each master (bias, dark, flat) from the frames the library picked, 
 
 A 5-frame stack therefore uses `rej 3.0000 2.5000`. A `rejection_sigma` passed by the caller, or `fixed` mode, bypasses both changes.
 
-**What it records.** The run records the final limits, the mode, the floor, the extra and whether the floor applied (`rejection_sigma_low`, `rejection_sigma_high`, `rejection_sigma_mode`, `rejection_sigma_floor`, `rejection_sigma_low_extra`, `rejection_sigma_floor_applied`) in the quality summary's `resolvedParameters`. Both settings change the stack's pixels, so they are part of the skip record in step 2b.
+**What it records.** The run records the final limits, the mode, the floor, the extra and whether the floor applied (`rejection_sigma_low`, `rejection_sigma_high`, `rejection_sigma_mode`, `rejection_sigma_floor`, `rejection_sigma_low_extra`, `rejection_sigma_floor_applied`) in the quality summary's `resolvedParameters`. Both settings change the stack's pixels, so they are part of the skip record in step 2.
 
-**How we know: good values wrongly rejected.** `scripts/rejection_small_n_check.py` draws 100,000 pixels of pure Gaussian noise per frame count and counts how many good samples the limits reject. It models Siril's Winsorized sigma clipping approximately (median centre, spread estimated with values beyond 1.5 standard deviations pulled in, times 1.134), so the figures show the size of the effect, not Siril's exact output. The fraction of good samples rejected (lower is better):
+**How we know: good values wrongly rejected.** `scripts/rejection_small_n_check.py` draws 100,000 pixels of pure Gaussian noise per frame count and counts how many good samples the limits reject. It models Siril's Winsorized sigma clipping approximately (median centre, spread estimated with values beyond 1.5 standard deviations pulled in, times 1.134; pulling values in shrinks the spread, and for normally distributed values 1.134 restores it to the true standard deviation), so the figures show the size of the effect, not Siril's exact output. The fraction of good samples rejected (lower is better):
 
 | Frames | Chauvenet limit on both sides | Floor 2.5 on both sides | Default (low 3.0, high 2.5) |
 |---|---|---|---|
@@ -201,7 +163,27 @@ A 5-frame stack therefore uses `rej 3.0000 2.5000`. A `rejection_sigma` passed b
 - The 2.5 default and the 0.5 extra are design choices, not fitted values.
 - The script uses Gaussian noise only, so it cannot show the benefit of the looser low limit for real data, where the bad values are mostly bright.
 - The earlier sweeps of `scripts/rejection_threshold_analysis.py` (M 81, M 13, NGC 2403) found no difference in stacked-image FWHM (full width at half maximum, the width of a star image; smaller is sharper) between sigma 2.5 and 3.0. Those stacks had 40 or more frames. No sharpness measurement exists for stacks of 5 to 15 frames.
-- With a plain sample standard deviation instead of the Winsorized estimate, a stack of 5 or 8 frames cannot reject anything at 2.5, because no value of 5 can lie more than 1.79 standard deviations from their mean. Siril's Winsorized estimate does not have this limit.
+- With a plain sample standard deviation instead of the Winsorized estimate, a stack of 5 or 8 frames cannot reject anything at 2.5, because no one of n values can lie more than (n−1)/√n sample standard deviations from their mean: 1.79 for 5 values and 2.47 for 8. Siril's Winsorized estimate does not have this limit.
+
+### Step 5. Line up and combine the exposure-group stacks
+
+When a stack has more than one exposure group, `stack_runner.py` lines up the group stacks and combines them, using the code in `processing/`:
+
+- `group_derotation.py` first turns spectral exposure-group stacks onto one common trail tilt (the angle at which the spectrum streak crosses the frame).
+- `group_alignment.py` aligns each group's stack with the reference group, the group that carries the most weight in the combination (for images by matching stars, which also removes the small rotation and scale between nights).
+- `exposure_groups.py` puts every group on the reference group's brightness scale by dividing it by a group scale factor, leaves out a group whose brightness one scale factor cannot describe, and combines the rest. `processing/README.md` describes how the group scale factor is measured.
+
+#### Trimming noisy edges
+
+**Why it matters.** Frames shift between nights, so the edges of a stack of several nights are covered by fewer frames and are noisier: on the M 27 stack the first 100 columns and 400 rows had 18% to 33% more noise.
+
+**What it does.** After the stack is complete, `stack_crop.py` trims the stack and its rejection map (an image of how many values the stacker threw out at each pixel) back to where the pixel noise falls to within 15% of the interior's. The trim measures the noise in 25-pixel strips and finds the noisy run on each side.
+
+**Why these numbers.** The 15% limit sits between the noisy edges of M 27 (18% to 33%) and the clean edges of the Bubble Nebula, M 81 and M 13 stacks (at most 6%). For frames of equal weight, 15% more noise means an edge covered by about three quarters of the frames, because noise goes as one over the square root of the number of frames. A 25-pixel strip holds thousands of sky pixels for a steady noise estimate and still places the edge within a few dozen pixels.
+
+It then cuts out the largest box with the original proportions (a square stack stays square) that fits in what is left, as near the image centre as the clean area allows. It changes nothing on a stack with clean edges (the Bubble Nebula, M 81 and M 13 stacks), it refuses a trim of more than a quarter of a side, and it moves the sky-coordinate reference with the crop.
+
+**Setting.** `trim_noisy_stack_edges_enabled` (default `true`) turns it off.
 
 ### Step 6. Judge the result
 
@@ -211,12 +193,12 @@ A 5-frame stack therefore uses `rej 3.0000 2.5000`. A `rejection_sigma` passed b
 
 **What it makes.** `stack_preview.py` saves two pictures next to the finished stack: a JPEG named `<stack name>_preview.jpg` and a FITS file named `<stack name>_processed.fits`. Both hold the same stretched picture, the same way up (Siril writes a JPEG upside down compared with its FITS source, so the JPEG script flips it first). The FITS file holds 32-bit numbers between 0 and 1, so the image viewer can zoom into it without the JPEG's 8-bit banding. It keeps the stack's observation keywords (exposure time, telescope, object) and a header note that it is a stretched picture and not linear data.
 
-**Why it stretches.** A stack holds linear data (pixel values proportional to the light collected), which looks almost black on a screen, because most of the interesting detail sits just above the sky level. Stretching is a non-linear brightness curve that lifts that faint detail. The steps below run on a scratch copy first. Sub-step 6 replaces sub-steps 4 and 7 when it is chosen.
+**Why it stretches.** A stack holds linear data (pixel values proportional to the light collected), which looks almost black on a screen, because most of the interesting detail sits just above the sky level. Stretching is a non-linear brightness curve that lifts that faint detail. The steps below run on a scratch copy first. In short: remove the sky gradient, balance the colours, remove excess green, stretch, remove noise, and dim the stars. Sub-step 6 (StarNet) replaces sub-steps 4 and 7 when it is chosen.
 
 1. **Gradient removal.** GraXpert removes the sky's brightness gradient, if the `[Processing.GraXpert]` setting names a GraXpert command. Its AI model learns what the smooth background looks like and subtracts it.
 2. **Colour calibration.** This step balances the colours of a colour stack on the linear data after GraXpert.
     - *Default method.* By default (`preview_colour_calibration_method = "pcc"`) it runs Siril's photometric colour calibration (PCC). Siril solves the field from the pointing, focal length and pixel size in the header (unless the stack already has a plate solution, the mapping from pixel position to sky coordinates), matches the stars to the Gaia DR3 catalogue (the star catalogue from the European Space Agency's Gaia satellite, third data release) over the network, removes each channel's background and scales the channels. It took about 13 seconds on M 51.
-    - *Fallback method.* If Siril, the solve or the network fails, the star-based method runs instead (`colour_calibration.py`). That method subtracts each channel's sky level (the median of its pixels), finds the stars on the summed channels, measures each in each channel with aperture photometry (summing the light in a circle around the star and subtracting the sky measured in a ring around it: here a 3.5 pixel circle minus the sky of a 7 to 11 pixel ring), and keeps the stars in the middle of the brightness range (30th to 85th percentile of total light). The median star is taken to be neutral, so the red and blue gains are the factors that make the median red-to-green and blue-to-green flux ratios equal to 1. Green is the reference. It needs no catalogue or network, and `preview_colour_calibration_method = "stars"` uses it alone.
+    - *Fallback method.* If Siril, the solve or the network fails, the star-based method runs instead (`colour_calibration.py`). That method subtracts each channel's sky level (the median of its pixels), finds the stars on the summed channels, measures each in each channel with aperture photometry (summing the light in a circle around the star and subtracting the sky measured in a ring around it: here a 3.5 pixel circle minus the sky of a 7 to 11 pixel ring), and keeps the stars in the middle of the brightness range (30th to 85th percentile of total light). The circle is about 1.2 times the star width of the Nikon stacks, which catches most of a star's light and keeps the noise down, and the ring lies well outside the star's faint outer light. The brightest stars may be saturated and the faintest have noisy colours, which is why the middle of the range is kept; the 30th and 85th percentiles are design choices, not fitted values. The median star is taken to be neutral, so the red and blue gains (the scale factors for the red and blue channels) are the factors that make the median red-to-green and blue-to-green flux ratios equal to 1. Green is the reference. It needs no catalogue or network, and `preview_colour_calibration_method = "stars"` uses it alone.
     - *Settings.* `preview_colour_calibration_enabled` in `[Processing.Siril]` (default `true`) turns the whole step off.
     - *Effect on the stretch.* A picture whose colours were calibrated is stretched with one shared stretch (`autostretch -linked`). Siril's default stretches each channel by itself, which sets every channel's sky and scale back to the same values and so undoes any colour balance: with the default stretch, the calibrated and uncalibrated pictures of M 51 came out identical. When too few stars are found (fewer than 40), or the setting is off, the stack is stretched channel by channel as before. See `post_processing/README.md` for how the gains compare with Siril's own calibration.
 3. **Green removal.** Siril's Remove Green Noise (`rmgreen`) lowers excess green in a colour stack, such as one from the Nikon DSLR.
@@ -224,7 +206,7 @@ A 5-frame stack therefore uses `rej 3.0000 2.5000`. A `rejection_sigma` passed b
     - *What it does.* It runs on the linear data in the same Siril script as the stretch, and only when the stack has three colour planes, so the single-channel ZWO stacks are never touched. Siril's default method limits each pixel's green to the average of its red and blue and keeps the pixel's lightness. It does not remove colour gradients across the frame, which are a separate problem.
     - *Setting.* `preview_remove_green_noise_enabled` in `[Processing.Siril]` (default `true`) turns it off.
     - *Measured.* With the colour calibration on, it changes little: on M 51 and M 31 it moved the sky's green by about 2 levels out of 255.
-4. **Stretch.** Siril's Autostretch sets the black point from the image's own background noise and bends the brightness curve so the sky lands on a chosen grey level.
+4. **Stretch.** Siril's Autostretch sets the black point (the pixel value shown as pure black) from the image's own background noise and bends the brightness curve so the sky lands on a chosen grey level.
     - *Choosing the sky level.* `sky_level.py` chooses that level from the stack itself. It measures the brightest extended light (nebulae and galaxy halos, not stars) as a signal-to-noise ratio above the sky, then places that light at a fixed display brightness. A faint target needs a lot of lift, so its sky comes out lighter (up to 0.20) and its faint structure stays visible. A lighter sky also lifts the grain into view, which is why the limit is 0.20 and not Siril's own 0.25. A bright target needs little, so its sky comes out darker (down to 0.11) for more contrast. A stack whose sky cannot be measured gets 0.18.
     - *Measured.* On the ASI533MM Pro stacks it gives 0.20 for M 101, M 81, M 27 and the faint star fields, about 0.19 for the Bubble Nebula, and 0.11 for M 42.
     - *Tuning.* The rule has one tuned number. It was set by eye on the Bubble Nebula stack, where the user judged the earlier, darker sky too black and chose a level near 0.20 from rendered options.
@@ -241,7 +223,7 @@ A 5-frame stack therefore uses `rej 3.0000 2.5000`. A `rejection_sigma` passed b
 7. **Star toning.** Star toning (`star_tone.py`) dims the stars in proportion to their brightness and compresses the brightest values below pure white.
     - *Why.* The stretch makes nearly every star a small white dot of about the same brightness.
     - *What it does.* The toning separates the light above the local background, raises it to a power (1.8) so that fainter stars dim more than bright ones, and then applies a soft roll-off above 0.65 so a saturated core ends near 0.92. Only light that stands out by more than 0.05 to 0.12 above the background is dimmed, so low-contrast structure (the knots along a galaxy's spiral arms) keeps its detail. The background and nebulae are not touched. A colour picture is toned on its brightness (the mean of its channels) and every channel of a pixel is scaled by the same factor. Toning each channel alone gave a Nikon stack a colour cast, because the channels differ in noise and so were dimmed by different amounts: the sky of M 51 went yellow in the middle and blue at the edges.
-    - *Noise-aware start.* The start of the dimming also follows the picture's noise: light counts as a star only if it stands at least 6 noise widths above the background, which is about 0.26 to 0.34 in stretched units on the stacks measured (the 0.05 and 0.12 limits above apply unchanged when the noise is small). The background under the stars is the local minimum, which lies 2 to 3 noise widths below the sky, so sky noise alone reaches 5.5 noise widths above it.
+    - *Noise-aware start.* The start of the dimming also follows the picture's noise: light counts as a star only if it stands at least 6 noise widths (standard deviations of the sky noise) above the background, which is about 0.26 to 0.34 in stretched units on the stacks measured (the 0.05 and 0.12 limits above apply unchanged when the noise is small). The background under the stars is the local minimum, which lies 2 to 3 noise widths below the sky, so sky noise alone reaches 5.5 noise widths above it.
     - *Measured.* With the fixed 0.05 start, about 90 percent of the sky pixels of M 51, M 106, M 81 and M 101 counted as star light: the toning halved the sky level (0.20 to about 0.10) and smeared the spiral arms of M 81. With the noise-aware start the sky level stays where `sky_level.py` put it on all four stacks, and bright stars are still toned. Faint stars are no longer dimmed, so a star field looks busier than before.
     - *Setting.* `preview_star_tone_enabled` in `[Processing.Siril]` (default `true`) turns it off.
     - *Tuning.* The power and the knee were chosen by eye on the Bubble Nebula stack and are not validated on other targets.
@@ -276,6 +258,46 @@ The step then records the FITS picture as the target's processed image (`process
 
 `post_processing/preview_remake.py` runs only this step again on the stack that is already there, without restacking (`ProcessingPipelines.remake_preview`). A run can override the denoise and star-toning settings, or choose StarNet, without writing them to the configuration. By default it copies the old pictures into a `_previous_preview` folder first, so the two can be compared, and a failed run puts them back. It never opens the stack file for writing.
 
+## The gate record
+
+A gate is a pass/fail check on the stack. Every check below is recorded in the stack's `gates` as `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. The red-team tests in `test/test_stack_gates.py` and `test/test_frame_quarantine_gate.py` (tests written to attack each check) feed each gate input that must fail it.
+
+Terms in the table:
+
+- The **zero-order star** is the plain, undispersed image of the star that a slitless spectrum frame records beside its spectrum.
+- A pixel is **saturated** when it has reached the highest value the camera can record, so its true brightness is lost.
+- **Flux** is the total light measured from a star.
+- The **reference group** is the exposure group that carries the most weight when the groups are combined (step 5). The other groups are lined up with it and put on its brightness scale.
+
+| Gate | Fails when | Not checked when |
+|---|---|---|
+| `frame_quarantine` | A session had too many bad frames to move, so they stay in the stack | No session had enough readable frames; the step is off; the stack is spectral |
+| `gain_homogeneity` | Never. Setting aside a minority gain corrects the stack | No frame records its gain |
+| `background_homogeneity` | An exposure length shows a sudden change of sky background | The check is off, or no exposure length has three frames with a measured background |
+| `flat_level`, `flat_noise` | The flats are too faint, too bright or too noisy, or cannot be read | The stack used no flats; the noise could not be estimated |
+| `calibration_metadata` | A calibration frame was applied although its gain, offset or temperature does not match the lights, or a kind of calibration frame was left out because its binning does not match | No calibration frame was applied and none was left out |
+| `calibration_frame_count` | A master bias, dark or flat was built from fewer frames than `minimum_calibration_frames` (default 3) | No calibration frame was applied |
+| `exposure_group_linearity` | A group's brightness is not one scale factor of the reference group's: measured on the same isolated, unclipped stars in both groups, its faint-star or bright-star flux ratio differs from the median ratio by more than `exposure_group_gain_tolerance` (default 0.05). Spectral stacks, and imaging stacks with too few clean stars, compare mid-range and bright-end pixels instead. The pipeline leaves that group out of the combined image | The stack has one exposure length, or no group could be compared with the reference |
+| `exposure_groups_combined` | An exposure group that had frames is missing from the combined stack, because it failed to stack, could not be lined up or was nonlinear. The message names each group, why, and how many frames it holds; the stack's `frames_stacked`, session breakdown and sharpness sample then count only the groups that were combined | The stack has fewer than two exposure groups |
+| `rejected_pixel_fraction` | The stacker threw out 15% or more of the pixels | The stacker did not report a count |
+| `stack_sharpness` | The stack is more than 1.2 times wider than its input frames predict | The stack is spectral or a single frame, or a width could not be measured |
+| `spectral_registration` | A frame's zero-order star moved or faded | The stack is not spectral, or the check did not run |
+| `saturated_pixel_fraction` | 0.1% or more of the stack's pixels are saturated | The saturation could not be measured |
+| `zero_pixel_fraction` | Half or more of an image stack's pixels are exactly zero, or 5% or more of a spectral stack's (the cleanest library spectra read 0.4% or less; the bad ones, Sirius and Alnath, 32% and 35%) | The file could not be read |
+| `raw_frame_clipping` | The raw frames of any exposure group have more than 20% of their pixels at exactly zero (a camera offset below the read noise cuts the faint sky off). A stack where only some groups are clipped fails too; its message says the longer groups replace the faint pixels. A stack where every group is clipped cannot replace them. One-length stacks are measured as well | The raw frames could not be read |
+| `negative_pixels` | Siril warns that 50% or more of a frame went negative | Never: no warning is the measurement |
+
+**Where the limits come from.**
+
+- `rejected_pixel_fraction` (15%): on three real sessions the rejected share never went above about 10%, even on NGC 2403's cloud-affected session at the loosest limits tried. 15% leaves room above normal sessions. It is a weaker signal than `stack_sharpness`: NGC 2403's problem showed in the star width and not in the rejected share.
+- `stack_sharpness` (1.2 times): the predicted width is the root mean square of a sample of the input frames' star widths (see `post_processing/README.md`). Six real stacks measured 0.77 to 1.16 times their prediction, so the limit does not fire on a normal stack. Whether it catches a real failed alignment is not tested, because the library holds no such session.
+- `saturated_pixel_fraction` (0.1%): a design value, not checked against real stacks.
+- `raw_frame_clipping` (20%): on one session of Vega, 31% of the pixels of the 1 second frames were exactly zero and 1% of the 2 second frames'. The measured noise of the 1 second frames read too low, and 20% sits between the two. It is not tested on other cameras or offsets.
+
+**What raw-frame clipping means.** The camera's offset is meant to lift the readings so that noise below zero is still recorded. When the offset is smaller than the read noise, readings that would fall below zero are stored as 0. The faint sky then reads too bright on average and its noise reads too low. When only the shorter groups are clipped, the combination (step 5) leaves the clipped group out at those pixels and uses the longer groups, whose sky stays above zero.
+
+**Known blind spots.** `gain_homogeneity` cannot see a missing gain, because a frame with no recorded gain is given the default `800`. `negative_pixels` trusts that Siril's log was read, so an unreadable log would pass.
+
 ## Where each piece lives
 
 The folders follow the layout in `pipelines/README.md`.
@@ -283,7 +305,7 @@ The folders follow the layout in `pipelines/README.md`.
 - `stack_request.py` is the entry point behind `ProcessingPipelines.stack`. `choose_frames_to_stack` picks the light frames: it never mixes imaging and spectroscopy frames or two cameras, and it narrows the choice by filter, file-name range, time window and camera, or takes an exact list. `run_stack` runs `stage.py` on the chosen frames as a tracked job, holds a stacking slot while Siril runs, and saves the target when a stack was made. A request that cannot be met raises an error.
 - `stage.py` is the coordinator: it runs the steps above in order for one target, and is what the rest of the codebase calls to stack a target's frames.
 - `calibration_ingest.py` turns a rescan of the calibration library into a report. It compares the library's frame lists from before and after the rescan, lists the groups that gained or lost frames, and measures each new set of flats with the stacker's own flat check (`pre_processing/flat_calibration.py`). `CalibrationCatalog.refresh` and `CalibrationCatalog.assess_flats` call it.
-- `stack_runner.py` runs the stacking engine (step 5): exposure groups, registration retries and the final read of the engine's files. The engine is the only code that stacks a batch's pixels. `processing/` combines the group stacks.
+- `stack_runner.py` runs the stacking engine (steps 3 to 5): exposure groups, registration retries and the final read of the engine's files. The engine is the only code that stacks a batch's pixels. `processing/` combines the group stacks.
 - `pre_processing/` checks and prepares the inputs: the one-camera rule (`camera_selection.py`, which picks a named camera's frames and refuses a set that still mixes cameras, because frames from two cameras differ in pixel size, gain, noise and calibration frames), the gain and background homogeneity checks, the flat-frame check, and the input-quality judgement (`StackingInputQuality`). See its README.
 - `processing/` lines up and combines frames: exposure groups, group alignment, spectral frame alignment and derotation. See its README.
 - `post_processing/` judges and presents the finished stack: the quality thresholds, the saturation check, the exposure-group report, the output-quality judgement (`StackingOutputQuality`), the bright-object rule, the sky level rule, the preview picture and its remake, and the stack reports that the API returns (`stack_quality_report.py`: the stack's star width, share of rejected pixels and frame registration, an optional comparison with the previous or another stack, and the saved summary). See its README.

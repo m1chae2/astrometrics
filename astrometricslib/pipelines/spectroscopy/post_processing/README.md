@@ -18,8 +18,10 @@ against an independent spectrum of the same star from the Gaia satellite.
 ## The flow
 
 1. **Compare against the catalog.** Most stars already have a spectral type
-   and a B-V colour (a blue-minus-visual brightness ratio in magnitudes;
-   larger is redder) on record, from SIMBAD (a general star database) or
+   and a B-V colour on record (the star's magnitude through a blue filter
+   minus its magnitude through a visual, yellow-green filter; magnitudes are
+   a logarithmic brightness scale on which larger is fainter, so a larger B-V
+   is redder), from SIMBAD (a general star database) or
    Gaia (a satellite survey of over a billion stars), measured by a different
    method. The pipeline checks the star's self-determined type and measured
    colour against those catalog values. A disagreement can mean the
@@ -49,9 +51,9 @@ against an independent spectrum of the same star from the Gaia satellite.
    the calibrated spectrum with the star's Gaia DR3 XP spectrum, a low-resolution
    spectrum from a different instrument. The comparison measures the tilt, the
    residual and the wavelength shift of the calibration. The code is in
-   `compare_to_gaia_xp.py`. See "Check against Gaia XP" in the pipeline README
-   for the method and the limits. A star with no known Gaia id is recorded as
-   not checked, with the reason.
+   `compare_to_gaia_xp.py`. "Check against Gaia XP" below gives the method
+   and the limits. A star with no known Gaia id is recorded as not checked,
+   with the reason.
 
 ## What this stage produces
 
@@ -77,8 +79,13 @@ it does not, a short note explaining why:
   supergiant reference spectrum that looks closest to this star, since the
   ordinary type comparison above is not a fair test for a giant.
 - **Colour agreement**: whether the spectrum's own measured B-V colour, from
-  the processing stage, is close enough to the catalog's B-V colour to
-  count as agreement.
+  the processing stage, is within 0.4 mag of the catalog's B-V colour
+  (`COLOUR_DISAGREEMENT_MAGNITUDES`). On 2026-09-24, 30 of 36 stars stayed
+  within 0.30 mag and the problem spectra were further out, so 0.4 is a
+  judgement from that one data set. A catalog colour redder than 1.7
+  (`MAXIMUM_CALIBRATED_B_MINUS_V`) is not compared, because the references
+  stop at M4V (B-V 1.64) and the colour measurement is not calibrated beyond
+  it.
 
 The output quality assessment then combines this comparison with the
 classification's own match checks into one overall verdict:
@@ -91,7 +98,9 @@ classification's own match checks into one overall verdict:
   `AMBIGUOUS_RMS_GAP` (0.02). Unit: relative RMS. The gap is a difference in
   RMS, not a probability. It is `False` when fewer than two references were
   compared. Neighbouring subtypes of one class are often this close, so this
-  flag is common and does not fail the run gate.
+  flag is common. It fails no run gate (the `spectral_classification` and
+  `processing_quality` gates look only at class-level ambiguity), but it does
+  make the star's `is_trustworthy` verdict false (see below).
 - **Ambiguous at the class level** (`is_class_ambiguous`): the gap between
   the best reference and the best reference of a different spectral class
   letter (`rms_gap_to_next_class`) is below `AMBIGUOUS_RMS_GAP`. Unit:
@@ -102,7 +111,10 @@ classification's own match checks into one overall verdict:
 - **Trustworthy** (`is_trustworthy`): the overall verdict,
   `not (is_poor_match or is_ambiguous or catalog disagrees)`. It is false
   when the match is poor, the subtype is ambiguous or the measured type
-  disagrees with the catalog type. Class-level ambiguity and a colour
+  disagrees with the catalog type. Because subtype ambiguity is common,
+  a star whose class is clear can still be marked not trustworthy for that
+  reason alone; the `subtype_ambiguous` flag at checkpoint 3 shows when that is
+  the cause. Class-level ambiguity and a colour
   disagreement do not change it. They raise their own flags at checkpoint 3
   (`class_ambiguous` and `colour_disagrees`), and class-level ambiguity
   fails the `spectral_classification` gate.
@@ -135,20 +147,133 @@ used only there and stay in that file.
 
 `output_quality_checkpoint` in `assess_output_quality.py` turns the output
 quality assessment into the final `StageQualityCheckpoint` (stage
-`post_processing`). It carries the poor-match, subtype-ambiguity, class-
-ambiguity, catalog-agreement, colour-agreement and trustworthy verdicts as 1 or
-0 values, plus the distance in subtype steps between the measured and the
-catalog type, judged against `DIFFERS_FROM_CATALOG_SUBTYPES`. For an
-unclassified spectrum every value is empty and the flag is `unclassified`.
-For a classified spectrum it raises one flag per failed verdict:
-`poor_match`, `subtype_ambiguous`, `class_ambiguous`, `catalog_disagrees`,
-`colour_disagrees` and `not_trustworthy`. It raises `gaia_xp_disagrees`
-when a Gaia XP metric fails, classified or not. `run_gates.py` also rolls the four
+`post_processing`). It carries the verdicts of
+`OutputQualityAssessment` and the catalog distance. Each verdict is 1 (yes) or
+0 (no). For an unclassified spectrum every classification value is `None`
+and the checkpoint carries the `unclassified` flag.
+
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `catalog_type_steps_apart` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance on the O-to-M ladder between the measured and the catalog type (B0 is 10, A5 is 25). |
+| `poor_match` | flag | 0, lower is better | 1 when `classification_rms` is above `NO_GOOD_MATCH_RMS`. |
+| `subtype_ambiguous` | flag | 0, lower is better | 1 when the gap to the second best is below `AMBIGUOUS_RMS_GAP`. Common, because neighbouring subtypes often fit about equally well. A 1 fails this metric and makes `trustworthy` 0. |
+| `class_ambiguous` | flag | 0, lower is better | 1 when the gap to the next class is below `AMBIGUOUS_RMS_GAP`. |
+| `catalog_agrees` | flag | 1, higher is better | 1 when the measured type agrees with the catalog type. |
+| `colour_agrees` | flag | 1, higher is better | 1 when the spectrum's B-V colour agrees with the catalog colour. |
+| `trustworthy` | flag | 1, higher is better | The overall verdict of `OutputQualityAssessment`: 0 when the match is poor, the subtype is ambiguous or the type disagrees with the catalog. |
+| `gaia_xp_residual_rms_fraction` | fraction | 0.05, lower is better (designed) | The RMS of (observed / Gaia XP - 1) over 4200-8000 Å. See "Check against Gaia XP" below. Empty when the spectrum was not compared. |
+| `gaia_xp_slope_percent_per_1000_angstrom` | percent per 1000 Å | 3, lower is better (designed) | The absolute tilt of observed / Gaia XP. A tilt points at the instrument response or the airmass correction. |
+| `gaia_xp_wavelength_shift_angstrom` | Å | 11, lower is better (designed) | The absolute shift of the spectrum's features against Gaia XP's. 11 Å is one pixel of dispersion. A shift points at the wavelength scale. |
+| `gaia_xp_available` | flag | none (reported only) | 1 when the spectrum was compared with Gaia XP, 0 when not. The note gives the reason. |
+
+The Gaia XP metrics are filled for classified and unclassified spectra alike,
+because they test the calibration, not the classification. When a Gaia XP metric
+fails, the checkpoint carries the `gaia_xp_disagrees` flag.
+
+For a classified spectrum, checkpoint 3 also raises one flag for each failed
+verdict: `poor_match`, `subtype_ambiguous`, `class_ambiguous`,
+`catalog_disagrees` (the measured type is too far from the catalog type),
+`colour_disagrees` (the B-V colour disagrees with the catalog) and
+`not_trustworthy`. The `trustworthy` verdict is
+`not (poor_match or subtype_ambiguous or catalog_disagrees)`. Class
+ambiguity and colour disagreement raise their own flags but do not change it.
+
+`run_gates.py` also rolls the four
 checkpoints of all spectra up into the run summary's `stage_quality_summary`
 and builds the `processing_quality` gate. `wavelength_scale.py` reads the
 wavelength zero-point metrics from the pre-processing checkpoints and builds
 the run-level `wavelength_scale_summary` and the `wavelength_scale` gate. The
 [pipeline README](../README.md) describes all three.
+
+## Check against Gaia XP
+
+What and why: an independent spectrum of the same star, taken from space,
+shows whether this pipeline's calibration is right. A tilt in the ratio of
+the two spectra points at the colour correction; a sideways shift points at
+the wavelength scale.
+
+The Gaia satellite measured a low-resolution spectrum, the XP spectrum, for about
+220 million stars. Its resolving power (wavelength divided by the smallest
+resolvable wavelength difference) is about 30 to 100, close to the Star
+Analyser's (the grating this instrument uses). It comes from a different
+instrument above the atmosphere. The
+pipeline compares each calibrated spectrum with the XP spectrum of the same star.
+The comparison tests the instrument response (the colour tilt the camera and
+grating add), the airmass correction (for the air's dimming) and the
+wavelength scale together. The code is in
+`compare_to_gaia_xp.py`.
+
+1. **Find the Gaia DR3 source id.** The pipeline reads `StellarObject.gaia_dr3_source_id`
+   through `catalog_star_identity.gaia_dr3_source_id_of`, the same function the
+   reddening lookup uses.
+   The star identifier fills it from the `Gaia DR3 <number>` name in SIMBAD's list
+   of identifiers, or from a star that was named from Gaia. If the star has none
+   (the brightest stars are not in Gaia DR3), the comparison is `not_checked`
+   with that reason.
+2. **Fetch the XP spectrum** through the `GaiaXpDriver` (`drivers/gaia_xp_driver.py`).
+   The driver caches each spectrum on disk. A source with no XP spectrum, or a
+   failed download, gives `not_checked` and never stops the pipeline.
+3. **Put both on the same quantity.** The response-corrected spectrum is the
+   counts divided by the response, which is Vega observed over the Pickles A0V
+   template (a published reference spectrum of a star of Vega's type, from the
+   Pickles 1998 library). Pickles fluxes are energy per unit wavelength, so the
+   corrected spectrum is a relative F-lambda (energy per unit time, area and
+   wavelength) above the atmosphere. Gaia's sampled flux is
+   also F-lambda, in W m⁻² nm⁻¹. The two differ by one constant, which the
+   normalization removes. A difference between Vega and the A0V template stays
+   inside every corrected spectrum, so it appears as an offset common to all stars.
+4. **Match the resolutions.** XP's blur is a Gaussian of 95 Å full width at half
+   maximum (FWHM) at 4340 Å, 130 Å at 4861 Å, 70 Å at 6563 Å and 185 Å at 8800 Å,
+   with straight lines between. A fit of the Pickles A0V template to the XP
+   spectra of 12 A0V stars (G 6.0 to 6.6, their brightness in Gaia's broad G band, in magnitudes) gave these medians on 2026-10-10. The
+   spread between stars was 20 to 40 percent. The instrument's stored line
+   spread is sharper than XP's below about 5000 Å and broader above it. Where
+   the instrument is broader, the pipeline blurs XP to it. Where XP is broader,
+   the pipeline blurs the observed spectrum to XP. The blur width is the
+   quadrature difference, `sqrt(broad² - narrow²)` (Gaussian blurs add as the
+   square root of the sum of their squares, so this is the extra blur that
+   turns the narrow one into the broad one).
+5. **Compare.** The pipeline keeps 4200 to 8000 Å outside the atmospheric bands,
+   divides each spectrum by its median over 5400 to 5600 Å, and computes
+   - the RMS of observed / XP - 1;
+   - the slope of a straight line fitted to observed / XP, in percent of the flux
+     at 5500 Å per 1000 Å. The fit weights samples by XP's errors, the spectrum's
+     own errors when `response_corrected_intensity_errors` exists, and a 1 percent
+     floor;
+   - the median ratio and the RMS in four bands: 4200-5000, 5000-6000, 6000-7000
+     and 7000-8000 Å;
+   - the wavelength shift that best correlates the two spectra's logarithmic
+     derivatives (d ln F / dλ, which emphasizes the lines and edges and ignores
+     the overall slope). The sign is positive when the observed features sit
+     at longer wavelengths than XP's. The search covers ±60 Å. A correlation below
+     0.3 gives no shift. 0.3 is a design value: two spectra of the same star
+     correlate at 0.9 or more in the synthetic tests, and chance correlation
+     for about 700 independent points is about 0.04.
+
+The result is stored on `SpectroscopyResult.gaia_xp_comparison`
+(`GaiaXpComparison`, in `models/gaia_xp_comparison.py`), together with the
+normalization levels and whether either spectrum was blurred.
+
+Settings: all three limits are designed, not measured: 0.05 is above XP's own 1 to 2
+percent calibration error, 3 percent per 1000 Å is an 11 percent change across the
+compared range, and 11 Å is one pixel.
+
+How we know: synthetic tests recover a 5 percent per
+1000 Å tilt to within 0.2 and a 20 Å shift to within 1 Å. Against real data, a
+shift measured between a real XP spectrum and a template of a different star ranged
+from -23 to +36 Å over 12 A0V stars (median +11 Å). The template is not the
+same star as the XP spectrum, so that spread measures how much real stars
+of one type differ from the template, not the instrument. The shift's noise floor for a real
+spectrum of the same star is not known yet.
+`astrometricslib/scripts/compare_spectra_with_gaia_xp.py` measures it on a processed target.
+
+At the run level, the summary's `gaiaXpSummary` (`GaiaXpRunSummary`) gives, for
+each of the four bands, the median over the compared stars of observed / XP and
+its scatter (1.4826 times the median absolute deviation, MAD: the median
+distance from the median, scaled to match a standard deviation for normal
+data while ignoring a few wild values). A star with several
+spectra counts once. That median ratio is the measured residual instrument
+response: dividing the corrected spectra by it makes them agree with Gaia.
 
 ## Files
 

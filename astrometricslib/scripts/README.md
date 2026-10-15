@@ -1,6 +1,6 @@
 # Scripts
 
-This folder holds standalone command-line scripts: batch processing over the whole catalog, one-time data migrations and cleanups, and empirical validation/analysis of pipeline behavior against real stored data. Each script is meant to be run directly (`python <script>.py [args]`), not imported by the library or the backend.
+This folder holds standalone command-line scripts: batch processing over the whole catalog, one-time data migrations and cleanups, backups, and empirical validation and analysis of pipeline behavior against real stored data. Each script is meant to be run directly (`python <script>.py [args]`), not imported by the library or the backend.
 
 Terms are defined in the [glossary](../../documentation/library_design/Astrometrics_Library_Architecture.md#appendix-b-glossary).
 
@@ -17,42 +17,121 @@ A script here may import astrometricslib's internal modules. It never imports an
 ## One-time migrations and cleanups
 
 - `migrate_config_to_toml.py` — migrates the old INI configuration file and JSON camera profiles into the current TOML configuration format.
-- `measure_variability_cutoff.py` — read-only. Checks the photometry pipeline's variable-star cutoff (`median + k x MAD`, k = 7.4; MAD, the median absolute deviation, is a spread measure that a few wild values cannot inflate) against the catalogs: for each multiplier, the share of stars the catalogs list as variable that it flags, the share of unlisted stars, and an AUC (area under the ROC curve: 0.5 means no better than chance, 1 means perfect separation) for how well scatter separates the two, overall and between stars of similar brightness. On the library (2026-10-09) the scatter separates them no better than chance.
-- `report_gate_limits.py` — read-only. For every numeric quality limit, the spread of the saved values across all targets and how many targets are beyond the limit; also the spread of numbers with no limit yet (such as the astrometric residual), which a limit would have to be derived from.
-- `recompute_headline_numbers.py` — read-only. Independent re-check of saved headline numbers: recomputes light-curve variability (CV, the coefficient of variation: standard deviation divided by mean), mean brightness and best period, and stack zero/saturated shares and star widths from the files, then lists every saved value that disagrees. Star widths are checked twice: by re-running the pipeline method and by a separate half-maximum method.
-- `validate_emission_line_detector.py` — read-only. Runs the emission-line detector on every stored spectrum of a star not known to emit (any detected line is false) and on the same spectra with a line of known height added, giving the false-line rate and the share of injected lines recovered at each height.
-- `validate_asteroid_detection.py` — measures the asteroid detector: the share of injected synthetic movers it recovers at each brightness and speed, the tracks it confirms in fields with no mover, and (read-only) the confirmed movers on real frames of targets far from the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear), where they are almost all false.
 - `merge_duplicate_catalog_stars.py`, `merge_spectroscopy_star_rows.py`, `reconcile_position_only_star_catalog.py` — fold duplicate or split stellar catalog rows for the same real star back into one row.
 - `backfill_focal_length.py` — fills in a missing `FOCALLEN` header value on frames captured before the pipeline started requiring it.
 - `move_stacks_to_stacks_path.py` — moves the pipeline's existing output (stacks, group stacks, rejection maps, previews, processed pictures) from the frames folder to the `stacks_path` folder, and rewrites the paths in the database. Dry run by default; the backend must be stopped for `--apply`.
-- `restore_excluded_frames.py` — a command-line wrapper around `ProcessingPipelines.restore_excluded_frames`. It lists the frames the stacking pipeline moved into `_excluded` folders (clouds or trailed stars) and, with `--apply`, moves them back and re-scans their targets. Dry run by default.
-- `backfill_simbad_object_types.py` — fills in the SIMBAD object types of stars saved before they were recorded, so the library can say whether a star is already listed as a variable. It asks SIMBAD about 200 identifiers at a time (SIMBAD-named and Gaia-numbered stars only; about 40,000 of the 283,000 stars), rejects any answer more than 30 arcseconds from the star's stored position, and changes only the `simbad_object_types` field. It writes nothing without `--apply`, which first backs up the catalog database and then saves after every request, so a stopped run keeps its progress and can be run again. Try `--limit 400` first.
-- `backfill_variable_star_flags.py` — looks up each stored star in the AAVSO Variable Star Index (VSX) and in Gaia DR3 (through CDS XMatch, 2,000 stars per request, matched within 3 arcseconds) and stores the answers, so the library can say "not listed as variable in SIMBAD, Gaia DR3 or VSX" and pick out stars a catalog calls constant. Only stars with an identity are looked up unless `--include-position-only` is given. It writes nothing without `--apply`, which backs up the catalog database first and changes only the two flag fields.
-- `backfill_stack_previews.py` — makes the stretched JPEG and FITS pictures for stacks that were made before stacking saved them (it never restacks), and records the FITS as the target's processed image (replacing a picture a person attached unless `--keep-attached-pictures` is given; the attached file stays where it is).
-- `report_equipment_disagreements.py` — reports stored telescope/ISO values that a fresh re-scan of the frame would change, without changing anything itself.
+- `restore_excluded_frames.py` — a command-line wrapper around `ProcessingPipelines.restore_excluded_frames`. It lists the frames the stacking pipeline moved into `_excluded` folders because of clouds or trailed stars (stars smeared into short streaks). With `--apply`, it moves them back and re-scans their targets. Dry run by default.
+- `backfill_simbad_object_types.py` — fills in the SIMBAD object types of stars saved before they were recorded, so the library can say whether a star is already listed as a variable.
+  - It asks SIMBAD about 200 identifiers at a time. Only SIMBAD-named and Gaia-numbered stars are asked: about 40,000 of the 283,000 stars.
+  - It rejects any answer more than 30 arcseconds from the star's stored position, and changes only the `simbad_object_types` field.
+  - It writes nothing without `--apply`. With `--apply` it first backs up the catalog database and then saves after every request, so a stopped run keeps its progress and can be run again. Try `--limit 400` first.
+- `backfill_variable_star_flags.py` — looks up each stored star in the AAVSO Variable Star Index (VSX) and in Gaia DR3, and stores the answers. The library can then say "not listed as variable in SIMBAD, Gaia DR3 or VSX" and pick out stars a catalog calls constant.
+  - It uses CDS XMatch, the cross-match service of the Strasbourg astronomical Data Centre (CDS), which pairs a list of positions with a catalogue's stars. It sends 2,000 stars per request and accepts matches within 3 arcseconds.
+  - It looks up only stars with an identity unless `--include-position-only` is given. A position-only star is one that no catalog could name, so the library knows it only by its sky position (ids starting `FIELD_J`).
+  - It writes nothing without `--apply`, which backs up the catalog database first and changes only the two flag fields.
+- `backfill_stack_previews.py` — makes the stretched JPEG and FITS pictures for stacks that were made before stacking saved them. (A stretched picture has its brightness scale rescaled for display, so faint detail shows.) It never restacks. It records the FITS as the target's processed image, replacing a picture a person attached unless `--keep-attached-pictures` is given; the attached file stays where it is.
+- `report_equipment_disagreements.py` — reports stored telescope and ISO values that a fresh re-scan of the frame would change, without changing anything itself. ISO is a consumer camera's sensitivity setting (the header's `ISOSPEED`).
 
 ## Backups
 
-- `backup_library_databases.py` — makes a safe copy of `astrometrics.db` and `astrometrics_log.db` (SQLite's online backup, then an integrity check) and uploads it with `calibration_frames.json` and the configuration file to `drive:Library/_backup/<timestamp>/` using rclone. It works with the backend running or stopped. It does nothing when no source file changed since the last good upload (`--force` overrides). A folder whose upload failed stays on disk and is uploaded first on the next run. On Drive it keeps the 7 newest snapshots plus the newest of each calendar month. `--dry-run` prints the actions only; `--rclone` and `--remote` choose the program and remote. `build/linux/install_backup_timer.sh` sets it up to run every 4 hours, and `run_backend.sh stop` starts it in the background.
-- `upload_library.py` — makes the Google Drive copy (`drive:Library`) match the local library (`frames_path`) with `rclone sync`. A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/`, and recycle folders older than 90 days are removed after each good run (`--keep-deleted-days`); a renamed or moved file is moved on Drive, not uploaded again (`--track-renames`). One run deletes at most 100 files (`--max-delete`), and the run is refused (exit code 2) when the library is missing, empty, or holds fewer than half the files of the last good run (`--accept-file-count` overrides). `_backup`, hidden files and half-written temporary files are excluded. A file lock stops two runs at once. Exit code 1 and a desktop notice mean rclone failed. `--dry-run` reports only. `build/linux/watch_library_uploads.sh` (the `astrometrics-library-watch` user service) starts it once the library has been quiet for 5 minutes, and a timer runs it every 4 hours.
-- `restore_library_databases.py` — `--list` shows the snapshots on Drive. `--snapshot NAME --destination DIR` downloads one into a new folder, checks each database, and prints how to put the files in place. It never writes to the live library.
-- `check_drive_integrity.py` — read-only. Lists every file under `drive:Library` with `rclone lsjson` (size, MD5 checksum, modification time), saves the list as a gzipped manifest in `~/.cache/astrometrics/integrity` (newest 10 kept), and compares it with the previous one. A raw frame under `lights/`, `darks/`, `biases/` or `flats/` that is missing or has a different checksum or size is a serious problem: exit code 2, plus a `notify-send` desktop notice unless `--no-notify`. A file whose checksum and size reappear at a new path (such as a frame moved into `_excluded`) is reported as moved, not missing. Derived files (stacks, rejection maps, processed pictures, JPEGs, `.seq` files, `stacks/` folders) are listed as information only, and the `_backup` folder is skipped. Exit code 1 means `rclone` failed. The first run records a baseline. `--json` prints a machine-readable summary.
+The backup scripts copy the library to Google Drive with rclone, a command-line program that copies and syncs files with cloud storage. `drive:` is the name of the rclone remote (the configured Google Drive account), so `drive:Library` is the `Library` folder on that Drive.
+
+### `backup_library_databases.py`
+
+Makes a safe copy of the databases and uploads it.
+
+- **What it copies.** It copies `astrometrics.db` and `astrometrics_log.db` with SQLite's online backup, then checks each copy's integrity. It uploads the copies, `calibration_frames.json` and the configuration file to `drive:Library/_backup/<timestamp>/`. It works with the backend running or stopped.
+- **When it skips.** It does nothing when no source file changed since the last good upload (`--force` overrides). A folder whose upload failed stays on disk and is uploaded first on the next run.
+- **What it keeps.** On Drive it keeps the 7 newest snapshots plus the newest of each calendar month.
+- **Options.** `--dry-run` prints the actions only; `--rclone` and `--remote` choose the program and remote.
+- **When it runs.** `build/linux/install_backup_timer.sh` sets it up to run every 4 hours. `run_backend.sh stop` also starts it in the background, because with the backend stopped the databases are quiet. That backup can never make `stop` fail or wait.
+
+### `upload_library.py`
+
+Makes the Google Drive copy (`drive:Library`) match the local library (`frames_path`) with `rclone sync`.
+
+- **Deleted and renamed files.** A file deleted or replaced locally moves into `drive:Library_deleted/<timestamp>/`. Recycle folders older than 90 days are removed after each good run (`--keep-deleted-days`). A renamed or moved file is moved on Drive, not uploaded again (`--track-renames`).
+- **Safety limits.** One run deletes at most 100 files (`--max-delete`). The run is refused (exit code 2) when the library is missing, empty, or holds fewer than half the files of the last good run (`--accept-file-count` overrides). A file lock stops two runs at once.
+- **What it leaves out.** `_backup`, hidden files and half-written temporary files.
+- **Exit codes.** Exit code 1 and a desktop notice mean rclone failed. `--dry-run` reports only.
+- **When it runs.** `build/linux/watch_library_uploads.sh` (the `astrometrics-library-watch` user service) starts it once the library has been quiet for 5 minutes, and a timer runs it every 4 hours.
+
+### `restore_library_databases.py`
+
+`--list` shows the snapshots on Drive. `--snapshot NAME --destination DIR` downloads one into a new folder, checks each database, and prints how to put the files in place. It never writes to the live library.
+
+### `check_drive_integrity.py`
+
+Read-only. Checks that no raw frame on Drive has gone missing or changed.
+
+- **What it records.** It lists every file under `drive:Library` with `rclone lsjson` (size, MD5 checksum, modification time). It saves the list as a gzipped manifest in `~/.cache/astrometrics/integrity` (newest 10 kept) and compares it with the previous one. The first run records a baseline.
+- **Serious problems.** A raw frame under `lights/`, `darks/`, `biases/` or `flats/` that is missing, or has a different checksum or size, gives exit code 2, plus a `notify-send` desktop notice unless `--no-notify`.
+- **Moves.** A file whose checksum and size reappear at a new path (such as a frame moved into `_excluded`) is reported as moved, not missing.
+- **Information only.** Derived files (stacks, rejection maps, processed pictures, JPEGs, `.seq` files, `stacks/` folders) are listed but never count as problems. The `_backup` folder is skipped.
+- **Other exit codes and output.** Exit code 1 means `rclone` failed. `--json` prints a machine-readable summary.
 
 ## Empirical validation and analysis
 
+These scripts measure how well the pipelines work on real stored data. Unless an entry says otherwise, they read only.
+
+### Whole-pipeline checks
+
 - `run_empirical_validation.py` — the master script that runs astrometricslib's pipelines against real stored data to validate their design against actual results, not synthetic test cases.
+- `report_gate_limits.py` — read-only. For every numeric quality limit, it reports the spread of the saved values across all targets and how many targets are beyond the limit. It also reports the spread of numbers with no limit yet (such as the astrometric residual), which a limit would have to be derived from.
+- `recompute_headline_numbers.py` — read-only. An independent re-check of saved headline numbers. It recomputes from the files the light-curve variability (CV, the coefficient of variation: standard deviation divided by mean), the mean brightness and the best period, and the stacks' zero and saturated pixel shares and star widths. It then lists every saved value that disagrees. Star widths are checked twice: by re-running the pipeline method and by a separate half-maximum method.
+
+### Photometry and variability
+
+- `measure_variability_cutoff.py` — read-only. Checks the photometry pipeline's variable-star cutoff against the catalogs.
+  - **The cutoff.** A star is flagged when the CV of its light curve is above `median + k x MAD` of the CVs of all stars in the field. MAD, the median absolute deviation, is a spread measure that a few wild values cannot inflate. The pipeline uses k = 7.4, chosen to flag roughly the top 3% of stars and set slightly low on purpose so that a new supernova is not missed.
+  - **What it measures.** For each multiplier k it tries (3 to 16, including 7.4), it reports the share of stars the catalogs list as variable that the cutoff flags, and the share of unlisted stars it flags. It also reports an AUC (area under the ROC curve) for how well a star's CV separates listed from unlisted stars, overall and between stars of similar brightness. An AUC of 0.5 means no better than chance, 1 means perfect separation.
+  - **Result.** On the library (2026-10-09) the CV separates the two groups no better than chance. The multiplier therefore does not limit the search; the photometry's own scatter does.
+- `validate_photometry_injection.py` — read-only. Measures which variability signals the pipeline's variable-candidate rule finds. That rule flags a star when its variability score is above 1 and its false-discovery q-value is below 0.01 (see `pipelines/photometry/processing/variability_indices.py`).
+  - **Method.** In each of many random draws, it picks about 8 percent of a target's stars as hosts (stars that receive an injected signal), leaving out stars the rule already flags and stars the catalogs list as variable. It adds a signal of known depth to each host's real light curve: a sinusoid or a box transit (a flat-bottomed dip like a planet passing in front of its star), 0.005 to 0.16 mag deep. A magnitude difference of 0.01 is about a 1% change in brightness. It then runs the rule on the whole field.
+  - **Output.** The share of injected stars flagged, by depth and star brightness, and how many untouched stars are flagged.
+  - **Scope.** It measures the rule and the noise of the photometry, not the aperture photometry itself, because the signals are added to light curves, not pixels.
+  - **Result on M 13** (2026-10-11, 80 draws, 408 usable hosts). The brightest quarter of stars is flagged half the time at about 0.04 mag (85 percent of sinusoids and 84 percent of transits at 0.04). The faintest quarter is flagged that often only at 0.16 mag (82 and 69 percent). Nothing is found below 0.02 mag at any brightness, and 0 of 29,760 untouched stars were flagged. The counts are saved in `~/astrometrics_db_backups/20261010_validation_step0/photometry_injection_m13.json`.
 - `validate_spectral_and_period_analysis.py` — checks that the spectral and period-search analyses actually tell a real signal from noise.
-- `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with our own group alignment and group combining on the group stacks a target already has, to show whether a replacement would lose quality (it changes nothing in the library).
-- `rejection_threshold_analysis.py` — an empirical grid search over stacking's sigma/filter-percentile rejection thresholds.
+
+### Stacking
+
+Stacking groups a target's frames by exposure length, makes one stack per group (a group stack), lines the group stacks up with each other (group alignment), and combines them.
+
+- `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with the pipeline's own group alignment and group combining, on the group stacks a target already has. It shows whether replacing one of the pipeline's steps with Siril's would lose quality. It changes nothing in the library.
+- `rejection_threshold_analysis.py` — a grid search over two stacking settings, measuring the stacked image's star width and the share of rejected pixels for each pair. The settings are the rejection limit in standard deviations (sigma, 2 to 4) and Siril's sharpness filter percentile (keep the sharpest 80 or 90 percent of frames, or all).
 - `rejection_small_n_check.py` — simulates pure noise at 5, 8, 15 and 40 frames per pixel and reports how many good samples each rejection rule throws out and how often it catches an injected outlier. Needs no library data.
-- `validate_photometry_injection.py` — read-only. Adds a signal of known depth (a sinusoid or a box transit, a flat-bottomed dip like a planet passing in front of its star, 0.005 to 0.16 mag; a magnitude difference of 0.01 is about a 1% change in brightness) to the real light curves of about 8 percent of a target's stars in each of many random draws, runs the variable-candidate rule on the whole field, and prints the share of injected stars it flags by depth and star brightness, plus how many untouched stars it flags. It measures the rule and the noise of the photometry, not the aperture photometry (the signals are added to light curves, not pixels). On M 13 (2026-10-11, 80 draws, 408 usable hosts): the brightest quarter of stars is flagged half the time at about 0.04 mag (85 percent of sinusoids and 84 percent of transits at 0.04), the faintest quarter only at 0.16 mag (82 and 69 percent), nothing is found below 0.02 mag at any brightness, and 0 of 29,760 untouched stars were flagged. The counts are saved in `~/astrometrics_db_backups/20261010_validation_step0/photometry_injection_m13.json`.
-- `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating.
-- `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames. It applies the same airmass extinction correction (removing the dimming by the atmosphere, which grows with airmass, the amount of atmosphere the light passed through) as the pipeline, using the airmass stored with each spectrum.
-- `compare_spectra_with_gaia_xp.py` — read-only. For every star of a processed target, compares its stored response-corrected spectrum with the star's Gaia DR3 XP spectrum and prints one line per star (tilt, RMS residual, wavelength shift, median ratio observed / XP in four bands), then the run summary: the median ratio and scatter per band, which is the residual instrument response, and the `gaia_xp_agreement` gate verdict. XP spectra are downloaded once and cached in `~/.cache/astrometrics/catalogs/gaia_xp`.
-- `derive_instrument_response.py` — derives a camera's instrument response curve (how sensitive the telescope, grating and camera together are at each wavelength) from a known star's master stack and stores it, with the standard star's airmass (`reference_airmass`), as a JSON file.
-- `spectral_focus_sweep.py` — the tool for choosing the focuser position at the telescope. It reads spectral frames of one bright star taken at several focuser positions (the `FOCUSPOS` header card), extracts each spectrum with the normal pipeline extractor, and measures the trail's FWHM (full width at half maximum, the width where brightness falls to half its peak) in 400 A (angstrom, 0.1 nm) bands. It fits a parabola of FWHM against focuser position for each band and prints a table of the best focus per band, the position that minimizes the FWHM at 5500 A, and the FWHM that position gives at 4500 and 6500 A. Nothing is saved to the catalog. Take at least five frames that straddle the best focus. Pass `--star-position X Y` when the star is not the source nearest the frame centre.
-- `compare_instrument_responses.py` — compares two instrument-response JSON files over their common wavelength range after scaling both to 1 at 5500 A. It prints the largest and RMS fractional difference and the difference in red-to-blue tilt (7000 A over 4500 A), and exits non-zero when either exceeds `--tolerance` (default 0.02, a designed value). Use it to check that two standard stars observed on the same night give the same response.
 - `benchmark_siril_concurrency.py` — measures how many Siril stacking runs a given machine should be allowed to run at once.
+
+### Spectroscopy
+
+The spectroscopy scripts use these terms:
+
+- A standard star is a star of known spectrum (Vega, type A0V, by default) observed to calibrate the instrument.
+- The instrument response is how sensitive the telescope, grating and camera together are at each wavelength. A response-corrected spectrum has been divided by it.
+- A master stack is the stacked image of all of a target's spectral frames.
+- An emission line is a narrow bump in a spectrum where hot gas gives off light at one wavelength.
+
+Scripts:
+
+- `derive_instrument_response.py` — derives a camera's instrument response curve from a standard star's master stack and stores it, with the standard star's airmass (`reference_airmass`), as a JSON file.
+- `compare_instrument_responses.py` — compares two instrument-response JSON files over their common wavelength range after scaling both to 1 at 5500 A. It prints the largest and RMS fractional difference and the difference in red-to-blue tilt (the response at 7000 A divided by the response at 4500 A). It exits non-zero when either exceeds `--tolerance` (default 0.02, a design value, not measured). Use it to check that two standard stars observed on the same night give the same response.
+- `compare_spectra_with_gaia_xp.py` — read-only. For every star of a processed target, compares its stored response-corrected spectrum with the star's Gaia DR3 XP spectrum.
+  - Per star, it prints one line: the tilt (the straight-line slope of the ratio observed / XP, in percent per 1000 A), the RMS residual, the wavelength shift, and the median ratio observed / XP in four bands.
+  - It then prints the run summary: the median ratio and scatter per band, which is the residual instrument response, and the `gaia_xp_agreement` gate verdict.
+  - XP spectra are downloaded once and cached in `~/.cache/astrometrics/catalogs/gaia_xp`.
+- `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames. It applies the same airmass extinction correction as the pipeline, using the airmass stored with each spectrum. That correction removes the dimming by the atmosphere, which grows with airmass, the amount of atmosphere the light passed through.
+- `validate_emission_line_detector.py` — read-only. Measures how often the emission-line detector reports a line that is not there, and how often it misses one.
+  - **False lines.** It runs the detector on every stored spectrum. Most are ordinary stars with no emission lines, so a detected line counts as false. Some stars may truly emit (not every stored spectrum has a type), so the rate is an upper bound.
+  - **Recovery.** It adds a line of known height to the same spectra and reports the share recovered at each height.
+- `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating (the Star Analyser 200, a grating with 200 lines per millimetre).
+- `spectral_focus_sweep.py` — the tool for choosing the focuser position at the telescope.
+  - **Input.** Spectral frames of one bright star taken at several focuser positions (the `FOCUSPOS` header card). Take at least five frames that straddle the best focus. Pass `--star-position X Y` when the star is not the source nearest the frame centre.
+  - **Method.** It extracts each spectrum with the normal pipeline extractor and measures the spectrum trail's FWHM (full width at half maximum, the width where brightness falls to half its peak) in 400 A (angstrom, 0.1 nm) bands. It fits a parabola of FWHM against focuser position for each band.
+  - **Output.** A table of the best focus per band, the position that minimizes the FWHM at 5500 A, and the FWHM that position gives at 4500 and 6500 A. Nothing is saved to the catalog.
+
+### Asteroids
+
+- `validate_asteroid_detection.py` — measures the asteroid detector. It reports the share of injected synthetic movers it recovers at each brightness and speed, and the tracks it confirms in fields with no mover. Read-only, it also counts the confirmed movers on real frames of targets far from the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear); there, almost all of them are false.
 
 ## Demos and one-off tools
 

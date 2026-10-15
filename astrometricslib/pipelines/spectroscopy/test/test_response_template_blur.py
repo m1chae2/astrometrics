@@ -2,8 +2,8 @@
 
 Description: The instrument response is the ratio of an observed standard
 star (Vega) to a bundled reference spectrum of its type. The reference is
-much sharper than a slitless grism spectrum, so it is blurred first. The
-grism's line spread grows with wavelength, from about 42 Angstroms in the
+much sharper than a slitless grating spectrum, so it is blurred first. The
+grating's line spread grows with wavelength, from about 42 Angstroms in the
 blue to 148 Angstroms at H-alpha for the ASI533 setup. These tests observe
 the bundled A0V reference through the stored line-spread profile, times a
 known tilted response, and check that the fit recovers that response. They

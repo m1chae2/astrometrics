@@ -17,7 +17,9 @@ at fixed wavelengths (absorption lines, light absorbed by atoms in the
 star's outer layers) say which atoms are present and at what temperature.
 Bright bumps (emission lines) come from glowing gas. This stage reads those
 clues and names the closest spectral type on the O-B-A-F-G-K-M ladder
-(hottest to coolest, each letter split into subtypes 0 to 9). Wavelengths
+(hottest to coolest, each letter split into subtypes 0 to 9). "Early" types
+sit at the hot end of the ladder and "late" types at the cool end, so
+"12 subtypes too late" means 12 steps too cool. Wavelengths
 are in Angstroms (A; 1 A is 0.1 nm).
 
 ## The flow
@@ -131,8 +133,13 @@ fall together). The correlation is kept for comparison only, because
 it barely separates neighbouring types.
 
 A best match above `NO_GOOD_MATCH_RMS` (0.15) gets `match_quality` of
-`poor`. A best match above `UNRELIABLE_MATCH_RMS` (0.45) gets no type at
-all, because the closest reference would only invent one.
+`poor`. On 14 stars of known type, the ones matched within three subtype
+steps of the catalog scored 0.046 to 0.105, and the ones matched to the wrong
+type scored 0.181 to 0.283; 0.15 sits between the two groups. A best match
+above `UNRELIABLE_MATCH_RMS` (0.45) gets no type at all, because the closest
+reference would only invent one. Of 55 stars classified on 2026-09-24, 19
+scored above 0.45, and 18 of those had no catalog type (they were matched to
+the wrong part of the sky).
 
 The limits `NO_GOOD_MATCH_RMS`, `UNRELIABLE_MATCH_RMS` and
 `AMBIGUOUS_RMS_GAP` are defined once, in
@@ -294,9 +301,11 @@ the square root of the sum of squares):
   each coefficient.
 
 When the band samples scatter about the fitted curve by clearly more than their
-errors say (more than 3 standard deviations above a reduced chi-square of 1;
-the reduced chi-square is the mean squared residual in units of the error
-bars, about 1 when the scatter matches the errors),
+errors say, the pipeline inflates the error. The reduced chi-square is the
+mean squared residual in units of the error bars: about 1 when the scatter
+matches the errors. For pure noise with `n` degrees of freedom it scatters
+about 1 with a standard deviation of `sqrt(2 / n)`. "Clearly more" means
+above `1 + 3 sqrt(2 / n)`, 3 of those standard deviations above 1. Then
 the continuum part is multiplied by the square root of that reduced
 chi-square. `equivalent_width.py` holds the details and its limits. The
 verdicts and p-values do not use the errors.
@@ -338,41 +347,66 @@ for post-processing to evaluate.
 
 ## Quality checkpoint 2
 
-`assess_processing_quality.py` judges this stage's results on their own and
-returns a `StageQualityCheckpoint` for the `processing` stage. It reads the
-classification, the feature tests, the synthetic colour, the emission lines and
-the second-order ratio, and changes none of them. Its metrics are:
+`assess_processing_quality.py` judges this stage's results on their own,
+before the catalog comparison, and returns a `StageQualityCheckpoint` for the
+`processing` stage. It reads the classification, the feature tests, the
+synthetic colour, the emission lines and the second-order ratio, and changes
+none of them. For an unclassified spectrum the
+classification and colour metrics have no value, and the checkpoint carries the
+`unclassified` flag.
 
-- the classification RMS and the RMS gaps to the second-best and the next
-  class, judged against `NO_GOOD_MATCH_RMS` and `AMBIGUOUS_RMS_GAP`;
-- whether the pipeline measured a synthetic colour, and the colour itself;
-- the number of significant features, their best p-value and the number of
-  p-values that were not calibrated;
-- the share of samples with second-order risk and the largest blue-to-red
-  ratio;
-- the number of detected emission lines;
-- `ebv_used` (magnitudes) and `dereddening_type_shift_steps` (subtype steps),
-  which report the dereddening and have no limit, because a type shift is
-  expected when dust is present;
-- `index_vs_template_type_steps` (subtype steps), the distance between the
-  line-index type and the reported type, judged against
-  `DIFFERS_FROM_CATALOG_SUBTYPES` (20). The limit is the one the repository
-  already uses for two types that disagree. It is a designed value. The
-  checkpoint raises the `slope_and_lines_disagree` flag when the distance
-  passes it. On the templates, the leave-one-out distance never passes it
-  (the worst miss is 19 subtypes).
-- `median_equivalent_width_relative_error`: the median of the EW error over the
-  EW's size, for features with a detected or possible verdict;
-- `hbeta_equivalent_width_angstrom` and `halpha_equivalent_width_angstrom`: the
-  EW of each line, with its error in the note;
-- `best_template_reduced_chi_square`: the reduced chi-square of the best
-  reference.
+| Metric | Unit | Limit | What it tells a reader |
+|---|---|---|---|
+| `classification_rms` | relative RMS | `NO_GOOD_MATCH_RMS` (0.15), lower is better | How far the best reference spectrum is from this spectrum. |
+| `rms_gap_to_second_best` | relative RMS | none (reported only) | How much closer the best reference is than the runner-up. Below `AMBIGUOUS_RMS_GAP` (0.02) the subtype is uncertain. That is common at this resolution, so this metric has no limit and fails nothing at this checkpoint or in any run gate. The same condition does set checkpoint 3's `subtype_ambiguous` flag and makes the star's `trustworthy` verdict 0 (see the [post-processing README](../post_processing/README.md)). |
+| `rms_gap_to_next_class` | relative RMS | `AMBIGUOUS_RMS_GAP`, higher is better | The same gap to the best reference of another class letter. A small gap means the class is uncertain. |
+| `synthetic_colour_measured` | flag | 1, higher is better | 1 when the pipeline measured a B-V colour from the spectrum. |
+| `synthetic_b_minus_v` | magnitude | none | The B-V colour measured from the spectrum. |
+| `significant_feature_count` | features | none | How many named features have a detected or possible verdict. |
+| `best_feature_p_value` | probability | none | The smallest feature p-value (the chance that noise like this spectrum's gives a feature this strong). Lower is stronger. |
+| `uncalibrated_feature_count` | features | 0, lower is better | How many p-values assumed Gaussian noise because fewer than 20 control windows were available. Control windows are other positions along the spectrum where the feature detector runs the same dip test, to learn how strong a "feature" this spectrum's noise alone produces. |
+| `second_order_risky_fraction` | fraction | none | The share of samples where second-order light could add a tenth (10 percent) of the signal. |
+| `second_order_max_blue_to_red_ratio` | ratio | none | The largest ratio of the brightness at half a wavelength to the brightness at that wavelength. |
+| `emission_lines_detected` | lines | none | How many named emission lines or blends have a detected verdict. The `emission_line_source` flag marks two or more. |
+| `ebv_used` | magnitude | none (reported only) | The colour excess E(B-V) the pipeline removed from the spectrum before classifying. The note names the catalog and the conversion. No value when the star has no Gaia DR3 id or Gaia gives none. |
+| `dereddening_type_shift_steps` | subtype steps | none (reported only) | How many steps on the O-to-M ladder the best type moved because of dereddening (ten steps to a letter class). A large shift means the observed colour was mostly dust. No value without an E(B-V). |
+| `index_vs_template_type_steps` | subtype steps | `DIFFERS_FROM_CATALOG_SUBTYPES` (20), lower is better | The distance between the type that the six line indices point to (see "Line-index cross-check") and the template-fit type. A designed limit, the one used for two types that disagree. |
+| `median_equivalent_width_relative_error` | fraction | none | The median of the equivalent-width error over its size, for features with a detected or possible verdict. |
+| `hbeta_equivalent_width_angstrom`, `halpha_equivalent_width_angstrom` | angstrom | none | The equivalent width of each Balmer line (positive for a dip). The note holds its error. |
+| `best_template_reduced_chi_square` | reduced chi-square | none | The chi-square per degree of freedom of the best reference by RMS, using the per-sample errors. Near 1 means a fit within the noise. It decides nothing. |
 
-The last four metrics have no limit. No measurement says what value is too
-poor, so the pipeline reports them only.
+The processing flags are `unclassified`, `emission_line_source`,
+`second_order_risk` and `slope_and_lines_disagree`. The last one marks a
+spectrum whose `index_vs_template_type_steps` is above its limit: the
+continuum slope and the line strengths point to different types.
+
+**Where the limits come from.**
+
+- 0.15 (`NO_GOOD_MATCH_RMS`): the gap between correct and wrong matches on 14
+  stars of known type (see "Quality metrics from the classifier").
+- 0.02 (`AMBIGUOUS_RMS_GAP`): the smallest RMS distance between two
+  neighbouring templates on the reference ladder (A0V and A2V are 0.019
+  apart; the median neighbouring pair is 0.043 apart). A smaller gap means the
+  spectrum cannot prefer one rung over its neighbour even by the margin a
+  perfect match to the closest-spaced pair would show.
+- 20 subtype steps (`DIFFERS_FROM_CATALOG_SUBTYPES`): two whole letter
+  classes, such as B to F. Of 29 stars with a catalog type, 27 were within 12
+  steps of it; the two beyond were wrong for reasons other than the
+  templates. On the templates, the line-index leave-one-out distance never
+  passes it (the worst miss is 19 subtypes).
+
+**Second-order figures.** The risk metric assumes that second-order light is
+at most 2 percent of the first-order brightness at half the wavelength. 2
+percent is the largest value seen when fitting the stored spectra of two
+stacks (the estimates were -0.7 to +2.0 percent and could not be told apart
+from zero), not a measured value. A wavelength is called risky when that 2
+percent could add 10 percent of its own brightness, that is, when the star is
+at least 5 times brighter at half the wavelength. 10 percent is a judgement:
+about where an added signal starts to change a spectrum's shape visibly. The
+two second-order metrics have no limit because neither figure is validated.
 
 The `processing_quality` run gate counts the spectra in which any of these
-metrics fails. The [pipeline README](../README.md) lists every metric with its
-unit and limit.
+metrics fails. The [pipeline README](../README.md) describes the checkpoint
+record and the run-level summary.
 
 For exact behavior, read the code.

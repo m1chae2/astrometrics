@@ -31,8 +31,8 @@ class StackingInputQuality(BaseModel):
 
     # How many frames were handed to the stage, before any were set aside.
     frames_submitted: int = Field(alias="framesSubmitted")
-    # How many were left after the gain and background checks, so how many
-    # the stacking engine was given.
+    # How many were left after the gain, frame-quality and background
+    # checks, so how many the stacking engine was given.
     frames_accepted: int = Field(alias="framesAccepted")
     # Frames set aside because their camera gain differed from the rest.
     frames_excluded_for_gain: int = Field(default=0, alias="framesExcludedForGain")

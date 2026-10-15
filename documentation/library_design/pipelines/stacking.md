@@ -20,32 +20,37 @@ cleaner image, called a stack.
 
 Each raw exposure carries flaws from the camera and the optics: a fixed
 electronic level, a glow that builds up with exposure time, and darker corners
-and dust shadows. Each exposure is also noisy, and some catch satellite trails
-or cosmic-ray hits. The pipeline first removes the camera and optics flaws
-using reference exposures taken for the purpose (calibration frames). It then
-lines the exposures up on their stars and averages them, rejecting pixels that
-disagree with the rest.
+and dust shadows. Each exposure is also noisy, and some catch satellite or
+meteor streaks or cosmic-ray hits. The pipeline first removes the camera and
+optics flaws using reference exposures taken for the purpose (calibration
+frames). It then lines the exposures up on their stars and averages them,
+rejecting pixels that disagree with the rest.
 
 The result is the stacked image, a preview picture, and a quality summary that
 checks both the inputs and the result.
 
 ### 1.2 Statement of Need
 
-Raw frames carry dark current (a signal the sensor builds up from heat, which
-grows with exposure time), a bias level (the fixed electronic level of an
-empty exposure), and vignetting (darker corners from the optics) and dust
-shadows. Master darks, biases and flats (averaged calibration frames taken
-with the shutter closed, with the shortest exposure, and of an evenly lit
-surface) remove them. Stacking many aligned frames raises the signal-to-noise
-ratio by about $\sqrt{N}$ for $N$ frames and rejects satellite trails and
-cosmic rays.
+Raw frames carry three kinds of flaw:
+
+- dark current: a signal the sensor builds up from heat, which grows with
+  exposure time;
+- a bias level: the fixed electronic level of an empty exposure;
+- vignetting (darker corners from the optics) and dust shadows.
+
+Three kinds of master calibration frame remove them. Each master is the
+average of many frames. A master dark is taken with the shutter closed, a
+master bias with the shortest exposure the camera allows, and a master flat
+of an evenly lit surface. Stacking many aligned frames raises the
+signal-to-noise ratio by about $\sqrt{N}$ for $N$ frames and rejects
+streaks and cosmic rays.
 
 The diagram shows one run, top to bottom.
 
 ```mermaid
 flowchart TD
     A["Start a stack for a target"] --> B["Select frames: one camera, no mix of spectra and normal images"]
-    B --> C["Set aside frames taken at a less common gain"]
+    B --> C["Set aside frames taken at a less common gain setting"]
     C --> D["Set bad frames aside (too few stars, stars not round)"]
     D --> E["Check the sky background for each exposure length"]
     E --> F["Choose weighting"]
@@ -60,11 +65,12 @@ flowchart TD
     N --> O["Preview picture and inputs record"]
 ```
 
+Siril is an open-source astronomy image processor that does the pixel work.
 In code terms the run starts at `stage.stack_frames(target)`, splits frames in
-`stack_runner.run_stack`, and stacks through a `StackingDriver`, whose Siril
-version runs `ImageProcessing` (Section 4). Siril is an open-source
-astronomy image processor. Setting bad frames aside is the frame quarantine,
-and the quality summary is a `StackQualitySummary` (Section 7).
+`stack_runner.run_stack`, and stacks through a `StackingDriver` (the interface
+for a stacking program), whose Siril version runs `ImageProcessing`
+(Section 4). Setting bad frames aside is the frame quarantine, and the quality
+summary is a `StackQualitySummary` (Section 7).
 
 ## 2. Input Requirements & FITS Header Specification
 
@@ -77,8 +83,8 @@ what the pipeline does if a card is absent.
 | :--- | :--- | :--- | :--- | :--- |
 | `EXPTIME` | Mandatory | `float` (s) | Exposure length. Frames are stacked one exposure length at a time. Darks (frames taken with the shutter closed) are filed by it and matched within 0.1 s. | A dark with no `EXPTIME` is filed as 30 s. |
 | `CCD-TEMP` (or `SET-TEMP`) | Recommended | `float` (°C) | Sensor temperature, for filing darks in temperature slots and judging how well a dark matches. | The dark's temperature is not judged. |
-| `GAIN` (or `ISOSPEED`) | Recommended | `float` | Gain setting (the camera's amplification). Used for the minority-gain check and to file calibration frames. | Frames fall into one unknown-gain group; `gain_homogeneity` is not checked. |
-| `OFFSET` (or `BLKLEVEL`) | Recommended | `int` | Camera offset (a fixed level added to every pixel), used to file calibration frames. | Offset 0 is assumed. |
+| `GAIN` (or `ISOSPEED`) | Recommended | `float` | Gain setting: the camera's amplifier setting, a unitless number (not the gain in electrons per ADU). `ISOSPEED` is a DSLR camera's ISO setting, its counterpart of a gain setting. Used for the minority-gain check and to file calibration frames. | Frames fall into one unknown-gain group; `gain_homogeneity` is not checked. |
+| `OFFSET` (or `BLKLEVEL`) | Recommended | `int` | Camera offset: a constant the camera adds to every pixel so that noise below zero is still recorded. Used to file calibration frames. | Offset 0 is assumed. |
 | `XBINNING` / `YBINNING` | Optional | `int` | Binning (sensor pixels joined into one); calibration frames of another binning are never applied. | 1x1. |
 | `FILTER` | Recommended | `str` | Filter name. Flats (images of an evenly lit surface) are filed and picked by filter; the stack's file name carries it. | Filter type `NONE`. |
 | `INSTRUME` (or `CAMERA`) | Recommended | `str` | Camera name; frames from two cameras are never stacked together. | The camera of the frame record. |
@@ -93,9 +99,10 @@ lengths.
 
 A dark only cancels the heat signal if it was taken at about the same sensor
 temperature as the light frames (the exposures of the target). The
-calibration library files each frame under its gain, offset and binning, and
-each dark also under a temperature slot 3 °C wide. Lights use the
-darks of their own slot. With none, the nearest-temperature dark is used.
+calibration library files each frame under its gain setting, offset and
+binning, and each dark also under a temperature slot 3 °C wide.
+Lights use the darks of their own slot. With none, the nearest-temperature
+dark is used.
 
 The master's temperature is the mean of its darks. A soft flag (a warning
 that does not stop the dark being used) is raised when the gap between the
@@ -104,8 +111,8 @@ light's temperature and the master's is too large:
 $$\left|T_\text{light} - \bar{T}_\text{dark}\right| > 3\,^\circ\text{C} \tag{1}$$
 
 The dark is still applied; the flag makes `calibration_metadata` fail. When
-no dark records a temperature, the match is not judged. A gain or offset
-mismatch falls back the same way. A binning mismatch never falls back.
+no dark records a temperature, the match is not judged. A gain-setting or
+offset mismatch falls back the same way. A binning mismatch never falls back.
 
 ### 3.2 Expected Stack FWHM
 
@@ -113,46 +120,89 @@ FWHM (full width at half maximum) is the width of a star's light profile at
 half its peak height; a smaller FWHM means a sharper image. Averaging aligned
 frames adds no blur of its own, so the stack's star width follows from the
 input widths. The pipeline predicts that width and checks the stack against
-it. For round Gaussian (bell-shaped) stars of widths $w_1, \dots, w_N$, the
-stacked star's FWHM is the root mean square of the inputs:
+it. For round Gaussian (bell-shaped) stars whose widths in the $N$ frames are
+$\text{FWHM}_1, \dots, \text{FWHM}_N$, the stacked star's FWHM is the root
+mean square of the inputs:
 
 $$\text{FWHM}_\text{expected} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\text{FWHM}_i^2} \tag{2}$$
 
 The ratio $R$ of measured to expected width is 1 for a perfect stack. A ratio
-well above 1 means the alignment or the combination blurred the stars:
+well above 1 means the alignment or the combination blurred the stars. The
+stack passes when
 
 $$R = \frac{\text{FWHM}_\text{stack}}{\text{FWHM}_\text{expected}} \le 1.2 \tag{3}$$
 
 ### 3.3 Weighting and Rejection
 
-**Weighting.** Frames of different exposure lengths have different noise, so
-giving them equal weight can waste the better frames. The configured weighting
-always wins. With none configured, an imaging stack uses Siril's noise
-weighting when equal weights would cost at least 1.05 in noise. The
-penalty $P$ is 1 when all exposures are equal and grows as they differ:
+**Why weight.** For frames limited by the noise of the sky, a frame's
+signal-to-noise squared grows in step with its exposure. A 30 s frame then
+carries less information than a 120 s frame, and giving both the same weight
+wastes the better one. Weighting each frame by its own noise gives the best
+combination.
 
-$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \ge 1.05 \tag{4}$$
+**The penalty of equal weights.** $P$ is how much noisier an equal-weight
+stack is than the best-weighted one, for sky-limited frames. It follows from
+the exposure times alone:
 
-where $t$ are the frame exposures and a bar is the mean over frames. Frames
-of one exposure length give $P = 1$, so such a stack is unweighted unless a
-weighting is configured.
+$$P = \sqrt{\overline{(1/t)}\;\cdot\;\overline{t}} \tag{4}$$
+
+where $t$ are the frame exposures and a bar is the mean over frames. $P$ is 1
+when all exposures are equal and grows as they differ; 1.17 means 17% more
+noise.
+
+**The rule.** A configured weighting always wins. With none configured, an
+imaging stack uses Siril's noise weighting when $P \ge 1.05$. Spectral
+stacks are left to the exposure-group handling of Section 3.4.
+
+**When P is not 1.** $P$ is computed over all of a stack's frames before they
+are split by exposure length (Section 3.4). So a stack whose exposure lengths
+differ enough to reach the limit gets noise weighting, and that setting is
+passed to the Siril stack of every group. Inside one group the exposures are
+equal, so the weighting then evens out other differences in noise between
+frames. Frames of different lengths share one Siril stack only when a length
+has fewer than 5 frames and joins the group with the nearest
+length, or when no length has that many frames, or a frame has no readable
+exposure, and all frames are stacked together. Between groups, the
+inverse-variance combination of Section 3.4 does the weighting.
 
 **Rejection.** Siril stacks with `-norm=addscale` (each frame's level and
-spread are matched to the reference before combining) and sigma rejection
-(`rej`). Sigma rejection drops, at each pixel, values more than a set number
-of standard deviations from the rest, which removes satellite trails and
-cosmic rays. The low and high limits are either fixed or set from the frame
-count.
+spread are matched to the group's reference frame before combining) and
+sigma rejection (`rej`). Sigma rejection drops, at each pixel, values more
+than a set number of standard deviations from the rest, which removes
+streaks and cosmic rays.
+
+The limits are set in one of three ways. A limit passed by the caller always
+wins. In the default "adaptive" mode the high limit comes from Chauvenet's
+criterion: reject a value when fewer than half a frame of a stack of $N$
+frames would stray that far by chance, which gives a limit that grows slowly
+with $N$. The high limit is kept at or above a configured floor, and the low
+limit is set a little looser, because the bad values in sky images (streaks,
+cosmic rays, hot pixels) are brighter than the truth. A "fixed" mode uses one
+configured pair of limits for every stack.
 
 ### 3.4 Exposure Groups
 
-Every stack with more than one exposure length is stacked one length at a
-time. Each group's stack is turned into counts per second and put on the
-reference group's brightness scale using mid-range pixels. A group whose
-bright end disagrees is left out, because its brightest pixels no longer grow
-in step with exposure. The rest are combined with inverse-variance weights:
-each group counts in proportion to $1/\sigma^2$, so less noisy groups count
-more. All groups are used, not only the largest one.
+**Why groups.** Siril's usual recipe matches every frame to one noise level
+and then clips outliers. With several exposure lengths, a 5 s frame and a
+0.5 s frame hold very different amounts of light in the same pixel, and the
+clipping throws away the best frames' values. Each length also needs darks of
+its own length. So every stack with more than one exposure length is stacked
+one length at a time. A spectral stack is also split by night, because the
+zero order (the star's undispersed image) sits on a different pixel each night
+and aligning two nights together can lose most frames.
+
+**Putting groups on one scale.** Each group's stack is turned into counts per
+second. That alone does not line the groups up, because Siril's normalization
+leaves each group's stack on the brightness scale of its own reference frame.
+Each group therefore gets a group scale factor that puts it on the reference
+group's scale, measured on mid-range pixels with saturated pixels left out. A
+group whose bright end disagrees with that factor is left out, because its
+brightest pixels no longer grow in step with exposure.
+
+**Combining.** The rest are combined with inverse-variance weights: each
+group counts in proportion to $1/\sigma^2$, where $\sigma$ is the background
+noise of its stack, so less noisy groups count more. All groups are used, not
+only the largest one.
 
 ## 4. Processing Flow
 
@@ -160,7 +210,7 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is
 `stage.stack_frames`:
 
 1. **Frame selection and checks.** One camera only, no mix of spectral and
-   imaging frames, minority-gain frames set aside, frames set aside by an
+   imaging frames, frames at a less common gain setting set aside, frames set aside by an
    earlier run dropped, the quarantine (imaging only), and the background
    check.
 2. **Skip unchanged.** `stack_inputs.py` takes a fingerprint of the frames,
@@ -173,14 +223,23 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is
 4. **Stack.** `stack_runner.run_stack` splits the frames by exposure length
    (and by night for spectra) and calls the `StackingDriver`. The Siril driver
    (`siril_stacking_driver.py`) runs `ImageProcessing` in `siril_interface.py`:
-   masters, calibration, registration (alignment) and stacking. Spectral registration that
-   loses too many frames is retried with relaxed detection, then with phase
-   correlation (aligning whole images by their overall pattern rather than by
-   single stars).
-5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). The
-   quality summary and its gates are built (16 run gates). A preview
-   picture is made with the GraXpert and Cosmic Clarity image tools and star
-   toning, and the inputs record is written last.
+   masters, calibration, registration (alignment) and stacking. Spectral
+   registration that loses too many frames is retried with relaxed detection,
+   then with phase correlation (aligning whole images by their overall
+   pattern rather than by single stars).
+5. **After the stack.** Noisy edges are trimmed (`stack_crop.py`). Frames
+   never line up exactly, so the edges of a stack are covered by fewer frames
+   than the middle and are noisier. The trim measures the noise and cuts each
+   side back to where it matches the interior; a stack with clean edges is
+   left alone. The quality summary and its gates are built (16 run gates).
+6. **Preview picture.** A JPEG for people to look at is made from a copy of
+   the stack; the stack itself is never changed. GraXpert, an AI tool, removes
+   the sky's brightness gradient. Siril stretches the brightness so faint parts
+   show. Cosmic Clarity, another AI tool, removes noise. Star toning dims the
+   stars in proportion to their brightness, because the stretch makes nearly
+   every star the same white dot. GraXpert and Cosmic Clarity run only when
+   configured, and a failed step never fails the stack. The inputs record is
+   written last.
 
 ### 4.1 Quality Gates
 
@@ -194,36 +253,49 @@ list below is read from the code when this guide is generated.
 | `rejected_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when the share of pixels rejected as outliers in the stack is above `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`. |
 | `stack_sharpness` | run gate | `post_processing/assess_output_quality.py` | Fails when the stack's star width (FWHM) over the expected width is above `DEFAULT_FWHM_DEGRADATION_RATIO` (Eq. 3), meaning the stack is blurrier than its inputs predict. |
 | `spectral_registration` | run gate | `post_processing/assess_output_quality.py` | Fails when the registration (alignment) check of a spectral stack raised a concern. Not checked for an imaging stack. |
-| `saturated_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when the stack holds a significant share of saturated pixels. |
+| `saturated_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when at least `DEFAULT_SATURATION_FLAG_THRESHOLD` of the stack's pixels are saturated (clipped at the sensor's maximum). |
 | `zero_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when too many stack pixels are exactly zero (over-subtraction). |
 | `negative_pixels` | run gate | `post_processing/assess_output_quality.py` | Fails when the stacking engine (Siril) reports too high a share of negative pixels. |
-| `exposure_group_linearity` | run gate | `post_processing/exposure_group_report.py` | Fails when the bright end of an exposure group (the frames of one exposure length) is not one scale factor of the reference group; that group is left out of the combination. |
+| `exposure_group_linearity` | run gate | `post_processing/exposure_group_report.py` | Fails when the bright end of an exposure group (the frames of one exposure length) does not follow the group scale factor that puts it on the reference group's brightness scale; that group is left out of the combination. |
 | `raw_frame_clipping` | run gate | `post_processing/exposure_group_report.py` | Fails when raw frames of an exposure group are clipped at zero. |
 | `exposure_groups_combined` | run gate | `post_processing/exposure_group_report.py` | Fails when an exposure group with frames is missing from the combined stack. |
-| `flat_level` | run gate | `pre_processing/assess_input_quality.py` | Fails when the level of the master flat (the averaged image of an evenly lit surface) is outside the allowed share of the sensor's full scale. |
-| `flat_noise` | run gate | `pre_processing/assess_input_quality.py` | Fails when the master flat (the averaged image of an evenly lit surface) is too noisy. |
-| `calibration_metadata` | run gate | `pre_processing/assess_input_quality.py` | Fails when a calibration frame (dark, bias or flat) was applied with a different gain, offset or temperature, or refused for a binning mismatch. |
+| `flat_level` | run gate | `pre_processing/assess_input_quality.py` | Fails when the level of the master flat (the averaged image of an evenly lit surface) is outside `MINIMUM_FLAT_LEVEL_FRACTION` to `MAXIMUM_FLAT_LEVEL_FRACTION` of the sensor's full scale (the largest value a pixel can record). |
+| `flat_noise` | run gate | `pre_processing/assess_input_quality.py` | Fails when the relative noise of the master flat (the averaged image of an evenly lit surface) is above `MAXIMUM_FLAT_NOISE_FRACTION`. |
+| `calibration_metadata` | run gate | `pre_processing/assess_input_quality.py` | Fails when a calibration frame (dark, bias or flat) was applied with a different gain setting, offset or temperature, or refused for a binning mismatch. |
 | `calibration_frame_count` | run gate | `pre_processing/assess_input_quality.py` | Fails when a master bias, dark or flat was built from fewer frames than the configured minimum. |
-| `background_homogeneity` | run gate | `pre_processing/background_homogeneity.py` | Fails when the frames of one exposure length split into groups with different sky background levels. Not checked when turned off or with too few measured frames. |
-| `gain_homogeneity` | run gate | `pre_processing/frame_homogeneity.py` | Frames taken at a less common gain (camera amplification) setting are set aside, which corrects the stack. Not checked when no frame records its gain. |
+| `background_homogeneity` | run gate | `pre_processing/background_homogeneity.py` | Fails when the sky-background levels of the frames of one exposure length split into two groups with a sudden jump between them (a gap at least `DEFAULT_GAP_RATIO_THRESHOLD` times the spread within a group), as when clouds arrive. Slow changes leave no such gap. Not checked when turned off or with too few measured frames. |
+| `gain_homogeneity` | run gate | `pre_processing/frame_homogeneity.py` | Frames taken at a less common gain setting (the camera's amplifier setting) are set aside, which corrects the stack. Not checked when no frame records its gain setting. |
 | `frame_quarantine` | run gate | `pre_processing/frame_quarantine.py` | Fails when a batch had more bad frames (too few stars, or stars not round) than `MAXIMUM_QUARANTINED_FRACTION`, so none were moved. |
 
 ## 5. Tuned Calibration Parameters
 
 These are the fixed limits and settings the pipeline uses. "Live Value" is
-read from the code when this guide is generated. "Empirical Status" says where
-the value came from: measured on real data (the data set is named in
-brackets), or set by design.
+read from the code when this guide is generated. "Empirical Status" says how
+far real data back the value, with one of three labels:
+
+- **Measured.** The value was set from, or checked against, real
+  observations. The Notes column names the data and the result.
+- **Partly measured.** Real observations support the value but do not
+  pin it down, for example because no failure was found to set it against.
+- **Design estimate.** The value was chosen by reasoning about the
+  method, not tuned on real data. Where it was checked only on synthetic
+  (simulated) data, or picked with a margin over a few observed values, the
+  Notes column says so.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | `3.0` °C | Designed | Width of a dark temperature slot, and the largest temperature gap before a soft flag (a warning that does not stop the dark being used). |
-| `DEFAULT_MINIMUM_SURVIVING_FRAMES` | `5` frames | Measured (M 13) | Fewest frames that must be left after Siril's percentage-based frame filters. |
-| `DEFAULT_FWHM_DEGRADATION_RATIO` | `1.2` | Measured (6 stacks) | Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). |
-| `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | `0.15` | Measured (3 sessions) | Share of pixels rejected as outliers during stacking above which `rejected_pixel_fraction` fails. |
-| `MAXIMUM_QUARANTINED_FRACTION` | `0.25` | Designed | Largest share of a batch the quarantine (setting bad frames aside) may move. |
-| `MINIMUM_PENALTY_TO_WEIGHT` | `1.05` | Measured (M 27) | Noise penalty of giving every frame equal weight (Eq. 4), above which noise weighting is used. |
-| `MINIMUM_REGISTERED_FRACTION` | `0.9` | Unvalidated (Vega) | Share of spectral frames that must register (align on each other); fewer triggers a retry. |
+| `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | `3.0` °C | Partly measured | Width of a dark temperature slot, and the largest temperature gap before a soft flag (a warning that does not stop the dark being used). A deliberately loose first estimate, not checked against this camera's dark-current curve. One real case backs it: Arcturus darks near 0 °C and -10 °C, against lights that drifted from -2.9 °C to -10.7 °C, left 57-64% negative pixels. |
+| `DEFAULT_MINIMUM_SURVIVING_FRAMES` | `5` frames | Partly measured | Fewest frames that must be left after Siril's percentage-based frame filters. On one M 13 session, stacks of 5 to 20 frames got steadily worse with fewer frames, with no failure at 5 to set the value against. |
+| `DEFAULT_FWHM_DEGRADATION_RATIO` | `1.2` | Measured | Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Six real stacks gave 0.77 to 1.16, so a normal stack stays below it. Whether it catches a real alignment failure is untested: no such session exists. |
+| `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | `0.15` | Measured | Share of pixels rejected as outliers during stacking above which `rejected_pixel_fraction` fails. On three real sessions the share stayed below about 10%, even on a cloud-affected NGC 2403 session. |
+| `MAXIMUM_QUARANTINED_FRACTION` | `0.25` | Partly measured | Largest share of a batch the quarantine (setting bad frames aside) may move. A dry run on the library picked at most 13% of a batch; a quarter is about twice that. |
+| `MINIMUM_PENALTY_TO_WEIGHT` | `1.05` | Design estimate | Noise penalty $P$ of equal weights (Eq. 4) at or above which noise weighting is used. The value is designed; the benefit was measured on the M 27 imaging stack, where $P$ = 1.17 and noise weighting lowered its pixel noise by 13%. |
+| `MINIMUM_REGISTERED_FRACTION` | `0.9` | Design estimate | Share of spectral frames that must register (align on each other); fewer triggers a retry. Chosen to tolerate one lost frame in ten; seen only on the Vega session. |
+| `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` | `5` | Design estimate | Fewest frames an exposure length needs to be stacked on its own; a smaller set joins the group with the nearest exposure length. Not tested at this value. |
+| `DEFAULT_GAP_RATIO_THRESHOLD` | `4` | Partly measured | Smallest gap between two groups of sky-background levels, as a multiple of the spread within a group, that counts as a split. In tests, normal nights gave below 1 and sudden cloud above 6. |
+| `MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION` | `0.1` / `0.9` | Design estimate | Allowed level of the master flat, as a share of the sensor's full scale (the largest value a pixel can record). Common practice, not checked on this observatory's data. |
+| `MAXIMUM_FLAT_NOISE_FRACTION` | `0.005` | Measured | Largest relative noise (standard deviation over mean) of the master flat before it is smoothed and `flat_noise` fails. A 4.5% flat caused 86% of the fine-scale noise of the M 101 stack, and smoothing it halved that stack's noise. |
+| `DEFAULT_SATURATION_FLAG_THRESHOLD` | `0.001` | Design estimate | Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`). Not checked against real stacks. |
 
 ## 6. Degraded States & Fallback Pathways
 
@@ -258,7 +330,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as gain and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates and checks were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
@@ -280,12 +352,12 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `excluded_frames` | `list[astrometricslib.models.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
 | `rejected_fraction_flagged` | `bool` | True if pixel rejection was above the warning threshold. |
-| `background_split_detected` | `bool` | True if a gradient or a jump in the sky background was found. |
+| `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
 | `background_split_detail` | `str \| None` | Description of the sky-background jump. |
-| `calibration_mismatch_flags` | `list[str]` | Soft flags for calibration frames applied with a different gain, offset or temperature. |
+| `calibration_mismatch_flags` | `list[str]` | Soft flags for calibration frames applied with a different gain setting, offset or temperature. |
 | `flat_frame_count` | `int \| None` | Number of flat exposures (images of an evenly lit surface) in the master flat. |
 | `flat_noise_fraction` | `float \| None` | Relative noise level measured in the master flat. |
-| `flat_smoothing_sigma_px` | `float \| None` | Gaussian smoothing (sigma, in pixels) applied to the master flat if it was noisy. |
+| `flat_smoothing_sigma_px` | `float \| None` | Gaussian smoothing width (sigma, in pixels) applied to the master flat because its relative noise was above 0.5% (`MAXIMUM_FLAT_NOISE_FRACTION`). None when no smoothing was applied, including on colour sensors. |
 | `flat_calibration_issues` | `list[str]` | Messages about problems with the flat calibration. |
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
 | `saturation_flagged` | `bool` | True if the stack holds a significant share of saturated pixels. |

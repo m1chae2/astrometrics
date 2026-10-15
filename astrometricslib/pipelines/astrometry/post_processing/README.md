@@ -14,7 +14,11 @@ Terms are defined in the [glossary](../../../../documentation/library_design/Ast
 
 Post-processing produces one quality record per identified star, made up of the three facts listed above: which catalog matched it, how far off the match was, and whether it was picked out of a crowded group. Together, these describe how much to trust that one star's identity.
 
-These per-star records also feed a session-level number: the pipeline calculates the catalog match separation by taking the root mean square (RMS) of the match distances across every identified star. A smaller value means the detected positions line up more closely with the star catalogs. This number is a rough check. It counts only stars within the 10 arcsecond match radius, and wrong matches raise it. It is not the plate-solve fit residual, which the plate solver (the step that works out where in the sky the image points) reports separately and the `astrometric_residual` gate prefers (see `run_gates.py` and the pipeline README). The catalog match separation, along with how many stars were matched through each catalog, becomes part of the astrometry pipeline's quality summary for that session.
+These per-star records also feed a session-level number: the pipeline calculates the catalog match separation by taking the root mean square (RMS) of the match distances across every identified star. A smaller value means the detected positions line up more closely with the star catalogs. This number is a rough check. It counts only stars within the 10 arcsecond match radius, and wrong matches raise it. It is not the plate-solve fit residual, which the plate solver (the step that works out where in the sky the image points) reports separately and the `astrometric_residual` gate prefers (see "The gate record" in the pipeline README). The catalog match separation, along with how many stars were matched through each catalog, becomes part of the astrometry pipeline's quality summary for that session.
+
+## The run gates
+
+`run_gates.py` builds four of the run's pass/fail quality checks (gates) from the session summary: `source_detection` (was any star detected), `astrometric_residual` (does the solution miss its stars by more than half a star's width), `catalog_matches` (were at least 20 stars matched) and `catalog_lookup` (did the catalogue lookups work). The pipeline README's "The gate record" lists when each passes, fails or is not checked.
 
 ## Why this step exists
 

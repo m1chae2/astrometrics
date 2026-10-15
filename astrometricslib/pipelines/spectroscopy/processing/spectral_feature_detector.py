@@ -1,6 +1,6 @@
 """Looks for named absorption features (dips) in a star's spectrum.
 
-A slitless grism at amateur resolution (R~100-300, roughly 2-5 nm per
+A slitless grating at amateur resolution (R~100-300, roughly 2-5 nm per
 resolution element) can't resolve individual metal lines the way a lab
 spectrograph can, but it can resolve broad, well-separated features --
 the hydrogen Balmer series, the Ca II H&K blend, the Mg b and Na D
@@ -48,7 +48,7 @@ from astrometricslib.pipelines.spectroscopy.processing.equivalent_width import (
 )
 
 # Rest wavelengths of features broad or strong enough for a low-resolution
-# slitless grism to plausibly resolve as a distinct dip. window_angstrom is
+# slitless grating to plausibly resolve as a distinct dip. window_angstrom is
 # the half-width of the feature's own core; the continuum is measured on
 # the bands just outside that core on each side.
 #

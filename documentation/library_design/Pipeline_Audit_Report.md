@@ -4,11 +4,11 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 172
-- **Resolved Code Symbols:** 172
+- **Implementation References Checked:** 194
+- **Resolved Code Symbols:** 194
 - **Broken / Stale Implementation Links:** 0
 - **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
-- **Documented Design Parameters (Table A1):** 41
+- **Documented Design Parameters (Table A1):** 55
 
 ---
 
@@ -37,6 +37,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.shared.provenance_recording.record_pipeline_run` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.provenance_store.ProvenanceStore` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.provenance_store.export_target_lineage_as_prov_xml` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.drivers.siril_interface.light_calibration_flags` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.calibration_library.calibration_setting_key` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.calibration_library.temperature_slot_c` | RESOLVED | Resolves; used by library code |
@@ -48,6 +49,8 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.scripts.rejection_small_n_check` | RESOLVED | Resolves; a script run by hand |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.choose_stack_weight` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.equal_weight_noise_penalty` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.find_dominant_gain_subset` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.stack_request.choose_frames_to_stack` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.stacking.stack_request.run_stack` | RESOLVED | Resolves; used by library code |
@@ -78,6 +81,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch` | RESOLVED | Resolves; used by library code |
@@ -148,8 +152,10 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.wavelength_scale_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.asteroid_detection.pipeline._detect_sources_in_one_frame` | RESOLVED | Resolves; used by library code |
@@ -204,6 +210,22 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.models.moving_object_config.MovingObjectConfig` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.SESSION_GAP_SECONDS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MINIMUM_FRAMES_TO_JUDGE` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.CLOUD_STAR_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.TRAILED_ROUNDNESS_LIMIT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.ROUNDNESS_DROP_BELOW_MEDIAN` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.MAXIMUM_QUARANTINED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.stack_runner.MINIMUM_REGISTERED_FRACTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.post_processing.run_gates.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.photometry.processing.periodicity_search.FALSE_ALARM_FOR_DETECTION` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | RESOLVED | Resolves; used by library code |
 
 ---
 
@@ -216,14 +238,22 @@ Audit of parameters and validation declarations from Table A1:
 | Stacking | Floor on the high rejection cutoff | 2.5 $\sigma$ | Designed. Checked only in a Gaussian-noise simulation. |
 | Stacking | Margin of the low cutoff above the high one | 0.5 $\sigma$ | Designed. The simulation cannot show the benefit for real, mostly bright, outliers. |
 | Stacking | Minimum frames per master calibration frame | 3 | Designed. |
+| Stacking | Frame screening: session gap; fewest frames to judge | 4 h; 8 | Designed. Eight consecutive clean frames kept their median star count within 3.9% (one target) to 18.3% (M 27) of the whole session's. |
+| Stacking | Frame screening: star count for a clouded frame; roundness for a trailed frame (0 to 1 scale) | below 0.5 of the session median; below 0.80 and at least 0.15 under the session median | Measured on one real target: clean frames held 0.92 to 1.09 of the median star count and roundness 0.87 to 0.99; cloud frames 0.37 and 0.06; drift frames 0.44 and 0.65. The 0.15 drop was set on one M 27 session. |
+| Stacking | Largest share of a session moved aside | 25% | Partly measured. The real library moved at most 13% of a session; a quarter is about twice that. |
 | Stacking | Dark temperature slot width | 3 °C | Designed. A first-pass estimate, not fitted to the camera's dark-current curve. Checked against one real incident. |
 | Stacking | Minimum frames kept after quality filtering | 5 | Partly measured. On one real session (M 13), stacks of 5 to 20 frames degraded smoothly, with no failure at 5. The exact value is not calibrated. |
 | Stacking | Brightness scale measured on pixels between percentiles | 20th to 80th | Designed. |
 | Stacking | Bright-end fraction and nonlinearity tolerance | 1% of pixels; 5% | Designed. |
-| Stacking | Star sharpness warning ratio | 1.2 | Measured on six real stacks (none fired). Sensitivity to a real failure is untested. |
+| Stacking | Noise penalty of equal weights above which frames are noise-weighted | 1.05 | Designed. The benefit was measured on one stack (M 27: penalty 1.17, 13% less noise with weighting). |
+| Stacking | Share of spectral frames that must register before the alignment fallback | 0.9 | Designed. On the Vega session standard detection registered 140 of 140 frames. |
+| Stacking | Rejected pixel share that flags a stack | 15% | Measured. On three real sessions the share never passed about 10%. |
+| Stacking | Star sharpness warning ratio (fails above) | 1.2 | Measured on six real stacks (ratios 0.77 to 1.16, none fired). Sensitivity to a real failure is untested. |
 | Astrometry | Star detection threshold; sharpness and roundness ranges | 5 $\sigma$; 0.2 to 1.0; $\pm$0.6 | Designed. |
 | Astrometry | Minimum stars to attempt a solve; minimum for a local solve | 4; 10 | Designed. The local minimum comes from one incident of repeated time-outs. |
 | Astrometry | Pixel-scale window; further widening by the solver | $\pm$5%; 20% | Designed. |
+| Astrometry | Brightest stars sent to the online solver | 100 | Designed. |
+| Astrometry | Gaia refit: fewest matched stars; largest allowed shift of the field | 40; 30 arcsec | Designed. 30 arcsec is more than ten times the largest solver error seen (2.7 arcsec). |
 | Astrometry | Catalog match radius | 10 arcsec | Designed. |
 | Astrometry | Minimum catalog-matched stars | 20 | Designed. Supported only by the four saved solves with fewer matches having among the five largest residuals. |
 | Astrometry | Residual limit | 0.5 of a star width | Designed. Set on catalog separations (0.14 to 0.44 of a star width on 8 saved solves), not on solver fit residuals. |
@@ -234,19 +264,25 @@ Audit of parameters and validation declarations from Table A1:
 | Photometry | Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Designed. |
 | Photometry | Vetting consistency limit; share of typical stars for a usable frame | 3 $\sigma$; one half | Designed. |
 | Photometry | Frame outlier clip; per-star outlier clip | 3 $\sigma$ (at least 5 frames); 5 $\sigma$ | Designed. |
+| Photometry | Share of frames rejected before the run is flagged | 25% | Designed. Past runs rejected about 7.2%. |
 | Photometry | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Designed. |
 | Photometry | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust $\sigma$ | Designed. Checked on synthetic fields only. |
+| Photometry | Small-field cutoff on the coefficient of variation | median + 7.4 MAD (unscaled; about 5 robust $\sigma$, since 7.4 / 1.4826 = 5.0), never below 0.02 | Measured on the library: flags 5.2% of stars, and separates catalogued variables no better than chance (AUC 0.46). |
+| Photometry | Period verdicts: false-alarm limit for "possible"; for "detected"; shuffles | 0.05; 0.01 with at least 3 cycles; 300 | Designed. |
 | Photometry | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Designed. |
 | Photometry | Discrimination AUC floor | 0.7 | Designed. |
-| Photometry | Largest change the variability flag can see | about 0.3 mag | Designed. |
+| Photometry | Largest acceptable value of the smallest detectable change (peak to peak) | 0.3 mag | Designed. Most pulsating, rotating, and young variable stars change by less. |
 | Spectroscopy | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Designed. Chosen by judgement. |
 | Spectroscopy | Sky strip gap and width | 6 px; 10 px | Measured on one frame (Vega), then used unchanged on a crowded field. |
 | Spectroscopy | Sky contamination limit; fewest pixels in a strip | 3 $\sigma$; 4 | Designed. |
 | Spectroscopy | Poor-match limit | 0.15 relative RMS | Measured on 14 stars with known types. |
 | Spectroscopy | No-type limit | 0.45 relative RMS | Measured on 55 classified stars. |
 | Spectroscopy | Ambiguity gap | 0.02 relative RMS | Measured as the smallest RMS distance between neighboring reference spectra. |
-| Spectroscopy | Catalog disagreement | 20 subtype steps | Measured on 29 stars with a catalog type. |
+| Spectroscopy | Catalog disagreement | 20 subtype steps (two whole letter classes) | Measured on 29 stars with a catalog type: 27 were within 12 steps. |
 | Spectroscopy | Wavelength-fit rejection tolerance | 10 nm RMS | Designed. |
+| Spectroscopy | Wavelength-scale limit (scatter of the corrected offsets) | 11 Å | Designed. One pixel of dispersion (11.0 to 11.4 Å per pixel). |
+| Spectroscopy | Gaia XP agreement: largest median tilt | 3% per 1000 Å | Designed. About the size of the airmass error at 0.3 airmass. |
+| Spectroscopy | Processing quality: largest share of spectra failing a metric | 50% | Designed. |
 | Moving objects | Frames needed for a track | 3 | Designed. |
 | Moving objects | Rate range; chaining radius cap | 1 to 300 arcsec/h; 300 arcsec | Designed. |
 | Moving objects | Stationary tolerances | 1.5 px; 3 arcsec | Designed. |

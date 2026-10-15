@@ -1,6 +1,6 @@
 """Finds the bundled reference spectrum a star's spectrum most resembles.
 
-A slitless grism can't resolve spectral lines finely enough to derive a
+A slitless grating can't resolve spectral lines finely enough to derive a
 star's physical properties from first principles, and it can't tell you
 a catalog name either. What it can do is compare the overall shape of an
 observed spectrum -- continuum slope, Balmer line strength -- against a
@@ -118,7 +118,7 @@ _TEMPLATE_DIR = Path(__file__).parent.parent / "data"
 # Pickles (1998) stellar flux library (Pickles, A.J. 1998, PASP, 110, 863).
 # Each covers 3000-10000 A at 5 A sampling, normalized to 1.0 at 5556 A --
 # enough range to capture the Balmer lines and the overall continuum slope
-# a low-resolution slitless grism can actually resolve. This is the full
+# a low-resolution slitless grating can actually resolve. This is the full
 # non-metallicity-variant main-sequence ladder the library offers (every
 # single- or double-subtype rung from O5V to M6V), not just a coarse
 # sample -- a denser ladder means a star between two rungs has a closer
@@ -431,7 +431,7 @@ def _get_blurred_templates(
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Give every reference spectrum blurred to a given resolution.
 
-    The references are much sharper than a grism spectrum, so they are
+    The references are much sharper than a grating spectrum, so they are
     blurred to the instrument's resolution before being compared.
     Comparing sharp references with a blurred observation would add a
     mismatch that has nothing to do with the star's type.

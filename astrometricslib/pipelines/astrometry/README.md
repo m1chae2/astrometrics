@@ -8,7 +8,7 @@ Terms are defined in the [glossary](../../../documentation/library_design/Astrom
 - **Plate solving** works out which part of the sky an image shows, and how it is turned and scaled, by matching the pattern of its stars to a reference star catalogue. The result is a **WCS** (World Coordinate System), the formula stored in the image's FITS header (the text header of the standard astronomy image file) that converts a pixel position to a sky position.
 - **Plate scale** (or pixel scale) is how much sky one pixel covers, in arcseconds per pixel.
 - **Catalogues.** **SIMBAD** is an online database of named astronomical objects. **Gaia DR3** is the third data release of the European Space Agency's Gaia satellite, which lists precise positions for over a billion stars. **VizieR** is an online service that hosts copies of many catalogues, Gaia DR3 among them.
-- **Magnitude** is the astronomer's brightness scale: larger numbers are fainter, and 5 magnitudes is a factor of 100 in brightness. **G** is the magnitude Gaia measures in its own broad band.
+- **Magnitude** is the astronomer's brightness scale: larger numbers are fainter, and 5 magnitudes is a factor of 100 in brightness. **G** is the magnitude Gaia measures in its own broad band (a band is the range of colours, or wavelengths, a filter or detector lets through). **V** is the older visual magnitude, measured through a standard green-yellow filter, which SIMBAD lists for many stars. V and G differ by a few tenths of a magnitude for most stars and by more than one for the reddest.
 - **FWHM** (full width at half maximum) is the width of a star's image where its brightness falls to half its peak, used as the measure of star width.
 
 ## What the pipeline does, in order
@@ -45,7 +45,7 @@ A residual is the leftover distance between where the solved sky map puts a star
 
 **The limit.** The limit is half a star's width. It was set on catalog match separations, and a fit residual is normally smaller, so the limit is lenient for fit residuals.
 
-**How we know.** Measured on 2026-10-10: solve-field reported fit residuals of 1.35 arcsec (M 13, 95 stars) and 0.82 arcsec (NGC 2403, 24 stars), 0.29 and 0.11 of a star's width. An independent check of the same solutions (2-D Gaussian centroids, the centre of a bell-shaped surface fitted to each star, against Gaia DR3 moved to the image date) found a median scatter of 0.23 to 0.24 arcsec, so the fit residual mostly reflects the solver's reference catalog, not the solution. That check also found a constant 0.60 arcsec shift in declination on NGC 2403, which no gate measures.
+**How we know.** Measured on 2026-10-10: solve-field reported fit residuals of 1.35 arcsec (M 13, 95 stars) and 0.82 arcsec (NGC 2403, 24 stars), 0.29 and 0.11 of a star's width. An independent check of the same solutions (2-D Gaussian centroids, the centre of a bell-shaped surface fitted to each star, against Gaia DR3 moved to the image date) found a median scatter of 0.23 to 0.24 arcsec. Measured against Gaia, the solution places stars far better than its own fit residual says, so most of that residual comes from errors in the positions of the solver's own reference stars (its index files), not from the solution. That check also found a constant 0.60 arcsec shift in declination on NGC 2403. No gate measures such a shift, but the refit described in the next section removes it (0.59 to 0.06 arcsec on NGC 2403).
 
 ## Refitting the solution to Gaia
 
@@ -53,9 +53,9 @@ A residual is the leftover distance between where the solved sky map puts a star
 
 **What it does.** After the solve, `_refine_wcs_against_gaia` (in `processing/star_identifier.py`, the fit itself in `processing/wcs_refinement.py`) checks and corrects the solution against the Gaia DR3 stars of the field, moved to the date of the image:
 
-1. Each detected star (all of them, not only the brightest ones that are named; in M 13 the brightest 500 are the unresolved cluster core, where Gaia has no star to match) is matched to the nearest Gaia star within 4 pixels of the solver's solution.
-2. A tangent-plane solution (a projection of the curved sky onto a flat plane touching it at the image centre) with second-order SIP distortion is fitted to the matches (`astropy.wcs.utils.fit_wcs_from_points`). Stars more than 3 robust standard deviations (a spread estimate that a few wild values cannot inflate) from the fit (blends, wrong matches) are dropped, and the match is repeated within 1.5 pixels of the new solution, up to five times, until the set of stars stops changing.
-3. The new solution replaces the solver's only when it fits the same stars better and moves no point of the image by more than 30 arcseconds. It is refused with fewer than 40 matched stars. The reason is kept in `wcs_refinement`, and the summary's `astrometry_flags` gets `wcs_refined_against_gaia` or `wcs_refinement_skipped`.
+1. Each detected star (all of them, not only the brightest ones that are named; in M 13 the brightest 500 are the unresolved cluster core, where Gaia has no star to match) is matched to the nearest Gaia star within 4 pixels of the solver's solution. The 4 pixels must exceed the solver's error (up to 2 pixels was found) and stay small enough that a neighbouring star is rarely taken for the right one.
+2. A tangent-plane solution (a projection of the curved sky onto a flat plane touching it at the image centre) with second-order SIP distortion is fitted to the matches (`astropy.wcs.utils.fit_wcs_from_points`). Stars more than 3 robust standard deviations (a spread estimate that a few wild values cannot inflate) from the fit are dropped: blends (two stars too close to separate, measured as one), double stars and wrong matches. A limit of 3 keeps 99.7 percent of normally distributed errors. The match is then repeated within 1.5 pixels of the new solution, up to five times, until the set of stars stops changing.
+3. The new solution replaces the solver's only when it fits the same stars better and moves no point of the image by more than 30 arcseconds. A solved field is already near the truth, so a larger move means the fit followed wrong matches; 30 arcseconds is more than ten times the largest error seen (2.7 arcseconds). The refit is refused with fewer than 40 matched stars. The fit has two linear and ten distortion terms per axis plus the reference point, and 40 stars leaves a wide margin so the distortion terms do not follow noise (a design value, not tuned). The reason is kept in `wcs_refinement`, and the summary's `astrometry_flags` gets `wcs_refined_against_gaia` or `wcs_refinement_skipped`.
 
 **What it records.**
 
@@ -81,7 +81,7 @@ The `astrometric_residual` gate judges `gaia_fit_rms_arcsec` first, because it d
 - `gaia_depth_reduced`: every Gaia service failed at the depth asked for and a shallower answer was used.
 - `wcs_refined_against_gaia`, `wcs_refinement_skipped`: whether the solution was refitted to Gaia (see the section above).
 
-**How deep the search goes.** The Gaia search asks only for stars brighter than a G magnitude limit and returns the brightest first. The limit is the faintest detected star's magnitude plus one, kept between 14 and 20. The identifier estimates that magnitude from the detected stars that SIMBAD identified: each gives a zero point (catalog V magnitude plus 2.5 times log10 of the measured flux; the zero point is the constant that converts the camera's measured light to a catalogue magnitude), and the median zero point converts the faintest detection's flux to a magnitude. With fewer than five such stars, the limit is G < 18.
+**How deep the search goes.** The Gaia search asks only for stars brighter than a G magnitude limit and returns the brightest first. The limit is the faintest detected star's magnitude plus one, kept between 14 and 20. Because the estimate uses V magnitudes (below) and V differs from G, the margin of one magnitude and the 14 to 20 range are design estimates, not measurements. The identifier estimates that magnitude from the detected stars that SIMBAD identified: each gives a zero point (catalog V magnitude plus 2.5 times log10 of the measured flux; the zero point is the constant that converts the camera's measured light to a catalogue magnitude), and the median zero point converts the faintest detection's flux to a magnitude. With fewer than five such stars, the limit is G < 18, the same depth the bulk cache download uses.
 
 **Where it asks.** The search returns at most 50,000 rows. It asks VizieR's copy of Gaia DR3 first and the ESA Gaia archive second; if both fail it asks VizieR again one and then two magnitudes brighter (`_fetch_gaia_cone`). On 2026-10-10 the ESA archive timed out on M 13 at G < 18 while VizieR answered in 10 s. A shallower answer records the flag `gaia_depth_reduced`, and the cache records the depth actually fetched. When the result hits the row limit, the identifier records the flag `gaia_row_limit_reached`, because faint stars in the field may be missing.
 
@@ -91,7 +91,7 @@ The `astrometric_residual` gate judges `gaia_fit_rms_arcsec` first, because it d
 
 **Why.** The identifier gives the plate solver a pixel scale range so the solver does not search every scale.
 
-**The formula.** The scale is `206.265 * pixel size / focal length` in arcseconds per pixel, with the pixel size in micrometers and the focal length in millimeters.
+**The formula.** The scale is `206.265 * pixel size / focal length` in arcseconds per pixel, with the pixel size in micrometers and the focal length in millimeters. A radian is 206,265 arcseconds, and the micrometer-to-millimeter ratio (1/1000) turns that into 206.265.
 
 **Which header value it uses.** Binning (combining neighbouring pixels, for example 2 by 2, into one larger pixel) changes the effective pixel size, so the identifier must count it exactly once:
 
@@ -102,7 +102,7 @@ The `astrometric_residual` gate judges `gaia_fit_rms_arcsec` first, because it d
 
 ## The gate record
 
-A gate is a pass/fail check on the run. The summary keeps one record per check in `gates`. Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. `plate_solve` is built in `runner.py`; `source_detection` and `catalog_lookup` are built in `post_processing/run_gates.py`. The tests in `test/test_plate_solve_gate.py` and `test/post_processing/test_run_gates.py` give each gate input that must fail it.
+A gate is a pass/fail check on the run. The summary keeps one record per check in `gates`. Each gate is `passed`, `failed` or `not_checked`; a check that could not look is never recorded as passed. `plate_solve` is built in `runner.py`; the other four are built in `post_processing/run_gates.py`. The tests in `test/test_plate_solve_gate.py` and `test/post_processing/test_run_gates.py` give each gate input that must fail it.
 
 | Gate | Fails when | Not checked when |
 |---|---|---|
@@ -114,13 +114,13 @@ A gate is a pass/fail check on the run. The summary keeps one record per check i
 
 The catalog circuit breaker stops further catalogue lookups after repeated failures, so a dead service does not slow every image.
 
-**Limits.** `source_detection` and `catalog_lookup` are new flags. The 50% failed-lookup limit is a design estimate. The two limits are design estimates, tied to the equipment: the residual is judged against the star width in pixels times the plate scale, both recorded with each run.
+**Limits.** The 50% failed-lookup limit of `catalog_lookup` is a design estimate: the first failures usually come from one slow or unreachable service, and half failing means most stars went unnamed. The 20-star limit of `catalog_matches` and the half-width limit of `astrometric_residual` are design estimates too. The half-width limit is tied to the equipment: the residual is judged against the star width in pixels times the plate scale, both recorded with each run.
 
 **How we know.** On the library (2026-10-09) the 8 saved solves with a plate scale had catalog match separations of 0.14 to 0.44 of a star's width, so the half-width limit catches a failed solve and does not rank good ones; and the four solves with fewer than 20 matched stars (4, 6, 11 and 19) are among the five with the largest residuals (5.8 to 9.0 arcsec).
 
 ## SIMBAD object types
 
-When a detected star is matched to SIMBAD, the star keeps every object type SIMBAD lists for it (`simbad_object_types`, such as `*|**|EB*|SB*|V*`; for example `EB*` is an eclipsing binary, `SB*` a spectroscopic binary and `V*` a variable star), and `StellarObject.known_variability` reads them (see `models/known_variability.py`). The full list matters: the single main type of Algol, a textbook eclipsing binary, is only `SB*`, so a check on the main type alone would call it "not listed as variable". If a result carries only the main type, it is kept only when that type is itself a variable type; otherwise the star is recorded as unknown. Stars named from Gaia alone have no SIMBAD types and are unknown. Stars saved before this was recorded are also unknown until a backfill runs.
+When a detected star is matched to SIMBAD, the star keeps every object type SIMBAD lists for it (`simbad_object_types`, such as `*|**|EB*|SB*|V*`; for example `EB*` is an eclipsing binary, a pair of stars whose orbit makes them pass in front of each other and dim; `SB*` a spectroscopic binary, a pair seen as one star whose spectrum shows the orbit; and `V*` a variable star), and `StellarObject.known_variability` reads them (see `models/known_variability.py`). The full list matters: the single main type of Algol, a textbook eclipsing binary, is only `SB*`, so a check on the main type alone would call it "not listed as variable". If a result carries only the main type, it is kept only when that type is itself a variable type; otherwise the star is recorded as unknown. Stars named from Gaia alone have no SIMBAD types and are unknown. Stars saved before this was recorded are also unknown until a backfill runs.
 
 ## A note on scope
 

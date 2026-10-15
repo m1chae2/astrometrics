@@ -18,7 +18,9 @@ script measures both.
 
 Synthetic frames share one pointing, so they test detection and chaining, not
 the error in each real frame's position; the real-field run shows that. Both
-results go in the detector's README.
+results are recorded in the validation register,
+`documentation/library_design/validation/asteroid_detection.md` (MOV-01 to
+MOV-04).
 
     python -m astrometricslib.scripts.validate_asteroid_detection --synthetic
     python -m astrometricslib.scripts.validate_asteroid_detection \

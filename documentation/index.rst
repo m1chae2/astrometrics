@@ -81,3 +81,4 @@ For users interested in understanding the mathematical models and logic powering
    Wayfinding Implementation <library_design/Wayfinding_Library_Implementation>
    Pipeline Audit Report <library_design/Pipeline_Audit_Report>
    Pipeline Review Guides <library_design/pipelines/index>
+   Validation and Tuning <library_design/validation/index>

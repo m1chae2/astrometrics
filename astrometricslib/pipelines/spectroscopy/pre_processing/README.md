@@ -156,10 +156,10 @@ in two ways:
 - It takes the box width from the median of the fitted widths over 61
   neighbouring steps (`APERTURE_SIGMA_SMOOTHING_STEPS`). The median follows
   the slow change of the real width along the trail and ignores the noise
-  of single fits. The real width changes over hundreds of steps (on Vega,
-  from 1.2 to 1.9 pixels over about 400 steps), so 61 steps, about a tenth of
-  a typical trail, removes the noise and still follows the change. 61 is a
-  judgement, not tuned. Steps whose fit failed do not count in the median, and
+  of single fits. The real width changes over hundreds of steps, so 61
+  steps, about a tenth of a typical trail, removes the noise and still
+  follows the change. 61 is a judgement, not tuned (partly measured; see
+  [SPE-04](../../../../documentation/library_design/validation/spectroscopy.md#spe-04)). Steps whose fit failed do not count in the median, and
   read a fixed box of the configured radius instead.
 - The box can end part-way through a pixel. Each pixel at the edge counts
   for the fraction of it that lies inside the box. The box centre also
@@ -172,12 +172,11 @@ in pixels, is in the extractor's `last_diagnostics.aperture_half_width_px`.
 
 **The sky.** The pipeline measures the sky in two strips, one on each side
 of the box, separated from it by a 6-pixel gap and 10 pixels wide. It does
-this at every step. On one Vega frame, moving the strips out from a 2-pixel
-to a 6-pixel gap cut the star light caught in them from 2.05 to 0.57 percent
-of the total, and a larger gap gained little while coming closer to
-neighbouring trails. A strip 10 pixels wide gives 20 sky pixels per step,
-enough that a few odd pixels cannot move the median. Both are design values
-from that one sparse frame.
+this at every step. The gap keeps the star's own faint wings out of the
+strips, and a larger gap would come closer to neighbouring trails. A strip
+10 pixels wide gives 20 sky pixels per step, enough that a few odd pixels
+cannot move the median. Both values come from a sweep on one sparse frame
+(partly measured; see [SPE-01](../../../../documentation/library_design/validation/spectroscopy.md#spe-01)).
 
 1. It removes pixels more than 3 sigma (3 standard deviations) from the
    strip's median (hot pixels,
@@ -194,7 +193,8 @@ from that one sparse frame.
 Taking the lower of the two medians every time would read low by about 0.2
 of one pixel's noise, for strips of this size, because the smaller of two
 noisy numbers sits below their true value. A faint trail would then keep
-too much sky in its total.
+too much sky in its total (partly measured, by simulation; see
+[SPE-03](../../../../documentation/library_design/validation/spectroscopy.md#spe-03)).
 
 The extractor records how it found the sky in `last_diagnostics`.
 `sky_mode_counts` counts the sky readings by mode: `both_bands`,
@@ -461,8 +461,8 @@ variance (the square of the error), in four terms:
    mean of the two bands has a quarter of the sum. For many pixels, the
    median of normal values has `pi / 2` times the variance of their mean,
    `s^2 / n`. For the few pixels of one band the true value is a little
-   lower, and the `+ 1.4` and `+ 0.4` match a simulation of small bands to
-   within about 1 percent. The pixel scatter `s` is
+   lower, and the `+ 1.4` and `+ 0.4` come from a simulation of small bands
+   (partly measured; see [SPE-07](../../../../documentation/library_design/validation/spectroscopy.md#spe-07)). The pixel scatter `s` is
    measured from the band, but never taken below what the camera model predicts
    for sky pixels. A band of ten pixels gives a noisy scatter, and the clipping
    step that drops hot pixels reads it low.
@@ -497,14 +497,8 @@ shows the local noise.
 loads it (`SpectroscopyPipeline._noise_model_for`); without a map the factor is
 1, and the stored record says `rejection_map_used`.
 
-*How we know.* Measured on 19 real
-spectral stacks on 2026-10-11, the average factor over the brightest pixels
-(the star and its trail) is 1.02 to 1.28 for most targets. It is 1.27 for
-Alnath, 1.28 for Vega and 1.48 for Arcturus, where the reported variance was
-too small by 21 to 32 percent (the errors by 11 to 18 percent).
-`test_the_box_variance_follows_the_frames_each_pixel_kept` simulates stacks that
-lost frames and recovers the known variance to 1 percent, where the model without
-the map reports under 70 percent of it.
+*How we know.* Measured on real spectral stacks and on simulated stacks that
+lost frames (see [SPE-08](../../../../documentation/library_design/validation/spectroscopy.md#spe-08)).
 
 **Carrying the error through pre-processing.** Each later step multiplies a
 sample by a factor, so each multiplies its error by the size of that factor
@@ -547,17 +541,11 @@ units and order as `intensities`) and
   variance covers the pixel noise inside the box it chose. It does not cover
   the extra scatter from the box moving between exposures.
 
-  How we know (the extraction paths are defined in the
-  [pipeline README](../README.md), "How a spectrum is made"): over 200 noise
-  realizations (copies of the frame with fresh random noise) of one small synthetic frame, the median ratio of the reported
-  error to the measured scatter is 1.00 for the flare-mask extraction (with
-  sky subtraction), 0.97 for the dispersion-line extraction, and 0.96 for the
-  traced dispersion line (60 realizations). The traced flare-mask extraction on
-  that frame scattered more than its errors (median ratio 0.73 over 200
-  realizations, and 0.2 at the 5th percentile of the samples), because its box
-  switched between the fitted width and the fixed fallback width from one
-  exposure to the next. That frame is small, and the width fit fails in about
-  40% of its steps.
+  The traced flare-mask extraction (the extraction paths are defined in the
+  [pipeline README](../README.md), "How a spectrum is made") can scatter
+  more than its errors say, because its box can switch between the fitted
+  width and the fixed fallback width from one exposure to the next (partly
+  measured, on synthetic frames; see [SPE-07](../../../../documentation/library_design/validation/spectroscopy.md#spe-07)).
 
 ## What this stage produces
 
@@ -691,10 +679,8 @@ What a value means: an `snr_estimate_ratio` far from 1 means one of the two
 is wrong: the gain or read noise in the model, or scatter in the spectrum
 that the model does not include.
 
-How we know: the post-hoc estimate is itself noisy. On four synthetic frames
-run through the whole pipeline with the true gain and read noise, the ratio
-was 1.0 to 1.8, and the post-hoc estimate alone ranged from 29 to 69 (40 and
-69 for two noise seeds of one frame with the traced extraction).
+The post-hoc estimate is itself noisy, so the ratio can stray from 1 for
+that reason alone (partly measured; see [SPE-09](../../../../documentation/library_design/validation/spectroscopy.md#spe-09)).
 
 No measurement says what value of the three error-based metrics is too low,
 and the limit of `signal_to_noise` was set for that estimator, so the three
@@ -757,11 +743,12 @@ separate nearby spectral types there.
 **Settings.** The limit of 1.3 on `chromatic_defocus_ratio` is a designed
 value.
 
-**How we know what "in focus" looks like.** A spectrum that is in focus
-changes width with wavelength only through seeing (the blur from the air),
-roughly as wavelength to the power -0.2. From 4600 A to 6600 A that gives a
-red-to-blue ratio of about 0.92. The limit sits well above that, and no real
-focus sweep has set it. The focus-sweep script (below) is the tool to check it.
+**What "in focus" looks like.** A spectrum that is in focus changes width
+with wavelength only through seeing (the blur from the air), which makes the
+red end slightly sharper (a ratio of about 0.92). The limit sits well above
+that, and no real focus sweep has set it (designed; see the
+[design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)). The focus-sweep script
+(below) is the tool to check it.
 
 **The option to blur with the measured profile.** The classifier blurs its
 reference spectra to the instrument's resolution before it compares them with

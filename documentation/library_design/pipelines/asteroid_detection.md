@@ -1,6 +1,6 @@
 # Asteroid and Moving Object Detection Pipeline Review Guide
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -98,9 +98,9 @@ of arcseconds off.
 detections within 300 arcsec. Every pair votes for an offset
 in 5-arcsec bins, and the winning offset is removed from the
 frame's positions. True pairs agree on one offset; chance pairs scatter their
-votes. A plain nearest-star match was tried first and failed: on NGC 2403 the
-stars are about as far apart as the mount's error, so many detections were
-paired with the wrong star.
+votes. A plain nearest-star match is not used: where the stars are about as
+far apart as the mount's error, many detections pair with the wrong star
+(partly measured; see [MOV-05](../validation/asteroid_detection.md#mov-05)).
 
 **Position error.** The same vote measures each frame's position error: the
 scatter of the matched stack stars about the winning offset, on each axis,
@@ -232,14 +232,17 @@ These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **Measured.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **Partly measured.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **Design estimate.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so.
+- **Measured.** Chosen or confirmed from a measurement on real data.
+- **Partly measured.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **Design estimate.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register](../validation/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value.
 
 The values below are the defaults of `MovingObjectConfig`, plus the two
 pointing-vote constants of `pipeline.py`. The configuration can change the
@@ -247,17 +250,17 @@ defaults.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `min_frames_for_persistence` | `3` | Design estimate | Fewest detections in a chain (detections linked across frames as one object). |
-| `pixel_match_tolerance_px` | `1.5` | Design estimate | Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high). |
-| `sky_match_tolerance_arcsec` | `3` | Design estimate | Sky spread below which a chain is a fixed star (Eq. 2). |
-| `rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour` | `1` / `300` arcsec/h | Design estimate | Allowed range of the total speed across the sky. |
-| `chain_match_radius_max_arcsec` | `300` arcsec | Design estimate | Cap on how far a chain may reach for its next detection (Eq. 1). |
-| `residual_rms_max_multiple` | `2` | Design estimate | Largest RMS (root mean square) distance from the fitted straight line on each axis, in units of that axis's position error. |
-| `min_displacement_error_multiple` | `3` | Design estimate | Smallest total distance moved, in units of the position error. |
-| `astrometric_error_default_arcsec` | `10` arcsec | Design estimate | Position error assumed for a detection with none measured. |
-| `ephemeris_cross_match_radius_arcsec` | `10` arcsec | Design estimate | Match radius for a known body from SkyBoT (an online service that lists known solar-system bodies), at both the first and last detection. |
-| `_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC` | `300` arcsec | Partly measured | Pairing radius between stack stars and frame detections in the per-frame pointing-offset vote (Section 3.1). Chosen on NGC 2403 only, not on a range of mount pointing errors. |
-| `_POINTING_CORRECTION_VOTE_BIN_ARCSEC` | `5` arcsec | Partly measured | Bin width of the offset vote. Small enough to separate the true offset from the spacing of NGC 2403's stars (median 48 arcsec), and well above the star finder's sub-arcsec centering noise. |
+| `min_frames_for_persistence` | `3` | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-01](../validation/asteroid_detection.md#mov-01)) | Fewest detections in a chain (detections linked across frames as one object). |
+| `pixel_match_tolerance_px` | `1.5` | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-02](../validation/asteroid_detection.md#mov-02)) | Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high). |
+| `sky_match_tolerance_arcsec` | `3` | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-02](../validation/asteroid_detection.md#mov-02)) | Sky spread below which a chain is a fixed star (Eq. 2). |
+| `rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour` | `1` / `300` arcsec/h | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-01](../validation/asteroid_detection.md#mov-01)) | Allowed range of the total speed across the sky. |
+| `chain_match_radius_max_arcsec` | `300` arcsec | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-08](../validation/asteroid_detection.md#mov-08)) | Cap on how far a chain may reach for its next detection (Eq. 1). |
+| `residual_rms_max_multiple` | `2` | Partly measured ([MOV-03](../validation/asteroid_detection.md#mov-03)) | Largest RMS (root mean square) distance from the fitted straight line on each axis, in units of that axis's position error. |
+| `min_displacement_error_multiple` | `3` | Partly measured ([MOV-03](../validation/asteroid_detection.md#mov-03)) | Smallest total distance moved, in units of the position error. |
+| `astrometric_error_default_arcsec` | `10` arcsec | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-06](../validation/asteroid_detection.md#mov-06)) | Position error assumed for a detection with none measured. |
+| `ephemeris_cross_match_radius_arcsec` | `10` arcsec | Design estimate ([how to measure](../validation/asteroid_detection.md#design-estimates); related: [MOV-06](../validation/asteroid_detection.md#mov-06)) | Match radius for a known body from SkyBoT (an online service that lists known solar-system bodies), at both the first and last detection. |
+| `_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC` | `300` arcsec | Partly measured ([MOV-05](../validation/asteroid_detection.md#mov-05)) | Pairing radius between stack stars and frame detections in the per-frame pointing-offset vote (Section 3.1). Wide enough to contain a mount error of several arcminutes; the vote copes with the wrong pairs a wide radius admits. |
+| `_POINTING_CORRECTION_VOTE_BIN_ARCSEC` | `5` arcsec | Partly measured ([MOV-05](../validation/asteroid_detection.md#mov-05)) | Bin width of the offset vote. Small enough to separate the true offset from the typical spacing of the field's stars, and well above the star finder's sub-arcsec centering noise. |
 
 ## 6. Degraded States & Fallback Pathways
 

@@ -1,6 +1,6 @@
 # Astrometry and Plate Solving Pipeline Review Guide
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -128,10 +128,9 @@ written as the FWHM of a Gaussian with the same spread (2.355 times its
 standard deviation). FWHM (full width at half maximum) is the width of a
 star's light profile at half its peak height. Because the box also holds
 faint wings and neighbours, this blob width reads about twice the star's
-fitted FWHM: 4.9 px against 2.5 px on the Bubble Nebula stack. It is used
-because it detects better. On that stack it gave 335 catalog matches and a
-1.04 arcsec residual, against 181 matches and 5.0 arcsec with the kernel
-sized from the fitted FWHM. It is never reported as a star width.
+fitted FWHM. It is used because it detects better than a kernel sized from
+the fitted FWHM: more catalog matches and a smaller residual (partly
+measured; see [AST-06](../validation/astrometry.md#ast-06)). It is never reported as a star width.
 
 **Clean-up.** Detections closer than 15 px are merged into one,
 because the finder can split one large star into two. Colour frames are
@@ -289,27 +288,30 @@ These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **Measured.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **Partly measured.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **Design estimate.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so.
+- **Measured.** Chosen or confirmed from a measurement on real data.
+- **Partly measured.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **Design estimate.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register](../validation/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | `0.5` | Design estimate | Largest allowed residual (position error of the sky map), as a share of a star's width (FWHM). Set against 8 saved solves whose catalog match separations were 0.14 to 0.44 of a star width; not re-measured on fit residuals, which are usually smaller. |
-| `MINIMUM_MATCHED_STARS` (`run_gates`) | `20` | Design estimate | Fewest stars matched to a catalog for the residual to mean anything. |
-| `MAXIMUM_FAILED_LOOKUP_FRACTION` | `0.5` | Design estimate | Share of failed online catalog lookups at which `catalog_lookup` fails. |
-| `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Design estimate | Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star. |
-| `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Design estimate | How many of the brightest detected stars are sent to the online solver. |
-| Solve minimum | 4 sources | Design estimate | Fewest detections for a solve to be tried (`process_image`). |
-| `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | `10` | Partly measured | Fewest detections for the local solver to be tried; with fewer, the run goes straight to the online solver. Confirmed on one underexposed M 13 frame. |
-| `SourceDetector` threshold | `5` σ | Design estimate | How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1). |
-| `MINIMUM_MATCHED_STARS` (`wcs_refinement`) | `40` | Design estimate | Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit has about a dozen terms per axis, and 40 stars leaves a wide margin. |
-| `MAXIMUM_SHIFT_ARCSEC` | `30.0` arcsec | Design estimate | Largest move of the whole field a refit may make and still be kept. More than ten times the largest error seen (2.7 arcsec). |
+| `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | `0.5` | Partly measured ([AST-04](../validation/astrometry.md#ast-04)) | Largest allowed residual (position error of the sky map), as a share of a star's width (FWHM). It is there to catch a failed solve, not to rank good ones. |
+| `MINIMUM_MATCHED_STARS` (`run_gates`) | `20` | Partly measured ([AST-05](../validation/astrometry.md#ast-05)) | Fewest stars matched to a catalog for the residual to mean anything. |
+| `MAXIMUM_FAILED_LOOKUP_FRACTION` | `0.5` | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | Share of failed online catalog lookups at which `catalog_lookup` fails. |
+| `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star. |
+| `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | How many of the brightest detected stars are sent to the online solver. |
+| Solve minimum | 4 sources | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | Fewest detections for a solve to be tried (`process_image`). |
+| `MINIMUM_SOURCES_FOR_LOCAL_SOLVE` | `10` | Partly measured ([AST-13](../validation/astrometry.md#ast-13)) | Fewest detections for the local solver to be tried; with fewer, the run goes straight to the online solver, because a local attempt would spend its whole time limit on a near-certain failure (Section 3.3). |
+| `SourceDetector` threshold | `5` σ | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1). |
+| `MINIMUM_MATCHED_STARS` (`wcs_refinement`) | `40` | Design estimate ([how to measure](../validation/astrometry.md#design-estimates)) | Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit has about a dozen terms per axis, and 40 stars leaves a wide margin. |
+| `MAXIMUM_SHIFT_ARCSEC` | `30.0` arcsec | Partly measured ([AST-02](../validation/astrometry.md#ast-02)) | Largest move of the whole field a refit may make and still be kept. Set at about ten times the largest solver error seen; a larger move means the fit followed wrong matches. |
 
 ## 6. Degraded States & Fallback Pathways
 

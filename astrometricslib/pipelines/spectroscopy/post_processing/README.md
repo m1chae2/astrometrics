@@ -80,9 +80,8 @@ it does not, a short note explaining why:
   ordinary type comparison above is not a fair test for a giant.
 - **Colour agreement**: whether the spectrum's own measured B-V colour, from
   the processing stage, is within 0.4 mag of the catalog's B-V colour
-  (`COLOUR_DISAGREEMENT_MAGNITUDES`). On 2026-09-24, 30 of 36 stars stayed
-  within 0.30 mag and the problem spectra were further out, so 0.4 is a
-  judgement from that one data set. A catalog colour redder than 1.7
+  (`COLOUR_DISAGREEMENT_MAGNITUDES`). 0.4 is a judgement from one data set
+  (partly measured; see [SPE-27](../../../../documentation/library_design/validation/spectroscopy.md#spe-27)). A catalog colour redder than 1.7
   (`MAXIMUM_CALIBRATED_B_MINUS_V`) is not compared, because the references
   stop at M4V (B-V 1.64) and the colour measurement is not calibrated beyond
   it.
@@ -224,9 +223,9 @@ wavelength scale together. The code is in
    inside every corrected spectrum, so it appears as an offset common to all stars.
 4. **Match the resolutions.** XP's blur is a Gaussian of 95 Å full width at half
    maximum (FWHM) at 4340 Å, 130 Å at 4861 Å, 70 Å at 6563 Å and 185 Å at 8800 Å,
-   with straight lines between. A fit of the Pickles A0V template to the XP
-   spectra of 12 A0V stars (G 6.0 to 6.6, their brightness in Gaia's broad G band, in magnitudes) gave these medians on 2026-10-10. The
-   spread between stars was 20 to 40 percent. The instrument's stored line
+   with straight lines between. These are medians of a fit of the Pickles
+   A0V template to the XP spectra of A0V stars (partly measured; see
+   [SPE-28](../../../../documentation/library_design/validation/spectroscopy.md#spe-28)). The instrument's stored line
    spread is sharper than XP's below about 5000 Å and broader above it. Where
    the instrument is broader, the pipeline blurs XP to it. Where XP is broader,
    the pipeline blurs the observed spectrum to XP. The blur width is the
@@ -246,9 +245,9 @@ wavelength scale together. The code is in
      derivatives (d ln F / dλ, which emphasizes the lines and edges and ignores
      the overall slope). The sign is positive when the observed features sit
      at longer wavelengths than XP's. The search covers ±60 Å. A correlation below
-     0.3 gives no shift. 0.3 is a design value: two spectra of the same star
-     correlate at 0.9 or more in the synthetic tests, and chance correlation
-     for about 700 independent points is about 0.04.
+     0.3 gives no shift. 0.3 is a design value, far above chance correlation
+     and far below the correlation of two spectra of the same star (see
+     [SPE-28](../../../../documentation/library_design/validation/spectroscopy.md#spe-28)).
 
 The result is stored on `SpectroscopyResult.gaia_xp_comparison`
 (`GaiaXpComparison`, in `models/gaia_xp_comparison.py`), together with the
@@ -258,13 +257,9 @@ Settings: all three limits are designed, not measured: 0.05 is above XP's own 1 
 percent calibration error, 3 percent per 1000 Å is an 11 percent change across the
 compared range, and 11 Å is one pixel.
 
-How we know: synthetic tests recover a 5 percent per
-1000 Å tilt to within 0.2 and a 20 Å shift to within 1 Å. Against real data, a
-shift measured between a real XP spectrum and a template of a different star ranged
-from -23 to +36 Å over 12 A0V stars (median +11 Å). The template is not the
-same star as the XP spectrum, so that spread measures how much real stars
-of one type differ from the template, not the instrument. The shift's noise floor for a real
-spectrum of the same star is not known yet.
+How we know: synthetic tests recover a known tilt and shift; the shift's
+noise floor for a real spectrum of the same star is not known yet (partly
+measured; see [SPE-28](../../../../documentation/library_design/validation/spectroscopy.md#spe-28)).
 `astrometricslib/scripts/compare_spectra_with_gaia_xp.py` measures it on a processed target.
 
 At the run level, the summary's `gaiaXpSummary` (`GaiaXpRunSummary`) gives, for

@@ -31,7 +31,7 @@ Why it is hard: faint stars are noisy, so a rule that simply picks the stars wit
    It combines the three into one variability score, which is above 1 only when all three pass their thresholds. It flags a star as a possible variable when its score is above 1 and its false discovery q-value is below 0.01. The q-value is the expected share of false alarms among all stars flagged at that level (see "False alarm probability" below). This also lives in `processing/`, which gives the definitions, the thresholds and the measured AUC (the chance that a real variable gets a higher score than a constant star; 0.5 is chance, 1 is perfect).
 5. **Look for repeating patterns.** A period is a repeating pattern in brightness over time, such as an eclipsing binary star (two stars that pass in front of each other) or a transiting planet (a planet that crosses its star's face). The pipeline searches for a period in only a few stars: the target's own star and the 10 brightest other stars with enough data points (`MAXIMUM_BRIGHTEST_STARS_FOR_PERIOD_SEARCH` in `batch.py`). Each search takes several seconds, so a field of thousands of stars cannot all be searched; any other star can be searched on request. The searches weight each point by its uncertainty and measure time in BJD_TDB days when the star has them. This also lives in `processing/`.
 6. **Judge how much to trust the results.** Two separate quality checks run alongside the steps above. One checks how good the raw data behind a star's brightness history was (`pre_processing/`). The other records how far each star's CV (coefficient of variation, its standard deviation over its mean) sits from the field's CV cutoff (a fallback variable-star boundary, defined under "The gate record"), and builds the run's gates (`post_processing/`; its README explains when that margin describes the actual variable-star decision).
-7. **Combine sessions.** When a target has more than one observing session, the pipeline matches up the same stars between sessions and combines their brightness histories into one longer record. The combined record keeps each session's brightness level as measured. It does not rescale one session to match another. The pipeline then measures how much each star's level differs between sessions (see "Change between sessions" below), which can reveal slower changes that a single session would miss.
+7. **Combine sessions.** When a target has more than one observing session, the pipeline matches up the same stars between sessions and combines their brightness histories into one longer record (partly measured on M 81; see [PHO-14](../../../documentation/library_design/validation/photometry.md#pho-14)). The combined record keeps each session's brightness level as measured. It does not rescale one session to match another. The pipeline then measures how much each star's level differs between sessions (see "Change between sessions" below), which can reveal slower changes that a single session would miss.
 
 ## Where to look
 
@@ -74,11 +74,11 @@ A few terms used in the table:
 | `detectable_amplitude` | The gate estimates the smallest variable this run could flag, and fails when that estimate is above 0.3 mag peak to peak (`MAXIMUM_DETECTABLE_AMPLITUDE_MAG`). The estimate is for a sinusoid on a star of median brightness. With a noise model, it is the model's scatter there times `2 sqrt(2) sqrt(1.5^2 - 1)`. Without one, it is the sinusoid whose scatter equals the CV cutoff (see the note below the table) | The run has no noise model and no cutoff |
 | `flux_uncertainty` | Never. It passes with the median per-point error in magnitudes as its measured value | No light curve carries errors, or the camera's gain is unknown and the errors assume 1 electron per ADU (the detail still quotes the median error) |
 
-`registration_drift` and `comparison_ensemble` report a lost-tracking night and a thin or unstable comparison set at the level of the run. The limit for `scatter_population` and the 7.4 multiplier in the CV cutoff are not yet backed by a measured false-alarm rate.
+`registration_drift` and `comparison_ensemble` report a lost-tracking night and a thin or unstable comparison set at the level of the run. The limit for `scatter_population` and the 7.4 multiplier in the CV cutoff are not yet backed by a measured false-alarm rate (the cutoff's behaviour on the library is measured; see [PHO-10](../../../documentation/library_design/validation/photometry.md#pho-10)).
 
 **The `detectable_amplitude` estimate.** A sinusoid of half-height `a` adds a scatter of `a / sqrt(2)` (its root-mean-square value), and independent scatters add in quadrature (as the square root of the sum of squares). The candidate rule needs a star's total scatter to reach 1.5 times the noise model's scatter `s`, so `a / sqrt(2) = s sqrt(1.5^2 - 1)`, and the peak-to-peak size `2a` is `2 sqrt(2) sqrt(1.5^2 - 1) s`. A real star also has to pass the other two indices, so it needs slightly more.
 
-**Two different numbers.** The 0.3 mag limit is a design estimate, not a measurement: pulsating, rotating and young variable stars mostly change by less than about 0.3 mag, while eclipsing binaries, Cepheids, RR Lyrae stars and Miras change by more, so a run that cannot see 0.3 mag is blind to most variables. It is a pass-or-fail line for the run's computed estimate. The 0.04 mag quoted under "Measured on real data" is different: it is the measured size at which the rule flagged half of the injected signals on the brightest quarter of stars in M 13.
+**Two different numbers.** The 0.3 mag limit is a design estimate, not a measurement: pulsating, rotating and young variable stars mostly change by less than about 0.3 mag, while eclipsing binaries, Cepheids, RR Lyrae stars and Miras change by more, so a run that cannot see 0.3 mag is blind to most variables. It is a pass-or-fail line for the run's computed estimate. The size of signal the rule actually finds on real light curves is a separate, measured number (partly measured; see [PHO-09](../../../documentation/library_design/validation/photometry.md#pho-09)).
 
 ### The registration drift gate
 
@@ -92,7 +92,7 @@ Registration is the lining up of each picture with the first one. This gate chec
 
 **What it reports.** The detail reports the global drift, the corner displacement, the median and 95th-percentile per-star offset (reported, not judged: it is dominated by centroid noise on faint and crowded stars), the fallback share, the worst picture, and, when a session fell back to the older anchor rule, that fact. With several sessions, it reports the worst one. The measured value is the global drift for limit 1, the corner displacement for limit 2 and the fallback share (0 to 1) for limit 3.
 
-**How we know.** The limits are design estimates, not measured false-alarm rates. On 2026-10-11 the corner displacement (95th percentile) was 0.2 pixels on M 13, 0.9 on M 81 and 1.8 on NGC 2403 (a real rotation of 0.05 degrees over the night; 1.9 pixels in the worst picture).
+**Status.** The limits are design estimates, not measured false-alarm rates (partly measured on three real fields; see [PHO-04](../../../documentation/library_design/validation/photometry.md#pho-04)).
 
 ## Uncertainties
 
@@ -116,18 +116,9 @@ A camera's noise has a few known sources: the random arrival of light (photon or
 
 **When nothing gives them.** The code assumes 1 electron per ADU and no read noise, and the light curve records that in `errorsAssumeUnitGain` and `errorsAssumeZeroReadNoise`. With a wrong gain the errors have the right shape but the wrong size. The `flux_uncertainty` gate reports the median error in magnitudes (`1.0857 x error / flux`; 1.0857 is 2.5 / ln 10, which turns a small fractional error into magnitudes) and whether the gain was assumed.
 
-**Measured gain of the ASI 533MM Pro, 2026-10-11.**
+**The ASI 533MM Pro's numbers.** The camera's profile and the shipped example config hold a gain of 0.783 e-/ADU and a read noise of 3.8 e- (partly measured; see [PHO-03](../../../documentation/library_design/validation/photometry.md#pho-03)). The gain is in electrons per stored ADU. The sensor is 14-bit and the files are 16-bit in steps of 4, so it is a quarter of the datasheet's value in sensor ADU. A gain of 3.6 e-/ADU, a datasheet figure for the sensor's own 14-bit ADU, is wrong for these files and makes the error bars about 2 times too small.
 
-- *Units.* The gain is in electrons per stored ADU. The sensor is 14-bit and the files are 16-bit in steps of 4, so it is a quarter of the datasheet's value in sensor ADU.
-- *Method.* A flat is a picture of an evenly lit panel. The difference of two flats taken back to back cancels the fixed pixel-to-pixel pattern, so half the variance of that difference is the random noise of one frame. For photon noise, the variance in electrons equals the signal in electrons, so the gain is the signal divided by (the single-frame variance minus the read variance), all in ADU.
-- *Gain.* On the 15 flat pairs of each of two sets (gain setting 0, offset 10, 0.55 s, -10 C), the central 1000 by 1000 pixels give 0.783 and 0.782 e-/ADU, with a pair-to-pair spread of 0.0004.
-- *Read noise.* The read noise from 5 pairs of bias frames (zero-length exposures) is 4.88 ADU, which is 3.8 e-, the same as the ZWO datasheet's value at gain setting 0. A median-based estimate gives 3.3 e-. The camera profile uses 3.8 e-.
-- *Limits of the measurement.* Both sets sit at one signal level (about 28,000 ADU), so no full photon-transfer curve (the gain measured at many signal levels) was fitted; a flat panel that flickers between frames would lower the gain, so 0.783 is more likely too low than too high.
-- *Where it is used.* Both numbers are in the camera's profile and in the shipped example config. A gain of 3.6 e-/ADU, a datasheet figure for the sensor's own 14-bit ADU, is wrong for these files and makes the error bars about 2 times too small.
-
-**The 5 times limit.** Real ratios of the comparison stars' scatter to their predicted error, ASI 533MM stacks, 2026-10-11: M 13 1.3, M 81 1.7 and NGC 2403 18 (0.0655 mag against 0.0036). On NGC 2403 the comparison stars' brightness fell by 30 percent over 16 minutes and recovered (922, 636 and 946 ADU/s), and the faint stars' normalized fluxes scattered 0.08 to 0.09 mag, about the same for every brightness, with the brightest 50 stars anti-correlated with the ensemble. That pattern is patchy cloud or tracking loss, which dividing by the ensemble cannot remove. The gate had passed that run; the limit is a design value set on these three fields.
-
-**First real-data check of the error bars (M 13, 41 frames).** With the measured gain, the `comparison_ensemble` gate reports an ensemble scatter of 0.0142 mag where the predicted noise (from the CCD equation) is 0.0112 mag, so the predicted errors are about 21 percent too small. The prediction has only photon, read and sky noise, so a gap of this size is expected from flat-field residuals and centroid error; nothing here shows how it splits. The `flux_uncertainty` gate passes on this run with a median per-point error of 0.0205 mag. (With the gain assumed to be 1 e-/ADU, that gate is `not_checked` and quotes the error as a guide only.)
+**The 5 times limit.** `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` is a design value set between clear and cloudy real fields (partly measured; see [PHO-02](../../../documentation/library_design/validation/photometry.md#pho-02)). A ratio far above it means patchy cloud or tracking loss, which dividing by the ensemble cannot remove. On clear nights the predicted errors still run somewhat smaller than the measured scatter, because the CCD equation leaves out flat-field residuals and centroid error (see [PHO-02](../../../documentation/library_design/validation/photometry.md#pho-02)).
 
 A light curve saved before the errors existed has empty error lists. The searches then work as they did before.
 
@@ -179,7 +170,7 @@ No run gate checks this amplitude yet. The `detectable_amplitude` gate in the ta
 
 ## Comparison stars: measured and designed
 
-Measured (synthetic sessions with known truth, `test/test_comparison_ensemble_injection.py`): the pipeline recovers a 1 percent, 2 hour dip to within 3 percent of its depth, rejects a comparison candidate that carries a 5 percent sinusoid, matches the comparison scatter to the propagated error within 20 percent, and removes a 3 percent frame-to-frame transparency change from every curve.
+Measured only on synthetic sessions with known truth (partly measured; see [PHO-01](../../../documentation/library_design/validation/photometry.md#pho-01)).
 
 Designed (no real field has checked them): the brightness band for comparison candidates (ranked by brightness, the brightest 2 percent are skipped and the band reaches down to the brightest 30 percent), the minimum of 5 and the cap of 20 comparison stars, the 3-sigma consistency limit, and the rule that a usable frame has at least half the typical number of measured stars. The cap and the optional ensemble airmass correction are arguments of `VariabilityAnalyzer`; no configuration file sets them.
 
@@ -189,7 +180,7 @@ Each variable candidate carries `knownVariability` and a one-sentence `knownVari
 
 ## What the variable-star flag can see
 
-The flag picks candidates with the noise model and the three indices described in `processing/README.md`. On synthetic fields with known variables, the score ranks them with an AUC of 0.94 (the CV alone: 0.84), and the rule flags none of the constant stars. That measurement is on synthetic data, not on the sky. The `variability_discrimination` gate fails a run whose AUC on the catalogued variables is below 0.7. No AUC for the new score on the library has been measured yet.
+The flag picks candidates with the noise model and the three indices described in `processing/README.md`. The score is checked on synthetic fields with known variables (partly measured; see [PHO-06](../../../documentation/library_design/validation/photometry.md#pho-06)) and on one real field (see [PHO-08](../../../documentation/library_design/validation/photometry.md#pho-08)). The `variability_discrimination` gate fails a run whose AUC on the catalogued variables is below 0.7. No AUC for the new score on the whole library has been measured yet.
 
 Each light curve carries the indices as `instrumentalMag`, `rmsMag`, `excessScatter`, `reducedChiSquare`, `stetsonJ`, `variabilityScore`, `falseAlarmProbability` and `falseDiscoveryQValue`, and each variable candidate carries the last six.
 
@@ -203,17 +194,11 @@ Each light curve carries the indices as `instrumentalMag`, `rmsMag`, `excessScat
 
 **Assumptions.** Both numbers assume noise that is independent from point to point. Slow systematics (red noise: errors that drift together over many points) make them too small, and no test measures how much. A tail below 2.2e-308 is reported as that value, never as 0 (`MINIMUM_PROBABILITY`).
 
-**How we know.** On constant synthetic fields with correct errors, 1.0 percent of stars fell below a probability of 0.01 (`test_constant_stars_with_correct_errors_give_uniform_probabilities`) and a field of 300 constant stars gave at most 3 candidates. The 0.01 level is a design value.
+**Status.** The probabilities are checked on constant synthetic fields (partly measured; see [PHO-07](../../../documentation/library_design/validation/photometry.md#pho-07)). The 0.01 level is a design value.
 
-### Measured on real data, 2026-10-11
+### On real data
 
-The field: M 13, ASI 533MM, 41 frames, 458 stars with indices, 37 of them listed as variable by SIMBAD, Gaia DR3 or VSX, 403 not listed.
-
-- **How well the score ranks.** The score separates the listed variables from the others with an AUC of 0.61 (0.58 is the least that beats chance at the 5 percent level), against 0.94 on the synthetic fields. The false-alarm probability gives the same 0.61, the reduced chi-square 0.61 and the Stetson J 0.57, and the old CV 0.41, worse than chance.
-- **What the rule accepts.** The rule accepts 16 stars: 5 listed variables and 11 not listed. The listed variables are 8 percent of the field and 31 percent of the accepted stars, so the rule finds the strong ones, but it finds 5 of 37 (14 percent), and 11 of 403 (2.7 percent) of the unlisted stars.
-- **Why it misses most listed variables.** Most listed variables in this field are small-amplitude, or in the crowded core where the photometry is poor, so the limit is the detection threshold and not the statistic. That threshold is now measured (`astrometricslib/scripts/validate_photometry_injection.py`, which adds signals of known depth to the real light curves): on M 13 the rule flags half of the signals at about 0.04 mag peak to peak on the brightest quarter of stars and only at 0.16 mag on the faintest quarter, finds nothing below 0.02 mag, and flagged 0 of 29,760 untouched stars. Most catalogued variables in a field like this vary by less than 0.04 mag, which accounts for finding 5 of 37.
-- **The trade-off.** The rule is stricter than its 1 percent level suggests; whether to loosen it is a choice between missed signals and false flags that the table lets you make.
-- **The gates on this run.** The `variability_discrimination` gate failed on this run for the same reason, and `registration_drift` failed with a 95th-percentile per-star centroid offset of 1.13 pixels (limit 1). Replaying it on the frames showed that this was centroid noise on faint and crowded stars, not field rotation (M 13 turned 0.05 pixels at the corner over its night). The gate now judges the fitted rotation and scale, not that offset (see `registration_drift` above); M 13 passes it.
+On a real field the score ranks the catalogued variables well below its synthetic performance, and the rule finds only the stronger variables (partly measured on M 13; see [PHO-08](../../../documentation/library_design/validation/photometry.md#pho-08)). Most catalogued variables there are small-amplitude or sit in the crowded core, so the limit is the detection threshold and not the statistic (see [PHO-09](../../../documentation/library_design/validation/photometry.md#pho-09)). The rule is stricter than its 1 percent level suggests; whether to loosen it is a choice between missed signals and false flags.
 
 The run's summary carries the fitted noise-model curve as `noiseModelCurve`.
 
@@ -221,17 +206,13 @@ The run's summary carries the fitted noise-model curve as `noiseModelCurve`.
 
 The CV-only flag is the fallback rule: flag a star whose CV is above the field's median CV plus 7.4 MAD.
 
-**Measured** on the library on 2026-10-09 (`astrometricslib/scripts/measure_variability_cutoff.py`, 46,259 stars with light curves in 32 targets, 2,374 of them listed as variable by SIMBAD, Gaia DR3 or VSX):
+The multiplier was chosen to flag about the top 3 percent of stars. On the library, the CV separates catalogued variables from other stars no better than chance, and the cutoff flags a larger share than that (measured; see [PHO-10](../../../documentation/library_design/validation/photometry.md#pho-10)).
 
-- At the multiplier of 7.4, the cutoff flagged 5.2% of stars, but only 3.8% of the catalogued variables, against 5.2% of the stars no catalog lists.
-- The scatter statistic separates the two no better than chance (AUC 0.46 between stars of similar brightness; 0.5 is chance), including for strong-amplitude types.
-- The median CV of a light curve is 8 percent (about 0.08 mag) even among the brightest fifth of stars. Per target, the recorded median scatter in magnitudes ranges from 0.009 to 0.9 mag, with a median over the targets of 0.29 mag.
-
-**What it means.** A flag in most of these runs is not evidence of the kind of variable the catalogs know; the gates `variability_discrimination` and `detectable_amplitude` say so for each run. Raising the multiplier trims the false flags but does not change this: the scatter of the photometry, not the multiplier, is the limit. The "top 3%" the multiplier was chosen for was never measured; it flags 5.2%.
+**What it means.** A CV-only flag is not evidence of the kind of variable the catalogs know; the gates `variability_discrimination` and `detectable_amplitude` say so for each run. Raising the multiplier trims the false flags but does not change this: the scatter of the photometry, not the multiplier, is the limit.
 
 ### Period searches
 
-Period searches use a family-wise correction: each false-alarm probability is adjusted for every search made on the target (see `processing/family_wise_correction.py`), so trying many stars and many periods does not inflate the chance of a false detection. They measure that probability against shuffled copies of the light curve that keep correlated noise (see `processing/periodicity_search.py`): a point shuffle moves single points at random, which breaks up any slow drift; a block shuffle moves runs of neighbouring points together, which keeps it. On simulated red noise with nothing real in it, the old point shuffle called 97% to 100% of light curves significant at the 5% level, the block shuffle about 5% to 10%.
+Period searches use a family-wise correction: each false-alarm probability is adjusted for every search made on the target (see `processing/family_wise_correction.py`), so trying many stars and many periods does not inflate the chance of a false detection. They measure that probability against shuffled copies of the light curve that keep correlated noise (see `processing/periodicity_search.py`): a point shuffle moves single points at random, which breaks up any slow drift; a block shuffle moves runs of neighbouring points together, which keeps it. The searches use the block shuffle, because a point shuffle calls pure red noise significant almost every time (partly measured on simulated red noise; see [PHO-11](../../../documentation/library_design/validation/photometry.md#pho-11)). How often the searches call white noise a detection, and which injected signals they find, is in [PHO-12](../../../documentation/library_design/validation/photometry.md#pho-12).
 
 ## How a period verdict is reached
 

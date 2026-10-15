@@ -133,14 +133,16 @@ the detail.
    in Angstroms. One FWHM is one resolution element. The pipeline has two
    measures of it:
    - *From the trail width.* The width of the trail across the dispersion,
-     in pixels, times the Angstroms per pixel. On Vega's stack this gives
-     about 35 to 43 A across the middle of the spectrum, about 40 A at
-     5000 A. A spectrum with no trail width (the fixed-box extraction) uses
-     a fixed 45 A.
+     in pixels, times the Angstroms per pixel. This gives about 40 A at
+     5000 A (partly measured; see
+     [SPE-05](../../../documentation/library_design/validation/spectroscopy.md#spe-05)).
+     A spectrum with no trail width (the fixed-box extraction) uses a fixed
+     45 A.
    - *The stored line-spread profile* (`data/line_spread_*.json`). It was
-     fitted to the depths of real absorption lines on three stars: 42 A at
-     4200 A, about 100 to 110 A from 4861 to 5175 A, and 148 A at H-alpha
-     (6563 A). It is wider than the trail width above about 4400 A. A fit to
+     fitted to the depths of real absorption lines (partly measured; see
+     [SPE-06](../../../documentation/library_design/validation/spectroscopy.md#spe-06)):
+     42 A at 4200 A, about 100 to 110 A from 4861 to 5175 A, and 148 A at
+     H-alpha (6563 A). It is wider than the trail width above about 4400 A. A fit to
      line depths may include scattered light that the trail width does not
      see. The classifier, the wavelength zero-point fit, the equivalent
      widths and the Gaia XP comparison use this stored profile.
@@ -435,8 +437,7 @@ steps:
       spectrum with 60 valleys gave about 34,000.
    4. Refine each valley's position to a fraction of a sample. A parabola
       through the lowest sample and its two neighbours gives the position of
-      its lowest point, which is within 0.5 sample of the sample itself and
-      within 0.1 sample of the true centre for a smooth valley.
+      its lowest point, which is within 0.5 sample of the sample itself.
 3. Look up where each valley sits. The tuner reads the position from
    `sample_distances_px`, the distance from the zero-order star, in pixels,
    that the pipeline recorded for each kept sample. It does not count
@@ -460,19 +461,9 @@ steps:
    flare-mask extraction (see "How a spectrum is made") and whether the
    extraction must stop short to stay on the image.
 
-How we know it works: `utilities/test/test_calibration_tuner_sample_distances.py`
-builds frames with the Balmer lines at known positions and checks that:
-
-- the tuner recovers those positions to 0.5 pixel and the grating distance to
-  1 percent, with and without leading samples dropped;
-- a noisy frame (3000 ADU continuum, Poisson noise, the random scatter of
-  counted light) gives at most 12 candidates including the three true lines
-  and finishes the search in under 10 seconds;
-- the refined positions bring the fitted distance within 0.02 percent of the
-  truth on both the dispersion-line and the flare-mask extraction, with
-  zero-order positions that fall between pixels;
-- each flare-mask sample distance lands within 0.01 pixel of the true
-  distance from the zero order.
+The tuner's accuracy is checked on synthetic frames with the Balmer lines at
+known positions, and once on Vega (partly measured; see
+[SPE-12](../../../documentation/library_design/validation/spectroscopy.md#spe-12)).
 
 For exact behavior, read the code.
 
@@ -496,13 +487,12 @@ Besides each star's own quality records, a run keeps one record per run-level ch
 
 The counts behind the gates come from `spectrum_facts`, which the batch workers return per frame so the parallel path builds the same gates as the single-image path.
 
-Second-order contamination and the emission-line detector have no run-level gate yet, because their limits are not validated: the 2% and 10% second-order figures (see [processing](processing/README.md), "Quality checkpoint 2") and the emission detector's 5σ, set on M 57 only.
+Second-order contamination and the emission-line detector have no run-level gate yet, because their limits are not validated: the 2% and 10% second-order figures (see [processing](processing/README.md), "Quality checkpoint 2") and the emission detector's 5σ, set on M 57 only (see [SPE-25](../../../documentation/library_design/validation/spectroscopy.md#spe-25)).
 
 ## What the emission-line detector can see
 
 An emission line is a bright bump at one wavelength, made by glowing gas (a nebula, or a star with hot gas around it). The detector is meant to find these.
 
-- **False alarms.** Measured on 228 stored spectra of stars not known to emit (`scripts/validate_emission_line_detector.py`, 2026-10-09): the detector reports a false "detected" line in 1 of them (0.4%) and calls none an emission-line source.
-- **Sensitivity.** It is also insensitive. A box-shaped line added to those spectra is reported as detected only about half the time (44% to 47%) when its height is 1.6 times the spectrum's median brightness, and 2% to 6% of the time at 0.4 to 0.8 times.
+- **False alarms and sensitivity.** The detector rarely reports a line that is not there, and it misses all but strong lines (partly measured; see [SPE-25](../../../documentation/library_design/validation/spectroscopy.md#spe-25)).
 - **What it means.** A "not seen" from this detector means only that no strong line is there; it is built for a bright nebula such as M 57 (the Ring Nebula) and will pass a faint emitter.
 - **Settings.** The thresholds (5 error bars detected, 3 unclear) were set on M 57 only and have not been tuned on any other nebula.

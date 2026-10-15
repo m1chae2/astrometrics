@@ -1,6 +1,6 @@
 # Differential Photometry and Light Curve Pipeline Review Guide
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -393,33 +393,36 @@ These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **Measured.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **Partly measured.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **Design estimate.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so.
+- **Measured.** Chosen or confirmed from a measurement on real data.
+- **Partly measured.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **Design estimate.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register](../validation/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | `0.25` | Partly measured | Share of frames rejected as ensemble outliers (frames whose comparison-star level is out of line with the rest) that fails the gate. Past runs rejected about 7.2% of frames; the limit sits well above that. |
-| `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` | `5` | Design estimate | Fewest rejected frames that can fail the gate, so one frame of a short run cannot. |
-| Aperture radius | `4` px | Design estimate | Radius of the circle in which a star's light is summed. Default of `measure_aperture_photometry`. It is fixed, not scaled to each star's width. |
-| Sky annulus radii | `7` to `12` px | Design estimate | Inner and outer radius of the sky ring (annulus) around each star, where the sky level is measured. |
-| `MINIMUM_COMPARISON_STARS` | `5` | Design estimate | Comparison-star vetting stops at this size; fewer fails `comparison_ensemble`. |
-| `DEFAULT_MAXIMUM_COMPARISON_STARS` | `20` | Design estimate | Most comparison stars kept in the set. More stars lower the ensemble noise, but the extra ones are fainter, so the benefit shrinks quickly. |
-| `MINIMUM_STARS_FOR_NOISE_MODEL` | `20` | Design estimate | Fewest stars for a noise model (expected scatter against brightness): two brightness bins of 10 stars. With fewer, the CV cutoff (Eq. 9) picks candidates. |
-| `FALSE_DISCOVERY_LEVEL` | `0.01` | Design estimate | Largest Benjamini-Hochberg q-value a candidate may have (Section 3.4). The level journals usually ask for; checked only on synthetic fields. |
-| `EXCESS_SCATTER_THRESHOLD` | `1.5` | Design estimate | Fixed threshold on the excess scatter (Eq. 7). A 50% excess, which the ordinary spread of a constant star's scatter (10 to 20% for 25 to 50 points) rarely reaches. |
-| `CALIBRATION_SIGMAS` | `2.326` | Design estimate | Robust standard deviations above the field median for the chi-square and J thresholds: the one-sided 99% point of a normal distribution. |
-| `DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | `7.4` | Measured | Multiplier of the unscaled MAD in the CV cutoff (Eq. 9), about 5.0 robust standard deviations. Chosen to flag about the top 3% of stars. Measured on the library: it flags 5.2% of stars, and separates catalogued variables from other stars no better than chance. |
-| `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | `0.3` mag | Design estimate | If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic brightness scale) is larger, the run is called blind to most variables. Most pulsating and rotating variables change by less than this. |
-| `UNSTABLE_TRACKING_DRIFT_PX` | `20` px | Design estimate | Largest shift of the field between frames before `registration_drift` fails. Half of the ±40 px box in which a star's center is searched, so stars are caught before they leave the box. |
-| `MAXIMUM_CORNER_DISPLACEMENT_PX` | `1.0` px | Design estimate | Largest shift of an image corner caused by rotation and scale change between frames (95th percentile). Measured values for comparison: M 13 0.2 px, M 81 0.9 px, NGC 2403 1.8 px. |
-| `MAXIMUM_CENTROID_FALLBACK_FRACTION` | `0.2` | Design estimate | Largest share of star measurements that may keep the aligned position because the star's own centroid was refused. |
-| `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` | `5.0` | Partly measured | Largest ratio of the comparison stars' measured scatter to the scatter their error bars predict. Set between three fields: 1.27 on M 13 and 1.66 on M 81, against 18 on a cloudy NGC 2403 night. |
+| `MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG` | `0.25` | Design estimate ([how to measure](../validation/photometry.md#design-estimates)) | Share of frames rejected as ensemble outliers (frames whose comparison-star level is out of line with the rest) that fails the gate. |
+| `MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG` | `5` | Design estimate ([how to measure](../validation/photometry.md#design-estimates)) | Fewest rejected frames that can fail the gate, so one frame of a short run cannot. |
+| Aperture radius | `4` px | Design estimate ([how to measure](../validation/photometry.md#design-estimates)) | Radius of the circle in which a star's light is summed. Default of `measure_aperture_photometry`. It is fixed, not scaled to each star's width. |
+| Sky annulus radii | `7` to `12` px | Design estimate ([how to measure](../validation/photometry.md#design-estimates)) | Inner and outer radius of the sky ring (annulus) around each star, where the sky level is measured. |
+| `MINIMUM_COMPARISON_STARS` | `5` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-01](../validation/photometry.md#pho-01)) | Comparison-star vetting stops at this size; fewer fails `comparison_ensemble`. |
+| `DEFAULT_MAXIMUM_COMPARISON_STARS` | `20` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-01](../validation/photometry.md#pho-01)) | Most comparison stars kept in the set. More stars lower the ensemble noise, but the extra ones are fainter, so the benefit shrinks quickly. |
+| `MINIMUM_STARS_FOR_NOISE_MODEL` | `20` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-06](../validation/photometry.md#pho-06)) | Fewest stars for a noise model (expected scatter against brightness): two brightness bins of 10 stars. With fewer, the CV cutoff (Eq. 9) picks candidates. |
+| `FALSE_DISCOVERY_LEVEL` | `0.01` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-07](../validation/photometry.md#pho-07)) | Largest Benjamini-Hochberg q-value a candidate may have (Section 3.4). The level journals usually ask for. |
+| `EXCESS_SCATTER_THRESHOLD` | `1.5` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-06](../validation/photometry.md#pho-06)) | Fixed threshold on the excess scatter (Eq. 7). A 50% excess, which the ordinary spread of a constant star's scatter (10 to 20% for 25 to 50 points) rarely reaches. |
+| `CALIBRATION_SIGMAS` | `2.326` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-06](../validation/photometry.md#pho-06)) | Robust standard deviations above the field median for the chi-square and J thresholds: the one-sided 99% point of a normal distribution. |
+| `DEFAULT_VARIABILITY_SIGMA_THRESHOLD` | `7.4` | Measured ([PHO-10](../validation/photometry.md#pho-10)) | Multiplier of the unscaled MAD in the CV cutoff (Eq. 9), about 5.0 robust standard deviations. Chosen to flag about the top 3% of stars. |
+| `MAXIMUM_DETECTABLE_AMPLITUDE_MAG` | `0.3` mag | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-09](../validation/photometry.md#pho-09)) | If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic brightness scale) is larger, the run is called blind to most variables. Most pulsating and rotating variables change by less than this. |
+| `UNSTABLE_TRACKING_DRIFT_PX` | `20` px | Design estimate ([how to measure](../validation/photometry.md#design-estimates)) | Largest shift of the field between frames before `registration_drift` fails. Half of the ±40 px box in which a star's center is searched, so stars are caught before they leave the box. |
+| `MAXIMUM_CORNER_DISPLACEMENT_PX` | `1.0` px | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-04](../validation/photometry.md#pho-04)) | Largest shift of an image corner caused by rotation and scale change between frames (95th percentile). |
+| `MAXIMUM_CENTROID_FALLBACK_FRACTION` | `0.2` | Design estimate ([how to measure](../validation/photometry.md#design-estimates); related: [PHO-04](../validation/photometry.md#pho-04)) | Largest share of star measurements that may keep the aligned position because the star's own centroid was refused. |
+| `MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED` | `5.0` | Partly measured ([PHO-02](../validation/photometry.md#pho-02)) | Largest ratio of the comparison stars' measured scatter to the scatter their error bars predict. Set between clear nights and a cloudy one. |
 
 ## 6. Degraded States & Fallback Pathways
 

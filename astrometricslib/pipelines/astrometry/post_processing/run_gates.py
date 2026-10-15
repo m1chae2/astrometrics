@@ -2,17 +2,20 @@
 
 Astrometry finds the stars in an image, works out where the image points
 (a "plate solve") and names the stars by looking them up in online catalogs.
-Three checks say whether the run can be trusted: were any stars found, did the
-plate solve succeed, and did the catalog lookups work.
+Five checks say whether the run can be trusted: were any stars found, did the
+plate solve succeed, is the solution accurate, were enough stars matched to a
+catalog, and did the catalog lookups work.
 
-The residual check judges the plate solver's own fit residual (how far the
-fitted position of each star it matched sits from the reference star). When the
-solver reported none, as the online solver does, the check falls back to the
-catalog match separation (the distance from each detected star to the nearest
-SIMBAD or Gaia star). The gate's detail says which number it used.
+The residual check judges the RMS distance to Gaia stars when the run refit
+the solution against Gaia, because that number does not depend on the plate
+solver. Otherwise it judges the plate solver's own fit residual (how far the
+fitted position of each star it matched sits from the reference star). When
+the solver reported none, as the online solver does, the check falls back to
+the catalog match separation (the distance from each detected star to the
+nearest SIMBAD or Gaia star). The gate's detail says which number it used.
 
 Each check is returned as a `GateResult`. The plate-solve gate is built by the
-runner as before; the other two are built here. A catalog lookup that was
+runner; the other four are built here. A catalog lookup that was
 never attempted is ``not_checked``; it is not a pass.
 """
 
@@ -28,10 +31,11 @@ CATALOG_LOOKUP_GATE_NAME = "catalog_lookup"
 # width (FWHM). Centroid noise on a well-measured star is a few percent of its
 # width, so a residual near half a width means the fit is dominated by
 # something else: a wrong match, a bad distortion model or a wrong field.
-# A design estimate. On the 8 saved solves whose stacked image carries a
-# solved plate scale (2026-10-09) the residual was 0.14 to 0.44 of the width
-# (median 0.25), so none fires; it is there to catch a failed solve, not to
-# rank good ones. Those 8 numbers are catalog match separations (see
+# Partly measured (validation register AST-04). On the 8 saved solves whose
+# stacked image carries a solved plate scale (2026-10-09) the residual was 0.14
+# to 0.44 of the width (median 0.25), so none fires; it is there to catch a
+# failed solve, not to rank good ones. Those 8 numbers are catalog match
+# separations (see
 # `AstrometryPipelineQualityMetrics.catalog_match_separation_rms_arcsec`), not
 # plate-solver fit residuals. A fit residual is expected to be the smaller of
 # the two, so this limit is the more lenient one for it. It has not been

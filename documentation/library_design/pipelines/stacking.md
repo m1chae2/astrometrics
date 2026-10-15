@@ -1,6 +1,6 @@
 # Astronomical Stacking and Image Calibration Pipeline Review Guide
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -194,10 +194,16 @@ and aligning two nights together can lose most frames.
 **Putting groups on one scale.** Each group's stack is turned into counts per
 second. That alone does not line the groups up, because Siril's normalization
 leaves each group's stack on the brightness scale of its own reference frame.
-Each group therefore gets a group scale factor that puts it on the reference
-group's scale, measured on mid-range pixels with saturated pixels left out. A
-group whose bright end disagrees with that factor is left out, because its
-brightest pixels no longer grow in step with exposure.
+Each group therefore gets a group scale factor that puts it on the scale of
+the reference group (the group with the most weight). On an imaging stack the
+factor is the median ratio of the aperture brightness of isolated,
+unsaturated stars found in both groups. A group with too few such stars, and
+every spectral stack, uses pixels instead: the median ratio over mid-range
+pixels, with saturated pixels left out. A group that one factor does not
+describe is left out, because its brightness no longer grows in step with
+exposure. With stars, that is when the ratio of its faintest quarter or its
+brightest quarter of stars sits more than a set tolerance from the factor;
+with pixels, when the ratio over its brightest pixels does.
 
 **Combining.** The rest are combined with inverse-variance weights: each
 group counts in proportion to $1/\sigma^2$, where $\sigma$ is the background
@@ -256,7 +262,7 @@ list below is read from the code when this guide is generated.
 | `saturated_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when at least `DEFAULT_SATURATION_FLAG_THRESHOLD` of the stack's pixels are saturated (clipped at the sensor's maximum). |
 | `zero_pixel_fraction` | run gate | `post_processing/assess_output_quality.py` | Fails when too many stack pixels are exactly zero (over-subtraction). |
 | `negative_pixels` | run gate | `post_processing/assess_output_quality.py` | Fails when the stacking engine (Siril) reports too high a share of negative pixels. |
-| `exposure_group_linearity` | run gate | `post_processing/exposure_group_report.py` | Fails when the bright end of an exposure group (the frames of one exposure length) does not follow the group scale factor that puts it on the reference group's brightness scale; that group is left out of the combination. |
+| `exposure_group_linearity` | run gate | `post_processing/exposure_group_report.py` | Fails when one group scale factor does not describe an exposure group (the frames of one exposure length): the ratio of its faintest or brightest quarter of stars, or with the pixel method its brightest pixels, is more than the configured tolerance from the factor that puts it on the reference group's brightness scale (Section 3.4). That group is left out of the combination. |
 | `raw_frame_clipping` | run gate | `post_processing/exposure_group_report.py` | Fails when raw frames of an exposure group are clipped at zero. |
 | `exposure_groups_combined` | run gate | `post_processing/exposure_group_report.py` | Fails when an exposure group with frames is missing from the combined stack. |
 | `flat_level` | run gate | `pre_processing/assess_input_quality.py` | Fails when the level of the master flat (the averaged image of an evenly lit surface) is outside `MINIMUM_FLAT_LEVEL_FRACTION` to `MAXIMUM_FLAT_LEVEL_FRACTION` of the sensor's full scale (the largest value a pixel can record). |
@@ -273,29 +279,32 @@ These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **Measured.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **Partly measured.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **Design estimate.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so.
+- **Measured.** Chosen or confirmed from a measurement on real data.
+- **Partly measured.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **Design estimate.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register](../validation/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | `3.0` °C | Partly measured | Width of a dark temperature slot, and the largest temperature gap before a soft flag (a warning that does not stop the dark being used). A deliberately loose first estimate, not checked against this camera's dark-current curve. One real case backs it: Arcturus darks near 0 °C and -10 °C, against lights that drifted from -2.9 °C to -10.7 °C, left 57-64% negative pixels. |
-| `DEFAULT_MINIMUM_SURVIVING_FRAMES` | `5` frames | Partly measured | Fewest frames that must be left after Siril's percentage-based frame filters. On one M 13 session, stacks of 5 to 20 frames got steadily worse with fewer frames, with no failure at 5 to set the value against. |
-| `DEFAULT_FWHM_DEGRADATION_RATIO` | `1.2` | Measured | Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Six real stacks gave 0.77 to 1.16, so a normal stack stays below it. Whether it catches a real alignment failure is untested: no such session exists. |
-| `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | `0.15` | Measured | Share of pixels rejected as outliers during stacking above which `rejected_pixel_fraction` fails. On three real sessions the share stayed below about 10%, even on a cloud-affected NGC 2403 session. |
-| `MAXIMUM_QUARANTINED_FRACTION` | `0.25` | Partly measured | Largest share of a batch the quarantine (setting bad frames aside) may move. A dry run on the library picked at most 13% of a batch; a quarter is about twice that. |
-| `MINIMUM_PENALTY_TO_WEIGHT` | `1.05` | Design estimate | Noise penalty $P$ of equal weights (Eq. 4) at or above which noise weighting is used. The value is designed; the benefit was measured on the M 27 imaging stack, where $P$ = 1.17 and noise weighting lowered its pixel noise by 13%. |
-| `MINIMUM_REGISTERED_FRACTION` | `0.9` | Design estimate | Share of spectral frames that must register (align on each other); fewer triggers a retry. Chosen to tolerate one lost frame in ten; seen only on the Vega session. |
-| `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` | `5` | Design estimate | Fewest frames an exposure length needs to be stacked on its own; a smaller set joins the group with the nearest exposure length. Not tested at this value. |
-| `DEFAULT_GAP_RATIO_THRESHOLD` | `4` | Partly measured | Smallest gap between two groups of sky-background levels, as a multiple of the spread within a group, that counts as a split. In tests, normal nights gave below 1 and sudden cloud above 6. |
-| `MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION` | `0.1` / `0.9` | Design estimate | Allowed level of the master flat, as a share of the sensor's full scale (the largest value a pixel can record). Common practice, not checked on this observatory's data. |
-| `MAXIMUM_FLAT_NOISE_FRACTION` | `0.005` | Measured | Largest relative noise (standard deviation over mean) of the master flat before it is smoothed and `flat_noise` fails. A 4.5% flat caused 86% of the fine-scale noise of the M 101 stack, and smoothing it halved that stack's noise. |
-| `DEFAULT_SATURATION_FLAG_THRESHOLD` | `0.001` | Design estimate | Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`). Not checked against real stacks. |
+| `DEFAULT_DARK_TEMPERATURE_TOLERANCE_C` | `3.0` °C | Partly measured ([STK-06](../validation/stacking.md#stk-06)) | Width of a dark temperature slot, and the largest temperature gap before a soft flag (a warning that does not stop the dark being used). A deliberately loose first estimate. |
+| `DEFAULT_MINIMUM_SURVIVING_FRAMES` | `5` frames | Partly measured ([STK-10](../validation/stacking.md#stk-10)) | Fewest frames that must be left after Siril's percentage-based frame filters. |
+| `DEFAULT_FWHM_DEGRADATION_RATIO` | `1.2` | Partly measured ([STK-25](../validation/stacking.md#stk-25)) | Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Set just above the ratio of a normal stack. |
+| `DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD` | `0.15` | Partly measured ([STK-24](../validation/stacking.md#stk-24)) | Share of pixels rejected as outliers during stacking above which `rejected_pixel_fraction` fails. Set above the share a normal session rejects. |
+| `MAXIMUM_QUARANTINED_FRACTION` | `0.25` | Partly measured ([STK-03](../validation/stacking.md#stk-03)) | Largest share of a batch the quarantine (setting bad frames aside) may move. About twice the share it picks from a normal batch: room for a bad stretch, without gutting a session whose limits do not suit the equipment. |
+| `MINIMUM_PENALTY_TO_WEIGHT` | `1.05` | Design estimate ([how to measure](../validation/stacking.md#design-estimates); related: [STK-07](../validation/stacking.md#stk-07)) | Noise penalty $P$ of equal weights (Eq. 4) at or above which noise weighting is used. The benefit of noise weighting is measured; the switch-on value is not. |
+| `MINIMUM_REGISTERED_FRACTION` | `0.9` | Design estimate ([how to measure](../validation/stacking.md#design-estimates); related: [STK-12](../validation/stacking.md#stk-12)) | Share of spectral frames that must register (align on each other); fewer triggers a retry. Chosen to tolerate one lost frame in ten. |
+| `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` | `5` | Design estimate ([how to measure](../validation/stacking.md#design-estimates); related: [STK-11](../validation/stacking.md#stk-11)) | Fewest frames an exposure length needs to be stacked on its own; a smaller set joins the group with the nearest exposure length. |
+| `DEFAULT_GAP_RATIO_THRESHOLD` | `4` | Partly measured ([STK-04](../validation/stacking.md#stk-04)) | Smallest gap between two groups of sky-background levels, as a multiple of the spread within a group, that counts as a split. Set between the gaps of a normal night and of sudden cloud. |
+| `MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION` | `0.1` / `0.9` | Design estimate ([how to measure](../validation/stacking.md#design-estimates)) | Allowed level of the master flat, as a share of the sensor's full scale (the largest value a pixel can record). Common practice. |
+| `MAXIMUM_FLAT_NOISE_FRACTION` | `0.005` | Partly measured ([STK-05](../validation/stacking.md#stk-05)) | Largest relative noise (standard deviation over mean) of the master flat before it is smoothed and `flat_noise` fails. A flat at the limit adds only a few percent to the variance of a typical stack's sky noise; a noisier flat leaves a fixed pattern, which smoothing removes. |
+| `DEFAULT_SATURATION_FLAG_THRESHOLD` | `0.001` | Design estimate ([how to measure](../validation/stacking.md#design-estimates)) | Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`). |
 
 ## 6. Degraded States & Fallback Pathways
 

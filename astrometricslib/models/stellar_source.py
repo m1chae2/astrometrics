@@ -84,12 +84,13 @@ NO_GOOD_MATCH_RMS = 0.15
 fraction of the spectrum's average brightness; 0.15 means a typical sample is
 15% off). A spectrum is a poor match ("no good match") when its closest
 reference differs from it by more than this. Measured on 14 stars with a
-known type or a standard: stars matched within three spectral-type steps of
-the catalog scored 0.046 to 0.105, and stars matched to the wrong type scored
-0.181 to 0.283. A low RMS means the reference is close to the spectrum, not
-that the type is right: two known-wrong matches (K2 matched as M0 at 0.086,
-and A2 matched as F2 at 0.048) score below this limit. The model field, the
-run gate and the star summary all read this one value."""
+known type or a standard: the A to K stars matched within three
+spectral-type steps of the catalog scored 0.046 to 0.105 (two M dwarfs also
+within three steps scored 0.61 and 0.64), and stars matched to the wrong type
+scored 0.181 to 0.283. A low RMS means the reference is close to the
+spectrum, not that the type is right: two known-wrong matches (K2 matched as
+M0 at 0.086, and A2 matched as F2 at 0.048) score below this limit. The model
+field, the run gate and the star summary all read this one value."""
 
 UNRELIABLE_MATCH_RMS = 0.45
 """No-match limit. Unit: relative RMS, as for `NO_GOOD_MATCH_RMS`. When even

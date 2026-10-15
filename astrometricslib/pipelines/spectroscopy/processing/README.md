@@ -133,13 +133,10 @@ fall together). The correlation is kept for comparison only, because
 it barely separates neighbouring types.
 
 A best match above `NO_GOOD_MATCH_RMS` (0.15) gets `match_quality` of
-`poor`. On 14 stars of known type, the ones matched within three subtype
-steps of the catalog scored 0.046 to 0.105, and the ones matched to the wrong
-type scored 0.181 to 0.283; 0.15 sits between the two groups. A best match
-above `UNRELIABLE_MATCH_RMS` (0.45) gets no type at all, because the closest
-reference would only invent one. Of 55 stars classified on 2026-09-24, 19
-scored above 0.45, and 18 of those had no catalog type (they were matched to
-the wrong part of the sky).
+`poor`. 0.15 sits between the scores of right and wrong matches on stars of
+known type (partly measured; see [SPE-16](../../../../documentation/library_design/validation/spectroscopy.md#spe-16)). A best match above
+`UNRELIABLE_MATCH_RMS` (0.45) gets no type at all, because the closest
+reference would only invent one (partly measured; see [SPE-17](../../../../documentation/library_design/validation/spectroscopy.md#spe-17)).
 
 The limits `NO_GOOD_MATCH_RMS`, `UNRELIABLE_MATCH_RMS` and
 `AMBIGUOUS_RMS_GAP` are defined once, in
@@ -148,9 +145,9 @@ states its unit and the measurement behind it. The classifier imports them
 and defines no limit of its own. A test
 (`test/test_threshold_single_definition.py`) fails if it does.
 
-Neighbouring rungs of the reference ladder sit 0.02 to 0.19 RMS apart
-(median 0.043). Real spectra often fit two neighbouring rungs almost
-equally well, and interstellar reddening shifts the score by about as much
+Neighbouring rungs of the reference ladder sit only a few hundredths of RMS
+apart (measured; see [SPE-18](../../../../documentation/library_design/validation/spectroscopy.md#spe-18)). Real spectra often fit two
+neighbouring rungs almost equally well, and interstellar reddening shifts the score by about as much
 as one rung. A small gap therefore means the data cannot choose between
 the two rungs, and the flag reports that.
 
@@ -199,12 +196,9 @@ The result keeps `SpectroscopyResult.reddening`: `ebv`, `ebv_source`,
 negative when dereddening gives a hotter type). The stored spectrum stays
 as observed.
 
-How we know it helps: measured on the bundled templates (reference spectra)
-blurred to the stored line spread (the instrument's blur at each
-wavelength): a G0V
-template reddened with E(B-V) = 0.3 classifies as K2V (12 subtypes too late)
-without dereddening, and as G0V with the known E(B-V). With E(B-V) 0.25 for a
-star that has 0.30, the type still moves closer to G0V. The catalog value is
+How we know it helps: on the bundled templates (reference spectra), removing
+the known E(B-V) brings a reddened template back to its own type (partly
+measured, on templates only; see [SPE-21](../../../../documentation/library_design/validation/spectroscopy.md#spe-21)). The catalog value is
 itself an estimate, so a real star improves by less than a template does.
 
 ## Line-index cross-check
@@ -219,8 +213,7 @@ depth is how far the spectrum sits below a local continuum at the line, as a
 fraction of that continuum (the brightness the star would have without the
 line). The local continuum is the quadratic curve the
 feature detector uses (`spectral_feature_detector.measure_local_dip_depth`),
-so a smooth tilt cancels. Measured on a G0V template, adding E(B-V) = 0.3
-moves every index by under 0.01.
+so a smooth tilt cancels (see [SPE-22](../../../../documentation/library_design/validation/spectroscopy.md#spe-22)).
 
 | Index | Core window | What it tracks |
 |---|---|---|
@@ -239,18 +232,11 @@ indices). The result is `SpectroscopyResult.line_index_classification`:
 `best_type`, `distance` (unitless, root-mean-square in spread units),
 `indices`, `template_fit_type` and `steps_from_template_fit`.
 
-How accurate the estimate is, measured on the bundled templates with the
-ZWO ASI 533MM Pro line spread (34 templates):
-
-- Each template given as input, with itself among the references: 34 of 34
-  exact. This only shows that the six indices tell the templates apart.
-- Each template with itself removed from the references (a leave-one-out
-  test, which mimics a star whose exact type is not in the library): 50% within two
-  subtypes, 71% within five, and the worst miss is 19 subtypes (B3 read as
-  F2). The ladder has gaps of three to five subtypes in places, so even a
-  perfect method could not reach two subtypes everywhere.
-- With 0.5% random noise on every 10 A sample: 99% within two subtypes. With
-  1% noise: 85%. With 2% noise: 72%.
+How accurate the estimate is: on the bundled templates, with each template
+left out of the references in turn (a leave-one-out test, which mimics a star
+whose exact type is not in the library), it lands within a few subtypes, and
+its worst miss stays inside the catalog-disagreement limit (partly measured,
+on templates only; see [SPE-22](../../../../documentation/library_design/validation/spectroscopy.md#spe-22)).
 
 At this resolution a hot B star and a mid F star have nearly the same line
 indices. The estimate is therefore a second opinion on the type, good to a
@@ -310,12 +296,10 @@ the continuum part is multiplied by the square root of that reduced
 chi-square. `equivalent_width.py` holds the details and its limits. The
 verdicts and p-values do not use the errors.
 
-How we know: on a synthetic Gaussian line (EW 9.6 A, blur 45 A, 200 noise
-realizations, copies with fresh random noise),
-the mean EW is within one standard error of the truth, and the mean reported
-error is 0.95 times the scatter of the 200 results (0.99 with noise only in
-the window, and 1.01 with noise only in the continuum bands). With the center
-chosen by the detector's best-dip search, a faint line's EW reads about 3% high.
+How we know: on synthetic lines, the mean EW and the reported error match
+the truth and the scatter of many noise realizations; with the center chosen
+by the detector's best-dip search, a faint line's EW reads a few percent high
+(partly measured; see [SPE-23](../../../../documentation/library_design/validation/spectroscopy.md#spe-23)).
 
 ## Reduced chi-square next to the RMS
 
@@ -382,24 +366,23 @@ continuum slope and the line strengths point to different types.
 
 **Where the limits come from.**
 
-- 0.15 (`NO_GOOD_MATCH_RMS`): the gap between correct and wrong matches on 14
-  stars of known type (see "Quality metrics from the classifier").
+- 0.15 (`NO_GOOD_MATCH_RMS`): the gap between correct and wrong matches on
+  stars of known type (see "Quality metrics from the classifier"; partly
+  measured, [SPE-16](../../../../documentation/library_design/validation/spectroscopy.md#spe-16)).
 - 0.02 (`AMBIGUOUS_RMS_GAP`): the smallest RMS distance between two
-  neighbouring templates on the reference ladder (A0V and A2V are 0.019
-  apart; the median neighbouring pair is 0.043 apart). A smaller gap means the
-  spectrum cannot prefer one rung over its neighbour even by the margin a
-  perfect match to the closest-spaced pair would show.
+  neighbouring templates on the reference ladder (measured; see
+  [SPE-18](../../../../documentation/library_design/validation/spectroscopy.md#spe-18)). A smaller gap means the spectrum cannot prefer one rung
+  over its neighbour even by the margin a perfect match to the closest-spaced
+  pair would show.
 - 20 subtype steps (`DIFFERS_FROM_CATALOG_SUBTYPES`): two whole letter
-  classes, such as B to F. Of 29 stars with a catalog type, 27 were within 12
-  steps of it; the two beyond were wrong for reasons other than the
-  templates. On the templates, the line-index leave-one-out distance never
-  passes it (the worst miss is 19 subtypes).
+  classes, such as B to F. It sits above the ordinary misses of real stars
+  and of the line-index estimate on the templates (partly measured; see
+  [SPE-19](../../../../documentation/library_design/validation/spectroscopy.md#spe-19) and [SPE-22](../../../../documentation/library_design/validation/spectroscopy.md#spe-22)).
 
 **Second-order figures.** The risk metric assumes that second-order light is
 at most 2 percent of the first-order brightness at half the wavelength. 2
-percent is the largest value seen when fitting the stored spectra of two
-stacks (the estimates were -0.7 to +2.0 percent and could not be told apart
-from zero), not a measured value. A wavelength is called risky when that 2
+percent is the largest value seen when fitting stored spectra, not a
+measured value (partly measured; see [SPE-26](../../../../documentation/library_design/validation/spectroscopy.md#spe-26)). A wavelength is called risky when that 2
 percent could add 10 percent of its own brightness, that is, when the star is
 at least 5 times brighter at half the wavelength. 10 percent is a judgement:
 about where an added signal starts to change a spectrum's shape visibly. The

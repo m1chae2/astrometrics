@@ -1,6 +1,6 @@
 # Slitless Spectroscopy Extraction and Classification Pipeline Review Guide
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -148,8 +148,10 @@ sigma). Edge pixels count for the fraction inside the box.
 
 **The sky.** Two sky bands, each 10 px wide and 6 px
 from the box, are sigma-clipped (pixels far from the median, such as stars,
-are dropped). The sky level is the mean of their medians, or the lower band
-alone when they disagree by more than the noise allows.
+are dropped). The sky level is the mean of their medians. When the two
+disagree by more than the noise allows, the fainter band (the one with the
+lower median) is used alone: light can only add to a band, so the brighter
+one holds a neighbour's light.
 
 **Neighbours.** A bright neighbour's wings (the faint outer edges of its
 trail) are removed with a blur profile measured from an isolated star
@@ -278,27 +280,30 @@ These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **Measured.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **Partly measured.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **Design estimate.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so.
+- **Measured.** Chosen or confirmed from a measurement on real data.
+- **Partly measured.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **Design estimate.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register](../validation/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value.
 
 | Parameter | Live Value | Empirical Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `NO_GOOD_MATCH_RMS` | `0.15` | Measured | Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a classification is a poor match. On 14 stars of known type, right matches scored 0.046 to 0.105 and wrong ones 0.181 to 0.283. |
-| `UNRELIABLE_MATCH_RMS` | `0.45` | Measured | Misfit (relative RMS, Eq. 4) above which no spectral type is given at all. Of 55 stars, 19 scored above it, and 18 of those had no catalog type. |
-| `AMBIGUOUS_RMS_GAP` | `0.02` | Measured | Smallest misfit gap to the best reference of another spectral class; a smaller gap makes the match ambiguous. It is the smallest spacing between neighbouring reference spectra (A0V and A2V are 0.019 apart). |
-| `DIFFERS_FROM_CATALOG_SUBTYPES` | `20.0` | Measured | Subtype steps (ten to a class, so 20 is two whole classes, such as B to F) beyond which the measured type disagrees with the catalog type. Of 29 stars with a catalog type, 27 were within 12 steps; the other two were wrong for other reasons. |
-| `APERTURE_SIGMA_MULTIPLIER` | `2.5` | Design estimate | Half-width of the extraction box, in units of the trail's Gaussian sigma (its width measure, Eq. 2). ±2.5 sigma holds about 99% of a Gaussian's light. |
-| `SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX` | `6` px / `10` px | Partly measured | Gap between the box and each sky band, and the band's width, on each side of the box. Swept on one Vega frame of a sparse field; used unswept on the crowded M 13 stack. |
-| `MINIMUM_LINE_SIGNIFICANCE` | `6` | Design estimate | Depth, in units of the local noise, a line needs to count for the zero-point shift. On synthetic noise-only spectra no fake line reached 6; real lines in a clean spectrum reach 20 or more. |
-| `WAVELENGTH_SCALE_LIMIT_ANGSTROM` | `11.0` Å | Design estimate | Largest scatter of the run's wavelength zero points (offsets of the wavelength scale) after correction. It is one pixel of dispersion (11.0 to 11.4 Å per pixel): a larger error puts a line in the wrong sample. |
-| `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | `3.0` | Design estimate | Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own low-resolution spectra), in percent per 1000 Å. About the error the extinction correction makes at 0.3 airmass. |
-| `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | `0.5` | Design estimate | Largest share of classified spectra that may fail a limit of the processing checkpoint before `processing_quality` fails. |
+| `NO_GOOD_MATCH_RMS` | `0.15` | Partly measured ([SPE-16](../validation/spectroscopy.md#spe-16)) | Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a classification is a poor match. It sits between the misfits of most right and wrong matches on stars of known type. |
+| `UNRELIABLE_MATCH_RMS` | `0.45` | Partly measured ([SPE-17](../validation/spectroscopy.md#spe-17)) | Misfit (relative RMS, Eq. 4) above which no spectral type is given at all: the closest reference would only invent a type. Misfits this large mostly mean the star was identified wrongly. |
+| `AMBIGUOUS_RMS_GAP` | `0.02` | Measured ([SPE-18](../validation/spectroscopy.md#spe-18)) | Smallest misfit gap to the best reference of another spectral class; a smaller gap makes the match ambiguous. It is about the smallest spacing between neighbouring reference spectra. |
+| `DIFFERS_FROM_CATALOG_SUBTYPES` | `20.0` | Partly measured ([SPE-19](../validation/spectroscopy.md#spe-19)) | Subtype steps (ten to a class, so 20 is two whole classes, such as B to F) beyond which the measured type disagrees with the catalog type. It is set above the ordinary spread of good classifications. |
+| `APERTURE_SIGMA_MULTIPLIER` | `2.5` | Design estimate ([how to measure](../validation/spectroscopy.md#design-estimates); related: [SPE-04](../validation/spectroscopy.md#spe-04)) | Half-width of the extraction box, in units of the trail's Gaussian sigma (its width measure, Eq. 2). ±2.5 sigma holds about 99% of a Gaussian's light. |
+| `SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX` | `6` px / `10` px | Partly measured ([SPE-01](../validation/spectroscopy.md#spe-01), [SPE-02](../validation/spectroscopy.md#spe-02)) | Gap between the box and each sky band, and the band's width, on each side of the box. The gap keeps the star's own light out of the sky estimate. |
+| `MINIMUM_LINE_SIGNIFICANCE` | `6` | Partly measured ([SPE-11](../validation/spectroscopy.md#spe-11)) | Depth, in units of the local noise, a line needs to count for the zero-point shift. Set above what noise alone reaches and well below the depth of a real line in a clean spectrum. |
+| `WAVELENGTH_SCALE_LIMIT_ANGSTROM` | `11.0` Å | Design estimate ([how to measure](../validation/spectroscopy.md#design-estimates)) | Largest scatter of the run's wavelength zero points (offsets of the wavelength scale) after correction. It is one pixel of dispersion (11.0 to 11.4 Å per pixel): a larger error puts a line in the wrong sample. |
+| `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` | `3.0` | Design estimate ([how to measure](../validation/spectroscopy.md#design-estimates); related: [SPE-28](../validation/spectroscopy.md#spe-28)) | Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own low-resolution spectra), in percent per 1000 Å. About the error the extinction correction makes at 0.3 airmass. |
+| `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` | `0.5` | Design estimate ([how to measure](../validation/spectroscopy.md#design-estimates)) | Largest share of classified spectra that may fail a limit of the processing checkpoint before `processing_quality` fails. |
 
 ## 6. Degraded States & Fallback Pathways
 
@@ -314,7 +319,9 @@ far real data back the value, with one of three labels:
    the summary. `spectral_classification` fails only on a class-level
    ambiguity or a poor match.
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends
-   to read about one subtype cool.
+   to read about one step of the reference list cool. The list skips some
+   subtypes, so one step can be more than one subtype: the A stars of
+   [SPE-16](../validation/spectroscopy.md#spe-16) read two subtypes cool.
 5. **No solved stack.** Stars are named by matching the pattern of their pixel
    positions to catalog stars ("by geometry"), which can fail on sparse
    fields.

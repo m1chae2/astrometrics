@@ -18,7 +18,7 @@ These per-star records also feed a session-level number: the pipeline calculates
 
 ## The run gates
 
-`run_gates.py` builds four of the run's pass/fail quality checks (gates) from the session summary: `source_detection` (was any star detected), `astrometric_residual` (does the solution miss its stars by more than half a star's width), `catalog_matches` (were at least 20 stars matched) and `catalog_lookup` (did the catalogue lookups work). The pipeline README's "The gate record" lists when each passes, fails or is not checked.
+`run_gates.py` builds four of the run's pass/fail quality checks (gates) from the session summary: `source_detection` (was any star detected), `astrometric_residual` (does the solution miss its stars by more than half a star's width), `catalog_matches` (were at least 20 stars matched) and `catalog_lookup` (did the catalogue lookups work). The residual and matched-star limits are partly measured (see [AST-04](../../../../documentation/library_design/validation/astrometry.md#ast-04) and [AST-05](../../../../documentation/library_design/validation/astrometry.md#ast-05)). The pipeline README's "The gate record" lists when each passes, fails or is not checked.
 
 ## Why this step exists
 

@@ -1,6 +1,6 @@
 # Scientific Analysis Pipelines Review Index
 
-*Version 1.1 · 2026-10-14 · Status: current*
+*Version 1.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
@@ -107,7 +107,10 @@ When auditing the pipelines, check:
    images beside the spectra) and catalog outages.
 4. **Empirical status.** Which limits were measured on real data and which are
    design estimates. Section 5 of every guide labels each limit
-   "Measured", "Partly measured" or "Design estimate".
+   "Measured", "Partly measured" or "Design estimate", and
+   links the label to the [validation register](../validation/index.md).
+   The register gives the evidence for each value and the library calls to
+   repeat the check on other data.
 
 ```{toctree}
 :maxdepth: 1

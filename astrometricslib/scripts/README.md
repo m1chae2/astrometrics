@@ -76,7 +76,7 @@ These scripts measure how well the pipelines work on real stored data. Unless an
 
 ### Whole-pipeline checks
 
-- `run_empirical_validation.py` — the master script that runs astrometricslib's pipelines against real stored data to validate their design against actual results, not synthetic test cases.
+- `run_empirical_validation.py` — the master script that runs astrometricslib's pipelines against real stored data to validate their design against actual results, not synthetic test cases. Its runs are recorded in [AST-14](../../documentation/library_design/validation/astrometry.md#ast-14), [PHO-13](../../documentation/library_design/validation/photometry.md#pho-13), [PHO-14](../../documentation/library_design/validation/photometry.md#pho-14), [SPE-12](../../documentation/library_design/validation/spectroscopy.md#spe-12), [SPE-29](../../documentation/library_design/validation/spectroscopy.md#spe-29), [STK-24](../../documentation/library_design/validation/stacking.md#stk-24), [STK-25](../../documentation/library_design/validation/stacking.md#stk-25) and [MOV-04](../../documentation/library_design/validation/asteroid_detection.md#mov-04).
 - `report_gate_limits.py` — read-only. For every numeric quality limit, it reports the spread of the saved values across all targets and how many targets are beyond the limit. It also reports the spread of numbers with no limit yet (such as the astrometric residual), which a limit would have to be derived from.
 - `recompute_headline_numbers.py` — read-only. An independent re-check of saved headline numbers. It recomputes from the files the light-curve variability (CV, the coefficient of variation: standard deviation divided by mean), the mean brightness and the best period, and the stacks' zero and saturated pixel shares and star widths. It then lists every saved value that disagrees. Star widths are checked twice: by re-running the pipeline method and by a separate half-maximum method.
 
@@ -85,21 +85,21 @@ These scripts measure how well the pipelines work on real stored data. Unless an
 - `measure_variability_cutoff.py` — read-only. Checks the photometry pipeline's variable-star cutoff against the catalogs.
   - **The cutoff.** A star is flagged when the CV of its light curve is above `median + k x MAD` of the CVs of all stars in the field. MAD, the median absolute deviation, is a spread measure that a few wild values cannot inflate. The pipeline uses k = 7.4, chosen to flag roughly the top 3% of stars and set slightly low on purpose so that a new supernova is not missed.
   - **What it measures.** For each multiplier k it tries (3 to 16, including 7.4), it reports the share of stars the catalogs list as variable that the cutoff flags, and the share of unlisted stars it flags. It also reports an AUC (area under the ROC curve) for how well a star's CV separates listed from unlisted stars, overall and between stars of similar brightness. An AUC of 0.5 means no better than chance, 1 means perfect separation.
-  - **Result.** On the library (2026-10-09) the CV separates the two groups no better than chance. The multiplier therefore does not limit the search; the photometry's own scatter does.
+  - **Result.** See [PHO-10](../../documentation/library_design/validation/photometry.md#pho-10).
 - `validate_photometry_injection.py` — read-only. Measures which variability signals the pipeline's variable-candidate rule finds. That rule flags a star when its variability score is above 1 and its false-discovery q-value is below 0.01 (see `pipelines/photometry/processing/variability_indices.py`).
   - **Method.** In each of many random draws, it picks about 8 percent of a target's stars as hosts (stars that receive an injected signal), leaving out stars the rule already flags and stars the catalogs list as variable. It adds a signal of known depth to each host's real light curve: a sinusoid or a box transit (a flat-bottomed dip like a planet passing in front of its star), 0.005 to 0.16 mag deep. A magnitude difference of 0.01 is about a 1% change in brightness. It then runs the rule on the whole field.
   - **Output.** The share of injected stars flagged, by depth and star brightness, and how many untouched stars are flagged.
   - **Scope.** It measures the rule and the noise of the photometry, not the aperture photometry itself, because the signals are added to light curves, not pixels.
-  - **Result on M 13** (2026-10-11, 80 draws, 408 usable hosts). The brightest quarter of stars is flagged half the time at about 0.04 mag (85 percent of sinusoids and 84 percent of transits at 0.04). The faintest quarter is flagged that often only at 0.16 mag (82 and 69 percent). Nothing is found below 0.02 mag at any brightness, and 0 of 29,760 untouched stars were flagged. The counts are saved in `~/astrometrics_db_backups/20261010_validation_step0/photometry_injection_m13.json`.
-- `validate_spectral_and_period_analysis.py` — checks that the spectral and period-search analyses actually tell a real signal from noise.
+  - **Result.** See [PHO-09](../../documentation/library_design/validation/photometry.md#pho-09), which also gives the library calls to repeat it on your own data.
+- `validate_spectral_and_period_analysis.py` — checks that the spectral and period-search analyses actually tell a real signal from noise. Results: [PHO-12](../../documentation/library_design/validation/photometry.md#pho-12), [SPE-13](../../documentation/library_design/validation/spectroscopy.md#spe-13), [SPE-16](../../documentation/library_design/validation/spectroscopy.md#spe-16) and [SPE-24](../../documentation/library_design/validation/spectroscopy.md#spe-24).
 
 ### Stacking
 
 Stacking groups a target's frames by exposure length, makes one stack per group (a group stack), lines the group stacks up with each other (group alignment), and combines them.
 
-- `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with the pipeline's own group alignment and group combining, on the group stacks a target already has. It shows whether replacing one of the pipeline's steps with Siril's would lose quality. It changes nothing in the library.
-- `rejection_threshold_analysis.py` — a grid search over two stacking settings, measuring the stacked image's star width and the share of rejected pixels for each pair. The settings are the rejection limit in standard deviations (sigma, 2 to 4) and Siril's sharpness filter percentile (keep the sharpest 80 or 90 percent of frames, or all).
-- `rejection_small_n_check.py` — simulates pure noise at 5, 8, 15 and 40 frames per pixel and reports how many good samples each rejection rule throws out and how often it catches an injected outlier. Needs no library data.
+- `compare_group_steps_with_siril.py` — compares Siril's registration and stacking with the pipeline's own group alignment and group combining, on the group stacks a target already has. It shows whether replacing one of the pipeline's steps with Siril's would lose quality. It changes nothing in the library. Result: [STK-16](../../documentation/library_design/validation/stacking.md#stk-16).
+- `rejection_threshold_analysis.py` — a grid search over two stacking settings, measuring the stacked image's star width and the share of rejected pixels for each pair. The settings are the rejection limit in standard deviations (sigma, 2 to 4) and Siril's sharpness filter percentile (keep the sharpest 80 or 90 percent of frames, or all). Results: [STK-09](../../documentation/library_design/validation/stacking.md#stk-09) and [STK-24](../../documentation/library_design/validation/stacking.md#stk-24).
+- `rejection_small_n_check.py` — simulates pure noise at 5, 8, 15 and 40 frames per pixel and reports how many good samples each rejection rule throws out and how often it catches an injected outlier. Needs no library data. Result: [STK-08](../../documentation/library_design/validation/stacking.md#stk-08).
 - `benchmark_siril_concurrency.py` — measures how many Siril stacking runs a given machine should be allowed to run at once.
 
 ### Spectroscopy
@@ -118,12 +118,14 @@ Scripts:
 - `compare_spectra_with_gaia_xp.py` — read-only. For every star of a processed target, compares its stored response-corrected spectrum with the star's Gaia DR3 XP spectrum.
   - Per star, it prints one line: the tilt (the straight-line slope of the ratio observed / XP, in percent per 1000 A), the RMS residual, the wavelength shift, and the median ratio observed / XP in four bands.
   - It then prints the run summary: the median ratio and scatter per band, which is the residual instrument response, and the `gaia_xp_agreement` gate verdict.
+  - **Result.** See [SPE-28](../../documentation/library_design/validation/spectroscopy.md#spe-28).
   - XP spectra are downloaded once and cached in `~/.cache/astrometrics/catalogs/gaia_xp`.
 - `recompute_spectral_analysis.py` — re-runs the current spectral analysis over every already-stored spectrum, without re-extracting from the raw frames. It applies the same airmass extinction correction as the pipeline, using the airmass stored with each spectrum. That correction removes the dimming by the atmosphere, which grows with airmass, the amount of atmosphere the light passed through.
 - `validate_emission_line_detector.py` — read-only. Measures how often the emission-line detector reports a line that is not there, and how often it misses one.
   - **False lines.** It runs the detector on every stored spectrum. Most are ordinary stars with no emission lines, so a detected line counts as false. Some stars may truly emit (not every stored spectrum has a type), so the rate is an upper bound.
   - **Recovery.** It adds a line of known height to the same spectra and reports the share recovered at each height.
-- `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating (the Star Analyser 200, a grating with 200 lines per millimetre).
+  - **Result.** See [SPE-25](../../documentation/library_design/validation/spectroscopy.md#spe-25).
+- `spectral_registration_quality_analysis.py` — checks spectral frame registration quality for the SA200 grating (the Star Analyser 200, a grating with 200 lines per millimetre). Result: [SPE-29](../../documentation/library_design/validation/spectroscopy.md#spe-29).
 - `spectral_focus_sweep.py` — the tool for choosing the focuser position at the telescope.
   - **Input.** Spectral frames of one bright star taken at several focuser positions (the `FOCUSPOS` header card). Take at least five frames that straddle the best focus. Pass `--star-position X Y` when the star is not the source nearest the frame centre.
   - **Method.** It extracts each spectrum with the normal pipeline extractor and measures the spectrum trail's FWHM (full width at half maximum, the width where brightness falls to half its peak) in 400 A (angstrom, 0.1 nm) bands. It fits a parabola of FWHM against focuser position for each band.
@@ -131,7 +133,7 @@ Scripts:
 
 ### Asteroids
 
-- `validate_asteroid_detection.py` — measures the asteroid detector. It reports the share of injected synthetic movers it recovers at each brightness and speed, and the tracks it confirms in fields with no mover. Read-only, it also counts the confirmed movers on real frames of targets far from the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear); there, almost all of them are false.
+- `validate_asteroid_detection.py` — measures the asteroid detector. It reports the share of injected synthetic movers it recovers at each brightness and speed, and the tracks it confirms in fields with no mover. Read-only, it also counts the confirmed movers on real frames of targets far from the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear); there, almost all of them are false. Results: [MOV-01](../../documentation/library_design/validation/asteroid_detection.md#mov-01) to [MOV-04](../../documentation/library_design/validation/asteroid_detection.md#mov-04).
 
 ## Demos and one-off tools
 

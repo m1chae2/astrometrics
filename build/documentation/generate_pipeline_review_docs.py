@@ -33,8 +33,8 @@ from pathlib import Path
 from typing import Any
 
 # The date and version written under each guide's title.
-DOC_VERSION = "1.1"
-DOC_DATE = "2026-10-14"
+DOC_VERSION = "1.2"
+DOC_DATE = "2026-10-15"
 VERSION_LINE = f"*Version {DOC_VERSION} · {DOC_DATE} · Status: current*"
 
 # The repository root, and the folder that holds the pipeline packages.
@@ -340,9 +340,11 @@ GATE_DESCRIPTIONS: dict[str, str] = {
     "zero_pixel_fraction": "Fails when too many stack pixels are exactly zero (over-subtraction).",
     "negative_pixels": "Fails when the stacking engine (Siril) reports too high a share of negative pixels.",
     "exposure_group_linearity": (
-        "Fails when the bright end of an exposure group (the frames of one exposure length) does "
-        "not follow the group scale factor that puts it on the reference group's brightness "
-        "scale; that group is left out of the combination."
+        "Fails when one group scale factor does not describe an exposure group (the frames of "
+        "one exposure length): the ratio of its faintest or brightest quarter of stars, or with "
+        "the pixel method its brightest pixels, is more than the configured tolerance from the "
+        "factor that puts it on the reference group's brightness scale (Section 3.4). That group "
+        "is left out of the combination."
     ),
     "raw_frame_clipping": "Fails when raw frames of an exposure group are clipped at zero.",
     "exposure_groups_combined": (
@@ -456,7 +458,8 @@ def fill(template: str, values: dict[str, Any]) -> str:
     ----------
     template : `str`
         Text with ``<<key>>`` placeholders. Placeholders avoid braces, which
-        LaTeX uses.
+        LaTeX uses. A placeholder that is a register entry ID, such as
+        ``<<AST-06>>``, becomes a link to that entry (`register_link`).
     values : `dict` [`str`, `Any`]
         The value for each key. Floats are written with ``:g``.
 
@@ -470,6 +473,7 @@ def fill(template: str, values: dict[str, Any]) -> str:
     KeyError
         If a placeholder has no value.
     """
+    template = re.sub(r"<<([A-Z]{3}-\d{2})>>", lambda match: register_link(match.group(1)), template)
     missing = sorted(set(re.findall(r"<<(\w+)>>", template)) - set(values))
     if missing:
         raise KeyError(f"no value for placeholder(s): {', '.join(missing)}")
@@ -872,24 +876,102 @@ list below is read from the code when this guide is generated."""
 
 # The labels of the "Empirical Status" column. Every guide uses only these
 # three, so a reader can compare limits across pipelines. The data set and
-# any measurement go in the Notes column, not in the label.
+# any measurement go in the validation register, not in the guide: the label
+# links to the register entry (`status_cell`), and the Notes column keeps
+# only the reason for the value.
 STATUS_MEASURED = "Measured"
 STATUS_PARTLY_MEASURED = "Partly measured"
 STATUS_DESIGN_ESTIMATE = "Design estimate"
+
+# The folder of the validation register, relative to the guides.
+VALIDATION_LINK = "../validation"
+
+# The register file that holds each entry-ID prefix.
+REGISTER_FILES: dict[str, str] = {
+    "STK": "stacking.md",
+    "AST": "astrometry.md",
+    "PHO": "photometry.md",
+    "SPE": "spectroscopy.md",
+    "MOV": "asteroid_detection.md",
+}
+
+
+def register_link(entry_id: str) -> str:
+    """Link to one entry of the validation register.
+
+    Parameters
+    ----------
+    entry_id : `str`
+        The entry ID, such as ``"STK-24"``. Its prefix picks the file.
+
+    Returns
+    -------
+    link : `str`
+        A Markdown link such as ``[STK-24](../validation/stacking.md#stk-24)``.
+    """
+    prefix = entry_id.split("-")[0]
+    return f"[{entry_id}]({VALIDATION_LINK}/{REGISTER_FILES[prefix]}#{entry_id.lower()})"
+
+
+def status_cell(status: str, *entry_ids: str) -> str:
+    """Give a status label with links to the register entries behind it.
+
+    Parameters
+    ----------
+    status : `str`
+        `STATUS_MEASURED` or `STATUS_PARTLY_MEASURED`.
+    *entry_ids : `str`
+        The register entries that hold the evidence, such as ``"STK-24"``.
+
+    Returns
+    -------
+    cell : `str`
+        The label followed by the links in brackets, for example
+        ``Partly measured ([STK-24](../validation/stacking.md#stk-24))``.
+    """
+    links = ", ".join(register_link(entry_id) for entry_id in entry_ids)
+    return f"{status} ({links})"
+
+
+def design_estimate_cell(prefix: str, *related_ids: str) -> str:
+    """Give the design-estimate label with a link to its register table.
+
+    Parameters
+    ----------
+    prefix : `str`
+        The entry-ID prefix of the pipeline, such as ``"STK"``.
+    *related_ids : `str`
+        Register entries that bear on the value without measuring it, such
+        as a check of the method on synthetic data.
+
+    Returns
+    -------
+    cell : `str`
+        The label and a link to the "Design estimates" table of the
+        pipeline's register file, which says how the value could be measured,
+        followed by any related entries.
+    """
+    link = f"[how to measure]({VALIDATION_LINK}/{REGISTER_FILES[prefix]}#design-estimates)"
+    related = "".join(f"; related: {register_link(entry_id)}" for entry_id in related_ids)
+    return f"{STATUS_DESIGN_ESTIMATE} ({link}{related})"
+
 
 # Words that open section 5 of every guide, before the parameter table.
 PARAM_INTRO = f"""These are the fixed limits and settings the pipeline uses. "Live Value" is
 read from the code when this guide is generated. "Empirical Status" says how
 far real data back the value, with one of three labels:
 
-- **{STATUS_MEASURED}.** The value was set from, or checked against, real
-  observations. The Notes column names the data and the result.
-- **{STATUS_PARTLY_MEASURED}.** Real observations support the value but do not
-  pin it down, for example because no failure was found to set it against.
-- **{STATUS_DESIGN_ESTIMATE}.** The value was chosen by reasoning about the
-  method, not tuned on real data. Where it was checked only on synthetic
-  (simulated) data, or picked with a margin over a few observed values, the
-  Notes column says so."""
+- **{STATUS_MEASURED}.** Chosen or confirmed from a measurement on real data.
+- **{STATUS_PARTLY_MEASURED}.** Backed by a measurement that is incomplete,
+  such as synthetic (simulated) data only, one target or a small sample.
+- **{STATUS_DESIGN_ESTIMATE}.** Chosen by reasoning and not yet measured.
+
+The labels are defined in the [validation register]({VALIDATION_LINK}/index.md).
+Each label links to the register entry that holds the evidence: the data, the
+library calls, the result, and how to repeat the check on your own data. A
+design estimate links to the register's table of values not yet measured,
+which says how each one could be measured. The Notes column gives the reason
+for the value."""
 
 # Placeholder values shared by every guide.
 COMMON_VALUES: dict[str, str] = {
@@ -1011,67 +1093,68 @@ def build_astrometry_doc() -> str:
         [
             "`MAXIMUM_RESIDUAL_FRACTION_OF_FWHM`",
             f"`{values['max_res']}`",
-            STATUS_DESIGN_ESTIMATE,
+            status_cell(STATUS_PARTLY_MEASURED, "AST-04"),
             "Largest allowed residual (position error of the sky map), as a share of a star's "
-            "width (FWHM). Set against 8 saved solves whose catalog match separations were 0.14 "
-            "to 0.44 of a star width; not re-measured on fit residuals, which are usually smaller.",
+            "width (FWHM). It is there to catch a failed solve, not to rank good ones.",
         ],
         [
             "`MINIMUM_MATCHED_STARS` (`run_gates`)",
             f"`{values['min_match']}`",
-            STATUS_DESIGN_ESTIMATE,
+            status_cell(STATUS_PARTLY_MEASURED, "AST-05"),
             "Fewest stars matched to a catalog for the residual to mean anything.",
         ],
         [
             "`MAXIMUM_FAILED_LOOKUP_FRACTION`",
             f"`{values['max_fail']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "Share of failed online catalog lookups at which `catalog_lookup` fails.",
         ],
         [
             "`CATALOG_MATCH_RADIUS_ARCSEC`",
             f"`{values['match_radius']}` arcsec",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star.",
         ],
         [
             "`MAXIMUM_PLATE_SOLVE_SOURCES`",
             f"`{values['solver_sources']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "How many of the brightest detected stars are sent to the online solver.",
         ],
         [
             "Solve minimum",
             "4 sources",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "Fewest detections for a solve to be tried (`process_image`).",
         ],
         [
             "`MINIMUM_SOURCES_FOR_LOCAL_SOLVE`",
             f"`{values['local_minimum']}`",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "AST-13"),
             "Fewest detections for the local solver to be tried; with fewer, the run goes "
-            "straight to the online solver. Confirmed on one underexposed M 13 frame.",
+            "straight to the online solver, because a local attempt would spend its whole time "
+            "limit on a near-certain failure (Section 3.3).",
         ],
         [
             "`SourceDetector` threshold",
             f"`{values['threshold']:g}` σ",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "How far a peak must stand above the sky, in standard deviations of the sky noise (Eq. 1).",
         ],
         [
             "`MINIMUM_MATCHED_STARS` (`wcs_refinement`)",
             f"`{values['refit_min_stars']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("AST"),
             "Fewest Gaia star matches needed for the refit with distortion terms (SIP). The fit "
             "has about a dozen terms per axis, and 40 stars leaves a wide margin.",
         ],
         [
             "`MAXIMUM_SHIFT_ARCSEC`",
             f"`{values['refit_shift']}` arcsec",
-            STATUS_DESIGN_ESTIMATE,
-            "Largest move of the whole field a refit may make and still be kept. More than ten "
-            "times the largest error seen (2.7 arcsec).",
+            status_cell(STATUS_PARTLY_MEASURED, "AST-02"),
+            "Largest move of the whole field a refit may make and still be kept. Set at about "
+            "ten times the largest solver error seen; a larger move means the fit followed "
+            "wrong matches.",
         ],
     ])
     template = r"""# Astrometry and Plate Solving Pipeline Review Guide
@@ -1192,10 +1275,9 @@ written as the FWHM of a Gaussian with the same spread (2.355 times its
 standard deviation). FWHM (full width at half maximum) is the width of a
 star's light profile at half its peak height. Because the box also holds
 faint wings and neighbours, this blob width reads about twice the star's
-fitted FWHM: 4.9 px against 2.5 px on the Bubble Nebula stack. It is used
-because it detects better. On that stack it gave 335 catalog matches and a
-1.04 arcsec residual, against 181 matches and 5.0 arcsec with the kernel
-sized from the fitted FWHM. It is never reported as a star width.
+fitted FWHM. It is used because it detects better than a kernel sized from
+the fitted FWHM: more catalog matches and a smaller residual (partly
+measured; see <<AST-06>>). It is never reported as a star width.
 
 **Clean-up.** Detections closer than <<merge_px>> px are merged into one,
 because the finder can split one large star into two. Colour frames are
@@ -1468,85 +1550,83 @@ def build_photometry_doc() -> str:
         [
             "`MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG`",
             f"`{values['rej_frac']}`",
-            STATUS_PARTLY_MEASURED,
+            design_estimate_cell("PHO"),
             "Share of frames rejected as ensemble outliers (frames whose comparison-star level "
-            "is out of line with the rest) that fails the gate. Past runs rejected about 7.2% "
-            "of frames; the limit sits well above that.",
+            "is out of line with the rest) that fails the gate.",
         ],
         [
             "`MINIMUM_ENSEMBLE_REJECTION_COUNT_TO_FLAG`",
             f"`{values['rej_cnt']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO"),
             "Fewest rejected frames that can fail the gate, so one frame of a short run cannot.",
         ],
         [
             "Aperture radius",
             f"`{values['radius']:g}` px",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO"),
             "Radius of the circle in which a star's light is summed. Default of "
             "`measure_aperture_photometry`. It is fixed, not scaled to each star's width.",
         ],
         [
             "Sky annulus radii",
             f"`{values['r_in']:g}` to `{values['r_out']:g}` px",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO"),
             "Inner and outer radius of the sky ring (annulus) around each star, where the sky "
             "level is measured.",
         ],
         [
             "`MINIMUM_COMPARISON_STARS`",
             f"`{values['min_comp']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-01"),
             "Comparison-star vetting stops at this size; fewer fails `comparison_ensemble`.",
         ],
         [
             "`DEFAULT_MAXIMUM_COMPARISON_STARS`",
             f"`{values['max_comp']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-01"),
             "Most comparison stars kept in the set. More stars lower the ensemble noise, but the "
             "extra ones are fainter, so the benefit shrinks quickly.",
         ],
         [
             "`MINIMUM_STARS_FOR_NOISE_MODEL`",
             f"`{values['noise_model_stars']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-06"),
             "Fewest stars for a noise model (expected scatter against brightness): two "
             "brightness bins of 10 stars. With fewer, the CV cutoff (Eq. 9) picks candidates.",
         ],
         [
             "`FALSE_DISCOVERY_LEVEL`",
             f"`{values['fdr']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-07"),
             "Largest Benjamini-Hochberg q-value a candidate may have (Section 3.4). The level "
-            "journals usually ask for; checked only on synthetic fields.",
+            "journals usually ask for.",
         ],
         [
             "`EXCESS_SCATTER_THRESHOLD`",
             f"`{values['excess']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-06"),
             "Fixed threshold on the excess scatter (Eq. 7). A 50% excess, which the ordinary "
             "spread of a constant star's scatter (10 to 20% for 25 to 50 points) rarely reaches.",
         ],
         [
             "`CALIBRATION_SIGMAS`",
             f"`{values['cal_sigmas']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-06"),
             "Robust standard deviations above the field median for the chi-square and J "
             "thresholds: the one-sided 99% point of a normal distribution.",
         ],
         [
             "`DEFAULT_VARIABILITY_SIGMA_THRESHOLD`",
             f"`{values['cv_sigma']}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_MEASURED, "PHO-10"),
             "Multiplier of the unscaled MAD in the CV cutoff (Eq. 9), about "
             f"{values['cv_robust_sigmas']} robust standard deviations. Chosen to flag about the "
-            "top 3% of stars. Measured on the library: it flags 5.2% of stars, and separates "
-            "catalogued variables from other stars no better than chance.",
+            "top 3% of stars.",
         ],
         [
             "`MAXIMUM_DETECTABLE_AMPLITUDE_MAG`",
             f"`{values['max_amp']}` mag",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-09"),
             "If the smallest detectable peak-to-peak amplitude (in magnitudes, a logarithmic "
             "brightness scale) is larger, the run is called blind to most variables. Most "
             "pulsating and rotating variables change by less than this.",
@@ -1554,7 +1634,7 @@ def build_photometry_doc() -> str:
         [
             "`UNSTABLE_TRACKING_DRIFT_PX`",
             f"`{values['drift']:g}` px",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO"),
             "Largest shift of the field between frames before `registration_drift` fails. Half "
             "of the ±40 px box in which a star's center is searched, so stars are caught "
             "before they leave the box.",
@@ -1562,25 +1642,23 @@ def build_photometry_doc() -> str:
         [
             "`MAXIMUM_CORNER_DISPLACEMENT_PX`",
             f"`{values['corner']}` px",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-04"),
             "Largest shift of an image corner caused by rotation and scale change between frames "
-            "(95th percentile). Measured values for comparison: M 13 0.2 px, M 81 0.9 px, "
-            "NGC 2403 1.8 px.",
+            "(95th percentile).",
         ],
         [
             "`MAXIMUM_CENTROID_FALLBACK_FRACTION`",
             f"`{values['fallback']:g}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("PHO", "PHO-04"),
             "Largest share of star measurements that may keep the aligned position because the "
             "star's own centroid was refused.",
         ],
         [
             "`MAXIMUM_ENSEMBLE_SCATTER_OVER_PREDICTED`",
             f"`{values['ens_scatter']}`",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "PHO-02"),
             "Largest ratio of the comparison stars' measured scatter to the scatter their error "
-            "bars predict. Set between three fields: 1.27 on M 13 and 1.66 on M 81, against 18 "
-            "on a cloudy NGC 2403 night.",
+            "bars predict. Set between clear nights and a cloudy one.",
         ],
     ])
     template = r"""# Differential Photometry and Light Curve Pipeline Review Guide
@@ -2068,61 +2146,61 @@ def build_spectroscopy_doc() -> str:
         [
             "`NO_GOOD_MATCH_RMS`",
             f"`{values['no_good']}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "SPE-16"),
             "Misfit to the best reference spectrum (relative RMS, Eq. 4) above which a "
-            "classification is a poor match. On 14 stars of known type, right matches scored "
-            "0.046 to 0.105 and wrong ones 0.181 to 0.283.",
+            "classification is a poor match. It sits between the misfits of most right and "
+            "wrong matches on stars of known type.",
         ],
         [
             "`UNRELIABLE_MATCH_RMS`",
             f"`{values['unreliable']}`",
-            STATUS_MEASURED,
-            "Misfit (relative RMS, Eq. 4) above which no spectral type is given at all. Of 55 "
-            "stars, 19 scored above it, and 18 of those had no catalog type.",
+            status_cell(STATUS_PARTLY_MEASURED, "SPE-17"),
+            "Misfit (relative RMS, Eq. 4) above which no spectral type is given at all: the "
+            "closest reference would only invent a type. Misfits this large mostly mean the "
+            "star was identified wrongly.",
         ],
         [
             "`AMBIGUOUS_RMS_GAP`",
             f"`{values['gap']}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_MEASURED, "SPE-18"),
             "Smallest misfit gap to the best reference of another spectral class; a smaller gap "
-            "makes the match ambiguous. It is the smallest spacing between neighbouring "
-            "reference spectra (A0V and A2V are 0.019 apart).",
+            "makes the match ambiguous. It is about the smallest spacing between neighbouring "
+            "reference spectra.",
         ],
         [
             "`DIFFERS_FROM_CATALOG_SUBTYPES`",
             f"`{values['subtypes']}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "SPE-19"),
             "Subtype steps (ten to a class, so 20 is two whole classes, such as B to F) beyond "
-            "which the measured type disagrees with the catalog type. Of 29 stars with a catalog "
-            "type, 27 were within 12 steps; the other two were wrong for other reasons.",
+            "which the measured type disagrees with the catalog type. It is set above the "
+            "ordinary spread of good classifications.",
         ],
         [
             "`APERTURE_SIGMA_MULTIPLIER`",
             f"`{values['box']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("SPE", "SPE-04"),
             "Half-width of the extraction box, in units of the trail's Gaussian sigma (its "
             "width measure, Eq. 2). ±2.5 sigma holds about 99% of a Gaussian's light.",
         ],
         [
             "`SKY_BAND_GAP_PX` / `SKY_BAND_WIDTH_PX`",
             f"`{values['sky_gap']}` px / `{values['sky_width']}` px",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "SPE-01", "SPE-02"),
             "Gap between the box and each sky band, and the band's width, on each side of the "
-            "box. Swept on one Vega frame of a sparse field; used unswept on the crowded M 13 "
-            "stack.",
+            "box. The gap keeps the star's own light out of the sky estimate.",
         ],
         [
             "`MINIMUM_LINE_SIGNIFICANCE`",
             f"`{values['zp_sig']:g}`",
-            STATUS_DESIGN_ESTIMATE,
+            status_cell(STATUS_PARTLY_MEASURED, "SPE-11"),
             "Depth, in units of the local noise, a line needs to count for the zero-point "
-            "shift. On synthetic noise-only spectra no fake line reached 6; real lines in a "
-            "clean spectrum reach 20 or more.",
+            "shift. Set above what noise alone reaches and well below the depth of a real line "
+            "in a clean spectrum.",
         ],
         [
             "`WAVELENGTH_SCALE_LIMIT_ANGSTROM`",
             f"`{values['wl_limit']}` Å",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("SPE"),
             "Largest scatter of the run's wavelength zero points (offsets of the wavelength "
             "scale) after correction. It is one pixel of dispersion (11.0 to 11.4 Å per pixel): "
             "a larger error puts a line in the wrong sample.",
@@ -2130,7 +2208,7 @@ def build_spectroscopy_doc() -> str:
         [
             "`GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM`",
             f"`{values['xp_limit']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("SPE", "SPE-28"),
             "Largest median tilt of the ratio observed / Gaia XP (the Gaia mission's own "
             "low-resolution spectra), in percent per 1000 Å. About the error the extinction "
             "correction makes at 0.3 airmass.",
@@ -2138,7 +2216,7 @@ def build_spectroscopy_doc() -> str:
         [
             "`PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION`",
             f"`{values['processing_fraction']:g}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("SPE"),
             "Largest share of classified spectra that may fail a limit of the processing "
             "checkpoint before `processing_quality` fails.",
         ],
@@ -2283,8 +2361,10 @@ sigma). Edge pixels count for the fraction inside the box.
 
 **The sky.** Two sky bands, each <<sky_width>> px wide and <<sky_gap>> px
 from the box, are sigma-clipped (pixels far from the median, such as stars,
-are dropped). The sky level is the mean of their medians, or the lower band
-alone when they disagree by more than the noise allows.
+are dropped). The sky level is the mean of their medians. When the two
+disagree by more than the noise allows, the fainter band (the one with the
+lower median) is used alone: light can only add to a band, so the brighter
+one holds a neighbour's light.
 
 **Neighbours.** A bright neighbour's wings (the faint outer edges of its
 trail) are removed with a blur profile measured from an isolated star
@@ -2411,7 +2491,9 @@ happens when the instrument is calibrated (`calibration_tuner.py`).
    the summary. `spectral_classification` fails only on a class-level
    ambiguity or a poor match.
 4. **Reddened hot stars.** With no catalog $E(B-V)$, an O, B or A star tends
-   to read about one subtype cool.
+   to read about one step of the reference list cool. The list skips some
+   subtypes, so one step can be more than one subtype: the A stars of
+   <<SPE-16>> read two subtypes cool.
 5. **No solved stack.** Stars are named by matching the pattern of their pixel
    positions to catalog stars ("by geometry"), which can fail on sparse
    fields.
@@ -2502,74 +2584,74 @@ def build_asteroid_detection_doc() -> str:
         [
             "`min_frames_for_persistence`",
             cfg("min_frames_for_persistence"),
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-01"),
             "Fewest detections in a chain (detections linked across frames as one object).",
         ],
         [
             "`pixel_match_tolerance_px`",
             cfg("pixel_match_tolerance_px"),
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-02"),
             "Pixel spread below which a chain is a hot pixel (a sensor pixel that always reads high).",
         ],
         [
             "`sky_match_tolerance_arcsec`",
             cfg("sky_match_tolerance_arcsec"),
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-02"),
             "Sky spread below which a chain is a fixed star (Eq. 2).",
         ],
         [
             "`rate_min_arcsec_per_hour` / `rate_max_arcsec_per_hour`",
             f"{cfg('rate_min_arcsec_per_hour')} / {cfg('rate_max_arcsec_per_hour')} arcsec/h",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-01"),
             "Allowed range of the total speed across the sky.",
         ],
         [
             "`chain_match_radius_max_arcsec`",
             f"{cfg('chain_match_radius_max_arcsec')} arcsec",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-08"),
             "Cap on how far a chain may reach for its next detection (Eq. 1).",
         ],
         [
             "`residual_rms_max_multiple`",
             cfg("residual_rms_max_multiple"),
-            STATUS_DESIGN_ESTIMATE,
+            status_cell(STATUS_PARTLY_MEASURED, "MOV-03"),
             "Largest RMS (root mean square) distance from the fitted straight line on each axis, "
             "in units of that axis's position error.",
         ],
         [
             "`min_displacement_error_multiple`",
             cfg("min_displacement_error_multiple"),
-            STATUS_DESIGN_ESTIMATE,
+            status_cell(STATUS_PARTLY_MEASURED, "MOV-03"),
             "Smallest total distance moved, in units of the position error.",
         ],
         [
             "`astrometric_error_default_arcsec`",
             f"{cfg('astrometric_error_default_arcsec')} arcsec",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-06"),
             "Position error assumed for a detection with none measured.",
         ],
         [
             "`ephemeris_cross_match_radius_arcsec`",
             f"{cfg('ephemeris_cross_match_radius_arcsec')} arcsec",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("MOV", "MOV-06"),
             "Match radius for a known body from SkyBoT (an online service that lists known "
             "solar-system bodies), at both the first and last detection.",
         ],
         [
             "`_POINTING_CORRECTION_SEARCH_RADIUS_ARCSEC`",
             f"`{values['pointing_radius']:g}` arcsec",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "MOV-05"),
             "Pairing radius between stack stars and frame detections in the per-frame "
-            "pointing-offset vote (Section 3.1). Chosen on NGC 2403 only, not on a range of "
-            "mount pointing errors.",
+            "pointing-offset vote (Section 3.1). Wide enough to contain a mount error of several "
+            "arcminutes; the vote copes with the wrong pairs a wide radius admits.",
         ],
         [
             "`_POINTING_CORRECTION_VOTE_BIN_ARCSEC`",
             f"`{values['vote_bin']:g}` arcsec",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "MOV-05"),
             "Bin width of the offset vote. Small enough to separate the true offset from the "
-            "spacing of NGC 2403's stars (median 48 arcsec), and well above the star finder's "
-            "sub-arcsec centering noise.",
+            "typical spacing of the field's stars, and well above the star finder's sub-arcsec "
+            "centering noise.",
         ],
     ])
     template = r"""# Asteroid and Moving Object Detection Pipeline Review Guide
@@ -2663,9 +2745,9 @@ of arcseconds off.
 detections within <<pointing_radius>> arcsec. Every pair votes for an offset
 in <<vote_bin>>-arcsec bins, and the winning offset is removed from the
 frame's positions. True pairs agree on one offset; chance pairs scatter their
-votes. A plain nearest-star match was tried first and failed: on NGC 2403 the
-stars are about as far apart as the mount's error, so many detections were
-paired with the wrong star.
+votes. A plain nearest-star match is not used: where the stars are about as
+far apart as the mount's error, many detections pair with the wrong star
+(partly measured; see <<MOV-05>>).
 
 **Position error.** The same vote measures each frame's position error: the
 scatter of the matched stack stars about the winning offset, on each axis,
@@ -2920,96 +3002,89 @@ def build_stacking_doc() -> str:
         [
             "`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`",
             f"`{values['dark_tol']}` °C",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "STK-06"),
             "Width of a dark temperature slot, and the largest temperature gap before a soft "
             "flag (a warning that does not stop the dark being used). A deliberately loose first "
-            "estimate, not checked against this camera's dark-current curve. One real case backs "
-            "it: Arcturus darks near 0 °C and -10 °C, against lights that drifted from -2.9 °C "
-            "to -10.7 °C, left 57-64% negative pixels.",
+            "estimate.",
         ],
         [
             "`DEFAULT_MINIMUM_SURVIVING_FRAMES`",
             f"`{values['min_surviving']}` frames",
-            STATUS_PARTLY_MEASURED,
-            "Fewest frames that must be left after Siril's percentage-based frame filters. On "
-            "one M 13 session, stacks of 5 to 20 frames got steadily worse with fewer frames, "
-            "with no failure at 5 to set the value against.",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-10"),
+            "Fewest frames that must be left after Siril's percentage-based frame filters.",
         ],
         [
             "`DEFAULT_FWHM_DEGRADATION_RATIO`",
             f"`{values['degrade']}`",
-            STATUS_MEASURED,
-            "Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Six "
-            "real stacks gave 0.77 to 1.16, so a normal stack stays below it. Whether it catches "
-            "a real alignment failure is untested: no such session exists.",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-25"),
+            "Largest ratio of the stack's star width (FWHM) to the expected width (Eq. 3). Set "
+            "just above the ratio of a normal stack.",
         ],
         [
             "`DEFAULT_REJECTED_FRACTION_FLAG_THRESHOLD`",
             f"`{values['rej']}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "STK-24"),
             "Share of pixels rejected as outliers during stacking above which "
-            "`rejected_pixel_fraction` fails. On three real sessions the share stayed below "
-            "about 10%, even on a cloud-affected NGC 2403 session.",
+            "`rejected_pixel_fraction` fails. Set above the share a normal session rejects.",
         ],
         [
             "`MAXIMUM_QUARANTINED_FRACTION`",
             f"`{values['quarantine']}`",
-            STATUS_PARTLY_MEASURED,
-            "Largest share of a batch the quarantine (setting bad frames aside) may move. A "
-            "dry run on the library picked at most 13% of a batch; a quarter is about twice that.",
+            status_cell(STATUS_PARTLY_MEASURED, "STK-03"),
+            "Largest share of a batch the quarantine (setting bad frames aside) may move. About "
+            "twice the share it picks from a normal batch: room for a bad stretch, without "
+            "gutting a session whose limits do not suit the equipment.",
         ],
         [
             "`MINIMUM_PENALTY_TO_WEIGHT`",
             f"`{values['penalty']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("STK", "STK-07"),
             "Noise penalty $P$ of equal weights (Eq. 4) at or above which noise weighting is "
-            "used. The value is designed; the benefit was measured on the M 27 imaging stack, "
-            "where $P$ = 1.17 and noise weighting lowered its pixel noise by 13%.",
+            "used. The benefit of noise weighting is measured; the switch-on value is not.",
         ],
         [
             "`MINIMUM_REGISTERED_FRACTION`",
             f"`{values['registered']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("STK", "STK-12"),
             "Share of spectral frames that must register (align on each other); fewer triggers a "
-            "retry. Chosen to tolerate one lost frame in ten; seen only on the Vega session.",
+            "retry. Chosen to tolerate one lost frame in ten.",
         ],
         [
             "`MINIMUM_FRAMES_PER_EXPOSURE_GROUP`",
             f"`{values['group_minimum']}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("STK", "STK-11"),
             "Fewest frames an exposure length needs to be stacked on its own; a smaller set joins "
-            "the group with the nearest exposure length. Not tested at this value.",
+            "the group with the nearest exposure length.",
         ],
         [
             "`DEFAULT_GAP_RATIO_THRESHOLD`",
             f"`{values['gap_ratio']:g}`",
-            STATUS_PARTLY_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "STK-04"),
             "Smallest gap between two groups of sky-background levels, as a multiple of the "
-            "spread within a group, that counts as a split. In tests, normal nights gave below 1 "
-            "and sudden cloud above 6.",
+            "spread within a group, that counts as a split. Set between the gaps of a normal "
+            "night and of sudden cloud.",
         ],
         [
             "`MINIMUM_FLAT_LEVEL_FRACTION` / `MAXIMUM_FLAT_LEVEL_FRACTION`",
             f"`{values['flat_low']:g}` / `{values['flat_high']:g}`",
-            STATUS_DESIGN_ESTIMATE,
+            design_estimate_cell("STK"),
             "Allowed level of the master flat, as a share of the sensor's full scale (the "
-            "largest value a pixel can record). Common practice, not checked on this "
-            "observatory's data.",
+            "largest value a pixel can record). Common practice.",
         ],
         [
             "`MAXIMUM_FLAT_NOISE_FRACTION`",
             f"`{values['flat_noise']:g}`",
-            STATUS_MEASURED,
+            status_cell(STATUS_PARTLY_MEASURED, "STK-05"),
             "Largest relative noise (standard deviation over mean) of the master flat before it "
-            "is smoothed and `flat_noise` fails. A 4.5% flat caused 86% of the fine-scale noise of "
-            "the M 101 stack, and smoothing it halved that stack's noise.",
+            "is smoothed and `flat_noise` fails. A flat at the limit adds only a few percent to "
+            "the variance of a typical stack's sky noise; a noisier flat leaves a fixed pattern, "
+            "which smoothing removes.",
         ],
         [
             "`DEFAULT_SATURATION_FLAG_THRESHOLD`",
             f"`{values['saturation']:g}`",
-            STATUS_DESIGN_ESTIMATE,
-            "Share of saturated pixels at or above which the stack is flagged "
-            "(`saturated_pixel_fraction`). Not checked against real stacks.",
+            design_estimate_cell("STK"),
+            "Share of saturated pixels at or above which the stack is flagged (`saturated_pixel_fraction`).",
         ],
     ])
     template = r"""# Astronomical Stacking and Image Calibration Pipeline Review Guide
@@ -3197,10 +3272,16 @@ and aligning two nights together can lose most frames.
 **Putting groups on one scale.** Each group's stack is turned into counts per
 second. That alone does not line the groups up, because Siril's normalization
 leaves each group's stack on the brightness scale of its own reference frame.
-Each group therefore gets a group scale factor that puts it on the reference
-group's scale, measured on mid-range pixels with saturated pixels left out. A
-group whose bright end disagrees with that factor is left out, because its
-brightest pixels no longer grow in step with exposure.
+Each group therefore gets a group scale factor that puts it on the scale of
+the reference group (the group with the most weight). On an imaging stack the
+factor is the median ratio of the aperture brightness of isolated,
+unsaturated stars found in both groups. A group with too few such stars, and
+every spectral stack, uses pixels instead: the median ratio over mid-range
+pixels, with saturated pixels left out. A group that one factor does not
+describe is left out, because its brightness no longer grows in step with
+exposure. With stars, that is when the ratio of its faintest quarter or its
+brightest quarter of stars sits more than a set tolerance from the factor;
+with pixels, when the ratio over its brightest pixels does.
 
 **Combining.** The rest are combined with inverse-variance weights: each
 group counts in proportion to $1/\sigma^2$, where $\sigma$ is the background
@@ -3420,7 +3501,10 @@ When auditing the pipelines, check:
    images beside the spectra) and catalog outages.
 4. **Empirical status.** Which limits were measured on real data and which are
    design estimates. Section 5 of every guide labels each limit
-   "<<status_measured>>", "<<status_partly>>" or "<<status_design>>".
+   "<<status_measured>>", "<<status_partly>>" or "<<status_design>>", and
+   links the label to the [validation register](<<validation_link>>/index.md).
+   The register gives the evidence for each value and the library calls to
+   repeat the check on other data.
 
 ```{toctree}
 :maxdepth: 1
@@ -3443,6 +3527,7 @@ stacking
             "status_measured": STATUS_MEASURED,
             "status_partly": STATUS_PARTLY_MEASURED,
             "status_design": STATUS_DESIGN_ESTIMATE,
+            "validation_link": VALIDATION_LINK,
         },
     )
 

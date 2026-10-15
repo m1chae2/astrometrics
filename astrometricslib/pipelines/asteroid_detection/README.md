@@ -24,7 +24,7 @@ The pipeline reuses astrometry's own source detector (`SourceDetector`) to find 
 
 **Why.** Left uncorrected, the mount's pointing error makes every fixed star in a frame appear to move from one frame to the next, which is exactly what the later checks try to screen out.
 
-**What it does.** `pipeline.py` detects the stack's own stars (the reference stars, whose positions come from the stack's plate solution). For each frame it then finds the one shift in RA and Dec that lines most of the frame's dots up with those stars, and applies it to every detection in the frame. It finds the shift by voting: it collects the offset of every dot to every reference star within 300 arcseconds and takes the offset that most pairs share (5 arcsecond bins), so the many wrong pairs in a dense field do not pull the answer. A frame with fewer than 5 votes for the winning offset keeps its uncorrected mount pointing.
+**What it does.** `pipeline.py` detects the stack's own stars (the reference stars, whose positions come from the stack's plate solution). For each frame it then finds the one shift in RA and Dec that lines most of the frame's dots up with those stars, and applies it to every detection in the frame. It finds the shift by voting: it collects the offset of every dot to every reference star within 300 arcseconds and takes the offset that most pairs share (5 arcsecond bins), so the many wrong pairs in a dense field do not pull the answer. A frame with fewer than 5 votes for the winning offset keeps its uncorrected mount pointing. The search radius and bin width are partly measured (see [MOV-05](../../../documentation/library_design/validation/asteroid_detection.md#mov-05)); the vote count is a design estimate.
 
 **The position error.** The position error of one picture comes from the same correction:
 
@@ -33,7 +33,7 @@ The pipeline reuses astrometry's own source detector (`SourceDetector`) to find 
 - The result is stored on each detection as `astrometric_error_ra_arcsec`, `astrometric_error_dec_arcsec` and `astrometric_error_correlation`, and `astrometric_error_arcsec` is the root mean square of the two axes.
 - When a frame has too few matched stars to measure it, the detection carries no value and the test uses `astrometric_error_default_arcsec` (default 10 arcsec). The track records which case applied in `astrometric_error_assumed`, and the chain's error on each axis in `astrometric_error_ra_arcsec` and `astrometric_error_dec_arcsec`.
 
-**Why it is 5 to 13 arcseconds.** This error is much larger than the 0.2 arcsecond scatter of a plate-solved stack (see the astrometry README), because a single frame is not plate solved. Its WCS is the mount's pointing corrected by one overall shift, not a fit to the frame's own stars.
+**Why it is several arcseconds.** This error is much larger than the 0.2 arcsecond scatter of a plate-solved stack (see the astrometry README), because a single frame is not plate solved. Its WCS is the mount's pointing corrected by one overall shift, not a fit to the frame's own stars (partly measured; see [MOV-06](../../../documentation/library_design/validation/asteroid_detection.md#mov-06)).
 
 ### Step 4. Track dots across frames and filter out noise
 
@@ -51,9 +51,9 @@ Right Ascension wraps from 360 deg back to 0 deg, so a field or a mover can stra
 
 **What it does.** The detector groups detections by observing night (`observing_night_id` in `utilities/observing_night.py`; a night runs from local noon to local noon) and links dots within each night on its own. Within a night, a track may add a dot only if the dot lies within a match radius of the track's last dot.
 
-**Setting.** That radius is `rate_max_arcsec_per_hour` (the fastest rate searched, default 300 arcsec per hour) times the elapsed hours, capped at `chain_match_radius_max_arcsec` (default 300 arcsec, 5 arcminutes).
+**Setting.** That radius is `rate_max_arcsec_per_hour` (the fastest rate searched, default 300 arcsec per hour) times the elapsed hours, capped at `chain_match_radius_max_arcsec` (default 300 arcsec, 5 arcminutes; design estimate). Before it computes exact distances, the detector drops every dot outside an RA/Dec box slightly larger than the radius, so chaining stays fast on dense fields (see [MOV-07](../../../documentation/library_design/validation/asteroid_detection.md#mov-07)).
 
-**Why.** Without the night split, a gap of weeks let the radius grow to 1 degree, and two unrelated stars half a degree apart, seen on nights a month apart, linked into a false mover at 2.5 arcsec per hour.
+**Why.** Without the night split and the cap, the radius grows with the time between frames. For a gap of weeks it reaches a large part of a degree, and two unrelated stars seen on different nights can link into a slow false mover (partly measured; see [MOV-08](../../../documentation/library_design/validation/asteroid_detection.md#mov-08)).
 
 **Limits.** Joining a mover that appears on more than one night is a separate step that does not exist yet. A real asteroid seen on two nights comes out as two separate candidates. The detector knows only each frame's time, so a "session" here is an observing night; it does not split by camera gain or offset the way `derive_target_sessions` does.
 
@@ -61,7 +61,7 @@ Right Ascension wraps from 360 deg back to 0 deg, so a field or a mover can stra
 
 **What it measures, and why.** A real asteroid moves in a nearly straight line at a steady rate over one night, so its dots should sit close to a straight line in position against time. A residual is the distance of a dot from that fitted line. The test asks whether the residuals are no bigger than the measurement error would explain.
 
-**The test.** The detector fits a straight line to the sky position against time, separately for RA and Dec. It then takes the root-mean-square (RMS: square each distance, average, take the root) distance of the dots from that line on each axis. The track passes when each axis's RMS is at most `residual_rms_max_multiple` (default 2) times the position error of that axis, and when the rate is inside the allowed range.
+**The test.** The detector fits a straight line to the sky position against time, separately for RA and Dec. It then takes the root-mean-square (RMS: square each distance, average, take the root) distance of the dots from that line on each axis. The track passes when each axis's RMS is at most `residual_rms_max_multiple` (default 2; partly measured, see [MOV-03](../../../documentation/library_design/validation/asteroid_detection.md#mov-03)) times the position error of that axis, and when the rate is inside the allowed range.
 
 The position error each axis is judged against comes from step 3.
 
@@ -93,7 +93,7 @@ A passing track also stores `residual_rms_right_ascension_arcsec`, `residual_rms
 
 **Network use.** The matcher remembers each answer within a run, waits at least half a second between questions that go out over the network, and skips the second question when the first one fails.
 
-**Limits.** Positions are the measured detection positions, not the fitted line, so the 10 arcsec radius sits close to the position error of a single frame (about 5 to 13 arcsec after the pointing correction, see step 3); a real match can miss at one end.
+**Limits.** Positions are the measured detection positions, not the fitted line, so the 10 arcsec radius sits close to the position error of a single frame (several arcseconds after the pointing correction, see step 3 and [MOV-06](../../../documentation/library_design/validation/asteroid_detection.md#mov-06)); a real match can miss at one end.
 
 ### Rotation period (not yet called)
 
@@ -122,7 +122,7 @@ A gate is a pass/fail check on the run. The summary keeps one record per check i
 
 **The `track_residuals` value.** When `track_residuals` passes, its measured value is the largest ratio of RMS residual to position error among the accepted tracks, and its limit is `residual_rms_max_multiple`. The detail line also gives how many chains were tested, how many the residual test rejected, and how many were rejected for moving back along their direction. The run metrics carry the same counts as `residual_chains_tested`, `residual_chains_rejected` and `residual_chains_non_monotonic`.
 
-**Not yet covered.** Two things are not yet covered: the false-mover rate of the rejection cascade and its recovery of injected movers (Gap 2), and whether the field is near the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear) enough for a real asteroid to appear. `NGC 2403` and `M 81` sit far from it, so a clean run there only confirms "found nothing".
+**Not yet covered.** Two things are not yet covered: the false-mover rate of the rejection cascade and its recovery of injected movers (Gap 2), and whether the field is near the ecliptic (the band of sky around the plane of the Earth's orbit, where most asteroids appear) enough for a real asteroid to appear. A clean run on a field far from the ecliptic only confirms "found nothing" (see [MOV-04](../../../documentation/library_design/validation/asteroid_detection.md#mov-04)).
 
 ## MPC report lines
 
@@ -156,33 +156,22 @@ A gate is a pass/fail check on the run. The summary keeps one record per check i
 ## Limits of this pipeline
 
 - **No cross-night linking.** A mover seen on two or more nights is reported as separate candidates, one per night. Linking them needs an orbit-style fit over days, which this package does not do.
-- **No search for fast movers, by decision.** The rate limit is 300 arcsec per hour (5 arcsec per minute, `rate_max_arcsec_per_hour`), and the detector keeps stars that are round (`roundness_range` of -0.6 to 0.6, on DAOStarFinder's roundness scale, which runs from about -1 to 1 with 0 for a perfectly round source). A faster object draws a streak in one exposure and is dropped. Streaks that fast are mostly satellites, and Starlink alone puts thousands in the sky, so a trail fit or a shift-and-add search (shifting frames along a guessed motion and adding them, so a faint mover builds up) would find mostly satellites. The injection tests only reach 150 arcsec per hour, with round sources, and do not test trailed ones. The decision was made on 2026-10-11 (see `REVIEW_ACTION_PLAN.md`, section 1.5).
+- **No search for fast movers, by decision.** The rate limit is 300 arcsec per hour (5 arcsec per minute, `rate_max_arcsec_per_hour`), and the detector keeps stars that are round (`roundness_range` of -0.6 to 0.6, on DAOStarFinder's roundness scale, which runs from about -1 to 1 with 0 for a perfectly round source). A faster object draws a streak in one exposure and is dropped. Streaks that fast are mostly satellites, and Starlink alone puts thousands in the sky, so a trail fit or a shift-and-add search (shifting frames along a guessed motion and adding them, so a faint mover builds up) would find mostly satellites. Recovery has been checked only for round sources up to 150 arcsec per hour, not for trailed ones (see [MOV-01](../../../documentation/library_design/validation/asteroid_detection.md#mov-01)). The decision was made on 2026-10-11 (see [`REVIEW_ACTION_PLAN.md`](../../../documentation/plans/REVIEW_ACTION_PLAN.md), section 1.5).
 - **Short sequences only.** The chaining radius is capped at 5 arcminutes, so a fast mover (300 arcsec per hour) is followed across gaps of up to about one hour. Raise `chain_match_radius_max_arcsec` for longer gaps within a night, at the cost of more false links.
 - **Slow movers need a long baseline.** The displacement condition means an object must travel about three times the position error between its first and last picture. With the assumed 10 arcsec error, that is 30 arcsec.
 - **A reversal smaller than the position error passes.** A star that flips by less than the combined error of two dots is not caught by the direction check.
 - **The measured position error reads low when it is large.** The estimate ignores stars farther than 15 arcsec from their nearest reference star, so a frame whose true scatter approaches that value is under-measured, and the test then allows less than intended.
 - **Mid-exposure times need `EXPTIME`.** A frame without it gets the exposure start, and rates and reports are early by half an exposure.
-- **The `track_residuals` limits are not yet validated on real fields.** The synthetic fields share one pointing and have no position error to speak of.
+- **The `track_residuals` limits are not yet validated on real fields.** They are checked on synthetic fields only (partly measured; see [MOV-03](../../../documentation/library_design/validation/asteroid_detection.md#mov-03)).
 
 ## What the detector can find
 
-**Setup.** Measured on 2026-10-10 (`scripts/validate_asteroid_detection.py --synthetic`, with the SkyBoT query stubbed out so the run is offline; synthetic fields of 8 frames 300 s apart at 1.8 arcsec per pixel, with a mover of the given peak brightness above the sky noise, 12 fields per cell). Peak brightness is given in sigma: the mover's brightest pixel divided by the standard deviation of the sky noise, so 5 sigma is five times the typical noise. Each cell is the share of fields in which the detector found the mover.
+The detector's reach has been measured on synthetic fields and on two real fields. The results, and the library calls that produced them, are in the validation register:
 
-| peak brightness | 5 arcsec/h | 20 arcsec/h | 60 arcsec/h | 150 arcsec/h |
-|---|---|---|---|---|
-| 3 sigma | 0% | 0% | 0% | 0% |
-| 5 sigma | 0% | 0% | 0% | 8% |
-| 8 sigma | 0% | 83% | 83% | 92% |
-| 12 sigma | 0% | 67% | 83% | 92% |
-| 20 sigma | 0% | 83% | 92% | 100% |
-
-**Two limits show.** A mover is not found below about 8 sigma at its peak. And a slow mover is not found at any brightness. At 5 arcsec/h an object moves 2.9 arcsec, or 1.6 pixels, in the 35 minutes from the first to the last of the 8 frames. The stationary test in `detection.py` (`_evaluate_reference_frame_test`) does not use that total motion: it takes the largest distance of any detection from the track's mean position, which for steady motion is half the total, about 0.8 pixel and 1.5 arcsec. That is below both the 1.5 pixel tolerance (`pixel_match_tolerance_px`) and the 3 arcsec tolerance (`sky_match_tolerance_arcsec`) within which a track counts as stationary, so the detector rejects it as a fixed source.
-
-**False movers in empty fields.** In 40 synthetic fields with no mover, one track was confirmed by the residual test alone. It was a star whose measured centre flipped between two positions 2.8 pixels apart. The positions fit a line to within 1.8 arcsec (the limit here, twice the 0.9 arcsec position error of these frames), so the residual test passed it, although R-squared was only 0.40. The R-squared test that the residual test replaced rejected that track, and confirmed none in the same 40 fields. The direction check now rejects that field (it reports `rejected_non_monotonic`).
-
-**Re-run.** The whole grid and the 40 mover-free fields were re-run on 2026-10-11, after the direction check, the per-axis residual test and the Gaia refit were added: the recovery table above came out the same in every cell (the fields are seeded), and no track was confirmed in the 40 mover-free fields (0, where the first run had 1). The synthetic frames share one pointing, so these numbers test detection and chaining, not the error in each real frame's position.
-
-**Real fields.** The counts on real fields predate the residual test and the per-night chaining and have not been repeated since. On frames of targets far from the ecliptic, where an unmatched confirmed mover is almost certainly not an asteroid, NGC 2403 (35 frames) gave one confirmed mover that matched no known asteroid and M 101 (40 frames) gave none.
+- **Recovery of injected movers** by brightness and rate, including the faintest mover it finds (partly measured; see [MOV-01](../../../documentation/library_design/validation/asteroid_detection.md#mov-01)).
+- **Slow movers.** The stationary test takes the largest distance of any detection from the track's mean position. For steady motion that is half the total motion. A slow mover whose half-motion stays under `pixel_match_tolerance_px` (default 1.5 pixel) or `sky_match_tolerance_arcsec` (default 3 arcsec) is rejected as a fixed source, at any brightness (partly measured; see [MOV-02](../../../documentation/library_design/validation/asteroid_detection.md#mov-02)).
+- **False tracks in fields with no mover** (partly measured; see [MOV-03](../../../documentation/library_design/validation/asteroid_detection.md#mov-03)).
+- **Confirmed movers on real fields** far from the ecliptic (partly measured; see [MOV-04](../../../documentation/library_design/validation/asteroid_detection.md#mov-04)).
 
 ## A note on scope
 

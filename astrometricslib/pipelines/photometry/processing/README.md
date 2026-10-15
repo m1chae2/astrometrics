@@ -70,7 +70,7 @@ The analyzer's `comparison_set` holds the star ids, the candidates that failed t
 
 ### Measured and designed
 
-Measured, on synthetic light curves and drifting synthetic frames with known truth (`test/test_comparison_ensemble_injection.py`): a 1 percent, 2 hour dip in a 6 hour run with the airmass rising from 1 to 2 comes back at 1.01 to 1.02 percent from light curves and 1.00 percent from frames. For comparison, a median of raw fluxes with a quadratic airmass fit to each star's own flux gives 0.51 to 0.53 percent from the same light curves and 0.30 percent from the frames. A 5 percent sinusoid in a candidate is dropped. The comparison scatter matches the propagated error within 20 percent. A 3 percent frame-to-frame transparency change is removed from every curve.
+Measured only on synthetic light curves and drifting synthetic frames with known truth (partly measured; see [PHO-01](../../../../documentation/library_design/validation/photometry.md#pho-01)). An earlier median ensemble was measured on one real field, NGC 2244 (see [PHO-13](../../../../documentation/library_design/validation/photometry.md#pho-13)).
 
 Designed, not measured on real fields: the 2 and 30 percent band edges, the 5-star minimum, the 20-star cap, the 3-sigma consistency limit and the half-of-typical rule for usable frames.
 
@@ -99,35 +99,11 @@ A star's raw scatter grows as it gets fainter, because its measurements are nois
 
    A score above 1 is not enough on its own, because a field of hundreds of stars will hold a few constant stars that pass by chance. Each star also gets `falseAlarmProbability`, the chance that a constant star would show at least its chi-square from noise alone, and `falseDiscoveryQValue`, that probability corrected for the number of stars tested (the Benjamini and Hochberg step-up rule, which keeps the expected share of false alarms among the flagged stars below the chosen level). A star is a candidate only when its score is above 1 and its q-value is below `FALSE_DISCOVERY_LEVEL` (0.01). The photometry README gives the details of both numbers.
 
-The thresholds are designed values: the 1.5, the 2.326 (the 99th percentile), the 0.01 q-value level, the bin sizes and the 20-star minimum. The synthetic fields below check that they work. No real field has validated them.
+The thresholds are designed values: the 1.5, the 2.326 (the 99th percentile), the 0.01 q-value level, the bin sizes and the 20-star minimum. Synthetic fields check that they work (partly measured; see [PHO-06](../../../../documentation/library_design/validation/photometry.md#pho-06)). No real field has validated them; one real field shows how far they are from the synthetic result (see [PHO-08](../../../../documentation/library_design/validation/photometry.md#pho-08)).
 
-### What the indices recover: measured on synthetic data
+### Why J is a veto
 
-The numbers below come from `make_variability_field` (see `astrometricslib/test/synthetic/README.md`), not from the sky. The test plants variables of known size in a fake field and checks how well each index ranks them above the constant stars.
-
-- *The field.* Each field holds 400 constant stars spread evenly over 6 magnitudes of brightness (scatter from 0.0035 mag at the bright end, set by an unrecorded systematic term of 0.3 percent, to 0.06 mag at the faint end, set by photon and background noise) and 48 frames.
-- *The planted variables.* Five percent of the stars (20) carry a sinusoid (two thirds) or an eclipsing dip (one third) with an amplitude drawn log-uniformly (evenly spread in the logarithm) from 0.01 to 0.3 mag, independent of brightness.
-- *The processing.* Every field runs through the real comparison-star normalization, the detrending and `identify_variable_stars`.
-- *The score.* The AUC (the chance that a random injected variable gets a higher value than a random constant star; 0.5 is chance, 1 is perfect) is the mean over 24 fields, with the standard deviation (sd) between fields.
-
-| Index | AUC (mean, sd) |
-|---|---|
-| Coefficient of variation | 0.835, 0.039 |
-| Reduced chi-square against the propagated errors | 0.809, 0.066 |
-| Reduced chi-square against the scaled errors | 0.940, 0.044 |
-| Stetson J (scaled errors) | 0.879, 0.042 |
-| Excess scatter | 0.942, 0.042 |
-| Smallest ratio of the three indices to their thresholds | 0.880, 0.043 |
-| Chosen score (chi-square and excess scatter, J as a veto) | 0.940, 0.044 |
-
-Reading the table:
-
-- Dividing by the noise model matters more than the choice of index. Chi-square against the propagated errors alone ranks below the CV, because the propagated errors are too small for the bright stars. Against the scaled errors it ranks with excess scatter.
-- Stetson J ranks lower than chi-square here, since it uses only the sign pattern of neighbouring points. Taking the smallest of the three ratios lets J pull the ranking down to 0.880, so the score uses J only as a veto. This gives the same AUC as chi-square with excess scatter (0.940) and keeps J's protection against isolated bad points: in 8 fields where 5 percent of the points scatter five times more than the others, the rule with J flagged none of 3,040 constant stars, and the rule without J flagged 24 (0.8 percent).
-- At the thresholds above, the rule flagged none of the 9,120 constant stars in the 24 fields, and 64 percent of the injected variables: 90 percent of those with an amplitude of 0.1 to 0.3 mag, 63 percent of those from 0.03 to 0.1 mag, and 40 percent of those from 0.01 to 0.03 mag; 76 percent of the sinusoids and 38 percent of the eclipsing dips. A narrow eclipse puts few points in the dip, so it is the hardest shape.
-- The injected systematic term and the outlier share are the generator's choices. A real field has other error sources, so these AUCs describe the method on a field whose noise is understood, not its performance on the sky.
-
-To reproduce the table, run `.venv/bin/python -m astrometricslib.pipelines.photometry.test.test_variability_injection`.
+Stetson J ranks variables less well than the other two indices, because it uses only the sign pattern of neighbouring points. Taking the smallest of the three ratios would let J pull the ranking down. The score therefore uses J only as a veto: it keeps J's protection against isolated bad points without lowering the ranking that chi-square and excess scatter give (partly measured on synthetic fields with known variables; see [PHO-06](../../../../documentation/library_design/validation/photometry.md#pho-06)).
 
 When the field has fewer than 20 stars with a usable light curve, the code has no noise model. It then flags the stars whose CV exceeds the field's CV cutoff, `max(0.02, median + 7.4 x MAD)` of the field's CVs, and leaves the new indices empty. The `scatter_population` gate says so.
 

@@ -32,7 +32,7 @@ The anchors are the stars whose positions give each picture's alignment (see "Fr
 
 Settings: the limits (20 times the noise, 5 percent, 50 stars, 10 stars) are design estimates, not measured values.
 
-How we know the new rule helps: a synthetic sparse field of 12 real stars on a noisy sky has more than 50 detections, almost all noise peaks. The older rule measured a shift of (-4.7, 2.1) pixels for a true shift of (2.7, -1.3) pixels. The new rule keeps the 12 stars and measures (2.70, -1.30) pixels (`test/pre_processing/test_frame_photometry.py`).
+The current rule exists because in a sparse field the detections ranked 50 to 100 are mostly noise peaks, which give a wrong shift (partly measured on a synthetic sparse field; see [PHO-05](../../../../documentation/library_design/validation/photometry.md#pho-05)).
 
 ## Aperture placement
 
@@ -52,16 +52,16 @@ Each measurement keeps the reason for a refusal in `StarPosition.fallback_reason
 
 `calculate_frame_alignment` fits three things to each picture: a shift, a rotation and a change of scale about the middle of the picture (`FrameAlignment`). It works in two steps:
 
-1. Each anchor is found in a wide box (`locate_star_centroid`, which searches up to 40 pixels from the anchor's expected position) and the median shift is taken. The wide box is easily pulled off by a neighbor or a galaxy, with errors of several pixels on some stars in M 81, but the median ignores them.
+1. Each anchor is found in a wide box (`locate_star_centroid`, which searches up to 40 pixels from the anchor's expected position) and the median shift is taken. The wide box is easily pulled off by a neighbor or a galaxy, but the median ignores those stars.
 2. Each anchor is re-centered in the small box (`refine_star_centroid`), starting where the alignment so far says it is.
    - *The fit.* A shift, a rotation and a scale change are then fitted to those accurate positions by least squares, leaving out anchors more than three scaled median absolute deviations from the fit. (The median absolute deviation, MAD, is the median distance of the values from their median; scaled by 1.4826 it estimates a standard deviation without being pulled by outliers.)
    - *Wrong stars.* The small box refuses a wrong star by itself, because it will not move more than 1.5 pixels from where the alignment so far puts the star.
-   - *Second try.* When that leaves fewer than 10 anchors (a rotation not yet fitted can put the far ones out of reach), the step is tried again with a reach of 4 pixels in place of 1.5 (`ALIGNMENT_ANCHOR_REACH_PX`): an anchor's centroid may then sit up to 4 pixels from where the alignment so far puts it. A wide reach is only the second try, because it lets blends (two stars close enough to merge into one blob) in. On M 81 the corner displacement (defined under "Per-star centroid offsets" below) was 0.9 pixels with the usual 1.5 pixel reach and 1.3 to 1.6 pixels with a reach of 3 to 4 pixels, where an independent fit on 800 bright stars gave about 0.6.
+   - *Second try.* When that leaves fewer than 10 anchors (a rotation not yet fitted can put the far ones out of reach), the step is tried again with a reach of 4 pixels in place of 1.5 (`ALIGNMENT_ANCHOR_REACH_PX`): an anchor's centroid may then sit up to 4 pixels from where the alignment so far puts it. A wide reach is only the second try, because it lets blends (two stars close enough to merge into one blob) in, which makes the fitted rotation worse (partly measured on M 81; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)).
    - *Repeats.* The step is repeated three times, because a better alignment puts more anchors inside the box.
 
 When fewer than 5 anchors are found (`MINIMUM_ANCHORS_FOR_SHIFT`), the code fits nothing and treats the picture as not shifted at all, rather than guess a shift from too few stars. Only the shift is used when fewer than 10 anchors are found, or when they sit within 7 percent of the corner distance of one another (a cluster core cannot tell a rotation from a shift). The 7 percent, the 4 pixels and the three repeats are design estimates.
 
-How we know the rotation matters: the reason for fitting a rotation is NGC 2403. On 2026-10-11 its field turned by 0.05 degrees over the night, which moved the corners 1.9 pixels in the worst picture (1.8 pixels at the 95th percentile over the pictures). A shift alone left the far stars outside the 1.5 pixel reach of the centroid box, and 12 percent of the measurements fell back to a position that was off the star. With the rotation fitted, 4 percent fell back. M 13 gave 0.2 pixels at the corner and M 81 gave 0.9, mostly the same small scale change in every picture. That scale change is not a motion of the field. It comes from comparing two ways of measuring a position: the first picture's star positions come from the star finder's centroids, and every later picture's come from the small re-centering box, and the two methods differ slightly.
+Why the rotation is fitted: a field can turn during a night far enough that a shift alone leaves the far stars outside the 1.5 pixel reach of the centroid box, and their measurements then fall back to a position off the star (partly measured on NGC 2403, M 13 and M 81; see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04)). A small scale change can also appear in every picture, even on a field that does not turn. It is not a motion of the field. It comes from comparing two ways of measuring a position: the first picture's star positions come from the star finder's centroids, and every later picture's come from the small re-centering box, and the two methods differ slightly.
 
 ### Per-star centroid offsets
 
@@ -70,7 +70,7 @@ How we know the rotation matters: the reason for fitting a rotation is NGC 2403.
 The 95th percentile used below is the value that 95 percent of the measurements fall below.
 
 - **Corner displacement.** For each picture, how far the fitted rotation and scale change move a corner of the picture (`FrameAlignment.corner_displacement_px`). The summary keeps the 95th percentile over the pictures, the worst picture and how many pictures had a rotation fitted. This is the number the `registration_drift` gate judges.
-- **Median and 95th-percentile offset.** What is left after the alignment: centroid noise, which is larger for faint and crowded stars, and any distortion the fit does not describe. On 2026-10-11 the 95th percentile was 1.0 to 1.3 pixels on M 13, M 81 and NGC 2403, with a median of 0.3 to 0.5, and it did not change with the rotation. The gate reports these but does not judge them.
+- **Median and 95th-percentile offset.** What is left after the alignment: centroid noise, which is larger for faint and crowded stars, and any distortion the fit does not describe. It does not change with the rotation fit (see [PHO-04](../../../../documentation/library_design/validation/photometry.md#pho-04) for values on real fields). The gate reports these but does not judge them.
 - **Fallback fraction.** The share of star measurements, over all pictures, that kept the aligned position because the centroid was refused. A refused star has no offset, so a large fraction also means the offsets underestimate the problem.
 - **Worst picture.** The picture with the largest 95th-percentile offset, and that value.
 

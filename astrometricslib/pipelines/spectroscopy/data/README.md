@@ -117,8 +117,8 @@ followed the same three steps described under "Processing" above.
 
 These references let the classifier match a giant against a giant template
 instead of against the dwarf template that happens to look most similar.
-Without them, the classifier matches catalog type K3II (the star HD 183753)
-and catalog type K1.5III (the star Arcturus) both to a K7V dwarf template.
+Without them, a catalog giant matches a cool dwarf template instead (partly
+measured; see [SPE-20](../../../../documentation/library_design/validation/spectroscopy.md#spe-20)).
 
 Labels follow the library's own naming: `b12iii` is B1-2 III, `k01ii` is
 K0-1 II, `k34ii` is K3-4 II. This directory omits two of the 58 downloaded
@@ -147,9 +147,9 @@ Pickles library; the project derives it from an observation.
 
 Why it is needed: correcting
 for this tilt is necessary for the reference comparison to be meaningful.
-Without this correction, every reference spectrum correlates at 0.95 or
-higher with every observed star, and the classifier matched a Vega spectrum
-to type F6V instead of its correct type, A0V.
+Without this correction, every reference spectrum looks alike to every
+observed star, and the classifier gives a wrong type even for Vega (partly
+measured; see [SPE-13](../../../../documentation/library_design/validation/spectroscopy.md#spe-13)).
 
 ### Derivation
 
@@ -191,12 +191,9 @@ same set of frames.
 
 **Known error in the stored coefficients.** The shipped file still holds these coefficients (its `source` note dates them 2026-09-25); re-deriving replaces them. They came from a fit that blurred the
 reference to one width and skipped a fixed 60 A band around every line, so
-they carry some of Vega's line wings. A synthetic Vega observed through the
-stored line spread measures the size of that error: blurring to one 45 A
-width leaves the fitted response up to 0.5 percent wrong (0.3 percent
-red-to-blue tilt), and one 119 A width up to 2.6 percent wrong, while the
-wavelength-dependent blur recovers it exactly; `test/test_response_template_blur.py`
-holds the fit to that.
+they carry some of Vega's line wings. The size of that error depends on the
+single width used, and the wavelength-dependent blur removes it (partly
+measured, on a synthetic Vega; see [SPE-13](../../../../documentation/library_design/validation/spectroscopy.md#spe-13)).
 
 **Re-deriving.** Re-running the
 derivation script on Vega's stack replaces the coefficients. The script
@@ -209,13 +206,9 @@ refuses a value outside 1 to 10.
 ### Validity
 
 This response is specific to one instrument setup. Re-derive it after any
-change to the camera, grating, or telescope. Validation against two stars
-with an independently known catalog type confirms the response's
-usefulness: the classifier matches Alcor's second star (catalog type A5V)
-to type A5V, or to A7V, two subtypes away, in the score-calibration check
-of 2026-09-19 (`documentation/evidence/spectral_score_calibration_20260919.json`),
-and HD 151023 (catalog type K0) to type K2V. Most other
-spectra in this project's catalog do not yet match any reference closely;
+change to the camera, grating, or telescope. Two stars with an
+independently known catalog type check the response (partly measured; see
+[SPE-13](../../../../documentation/library_design/validation/spectroscopy.md#spe-13)).
 `validate_spectral_and_period_analysis.py` reports the current numbers for
 the full catalog.
 
@@ -234,17 +227,12 @@ second position on the sensor that overlaps first-order light of
 wavelength 2 x L. Because extraction starts at 3800 A, second-order light
 from that wavelength reaches 7600 A and beyond.)
 
-How we know: extending the comparison range to 10000 A and re-fitting the response
-changes the match quality unevenly. For three stars — Vega (catalog type
-A0V), HD 151023 (catalog type K0), and Alcor's second star (catalog type
-A5V) — the match residual (the relative RMS difference from the best
-reference; 0 is perfect) stays about the same (0.08, 0.11, and 0.08). For
-other stars, such as HD 150679 (spectral type A2, a star bright in the
-blue), the residual rises substantially, from a range of 0.19-0.28 up to a range of 0.5-1.8.
-Weighting each wavelength by the sensor's sensitivity does not correct
-this: under that weighting, HD 150679 matches type F6V, which is
-incorrect. Based on this result, 8000 A remains the default upper limit
-for comparison.
+How we know: extending the comparison range to 10000 A and re-fitting the
+response leaves some stars about the same but makes the match residual (the
+relative RMS difference from the best reference; 0 is perfect) much worse
+for stars bright in the blue, and weighting each wavelength by the sensor's
+sensitivity does not correct this (partly measured; see [SPE-14](../../../../documentation/library_design/validation/spectroscopy.md#spe-14)).
+8000 A therefore remains the default upper limit for comparison.
 
 A setup where extending the range would help, for example one that adds a
 blocking filter to remove second-order light, can request the full range:

@@ -134,9 +134,10 @@ def build_group_summary(
         Why the group is not in the combined image. A group with a reason
         reports ``frames_stacked`` as 0.
     gain_measurement : `GroupGainMeasurement`, optional
-        The brightness scale measured for the group (mid-range gain and
-        bright-end ratio). Leave it out for a group that was never compared
-        with the reference.
+        The brightness scale measured for the group: the gain, the bright-end
+        ratio (brightest quarter of the stars, or brightest pixels on the pixel
+        fallback) and their disagreement. Leave it out for a group that was
+        never compared with the reference.
 
     Returns
     -------
@@ -180,22 +181,30 @@ def build_group_summary(
 def exposure_group_linearity_gate(groups: list[dict[str, Any]], tolerance: float) -> GateResult:
     """Judge whether each exposure group is one scale factor of the reference.
 
-    Each group is put on the reference group's brightness scale using the
-    median ratio over mid-range pixels. The same ratio over the brightest
-    pixels is a check: if the camera is linear the two agree, and if the bright
-    end of a group is compressed near full well or clipped they do not. A
-    group whose two ratios differ by more than `tolerance` is left out of the
-    combined image (see `_stack_exposure_groups`), and this gate fails with a
-    sentence that names both ratios. The sentence is the same text the stage
-    lists as the group's flag reason, so the two never disagree.
+    Each group is put on the reference group's brightness scale using one gain.
+    For an imaging stack the gain is the median aperture-flux ratio of the
+    isolated, unsaturated stars the two groups share
+    (`measure_group_gains_with_stars`), and the same ratio over the faintest
+    quarter and over the brightest quarter of those stars is the check. A group
+    with too few such stars, and every group of a spectral stack, uses the
+    pixel method instead (`measure_group_gains`): the gain is the median ratio
+    over mid-range pixels, and the ratio over the brightest pixels is the
+    check. If the camera is linear the check ratios agree with the gain; if the
+    bright end of a group is compressed near full well or clipped they do not.
+    A group whose check ratio sits more than `tolerance` from the gain is left
+    out of the combined image (see `_stack_exposure_groups`), and this gate
+    fails with a sentence that names the ratios. The sentence is the same text
+    the stage lists as the group's flag reason, so the two never disagree.
 
     Parameters
     ----------
     groups : `list` [`dict`]
         The entries from `build_group_summary`, one per exposure group.
     tolerance : `float`
-        The allowed difference between the two ratios, as a fraction of the
-        mid-range ratio (0.05 is 5%).
+        The allowed distance of the faint-quarter or bright-quarter star ratio
+        (the bright-end pixel ratio on the pixel fallback) from the gain, as a
+        fraction of the gain (0.05 is 5%; see
+        documentation/library_design/validation/stacking.md, STK-20).
 
     Returns
     -------

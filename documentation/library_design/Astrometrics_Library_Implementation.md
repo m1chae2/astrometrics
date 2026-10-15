@@ -1,6 +1,6 @@
 # Astrometrics Library Implementation Overview
 
-*Version 1.3 · 2026-10-15 · Status: current*
+*Version 1.4 · 2026-10-15 · Status: current*
 
 While the theoretical algorithms and data flow are covered in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), this map serves as a direct index to the Python source code where those algorithms are physically implemented.
 
@@ -221,26 +221,26 @@ Two paths do not: reading the target catalog goes through `local_database.load_t
 - **Job records (`ProcessingJob`):** `models.py`
 - **Telling whether the program that owns a job still runs:** `process_identity.py`
 
-## Empirical Validation Campaign — Implementation Notes
+## Validation — Implementation Notes
 
-[Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md)'s Empirical Validation section (§8) describes an 8-session validation campaign against real telescope data, plus one extra plate solve of M 45, in plain terms. It also covers the bugs that campaign surfaced. This section maps those findings back to the actual code, for developers who need to trace a finding to its source.
+The evidence behind every tuned value is kept in the validation register, [validation/index.md](./validation/index.md), not here. Each entry names the library calls that were made, the script or test that repeats them, and the result on our data. This section maps a few behaviours that the first validation campaign ([Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md), Section 8) relies on to the code that implements them.
 
-- **Validation scripts:** The sessions are driven through the public API by `astrometricslib/scripts/run_empirical_validation.py`.
-- **Finding 6 (cross-session photometry tracking bug):** `analyze_target(pipeline_type="photometry")` was running `VariabilityAnalyzer` across a target's entire frame history in one pass. It used a single reference frame from whichever session came first. The fix scopes each `VariabilityAnalyzer` run to one `TargetSession` at a time.
-- **Finding 7 (cross-session star identity matching):**
+- **Validation scripts:** `astrometricslib/scripts/run_empirical_validation.py` runs the campaign's targets through the public API. Each register entry names the script, command line and test that automate it.
+- **Per-session photometry tracking:** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` once per `TargetSession`, each with its own reference frame, because a star's pixel position is stable only within one session (see [PHO-14](./validation/photometry.md#pho-14)).
+- **Cross-session star identity matching** (see [PHO-14](./validation/photometry.md#pho-14)):
   - The matching itself is implemented per Architecture §5.2 (concept 6), in `pipelines/photometry/batch.py` (`_match_and_merge_across_sessions`).
-  - An unconditional per-star SIMBAD query was being triggered by routing through the shared `AstrometryPipeline` entry point, the same one "astrometry"/"spectroscopy" use, when only the already-solved WCS was actually needed. Photometry now builds a `StarIdentifier()` directly and passes it to `resolve_frame_wcs` (`pipelines/shared/session_identification.py`), which reuses a WCS already in the file and solves only when there is none.
-  - An initial pairwise `SkyCoord.separation()` loop (comparing every star to every other star) did not scale past a few hundred stars per session. It was replaced with a KD-tree-backed `search_around_sky` call. A KD-tree is a search structure that splits space into boxes, so finding the near neighbors of a point does not require checking every other point.
-  - Repeatability was verified by checking that two consecutive runs produced a byte-for-byte identical `stellar_catalog` row set.
-  - One session was excluded from matching: a light frame in it actually referenced `M 13/M_13_Stacked.fits`, a different target's stack, due to a pre-existing library data-labeling error. This was correctly isolated via `sessions_missing_wcs`, without affecting the other 7 sessions.
-- **Finding 5 (moving-object track linkage speedup):** This is the moving-object pipeline's chaining step, timed on M 81's detections. An RA/Dec (Right Ascension and Declination, the sky's longitude and latitude) bounding-box pre-filter, applied before computing angular separations (`MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py`), skips the exact distance calculation for almost every pair. The search is still $O(N \times M)$ (its work grows with the product of the two list sizes): the box test itself looks at every pair, but as one vectorized NumPy comparison instead of a Python loop. Tested on M 81's ~150,000 detected sources across 46 frames: the step went from over 20 minutes to seconds.
+  - Photometry builds a `StarIdentifier()` directly and passes it to `resolve_frame_wcs` (`pipelines/shared/session_identification.py`), which reuses a WCS already in the file and solves only when there is none. It does not route through the shared `AstrometryPipeline` entry point, which would query SIMBAD once per star.
+  - Neighbours are found with a KD-tree-backed `search_around_sky` call, not a pairwise `SkyCoord.separation()` loop. A KD-tree is a search structure that splits space into boxes, so finding the near neighbors of a point does not require checking every other point.
+  - Repeatability is checked by comparing the `stellar_catalog` row set of two consecutive runs.
+  - A session whose light frame references another target's stack is isolated via `sessions_missing_wcs` and left out, without affecting the other sessions.
+- **Moving-object track linking:** an RA/Dec (Right Ascension and Declination, the sky's longitude and latitude) bounding-box pre-filter, applied before computing angular separations (`MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py`), skips the exact distance calculation for almost every pair. The search is still $O(N \times M)$ (its work grows with the product of the two list sizes): the box test itself looks at every pair, but as one vectorized NumPy comparison instead of a Python loop (see [MOV-07](./validation/asteroid_detection.md#mov-07)).
 
 ## Batch Processing & Maintenance Scripts
 
 *Located in:* `astrometricslib/scripts/`
 These top-level scripts orchestrate the pipeline across multiple targets and manage execution environments.
 - **Batch execution:** `run_all_target_processing.py`
-- **Empirical validation:** `run_empirical_validation.py`
+- **Empirical validation:** `run_empirical_validation.py` (the register entries say which checks it repeats)
 - **Catalog seeding:** `seed_local_star_catalog.py`
 - **Concurrency benchmarking:** `benchmark_siril_concurrency.py`
 - **Data backfilling:** `backfill_focal_length.py`

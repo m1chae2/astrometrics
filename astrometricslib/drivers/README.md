@@ -69,7 +69,7 @@ The command lasts for the whole Siril session, so it comes before every `convert
 
 ### Bias and dark masters
 
-Several frames are stacked with sigma rejection, which throws out pixel values far from the rest, such as cosmic-ray hits. The command `rej 3 3` sets the low and high limits to 3 standard deviations from the middle value. A lone frame has nothing to compare with, so it becomes the master unchanged.
+Several frames are stacked with sigma rejection, which throws out pixel values far from the rest, such as cosmic-ray hits. The command `rej 3 3` sets the low and high limits to 3 standard deviations from the middle value (a design estimate). A lone frame has nothing to compare with, so it becomes the master unchanged.
 
 ### Flat master
 
@@ -103,7 +103,7 @@ Each call returns the frames and two lists of one-sentence flags. The driver cop
 
 - `calibration_mismatch_flags` (soft). The frames are still applied. One sentence says either:
   - that no frame matched the lights' gain setting and offset, naming the gain setting and offset applied and the lights they were applied to; or
-  - that no dark was within 3 C (`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`) of the lights, naming the lights' temperature, the master's temperature and the tolerance.
+  - that no dark was within 3 C (`DEFAULT_DARK_TEMPERATURE_TOLERANCE_C`, partly measured; see [STK-06](../../documentation/library_design/validation/stacking.md#stk-06)) of the lights, naming the lights' temperature, the master's temperature and the tolerance.
 - `calibration_match_blocking_flags` (blocking). No frame of that kind is applied. One sentence says that the lights' binning has no calibration frames and names the binning the library holds. Frames binned differently have different pixels, so they cannot calibrate the lights.
 
 The stacking pipeline reads both lists and fails its `calibration_metadata` gate (see the stacking README).
@@ -153,7 +153,7 @@ After choosing a slot, the library checks it:
 
 A rescan (`refresh_dark_frames`, `refresh_bias_frames` and `refresh_flat_frames`) moves a frame filed under an older, shorter key to its new key. A library saved before binning and temperature were tracked therefore updates on its next rescan. Until then its frames count as 1x1.
 
-Its darks are still not pooled across temperatures. When a dark's key has no temperature, the library reads that dark's own `CCD-TEMP` and places it in a slot before choosing. The test `test_a_library_saved_before_temperatures_does_not_pool_them` covers a real case: the library file of 2026-10-03 had no temperature keys, and without this rule -12 C lights received a master made of 61 darks at 0 C and 30 at -10 C, with no flag.
+Its darks are still not pooled across temperatures. When a dark's key has no temperature, the library reads that dark's own `CCD-TEMP` and places it in a slot before choosing. Without this rule, lights would receive a master pooled from darks of two temperatures, with no flag. The test `test_a_library_saved_before_temperatures_does_not_pool_them` covers a real case (see [STK-06](../../documentation/library_design/validation/stacking.md#stk-06)).
 
 ## Injecting drivers
 

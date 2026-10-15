@@ -57,7 +57,7 @@ Every flux (the light a star delivered, after the sky is subtracted) comes with 
 
 A camera's noise has a few known sources: the random arrival of light (photon or shot noise, which grows as the square root of the count), the electronics that read each pixel (read noise), and the sky glow under the star. The CCD equation (the noise budget of a camera sensor) adds them up. It gives the variance (the error squared) of the flux, in electrons:
 
-`variance = F + n_pix (S + RN^2 + D) + (n_pix^2 / n_sky) (S + RN^2)`
+`variance = F + n_pix (S + RN^2 + D) + (n_pix^2 / n_sky) (S + RN^2 + D)`
 
 `F` is the star's net counts, `S` the sky counts per pixel, `RN` the read noise, `D` the dark current per pixel (signal the sensor makes by itself from heat), `n_pix` the number of pixels in the circle, and `n_sky` the number of pixels in the sky ring. All of these are in electrons except the pixel counts. The code converts the result back to ADU with the camera's gain (electrons per ADU) and divides by the exposure time, the same way it stores the flux. The code takes the dark current as zero, and the equation assumes the frame has had its bias level (the fixed offset the camera adds) removed.
 

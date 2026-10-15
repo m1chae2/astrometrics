@@ -75,38 +75,33 @@ With no site configured, the observer is placed at Earth's center. With no targe
 
 **Measuring its light.** Aperture photometry sums the light inside a circle (the aperture) and subtracts the sky that falls in the same circle. The radius is a fixed 4 pixels for every star, not scaled to the star's width. The net flux is
 
-$$F_\text{net} = \sum_{i \in \text{ap}} I_i - n_\text{pix} \bar{B} \tag{1}$$
+$$F_\text{net} = \sum_{p \in \text{ap}} I_p - n_\text{pix} \bar{B} \tag{1}$$
 
-where $I_i$ are the pixel values in ADU (analog-to-digital units, raw camera counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring (annulus) from 7 to 12 pixels. Divided by the exposure, it becomes a flux in ADU per second.
+where $I_p$ is the value of pixel $p$ in ADU (analog-to-digital units, raw camera counts), $n_\text{pix}$ the number of pixels in the circle, and $\bar{B}$ the median of a sky ring (annulus) from 7 to 12 pixels. Divided by the exposure, it becomes a flux in ADU per second.
 
-**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large $\sigma_F$ compared with $F_\text{net}$ means a noisy measurement. Its 1σ error (one standard deviation) is
+**Its error.** The CCD equation adds up every noise source in electrons: the star's own photon noise, the sky, the read noise and the dark current. A large error compared with $F_\text{net}$ means a noisy measurement. In the symbols of the architecture paper's Equation (7), the 1σ error (one standard deviation) in ADU is $\sigma_{\text{ap}} / g$, where
 
-$$\sigma_F = \frac{1}{g}\sqrt{F_e + n_\text{pix}\left(S_e + R^2 + D_e\right)
-  + \frac{n_\text{pix}^2}{n_\text{sky}}\left(S_e + R^2\right)} \tag{2}$$
+$$\sigma_{\text{ap}}^2 = S_\star + n_\text{pix}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right)
+  + \frac{n_\text{pix}^2}{n_\text{sky}}\left(s_\text{sky} + \sigma_\text{rd}^2 + D\right) \tag{2}$$
 
-Here $g$ is the gain in electrons per ADU, $F_e = g F_\text{net}$, and $S_e = g \bar{B}$ is the sky per pixel. $R$ is the read noise (e-, the electronic noise of reading the sensor). $D_e$ is the dark current per pixel (a signal the sensor builds up from heat). $n_\text{sky}$ is the number of sky pixels. The last term is the error of the sky level itself. $\sigma_F$ is in ADU, like $F_\text{net}$. This predicted noise is compared later with the scatter the light curves actually show (Section 3.4).
+Here $g$ is the gain in electrons per ADU, $S_\star = g F_\text{net}$ the star's net counts, and $s_\text{sky} = g \bar{B}$ the sky per pixel, all in electrons. $\sigma_\text{rd}$ is the read noise (the electronic noise of reading the sensor). $D$ is the dark current per pixel (a signal the sensor builds up from heat); no source records it, so it is taken as zero. $n_\text{sky}$ is the number of sky pixels. The last term is the error of the sky level itself. This predicted noise is compared later with the scatter the light curves actually show (Section 3.4).
 
 ### 3.3 Differential ensemble normalization
 
 **Choosing the comparison stars.** A fixed comparison set is chosen per session. Candidates are measured, unsaturated (not clipped at the sensor's maximum) and positive in every usable frame and not listed as variable. The brightest 2% are skipped, and the band reaches the brightest 30%. Candidates that scatter more than their errors allow are then dropped one at a time, worst first. Dropping stops when no candidate is out of line, or when only 5 remain. At most 20 are kept.
 
-**The ensemble level.** Each member's flux is divided by its own mean over the session, so a ratio of 1 means "normal". The frame's ensemble level $L_k$ is the average of those ratios in frame $k$. It has no unit: 0.9 means the comparison stars were 10% fainter than their session average in that frame. The average is inverse-variance weighted: each star counts in proportion to $1/\sigma^2$, so precise stars count more than noisy ones. With $j$ the comparison star and $k$ the frame:
+**The ensemble signal.** The symbols follow the architecture paper: $i$ is a star, $c$ a comparison star and $t$ the time of a frame. Each comparison star's flux is divided by its own mean over the session, so a ratio of 1 means "normal". The ensemble signal $L_\text{ens}(t)$ is the weighted average of those ratios in the frame at time $t$, scaled back to flux units by the mean of the comparison stars' session means. The average is inverse-variance weighted: each star counts in proportion to one over its squared fractional error, so precise stars count more than noisy ones. This is Equation (8) of the paper:
 
-$$L_k = \frac{\sum_j w_{j,k} \, F_{j,k} / \langle F_j \rangle}{\sum_j w_{j,k}}, \qquad
-w_{j,k} = \frac{1}{\sigma_{j,k}^2}, \qquad \sigma_{L,k} = \frac{1}{\sqrt{\sum_j w_{j,k}}} \tag{3}$$
+$$L_\text{ens}(t) = \bar{\mu}\,\frac{\sum_c w_c(t) \, F_c(t) / \mu_c}{\sum_c w_c(t)}, \qquad
+w_c(t) = \frac{1}{\epsilon_c(t)^2}, \qquad
+\sigma_\text{ens}(t) = \frac{\bar{\mu}}{\sqrt{\sum_c w_c(t)}} \tag{3}$$
 
-Here $F_{j,k}$ is the star's flux (ADU per second), $\langle F_j \rangle$ its session mean, and $\sigma_{j,k} = \sigma_{F,j,k} / \langle F_j \rangle$ its fractional error in that frame. $\sigma_{L,k}$ is the fractional error of the level.
+Here $F_c(t)$ is the comparison star's flux (ADU per second), $\mu_c$ its session mean, $\bar{\mu}$ the mean of the $\mu_c$, and $\epsilon_c(t) = \sigma_{F,c}(t) / \mu_c$ its fractional error in that frame. $\sigma_\text{ens}(t)$ is the error of the signal, in ADU per second. $L_\text{ens}(t)$ is the flux of an "average comparison star" at time $t$: if the sky dims every star by 10% in one frame, it drops by 10% too.
 
-**Back to flux units.** To divide a star's flux by the level, the level is scaled back to flux units:
+**Normalizing a star.** A star's normalized flux is $\hat{F}_i(t) = F_i(t) / L_\text{ens}(t)$. A star as bright as the average comparison star has a normalized flux near 1. A comparison star is divided by the signal built from the other members only (leave one out), so its own changes never enter its divisor. The error combines the star's own error $\sigma_{F,i}(t)$ and the signal's error; either one being large makes the result noisy:
 
-$$N_k = \bar{F}\, L_k, \qquad \sigma_{N,k} = \bar{F}\, \sigma_{L,k}$$
-
-where $\bar{F}$ is the mean of the comparison stars' session means, in ADU per second. $N_k$ is the flux of an "average comparison star" in frame $k$. A star as bright as that average star then has a normalized flux near 1.
-
-**Normalizing a star.** A star's normalized flux in frame $k$ is $f_k = F_k / N_k$. A comparison star is divided by the level built from the other members only (leave one out), so its own changes never enter its divisor. The error combines the star's own error and the level's error; either one being large makes the result noisy:
-
-$$\sigma_{f,k} = \sqrt{\left(\frac{\sigma_{F,k}}{N_k}\right)^2
-  + \left(\frac{F_k \, \sigma_{N,k}}{N_k^2}\right)^2} \tag{4}$$
+$$e_i(t) = \sqrt{\left(\frac{\sigma_{F,i}(t)}{L_\text{ens}(t)}\right)^2
+  + \left(\frac{F_i(t) \, \sigma_\text{ens}(t)}{L_\text{ens}(t)^2}\right)^2} \tag{4}$$
 
 Normalization needs at least 2 comparison stars. With fewer, the raw light curves are kept.
 
@@ -114,21 +109,22 @@ Normalization needs at least 2 comparison stars. With fewer, the raw light curve
 
 **Why several tests.** Every light curve scatters a little from noise alone. A variable star scatters more than its error bars allow, and its changes are smooth from one point to the next. Three indices each catch one of these signs.
 
-**Units.** The indices are computed on each star's normalized fluxes $f_k$ (Section 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a larger number means fainter; 1 mag is a factor of about 2.5). A fractional scatter $s$ is $1.0857\,s$ magnitudes, where $1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m = -2.5 \log_{10} \bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the camera's own scale, not calibrated to a catalog.
+**Units.** The indices are computed on each star's normalized fluxes $\hat{F}_i(t)$ (Section 3.3). Scatter is quoted in magnitudes (a logarithmic scale where a larger number means fainter; 1 mag is a factor of about 2.5). A fractional scatter $s$ is $1.0857\,s$ magnitudes, where $1.0857 = 2.5 / \ln 10$. A star's brightness is its instrumental magnitude $m = -2.5 \log_{10} \bar{F}_\star$, with $\bar{F}_\star$ its mean raw flux in ADU per second: a magnitude on the camera's own scale, not calibrated to a catalog.
 
 **The noise model.** A noise model gives the scatter a constant star of instrumental magnitude $m$ shows in this field, $\sigma_\text{model}(m)$. It is the median measured scatter in brightness bins, so it includes noise the CCD equation leaves out (centroid jitter, flat-field errors). It needs at least 20 stars.
 
-**The three indices.** In each, $x_i$ are the star's $n$ normalized fluxes, $\sigma_i$ their errors and $\bar{x}_w$ their weighted mean. When a star's errors are smaller than the noise model's scatter, they are scaled up to it, so a constant star gives the values below.
+**The three indices.** In each, $\hat{F}_j$ is point $j$ of one star's light curve, $e_j$ its error, $\bar{F}_w$ the error-weighted mean of the points and $n_\text{pts}$ the number of points, as in the paper's Equation (9). When a star's errors are smaller than the noise model's scatter, they are scaled up to it, so a constant star gives the values below.
 
 The reduced chi-square $\chi^2_\nu$ asks whether the points scatter more than their error bars allow. A value near 1 means noise only; well above 1 means extra variation:
 
-$$\chi^2_\nu = \frac{1}{n-1}\sum_{i=1}^{n}\frac{(x_i - \bar{x}_w)^2}{\sigma_i^2} \tag{5}$$
+$$\chi^2_\nu = \frac{1}{n_\text{pts}-1}\sum_{j=1}^{n_\text{pts}}
+  \left(\frac{\hat{F}_j - \bar{F}_w}{e_j}\right)^2 \tag{5}$$
 
 The Stetson J index asks whether neighboring points in time stray to the same side of the mean together. Noise gives $J$ near 0; a smooth real change gives a clearly positive $J$:
 
-$$\delta_i = \sqrt{\frac{n}{n-1}}\,\frac{x_i - \bar{x}_w}{\sigma_i}, \qquad
-J = \frac{1}{n-1}\sum_{i=1}^{n-1}\operatorname{sgn}(P_i)\sqrt{|P_i|}, \qquad
-P_i = \delta_i \, \delta_{i+1} \tag{6}$$
+$$\delta_j = \sqrt{\frac{n_\text{pts}}{n_\text{pts}-1}}\,\frac{\hat{F}_j - \bar{F}_w}{e_j},
+\qquad J = \frac{1}{n_\text{pts}-1}\sum_{j=1}^{n_\text{pts}-1}\operatorname{sgn}(P_j)
+\sqrt{|P_j|}, \qquad P_j = \delta_j \, \delta_{j+1} \tag{6}$$
 
 The excess scatter $E$ compares the star's measured scatter (in magnitudes) with what the noise model expects for a star of its brightness. 1 means typical; 2 means twice the usual scatter:
 
@@ -144,7 +140,7 @@ $$S = \begin{cases}\min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr}\
 \min\left(\chi^2_\nu / \chi^2_\text{thr},\; E / E_\text{thr},\; 1\right) & \text{otherwise}
 \end{cases} \tag{8}$$
 
-**Limiting false positives.** Testing thousands of stars makes some pass by chance. A star is a candidate when $S > 1$ and its q-value is below 0.01. The chi-square false-alarm probability is the chance that noise alone gives a $\chi^2$ this large (the upper tail of the chi-square distribution with $n - 1$ degrees of freedom). The Benjamini–Hochberg method turns these probabilities into q-values that control the false discovery rate (FDR): the expected share of false positives among the stars flagged. A q-value of 0.05 means about 1 in 20 such picks is expected to be noise.
+**Limiting false positives.** Testing thousands of stars makes some pass by chance. A star is a candidate when $S > 1$ and its q-value is below 0.01. The chi-square false-alarm probability is the chance that noise alone gives a $\chi^2$ this large (the upper tail of the chi-square distribution with $n_\text{pts} - 1$ degrees of freedom). The Benjamini–Hochberg method turns these probabilities into q-values that control the false discovery rate (FDR): the expected share of false positives among the stars flagged. A q-value of 0.05 means about 1 in 20 such picks is expected to be noise.
 
 **Small fields.** A field too small for a noise model falls back to a cutoff on the coefficient of variation (CV, standard deviation over mean). The cutoff is the typical CV plus a multiple of its spread, and never below 2%:
 

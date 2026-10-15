@@ -48,7 +48,7 @@ Forms:
 ### 3.1 Pipeline README (`astrometricslib/pipelines/<name>/README.md`)
 
 1. H1 `<Pipeline> pipeline`, then one or two sentences on what it does.
-2. The glossary line (Section 6.5).
+2. The glossary line (Section 6.6).
 3. `## Terms used here`.
 4. `## What the pipeline does, in order`: a numbered list. Long sub-topics follow as their own H2 sections.
 5. `## Settings`.
@@ -142,12 +142,16 @@ Measures of a detector or classifier:
 - A quality-metric table has the columns: `Field` (code format) | `Unit` | `Limit (status)` | `High or low means` | `Read by`.
 - A gate table in a README has the columns: `Gate` | `Fails when` | `Not checked when`. A review guide's gate table has `Gate` | `Role` | `Defined in` | `What it checks`, because it is generated from the gate constants and is read by a reviewer comparing pipelines.
 
-### 6.4 Links
+### 6.4 Symbols
+
+The architecture paper's Appendix B is the one list of symbols. A review guide or README that writes an equation uses the paper's symbols and indices, and names the paper's equation it restates.
+
+### 6.5 Links
 
 - Relative links with anchors to other documents and sections, not quoted section names or bare paths.
 - Each pipeline README links its review guide, and each review guide links back.
 
-### 6.5 The glossary line
+### 6.6 The glossary line
 
 Near the top of every README, review guide and register file:
 

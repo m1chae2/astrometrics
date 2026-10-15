@@ -78,7 +78,7 @@ The re-centering box has a fixed size. It assumes a star width near 3 to 4 pixel
 
 `frame_photometry.py` computes the 1σ uncertainty of each flux with the CCD equation (the noise budget of a camera sensor), in `aperture_flux_error_adu`. The equation adds up the variances (errors squared) of the independent noise sources: the star's own light, the sky, and the camera electronics. It works in electrons, because the random scatter of a count follows the number of electrons collected:
 
-`variance = F + n_pix (S + RN^2 + D) + (n_pix^2 / n_sky) (S + RN^2)`
+`variance = F + n_pix (S + RN^2 + D) + (n_pix^2 / n_sky) (S + RN^2 + D)`
 
 | Symbol | Meaning | Unit |
 | --- | --- | --- |

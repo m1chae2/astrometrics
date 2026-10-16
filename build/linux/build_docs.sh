@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Purpose: Build script for Astrometrics Sphinx documentation suite.
+# Builds the HTML site, then checks that MathJax can draw every equation on
+# it (build/documentation/math_check/), since the browser, not Sphinx, draws
+# them. The check needs Node.js; without it the script warns and skips it.
 # Usage: ./build/linux/build_docs.sh [--clean]
 # ==============================================================================
 
@@ -35,6 +38,19 @@ echo "Building Astrometrics Sphinx Documentation..."
 # cross-references, missing autosummary stubs, and malformed directives from
 # silently accumulating and only failing once pushed.
 "${SPHINX_BUILD}" -W -b html "${DOCS_DIR}" "${BUILD_DIR}"
+
+# Sphinx only copies each equation into the page; MathJax draws it in the
+# reader's browser, so a broken equation never fails the build above.
+MATH_CHECK_DIR="${REPO_ROOT}/build/documentation/math_check"
+if command -v node >/dev/null 2>&1; then
+    echo "Checking that MathJax can draw every equation..."
+    if [ ! -d "${MATH_CHECK_DIR}/node_modules" ]; then
+        npm ci --prefix "${MATH_CHECK_DIR}" --no-audit --no-fund
+    fi
+    node "${MATH_CHECK_DIR}/check_math.mjs" "${BUILD_DIR}"
+else
+    echo "Warning: Node.js not found; skipped the equation check (CI runs it)."
+fi
 
 echo "Documentation built successfully!"
 echo "Main portal: file://${BUILD_DIR}/index.html"

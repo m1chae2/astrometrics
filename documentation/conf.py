@@ -7,6 +7,7 @@ reader expects on Read the Docs: an "Edit on GitHub" button, the date each page
 last changed, a sitemap, a 404 page, and a PDF of the four papers.
 """
 
+import json
 import os
 import re
 import sys
@@ -176,6 +177,14 @@ myst_enable_extensions = [
     "fieldlist",
 ]
 
+# Draw equations with the MathJax release the CI equation check uses
+# (build/documentation/math_check/), so a page draws exactly what the check
+# passed. The version is read from the check's package.json, so the two cannot
+# drift apart. Sphinx's default follows the latest 4.x release instead.
+_MATH_CHECK_PACKAGE = Path(__file__).resolve().parent.parent / "build/documentation/math_check/package.json"
+_MATHJAX_VERSION = json.loads(_MATH_CHECK_PACKAGE.read_text(encoding="utf-8"))["dependencies"]["@mathjax/src"]
+mathjax_path = f"https://cdn.jsdelivr.net/npm/mathjax@{_MATHJAX_VERSION}/tex-mml-chtml.js"
+
 # Route ```mermaid fences to sphinxcontrib-mermaid's directive. Without this
 # MyST hands them to Pygments as an ordinary code block, and since there is no
 # "mermaid" lexer every diagram raises a highlighting warning and renders as
@@ -287,6 +296,38 @@ def _plain_equation_numbers_for_print(app: Sphinx, docname: str, source: list[st
         source[0] = re.sub(r"\\tag\{([^}]*)\}", r"\\qquad(\1)", source[0])
 
 
+def _numbered_equations_unwrapped(app: Sphinx, doctree: nodes.document, docname: str) -> None:
+    r"""Let MathJax draw numbered equations that span several lines.
+
+    The papers number their display equations with ``\tag{n}``. For the web,
+    Sphinx wraps every equation with a line break (``\\``) in a ``split``
+    block, and MathJax refuses a ``\tag`` there: the page shows "\tag not
+    allowed in split environment" instead of the equation. This handler
+    passes each numbered equation to MathJax as written, inside the display
+    delimiters only. The source stays plain Markdown math, so GitHub draws
+    it too. The PDF handles ``\tag`` separately
+    (`_plain_equation_numbers_for_print`).
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
+    doctree : `docutils.nodes.document`
+        The resolved document, changed in place.
+    docname : `str`
+        The document's name.
+    """
+    if app.builder.format != "html":
+        return
+    opening, closing = app.config.mathjax_display
+    for node in doctree.findall(nodes.math_block):
+        text = node.astext()
+        if r"\tag{" not in text or node.get("nowrap"):
+            continue
+        node["nowrap"] = True
+        node.children = [nodes.Text(f"{opening}{text.strip()}{closing}")]
+
+
 def _papers_page_for_print_only(app: Sphinx, env: BuildEnvironment, docnames: list[str]) -> None:
     """Leave the PDF's starting page out of every build except the PDF.
 
@@ -320,4 +361,5 @@ def setup(app: Sphinx) -> None:
     app.connect("doctree-read", _builtin_type_xrefs)
     app.connect("builder-inited", _plain_mermaid_for_print)
     app.connect("source-read", _plain_equation_numbers_for_print)
+    app.connect("doctree-resolved", _numbered_equations_unwrapped)
     app.connect("env-before-read-docs", _papers_page_for_print_only)

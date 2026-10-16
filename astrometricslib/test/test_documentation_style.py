@@ -1,4 +1,4 @@
-"""Purpose: Enforce the layout and linking rules of the library documentation.
+r"""Purpose: Enforce the layout and linking rules of the library documentation.
 
 Description: ``documentation/Documentation_Conventions.md`` sets how the
 library's documents are laid out and linked. These tests check the rules a
@@ -13,7 +13,13 @@ script can check exactly:
   current value, so a changed threshold cannot leave stale evidence behind;
 - every "§n" reference in the implementation document names a section of
   the architecture paper;
-- every relative link and anchor in the documentation resolves.
+- every relative link and anchor in the documentation resolves;
+- every numbered display equation has the one shape both the docs site and
+  GitHub can draw: a single top-level ``\tag{n}`` and no blank line, with
+  each paper's numbers running 1, 2, 3 and so on.
+
+Whether MathJax can draw every equation at all is checked on the built site
+by ``build/documentation/math_check/check_math.mjs``.
 
 Prose style (spelling, terms, units, sentence length) is checked by Vale and
 Markdown mechanics by markdownlint; see ``build/documentation/lint_docs.sh``.
@@ -340,3 +346,85 @@ def test_agent_skill_copies_match(skill: str) -> None:
     assert copy.read_bytes() == original.read_bytes(), (
         f"{copy.relative_to(REPO_ROOT)} differs from {original.relative_to(REPO_ROOT)}; copy it over"
     )
+
+
+DISPLAY_MATH = re.compile(r"^[ \t]*\$\$\n(.*?)^[ \t]*\$\$", re.MULTILINE | re.DOTALL)
+EQUATION_TAG = re.compile(r"\\tag\{([^}]*)\}")
+ENVIRONMENT = re.compile(r"\\(begin|end)\{[^}]+\}")
+
+
+def _equation_files() -> list[Path]:
+    """List the Markdown files whose display equations are checked.
+
+    Returns
+    -------
+    paths : `list` [`pathlib.Path`]
+        Every Markdown file under ``documentation/`` except build output, and
+        every README in the two libraries.
+    """
+    files = {
+        path
+        for path in (REPO_ROOT / "documentation").rglob("*.md")
+        if "_build" not in path.parts and "plans" not in path.parts
+    }
+    for library in ("astrometricslib", "wayfindinglib"):
+        files.update((REPO_ROOT / library).rglob("README.md"))
+    return sorted(files)
+
+
+def _tag_depth(equation: str, position: int) -> int:
+    r"""Count the environments still open at one place in an equation.
+
+    Parameters
+    ----------
+    equation : `str`
+        The TeX source of one display equation.
+    position : `int`
+        A character offset into ``equation``.
+
+    Returns
+    -------
+    depth : `int`
+        The number of ``\begin{...}`` blocks not yet closed at ``position``.
+    """
+    depth = 0
+    for match in ENVIRONMENT.finditer(equation[:position]):
+        depth += 1 if match.group(1) == "begin" else -1
+    return depth
+
+
+@pytest.mark.parametrize("path", _equation_files(), ids=lambda path: str(path.relative_to(REPO_ROOT)))
+def test_numbered_equations_have_a_drawable_shape(path: Path) -> None:
+    r"""Each tagged equation has one top-level tag and no blank line.
+
+    MathJax and GitHub refuse a ``\tag`` inside an environment such as
+    ``aligned`` or ``cases``, refuse two tags in one equation, and treat a
+    blank line as the end of the equation. The docs build passes the rest to
+    MathJax unchanged (``_numbered_equations_unwrapped`` in
+    ``documentation/conf.py``).
+    """
+    problems = []
+    text = path.read_text(encoding="utf-8")
+    for block in DISPLAY_MATH.finditer(text):
+        equation = block.group(1)
+        tags = list(EQUATION_TAG.finditer(equation))
+        if not tags:
+            continue
+        line = text.count("\n", 0, block.start()) + 1
+        if len(tags) > 1:
+            problems.append(f"line {line}: {len(tags)} tags in one equation")
+        if any(_tag_depth(equation, tag.start()) for tag in tags):
+            problems.append(
+                f"line {line}: \\tag sits inside an environment; put it after the last \\end{{...}}"
+            )
+        if re.search(r"\n[ \t]*\n", equation.strip()):
+            problems.append(f"line {line}: blank line inside a numbered equation")
+    assert not problems, f"{path.relative_to(REPO_ROOT)}: {problems}"
+
+
+@pytest.mark.parametrize("path", sorted(DESIGN_DIR.glob("*_Library_*.md")), ids=lambda path: path.name)
+def test_paper_equation_numbers_run_in_order(path: Path) -> None:
+    """A paper numbers its equations 1, 2, 3 and so on, with no gaps."""
+    numbers = EQUATION_TAG.findall(path.read_text(encoding="utf-8"))
+    expected = [str(number) for number in range(1, len(numbers) + 1)]
+    assert numbers == expected, f"{path.name} numbers its equations {numbers}; expected {expected}"

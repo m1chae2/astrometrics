@@ -199,7 +199,7 @@ Near the top of every README, review guide and register file:
 | --- | --- |
 | Theory-only architecture papers; evidence only in the register; paper length limits | `astrometricslib/test/test_documentation_rules.py`, `wayfindinglib/test/test_documentation_papers.py` |
 | Seven sections, one place and one name per page; links and anchors in `llms.txt` resolve | `astrometricslib/test/test_documentation_site.py` |
-| Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching `.claude` and `.agent` skill copies | `astrometricslib/test/test_documentation_style.py` |
+| Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching `.claude` and `.agent` skill copies, numbered equations with one top-level `\tag` and papers numbered 1, 2, 3 | `astrometricslib/test/test_documentation_style.py` |
 | Register entries complete, cited and resolvable | `astrometricslib/test/test_validation_register.py` |
 | Guide symbols defined in Appendix A or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
 | Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py`, `wayfindinglib/test/test_documentation_papers.py` |
@@ -207,5 +207,6 @@ Near the top of every README, review guide and register file:
 | Spelling, terms, units, labels, voice | Vale (`.vale.ini`, `build/documentation/vale/`) |
 | Markdown mechanics | markdownlint (`.markdownlint-cli2.jsonc`) |
 | Docs site builds with no warnings | `build/linux/build_docs.sh` (`sphinx-build -W`) |
+| Every equation on the built site draws in MathJax, the version the site loads | `build/documentation/math_check/check_math.mjs`, run by `build/linux/build_docs.sh` |
 
 The pre-commit hooks `documentation-rules` and `documentation-lint`, and the `astrometricslib` and `docs` CI workflows, run these checks; `build/documentation/lint_docs.sh` runs both linters locally. A weekly workflow (`docs-linkcheck.yml`) reports dead external links without blocking pull requests.

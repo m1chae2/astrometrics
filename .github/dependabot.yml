@@ -36,6 +36,13 @@ updates:
       ui-mcp-minor-and-patch:
         update-types: [minor, patch]
 
+  # MathJax for the docs equation check. documentation/conf.py reads the
+  # version from this package.json, so the site moves with the check.
+  - package-ecosystem: npm
+    directory: /build/documentation/math_check
+    schedule:
+      interval: weekly
+
   # Python dependencies declared in pyproject.toml.
   - package-ecosystem: pip
     directory: /

@@ -1,0 +1,9 @@
+{
+  "name": "astrometrics-math-check",
+  "private": true,
+  "description": "Renders every equation of the built docs site with MathJax and reports render errors.",
+  "type": "module",
+  "dependencies": {
+    "@mathjax/src": "4.1.3"
+  }
+}

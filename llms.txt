@@ -1,0 +1,51 @@
+# Astrometrics
+
+> A desktop app and two Python libraries for astrophotography, photometry, spectroscopy and observatory control. astrometricslib turns telescope frames into measurements; wayfindinglib plans, runs and protects an observing night. This file maps each topic to the documents that explain it and the code that implements it. Read the documents first to learn what something is meant to do and where it lives, then confirm in the code. When a document and the code disagree, the code is the current behavior: say so and treat the document as needing a fix.
+
+Paths are relative to the repository root. Theory is in the architecture papers, code names and tuned values in the implementation papers, and evidence in the validation register (documentation/Documentation_Conventions.md, Section 1). Terms are in documentation/Glossary.md.
+
+## Start here
+
+- [About these docs](documentation/About_These_Docs.md): the map of every document, its kind and what checks it.
+- [Documentation conventions](documentation/Documentation_Conventions.md): where each kind of content lives and the rules the documents follow.
+- [Glossary](documentation/Glossary.md): definitions of the terms used everywhere.
+- [Installation](documentation/Installation.md): setting up the app and its environment.
+- [Library quick start](documentation/how_to/library_quick_start.md): a first call to the Python library.
+
+## Image processing (astrometricslib)
+
+- [Astrometrics library architecture](documentation/library_design/Astrometrics_Library_Architecture.md): the theory of every pipeline, with the equations. Code: astrometricslib/.
+- [Astrometrics library implementation](documentation/library_design/Astrometrics_Library_Implementation.md): the modules, classes and tuned values behind each section of the architecture paper.
+- [Data models](documentation/library_design/Astrometrics_Library_Architecture.md#2-observational-data-models): targets, frames, camera profiles and provenance. Code: astrometricslib/models/.
+- [Stacking](documentation/library_design/Astrometrics_Library_Architecture.md#3-image-stacking-pipeline): calibration and stacking. Guide: documentation/library_design/pipelines/stacking.md. README: astrometricslib/pipelines/stacking/README.md. Evidence: documentation/library_design/validation/stacking.md.
+- [Astrometry](documentation/library_design/Astrometrics_Library_Architecture.md#4-astrometry-pipeline): star detection, plate solving and the Gaia refit. Guide: documentation/library_design/pipelines/astrometry.md. README: astrometricslib/pipelines/astrometry/README.md. Evidence: documentation/library_design/validation/astrometry.md.
+- [Photometry](documentation/library_design/Astrometrics_Library_Architecture.md#5-stellar-photometry-pipeline): aperture photometry, the comparison ensemble, variability and period search. Guide: documentation/library_design/pipelines/photometry.md. README: astrometricslib/pipelines/photometry/README.md. Evidence: documentation/library_design/validation/photometry.md.
+- [Spectroscopy](documentation/library_design/Astrometrics_Library_Architecture.md#6-stellar-spectroscopy-pipeline): slitless extraction, wavelength and flux calibration, classification. Guide: documentation/library_design/pipelines/spectroscopy.md. README: astrometricslib/pipelines/spectroscopy/README.md. Evidence: documentation/library_design/validation/spectroscopy.md.
+- [Asteroid detection](documentation/library_design/Astrometrics_Library_Architecture.md#7-asteroid-detection-pipeline): chaining detections and straight-line motion tests. Guide: documentation/library_design/pipelines/asteroid_detection.md. README: astrometricslib/pipelines/asteroid_detection/README.md. Evidence: documentation/library_design/validation/asteroid_detection.md.
+- [Shared pipeline code](astrometricslib/pipelines/shared/README.md): helpers used by several pipelines.
+- [Public API](astrometricslib/api/README.md): the Astrometrics entry point and its catalogs. Reference: documentation/api/astrometricslib.rst.
+- [Validation register](documentation/library_design/validation/index.md): how each tuned value was checked, with the library calls to repeat the check.
+
+## Observatory control (wayfindinglib)
+
+- [Wayfinding library architecture](documentation/library_design/Wayfinding_Library_Architecture.md): the theory of planning, execution and control. Code: wayfindinglib/.
+- [Wayfinding library implementation](documentation/library_design/Wayfinding_Library_Implementation.md): the modules, classes and settings behind each section of the architecture paper.
+- [System architecture and delegation](documentation/library_design/Wayfinding_Library_Architecture.md#2-system-architecture): the three functions and how work moves from the incumbent software to this system.
+- [Foundation](documentation/library_design/Wayfinding_Library_Architecture.md#3-foundation-equipment-site-and-session-domain): equipment, site and session records. Code: wayfindinglib/models/.
+- [Observation planning](documentation/library_design/Wayfinding_Library_Architecture.md#4-observation-planning): placing imaging requests in a night. Code: wayfindinglib/api/planning.py, wayfindinglib/tasks/.
+- [Observation execution](documentation/library_design/Wayfinding_Library_Architecture.md#5-observation-execution): running a planned night and recovering from faults. Code: wayfindinglib/tasks/execution_tasks/.
+- [Observatory control](documentation/library_design/Wayfinding_Library_Architecture.md#6-observatory-control): device control, safety and the safe state. Code: wayfindinglib/tasks/control_tasks/, wayfindinglib/drivers/.
+- [Session analysis](wayfindinglib/session_analysis/README.md): guiding and image-quality analysis of past nights.
+- Reference: documentation/api/wayfindinglib.rst.
+
+## Desktop app
+
+- [Desktop app architecture](documentation/user_interface/technical_reference/User_Interface_Architecture.md): Electron, React and how the app talks to the backend. Code: ui/, electron/, backend/, and the interface in backend/public_interface.py.
+- [User manual](documentation/user_interface/user_guides/User_Manual.md): every view and control.
+- [Observatory control guide](documentation/user_interface/user_guides/Observatory_Control_and_Automation_Guide.md): task recipes for running the telescope from the app.
+- [Image processing tutorial](documentation/user_interface/user_guides/Image_Processing_and_Analysis_Tutorial.md): one guided path from raw frames to a result.
+- [Getting started](documentation/Getting_Started.md): a first session with the app.
+
+## How-to guides
+
+- [How-to guides](documentation/how_to/index.md): tuning for your setup, validating on your data, changing a tuned value, adding a register entry or a quality gate.

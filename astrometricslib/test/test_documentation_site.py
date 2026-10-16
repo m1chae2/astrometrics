@@ -11,7 +11,10 @@ pages. These tests check, from the source files alone:
 - no toctree entry carries its own label, so the navigation always shows each
   page's own title;
 - each link on a section page uses the exact title of the page it links to,
-  so a document has one name everywhere.
+  so a document has one name everywhere;
+- every link and anchor in ``llms.txt``, the topic map for AI agents at the
+  repository root, resolves, and the map covers the four papers and the
+  site's start pages.
 """
 
 import json
@@ -20,6 +23,8 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+
+from astrometricslib.test.test_documentation_style import _anchors
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE = REPO_ROOT / "documentation"
@@ -32,6 +37,20 @@ SUFFIXES = (".md", ".rst", ".ipynb")
 RST_TOCTREE = re.compile(r"^\.\. toctree::\n((?:[ \t]+.*\n|\n)*)", re.MULTILINE)
 MYST_TOCTREE = re.compile(r"^```\{toctree\}\n(.*?)^```", re.MULTILINE | re.DOTALL)
 BULLET_LINK = re.compile(r"^- \[([^\]]+)\]\(([^)#]+)\)", re.MULTILINE)
+LLMS_TXT = REPO_ROOT / "llms.txt"
+LLMS_LINK = re.compile(r"\]\(([^)]+)\)")
+LLMS_PATH = re.compile(
+    r"(?<![\w/.])((?:astrometricslib|wayfindinglib|documentation|backend|ui|electron)/[\w./-]*)"
+)
+LLMS_REQUIRED = (
+    "documentation/About_These_Docs.md",
+    "documentation/Glossary.md",
+    "documentation/library_design/Astrometrics_Library_Architecture.md",
+    "documentation/library_design/Astrometrics_Library_Implementation.md",
+    "documentation/library_design/Wayfinding_Library_Architecture.md",
+    "documentation/library_design/Wayfinding_Library_Implementation.md",
+    "documentation/library_design/validation/index.md",
+)
 
 
 def _docname(path: Path) -> str:
@@ -221,3 +240,29 @@ def test_section_links_use_page_titles(section: str) -> None:
         if text != title:
             problems.append(f"'{text}' links to a page titled '{title}'")
     assert not problems, f"{section}: use each page's own title as the link text: {problems}"
+
+
+def test_llms_txt_links_resolve() -> None:
+    """Every link, anchor and code path in ``llms.txt`` exists."""
+    text = LLMS_TXT.read_text(encoding="utf-8")
+    problems = []
+    for target in LLMS_LINK.findall(text):
+        file_part, _, anchor = target.partition("#")
+        destination = REPO_ROOT / file_part
+        if not destination.exists():
+            problems.append(f"missing file {file_part}")
+        elif anchor and anchor not in _anchors(destination):
+            problems.append(f"no anchor #{anchor} in {file_part}")
+    for path in LLMS_PATH.findall(text):
+        if not (REPO_ROOT / path.rstrip(".,")).exists():
+            problems.append(f"missing path {path}")
+    assert not problems, f"Fix llms.txt so it matches the repository: {problems}"
+
+
+def test_llms_txt_covers_the_papers() -> None:
+    """``llms.txt`` keeps the llmstxt.org layout and links the papers."""
+    text = LLMS_TXT.read_text(encoding="utf-8")
+    assert text.startswith("# Astrometrics\n\n> "), "llms.txt starts with an H1 title, then a summary quote"
+    linked = {target.partition("#")[0] for target in LLMS_LINK.findall(text)}
+    missing = [path for path in LLMS_REQUIRED if path not in linked]
+    assert not missing, f"llms.txt should link {missing}"

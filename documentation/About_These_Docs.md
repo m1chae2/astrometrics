@@ -58,6 +58,8 @@ The PDF download on Read the Docs holds the four papers only, the two architectu
 
 The pipeline READMEs under `astrometricslib/pipelines/` explain how each stage works, step by step. They live next to the code and are not part of the docs site. They are checked by `test_documentation_rules.py` and `test_documentation_style.py`.
 
+AI coding agents start from [`llms.txt`](https://github.com/m1chae2/astrometrics/blob/main/llms.txt) at the repository root. It maps each topic to its paper section, review guide, README, evidence and code, following the llmstxt.org layout. Agents read the documents first, confirm in the code, and report any disagreement; when the two differ, the code is the current behavior and the document needs a fix. The `answer-from-docs` skill under `.claude/skills/` holds these steps. `test_documentation_site.py` checks that every link and anchor in `llms.txt` resolves.
+
 ## 4. Editing rules
 
 Generated files are never edited by hand. Edit the generator in `build/documentation/` and run it again. Hand-written files follow [Documentation conventions](Documentation_Conventions.md). The steps for common changes are in the [how-to guides](how_to/index.md), and [Contributing](https://github.com/m1chae2/astrometrics/blob/main/CONTRIBUTING.md#documentation) lists the checks to run before a commit.

@@ -332,9 +332,9 @@ def test_relative_links_and_anchors_resolve() -> None:
     assert not problems, f"Broken documentation links: {problems}"
 
 
-@pytest.mark.parametrize("skill", ["documentation-style", "code-documentation-style"])
+@pytest.mark.parametrize("skill", ["documentation-style", "code-documentation-style", "answer-from-docs"])
 def test_agent_skill_copies_match(skill: str) -> None:
-    """The ``.agent`` copy of each style skill equals the ``.claude`` copy."""
+    """The ``.agent`` copy of each shared skill equals the ``.claude`` copy."""
     original = REPO_ROOT / ".claude" / "skills" / skill / "SKILL.md"
     copy = REPO_ROOT / ".agent" / "skills" / skill / "SKILL.md"
     assert copy.read_bytes() == original.read_bytes(), (

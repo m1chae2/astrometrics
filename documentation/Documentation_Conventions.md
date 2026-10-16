@@ -198,8 +198,8 @@ Near the top of every README, review guide and register file:
 | Rule | Enforced by |
 | --- | --- |
 | Theory-only architecture papers; evidence only in the register; paper length limits | `astrometricslib/test/test_documentation_rules.py`, `wayfindinglib/test/test_documentation_papers.py` |
-| Seven sections, one place and one name per page | `astrometricslib/test/test_documentation_site.py` |
-| Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching skill copies | `astrometricslib/test/test_documentation_style.py` |
+| Seven sections, one place and one name per page; links and anchors in `llms.txt` resolve | `astrometricslib/test/test_documentation_site.py` |
+| Status labels next to register links, README layouts, glossary line and code pointer, review-guide links, register values equal to the code, section references, relative links and anchors, matching `.claude` and `.agent` skill copies | `astrometricslib/test/test_documentation_style.py` |
 | Register entries complete, cited and resolvable | `astrometricslib/test/test_validation_register.py` |
 | Guide symbols defined in Appendix A or the guide's Notation table, used, not redefined, consistent across guides, and indexed with the paper's letters | `astrometricslib/test/test_documentation_notation.py` |
 | Code links in the papers resolve | `astrometricslib/test/test_architecture_doc_claims.py`, `wayfindinglib/test/test_documentation_papers.py` |

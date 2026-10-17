@@ -12,7 +12,7 @@ The plan covers:
 - the decisions agreed on 2026-10-17,
 - the shared shape: measurement, limit, judgment and the metric registry,
 - efficiency, the unit `wayfindinglib` uses to rank losses,
-- the metrics wanted at each checkpoint,
+- the metrics this plan carries (new metrics are in `QUALITY_SCIENCE_PLAN.md`),
 - what happens to today's verdicts and gates,
 - the impact of the work and how its risk is kept low,
 - the order of work.
@@ -27,7 +27,8 @@ issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
-the changes and where each one landed.
+the changes and where each one landed. After the review, the new science metrics moved to their
+own plan, `QUALITY_SCIENCE_PLAN.md`.
 
 ## 1. Findings from the survey
 
@@ -473,73 +474,39 @@ advice in itself, such as "fix the focus; another three hours will not help".
 Efficiency functions and references are design estimates until checked on real data. Each one gets
 a validation register entry before `wayfindinglib` ranks advice by it.
 
-## 5. Metrics at each checkpoint
+Phase 4 builds efficiency from the metrics of section 5.1: star width, sky and read noise. The
+transparency factor needs the catalog zero point, which is in `QUALITY_SCIENCE_PLAN.md`. Until that
+lands, efficiency states that transparency is not included.
 
-The tables list the metrics worth having. "Exists" means the code already measures the value, so
-the work is to emit it in the new shape. "New" means it must be built. Whether the new metrics
-move to a separate science plan is open (section 10).
+## 5. Metrics this plan carries
 
-### 5.1 Each frame, before stacking
+This plan carries the metrics that already exist, moved into the new shape, plus the few new ones
+that efficiency needs first. Every other new metric, with its definition and its evidence, is in
+`QUALITY_SCIENCE_PLAN.md`.
 
-A frame measurement step measures each light frame once (phase 2). The frame is the record that
-joins to guiding, temperature, altitude and the Moon.
+### 5.1 New in phase 2, because efficiency needs them
 
-| Metric | Decision it informs | State |
+| Metric | Definition | Why now |
 | :--- | :--- | :--- |
-| Star width from many stars across the field (Moffat fit, no elongation cut), elongation and its angle from second moments | Focus, guiding, polar alignment, backlash | New estimator. Today's `measure_image_fwhm` takes the 15 brightest stars, returns pixels and skips stars with elongation above 1.5, so on a trailed frame it measures only the round stars. |
-| Sky brightness in a defined band (e⁻ per second per pixel; mag per square arcsecond) | Moon, light pollution, twilight | Partly exists (background level) |
-| Catalog zero point against Gaia magnitudes in the frame's filter, with a color term and airmass correction, and its scatter within the night | Transparency, cloud | New (photometry has the method) |
-| Background gradient size and direction | Moon, horizon or light source | New |
-| Sky noise over read noise | Exposure too short | New; needs gain and read noise for the setting |
-| Pixels clipped at zero; saturated fraction | Camera offset; exposure too long | Exists for stacks, not per frame |
-| Target clipped, located through the WCS | Exposure too long for the target | New |
-| Center-to-corner star width | Tilt, field curvature, collimation | New |
-| Shift and rotation from registration | Dithering, polar alignment | Shift exists; rotation new |
-| Star count, roundness and sky, for every frame | Cloud or trailing | Measured for quarantine but stored only for moved frames |
-| Sensor temperature against set point and dark library | Calibration match | Partly exists |
+| Star width from many stars across the field, with elongation and its angle | A pixel-integrated Moffat fit to up to about 200 isolated, unsaturated stars on a grid over the field, with no elongation cut. Elongation and its angle come from second moments. Stored in pixels and in arcsec, with the plate-scale source. | Today's `measure_image_fwhm` takes the 15 brightest stars, returns pixels and skips stars with elongation above 1.5, so on a trailed frame it measures only the round stars. Efficiency's seeing factor would inherit that bias. |
+| Sky brightness in electrons | Background in electrons per second per pixel, from the background level, the gain for the frame's setting and the exposure time | Efficiency's sky factor and the read-noise regime |
+| Sky noise over read noise | The ratio of sky noise to read noise for the frame's setting | Decides the noise regime (section 4), and says when an exposure is too short |
+| Gain and read noise for each camera setting | Photon transfer from flat pairs and the noise of bias pairs, at each gain setting, offset and binning in use (decision 7) | Every metric above in electrons depends on it |
 
-### 5.2 Calibration health
+### 5.2 Existing metrics emitted in the new shape (phases 2 and 3)
 
-| Metric | Decision it informs | State |
+| Checkpoint | Metrics | Today's home |
 | :--- | :--- | :--- |
-| Flat noise and flat level | Retake flats | Exists |
-| Flat-to-light match (dust shadows moved, camera rotated) | Retake flats | New |
-| Dark temperature and exposure match | Retake darks | Partly exists |
-| Fixed pattern left on calibrated frames | Calibration or dithering | Partly exists (flat residual study) |
-| Gain and read noise from flat and bias pairs, per setting | Every noise model | New (decision 7) |
+| Each frame | Background level, saturated fraction, registration star width, roundness, shift and star count; quarantine star count, roundness and sky for every frame; sensor temperature | `FrameRecord.measurements`, the quarantine manifest |
+| Calibration | Flat noise and level, calibration mismatches, master frame counts | `StackQualitySummary` |
+| After stacking | Rejected-pixel fraction, saturated and zero-pixel fractions, negative pixels, stack star width against input width, exposure-group results | `StackQualitySummary` |
+| Astrometry | Plate-solve residual and star count, catalog separation, Gaia refit residual and shift, match counts | `AstrometryQualitySummary`, `CatalogMatchQuality` |
+| Photometry | Flux errors, input and output quality, variability indices, ensemble scatter, noise-model curve, period and transit statistics | `PhotometryQualitySummary`, `PhotometryResult` |
+| Spectroscopy | The four stage checkpoints, wavelength zero point, Gaia XP comparison, line spread, noise model, classification statistics | `SpectroscopyQualitySummary`, `SpectroscopyResult` |
+| Asteroid detection | Cascade counts, per-frame position error, track fit, ephemeris separations, the `residual_*` counts (no longer dropped) | `AsteroidDetectionQualitySummary`, candidates |
 
-### 5.3 After stacking
-
-| Metric | Decision it informs | State |
-| :--- | :--- | :--- |
-| Noise in random empty apertures of the photometric size, and its ratio to the noise expected from the weighted effective frame count | More frames, dithering, calibration | New. Pixel noise underestimates the real noise, because registration correlates neighboring pixels. |
-| Limiting magnitude from empty-aperture noise or 50% injection recovery, with the aperture stated | Depth reached | New |
-| Stack star width over input star width | Registration or stacking loss | Exists |
-| Rejected-pixel fraction and a defined clustering statistic | Satellites, aircraft | Fraction exists |
-| Walking noise (noise stronger along the drift direction) | Dithering | New |
-| Background gradient left after stacking | Flats, gradient removal | New |
-| Each night's contribution to the stack | Drop poor nights on purpose | New |
-
-### 5.4 After each pipeline
-
-| Pipeline | Metric | Decision it informs | State |
-| :--- | :--- | :--- | :--- |
-| Astrometry | Fit residual, and the expected residual (about FWHM/(2.35·SNR) per star, with the Gaia epoch error and the pixel-phase error) stored as its own metric | Distortion or tilt against noise | Residual exists; expected new |
-| Astrometry | Residual pattern across the field | Distortion model | New |
-| Astrometry | Measured plate scale over configured plate scale | Camera spacing changed | New |
-| Astrometry | Pointing error | Mount model | New |
-| Photometry | Precision at each magnitude, and the noise model (photons, sky, read noise, scintillation from Young's formula) stored separately | Systematic floor, flats, comparison stars | Partly exists (`noiseModelCurve`) |
-| Photometry | Scintillation share (model-derived, labeled so) | Longer exposures or defocus for bright targets | New |
-| Photometry | Period sensitivity from the window function | Which nights to add to break an alias | Partly exists (`alias_ambiguity`) |
-| Spectroscopy | SNR per resolution element at the classifying lines, the element taken from the measured line spread in Å | Exposure needed for a subtype | Partly exists |
-| Spectroscopy | Resolution achieved over resolution allowed by focus and trail width | Focus | Partly exists |
-| Spectroscopy | Wavelength scale and response stability | Calibration | Exists |
-| Spectroscopy | Contamination from neighboring spectra and second-order overlap | Rotate the camera | New |
-| Spectroscopy | Differential refraction | Observe nearer the meridian | Partly exists (checkpoint 0) |
-| Asteroid detection | Completeness over a grid of magnitude and motion rate, from movers injected into the individual frames | What the night could find | New |
-| Asteroid detection | False-positive rate per night, from a null test (scrambled frame order or a non-physical rate) | Trust in candidates | New |
-| Asteroid detection | Position uncertainty including timing error times rate, against MPC needs | Whether to report | Partly exists per detection |
-| Asteroid detection | Arc length | Observe again soon to link the object | New |
+Each existing metric keeps its current estimator under a name that says so. An improved estimator
+from the science plan gets a new name (decision 6).
 
 ## 6. What happens to today's verdicts and gates
 
@@ -666,8 +633,11 @@ the affected READMEs updated. Each phase is one pull request.
    already loaded. The scan itself stays header-only. The job skips frames whose file state is
    unchanged, using the stamp `_is_unchanged` already checks, and keeps to a stated time budget per
    frame, because frames are read over the remote storage mount. It records what
-   `FrameRecord.measurements` holds today and the quarantine measurements of every frame. Done when
-   a real night's frames have measurements and a second run measures nothing again.
+   `FrameRecord.measurements` holds today, the quarantine measurements of every frame, and the new
+   metrics of section 5.1. Gain and read noise are first keyed by camera and setting, with the
+   calibration measurement that computes them from flat and bias pairs (decision 7). Done when a
+   real night's frames have measurements, a second run measures nothing again, and the new star
+   width is checked against the current estimator on round and on trailed frames.
 3. **Existing pipeline metrics in the new shape.** In each pipeline's change, rename its
    `run_gates.py` to `record_quality.py` (decision 10) and emit measurements next to its current
    summary. Fix the dropped asteroid `residual_*` counts and regenerate the UI types. Run the
@@ -680,10 +650,8 @@ the affected READMEs updated. Each phase is one pull request.
    `PerformanceThreshold` to `QualityLimit`. Rules declare the metrics they require. Switch the
    guiding and capture recommendations to `quality.query`. Done when they read through it and a
    real night's loss account adds up to the captured time.
-5. **New metrics.** First key gain and read noise by camera and setting, and add the calibration
-   measurement that computes them from flat and bias pairs (decision 7). Then build the "new" rows
-   of section 5 in order of value. Each tuned limit gets a validation register entry. Whether this
-   phase moves to a separate science plan is open (section 10).
+5. **New metrics.** Built under `QUALITY_SCIENCE_PLAN.md`, in its own order, once phase 1 exists.
+   This plan only provides the shape they fill.
 6. **Verdicts and gates, one pipeline at a time.** Photometry goes first, because its labels and
    its `variability_discrimination` gate already exist (decision 8). For each pipeline: write and
    approve the inventory (section 6), build the rules in `wayfindinglib/analytics/result_quality/`,
@@ -714,8 +682,9 @@ phase 1.
 
 ## 10. Open questions and risks
 
-- **A separate science plan (open).** Whether section 5's new metrics and phase 5 move into their
-  own plan, leaving this plan as the shared shape and the migration.
+- **A separate science plan (settled).** The user agreed on 2026-10-17 to move the new metrics into
+  `QUALITY_SCIENCE_PLAN.md`. This plan keeps the shared shape, the migration and the four metrics
+  efficiency needs first (section 5.1).
 - **Where metrics are declared (settled).** See decision 6 and section 3.4.
 - **Night boundaries (settled).** `observing_night_id` uses the processing computer's local time.
   The user confirmed on 2026-10-17 that the computer and the observatory share a time zone. The
@@ -744,10 +713,10 @@ The board met on 2026-10-17. Each finding below was accepted and placed as shown
 | Backend RPC, UI types and MCP dispositions for the new calls | Architect, engineer | Section 3.6, phases 1, 4 and 6 |
 | The frame step must not run inside the header-only scan; idempotence; stable frame ids | Engineer, architect | Section 3.1, phase 2 |
 | Conformance tests must be static and switched on per pipeline | Engineer | Section 3.7 |
-| Today's FWHM estimator is biased on trailed frames and returns pixels | Astronomer | Sections 3.4 and 5.1 |
-| Bands, color terms, airmass and per-channel metrics for color cameras | Astronomer | Sections 3.1 and 5.1 |
-| Correlated noise after stacking; limiting magnitude definition | Astronomer | Section 5.3 |
-| Asteroid completeness grid, per-night false-positive rate, timing error | Astronomer | Section 5.4 |
+| Today's FWHM estimator is biased on trailed frames and returns pixels | Astronomer | Sections 3.4 and 5.1, phase 2 |
+| Bands, color terms, airmass and per-channel metrics for color cameras | Astronomer | Section 3.1; `QUALITY_SCIENCE_PLAN.md` section 2.1 |
+| Correlated noise after stacking; limiting magnitude definition | Astronomer | `QUALITY_SCIENCE_PLAN.md` section 2.3 |
+| Asteroid completeness grid, per-night false-positive rate, timing error | Astronomer | `QUALITY_SCIENCE_PLAN.md` section 2.4 |
 | Probability calibration on injections, held out by night or field, minimum sample size | Astronomer | Section 6 |
 | Store failures, error type and logging | Engineer | Section 3.5 |
 | Golden suite must run, not skip; shadow-mode mechanism | Engineer | Safeguards 4 and 8 |

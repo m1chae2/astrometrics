@@ -90,6 +90,10 @@ When a workflow is referenced (e.g., `/manage_mcp`), always use `view_file` to r
 - **Skills** (`.agent/skills/`): Agent-triggered capabilities, loaded on-demand. Examples: documentation style, planning, verification.
 - **Workflows** (`.agent/workflows/`): User-triggered sequences, manually invoked. Examples: `/manage_mcp`, `/troubleshoot`.
 
+## Change control board
+
+`/change-control-board` reviews a plan, design document, branch or pull request with three read-only reviewers that run at the same time: `ccb-astronomer` (scientific soundness), `ccb-software-engineer` (feasibility, data safety, testing) and `ccb-technical-architect` (layering, ownership, simplicity). Their role briefs are in `.claude/agents/`. The skill, in `.claude/skills/change-control-board/SKILL.md`, then checks their claims against the code, groups the findings, asks the user to decide what only the user can decide, and records the outcome in the reviewed document.
+
 ## Standards & Best Practices
 
 All code contributions must adhere to:

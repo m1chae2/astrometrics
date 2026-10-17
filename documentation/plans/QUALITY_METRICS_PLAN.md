@@ -867,7 +867,8 @@ the affected READMEs updated. Each phase is one pull request.
    guiding and capture recommendations to `quality.query`. Then build the target dataset report
    (section 6): the action classes, the rules of the decision catalog whose metrics exist, marginal
    value and the forecast check, extended `get_advisory(kind="quality")`, its backend RPC method,
-   regenerated UI types, and a data-quality panel on the target view in the desktop app. Done when
+   regenerated UI types, and a data-quality panel on the target view in the desktop app
+   (`UI_DISPLAY_PLAN.md`, phase 0). Done when
    the guiding and capture recommendations read through `quality.query`, a real night's loss
    account adds up to the captured time, and a real target's report gives a "take N more"
    recommendation whose forecast is checked after the next stack.

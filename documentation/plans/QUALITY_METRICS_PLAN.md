@@ -1105,11 +1105,11 @@ Safeguards:
 5. **A written inventory per pipeline** (section 7), approved by the user before phase 6 code for
    that pipeline.
 6. **Four sub-issues, by layer.** Issue #93 is the epic. Its sub-issues follow the layers:
-   A, `astrometricslib` measures everything the use cases need (phases 0 to 3 and the
-   `QUALITY_SCIENCE_PLAN.md` metrics that back a use case); B, `wayfindinglib` judgments,
-   efficiency and recommendations (phase 4 and the result-quality rules); C, the UI tier
-   (`UI_DISPLAY_PLAN.md`, the backend and the MCP servers); D, cleanup across the layers (phases 6
-   and 7). Each sub-issue takes several pull requests marked "Part of", and its last pull request
+   #94, `astrometricslib` measures everything the use cases need (phases 0 to 3 and the
+   `QUALITY_SCIENCE_PLAN.md` metrics that back a use case); #95, `wayfindinglib` judgments,
+   efficiency and recommendations (phase 4 and the result-quality rules); #96, the UI tier
+   (`UI_DISPLAY_PLAN.md`, the backend and the MCP servers); #97, cleanup across the layers (phases
+   6 and 7). Each sub-issue takes several pull requests marked "Part of", and its last pull request
    closes it. Each has its own Analysis and Plan.
 7. **Data safety.** The new tables only add; existing table schemas do not change before phase 7.
    `astrometrics.db` is backed up with `scripts/backup_library_databases` before the first write
@@ -1120,10 +1120,10 @@ Safeguards:
    search, one spectrum) covers the rest. Both give identical science numbers after phase 0 and
    after each pipeline's phase 6.
 9. **Removals wait for their replacement.** Nothing is removed or renamed until its replacement
-   exists and every reader has switched. All removals belong to sub-issue D. For example,
-   `recommended_exposure_seconds` stays in `astrometricslib` while sub-issue A adds the
+   exists and every reader has switched. All removals belong to #97. For example,
+   `recommended_exposure_seconds` stays in `astrometricslib` while #94 adds the
    replacement measurement (the brightest star's peak as a fraction of saturation at each
-   exposure); it is removed in D, after `wayfindinglib`'s rule replaces it and its reader in the
+   exposure); it is removed in #97, after `wayfindinglib`'s rule replaces it and its reader in the
    capture analysis has switched.
 10. **A pull request that changes a public interface updates every caller.** The tickets follow
     the layers, but a single pull request may cross them. The phase 1 move of `QualityDiagnostics`

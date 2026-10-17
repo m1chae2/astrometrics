@@ -398,7 +398,10 @@ status_check() {
   if [ -f "$VITE_PID_FILE" ] && kill -0 "$(cat "$VITE_PID_FILE" 2>/dev/null)" 2>/dev/null; then
     vpid="$(cat "$VITE_PID_FILE")"
   else
-    vpid=$(pgrep -f "vite --port ${PORT}|vite" | head -n 1 || true)
+    # Match Vite's own command line only. A bare "vite" also matched any
+    # shell whose command text mentioned it, so status reported Vite as
+    # running after it had stopped.
+    vpid=$(pgrep -f "node_modules/.bin/vite --port ${PORT}" | head -n 1 || true)
   fi
 
   if [ -n "$vpid" ] || curl -s -o /dev/null --max-time 1 "http://127.0.0.1:${PORT}"; then

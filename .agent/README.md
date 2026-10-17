@@ -1,103 +1,43 @@
-# Astrometrics AI Agent Configuration
+# The .agent folder
 
-This directory contains all AI agent workflows, skills, and configuration documentation.
+This folder configures Gemini for this repository. It holds the instructions Gemini loads, the skills and workflows it can follow, and its settings. The `.claude/` folder does the same job for Claude Code. The two folders share some files, so read "Keeping .agent and .claude in step" before you edit either one.
 
-## Critical Environment & Tool Configuration
+Rules for working on the code are in `AGENTS.md`. Rules for Gemini acting as the read-only observatory companion are in `GEMINI.md`. This file does not repeat them. One rule matters in every script you run: use the project's virtual environment, for example `.venv/bin/python script.py`.
 
-### Python Environment
-**All Python scripts must be executed using the project's virtual environment:**
-```bash
-.venv/bin/python <script_name>.py
-```
+## What is in this folder
 
-This includes:
-- Backend scripts
-- Testing scripts
-- Utility scripts (e.g., `scripts/audit_requirements.py`)
-- MCP servers
-
-### MCP Servers
-
-The project runs five MCP servers. For an AI client they look things up, calculate and measure, and one tool (`observatory_remote_sync_frames`) brings frames from the telescope into the library. None commands a device. The servers are started from `.mcp.json` (a developer session) or `.claude/companion.mcp.json` (a read-only companion session).
-
-| Server | Start command | What it offers an AI |
+| Path | What it is | Edited by |
 |---|---|---|
-| `astrometricslib-core` | `.venv/bin/python -m mcp_servers.astrometrics_core` | Lookups and calculations on targets, stars, calibration, stacks and frames |
-| `wayfindinglib-core` | `.venv/bin/python -m mcp_servers.wayfinding_core` | Observatory status, equipment state, past-night analysis, planning. No device commands |
-| `astrometrics-backend` | `.venv/bin/python -m mcp_servers.backend` | Backend health, documentation, change the view, show a notification |
-| `astrometrics-gaps` | `.venv/bin/python -m mcp_servers.gaps` | Report what the tools cannot do |
-| `astrometrics-ui` | `node ui/mcp/dist/index.js` | Developer profile only: UI tests, type check, build, accessibility |
+| `GEMINI.md` | Instructions for Gemini as the read-only companion. Gemini only. | By hand |
+| `AGENTS.md` | Rules for any AI agent. Shared with `.claude/`. | By hand, in both folders |
+| `README.md` | This file. | By hand |
+| `settings.json` | Gemini permission settings. | By hand |
+| `skills/answer-from-docs/` | How to answer questions from the documentation first. Shared with `.claude/`. | By hand, in both folders |
+| `skills/code-documentation-style/` | Style for READMEs outside `documentation/`. Shared with `.claude/`. | By hand, in both folders |
+| `skills/documentation-style/` | Style for files under `documentation/`. Shared with `.claude/`. | By hand, in both folders |
+| `workflows/manage_mcp.md` | Steps to stop and start the MCP servers by hand. Shared with `.claude/`. | By hand, in both folders |
+| `workflows/verify.md` | Steps to lint and test each part of the repo. Shared with `.claude/`. | By hand, in both folders |
+| `scheduled_tasks.lock`, `skills/scratch/` | Local files. Git ignores them. | Not edited |
 
-Each server reads a `tool_manifest.json` and offers only the tools it allows for the chosen profile (`ASTROMETRICS_MCP_PROFILE`, default `investigator`). See `mcp_servers/README.md`.
+A workflow is a plain procedure. When one is named (for example `/manage_mcp`), read the whole file before you run its steps.
 
-- `.venv/bin/python build/mcp/generate_client_configs.py` writes `.mcp.json`, `.claude/companion.mcp.json`, `.claude/agents/investigator.md` and `.gemini/settings.json` from one list of servers, and `ui/mcp/src/profileRules.ts` from `mcp_servers/common/profile.py`. Run it after a manifest or the profile rules change. Do not edit those files by hand.
-- The Python servers need the optional `mcp` extra (`pip install -e ".[mcp]"`), which `build/linux/setup_venv.sh` installs.
-- `build/linux/run_ai_companion.sh` starts Claude as the `investigator` agent.
-- `.venv/bin/python -m mcp_servers.gaps.review list` shows the gaps an AI reported.
+## How Gemini finds this folder
 
-#### Chrome DevTools MCP Server
-- **Location**: `mcp_servers.json`
-- **Purpose**: Provides tools for interacting with the Electron frontend via Chrome DevTools Protocol
-- **Configuration**:
-  ```json
-  {
-    "mcpServers": {
-      "chrome-devtools": {
-        "command": "npx",
-        "args": [
-          "chrome-devtools-mcp@latest",
-          "--browser-url=http://127.0.0.1:9222",
-          "-y"
-        ]
-      }
-    }
-  }
-  ```
-- **Use Cases**:
-  - Debugging running Electron app
-  - Frontend UI interaction testing
-  - Console log inspection
+Gemini looks for `GEMINI.md` only in the working directory and its parents. `build/mcp/generate_client_configs.py` therefore adds the `.agent` folder to `context.includeDirectories` in `.gemini/settings.json`, so Gemini loads `.agent/GEMINI.md`. The generator writes `.gemini/settings.json`, and Git ignores that file. Do not edit it by hand.
 
-## Directory Structure
+## MCP servers
 
-```
-.agent/
-├── README.md                    # This file
-├── rules/                       # AI agent passive constraints
-│   ├── standards-enforcement.md # Architectural standards enforcement
-│   ├── mcp-troubleshooting.md   # MCP-first troubleshooting protocol
-│   ├── backend-layering.md      # Strict backend architecture layering
-│   └── sandbox-constraints.md   # Google Antigravity sandbox limitations
-├── skills/                      # AI agent role-based skills
-│   ├── architect/              # Design fit, best practices, architectural patterns
-│   ├── devops/                 # Final release gate, commit preparation
-│   ├── implementer/            # Surgical code changes and feature implementation
-│   ├── mcp_tools/              # MCP server usage guidance
-│   ├── planning/               # Strategy, research, implementation plans
-│   ├── roadmap/                # Strategic planning, requirements evolution
-│   └── verification/           # Testing, quality audit, requirement traceability
-└── workflows/                   # User-defined workflows
-    ├── manage_mcp.md           # MCP server lifecycle management
-    └── troubleshoot.md         # System troubleshooting protocol
-```
+The five MCP servers, the generator, and the commands to run them are described in `.claude/README.md`. The generator also writes the Gemini server list, from the same source as Claude's.
 
-## Workflow Usage
+## Keeping .agent and .claude in step
 
-When a workflow is referenced (e.g., `/manage_mcp`), always use `view_file` to read the complete workflow before executing its steps.
+These files must stay byte-identical in both folders. When you edit one, make the same edit in the other:
 
-## Skills & Workflows
+- `AGENTS.md`
+- `skills/answer-from-docs/SKILL.md`
+- `skills/code-documentation-style/SKILL.md`
+- `skills/documentation-style/SKILL.md`
+- `workflows/manage_mcp.md`
+- `workflows/verify.md`
 
-- **Skills** (`.agent/skills/`): Agent-triggered capabilities, loaded on-demand. Examples: documentation style, planning, verification.
-- **Workflows** (`.agent/workflows/`): User-triggered sequences, manually invoked. Examples: `/manage_mcp`, `/troubleshoot`.
-
-## Standards & Best Practices
-
-All code contributions must adhere to:
-- **React/TypeScript**: Google TypeScript Style Guide, BEM Methodology
-- **Python**: PEP 8, Pydantic (camelCase aliases)
-- **C++**: PascalCase classes, smart pointers, thread safety
-- **Electron**: IPC isolation, context bridge security
-- **Documentation**: Comprehensive docstrings and inline comments
-- **Testing**: Unit tests required for all new functionality
-
-See individual skill files for detailed role-specific guidance.
+The test `backend/tests/test_agent_folder_mirror.py` fails when a pair differs. `GEMINI.md` lives only in `.agent/`. The agent definitions, the change-control-board skill, the hooks and `CLAUDE.md` live only in `.claude/`.

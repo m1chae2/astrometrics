@@ -30,6 +30,9 @@ on:
       - 'pyproject.toml'
       - 'build/linux/run_tests.sh'
       - 'build/linux/setup_venv.sh'
+      # backend/tests/test_agent_folder_mirror.py checks the files these two share.
+      - '.claude/**'
+      - '.agent/**'
       - '.github/actions/setup-python-env/**'
       - '.github/workflows/backend.yml'
   pull_request:

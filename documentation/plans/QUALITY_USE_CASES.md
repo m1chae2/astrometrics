@@ -41,8 +41,10 @@ it.
    never fills the gap with a default.
 4. **Recommendations are worked out fresh** each time they are shown, from the stored
    measurements. Only the measurements and the user's own plan are saved.
-5. **Limits come from the user's equipment** and its earlier nights, and change when the equipment
-   changes.
+5. **Limits come from the user's equipment** and its earlier nights. This happens on its own, with
+   nothing for the user to do: after an equipment change, limits that depend on earlier nights
+   start fresh and say "no baseline yet", while limits from physics and the camera profile apply at
+   once.
 
 ## 3. Reviewing observations
 
@@ -197,14 +199,7 @@ it.
 - **The user sees:** the measured gain and read noise, saved with their source. Until then, the
   target report marks that setting's efficiency as relative to the user's own data only.
 
-### UC14. Change equipment
-
-- **When:** the user changes the camera, telescope, focal length or guide optics.
-- **What happens:** limits that depend on the user's earlier nights start fresh for the new setup,
-  and say "no baseline yet" until enough nights exist. Limits from physics and the camera profile
-  apply at once.
-
-### UC15. Ask the AI companion
+### UC14. Ask the AI companion
 
 - **When:** the user prefers to ask in words, for example "what should I do next on M 81?".
 - **Where:** the read-only AI companion, through the app's MCP tools.

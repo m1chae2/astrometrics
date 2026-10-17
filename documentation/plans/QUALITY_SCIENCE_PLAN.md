@@ -53,6 +53,36 @@ The "Decision it informs" column in the tables below is a description for reader
 descriptive `MetricSpec.decisions` field. Nothing in `astrometricslib` reads it; the decisions
 themselves are rules in `wayfindinglib`.
 
+### 1.1 What issue #93 covers
+
+Issue #93 builds the metrics that an agreed use case in `QUALITY_USE_CASES.md` needs. The rest of
+this plan stays here for later, with no ticket. The table says which use case each metric in
+section 2 backs.
+
+| Metric (section) | Backs |
+| :--- | :--- |
+| Catalog zero point (2.1) | UC1 transparency in the loss account; UC6 tonight's sky model |
+| Zero-point scatter within a night (2.1) | UC15 "Is tonight photometric?" |
+| Effective star width (2.1) | UC1 and UC6 seeing factor of efficiency |
+| Target clipped (2.1) | UC2 overexposed setting |
+| Center-to-corner star width (2.1) | UC10 tilt |
+| Field rotation (2.1) | UC10 polar alignment |
+| Flat-to-light match (2.2) | UC9 calibration gap |
+| Fixed pattern left after calibration (2.2) | UC7 dither advice |
+| Master flat noise contribution (2.2) | UC3 why more frames did not help |
+| Noise over the expected noise (2.3) | UC3 why more frames did not help |
+| Each night's contribution (2.3) | UC2 which frames to leave out |
+| Walking noise (2.3) | UC7 dither advice |
+| Astrometry expected residual (2.4) | UC5 trusting a result |
+| Photometry noise model, scintillation share, target amplitude (2.4) | UC5 trusting a result |
+| Photometry period sensitivity (2.4) | UC7 period alias recommendation |
+| Spectroscopy SNR per resolution element, class gap against SNR (2.4) | UC5 trusting a result; spectroscopy finish line |
+
+Not in #93, kept for later: background gradient (frame and stack), satellite trails and cosmic
+rays, saturation and nonlinearity, limiting magnitude, rejected-pixel clustering, astrometric
+residual pattern, plate scale ratio, spectral contamination and second order, the asteroid items
+in section 2.4, the later items of section 6 and the deferred items of section 7.
+
 ## 2. The new metrics
 
 "Depends on" names what must exist first. "Data" names data the observatory does not yet hold.

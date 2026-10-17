@@ -23,7 +23,7 @@ source of truth. Line numbers drift, so this plan names files and functions inst
 
 ## Status
 
-Status on 2026-10-17: draft, with the user's decisions folded in (decisions 6 to 14). Not yet
+Status on 2026-10-17: draft, with the user's decisions folded in (decisions 6 to 15). Not yet
 reviewed by the change control board, nothing built.
 
 ## 1. Findings
@@ -129,6 +129,9 @@ Agreed with the user on 2026-10-17:
 14. **Night review and refresh.** Observation Execution has a night selector for reviewing earlier
     nights. Its quality strip and frame list refresh when frames are ingested, not on a timer
     (`QUALITY_USE_CASES.md`, section 6).
+15. **The night plan keeps its checklist.** Non-capture recommendations join the night plan as a
+    checklist, and ticked items are saved with the plan. A ticked item comes back as a
+    recommendation if the next measurements show it did not work.
 
 ## 3. The four displays
 
@@ -289,8 +292,10 @@ passing if the backend changes, the user guides updated, and new screenshots fro
    equipment settings moved from the Planetarium. Done when every setup panel works there and no
    live panel remains.
 4. **Observation Planner.** Observation Manager becomes Observation Planner: the Tonight panel with
-   the altitude chart and the ranked candidates, the night plan with dither folded in and "Add to
-   plan". Done when a recommendation goes into the night plan in one click and the sequence summary
+   the altitude chart and the ranked candidates, the night plan with dither folded in, "Add to
+   plan", and the checklist saved with the plan (decision 15). Today plan items live in the
+   display's memory (`PlanningContext`) until `ObservationPlanning.create_plan` writes the plan; the
+   checklist is saved with that written plan. Done when a recommendation goes into the night plan in one click and the sequence summary
    matches the plan.
 5. **Planetarium links and framing.** "Show on sky", "set as current target" from the map, and the
    framing overlay that replaces the Mosaic Planner and feeds the night plan. Done when a framing

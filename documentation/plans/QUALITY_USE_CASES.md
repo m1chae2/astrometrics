@@ -13,7 +13,7 @@ It is the user-facing companion of three plans:
 
 ## Status
 
-Status on 2026-10-17: agreed with the user except one point, listed as open in section 6.
+Status on 2026-10-17: agreed with the user. Section 6 records the points settled while writing it.
 
 ## 1. The user and the setting
 
@@ -206,7 +206,7 @@ Status on 2026-10-17: agreed with the user except one point, listed as open in s
   the public quality calls and explains them. It cannot change settings or command devices. When
   its tools cannot answer, it reports the gap.
 
-## 6. Points agreed and open
+## 6. Points agreed
 
 Agreed with the user on 2026-10-17:
 
@@ -221,13 +221,10 @@ Agreed with the user on 2026-10-17:
 4. **The Nikon D5300 stays relative for now.** The use cases assume the ZWO cameras. The Nikon
    gets measurements, but its gain and read noise are not yet measured, so its recommendations
    compare against its own earlier data only until UC13 is done for it.
-
-Still open:
-
-- **The checklist is plan state.** Non-capture recommendations join the night plan as a
-  checklist. The plan and its ticked items are saved as the user's plan; the recommendations
-  themselves are still worked out fresh. A ticked item that the next measurements show did not work
-  comes back as a recommendation.
+5. **The checklist is part of the night plan.** Non-capture recommendations join the night plan as
+   a checklist. The plan and its ticked items are saved as the user's plan; the recommendations
+   themselves are still worked out fresh. A ticked item comes back as a recommendation if the next
+   measurements show it did not work.
 
 ## 7. Not use cases
 

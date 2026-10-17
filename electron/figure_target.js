@@ -99,22 +99,87 @@ export function resolvePlotPath(candidate, directory = plotScratchDirectory()) {
 }
 
 /**
+ * The largest figure side, in pixels, that a size request may give. A bigger
+ * number is not a real figure, so the request is treated as having no size.
+ */
+const MAX_FIGURE_SIDE = 20000;
+
+/**
+ * Checks the figure size that came with a figure window request.
+ *
+ * The backend sends the size the interactive page draws the figure at, in
+ * pixels. Both sides must be whole numbers from 1 to `MAX_FIGURE_SIDE`.
+ *
+ * @param {unknown} width The figure's width the renderer sent.
+ * @param {unknown} height The figure's height the renderer sent.
+ * @returns {{width: number, height: number}|null} The size, or null when it
+ *   is missing or not sensible.
+ */
+export function resolveFigureSize(width, height) {
+  const isSide = (side) => Number.isInteger(side) && side >= 1 && side <= MAX_FIGURE_SIDE;
+  if (!isSide(width) || !isSide(height)) return null;
+  return { width, height };
+}
+
+/** The figure window's size when the figure's own size is not known. */
+export const DEFAULT_FIGURE_WINDOW = { width: 760, height: 600 };
+
+/**
+ * The room the figure page needs around the figure itself, in pixels: the
+ * page's padding and the toolbar under the figure (`_FIGURE_PAGE` in
+ * `backend/routers/figures.py`), plus a little spare so no scroll bar appears.
+ * Measured on a 1200 x 700 figure: the page needs about 24 px across and
+ * 78 px down beyond the figure.
+ */
+export const FIGURE_PAGE_MARGIN = { width: 48, height: 96 };
+
+/** The smallest figure window, so the toolbar always fits. */
+const MIN_FIGURE_WINDOW = { width: 420, height: 320 };
+
+/**
+ * Works out how big a figure window's inside (its content) should be.
+ *
+ * The window fits the figure and its page, but never goes past the screen's
+ * work area (the screen minus the top bar and dock). A figure too big for
+ * the screen still scrolls, but as little as possible.
+ *
+ * @param {{width: number, height: number}|null} figureSize The figure's size
+ *   in pixels, from `resolveFigureSize`, or null when it is not known.
+ * @param {{width: number, height: number}} workArea The size of the screen's
+ *   work area.
+ * @returns {{width: number, height: number}} The content size to open at.
+ */
+export function figureWindowContentSize(figureSize, workArea) {
+  if (!figureSize) return { ...DEFAULT_FIGURE_WINDOW };
+  const fit = (figureSide, margin, minimum, available) =>
+    Math.max(Math.min(minimum, available), Math.min(figureSide + margin, available));
+  return {
+    width: fit(figureSize.width, FIGURE_PAGE_MARGIN.width, MIN_FIGURE_WINDOW.width, workArea.width),
+    height: fit(figureSize.height, FIGURE_PAGE_MARGIN.height, MIN_FIGURE_WINDOW.height, workArea.height),
+  };
+}
+
+/**
  * Sorts a figure window request into a page address and a picture path, and
  * checks both.
  *
  * A text request that starts with `http://`, `https://` or `/figure/` is a
  * page address. Any other text is a picture path. An object may carry both,
- * as `interactiveUrl` and `plotPath`.
+ * as `interactiveUrl` and `plotPath`, and the figure's size in pixels, as
+ * `width` and `height`.
  *
  * @param {unknown} target What the renderer sent.
  * @param {{baseUrl?: string, directory?: string}} [options] Overrides for tests.
- * @returns {{interactiveUrl: string|null, plotPath: string|null, rejected: string[]}}
- *   The accepted page address and picture path (null when absent or refused),
- *   and one message for each part that was refused.
+ * @returns {{interactiveUrl: string|null, plotPath: string|null,
+ *   figureSize: {width: number, height: number}|null, rejected: string[]}}
+ *   The accepted page address, picture path and figure size (null when
+ *   absent or refused), and one message for each address or path that was
+ *   refused. A bad size only means the window opens at its usual size.
  */
 export function resolveFigureTarget(target, { baseUrl, directory } = {}) {
   let requestedUrl = '';
   let requestedPath = '';
+  let figureSize = null;
   if (typeof target === 'string') {
     if (/^https?:\/\//i.test(target) || target.startsWith('/figure/')) {
       requestedUrl = target;
@@ -124,6 +189,7 @@ export function resolveFigureTarget(target, { baseUrl, directory } = {}) {
   } else if (target && typeof target === 'object') {
     requestedUrl = target.interactiveUrl || '';
     requestedPath = target.plotPath || '';
+    figureSize = resolveFigureSize(target.width, target.height);
   }
 
   const rejected = [];
@@ -135,5 +201,5 @@ export function resolveFigureTarget(target, { baseUrl, directory } = {}) {
   if (requestedPath && !plotPath) {
     rejected.push(`Refused figure file ${JSON.stringify(requestedPath)}: only existing .png files in the backend's scratch folder may open.`);
   }
-  return { interactiveUrl, plotPath, rejected };
+  return { interactiveUrl, plotPath, figureSize, rejected };
 }

@@ -10,24 +10,40 @@ import { execFileSync } from 'child_process';
 // __dirname replacement for ESM (now at project root)
 const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'));
 
+// The app's freedesktop identity. The AppStream ID, the desktop file name, and
+// the window's Wayland app_id (electron/platforms/linux.js) must all use it.
+const APP_ID = 'io.github.m1chae2.Astrometrics';
+const DESKTOP_FILE_NAME = `${APP_ID}.desktop`;
+
 /**
- * Injects the AppStream metainfo file into a built .deb package.
+ * Fixes up a built .deb package so it carries the app's freedesktop identity.
  *
  * electron-installer-debian (the engine behind @electron-forge/maker-deb) has
- * no config option for shipping arbitrary extra files, so the only way to get
- * a file under /usr/share/metainfo/ into the package is to unpack the .deb it
- * produced, add the file, and repack it in place with dpkg-deb.
+ * no config option for shipping arbitrary extra files, and it names the
+ * desktop file after the package name ("astrometrics.desktop"). It has no
+ * setting for a different name. So this function unpacks the .deb it
+ * produced, then:
+ *   - renames /usr/share/applications/astrometrics.desktop to
+ *     io.github.m1chae2.Astrometrics.desktop
+ *   - adds the AppStream metainfo file under /usr/share/metainfo/
+ * and repacks the .deb in place with dpkg-deb.
  *
  * @param {string} debPath Absolute path to the built .deb artifact.
  */
-function injectAppStreamMetainfo(debPath) {
-  const metainfoSource = path.join(__dirname, 'assets', 'metainfo', 'astrometrics.metainfo.xml');
+function applyFreedesktopIdentity(debPath) {
+  const metainfoFileName = `${APP_ID}.metainfo.xml`;
+  const metainfoSource = path.join(__dirname, 'assets', 'metainfo', metainfoFileName);
   const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'astrometrics-deb-'));
   try {
     execFileSync('dpkg-deb', ['-R', debPath, workDir]);
+    const applicationsDir = path.join(workDir, 'usr', 'share', 'applications');
+    fs.renameSync(
+      path.join(applicationsDir, 'astrometrics.desktop'),
+      path.join(applicationsDir, DESKTOP_FILE_NAME)
+    );
     const metainfoDestDir = path.join(workDir, 'usr', 'share', 'metainfo');
     fs.mkdirSync(metainfoDestDir, { recursive: true });
-    fs.copyFileSync(metainfoSource, path.join(metainfoDestDir, 'astrometrics.metainfo.xml'));
+    fs.copyFileSync(metainfoSource, path.join(metainfoDestDir, metainfoFileName));
     execFileSync('dpkg-deb', ['-b', workDir, debPath]);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
@@ -124,7 +140,7 @@ export default {
           maintainer: 'Astrometrics Team <noreply@astrometrics.app>',
           homepage: 'https://github.com/m1chae2/astrometrics',
           icon: path.join(__dirname, 'assets', 'orbit.png'),
-          categories: ['Science', 'Education', 'Graphics'],
+          categories: ['Science', 'Astronomy'],
           mimeType: ['image/fits', 'application/fits', 'application/x-fits'],
           genericName: 'Astronomy Application',
           description: 'A clean modern looking visualization app for astrophotography images and spectroscopy',
@@ -139,6 +155,8 @@ export default {
           ],
           // The built-in desktop template can't add launcher actions and sets
           // the wrong StartupWMClass; see the template's header for details.
+          // (The file is renamed to the app ID after the build; see
+          // applyFreedesktopIdentity.)
           desktopTemplate: path.join(__dirname, 'assets', 'desktop', 'astrometrics.desktop.ejs')
         }
       }
@@ -168,7 +186,7 @@ export default {
         if (result.platform !== 'linux') continue;
         for (const artifactPath of result.artifacts) {
           if (artifactPath.endsWith('.deb')) {
-            injectAppStreamMetainfo(artifactPath);
+            applyFreedesktopIdentity(artifactPath);
           }
         }
       }

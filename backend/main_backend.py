@@ -298,7 +298,11 @@ def main() -> None:
     host = os.environ.get("ASTROMETRICS_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("ASTROMETRICS_PORT", "5000"))
     logger.info("Starting Astrometrics backend on %s:%s", host, port)
-    uvicorn.run(app, host=host, port=port, access_log=False)
+    # Requests still running when a stop signal arrives (such as a hardware
+    # poll the app window sent just before it closed) get a few seconds to
+    # finish. After that they are cancelled so the services below can stop,
+    # which is also what frees any call waiting on the INDI worker.
+    uvicorn.run(app, host=host, port=port, access_log=False, timeout_graceful_shutdown=3)
 
 
 if __name__ == "__main__":

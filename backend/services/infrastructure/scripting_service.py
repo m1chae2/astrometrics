@@ -625,10 +625,15 @@ class ScriptingService:
                         ) as tmp_file:
                             fig.savefig(tmp_file.name, bbox_inches="tight", dpi=100)
                             plots.append(tmp_file.name)
+                            # The interactive page draws the figure at this
+                            # size, so the app opens its window to fit it.
+                            width, height = fig.canvas.get_width_height()
                             interactive_plots.append({
                                 "figure_id": fignum,
                                 "plot_path": tmp_file.name,
                                 "url": f"/figure/{fignum}",
+                                "width": int(width),
+                                "height": int(height),
                             })
 
             except Exception:
@@ -650,6 +655,8 @@ class ScriptingService:
                         "plot_path": item["plot_path"],
                         "figure_id": item["figure_id"],
                         "interactive_url": item["url"],
+                        "width": item["width"],
+                        "height": item["height"],
                     },
                 )
         elif plots and self.container and hasattr(self.container, "socket_manager"):

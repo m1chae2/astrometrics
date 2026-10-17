@@ -8,7 +8,15 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { resolveFigureTarget, resolveFigureUrl, resolvePlotPath } from '../../electron/figure_target.js';
+import {
+  DEFAULT_FIGURE_WINDOW,
+  FIGURE_PAGE_MARGIN,
+  figureWindowContentSize,
+  resolveFigureSize,
+  resolveFigureTarget,
+  resolveFigureUrl,
+  resolvePlotPath,
+} from '../../electron/figure_target.js';
 
 const BASE = 'http://127.0.0.1:5000';
 
@@ -92,7 +100,12 @@ describe('resolvePlotPath', () => {
     expect(resolveFigureTarget({ interactiveUrl: '/figure/2', plotPath: file }, options)).toEqual({
       interactiveUrl: 'http://127.0.0.1:5000/figure/2',
       plotPath: fs.realpathSync(file),
+      figureSize: null,
       rejected: [],
+    });
+    expect(resolveFigureTarget({ interactiveUrl: '/figure/2', width: 1600, height: 900 }, options).figureSize).toEqual({
+      width: 1600,
+      height: 900,
     });
     expect(resolveFigureTarget(file, options).plotPath).toBe(fs.realpathSync(file));
 
@@ -100,5 +113,66 @@ describe('resolvePlotPath', () => {
     expect(refused.interactiveUrl).toBeNull();
     expect(refused.plotPath).toBeNull();
     expect(refused.rejected).toHaveLength(2);
+  });
+});
+
+describe('resolveFigureSize', () => {
+  /** Whole-number sides in range are kept. */
+  it('accepts a sensible size', () => {
+    expect(resolveFigureSize(800, 500)).toEqual({ width: 800, height: 500 });
+  });
+
+  /** Missing, fractional, negative, huge or non-number sides give no size. */
+  it('refuses anything else', () => {
+    for (const [width, height] of [
+      [undefined, undefined],
+      [800, undefined],
+      [800.5, 500],
+      [0, 500],
+      [-1, 500],
+      [800, 20001],
+      ['800', 500],
+      [Number.NaN, 500],
+      [Number.POSITIVE_INFINITY, 500],
+    ]) {
+      expect(resolveFigureSize(width, height)).toBeNull();
+    }
+  });
+});
+
+describe('figureWindowContentSize', () => {
+  const screen = { width: 1920, height: 1040 };
+
+  /** No known size keeps the old fixed window. */
+  it('uses the usual size when the figure size is unknown', () => {
+    expect(figureWindowContentSize(null, screen)).toEqual(DEFAULT_FIGURE_WINDOW);
+  });
+
+  /** A figure that fits gets room for itself and its page. */
+  it('fits a figure that fits on the screen', () => {
+    expect(figureWindowContentSize({ width: 1200, height: 800 }, screen)).toEqual({
+      width: 1200 + FIGURE_PAGE_MARGIN.width,
+      height: 800 + FIGURE_PAGE_MARGIN.height,
+    });
+  });
+
+  /** A figure bigger than the screen is held to the work area. */
+  it('never goes past the work area', () => {
+    expect(figureWindowContentSize({ width: 4000, height: 3000 }, screen)).toEqual(screen);
+  });
+
+  /** A tiny figure still leaves room for the toolbar. */
+  it('keeps a minimum size for small figures', () => {
+    const size = figureWindowContentSize({ width: 50, height: 40 }, screen);
+    expect(size.width).toBeGreaterThanOrEqual(420);
+    expect(size.height).toBeGreaterThanOrEqual(320);
+  });
+
+  /** On a screen smaller than the minimum, the screen wins. */
+  it('fits a screen smaller than the minimum', () => {
+    expect(figureWindowContentSize({ width: 50, height: 40 }, { width: 400, height: 300 })).toEqual({
+      width: 400,
+      height: 300,
+    });
   });
 });

@@ -25,6 +25,7 @@ forked child inheriting already-initialized native-extension state is unsafe;
 PyIndi is exactly that kind of native extension.
 """
 
+import gc
 import logging
 import multiprocessing
 import os
@@ -206,6 +207,7 @@ class IndiWorkerClient:
         self._pending_lock = threading.Lock()
         self._restart_lock = threading.Lock()
         self._process: BaseProcess | None = None
+        self._dispatch_thread: threading.Thread | None = None
         self._stopped = False
 
     def _start_process(self) -> None:
@@ -232,9 +234,10 @@ class IndiWorkerClient:
         result_queue: Queue = self._context.Queue()
         self._result_queue = result_queue
 
-        threading.Thread(
+        self._dispatch_thread = threading.Thread(
             target=self._dispatch_results, args=(result_queue,), daemon=True, name="IndiWorkerDispatch"
-        ).start()
+        )
+        self._dispatch_thread.start()
 
         self._process = self._context.Process(
             target=self._worker_target,
@@ -253,13 +256,18 @@ class IndiWorkerClient:
         """
         while True:
             try:
-                request_id, result, error = result_queue.get()
+                response = result_queue.get()
             except OSError, EOFError, ValueError:
                 # Raised when the queue itself is torn down (e.g. during
                 # interpreter shutdown or after stop() closes things out).
                 if self._stopped:
                     return
                 continue
+            if response is _STOP_SENTINEL:
+                # stop() sends this so the thread ends and lets go of the
+                # queue; see stop() for why that matters.
+                return
+            request_id, result, error = response
 
             with self._pending_lock:
                 future = self._pending.pop(request_id, None)
@@ -308,6 +316,8 @@ class IndiWorkerClient:
         HardwareError
             If the call fails on the worker side, or times out.
         """
+        if self._stopped:
+            raise HardwareError("INDI worker stopped.", retryable=False)
         with self._restart_lock:
             if self._process is None:
                 self._start_process()
@@ -342,15 +352,21 @@ class IndiWorkerClient:
             ) from None
 
     def stop(self) -> None:
-        """Stop the worker process cleanly.
+        """Stop the worker process cleanly and release its queues.
 
-        Also explicitly closes the current command/result queues once the
-        worker process is gone. Without this, each queue's underlying
-        semaphores stay open until Python's `resource_tracker` notices they
-        were never released and cleans them up itself, logging a "leaked
-        semaphore objects" warning at interpreter shutdown -- harmless (the
-        tracker does clean them up), but closing them here is the correct,
-        quiet way to release them.
+        Each queue holds three named semaphores that Python's
+        `resource_tracker` watches. They are released only when the queue
+        objects are garbage collected, or by Python's exit-time cleanup. The
+        backend never gets that cleanup: after its graceful shutdown, uvicorn
+        sends the stop signal to itself again with the default handler in
+        place, so the process ends without running exit handlers. So this
+        method ends the dispatch thread, which holds the result queue, then
+        drops every reference to the queues and the process and collects
+        them. Without that, the tracker reports "6 leaked semaphore objects"
+        at every exit.
+
+        Calls made after this raise `HardwareError`; the worker is never
+        restarted.
         """
         self._stopped = True
         if self._command_queue is not None:
@@ -363,17 +379,29 @@ class IndiWorkerClient:
             if self._process.is_alive():
                 self._process.kill()
                 self._process.join(timeout=2.0)
-        if self._command_queue is not None:
-            self._command_queue.close()
-            self._command_queue.join_thread()
         if self._result_queue is not None:
-            self._result_queue.close()
-            self._result_queue.join_thread()
+            try:
+                self._result_queue.put(_STOP_SENTINEL)
+            except (OSError, ValueError) as error:
+                logger.debug("Could not enqueue INDI dispatch stop sentinel: %s", error)
+        if self._dispatch_thread is not None:
+            self._dispatch_thread.join(timeout=1.0)
+        for worker_queue in (self._command_queue, self._result_queue):
+            if worker_queue is not None:
+                worker_queue.close()
+                worker_queue.join_thread()
         with self._pending_lock:
             for future in self._pending.values():
                 if not future.done():
                     future.set_exception(HardwareError("INDI worker stopped.", retryable=False))
             self._pending.clear()
+        if self._process is not None and not self._process.is_alive():
+            self._process.close()
+        self._process = None
+        self._command_queue = None
+        self._result_queue = None
+        self._dispatch_thread = None
+        gc.collect()
 
 
 class IndiWorkerProxy:

@@ -14,6 +14,43 @@ import { DocViewer } from './DocViewer';
 import { useReportModeReady } from '../common/utils/appBootReadiness';
 import './commandConsole.css';
 
+/** One interactive plot, as the backend reports it after running code. */
+interface InteractivePlot {
+  plot_path?: string;
+  url?: string;
+  interactive_url?: string;
+  width?: number;
+  height?: number;
+}
+
+/**
+ * Opens the app's figure windows for plots the backend reports.
+ *
+ * Each interactive plot opens its own page, sized to the figure. Plain PNG
+ * pictures open only when there is no interactive plot.
+ *
+ * @param interactivePlots - Plots with an interactive page, if any.
+ * @param plotPaths - PNG pictures of the plots, if any.
+ */
+function openFigureWindows(interactivePlots: InteractivePlot[] = [], plotPaths: string[] = []): void {
+  const openFigureWindow = window.astrometrics?.dialog?.openFigureWindow;
+  if (!openFigureWindow) return;
+  if (interactivePlots.length > 0) {
+    for (const plot of interactivePlots) {
+      openFigureWindow({
+        plotPath: plot.plot_path,
+        interactiveUrl: plot.url ?? plot.interactive_url,
+        width: plot.width,
+        height: plot.height,
+      });
+    }
+    return;
+  }
+  for (const plotPath of plotPaths) {
+    openFigureWindow(plotPath);
+  }
+}
+
 export const CommandConsole: React.FC = () => {
   // Left Column State
   const [recipes, setRecipes] = useState<ScriptRecipeItem[]>([]);
@@ -88,15 +125,10 @@ export const CommandConsole: React.FC = () => {
             },
           ]);
         } else if (action === 'terminal:plot_generated') {
-          if (window.astrometrics?.dialog?.openFigureWindow) {
-            if (payload?.interactive_url) {
-              window.astrometrics.dialog.openFigureWindow({
-                plotPath: payload.plot_path,
-                interactiveUrl: payload.interactive_url,
-              });
-            } else if (payload?.plot_path) {
-              window.astrometrics.dialog.openFigureWindow(payload.plot_path);
-            }
+          if (payload?.interactive_url) {
+            openFigureWindows([payload]);
+          } else if (payload?.plot_path) {
+            openFigureWindows([], [payload.plot_path]);
           }
         } else if (action === 'editor:sync' && payload?.code !== undefined) {
           setEditorCode(payload.code);
@@ -152,22 +184,7 @@ export const CommandConsole: React.FC = () => {
       }
 
       // Automatically open pop-up windows for generated plots
-      if (response.interactive_plots && response.interactive_plots.length > 0) {
-        for (const item of response.interactive_plots) {
-          if (window.astrometrics?.dialog?.openFigureWindow) {
-            window.astrometrics.dialog.openFigureWindow({
-              plotPath: item.plot_path,
-              interactiveUrl: item.url,
-            });
-          }
-        }
-      } else if (response.plots && response.plots.length > 0) {
-        for (const plotPath of response.plots) {
-          if (window.astrometrics?.dialog?.openFigureWindow) {
-            window.astrometrics.dialog.openFigureWindow(plotPath);
-          }
-        }
-      }
+      openFigureWindows(response.interactive_plots, response.plots);
     } catch (err: any) {
       setTerminalEntries((prev) => [
         ...prev,
@@ -208,22 +225,7 @@ export const CommandConsole: React.FC = () => {
         setWorkspaceVariables(response.workspace);
       }
 
-      if (response.interactive_plots && response.interactive_plots.length > 0) {
-        for (const item of response.interactive_plots) {
-          if (window.astrometrics?.dialog?.openFigureWindow) {
-            window.astrometrics.dialog.openFigureWindow({
-              plotPath: item.plot_path,
-              interactiveUrl: item.url,
-            });
-          }
-        }
-      } else if (response.plots && response.plots.length > 0) {
-        for (const plotPath of response.plots) {
-          if (window.astrometrics?.dialog?.openFigureWindow) {
-            window.astrometrics.dialog.openFigureWindow(plotPath);
-          }
-        }
-      }
+      openFigureWindows(response.interactive_plots, response.plots);
     } catch (err: any) {
       setTerminalEntries((prev) => [
         ...prev,

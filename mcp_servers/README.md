@@ -2,7 +2,7 @@
 
 This folder holds the Python MCP (Model Context Protocol) servers. An MCP server lets an AI agent call a program's functions directly instead of only reading its source. The servers here use only the public names of `astrometricslib` and `wayfindinglib`; the libraries and the backend know nothing about MCP. The front end's server (`astrometrics-ui`) is written in TypeScript and lives in `ui/mcp/`.
 
-The servers need version 2 of the MCP SDK, the `mcp` package. It is an optional extra in `pyproject.toml`, so the libraries and the backend install and run without it. `build/linux/setup_venv.sh` installs the project with the extra (`pip install -e ".[mcp]"`). Run the servers' tests with `build/linux/run_tests.sh mcp_servers`.
+The servers need version 2 of the MCP SDK, the `mcp` package. It is an optional extra in `pyproject.toml`, so the libraries and the backend install and run without it. `build/linux/setup_venv.sh` installs the project with the extra, and with the `dev` extra for the development tools (`pip install -e ".[mcp,dev]"`). Run the servers' tests with `build/linux/run_tests.sh mcp_servers`.
 
 ## What each folder is for
 

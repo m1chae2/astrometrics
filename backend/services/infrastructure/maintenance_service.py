@@ -5,7 +5,6 @@ REQ: SYS-1.0: Periodic maintenance and cleanup.
 
 import logging
 import threading
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -57,8 +56,11 @@ class MaintenanceService:
 
     def _run_maintenance_loop(self) -> None:
         """Periodically runs maintenance tasks."""
-        # Initial run after a short delay
-        time.sleep(10)
+        # Initial run after a short delay. Waiting on the stop event, not
+        # sleeping, lets a shutdown end this thread at once instead of
+        # starting a cleanup pass after the server has begun to stop.
+        if self._stop_event.wait(10):
+            return
 
         while not self._stop_event.is_set():
             try:
@@ -68,12 +70,8 @@ class MaintenanceService:
                 # The traceback is logged and the next pass tries again.
                 logger.exception("Error during maintenance cleanup")
 
-            # Wait for next interval or stop signal
-            # We sleep in small chunks to be responsive to stop event
-            for _ in range(self.interval_seconds):
-                if self._stop_event.is_set():
-                    break
-                time.sleep(1)
+            # Wait for the next interval; a stop signal ends the wait at once.
+            self._stop_event.wait(self.interval_seconds)
 
     def perform_cleanup(self) -> None:
         """Execute all cleanup tasks."""

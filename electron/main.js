@@ -19,7 +19,7 @@ import { getPlatform } from './platforms/index.js';
 import { PythonTerminalManager } from './python_terminal_manager.js';
 import { loadWindowState, trackWindowState } from './window_state.js';
 import { backendBaseUrl, backendPort } from './backend_client.js';
-import { resolveFigureTarget } from './figure_target.js';
+import { figureWindowContentSize, resolveFigureTarget } from './figure_target.js';
 
 const platform = getPlatform();
 const pythonTerminalManager = new PythonTerminalManager({ platform });
@@ -600,7 +600,7 @@ function createDisplayWindow(options = {}) {
  * @returns {BrowserWindow|null} The new window, or null when the target was refused.
  */
 function createFigureWindow(target) {
-  const { interactiveUrl, plotPath, rejected } = resolveFigureTarget(target);
+  const { interactiveUrl, plotPath, figureSize, rejected } = resolveFigureTarget(target);
   for (const reason of rejected) {
     log.warn(reason);
   }
@@ -608,9 +608,19 @@ function createFigureWindow(target) {
     return null;
   }
 
+  // Fit the window to the interactive page, which draws the figure at its
+  // own size. The PNG page shrinks its picture to fit, so it keeps the usual
+  // size. The work area comes from the screen the app window is on.
+  const parentWindow = BrowserWindow.getFocusedWindow() || mainWindow;
+  const display = parentWindow && !parentWindow.isDestroyed()
+    ? screen.getDisplayMatching(parentWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const contentSize = figureWindowContentSize(interactiveUrl ? figureSize : null, display.workAreaSize);
+
   const figureWin = new BrowserWindow({
-    width: 760,
-    height: 600,
+    width: contentSize.width,
+    height: contentSize.height,
+    useContentSize: true,
     title: 'Astrometrics Figure',
     backgroundColor: '#0a0d14',
     icon: getAppPath('assets', 'orbit.png'),

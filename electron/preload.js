@@ -313,7 +313,8 @@ const api = {
 		 * The main process opens only the backend's own `/figure/<number>` page,
 		 * or a PNG file from the backend's scratch folder. It refuses anything
 		 * else and resolves to null.
-		 * @param {string|{plotPath?: string, interactiveUrl?: string}} target Path to PNG figure or interactive descriptor.
+		 * @param {string|{plotPath?: string, interactiveUrl?: string, width?: number, height?: number}} target
+		 *   Path to PNG figure, or interactive descriptor with the figure's size in pixels.
 		 * @returns {Promise<{ windowId: number }|null>}
 		 */
 		async openFigureWindow(target) {

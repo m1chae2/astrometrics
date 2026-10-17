@@ -80,3 +80,24 @@ select {
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
+
+/* Reduced motion: when the desktop asks for less motion (GNOME 51 widened its
+  Reduced Motion setting), remove transitions and decorative animations.
+  Loading spinners stay, because they show that work is still running. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+
+  *:not([class*="spinner"]),
+  *:not([class*="spinner"])::before,
+  *:not([class*="spinner"])::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -120,6 +120,15 @@ class ObservatoryControl:
         self.safety = SafetyControl(self._context)
         self.equipment = EquipmentControl(self._context)
 
+    def close(self) -> None:
+        """Stop the background work control started, for good.
+
+        Call it once when the program shuts down. Today that stops the PHD2
+        event reader, if guiding was used. It starts nothing that was not
+        already running, and it is safe to call more than once.
+        """
+        self._context.close()
+
     @property
     def driver(self) -> Any:
         """The INDI session every INDI device driver wraps.

@@ -196,7 +196,7 @@ Folder: `tasks/execution_tasks/`. Facade: `ObservationExecution` in `api/executi
 
 ### 6.1 Facade and children
 
-`ObservatoryControl` (`api/control/control.py`) holds the drivers and seven children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`.
+`ObservatoryControl` (`api/control/control.py`) holds the drivers and seven children, each a `ControlChild` sharing one `ControlContext` (`api/control/context.py`). Each child lives in `api/control/<child>.py` and has `status(include=...)`. `close()` stops control's threads at shutdown.
 
 **Table 6.** The seven children of `ObservatoryControl`.
 

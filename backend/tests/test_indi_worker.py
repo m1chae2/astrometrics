@@ -228,3 +228,51 @@ def test_the_device_listing_works_through_the_worker_proxy(worker_client: IndiWo
     from wayfindinglib.drivers.indi.diagnostics import IndiDiagnostics
 
     assert IndiDiagnostics(IndiWorkerProxy(worker_client)).get_devices() == []
+
+
+def test_stop_releases_every_queue_semaphore(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stopping the client hands all six queue semaphores back to the tracker.
+
+    The backend's process ends without Python's exit-time cleanup (uvicorn
+    re-sends the stop signal to itself), so `stop()` has to release them
+    itself. Otherwise the resource tracker reports them as leaked.
+    """
+    from multiprocessing import resource_tracker
+
+    registered: list[str] = []
+    unregistered: list[str] = []
+    original_register = resource_tracker.register
+    original_unregister = resource_tracker.unregister
+
+    def record_register(name: str, rtype: str) -> None:
+        """Note each semaphore the queues create."""
+        if rtype == "semaphore":
+            registered.append(name)
+        original_register(name, rtype)
+
+    def record_unregister(name: str, rtype: str) -> None:
+        """Note each semaphore released again."""
+        if rtype == "semaphore":
+            unregistered.append(name)
+        original_unregister(name, rtype)
+
+    monkeypatch.setattr(resource_tracker, "register", record_register)
+    monkeypatch.setattr(resource_tracker, "unregister", record_unregister)
+
+    client = IndiWorkerClient(worker_target=_dummy_worker_main)
+    assert client.call_sync("echo_after_delay", "hello", 0.0, timeout=10.0) == "hello"
+    client.stop()
+
+    assert len(registered) == 6
+    assert sorted(unregistered) == sorted(registered)
+
+
+def test_a_call_after_stop_fails_without_restarting_the_worker() -> None:
+    """Once stopped, the client refuses calls and starts no new worker."""
+    client = IndiWorkerClient(worker_target=_dummy_worker_main)
+    client.call_sync("echo_after_delay", "start it", 0.0, timeout=10.0)
+    client.stop()
+
+    with pytest.raises(HardwareError, match="stopped"):
+        client.call_sync("echo_after_delay", "again", 0.0, timeout=10.0)
+    assert client._process is None

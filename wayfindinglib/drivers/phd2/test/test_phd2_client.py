@@ -89,3 +89,65 @@ def test_events_reconnects_after_dropped_connection() -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_events_notices_a_stop_on_a_connection_that_sends_nothing() -> None:
+    """A stop is noticed even while PHD2 is connected but silent.
+
+    PHD2 sends nothing while idle. Before reads had a timeout, the reader
+    waited on such a connection forever and never saw the stop.
+    """
+    import time
+
+    release = threading.Event()
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            release.wait(timeout=10)
+
+    server, port = _start_test_server(Handler)
+    stop_event = threading.Event()
+    finished = threading.Event()
+    client = PHD2Client(host="localhost", port=port, socket_timeout_seconds=0.2)
+
+    def read() -> None:
+        """Read events until the stream ends."""
+        for _ in client.events(stop_event=stop_event):
+            pass
+        finished.set()
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        time.sleep(0.3)
+        stop_event.set()
+        assert finished.wait(timeout=1.5)
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+
+
+def test_events_splits_lines_that_arrive_in_pieces() -> None:
+    """An event split across reads, or two in one read, still parses."""
+    first = {"Event": "GuideStep", "Timestamp": 1.0}
+    second = {"Event": "GuideStep", "Timestamp": 2.0}
+
+    class Handler(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            text = (json.dumps(first) + "\n" + json.dumps(second) + "\n").encode()
+            self.request.sendall(text[:10])
+            self.request.sendall(text[10:])
+
+    server, port = _start_test_server(Handler)
+    try:
+        client = PHD2Client(host="localhost", port=port)
+        collected = []
+        for event in client.events():
+            collected.append(event)
+            if len(collected) == 2:
+                break
+        assert collected == [first, second]
+    finally:
+        server.shutdown()
+        server.server_close()

@@ -84,6 +84,21 @@ Agreed with the user on 2026-10-17:
    never saves anything, so the read-only AI tools can keep calling it. The pipelines are the only
    writers of measurements. A diagnostic reads stored measurements first and computes only what is
    missing, without writing.
+6. **Each pipeline declares its own metrics.** A `metrics.py` beside each pipeline's code holds its
+   declarations, and one assembled registry gives `wayfindinglib` a single vocabulary (section
+   3.4). A scientist auditing one pipeline finds its metrics in one place, next to the code that
+   computes them.
+7. **Gain and read noise are keyed by camera and setting.** A camera profile holds gain and read
+   noise for each (gain setting, offset, binning) the camera is used at. A frame whose setting has
+   no entry gets `NOT_MEASURED` with a reason, never the nearest value. For ZWO cameras the maker's
+   published curve may fill a gap, always marked `ASSUMED`. A calibration measurement computes
+   gain and read noise from flat and bias pairs, so measuring a new setting is one library call.
+   The user works mainly with ZWO cameras.
+8. **Raw statistics are always stored; probabilities only where validated.** A verdict field is
+   replaced by its raw statistic and uncertainty. A calibrated probability is added as its own
+   metric only where a validation register entry shows it was checked on held-out data, and it
+   cites that entry. Variability is the first candidate, because its catalog labels and its
+   `variability_discrimination` gate already exist.
 
 ## 3. The shared shape
 
@@ -186,30 +201,48 @@ class QualityJudgment(BaseModel):
 
 ### 3.4 The metric registry
 
-The registry is what makes the shape shared in practice. Each metric is registered once:
+The registry is what makes the shape shared in practice. Each pipeline declares its metrics in
+its own `metrics.py` (decision 6). Metrics shared by several pipelines, such as frame star width,
+are declared in `pipelines/shared/quality/metrics.py`. `metric_registry.py` assembles every
+declaration into one registry. Names carry their pipeline or checkpoint, for example
+`stacking.noise_excess_ratio` or `frame.star_width_arcsec`, and `wayfindinglib` refers to them by
+these names. Two estimators of one quantity, such as Siril's FWHM and the library's own, get two
+names, never one.
 
 ```python
-METRICS: dict[MetricName, MetricSpec] = {
-    MetricName.FRAME_STAR_WIDTH_ARCSEC: MetricSpec(
+# pipelines/shared/quality/metrics.py
+FRAME_METRICS = (
+    MetricSpec(
+        name="frame.star_width_arcsec",
         unit="arcsec",
         checkpoint=Checkpoint.FRAME,
         levels=frozenset({SubjectLevel.FRAME, SubjectLevel.NIGHT}),
         better=Direction.LOWER,
         meaning="Median full width at half maximum of the stars on the frame.",
         decisions=("focus", "guiding", "seeing"),
+        estimator="Library FWHM fit to isolated unsaturated stars",
+        computed_by="pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm",
+        uncertainty_method="Scatter of the per-star widths over the square root of the star count",
+        register_entry=None,
         efficiency=efficiency_from_star_width_ratio,
     ),
-}
+)
 ```
 
 A `MetricSpec` holds:
 
-- the unit, checked against every measurement,
+- the name and the unit, the unit checked against every measurement,
+- the estimator, the function that computes it, how its uncertainty is found and its register
+  entry, which is what an auditor checks,
 - the checkpoint (section 5) and the subject levels it applies to,
 - which direction is better,
 - a one-line meaning in plain words,
 - the decisions it informs,
 - an optional function that turns a value and its expected value into an efficiency.
+
+The review-guide generator renders each pipeline's declarations as a metrics table in that
+pipeline's guide. The conformance test checks that every pipeline folder contributes a
+`metrics.py`, so a missed file cannot silently drop a pipeline's metrics from the registry.
 
 ### 3.5 Storage
 
@@ -259,7 +292,8 @@ A test in the style of `pipelines/test/test_gate_conformance.py` checks that:
 - every measurement a pipeline emits in its tests uses a registered name and the registered unit;
 - every registered metric is produced by at least one pipeline;
 - every `wayfindinglib` recommendation rule declares the metrics it reads
-  (`requires=(MetricName.FRAME_STAR_WIDTH_ARCSEC, ...)`), and each one is registered;
+  (`requires=("frame.star_width_arcsec", ...)`), and each one is registered;
+- every pipeline folder contributes a `metrics.py`, and no two declarations share a name;
 - every `VALIDATED_DATASET` limit names a register entry that exists;
 - a `NOT_MEASURED` measurement has a reason and no value.
 
@@ -285,7 +319,7 @@ on 2026-10-17:
 | :--- | :--- | :--- |
 | Models (shapes only) | `astrometricslib/models/quality/` | Measurement, limit and judgment shapes; today's quality models, moved |
 | Shared calculations | `astrometricslib/pipelines/shared/quality/` | The assembled registry, efficiency functions, the frame measurement step |
-| Each pipeline | `<pipeline>/post_processing/record_quality.py` and `<pipeline>/metrics.py` | What the pipeline emits, and the declaration of its metrics (proposed, see section 9) |
+| Each pipeline | `<pipeline>/post_processing/record_quality.py` and `<pipeline>/metrics.py` | What the pipeline emits, and the declaration of its metrics (decision 6) |
 | Storage | `astrometricslib/drivers/quality_store.py` | The two tables, through the butler |
 | Public API | `astrometricslib/api/quality.py` | `query` plus the live checks |
 | Interpretation | `wayfindinglib/session_analysis/` | Recommendations, and a new `result_quality/` folder holding the moved fitness-for-use rules as a table |
@@ -460,8 +494,9 @@ the affected READMEs updated.
    measurement and judgment references. Rules declare the metrics they require. Rank advice by
    efficiency lost, and show the night's loss account. Done when the existing guiding and capture
    recommendations read through `quality.query`.
-6. **New metrics.** Build the "new" rows of section 5 in order of value: sky noise over read noise
-   (after the camera profiles hold measured gain and read noise), noise over √N from subset
+6. **New metrics.** First key gain and read noise by camera and setting, and add the calibration
+   measurement that computes them from flat and bias pairs (decision 7). Then build the "new" rows
+   of section 5 in order of value: sky noise over read noise, noise over √N from subset
    stacks, rotation and elongation angle, dithering advice, target clipping through the WCS,
    center-to-corner width, injection tests. Each tuned limit gets a validation register entry.
 7. **Retire duplicates.** Once every reader uses `quality.query`, remove the values that the JSON
@@ -481,20 +516,14 @@ Phases 2 and 3 can run at the same time once phase 1 is done.
 
 ## 9. Open questions and risks
 
-- **Where metrics are declared (proposed).** Each pipeline declares its own metrics in a
-  `metrics.py` beside its code, and `metric_registry.py` assembles them into the one registry that
-  `wayfindinglib` reads. Names carry their pipeline or checkpoint (`stacking.noise_excess_ratio`,
-  `frame.star_width_arcsec`). Each declaration states the definition, the estimator, the function
-  that computes it, how its uncertainty is found and its register entry. The review-guide
-  generator renders each pipeline's declarations as a table in that pipeline's guide, so a
-  scientist auditing one pipeline reads its metrics in one place. Two estimators of one quantity
-  (for example, Siril's FWHM and the library's own) get two names, never one.
+- **Where metrics are declared (settled).** See decision 6 and section 3.4.
 - **Night boundaries (settled).** `observing_night_id` uses the processing computer's local time.
   The user confirmed on 2026-10-17 that the computer and the observatory share a time zone.
-- **Gain and read noise.** Several efficiency functions need measured gain and read noise. The
-  camera profile model has fields for them, but the profiles may not hold measured values yet.
-- **Calibrated probabilities.** Turning a verdict into a probability needs labeled examples. Where
-  none exist, the measurement keeps the raw statistic and its uncertainty, and gives no
-  probability.
+- **Gain and read noise (settled, see decision 7).** On 2026-10-17 only the ZWO ASI 533MM Pro had
+  measured values, at gain 0. The Nikon D5300 and the ZWO ASI120MC-S guide camera had none. Until a
+  setting is measured, its frames get relative efficiency only, not absolute.
+- **Calibrated probabilities (settled, see decision 8).** A probability needs an acceptance rule in
+  the register: a minimum held-out sample size and a check that predicted and observed rates
+  agree. Catalog labels are imperfect, so each register entry states how its labels were checked.
 - **Table growth (settled).** See section 3.5: narrow rows, stars kept in their own records,
   indexes, a "latest" view, and retention only if needed.

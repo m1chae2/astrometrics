@@ -23,7 +23,7 @@ source of truth. Line numbers drift, so this plan names files and functions inst
 
 ## Status
 
-Status on 2026-10-17: draft, with the user's decisions folded in (decisions 6 to 13). Not yet
+Status on 2026-10-17: draft, with the user's decisions folded in (decisions 6 to 14). Not yet
 reviewed by the change control board, nothing built.
 
 ## 1. Findings
@@ -126,6 +126,9 @@ Agreed with the user on 2026-10-17:
     sensor's field and the mosaic panels on the sky, and its result feeds the night plan.
 13. **The Planetarium's equipment settings move to Observatory Manager.** `EquipmentConfigPanel` is
     equipment setup, not sky viewing.
+14. **Night review and refresh.** Observation Execution has a night selector for reviewing earlier
+    nights. Its quality strip and frame list refresh when frames are ingested, not on a timer
+    (`QUALITY_USE_CASES.md`, section 6).
 
 ## 3. The four displays
 
@@ -171,7 +174,7 @@ New. Takes the live panels from Observatory Manager. Used at night.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Current target · quality strip: top warning · top recommendation · loss │
+│ Night: [tonight ▾] · current target · quality strip: warning · advice · loss│
 ├────────────────────────────┬─────────────────────────────────────────────┤
 │ Live session (monitor)     │ Guiding trends                              │
 │  guiding steady?           │                                             │
@@ -185,8 +188,14 @@ New. Takes the live panels from Observatory Manager. Used at night.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **Night selector.** It defaults to tonight. Choosing an earlier night shows the same panels from
+  the stored data, which makes this display the place to review last night
+  (`QUALITY_USE_CASES.md`, UC1).
 - **Monitor mode** (now): the live session status from the Ekos files, guiding trends, and the
   quality of each frame as it arrives in the library.
+- **When it refreshes.** The quality strip and the frame list update when new frames of the target
+  are ingested into the library, not on a timer. The live session status updates when the Ekos
+  logs are synced.
 - **Control mode** (later): the control panels and the execution queue become active, and the live
   frame returns.
 
@@ -272,9 +281,9 @@ passing if the backend changes, the user guides updated, and new screenshots fro
 2. **Observation Execution.** The new display, its flag and its mode entry. It takes the live
    panels from Observatory Manager and adds the capture-source setting, monitor mode with the live
    session status (adding a backend RPC method for it if there is none), the frame list and the
-   quality strip, and the control panels gated by mode. Execution Queue moves here. Done when a
-   real Ekos night shows live status and arriving frames, and every control panel reads as
-   unavailable and sends nothing in monitor mode.
+   quality strip refreshed on ingest, the night selector, and the control panels gated by mode. Execution Queue moves here. Done when a
+   real Ekos night shows live status and arriving frames, last night can be reviewed with the night
+   selector, and every control panel reads as unavailable and sends nothing in monitor mode.
 3. **Observatory Manager.** What is left becomes the equipment display: devices, settings, limits,
    alignment, camera profiles, the calibration library moved from Observation Manager and the
    equipment settings moved from the Planetarium. Done when every setup panel works there and no

@@ -13,8 +13,7 @@ It is the user-facing companion of three plans:
 
 ## Status
 
-Status on 2026-10-17: draft for the user's agreement. Section 6 lists the points that still need
-it.
+Status on 2026-10-17: agreed with the user except one point, listed as open in section 6.
 
 ## 1. The user and the setting
 
@@ -51,8 +50,7 @@ it.
 ### UC1. Review last night
 
 - **When:** the morning after a session.
-- **Where:** Observation Execution, with last night chosen in its night selector (section 6,
-  point 1).
+- **Where:** Observation Execution, with last night chosen in its night selector (section 6).
 - **The user sees:**
   - each target imaged, with frames captured, frames set aside and the reason, and the effective
     time: "M 81: 4.0 h captured, 2.6 h effective. Clouds 0.8 h, Moon 0.4 h, poor seeing 0.2 h";
@@ -182,7 +180,8 @@ it.
   - the quality strip: the target's top warning, top recommendation and the night's loss so far.
 - **What the user does:** acts in Ekos (refocus, recalibrate the guider, move to another target).
   The app sends no commands.
-- **Done right when:** a problem shows within a few frames of when it started.
+- **Refreshes:** when the night's new frames are ingested into the library, not on a timer.
+- **Done right when:** a problem shows in the first ingest after it started.
 
 ### UC12. Change plans mid-night
 
@@ -207,23 +206,28 @@ it.
   the public quality calls and explains them. It cannot change settings or command devices. When
   its tools cannot answer, it reports the gap.
 
-## 6. Points that need agreement
+## 6. Points agreed and open
 
-1. **Where the night review lives.** This document places UC1 in Observation Execution, with a
-   night selector that defaults to tonight and can show any earlier night from the stored data. The
-   UI plan does not have this yet.
-2. **The checklist is plan state.** Non-capture recommendations join the night plan as a checklist.
-   The plan and its ticked items are saved as the user's plan; the recommendations themselves are
-   still worked out fresh. A ticked item that the next measurements show did not work comes back as
-   a recommendation.
-3. **The "new target" case.** For a target with no frames yet, the report has no data to judge. It
-   offers a starting capture setting from the user's other targets with similar brightness and the
-   same equipment, marked as a starting point, not a recommendation from data.
-4. **How often the report refreshes at night.** This document assumes the quality strip and frame
-   list update as frames arrive from each sync, not continuously.
-5. **The Nikon D5300.** The use cases assume the ZWO cameras. The Nikon gets measurements, but its
-   gain and read noise are not yet measured, so its recommendations stay relative until UC13 is
-   done for it.
+Agreed with the user on 2026-10-17:
+
+1. **The night review lives in Observation Execution.** It has a night selector that defaults to
+   tonight and can show any earlier night from the stored data (UC1).
+2. **A new target gets a starting point.** For a target with no frames yet, the report has no data
+   to judge. It offers a starting capture setting from the user's other targets with similar
+   brightness and the same equipment, marked as a starting point, not a recommendation from data.
+3. **The report refreshes when frames are ingested.** The quality strip, the frame list and a
+   target's report update only when new frames of that target are ingested into the library, not
+   on a timer.
+4. **The Nikon D5300 stays relative for now.** The use cases assume the ZWO cameras. The Nikon
+   gets measurements, but its gain and read noise are not yet measured, so its recommendations
+   compare against its own earlier data only until UC13 is done for it.
+
+Still open:
+
+- **The checklist is plan state.** Non-capture recommendations join the night plan as a
+  checklist. The plan and its ticked items are saved as the user's plan; the recommendations
+  themselves are still worked out fresh. A ticked item that the next measurements show did not work
+  comes back as a recommendation.
 
 ## 7. Not use cases
 

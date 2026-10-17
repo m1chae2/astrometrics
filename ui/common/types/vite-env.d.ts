@@ -50,7 +50,7 @@ interface Window {
     dialog: {
       openFile: (options?: any) => Promise<string[] | null>;
       saveFile?: (options?: any) => Promise<string | null>;
-      openFigureWindow?: (target: string | { plotPath?: string; interactiveUrl?: string }) => Promise<{ windowId: number } | null>;
+      openFigureWindow?: (target: string | { plotPath?: string; interactiveUrl?: string; width?: number; height?: number }) => Promise<{ windowId: number } | null>;
     };
     terminal?: {
       executeScript: (code: string, options?: any) => Promise<any>;

@@ -63,7 +63,7 @@ The backend listens on port 5000 unless `ASTROMETRICS_PORT` names another port.
 - **Splash window.** Shows `electron/splash.html` during start-up.
 - **Main window.** Holds the whole app. Every view is mounted at start-up.
 - **Display windows.** Each view can open in its own window, for a second monitor. The URL carries `?mode=<view>&windowId=<number>`, and the window shows only that view.
-- **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder.
+- **Figure windows.** Hold a Matplotlib plot from the Python terminal. `figure_target.js` lets a figure window open only the backend's own `/figure/<number>` page or a PNG file in the backend's scratch folder. The backend sends each figure's size in pixels, and the window opens big enough for the figure and its toolbar, but no bigger than the screen.
 - **Tray popover.** A small window beside the tray icon. It is a second page of the same build, `ui/tray_popover.html`, with its code in `ui/trayPopover/`.
 
 ### The bridge between a window and the shell

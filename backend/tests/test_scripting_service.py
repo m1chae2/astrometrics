@@ -44,6 +44,19 @@ result = 42
     assert service.get_figure_manager(fig_id) is not None
 
 
+def test_scripting_service_reports_figure_size_in_pixels() -> None:
+    """Each interactive plot carries the figure's size, so its window fits."""
+    service = ScriptingService()
+    result = service.execute_structured("""
+import matplotlib.pyplot as plt
+fig = plt.figure(figsize=(8, 5), dpi=100)
+plt.plot([1, 2, 3], [4, 5, 6])
+""")
+    plot = result["interactive_plots"][-1]
+    assert (plot["width"], plot["height"]) == (800, 500)
+    assert isinstance(plot["width"], int)
+
+
 def test_scripting_service_list_and_get_recipes() -> None:
     """Verify built-in script recipes can be listed and retrieved."""
     service = ScriptingService()

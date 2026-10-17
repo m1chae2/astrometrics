@@ -70,6 +70,10 @@ class Phd2GuidingDriver(GuidingDriver):
         self._phd2.stop()
         return True
 
+    def close(self) -> None:
+        """Stop reading PHD2's events for good, as at shutdown."""
+        self._phd2.close()
+
     async def is_connected(self) -> bool:
         """Report whether the PHD2 event reader is running.
 

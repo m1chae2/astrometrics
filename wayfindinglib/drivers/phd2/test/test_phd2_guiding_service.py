@@ -112,3 +112,70 @@ def test_get_status_returns_empty_history_before_any_events() -> None:
     """
     service = PHD2GuidingService(FakeClient([]))
     assert service.get_status() == {"history": []}
+
+
+def test_stop_waits_for_the_reader_thread_to_end() -> None:
+    """stop() returns only once the reader thread has ended."""
+    service = PHD2GuidingService(FakeClient([]))
+    service.poll_external_telemetry()
+    assert service.is_running()
+
+    started_at = time.monotonic()
+    assert service.stop() is True
+
+    assert not service.is_running()
+    assert time.monotonic() - started_at < 0.5
+
+
+def test_a_poll_after_stop_starts_the_reader_again() -> None:
+    """stop() is a pause: the driver's next read starts the reader again."""
+    service = PHD2GuidingService(FakeClient([]))
+    service.poll_external_telemetry()
+    service.stop()
+
+    service.poll_external_telemetry()
+
+    assert service.is_running()
+    service.close()
+
+
+def test_close_stops_the_reader_for_good() -> None:
+    """After close(), polls no longer start the reader thread."""
+    service = PHD2GuidingService(FakeClient([]))
+    service.poll_external_telemetry()
+
+    assert service.close() is True
+    service.poll_external_telemetry()
+
+    assert not service.is_running()
+
+
+def test_polls_at_the_same_moment_start_only_one_reader() -> None:
+    """Several threads polling at once must not each start a reader."""
+    started: list[threading.Thread] = []
+    original_start = threading.Thread.start
+
+    def record_start(thread: threading.Thread) -> None:
+        """Note each PHD2 reader thread started."""
+        if thread.name == "PHD2Events":
+            started.append(thread)
+        original_start(thread)
+
+    service = PHD2GuidingService(FakeClient([]))
+    barrier = threading.Barrier(8)
+
+    def poll() -> None:
+        """Wait for every poller, then poll together."""
+        barrier.wait()
+        service.poll_external_telemetry()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(threading.Thread, "start", record_start)
+        pollers = [threading.Thread(target=poll) for _ in range(8)]
+        for poller in pollers:
+            original_start(poller)
+        for poller in pollers:
+            poller.join(timeout=5)
+
+    assert len(started) == 1
+    service.close()

@@ -109,6 +109,9 @@ class ControlContext:
         self._weather_driver: WeatherDriver | None = None
         self._remote_transfer_driver: RemoteTransferDriver | None = None
         self._guiding_driver: GuidingDriver | None = None
+        # Builds the guiding driver once, even when callers on several
+        # threads ask for it at the same moment.
+        self._guiding_driver_lock = threading.Lock()
         self._indi_diagnostics: IndiDiagnostics | None = None
         self.motion_stop = threading.Event()
         """Set by `control.mount.abort_motion` to stop a centering loop."""
@@ -407,46 +410,71 @@ class ControlContext:
         ``"phd2"`` reads PHD2's guide steps (and the mount's pulses when
         PHD2 is quiet), ``"internal"`` reads the pulses KStars/Ekos sends
         the mount, and ``"simulator"`` runs a stand-in guide loop.
-        ``"phd2"`` when no telescope is active.
+        ``"phd2"`` when no telescope is active. Built on first use, once,
+        by `_build_guiding_driver`, which raises `ConfigurationError` for a
+        protocol with no guiding driver.
 
         Returns
         -------
         guiding_driver : `GuidingDriver`
             The active guiding driver.
+        """
+        if self._guiding_driver is not None:
+            return self._guiding_driver
+        with self._guiding_driver_lock:
+            if self._guiding_driver is None:
+                self._guiding_driver = self._build_guiding_driver()
+        return self._guiding_driver
+
+    def _build_guiding_driver(self) -> GuidingDriver:
+        """Build the guiding driver the active telescope's protocol names.
+
+        Returns
+        -------
+        guiding_driver : `GuidingDriver`
+            The new driver.
 
         Raises
         ------
         ConfigurationError
             If the protocol has no guiding driver.
         """
-        if self._guiding_driver is None:
-            from astrometricslib import ConfigurationError
-            from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
-            from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
+        from astrometricslib import ConfigurationError
+        from wayfindinglib.drivers.indi.guiding_driver import IndiGuidingDriver
+        from wayfindinglib.drivers.interfaces.registry import build_guiding_driver_registry
 
-            telescope = self.active_telescope()
-            protocol = telescope.guiding_protocol if telescope else "phd2"
-            registry = cast("dict[str, Callable[..., GuidingDriver]]", build_guiding_driver_registry())
-            if protocol not in registry:
-                raise ConfigurationError(
-                    f"No guiding driver for guiding_protocol '{protocol}'. Choose from {sorted(registry)}."
-                )
-            pulses = IndiGuidingDriver(session=self.driver)
-            if protocol == "internal":
-                self._guiding_driver = pulses
-            elif protocol == "phd2":
-                from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
-                from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
+        telescope = self.active_telescope()
+        protocol = telescope.guiding_protocol if telescope else "phd2"
+        registry = cast("dict[str, Callable[..., GuidingDriver]]", build_guiding_driver_registry())
+        if protocol not in registry:
+            raise ConfigurationError(
+                f"No guiding driver for guiding_protocol '{protocol}'. Choose from {sorted(registry)}."
+            )
+        pulses = IndiGuidingDriver(session=self.driver)
+        if protocol == "internal":
+            return pulses
+        if protocol == "phd2":
+            from wayfindinglib.drivers.phd2.phd2_client import PHD2Client
+            from wayfindinglib.drivers.phd2.phd2_guiding_service import PHD2GuidingService
 
-                self._guiding_driver = registry[protocol](PHD2GuidingService(PHD2Client()), fallback=pulses)
-            else:
-                self._guiding_driver = registry[protocol](fallback=pulses)
-        return self._guiding_driver
+            return registry[protocol](PHD2GuidingService(PHD2Client()), fallback=pulses)
+        return registry[protocol](fallback=pulses)
 
     @guiding_driver.setter
     def guiding_driver(self, guiding_driver: GuidingDriver) -> None:
         """Set the guiding driver."""
         self._guiding_driver = guiding_driver
+
+    def close(self) -> None:
+        """Stop the background work of the drivers built so far, for good.
+
+        Builds nothing: a driver that was never asked for has nothing
+        running. Safe to call more than once.
+        """
+        with self._guiding_driver_lock:
+            guiding_driver = self._guiding_driver
+        if guiding_driver is not None:
+            guiding_driver.close()
 
     @property
     def indi_diagnostics(self) -> IndiDiagnostics | None:

@@ -24,6 +24,14 @@ DEFAULT_PHD2_PORT = 4400
 # so both hardware integrations back off from a dead endpoint the same way.
 _RECONNECT_COOLDOWN_SECONDS = 5.0
 
+# Longest a connect or a read may wait before the stop flag is checked again.
+# PHD2 sends nothing while it is idle, so without a limit a read on a quiet
+# connection would never return and a stop would never be noticed.
+_SOCKET_TIMEOUT_SECONDS = 1.0
+
+# Bytes asked for in one socket read.
+_READ_CHUNK_BYTES = 4096
+
 
 class PHD2Client:
     """Read-only TCP client for PHD2's event server.
@@ -44,6 +52,9 @@ class PHD2Client:
         Minimum time between connection attempts (default
         `_RECONNECT_COOLDOWN_SECONDS`). Overridable so tests can exercise
         reconnect behavior without waiting the production cooldown.
+    socket_timeout_seconds : `float`, optional
+        Longest a connect or a read waits before the stop flag is checked
+        again (default `_SOCKET_TIMEOUT_SECONDS`).
     """
 
     def __init__(
@@ -52,12 +63,14 @@ class PHD2Client:
         port: int = DEFAULT_PHD2_PORT,
         socket_factory: Callable[[], socket.socket] | None = None,
         reconnect_cooldown_seconds: float = _RECONNECT_COOLDOWN_SECONDS,
+        socket_timeout_seconds: float = _SOCKET_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the client without opening a connection yet."""
         self.host = host
         self.port = port
         self._socket_factory = socket_factory or (lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM))
         self._reconnect_cooldown_seconds = reconnect_cooldown_seconds
+        self._socket_timeout_seconds = socket_timeout_seconds
         self._last_connection_attempt = 0.0
 
     def _can_attempt_connect(self) -> bool:
@@ -82,17 +95,31 @@ class PHD2Client:
         Returns
         -------
         connected_socket : `socket.socket`
-            The connected socket, ready for line-delimited JSON reads.
+            The connected socket, ready for line-delimited JSON reads. Its
+            connect and reads give up after `socket_timeout_seconds`.
+
+        Raises
+        ------
+        OSError
+            If the connection cannot be made, including a connect that
+            takes longer than `socket_timeout_seconds`.
         """
         sock = self._socket_factory()
-        sock.connect((self.host, self.port))
+        sock.settimeout(self._socket_timeout_seconds)
+        try:
+            sock.connect((self.host, self.port))
+        except OSError:
+            sock.close()
+            raise
         return sock
 
     def events(self, stop_event: Any | None = None) -> Iterator[dict[str, Any]]:
         """Yield parsed JSON event dicts from PHD2's event stream.
 
         Reconnects on a dropped connection, subject to the reconnect
-        cooldown, until `stop_event` is set.
+        cooldown, until `stop_event` is set. A set stop is noticed within
+        about `socket_timeout_seconds`, even on a connection that sends
+        nothing.
 
         Parameters
         ----------
@@ -105,7 +132,18 @@ class PHD2Client:
         event : `dict`
             One decoded JSON message per PHD2 event.
         """
-        while stop_event is None or not stop_event.is_set():
+
+        def stopped() -> bool:
+            """Report whether the caller has asked the stream to stop.
+
+            Returns
+            -------
+            stopped : `bool`
+                `True` once `stop_event` is set.
+            """
+            return stop_event is not None and stop_event.is_set()
+
+        while not stopped():
             if not self._can_attempt_connect():
                 time.sleep(0.1)
                 continue
@@ -116,17 +154,30 @@ class PHD2Client:
                 continue
 
             try:
-                file_handle = sock.makefile("r")
-                for line in file_handle:
-                    if stop_event is not None and stop_event.is_set():
-                        return
-                    stripped_line = line.strip()
-                    if not stripped_line:
-                        continue
+                pending = b""
+                while not stopped():
                     try:
-                        yield json.loads(stripped_line)
-                    except json.JSONDecodeError:
-                        logger.warning("Skipping malformed PHD2 event line: %r", stripped_line)
+                        chunk = sock.recv(_READ_CHUNK_BYTES)
+                    except TimeoutError:
+                        # Nothing arrived in time; check the stop flag again.
+                        continue
+                    if not chunk:
+                        # PHD2 closed the connection; reconnect later.
+                        break
+                    pending += chunk
+                    while b"\n" in pending:
+                        raw_line, pending = pending.split(b"\n", 1)
+                        stripped_line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not stripped_line:
+                            continue
+                        try:
+                            event = json.loads(stripped_line)
+                        except json.JSONDecodeError:
+                            logger.warning("Skipping malformed PHD2 event line: %r", stripped_line)
+                            continue
+                        yield event
+                        if stopped():
+                            return
             except OSError as read_error:
                 logger.warning("PHD2 connection to %s:%s dropped: %s", self.host, self.port, read_error)
             finally:

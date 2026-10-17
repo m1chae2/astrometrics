@@ -43,6 +43,7 @@ class Container:
 
         # Domain Services
         self.astrometrics = None
+        self.wayfinder = None
         self.target_service = None
         self.stellar_object_service = None
         self.image_service = None
@@ -92,12 +93,15 @@ class Container:
     def shutdown_resources(self) -> None:
         """Stop the background threads and processes the container started.
 
-        Stops the maintenance thread and the INDI worker client. Safe to
-        call more than once, and safe on a container that was never
+        Stops the maintenance thread, the observatory control's background
+        readers (such as the PHD2 event reader) and the INDI worker client.
+        Safe to call more than once, and safe on a container that was never
         initialized or only partly built.
         """
         if self.maintenance_service is not None:
             self.maintenance_service.stop()
+        if self.wayfinder is not None:
+            self.wayfinder.control.close()
         if self.indi_worker_client is not None:
             self.indi_worker_client.stop()
         self.initialized = False

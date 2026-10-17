@@ -26,6 +26,16 @@ def test_shutdown_stops_the_maintenance_thread_and_the_indi_client() -> None:
     assert container.initialized is False
 
 
+def test_shutdown_closes_observatory_control() -> None:
+    """Shutdown stops observatory control's background readers too."""
+    container = Container()
+    container.wayfinder = MagicMock()
+
+    container.shutdown_resources()
+
+    container.wayfinder.control.close.assert_called_once_with()
+
+
 def test_shutdown_is_safe_on_a_container_that_never_started() -> None:
     """Nothing was built, so there is nothing to stop and no error."""
     container = Container()

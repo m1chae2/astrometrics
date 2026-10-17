@@ -127,6 +127,16 @@ ROOT_DRIVERS = frozenset({
 })
 """The driver properties `control` keeps for injecting drivers."""
 
+ROOT_LIFECYCLE = frozenset({"close"})
+"""Lifecycle methods on `control` itself, outside the operation count.
+
+`close()` releases the background work `control` owns at program shutdown.
+It does nothing to the observatory, so it is not one of the operations
+`MAXIMUM_CONTROL_MEMBERS` limits, and it belongs on the object that owns the
+work rather than on a child. Nothing else may join this set without the same
+argument.
+"""
+
 CHILDREN = {
     "mount": {
         "status",
@@ -262,8 +272,8 @@ def test_background_jobs_can_skip_registering_a_job() -> None:
 
 
 def test_control_root_holds_only_the_drivers_and_the_children(control: ObservatoryControl) -> None:
-    """The root offers only the driver properties and the seven children."""
-    assert _public_names(control) == ROOT_DRIVERS | set(CHILDREN)
+    """The root offers only the driver properties, the children and `close`."""
+    assert _public_names(control) == ROOT_DRIVERS | ROOT_LIFECYCLE | set(CHILDREN)
 
 
 @pytest.mark.parametrize("child", sorted(CHILDREN))

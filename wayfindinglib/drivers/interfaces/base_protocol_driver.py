@@ -56,3 +56,13 @@ class ProtocolDriver(abc.ABC):
         connected : `bool`
             `True` if the device is currently connected.
         """
+
+    def close(self) -> None:
+        """Release anything the driver runs in the background, for good.
+
+        Called once when the program shuts down, unlike `disconnect()`,
+        which a later `connect()` can undo. Drivers that start no
+        background threads or processes keep this default, which does
+        nothing.
+        """
+        return

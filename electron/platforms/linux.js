@@ -1,5 +1,5 @@
 /**
- * @fileoverview Linux (Ubuntu 26.04 / GNOME / Wayland / X11) platform adapter.
+ * @fileoverview Linux (Ubuntu 26.10 / GNOME / Wayland / X11) platform adapter.
  * Handles Wayland window decorations, XDG logging and desktop identity,
  * Freedesktop notification urgency mapping, and Linux backend binary/venv resolution.
  */

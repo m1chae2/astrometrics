@@ -6,7 +6,7 @@ set -euo pipefail
 # Purpose:
 #   Installs the Astrometrics XDG desktop launcher (.desktop file) and icon into
 #   the current user's local desktop environment (~/.local/share/applications).
-#   This allows Astrometrics (in development mode) to show up in the Ubuntu 26.04
+#   This allows Astrometrics (in development mode) to show up in the Ubuntu 26.10
 #   application menu and enables pinning directly to the dock / favorites tray.
 # ==============================================================================
 

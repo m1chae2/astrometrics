@@ -56,15 +56,15 @@ if [ -z "$EXEC_PATH" ]; then
 fi
 
 # Check desktop file
-if [ -f /usr/share/applications/astrometrics.desktop ]; then
+if [ -f /usr/share/applications/io.github.m1chae2.Astrometrics.desktop ]; then
   echo "✓ Desktop file found"
-  if grep -q "^Terminal=true" /usr/share/applications/astrometrics.desktop; then
+  if grep -q "^Terminal=true" /usr/share/applications/io.github.m1chae2.Astrometrics.desktop; then
     echo "✓ Terminal=true is set in desktop file"
   else
     echo "Warning: Terminal=true not found in desktop file"
   fi
 else
-  echo "Error: Desktop file not found at /usr/share/applications/astrometrics.desktop"
+  echo "Error: Desktop file not found at /usr/share/applications/io.github.m1chae2.Astrometrics.desktop"
   exit 1
 fi
 

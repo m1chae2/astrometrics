@@ -139,6 +139,19 @@ describe('Electron Platform Adapters', () => {
   describe('LinuxPlatform', () => {
     const platform = new LinuxPlatform();
 
+    /** Verifies the Wayland app_id is set apart from app.name (which names the user data folder) */
+    it('sets the desktop name for the Wayland app_id and keeps app.name unchanged', () => {
+      const mockApp = {
+        name: '',
+        setAppUserModelId: vi.fn(),
+        setDesktopName: vi.fn()
+      } as any;
+
+      platform.configureIdentity(mockApp);
+      expect(mockApp.name).toBe('astrometrics');
+      expect(mockApp.setDesktopName).toHaveBeenCalledWith('io.github.m1chae2.Astrometrics.desktop');
+    });
+
     /** Verifies Wayland window decorations switch */
     it('enables WaylandWindowDecorations switch on Linux', () => {
       const mockApp = {

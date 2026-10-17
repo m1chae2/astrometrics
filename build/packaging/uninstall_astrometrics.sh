@@ -40,7 +40,7 @@ rm -rf /opt/Astrometrics
 
 # Remove the desktop entry
 echo "Removing desktop entry"
-rm -f /usr/share/applications/astrometrics.desktop || true
+rm -f /usr/share/applications/io.github.m1chae2.Astrometrics.desktop /usr/share/applications/astrometrics.desktop || true
 
 # Remove the system user created for the backend service, if present
 if id -u astrometrics >/dev/null 2>&1; then

@@ -11,6 +11,12 @@ import { exec } from 'child_process';
 import { BasePlatform } from './base.js';
 
 /**
+ * The app's freedesktop ID plus ".desktop". It must match the installed
+ * desktop file name, the AppStream ID, and StartupWMClass in the desktop files.
+ */
+export const LINUX_DESKTOP_NAME = 'io.github.m1chae2.Astrometrics.desktop';
+
+/**
  * Linux platform implementation.
  */
 export class LinuxPlatform extends BasePlatform {
@@ -30,13 +36,20 @@ export class LinuxPlatform extends BasePlatform {
   }
 
   /**
-   * Sets app name and AppUserModelId for Wayland app_id and GNOME dock matching.
+   * Sets the app name, and the desktop file name that gives the window its
+   * Wayland app_id (and X11 WM_CLASS) so GNOME matches it to the launcher.
+   *
+   * app.name stays 'astrometrics' on purpose. Electron builds its user data
+   * folder (~/.config/astrometrics, which holds window-state.json) from it,
+   * and the backend's config uses the same folder name. The desktop name is
+   * set separately and does not change that folder.
    *
    * @param {Electron.App} app
    */
   configureIdentity(app) {
     app.name = 'astrometrics';
     app.setAppUserModelId('astrometrics');
+    app.setDesktopName(LINUX_DESKTOP_NAME);
   }
 
   /**

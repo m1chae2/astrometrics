@@ -14,18 +14,23 @@ set -euo pipefail
 # resolve_directories: locates repository root, icons, and target XDG locations.
 # ------------------------------------------------------------------------------
 resolve_directories() {
+  # The app's freedesktop ID. The AppStream ID, the desktop file name, and the
+  # window's Wayland app_id (electron/platforms/linux.js) must all use it.
+  APP_ID="io.github.m1chae2.Astrometrics"
+  OLD_DESKTOP_NAME="astrometrics.desktop"
+  OLD_METAINFO_NAME="astrometrics.metainfo.xml"
   ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   LAUNCHER_SCRIPT="$ROOT_DIR/astrometrics.sh"
   ICON_SOURCE="$ROOT_DIR/assets/orbit.png"
   MIME_SOURCE="$ROOT_DIR/build/linux/astrometrics-mime.xml"
   THUMBNAILER_SOURCE="$ROOT_DIR/build/linux/astrometrics-fits.thumbnailer"
-  METAINFO_SOURCE="$ROOT_DIR/build/linux/astrometrics.metainfo.xml"
+  METAINFO_SOURCE="$ROOT_DIR/assets/metainfo/$APP_ID.metainfo.xml"
   APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
   ICONS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
   MIME_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/mime/packages"
   THUMBNAILERS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/thumbnailers"
   METAINFO_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/metainfo"
-  DESKTOP_TARGET="$APPS_DIR/astrometrics.desktop"
+  DESKTOP_TARGET="$APPS_DIR/$APP_ID.desktop"
 }
 
 # ------------------------------------------------------------------------------
@@ -41,6 +46,21 @@ verify_prerequisites() {
   if [ ! -f "$ICON_SOURCE" ]; then
     echo "ERROR: Icon file not found at $ICON_SOURCE" >&2
     exit 1
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# remove_old_launcher_files: deletes the files earlier versions of this script
+# installed under the old "astrometrics" names, so the app does not show twice.
+# ------------------------------------------------------------------------------
+remove_old_launcher_files() {
+  if [ -f "$APPS_DIR/$OLD_DESKTOP_NAME" ]; then
+    echo "Removing old launcher $APPS_DIR/$OLD_DESKTOP_NAME..."
+    rm -f "$APPS_DIR/$OLD_DESKTOP_NAME"
+  fi
+  if [ -f "$METAINFO_DIR/$OLD_METAINFO_NAME" ]; then
+    echo "Removing old metadata $METAINFO_DIR/$OLD_METAINFO_NAME..."
+    rm -f "$METAINFO_DIR/$OLD_METAINFO_NAME"
   fi
 }
 
@@ -86,7 +106,7 @@ install_metainfo() {
   if [ -f "$METAINFO_SOURCE" ]; then
     echo "Installing AppStream metadata to $METAINFO_DIR..."
     mkdir -p "$METAINFO_DIR"
-    cp "$METAINFO_SOURCE" "$METAINFO_DIR/astrometrics.metainfo.xml"
+    cp "$METAINFO_SOURCE" "$METAINFO_DIR/$APP_ID.metainfo.xml"
   fi
 }
 
@@ -108,9 +128,9 @@ Exec=${LAUNCHER_SCRIPT} %F
 Path=${ROOT_DIR}
 Icon=${ICON_SOURCE}
 Terminal=false
-Categories=Science;Astronomy;Education;
+Categories=Science;Astronomy;
 Keywords=astronomy;astrophotography;fits;planetarium;telescope;spectroscopy;imaging;
-StartupWMClass=astrometrics
+StartupWMClass=${APP_ID}
 StartupNotify=true
 MimeType=image/fits;application/fits;application/x-fits;
 Actions=Planetarium;ImageProcessing;Observatory;LAN;Stop;Restart;
@@ -160,7 +180,9 @@ validate_and_update_database() {
 }
 
 # ------------------------------------------------------------------------------
-# pin_to_gnome_favorites: adds astrometrics.desktop to GNOME Shell favorite-apps.
+# pin_to_gnome_favorites: puts the launcher into GNOME Shell favorite-apps. An
+# old astrometrics.desktop entry is replaced in place so it keeps its position.
+# Otherwise the new entry is added at the end.
 # ------------------------------------------------------------------------------
 pin_to_gnome_favorites() {
   if ! command -v gsettings >/dev/null 2>&1; then
@@ -169,13 +191,20 @@ pin_to_gnome_favorites() {
 
   local current_favorites
   current_favorites=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "")
-  if [ -n "$current_favorites" ] && [[ "$current_favorites" != *"astrometrics.desktop"* ]]; then
-    echo "Pinning Astrometrics to GNOME Shell favorite-apps dock..."
-    local updated_favorites
-    updated_favorites=$(echo "$current_favorites" | sed "s/]/, 'astrometrics.desktop']/")
-    gsettings set org.gnome.shell favorite-apps "$updated_favorites" 2>/dev/null || true
-    echo "Successfully pinned Astrometrics to dock."
+  if [ -z "$current_favorites" ] || [[ "$current_favorites" == *"'$APP_ID.desktop'"* ]]; then
+    return 0
   fi
+
+  local updated_favorites
+  if [[ "$current_favorites" == *"'$OLD_DESKTOP_NAME'"* ]]; then
+    echo "Replacing the old Astrometrics dock entry with $APP_ID.desktop..."
+    updated_favorites="${current_favorites//\'$OLD_DESKTOP_NAME\'/\'$APP_ID.desktop\'}"
+  else
+    echo "Pinning Astrometrics to GNOME Shell favorite-apps dock..."
+    updated_favorites=$(echo "$current_favorites" | sed "s/]/, '$APP_ID.desktop']/")
+  fi
+  gsettings set org.gnome.shell favorite-apps "$updated_favorites" 2>/dev/null || true
+  echo "Successfully updated the Astrometrics dock entry."
 }
 
 # ------------------------------------------------------------------------------
@@ -185,6 +214,7 @@ main() {
   echo "=== Astrometrics Desktop Icon Installation ==="
   resolve_directories
   verify_prerequisites
+  remove_old_launcher_files
   install_icon_asset
   install_mime_definition
   install_thumbnailer

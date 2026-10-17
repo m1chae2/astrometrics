@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata for Astrometrics. This is the one source file for both
+  install routes:
+    - the .deb package: forge.config.js (applyFreedesktopIdentity) copies it to
+      /usr/share/metainfo/
+    - the development install: build/linux/install_desktop_icon.sh copies it to
+      ~/.local/share/metainfo/
+  GNOME Software and the Ubuntu App Center read it to show a full listing.
+  The file name, the <id>, the desktop file name, and the window's Wayland
+  app_id (set in electron/platforms/linux.js) must all match.
+  Reference: https://www.freedesktop.org/software/appstream/docs/chap-Metadata.html
+-->
+<component type="desktop-application">
+  <id>io.github.m1chae2.Astrometrics</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Astrometrics</name>
+  <summary>View, process, and analyze astronomy images and control a telescope</summary>
+  <developer id="io.github.m1chae2">
+    <name>Michael Coelho</name>
+  </developer>
+  <description>
+    <p>
+      Astrometrics is a desktop application for astrophotography, spectroscopy,
+      and observatory control. It opens FITS images, controls telescope mounts,
+      focusers, and cameras through INDI, and reads guiding from PHD2.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>A sky map and star catalog for finding and planning targets.</li>
+      <li>Star detection, plate solving, image stacking, and photometry.</li>
+      <li>Spectroscopy analysis.</li>
+      <li>Telescope mount, focuser, and camera control through INDI.</li>
+      <li>Several workspaces that can be spread across monitors, with a system tray icon that shows quick status.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.m1chae2.Astrometrics.desktop</launchable>
+  <url type="homepage">https://github.com/m1chae2/astrometrics</url>
+  <url type="bugtracker">https://github.com/m1chae2/astrometrics/issues</url>
+  <provides>
+    <mediatype>image/fits</mediatype>
+    <mediatype>application/fits</mediatype>
+    <mediatype>application/x-fits</mediatype>
+  </provides>
+  <categories>
+    <category>Science</category>
+    <category>Astronomy</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.2.0" date="2026-09-27">
+      <description>
+        <p>Support for Ubuntu 26.04 on Wayland, AppStream metadata, a native file thumbnailer for FITS images, and a platform adapter design.</p>
+      </description>
+    </release>
+  </releases>
+</component>

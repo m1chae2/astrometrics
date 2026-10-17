@@ -2,11 +2,15 @@
   Desktop entry template for the Linux .deb package.
 
   electron-installer-debian (used by @electron-forge/maker-deb) fills this in
-  to make /usr/share/applications/astrometrics.desktop. Its built-in template
-  has no way to add launcher actions, and it sets StartupWMClass to the
-  product name ("Astrometrics"). We need "astrometrics" there, because that is
-  the app.name set in electron/platforms/linux.js#configureIdentity, and GNOME
-  Shell only groups the running window under this launcher when they match.
+  to make a desktop file named after the package ("astrometrics.desktop").
+  forge.config.js then renames it to io.github.m1chae2.Astrometrics.desktop
+  (applyFreedesktopIdentity), because the maker cannot set that name itself.
+  Its built-in template has no way to add launcher actions, and it sets
+  StartupWMClass to the product name ("Astrometrics"). We need the app ID
+  there, because that is the Wayland app_id the window gets from
+  app.setDesktopName in electron/platforms/linux.js#configureIdentity, and
+  GNOME Shell only groups the running window under this launcher when they
+  match.
   forge.config.js points the deb maker's desktopTemplate option at this file.
   (The template engine is lodash.template, so this note sits in a JS comment.)
 */ %>[Desktop Entry]
@@ -18,7 +22,7 @@ Icon=<%= name %>
 Type=Application
 Terminal=false
 StartupNotify=true
-StartupWMClass=astrometrics
+StartupWMClass=io.github.m1chae2.Astrometrics
 Categories=<%= categories.join(';') %>;
 MimeType=<%= mimeType.join(';') %>;
 Actions=Planetarium;Observatory;Processing;

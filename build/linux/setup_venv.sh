@@ -136,14 +136,20 @@ log "Upgrading pip inside venv and installing hatchling, editables & build depen
 
 # Install the project in editable mode so local source is used at runtime.
 # pyproject.toml declares all dependencies. The `mcp` extra adds the MCP SDK,
-# which only the MCP servers in mcp_servers/ need.
+# which only the MCP servers in mcp_servers/ need. The `dev` extra adds the
+# tools the pre-commit hooks run (ruff, pyrefly, pre-commit, Vale).
 PYPROJECT="$ROOT_DIR/pyproject.toml"
 if [ ! -f "$PYPROJECT" ]; then
   die "pyproject.toml not found at $PYPROJECT"
 fi
 
-log "Installing project from $ROOT_DIR (editable, with the mcp extra)..."
-"$VENV_PYTHON" -m pip install --no-build-isolation -e "$ROOT_DIR[mcp]"
+log "Installing project from $ROOT_DIR (editable, with the mcp and dev extras)..."
+"$VENV_PYTHON" -m pip install --no-build-isolation -e "$ROOT_DIR[mcp,dev]"
+
+# The vale package downloads its program the first time it runs. Run it once
+# now, so the documentation-lint hook works later without a network.
+log "Fetching the Vale prose linter program..."
+"$VENV_DIR/bin/vale" --version >/dev/null 2>&1 || log "WARNING: could not fetch Vale; build/documentation/lint_docs.sh will try again on its first run."
 
 # pyindi-client is the real SWIG binding to the INDI client C++ library.
 # Without it, wayfindinglib.drivers.indi.pyindi_compatibility silently

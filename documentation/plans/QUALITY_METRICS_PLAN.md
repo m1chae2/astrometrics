@@ -74,9 +74,12 @@ Agreed with the user on 2026-10-17:
    time divided by the exposure time an ideal frame would need for the same result. It is shown
    as time for planning and as magnitudes for imaging depth. A loss that more exposure cannot
    repair carries the label "not recoverable with more time".
-4. **The equipment fingerprint moves into `astrometricslib`.** `build_equipment_fingerprint`
-   moves down from `wayfindinglib`, so both libraries use one definition, and the science side can
-   key its own baselines by it.
+4. **The equipment fingerprint stays in `wayfindinglib`.** Grouping measurements into one
+   equipment setup's baseline is interpretation, so it belongs with the judgments. Each
+   `astrometricslib` measurement carries the equipment facts its frames record (camera, telescope,
+   focal length, pixel scale, binning, gain setting, filter). `wayfindinglib` builds the
+   fingerprint from those facts plus the guide optics it already knows. This replaces the earlier
+   decision to move `build_equipment_fingerprint` down.
 5. **On-demand diagnostics stay read-only.** `QualityDiagnostics` keeps its rule that a check
    never saves anything, so the read-only AI tools can keep calling it. The pipelines are the only
    writers of measurements. A diagnostic reads stored measurements first and computes only what is
@@ -114,7 +117,7 @@ class QualitySubject(BaseModel):
     subject_id: str  # frame path, stack path, star id or job id
     target_id: str | None
     observing_night_id: str | None  # utilities/observing_night.py
-    equipment_fingerprint: str | None  # moved down from wayfindinglib (decision 4)
+    equipment: EquipmentFacts  # camera, telescope, focal length, binning, gain setting, filter (decision 4)
 
 
 class MeasurementStatus(StrEnum):
@@ -212,13 +215,29 @@ A `MetricSpec` holds:
 
 One table, `quality_measurements`, in `astrometrics.db`, created through the `DiskButler` like the
 other tables. It has one row per measurement and is append-only. Columns: metric, subject level,
-subject id, target id, observing night id, equipment fingerprint, value, unit, uncertainty, sample
+subject id, target id, observing night id, equipment facts, value, unit, uncertainty, sample
 count, expected value, efficiency, recoverable flag, status, reason, pipeline version, job id and
 time. Judgments made by `astrometricslib` self-checks go in a companion table,
 `quality_judgments`.
 
 The table can be searched across targets and nights, keeps history, and survives a restack. The
-JSON summaries stay as a convenience view until their readers move (phase 6).
+JSON summaries stay as a convenience view until their readers move (phase 7).
+
+Agreed with the user on 2026-10-17, so the table scales:
+
+- **Narrow rows for frames, nights, stacks and runs.** Adding a metric adds a registry entry, never
+  a column.
+- **Stars stay in their star records.** Per-star results are the largest volume (about 2,000 stars
+  times 10 metrics per run). They stay in `stellar_objects`. A star-level metric that a
+  recommendation needs is summarized per run (median, spread, count) into the narrow table.
+- **Indexes** on (metric, observing night), (target, metric) and (subject id).
+- **A "latest" view** picks the newest pipeline version for each subject and metric, so readers do
+  not see superseded rows by default.
+- **Nothing is deleted at first.** Rows are about 100 bytes, so a million rows is about 100 MB. A
+  retention rule, such as dropping superseded versions after a year, comes later if size becomes a
+  problem.
+- **The table is backed up with the database.** It cannot be rebuilt cheaply, because the raw
+  frames live on remote storage.
 
 ### 3.6 Reading
 
@@ -227,7 +246,7 @@ One public call with parameters, not one function per metric:
 ```python
 library.quality.query(
     metric=..., level=..., target_id=..., observing_night_id=...,
-    equipment_fingerprint=..., since=..., pipeline_version=...,
+    camera=..., telescope=..., since=..., pipeline_version=...,
 ) -> list[QualityMeasurement]
 ```
 
@@ -246,6 +265,62 @@ A test in the style of `pipelines/test/test_gate_conformance.py` checks that:
 
 With these tests, a rule can no longer depend on a field that was renamed or dropped without a
 test failing.
+
+### 3.8 Where the code lives
+
+Quality code is spread out today: ten model files loose in `models/`, frame checks in
+`pipelines/shared/quality/`, gate files in four pipelines, and `QualityDiagnostics` inside
+`api/processing.py`. The rule for this work is one quality home per layer. Agreed with the user
+on 2026-10-17:
+
+- All quality models move into one subpackage, `models/quality/`, in phase 1. The top-level
+  imports do not change.
+- `QualityDiagnostics` moves from `api/processing.py` to `api/quality.py`, so every quality read,
+  stored or live, starts at `astrometrics.quality`. `test_public_surface.py` and the MCP tools
+  follow.
+- Each pipeline's `run_gates.py` is renamed `record_quality.py`, because it will emit measurements
+  as well as self-checks. The gate-conformance test and the review-guide generator follow.
+
+| Layer | Home | Holds |
+| :--- | :--- | :--- |
+| Models (shapes only) | `astrometricslib/models/quality/` | Measurement, limit and judgment shapes; today's quality models, moved |
+| Shared calculations | `astrometricslib/pipelines/shared/quality/` | The assembled registry, efficiency functions, the frame measurement step |
+| Each pipeline | `<pipeline>/post_processing/record_quality.py` and `<pipeline>/metrics.py` | What the pipeline emits, and the declaration of its metrics (proposed, see section 9) |
+| Storage | `astrometricslib/drivers/quality_store.py` | The two tables, through the butler |
+| Public API | `astrometricslib/api/quality.py` | `query` plus the live checks |
+| Interpretation | `wayfindinglib/session_analysis/` | Recommendations, and a new `result_quality/` folder holding the moved fitness-for-use rules as a table |
+
+```text
+astrometricslib/
+├── models/quality/
+│   ├── measurement.py        QualitySubject, QualityMeasurement, MeasurementStatus
+│   ├── judgment.py           QualityLimit, LimitTier, QualityJudgment (replaces gate_result.py)
+│   ├── metric_spec.py        MetricSpec, Checkpoint, Direction
+│   └── (moved)               quality_summary, quality_reports, the per-pipeline *_quality files,
+│                             excluded_frames, stack_comparison
+├── pipelines/
+│   ├── shared/quality/
+│   │   ├── metrics.py        frame and calibration metric declarations
+│   │   ├── metric_registry.py    assembles every metrics.py into one registry
+│   │   ├── efficiency.py
+│   │   └── frame_measurement.py  the pre-stack step, built from the existing measuring functions
+│   └── <pipeline>/
+│       ├── metrics.py        that pipeline's metric declarations
+│       └── post_processing/record_quality.py    (stacking gains one; its checks stay put)
+├── drivers/quality_store.py
+└── api/quality.py            QualityDiagnostics moves here
+
+wayfindinglib/session_analysis/
+├── guiding/, capture/, sky/  read measurements through astrometrics.quality.query
+└── result_quality/
+    ├── rules.py              one row per moved gate: metric, limit, wording, required metrics
+    └── judge_results.py
+```
+
+The count is about nine new modules, four renamed, ten moved and one merged away, plus tests.
+The layer contracts do not change. Measurements living in `astrometricslib` also lets
+`wayfindinglib` Planning read measured performance directly, which it could not do if the data
+lived in `session_analysis`, because Planning may not import Control.
 
 ## 4. Efficiency: the shared unit for losses
 
@@ -367,9 +442,7 @@ Each phase ends with its tests passing, `ruff` clean, the import-linter contract
 the affected READMEs updated.
 
 1. **Foundations.** Add `QualityMeasurement`, `QualitySubject`, `QualityLimit`,
-   `QualityJudgment`, `MetricSpec` and the registry with a handful of metrics. Move
-   `build_equipment_fingerprint` into `astrometricslib` and import it in `wayfindinglib` from the
-   top-level package. Add the `quality_measurements` and `quality_judgments` tables, the
+   `QualityJudgment`, `MetricSpec` and the registry with a handful of metrics. Add the `quality_measurements` and `quality_judgments` tables, the
    `quality.query` call and the conformance test. Done when a test writes and reads back a
    measurement and the conformance test runs on the registry.
 2. **Frame measurement step.** Measure each light frame once on ingest and write frame-level
@@ -408,16 +481,20 @@ Phases 2 and 3 can run at the same time once phase 1 is done.
 
 ## 9. Open questions and risks
 
-- **Night boundaries.** `observing_night_id` uses the processing computer's local time. If that
-  computer and the observatory are in different time zones, nights split in the wrong place. The
-  site's coordinates are not yet in the configuration.
-- **Guide optics in the fingerprint.** The fingerprint includes the guide scope and guide camera,
-  which frame headers do not record. Frame measurements need these values from the configuration,
-  or a fingerprint for the imaging train alone.
+- **Where metrics are declared (proposed).** Each pipeline declares its own metrics in a
+  `metrics.py` beside its code, and `metric_registry.py` assembles them into the one registry that
+  `wayfindinglib` reads. Names carry their pipeline or checkpoint (`stacking.noise_excess_ratio`,
+  `frame.star_width_arcsec`). Each declaration states the definition, the estimator, the function
+  that computes it, how its uncertainty is found and its register entry. The review-guide
+  generator renders each pipeline's declarations as a table in that pipeline's guide, so a
+  scientist auditing one pipeline reads its metrics in one place. Two estimators of one quantity
+  (for example, Siril's FWHM and the library's own) get two names, never one.
+- **Night boundaries (settled).** `observing_night_id` uses the processing computer's local time.
+  The user confirmed on 2026-10-17 that the computer and the observatory share a time zone.
 - **Gain and read noise.** Several efficiency functions need measured gain and read noise. The
   camera profile model has fields for them, but the profiles may not hold measured values yet.
 - **Calibrated probabilities.** Turning a verdict into a probability needs labeled examples. Where
   none exist, the measurement keeps the raw statistic and its uncertainty, and gives no
   probability.
-- **Table growth.** One row per metric per frame adds up over many nights. Indexes on metric,
-  night and target, and a retention rule for superseded pipeline versions, may be needed.
+- **Table growth (settled).** See section 3.5: narrow rows, stars kept in their own records,
+  indexes, a "latest" view, and retention only if needed.

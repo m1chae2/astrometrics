@@ -12,19 +12,25 @@ The plan covers:
 - the three new displays, how the Planetarium links to them, and what goes on each,
 - how the app behaves while Ekos does the capture, without blocking direct control later,
 - two monitors, the shared current target and the shared planning time,
+- what the UI calls for each panel,
 - the order of work.
 
 It is the user-interface companion of `QUALITY_METRICS_PLAN.md`. That plan builds the target
 dataset report (its section 6): the warnings and recommendations for a target. This plan decides
 where the user sees them.
 
+The UI is a thin wrapper over `wayfindinglib` and `astrometricslib`. Every panel shows what a
+library call returns. The UI does no ranking, grouping, classification, text composition, unit
+conversion or joins (decision 16, section 6).
+
 The findings come from a read-only survey of `ui/` and `electron/` on 2026-10-17. The code is the
 source of truth. Line numbers drift, so this plan names files and functions instead.
 
 ## Status
 
-Status on 2026-10-17: draft, with the user's decisions folded in (decisions 6 to 15). Not yet
-reviewed by the change control board, nothing built.
+Status on 2026-10-17: draft, reviewed by the change control board on 2026-10-17. The board's
+changes and the user's decisions from that review are folded in (decisions 16 to 22, appendix A).
+Nothing built.
 
 ## 1. Findings
 
@@ -36,12 +42,17 @@ reviewed by the change control board, nothing built.
   display menu is the mode selector in `ui/statusHeader/StatusHeader.tsx`.
 - **Windows.** Electron can already open a second full app window for any display.
   `createDisplayWindow` in `electron/main.js` places it on a monitor other than the primary one,
-  and the mode selector has a pop-out button for each display (`openDisplayWindow`). Two gaps:
-  - only the main window's position is saved and restored (`electron/window_state.js`); popped-out
-    windows are not reopened at start;
-  - each window is a separate React tree with its own `TargetContext`. The selected target is
-    saved to local storage but only read when a window starts, so a second window does not follow
-    a target chosen in the first.
+  and the mode selector has a pop-out button for each display (`openDisplayWindow`). Only the main
+  window's position is saved and restored (`electron/window_state.js`). That stays: popped-out
+  windows are set up once per session (decision 22).
+- **Shared current target.** Each window is a separate React tree with its own `TargetContext`.
+  A shared current target already exists through the backend handoff state:
+  `HandoffService` (`backend/services/infrastructure/handoff_service.py`) stores
+  `selected_target` and broadcasts a `handoff` event when `handoff:update_state` changes it.
+  `ui/App.tsx` turns that event into `astrometrics:targetSelected`, which `TargetContext`
+  (`ui/common/context/TargetContext.tsx`) follows. The missing piece is publishing:
+  `setSelectedTarget` saves the target to local storage but never calls `handoff:update_state`,
+  so a second window does not follow a target chosen in the first.
 - **Layout.** Displays use `GenericDisplayLayout` (two or three columns) and `SectionPanel`. Some
   panels fetch their own data and can be placed anywhere (`LastImageViewer`, `TargetListStatus`,
   `MosaicPlanner`). Others take everything from their display's hook through props (the
@@ -92,7 +103,8 @@ This survey is from general knowledge of these tools, not a check of their curre
 
 ## 2. Decisions
 
-Agreed with the user on 2026-10-17:
+Agreed with the user on 2026-10-17. Decisions 16 to 22 were added after the change control board
+review on the same day.
 
 1. **Three displays, one job each.** Observation Planner (by day), Observation Execution (at
    night) and Observatory Manager (rarely). Observation Planner replaces Observation Manager.
@@ -133,6 +145,28 @@ Agreed with the user on 2026-10-17:
     checklist, and ticked items are saved with the plan. A ticked item comes back as a
     recommendation if the next measurements show it did not work.
 
+16. **The UI is a thin wrapper with named owners.** Every panel and behavior has a named
+    `wayfindinglib` or `astrometricslib` call, RPC method or event that supplies it (section 6).
+    The UI does no ranking, grouping, classification, text composition, unit conversion or joins.
+    The same calls serve the MCP tools.
+17. **Monitor mode is `wayfindinglib`'s delegation policy.** There is no separate UI setting for
+    who captures. Monitor mode means every capability is delegated to Ekos. The library refuses
+    commands, and the UI reads the policy and greys its control panels (section 4).
+18. **The night plan is stored in `wayfindinglib`.** It is a stored model, not the memory of one
+    window. It holds the capture settings (including gain, offset and binning), the checklist and
+    the framing. It is written from the first edit, has a revision check so two windows cannot
+    overwrite each other, and raises a plan-changed event (section 5).
+19. **The current target and planning time reuse the handoff state.** The backend handoff state
+    already carries the selected target to every window. The UI publishes to it on selection, and
+    the state gains a planning time. Both windows show "Now" or "fixed at 22:00" (section 5).
+20. **Syncs stay manual.** Observation Execution has a "Sync now" action that fetches the Ekos logs
+    and the frames, and a staleness line ("last sync 23:40, 25 min ago"). Target changes are read
+    from the Ekos analyze log after a sync. Automatic syncing is a later option, not designed now
+    (section 3.2).
+21. **No night theme.** Observation Execution uses the same theme as the rest of the app. It
+    meets the accessibility basics in section 3.5.
+22. **Popped-out windows are not saved or restored.** The user sets them up once per session.
+
 ## 3. The four displays
 
 The plan's three displays work beside the existing Planetarium, which keeps its own display.
@@ -142,34 +176,57 @@ The plan's three displays work beside the existing Planetarium, which keeps its 
 Replaces Observation Manager. Used by day, and at night when plans change.
 
 ```text
-┌───────────────┬─────────────────────────────────────┬──────────────────────┐
-│ Targets       │ Data Quality (current target)        │ Tonight              │
-│  filters      │  dataset summary per capture setting │  altitude over the   │
-│  search       │  loss account                        │  night: Moon,        │
-│  list         │  warnings                            │  twilight, limits    │
-│               │  recommendations  [Add to plan]      │  candidates ranked   │
-│               │  forecast check                      │  by gain per hour    │
-│               │                                      ├──────────────────────┤
-│               │                                      │ Night plan           │
-│               │                                      │  frames, filter,     │
-│               │                                      │  exposure, dither,   │
-│               │                                      │  calibration frames, │
-│               │                                      │  framing [Show on    │
-│               │                                      │  sky]                │
-└───────────────┴─────────────────────────────────────┴──────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Current target · Planning time: [Now ▾] (or "fixed at 22:00")            │
+├───────────────┬──────────────────────────────┬───────────────────────────┤
+│ Targets       │ Data Quality (current target)│ Tonight                   │
+│  filters      │  dataset summary per capture │  altitude over the night: │
+│  search       │  setting                     │  Moon, twilight, limits   │
+│  list         │  loss account                │  candidates ranked by     │
+│               │  top 3 statements, each with │  gain per hour, new       │
+│               │  type and confidence         │  targets marked "new"     │
+│               │  [Show all N]                │  [Show on sky]            │
+│               │  [Send to plan] [Evidence]   ├───────────────────────────┤
+│               │  forecast check              │ Night plan (stored)       │
+│               │                              │  frames, filter, exposure,│
+│               │                              │  gain, offset, binning,   │
+│               │                              │  dither, checklist,       │
+│               │                              │  framing [Show on sky]    │
+│               │                              │ Ekos summary, per row:    │
+│               │                              │  [Copy] [done in Ekos]    │
+└───────────────┴──────────────────────────────┴───────────────────────────┘
 ```
 
 - **Data Quality** is the full target dataset report from `QUALITY_METRICS_PLAN.md` section 6.
-  Each warning and recommendation opens to its evidence and its confidence.
+  The report returns its statements already ordered by priority. The panel shows the top 3 with
+  "Show all N", using the statement types in section 3.5. Each statement opens to its evidence
+  and its confidence.
+- **Evidence** opens the Image Viewer filtered to the cited frames. If an Image Viewer window is
+  open, it reuses that window.
+- **Display-agnostic panel.** The Data Quality panel takes the current target and the night as
+  inputs and fetches its own data, so it can sit on any display. Phase 0 places it on today's
+  Observation Manager; later phases only move it. The quality strip on Observation Execution and
+  the quality chip in the Astronomy Manager use the same statement component.
 - **Tonight** replaces Visible Targets and Target Status with one panel: the altitude curve of the
-  current target over the night, and tonight's candidates ranked by gain per hour
-  (`QUALITY_METRICS_PLAN.md` section 6.4).
-- **Add to plan.** A capture-settings recommendation ("take 60 more frames at 30 s, filter L,
-  dither every 3") adds its typed action to the night plan in one click. Other recommendations
-  (calibration, scheduling, adjustment) become a checklist in the night plan.
-- **Night plan** is the Image Planner and Image List, with dither settings folded in, and the
-  framing chosen in the Planetarium. While Ekos captures, the plan is shown as a sequence summary to
-  enter in Ekos (section 4).
+  current target over the night, and tonight's candidates as ranked by the library at the planning
+  time (`QUALITY_METRICS_PLAN.md` section 6.4). New targets are marked "new", not ranked. The UI
+  draws the order it is given.
+- **Send to plan.** A capture-settings recommendation ("take 20 more at 90 s, filter L") puts its
+  typed action into the stored night plan in one click. Other recommendations (calibration,
+  scheduling, adjustment) become checklist items in the night plan. Values the camera cannot take
+  are rejected by the library, and the reason shows beside the button. A conflicting or repeated
+  addition is merged or rejected by the library, not by the UI.
+- **Night plan** is the Image Planner and Image List, with dither settings folded in, the
+  checklist, and the framing chosen in the Planetarium. It is the stored `wayfindinglib` night plan
+  (decision 18). When another window changes it, the plan-changed event refreshes this panel.
+  A ticked checklist item that comes back says why ("ticked Oct 12; stars still 28% wider
+  Oct 15"); the library decides that, not the UI.
+- **Ekos summary.** While Ekos captures, the plan is shown as a sequence summary to enter in Ekos
+  (section 4). Its rows follow the fields and order of Ekos's Capture module (filter, exposure,
+  count, binning, gain, offset) and say which Ekos screen each value goes on. Each row has a copy
+  button and a "done in Ekos" tick.
+- **Starting point for a new target.** For a target with no data, the report gives a starting
+  exposure and total time, marked as a starting point. The UI shows it as given.
 
 ### 3.2 Observation Execution
 
@@ -177,30 +234,56 @@ New. Takes the live panels from Observatory Manager. Used at night.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ Night: [tonight ▾] · current target · quality strip: warning · advice · loss│
-├────────────────────────────┬─────────────────────────────────────────────┤
-│ Live session (monitor)     │ Guiding trends                              │
-│  guiding steady?           │                                             │
-│  last dither worked?       ├─────────────────────────────────────────────┤
-│  ruined frames             │ Guiding target                              │
-├────────────────────────────┴─────────────────────────────────────────────┤
-│ Frames tonight: per frame star width, sky, set-aside reason              │
+│ Night: [tonight ▾] · current target · Planning time: Now                 │
+│ Last sync 23:40, 25 min ago   [Sync now]                                 │
 ├──────────────────────────────────────────────────────────────────────────┤
-│ Control (direct control only): telescope, manual guide, focuser,         │
-│ filter wheel, execution queue, live frame                                │
+│ Quality strip: top warning · top recommendation · loss so far            │
+├──────────────────────────────────────────────────────────────────────────┤
+│ Live session: one verdict with its reason                                │
+│  "Guiding unsteady since 23:10: RMS 1.4 arcsec"                          │
+│ Alerts: "2 frames ruined by a slew" (3)   [Details]                      │
+│ Candidates re-ranked: top 3 [Switch to]   [Show all]                     │
+├──────────────────────────────────────────────────────────────────────────┤
+│ Frames tonight: per frame star width, sky, ruined or set-aside reason    │
+├──────────────────────────────────────────────────────────────────────────┤
+│ [Guiding] [Control]                                                      │
+│  Guiding: guiding trends, guiding target                                 │
+│  Control (direct control only): telescope, manual guide, focuser,        │
+│  filter wheel, execution queue, live frame                               │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Night selector.** It defaults to tonight. Choosing an earlier night shows the same panels from
-  the stored data, which makes this display the place to review last night
-  (`QUALITY_USE_CASES.md`, UC1).
+- **Order on the main monitor.** The quality strip comes first, then the live session as a single
+  verdict with its reason, then the frame list. Guiding trends and the guiding target are a second
+  panel or tab. Alerts are one sentence plus a count; details open on click.
+- **Night selector.** It defaults to tonight and lists the nights that have data, from a library
+  call. Choosing an earlier night shows the same panels from the stored data, which makes this
+  display the place to review last night (`QUALITY_USE_CASES.md`, UC1).
+- **Night review rows.** When reviewing a night, each target observed that night is a row with a
+  needs-attention badge (top warning count and severity, a library field) and "Open in Planner".
+  "Open in Planner" sets the current target and focuses the Data Quality panel of the Observation
+  Planner.
+- **Sync now** (decision 20). It fetches the Ekos logs and the frames from the StellarMate. The
+  staleness line shows when the last sync ran and how long ago. Nothing syncs on its own.
+- **Target changes.** After a sync, `wayfindinglib` reads the target changes from the Ekos analyze
+  log: a `MountState` change from slewing to tracking, with `MountCoords` at a new position,
+  matched to the nearest library target. The parser
+  (`wayfindinglib/drivers/ekos/analyze_log_parser.py`) already reads `MountState`, `MountCoords`
+  and `CaptureComplete`.
+- **When it refreshes.** The live session status is read again after a sync. The quality strip and
+  the frame list update when the sync's frames have been measured: the frame-measurement job
+  raises a `quality:measured` event with the target and the night. Nothing refreshes on a timer.
+- **Frames at night.** Set-aside reasons exist only after stacking moves frames aside. Until then
+  the frame list shows the live status's ruined frames.
+- **Re-ranked candidates** (`QUALITY_USE_CASES.md`, UC12). When plans change mid-night, the
+  library's re-ranked candidates show as the top 3 with "Show all". "Switch to" sets the current
+  target and shows its sequence summary.
 - **Monitor mode** (now): the live session status from the Ekos files, guiding trends, and the
-  quality of each frame as it arrives in the library.
-- **When it refreshes.** The quality strip and the frame list update when new frames of the target
-  are ingested into the library, not on a timer. The live session status updates when the Ekos
-  logs are synced.
+  quality of each frame as it arrives in the library. The control tab is greyed (section 4).
 - **Control mode** (later): the control panels and the execution queue become active, and the live
   frame returns.
+- **Theme.** The same theme as the rest of the app (decision 21), with the accessibility basics in
+  section 3.5.
 
 ### 3.3 Observatory Manager
 
@@ -214,7 +297,7 @@ commissioning, and for troubleshooting, usually on the second monitor.
   measures a new setting from flat and bias pairs (`QUALITY_METRICS_PLAN.md` decision 7).
 - The calibration library: darks, flats and bias frames held for each camera, gain, offset,
   binning and temperature, moved from today's Observation Manager. Gaps show beside the camera
-  settings they affect.
+  settings they affect. A calibration warning in the target report links to the exact row here.
 
 ### 3.4 Planetarium
 
@@ -222,28 +305,74 @@ Stays its own display. It already draws the sensor's field of view from the acti
 overlays the library's targets, follows the shared selected target and shows alignment points.
 
 - **Linked to the planner.** It shares the current target and the planning time with the
-  Observation Planner. Clicking an object sets the current target. "Show on sky" in the planner
-  centers the Planetarium on the current target at the planning time.
+  Observation Planner, and shows the same "Now" or "fixed at 22:00" line. Clicking an object sets
+  the current target. "Show on sky" in the planner centers the Planetarium on the current target at
+  the planning time.
 - **Framing.** The Mosaic Planner becomes a framing overlay: the sensor's field, its rotation and
-  the mosaic panels drawn on the sky. "Use this framing" sends the result to the night plan.
+  the mosaic panels drawn on the sky. The panels come from `wayfindinglib`'s `calculate_panels`;
+  the UI does no framing math. The first version is read-only: it shows the field and the panels,
+  with rotation as a number. Mosaics have no rotation today, so the library adds it.
+- **Send to plan.** It puts the framing into the stored night plan. Because the plan is stored and
+  raises a plan-changed event, this works when the Planetarium and the Observation Planner are in
+  different windows.
 - **Alignment points stay here.** They show where the mount's model has measured the sky, which
   the map shows best.
 - **A survey-image background is a possible later feature.** Other framing tools draw the field
   over a survey image of the real sky, which matters when framing a faint nebula. The Planetarium
   renders catalog stars today.
 
+### 3.5 Shared rules for every display
+
+**Statement types.** Every report statement shows its type by an icon plus a text label, never by
+color alone:
+
+| Type | How it looks | Action |
+| :--- | :--- | :--- |
+| Warning | Warning icon and the word "Warning" | Evidence |
+| Recommendation | Recommendation icon and the word "Recommendation" | Send to plan, evidence |
+| Limit | Plain text with the word "Limit" | None |
+| Not enough data | Greyed, with the word "Not enough data" and the reason | None |
+
+Confidence is a text chip with the validation register's labels: Measured, Partly measured, and
+Tentative (for a design estimate). The type, the order and the confidence come from the library.
+
+**The same verbs everywhere.** "Show on sky" centers the Planetarium on a target. "Send to plan"
+puts a recommendation or a framing into the night plan. "Open in Planner" and "Switch to" set the
+current target. "Use this framing" and "Add to plan" are not used.
+
+**Accessibility basics** (decision 21):
+
+- Severity shows by icon and words, not color alone.
+- Every action works from the keyboard, with a visible focus outline.
+- Every chart has a text alternative that states what it shows.
+- Summary text, such as the Ekos summary and the statements, can be selected and copied.
+
+**Quality chip in the Astronomy Manager.** A science result (a star's photometry or spectrum)
+shows a quality chip that says whether to trust it (`QUALITY_USE_CASES.md`, UC5). It uses the
+same statement component.
+
 ## 4. Ekos now, direct control later
 
-The app has one setting for who captures: Ekos (monitor mode, the default) or this app (control
-mode). Control mode stays off until direct control is built.
+Who controls the equipment is `wayfindinglib`'s delegation policy. There is no separate UI
+setting. `control.safety.enter_monitoring_mode` delegates every capability to Ekos (monitor mode,
+the default); `control.safety.enter_controller_mode` gives them back to this app (control mode).
+The backend already declares both as RPC methods, `observatory:enter_monitoring_mode` and
+`observatory:enter_controller_mode`, in `backend/public_interface.py`. Control mode stays off until
+direct control is built.
 
-- **In monitor mode** the control panels are visible but unavailable, with one line saying why
-  ("Ekos is controlling the equipment"). Two programs commanding the same devices would conflict,
-  so no panel sends a command, with no exceptions (decision 9). No panel is deleted. A test checks
-  that every command call in a control panel is blocked in monitor mode.
+- **The library refuses commands.** Each hardware command checks
+  `DelegationPolicy.is_authoritative` (`wayfindinglib/models/policy/delegation.py`) in
+  `wayfindinglib/tasks/control_tasks/hardware_operations.py`, and a delegated capability is
+  refused. The no-command guarantee (decision 9) is tested in `wayfindinglib`: commands from the
+  backend and from the MCP servers are refused there. No UI-only test stands in for it.
+- **The UI reads the policy and greys its panels.** The control panels are visible but
+  unavailable, with one line saying why ("Ekos is controlling the equipment"). The policy is read
+  with `control.safety.status(include=["delegation_policy"])`. No RPC method reads it today, so
+  phase 2 adds one. No panel is deleted.
 - **Recommendations are typed actions.** The target report's `proposed_action` holds exposure,
-  frame count, filter and dither as values. In monitor mode they are shown as a sequence summary
-  to enter in Ekos. In control mode the same values fill the night plan and the execution queue.
+  frame count, filter, gain, offset, binning and dither as values. In monitor mode they are shown
+  as the Ekos sequence summary, built by `wayfindinglib` from the stored night plan. In control
+  mode the same values fill the execution queue.
 - **Frame quality does not depend on who captured.** Frames are measured when they enter the
   library, whether they came from the StellarMate sync or, later, from the app's own capture.
 - **Session telemetry stays behind the Ekos driver** (`wayfindinglib/drivers/ekos/`). The live
@@ -257,18 +386,57 @@ mode). Control mode stays off until direct control is built.
 - **Suggested layout.** By day, the Observation Planner on monitor 1 and the Planetarium on monitor
   2. At night, Observation Execution on monitor 1, and the Planetarium, the Observation Planner,
   Observatory Manager or the Image Viewer on monitor 2 as needed.
-- **Windows come back.** Popped-out windows, with their display and monitor, are saved and reopened
-  at start, the way the main window already is.
-- **The current target follows across windows.** Choosing a target publishes it as an app-wide
-  event, and every window sets it as its current target. The plan uses a backend event on the
-  existing `/ws/events` connection rather than an Electron-only broadcast: it reaches every window
-  and also a future phone companion. It needs a declaration in `backend/public_interface.py` and
-  regenerated types. A window that is hidden keeps its deferred update (`DeferWhileHidden`).
-- **One planning time.** The Observation Planner and the Planetarium share one planning date and
-  time, carried the same way as the current target. "Now" is the default; choosing a time in either
-  display moves both. The Planetarium's own date and time picker sets the shared time.
+- **Windows are set up once per session.** Popped-out windows are not saved or reopened at start
+  (decision 22). Only the main window's position is kept, as today.
+- **The current target follows across windows.** This reuses the backend handoff state
+  (decision 19). `setSelectedTarget` calls `handoff:update_state` with the new target;
+  `HandoffService` broadcasts the `handoff` event on `/ws/events`; `ui/App.tsx` turns it into
+  `astrometrics:targetSelected`, and every window's `TargetContext` follows it. A window does not
+  publish a target it has just received. The event reaches every window and also a future phone
+  companion. A window that is hidden keeps its deferred update (`DeferWhileHidden`).
+- **One planning time.** The handoff state gains a `planning_time` field (none means "Now"), set
+  and broadcast the same way as the current target. The Observation Planner and the Planetarium
+  share it; choosing a time in either display moves both. The Planetarium's own date and time
+  picker sets the shared time. Both windows show "Now" or "fixed at 22:00", so the user can see
+  when the plan is not for the present moment.
+- **One night plan.** The night plan is stored in `wayfindinglib` (decision 18). Each write
+  carries the revision it was based on, and a write based on an old revision is refused, so two
+  windows cannot overwrite each other. Each change raises a plan-changed event, and every window
+  showing the plan reloads it.
 
-## 6. Order of work
+## 6. What the UI calls
+
+Each panel or behavior and what supplies it. Calls marked "new" are built in
+`QUALITY_METRICS_PLAN.md` or in this plan's phases; the rest exist today. The UI only displays
+what these return. It does no ranking, grouping, classification, text composition, unit conversion
+or joins. Results come as typed models, and the same calls serve the MCP tools.
+
+| Panel or behavior | Supplied by |
+| :--- | :--- |
+| Data Quality panel, quality strip | Planning `get_advisory(kind="quality")`, returning the `TargetDatasetReport` (new; replaces `TargetQualityAdvisory`) |
+| Statement order, type and confidence | The report's statements, ordered by priority, each with a kind (warning, recommendation, limit, not enough data) and a confidence label (new) |
+| Needs-attention badge | A per-target field in the night review: top warning count and severity (new) |
+| Evidence | `quality.query` with a row-id filter (new), opened in the Image Viewer |
+| Starting point for a new target | A field on `TargetDatasetReport`, computed in `wayfindinglib` (new) |
+| Tonight panel and re-ranked candidates | Planning `get_advisory(kind="tonight", at=...)` (new), at the shared planning time |
+| Altitude over the night | `planetarium:get_visibility` (Planning `get_visibility`) |
+| Night plan, checklist, framing | The stored night plan: Planning `get_plan` and a plan write with a revision check (new); a plan-changed event (new) |
+| Checklist items that come back | Planning `get_advisory`, reading the stored plan (new) |
+| Ekos summary | A `SequenceSummary` model of rows built from the stored night plan (new) |
+| Framing overlay | Planning `calculate_panels`, with rotation added (new) |
+| Night selector | A library call listing the nights that have data (new) |
+| Night review | `control.history.query(kind="night_quality", night_id=...)`, typed, with an RPC method (new) |
+| Live session verdict and alerts | `control.history.get_live_session_status`, typed, with an RPC method (new); called with `refresh=False` after a sync |
+| Sync now | `control.remote.sync_logs` (RPC `telescope:sync_logs`) and `control.remote.sync_frames` |
+| Target changes in the night | Read from the Ekos analyze log by `wayfindinglib` after a sync (new) |
+| Refresh after ingest | Backend event `quality:measured` with the target and night (new), declared in `backend/public_interface.py` |
+| Calibration warnings | Folded into the target report; the calibration library row it links to comes from `CalibrationCatalog.query` |
+| Quality chip in the Astronomy Manager | Planning `get_advisory(kind="result")` for one star's result, with an RPC method (new) |
+| Control panels greyed | `control.safety.status(include=["delegation_policy"])`, with an RPC method (new) |
+| Monitor or control mode | `observatory:enter_monitoring_mode`, `observatory:enter_controller_mode` |
+| Current target, planning time | Handoff state: `handoff:update_state` and the `handoff` event (`planning_time` new) |
+
+## 7. Order of work
 
 Each phase ends with `npm run type-check`, `npm test` and ESLint passing, the affected Python tests
 passing if the backend changes, the user guides updated, and new screenshots from
@@ -276,30 +444,36 @@ passing if the backend changes, the user guides updated, and new screenshots fro
 
 0. **Data Quality panel on today's Observation Manager.** Delivered with phase 4 of
    `QUALITY_METRICS_PLAN.md`. It takes the place of Last Image, so the recommendations reach the
-   user before the restructure. The Calibration Library stays where it is until phase 3 moves it.
-1. **Shared current target, planning time and restored windows.** The app-wide target and
-   planning-time events, and saving and reopening popped-out windows. Done when choosing a target
-   or a time in one window changes it in the other, and a restart brings both windows back on
-   their monitors.
+   user before the restructure. The panel is display-agnostic, so later phases only move it. The
+   Calibration Library stays where it is until phase 3 moves it.
+1. **Shared current target and planning time.** `setSelectedTarget` publishes through
+   `handoff:update_state`, and the handoff state gains `planning_time`. Both windows show "Now" or
+   "fixed at 22:00". Done when choosing a target or a time in one window changes it in the other.
 2. **Observation Execution.** The new display, its flag and its mode entry. It takes the live
-   panels from Observatory Manager and adds the capture-source setting, monitor mode with the live
-   session status (adding a backend RPC method for it if there is none), the frame list and the
-   quality strip refreshed on ingest, the night selector, and the control panels gated by mode. Execution Queue moves here. Done when a
-   real Ekos night shows live status and arriving frames, last night can be reviewed with the night
-   selector, and every control panel reads as unavailable and sends nothing in monitor mode.
+   panels from Observatory Manager and adds: monitor mode read from the delegation policy, with
+   the control panels greyed; an RPC method that reads the policy; typed live session status and
+   night review reads with RPC methods; "Sync now" and the staleness line; target changes read
+   after a sync; the frame list and the quality strip refreshed on `quality:measured`; the night
+   selector; night review rows with "Open in Planner" and the needs-attention badge; and the
+   accessibility basics. Execution Queue moves here. Done when a real Ekos night shows live status
+   and arriving frames after "Sync now", last night can be reviewed with the night selector, every
+   control panel reads as unavailable in monitor mode, and the `wayfindinglib` test shows that
+   every command is refused in monitor mode.
 3. **Observatory Manager.** What is left becomes the equipment display: devices, settings, limits,
    alignment, camera profiles, the calibration library moved from Observation Manager and the
    equipment settings moved from the Planetarium. Done when every setup panel works there and no
    live panel remains.
 4. **Observation Planner.** Observation Manager becomes Observation Planner: the Tonight panel with
-   the altitude chart and the ranked candidates, the night plan with dither folded in, "Add to
-   plan", and the checklist saved with the plan (decision 15). Today plan items live in the
-   display's memory (`PlanningContext`) until `ObservationPlanning.create_plan` writes the plan; the
-   checklist is saved with that written plan. Done when a recommendation goes into the night plan in one click and the sequence summary
-   matches the plan.
+   the altitude chart and the ranked candidates, the stored night plan with dither folded in,
+   "Send to plan", the checklist (decision 15) and the Ekos summary with copy and "done in Ekos"
+   per row. The night plan is the stored `wayfindinglib` model (decision 18), not `PlanningContext`
+   memory, with a revision check and a plan-changed event. Done when a recommendation goes into
+   the night plan in one click, the Ekos summary matches the plan, and an edit in one window shows
+   in the other.
 5. **Planetarium links and framing.** "Show on sky", "set as current target" from the map, and the
-   framing overlay that replaces the Mosaic Planner and feeds the night plan. Done when a framing
-   chosen on the sky appears in the night plan, and the Mosaic Planner is gone from the planner.
+   read-only framing overlay from `calculate_panels` that replaces the Mosaic Planner, with "Send
+   to plan". Done when a framing sent from the Planetarium in one window appears in the night plan
+   in another, and the Mosaic Planner is gone from the planner.
 6. **Documentation.** `User_Manual.md`, `Observatory_Control_and_Automation_Guide.md` and
    `User_Interface_Architecture.md` describe the displays, the two modes, the shared target and
    time, and the two-monitor layout.
@@ -307,7 +481,10 @@ passing if the backend changes, the user guides updated, and new screenshots fro
 Phase 1 can run beside phase 0. Phases 2, 3 and 4 follow in order, because each moves panels out
 of the display the next one rebuilds. Phase 5 follows phase 4.
 
-## 7. Open questions
+Order across plans: phase 2 (Observation Execution) needs phases 2 and 4 of
+`QUALITY_METRICS_PLAN.md`. Phase 4 (Observation Planner) needs phase 4 of that plan.
+
+## 8. Open questions
 
 - **Display names (settled).** See decision 6.
 - **Equipment settings in the Planetarium (settled).** See decision 13.
@@ -316,6 +493,26 @@ of the display the next one rebuilds. Phase 5 follows phase 4.
   keeps its name.
 - **Survey-image framing.** Whether to add a survey-image background to the Planetarium for
   framing, and from which survey. Not part of this plan.
+- **Automatic syncing.** A later option (decision 20). Not designed in this plan.
 - **A phone companion.** A future Android companion app is planned. This plan does not build for it,
   except that the current-target and planning-time events are backend events any client can
   receive.
+
+## Appendix A. Review board changes
+
+The change control board reviewed this plan with the other quality plans on 2026-10-17. Each row
+is a finding that changed this plan.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| F2: every UI behavior needs a named library owner; the UI does no ranking, grouping, classification, text composition, unit conversion or joins | Technical architect, software engineer | Decision 16, section 6 |
+| F3: the "capture source" setting duplicated `wayfindinglib`'s delegation policy; the no-command test belongs in the library | Technical architect, software engineer | Decision 17, section 4, phase 2 |
+| F4: the night plan lived only in each window's memory and had no gain, offset, binning, checklist or framing | Software engineer, technical architect | Decision 18, sections 3.1, 3.4 and 5, phase 4 |
+| F5: a shared current target already exists through the handoff state; only publishing on selection is missing; the planning time needs a visible indicator | Software engineer, user-experience reviewer | Decision 19, sections 1.1 and 5, phase 1 |
+| D1: syncs stay manual, with "Sync now", a staleness line and target changes read from the Ekos analyze log | User decision | Decision 20, section 3.2, phase 2 |
+| D3: no night theme; accessibility basics | User decision | Decision 21, section 3.5 |
+| D5: popped-out windows are not saved or restored | User decision | Decision 22, sections 1.1 and 5, phase 1 |
+| F8: refresh on ingest needs a declared event; set-aside reasons exist only after stacking; order across plans | Software engineer | Sections 3.2, 6 and 7 |
+| F9: statement types, Execution order, "Open in Planner", "Switch to", top 3 with "Show all", Ekos summary rows, evidence in the Image Viewer, consistent verbs, read-only framing, display-agnostic panel, quality chip | User-experience reviewer | Sections 3.1, 3.2, 3.4, 3.5 and 7 |
+
+No findings were rejected.

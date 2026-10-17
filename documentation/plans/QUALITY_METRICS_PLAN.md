@@ -13,6 +13,7 @@ The plan covers:
 - the shared shape: measurement, limit, judgment and the metric registry,
 - efficiency, the unit `wayfindinglib` uses to rank losses,
 - the metrics this plan carries (new metrics are in `QUALITY_SCIENCE_PLAN.md`),
+- the target dataset report: the warnings and recommendations the user sees for a target,
 - what happens to today's verdicts and gates,
 - the impact of the work and how its risk is kept low,
 - the order of work.
@@ -22,7 +23,7 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 
 ## Status
 
-Status on 2026-10-17: design and order of work agreed, nothing built. Phase 0 is next. Tracked in
+Status on 2026-10-17: design, target dataset report and order of work agreed, nothing built. Phase 0 is next. Tracked in
 issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
@@ -89,9 +90,9 @@ Agreed with the user on 2026-10-17:
    store efficiency on each measurement.
 4. **The equipment fingerprint stays in `wayfindinglib`.** Grouping measurements into one
    equipment setup's baseline is interpretation, so it belongs with the judgments. Each
-   `astrometricslib` measurement refers to the equipment facts its frames record (camera,
-   telescope, focal length, pixel scale, binning, gain setting, filter). `wayfindinglib` builds the
-   fingerprint from those facts plus the guide optics it already knows.
+   `astrometricslib` measurement refers to the capture setting its frames record (camera,
+   telescope, focal length, pixel scale, filter, exposure length, gain setting, offset, binning).
+   `wayfindinglib` builds the fingerprint from those facts plus the guide optics it already knows.
 5. **On-demand diagnostics stay read-only.** `QualityDiagnostics` keeps its rule that a check
    never saves anything, so the read-only AI tools can keep calling it. The pipelines are the only
    writers of measurements. A diagnostic reads stored measurements first and computes only what is
@@ -116,6 +117,24 @@ Agreed with the user on 2026-10-17:
    diagnostics MCP tools are renamed under it.
 10. **Each pipeline's `run_gates.py` is renamed in that pipeline's phase 3 change**, not in
     phase 0, which keeps the phase 0 diff small while many branches are open.
+11. **Recommendations never ask for new hardware.** Every warning and recommendation belongs to an
+    allowed action class: capture settings, scheduling, calibration, data selection, session
+    procedure, or adjustment of existing equipment such as polar alignment, tilt, camera rotation
+    or the dew heater. When only new hardware would help, the report states the limit as a
+    constraint and gives no advice (section 6.3).
+12. **The target dataset report extends the planner's quality advisory.** The user selects a
+    target and sees warnings about its data and recommendations for the next session.
+    `get_advisory(kind="quality")` in `wayfindinglib` Planning builds it, recomputed on each
+    request (section 6).
+13. **Imaging uses marginal value, not user-set goals.** The report gives the next step (doubling
+    the data), the point where more data stops helping, and the gain per hour across targets.
+    Spectroscopy, photometry and asteroid searches use the natural finish line their pipelines
+    already measure (section 6.4).
+14. **Every metric has a purpose:** decision, context or exploratory, enforced by tests. An
+    exploratory metric names its question and a review date (section 6.7).
+15. **Forecasts are checked.** When new frames are stacked, the report compares the measured gain
+    with the forecast and recomputes the recommendation. The check is rebuilt from the measurement
+    history, so recommendations are still never stored (section 6.5).
 
 ## 3. The shared shape
 
@@ -148,7 +167,7 @@ class QualitySubject(BaseModel):
     subject_id: str  # a stable id: target plus relative frame path, stack id or run id; never a mount path
     target_id: str | None
     observing_night_id: str | None  # utilities/observing_night.py
-    equipment_id: int | None  # row in the equipment-facts table (decision 4)
+    capture_setting_id: int | None  # row in the capture-setting table (decision 4, section 6.2)
     channel: str | None  # color channel for a one-shot-color camera, else None
 
 
@@ -267,6 +286,7 @@ FRAME_METRICS = (
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method="Bootstrap of the median",
         register_entry=None,
+        purpose=MetricPurpose.DECISION,  # section 6.7
     ),
 )
 ```
@@ -280,7 +300,9 @@ A `MetricSpec` holds:
 - the checkpoint (section 5) and the subject levels it applies to,
 - which direction is better,
 - a one-line meaning in plain words,
-- the decisions it informs.
+- the decisions it informs,
+- its purpose: decision, context or exploratory, with a reason, or a question and a review date
+  (section 6.7).
 
 A change to a metric's estimator, sample or constants raises its `definition_version`, which is
 stored on every row. `pipeline_version` changes for unrelated reasons, so it cannot show this. A
@@ -299,7 +321,9 @@ and has no views, ordering or exact filters, which an append-only, filtered tabl
 
 - **Typed columns**, one per field in section 3.1, with no JSON copy. The schema carries a version
   (`PRAGMA user_version`), and the store migrates it explicitly.
-- **Equipment facts in their own table**, `quality_equipment`, referenced by `equipment_id`. Seven
+- **Capture settings in their own table**, `quality_capture_setting`, referenced by
+  `capture_setting_id`. A capture setting is the camera, telescope, focal length, pixel scale,
+  filter, exposure length, gain setting, offset and binning a frame was taken with. Nine
   repeated columns on every row would make a row 300 to 600 bytes. With the reference, a row is
   closer to 150 bytes.
 - **No duplicates.** A `UNIQUE(run_id, metric, subject_level, subject_id, channel)` constraint
@@ -359,8 +383,14 @@ on which other tests ran:
 - every `VALIDATED_DATASET` limit names a register entry that exists;
 - a `NOT_MEASURED` measurement has a reason and no value.
 
-The check that every `wayfindinglib` rule's `requires=(...)` names a registered metric lives in
-`wayfindinglib/test/`, because `astrometricslib` and its tests may not import `wayfindinglib`.
+The checks that cross the two libraries live in `wayfindinglib/test/`, because `astrometricslib`
+and its tests may not import `wayfindinglib`:
+
+- every rule's `requires=(...)` names a registered metric;
+- every rule declares an allowed action class (section 6.3);
+- every metric's purpose holds: a decision metric is required by at least one rule, a context
+  metric is shown by at least one report section, and an exploratory metric's review date has not
+  passed (section 6.7).
 
 With these tests, a rule can no longer depend on a field that was renamed or dropped without a
 test failing.
@@ -481,10 +511,10 @@ lands, efficiency states that transparency is not included.
 ## 5. Metrics this plan carries
 
 This plan carries the metrics that already exist, moved into the new shape, plus the few new ones
-that efficiency needs first. Every other new metric, with its definition and its evidence, is in
+that efficiency and the target dataset report (section 6) need first. Every other new metric, with its definition and its evidence, is in
 `QUALITY_SCIENCE_PLAN.md`.
 
-### 5.1 New in phase 2, because efficiency needs them
+### 5.1 New early, because efficiency and the target report need them
 
 | Metric | Definition | Why now |
 | :--- | :--- | :--- |
@@ -492,6 +522,8 @@ that efficiency needs first. Every other new metric, with its definition and its
 | Sky brightness in electrons | Background in electrons per second per pixel, from the background level, the gain for the frame's setting and the exposure time | Efficiency's sky factor and the read-noise regime |
 | Sky noise over read noise | The ratio of sky noise to read noise for the frame's setting | Decides the noise regime (section 4), and says when an exposure is too short |
 | Gain and read noise for each camera setting | Photon transfer from flat pairs and the noise of bias pairs, at each gain setting, offset and binning in use (decision 7) | Every metric above in electrons depends on it |
+| Stack noise in empty apertures (phase 3) | Noise of the stack in random apertures of the photometric size, placed away from sources, with the aperture stated. Registration correlates neighboring pixels, so pixel noise underestimates the real noise. | The "more frames" recommendation and the forecast check (sections 6.4 and 6.5) |
+| Stack noise against frame count (phase 3) | Empty-aperture noise and the weighted effective frame count and time of each stack run, kept in the history, plus subset stacks when a run has too few predecessors | Gives the count in "take N more", and shows when noise stops falling |
 
 ### 5.2 Existing metrics emitted in the new shape (phases 2 and 3)
 
@@ -508,10 +540,192 @@ that efficiency needs first. Every other new metric, with its definition and its
 Each existing metric keeps its current estimator under a name that says so. An improved estimator
 from the science plan gets a new name (decision 6).
 
-## 6. What happens to today's verdicts and gates
+## 6. Target dataset report
+
+This is where the measurements reach the user. The user selects a target and sees, for that
+target's data, warnings about what was already taken and recommendations for the next session.
+A warning reads like "frames at 120 s clip the target core". A recommendation reads like "take 50
+more frames at 30 s". Agreed with the user on 2026-10-17 (decisions 11 to 15).
+
+### 6.1 Where it lives
+
+```text
+Desktop app: the user selects a target
+  → backend RPC method
+    → wayfindinglib Planning: get_advisory(kind="quality", target_id=...)
+        reads astrometrics.quality.query(target_id=...)     the measurements
+        + camera profiles and the equipment catalog          what is possible
+        + the performance envelope                           the limits
+        + visibility, Moon and sky history                   when to observe
+        applies the rules in wayfindinglib/analytics/result_quality/
+      → TargetDatasetReport, recomputed on each request and never stored
+```
+
+The report extends the planner's existing quality advisory (decision 12), which already has the
+right owner. It is forward-looking, so it belongs to Planning. The per-night view stays in
+`session_analysis` (Control). Both use the same rules from `analytics/`, which both layers may
+import.
+
+### 6.2 What it holds
+
+The unit of the report is the **capture setting**: one camera and telescope, with one filter,
+exposure length, gain setting, offset and binning. Warnings and recommendations are statements
+about one setting, so every measurement refers to its capture setting (section 3.1).
+
+- **Dataset summary.** One row per capture setting: frames taken, nights, frames set aside,
+  captured time, effective time, and the loss account by cause.
+- **Warnings.** Problems in the data already taken.
+- **Recommendations.** What to do in the next session on this target, with numbers.
+
+A sketch:
+
+```python
+class ActionClass(StrEnum):
+    CAPTURE_SETTINGS = "capture_settings"
+    SCHEDULING = "scheduling"
+    CALIBRATION = "calibration"
+    DATA_SELECTION = "data_selection"
+    SESSION_PROCEDURE = "session_procedure"
+    ADJUSTMENT = "adjustment"
+
+
+class TargetAdvice(BaseModel):
+    rule: str  # the rule that produced it
+    category: Literal["warning", "recommendation"]
+    action_class: ActionClass
+    capture_setting: CaptureSetting | None
+    message: str  # one plain sentence
+    proposed_action: ProposedAction | None  # typed values: exposure, frame count, filter, dither, window...
+    expected_effect: ExpectedEffect | None  # e.g. noise down 29%, efficiency up 0.2
+    evidence: list[int]  # quality_measurements row ids
+    limits: list[QualityLimit]
+    confidence: str  # the rule's validation register status
+
+
+class TargetDatasetReport(BaseModel):
+    target_id: str
+    capture_settings: list[CaptureSettingSummary]
+    warnings: list[TargetAdvice]
+    recommendations: list[TargetAdvice]
+    forecast_checks: list[ForecastCheck]  # section 6.5
+    constraints: list[str]  # limits of the equipment, stated, never advice (section 6.3)
+    generated_at: datetime
+```
+
+Every item shows its evidence and its confidence. A rule whose register entry is still a design
+estimate is shown as tentative. "Insufficient data" is an explicit outcome, never silence.
+
+### 6.3 What may be recommended
+
+The report never recommends changing hardware: no new telescope, camera, mount, guide scope,
+filter or other purchase. Every rule declares one of these action classes (decision 11):
+
+| Class | Examples | Allowed values come from |
+| :--- | :--- | :--- |
+| Capture settings | Exposure length, frame count, gain setting, offset, binning, filter, dither interval and size | The camera profile's measured settings and the filters in the equipment catalog |
+| Scheduling | Altitude window, Moon limits, nights to add, revisit within a time | Visibility and planning |
+| Calibration | Take or retake darks, flats or bias for a setting | The calibration library |
+| Data selection | Frames set aside or restored, restack | The quality measurements |
+| Session procedure | Refocus interval, guider recalibration, guide exposure | The performance envelope |
+| Adjustment of existing equipment | Polar alignment, tilt or collimation, camera rotation, dew heater | The equipment the user has |
+
+A test in `wayfindinglib/test/` fails a rule that declares no class, and a proposed value outside
+the equipment's own options cannot be built. When only new hardware would help, the report states
+the limit as a constraint, for example "seeing limits the resolution on this target; more time
+adds depth, not detail", and gives no advice about it.
+
+### 6.4 How much more data
+
+"More data makes a better image" is true with two catches. Returns shrink, because noise falls as
+the square root of the time: doubling the data cuts noise by about 29%. And some problems more data
+cannot fix, such as a fixed pattern or soft focus. For imaging the report therefore uses marginal
+value instead of a goal the user must set (decision 13):
+
+- **The next step.** "Doubling your data (60 more 30 s frames, about 30 min) would cut the noise
+  by about 29%." Doubling is the default step, because it is about the smallest change the eye
+  sees. The count comes from the measured noise against frame count of this target.
+- **The stop signal.** "Noise stopped falling with more frames after about 2 h. More frames will
+  not help until you dither or retake flats."
+- **The sharpness trade-off.** "Keeping the sharpest 70% of frames sharpens stars by 12% and
+  raises the noise by 15%."
+- **Comparing targets.** The marginal gain per hour lets the planner say which visible target
+  gains most from the next hour.
+
+Where a use has a natural finish line, the report uses it, taken from the pipeline rather than set
+by the user:
+
+| Use | Natural goal | Source |
+| :--- | :--- | :--- |
+| Spectroscopy | SNR enough for the classifier to separate the best subtype from the next | The classifier's gap between its two best matches |
+| Photometry | Precision fine enough to detect variability of a given size | The detectable-amplitude measurement |
+| Asteroid search | An arc long enough to link the object | Arc length and motion rate |
+| Imaging | None by default | Marginal value, as above |
+
+An explicit imaging goal per target (a depth, or a noise level) can be added later if wanted.
+
+### 6.5 Checking the forecast
+
+A recommendation is a forecast: "60 more frames cut the noise by 29%". Once the user takes more
+frames and stacks them, the report checks the forecast against the new stack (decision 15):
+
+- The expected noise comes from the previous stack's measured noise and the effective time of the
+  old and new frames together, so worse new frames (Moon, cloud) lower the expectation fairly.
+- The report says whether the gain arrived as forecast, fell short for a known reason (the new
+  frames' lower efficiency), or fell short for no known reason. An unexplained shortfall points to
+  a noise floor and raises the "more frames will not help" warning.
+- The recommendation is then recomputed from the new stack.
+
+The check needs nothing stored beyond the measurements. Each stack run's noise, frame count and
+effective time stay in the append-only history (section 3.5), so the forecast for any stack can be
+rebuilt from the run before it. This keeps the rule that recommendations are never stored.
+
+Across targets, the forecast checks are evidence about the marginal-value model itself. They feed
+its validation register entry, so the report's confidence in "take N more" is earned from the
+user's own results.
+
+### 6.6 Decision catalog
+
+Each warning and recommendation names the metrics it reads. A first catalog:
+
+| Item | Metrics it reads | Example text | Class |
+| :--- | :--- | :--- | :--- |
+| Overexposed setting | Target clipping through the WCS, saturated fraction; zero-order saturation for spectra | "120 s frames clip the target core in 38 of 40. Use 45 s or less." | Capture settings |
+| Underexposed setting | Sky noise over read noise | "30 s frames are limited by read noise. 90 s reaches the same depth in 25% less time." | Capture settings |
+| Offset too low | Pixels clipped at zero | "Raise the offset: 2% of pixels clip at zero." | Capture settings |
+| Guiding limits exposure | Exposure feasibility from the guide logs | "At 120 s only 40% of frames stay sharp; at 60 s, 85%." | Capture settings |
+| Frames lost | Set-aside counts, cloud and trailing, efficiency | "12 of 60 frames set aside; clouds from 22:40 to 23:10." | Data selection |
+| More frames | Stack noise against frame count | "Take 60 more at 30 s to cut the noise by about 29%." | Capture settings |
+| More frames will not help | Stack noise over the noise expected from the frame count; forecast check | "Dither every 3 frames by about 10 px before adding frames." | Capture settings |
+| Focus drift | Star width against focuser temperature | "Refocus every 1.5 °C." | Session procedure |
+| Calibration gap | Calibration match, flat-to-light match | "Take darks at gain 100, 60 s, −10 °C." | Calibration |
+| Sky cost | Sky brightness, Moon, gradient | "Frames with the Moon above 60% and within 40° lost 45%. Schedule moonless nights." | Scheduling |
+| Altitude cost | Efficiency against altitude | "Frames below 30° lost 35%. Image above 35°." | Scheduling |
+| Best window | Visibility, Moon, sky history | "Best nights: Oct 24 to 30, 22:00 to 02:00." | Scheduling |
+| Period alias | Window function | "Two more nights, 3 days apart, would rule out the alias." | Scheduling |
+| Spectrum SNR | SNR per resolution element | "8 more 20 s spectra for a subtype." | Capture settings |
+| Asteroid linking | Arc length | "Re-observe within 24 h to link the object." | Scheduling |
+| Polar alignment | Field rotation | "Field rotation shows a polar error; redo the polar alignment." | Adjustment |
+| Tilt | Center-to-corner star width | "Stars in one corner are 30% wider; check the camera tilt." | Adjustment |
+
+Items whose metrics are in `QUALITY_SCIENCE_PLAN.md` arrive with those metrics.
+
+### 6.7 Every metric has a purpose
+
+Every registered metric declares one purpose (decision 14), and the tests in section 3.7 hold it to
+it:
+
+| Purpose | Meaning | Test |
+| :--- | :--- | :--- |
+| Decision | Feeds at least one warning or recommendation | At least one rule declares it in `requires` |
+| Context | Explains other items and is shown as their evidence, such as airmass or sensor temperature | A stated reason, and at least one report section that shows it |
+| Exploratory | Collected to answer a question | The question and a review date. Never shown as advice. After the date the test fails until the metric is promoted or removed. |
+
+The review date keeps "exploratory" from becoming a permanent home for unused metrics.
+
+## 7. What happens to today's verdicts and gates
 
 Each existing verdict field and gate is sorted into one of four groups during phase 6, one
-pipeline at a time (section 8).
+pipeline at a time (section 9).
 
 | Group | Rule | Examples |
 | :--- | :--- | :--- |
@@ -545,7 +759,7 @@ Validation of a probability (decision 8) follows these rules:
   and may conclude "insufficient evidence". With one telescope and a few nights, many entries will
   honestly end there.
 
-## 7. Impact and risk
+## 8. Impact and risk
 
 The work is three kinds of change, and only one carries real risk. Agreed with the user on
 2026-10-17: take the clean split (decision 1) as a conscious choice, do the mechanical refactor
@@ -596,7 +810,7 @@ Safeguards:
    every target in the live database next to today's verdicts and writes a difference report. Each
    difference is marked as a bug fixed or a change the user approved. The desktop app switches only
    when no difference is left unmarked.
-5. **A written inventory per pipeline** (section 6), approved by the user before phase 6 code for
+5. **A written inventory per pipeline** (section 7), approved by the user before phase 6 code for
    that pipeline.
 6. **One pull request per phase.** Issue #93 becomes an epic with one sub-issue per phase, each
    with its own Analysis and Plan.
@@ -609,7 +823,7 @@ Safeguards:
    search, one spectrum) covers the rest. Both give identical science numbers after phase 0 and
    after each pipeline's phase 6.
 
-## 8. Order of work
+## 9. Order of work
 
 Each phase ends with its tests passing, `ruff` clean, the import-linter contracts unchanged, and
 the affected READMEs updated. Each phase is one pull request.
@@ -640,21 +854,28 @@ the affected READMEs updated. Each phase is one pull request.
    width is checked against the current estimator on round and on trailed frames.
 3. **Existing pipeline metrics in the new shape.** In each pipeline's change, rename its
    `run_gates.py` to `record_quality.py` (decision 10) and emit measurements next to its current
-   summary. Fix the dropped asteroid `residual_*` counts and regenerate the UI types. Run the
-   history fill (safeguard 3). Done when every metric in the five summaries has a registered name,
-   appears in the table after a run, and the filled history matches the JSON.
+   summary. In the stacking change, add the stack noise in empty apertures and the effective frame
+   count and time of each run (section 5.1). Fix the dropped asteroid `residual_*` counts and
+   regenerate the UI types. Run the history fill (safeguard 3). Done when every metric in the five
+   summaries has a registered name, appears in the table after a run, and the filled history
+   matches the JSON.
 4. **Efficiency and recommendations from measurements.** Build
    `wayfindinglib/analytics/result_quality/efficiency.py`: the references, goals, noise regimes
    and the loss split (section 4). Change `Recommendation.evidence` to a typed list of measurement
    references; this changes a reflected MCP tool's output, so note it there. Migrate
    `PerformanceThreshold` to `QualityLimit`. Rules declare the metrics they require. Switch the
-   guiding and capture recommendations to `quality.query`. Done when they read through it and a
-   real night's loss account adds up to the captured time.
+   guiding and capture recommendations to `quality.query`. Then build the target dataset report
+   (section 6): the action classes, the rules of the decision catalog whose metrics exist, marginal
+   value and the forecast check, extended `get_advisory(kind="quality")`, its backend RPC method,
+   regenerated UI types, and a data-quality panel on the target view in the desktop app. Done when
+   the guiding and capture recommendations read through `quality.query`, a real night's loss
+   account adds up to the captured time, and a real target's report gives a "take N more"
+   recommendation whose forecast is checked after the next stack.
 5. **New metrics.** Built under `QUALITY_SCIENCE_PLAN.md`, in its own order, once phase 1 exists.
    This plan only provides the shape they fill.
 6. **Verdicts and gates, one pipeline at a time.** Photometry goes first, because its labels and
    its `variability_discrimination` gate already exist (decision 8). For each pipeline: write and
-   approve the inventory (section 6), build the rules in `wayfindinglib/analytics/result_quality/`,
+   approve the inventory (section 7), build the rules in `wayfindinglib/analytics/result_quality/`,
    run them in shadow mode (safeguard 4), switch the desktop app, the planning advisory and the
    scripts, add any backend RPC and UI type changes, then turn that pipeline's verdict fields into
    measurements and keep its self-checks. Done for a pipeline when its shadow differences are all
@@ -668,19 +889,21 @@ the affected READMEs updated. Each phase is one pull request.
 Phases 2 and 3 can run at the same time once phase 1 is done. Phase 5 can start any time after
 phase 1.
 
-## 9. Documentation
+## 10. Documentation
 
 - `Astrometrics_Library_Architecture.md` gains a section on quality measurement: the measurement
   shape, the checkpoints and the split between measuring and judging, with no code names.
 - `Astrometrics_Library_Implementation.md` gains the registry and the store, with their status
   labels.
 - The `wayfindinglib` documentation gains efficiency, its references and the result-quality rules.
+- The desktop-app guides under `documentation/user_interface/` gain the target data-quality panel:
+  how to read its warnings, recommendations, evidence and confidence.
 - Each efficiency function, each reference and each moved limit gets an entry in the validation
   register.
 - `astrometricslib/models/README.md`, `pipelines/README.md`, `api/README.md` and the
   `wayfindinglib` analytics and `session_analysis` READMEs change with the code.
 
-## 10. Open questions and risks
+## 11. Open questions and risks
 
 - **A separate science plan (settled).** The user agreed on 2026-10-17 to move the new metrics into
   `QUALITY_SCIENCE_PLAN.md`. This plan keeps the shared shape, the migration and the four metrics
@@ -693,7 +916,7 @@ phase 1.
   measured values, at gain 0. The Nikon D5300 and the ZWO ASI120MC-S guide camera had none. Until a
   setting is measured, `wayfindinglib` computes efficiency against the baseline only, not the
   physical reference, and says so.
-- **Calibrated probabilities (settled, see decision 8 and section 6).**
+- **Calibrated probabilities (settled, see decision 8 and section 7).**
 - **Table growth (settled).** See section 3.5.
 
 ## Appendix A. Review board changes
@@ -706,10 +929,10 @@ The board met on 2026-10-17. Each finding below was accepted and placed as shown
 | The store cannot use the `Butler` (or `wayfindinglib`'s `DiskButler`); duplicates, version sorting, backfilled rows | Architect, engineer | Section 3.5, safeguard 3 |
 | Self-check judgments need no table of their own | Architect | Decision 2, section 3.3 |
 | Moving `QualityDiagnostics` changes a public path and the MCP tool names | Architect, engineer | Section 3.8, decision 9, phases 0 and 1 |
-| File counts, generators and the asteroid path in phase 0 | Engineer | Section 7, phase 0 |
+| File counts, generators and the asteroid path in phase 0 | Engineer | Section 8, phase 0 |
 | The judgment rules must be reachable from Planning | Architect | Section 3.8, `wayfindinglib/analytics/result_quality/` |
 | The registry must be public API; the cross-library check lives in `wayfindinglib/test/`; a per-metric definition version | Architect | Sections 3.4, 3.6, 3.7 |
-| The planning advisory reads verdicts only, so it switches in phase 6 | Architect | Section 7, phases 4 and 6 |
+| The planning advisory reads verdicts only, so it switches in phase 6 | Architect | Section 8, phases 4 and 6 |
 | Backend RPC, UI types and MCP dispositions for the new calls | Architect, engineer | Section 3.6, phases 1, 4 and 6 |
 | The frame step must not run inside the header-only scan; idempotence; stable frame ids | Engineer, architect | Section 3.1, phase 2 |
 | Conformance tests must be static and switched on per pipeline | Engineer | Section 3.7 |
@@ -717,10 +940,10 @@ The board met on 2026-10-17. Each finding below was accepted and placed as shown
 | Bands, color terms, airmass and per-channel metrics for color cameras | Astronomer | Section 3.1; `QUALITY_SCIENCE_PLAN.md` section 2.1 |
 | Correlated noise after stacking; limiting magnitude definition | Astronomer | `QUALITY_SCIENCE_PLAN.md` section 2.3 |
 | Asteroid completeness grid, per-night false-positive rate, timing error | Astronomer | `QUALITY_SCIENCE_PLAN.md` section 2.4 |
-| Probability calibration on injections, held out by night or field, minimum sample size | Astronomer | Section 6 |
+| Probability calibration on injections, held out by night or field, minimum sample size | Astronomer | Section 7 |
 | Store failures, error type and logging | Engineer | Section 3.5 |
 | Golden suite must run, not skip; shadow-mode mechanism | Engineer | Safeguards 4 and 8 |
 | The rename of `run_gates.py` can wait for each pipeline's phase 3 | Architect | Decision 10 |
 
 One finding was not adopted: a suggested change to the night id for daylight saving. The night's
-date changes at local noon, so a one-hour shift stays in daylight (section 10).
+date changes at local noon, so a one-hour shift stays in daylight (section 11).

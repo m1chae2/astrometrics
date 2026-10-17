@@ -21,8 +21,9 @@ plan names files and functions instead.
 
 Status on 2026-10-17: split from `QUALITY_METRICS_PLAN.md`, nothing built. Work starts after
 phase 1 of that plan, which provides the registry and the store. The few metrics that
-efficiency needs first (the corrected star width, sky in electrons, sky noise over read noise,
-and gain and read noise for each camera setting) stay in that plan's phase 2.
+efficiency and the target dataset report need first stay in that plan: the corrected star width,
+sky in electrons, sky noise over read noise, gain and read noise for each camera setting, and the
+stack noise in empty apertures and against frame count.
 
 ## 1. How a new metric enters
 
@@ -69,11 +70,13 @@ channel, and the channel is part of the measurement's subject.
 
 ### 2.3 After stacking
 
+Empty-aperture stack noise and stack noise against frame count moved to `QUALITY_METRICS_PLAN.md`
+(section 5.1), because the target dataset report needs them for its "take N more" recommendation.
+The metrics below build on them.
+
 | Metric | Definition | Decision it informs | Depends on | Data |
 | :--- | :--- | :--- | :--- | :--- |
-| Empty-aperture noise | Noise of the stack measured in random apertures of the photometric size, placed away from sources. Registration and rejection correlate neighboring pixels, so pixel noise underestimates the real noise. | Depth reached | None | None |
 | Noise over the expected noise | Empty-aperture noise against the noise expected from the weighted effective frame count, read noise and sky. Stored as its parts, not only as the ratio. | More frames, dithering, calibration | Empty-aperture noise; gain and read noise | None |
-| Noise against frame count | Empty-aperture noise of subset stacks of increasing size | Whether more frames will help | Subset stacking | None |
 | Limiting magnitude | The magnitude of 50% recovery of injected point sources, or 5 times the empty-aperture noise, with the aperture stated | Depth reached | Zero point; injection | None |
 | Walking noise | Noise anisotropy along the drift direction of the frames | Dithering | Registration shifts | Undithered and dithered runs |
 | Rejected-pixel clustering | A defined clustering statistic of the rejection map, separating trails from scattered rejection | Satellites, aircraft | Rejection map | None |
@@ -130,9 +133,8 @@ Each metric gets a validation register entry before `wayfindinglib` acts on it. 
 Each metric is built in the order its evidence can be gathered, and is one pull request with its
 declaration, its code, its tests and its register entry.
 
-1. **Calibration and stack noise.** Empty-aperture noise, noise over the expected noise, noise
-   against frame count. These use data already held and decide the most common question: will more
-   frames help?
+1. **Noise over the expected noise.** Builds on the main plan's stack-noise metrics and decides
+   why more frames stopped helping: fixed pattern, calibration or correlated noise.
 2. **Zero point and transparency.** Catalog zero point, its scatter, and the extinction
    coefficient. These complete efficiency's transparency factor in the main plan's section 4.
 3. **Star shape across the field.** Center-to-corner width, field rotation, trailing direction

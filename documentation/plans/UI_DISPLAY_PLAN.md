@@ -1,8 +1,8 @@
 # UI Display Plan
 
 This plan reorganizes the desktop app's two busiest displays, Observation Manager and Observatory
-Manager, into three displays, each built around one job: planning, running the night, and setting
-up the equipment. It also makes the app work well across two monitors.
+Manager, into three displays, each built around one job: planning (Observation Planner), running
+the night (Observation Execution), and setting up the equipment (Observatory Manager). It also makes the app work well across two monitors.
 
 The plan covers:
 
@@ -22,8 +22,8 @@ source of truth. Line numbers drift, so this plan names files and functions inst
 
 ## Status
 
-Status on 2026-10-17: draft, agreed in discussion, not yet reviewed by the change control board,
-nothing built.
+Status on 2026-10-17: draft, with the user's first-read decisions folded in (decisions 6 to 9). Not
+yet reviewed by the change control board, nothing built.
 
 ## 1. Findings
 
@@ -57,25 +57,27 @@ Ekos does the capture today, which lowers the value of every capture-control pan
 
 | Panel | Display today | Value today | Goes to |
 | :--- | :--- | :--- | :--- |
-| Filter Targets and Target List | Both | High, but repeated on both, about a sixth of each screen | Target Planner. Other displays show the current target only. |
-| Visible Targets (`TargetListStatus`) | Observation | High for planning | Target Planner, merged with Target Status |
-| Target Status (RA, Dec, altitude, rise, set) | Observation | Medium; overlaps Visible Targets | Merged into one visibility panel on the Target Planner |
-| Image Planner, Image List, Dither Settings | Observation | Medium: the plan for a night | Target Planner as "Night plan", dither folded into it |
-| Execution Queue | Observation | Only with direct control | Night Control, control mode |
-| Last Image (`images:last`) | Observation | Low: it shows a stacked file, not the last frame | Removed. A live frame returns in Night Control's control mode. |
-| Mosaic Planner | Observation | Occasional | Target Planner, collapsed by default |
-| Calibration Library | Observation | Low here: frame counts by camera | Image Processing, where calibration already lives. Missing calibration appears as a warning in the target report. |
-| Telescope Control, Manual Guide, Focuser, Filter Wheel | Observatory | Only with direct control | Night Control, control mode |
-| Guiding Trends and Guiding Target | Observatory | High at night | Night Control |
-| Tracking Settings, Safety Limits, Alignment Status | Observatory | Set once, changed rarely | Observatory Setup |
-| Devices and Device Properties | Observatory | Setup and troubleshooting | Observatory Setup |
+| Filter Targets and Target List | Both | High, but repeated on both, about a sixth of each screen | Observation Planner. Other displays show the current target only. |
+| Visible Targets (`TargetListStatus`) | Observation | High for planning | Observation Planner, merged with Target Status |
+| Target Status (RA, Dec, altitude, rise, set) | Observation | Medium; overlaps Visible Targets | Merged into one visibility panel on the Observation Planner |
+| Image Planner, Image List, Dither Settings | Observation | Medium: the plan for a night | Observation Planner as "Night plan", dither folded into it |
+| Execution Queue | Observation | Only with direct control | Observation Execution, control mode |
+| Last Image (`images:last`) | Observation | Low: it shows a stacked file, not the last frame | Removed (agreed). A live frame returns in Observation Execution's control mode. |
+| Mosaic Planner | Observation | Occasional | Observation Planner, collapsed by default |
+| Calibration Library | Observation | Belongs with the equipment, not the night plan | Observatory Manager, beside the camera profiles (decision 7). Missing calibration also appears as a warning in the target report. |
+| Telescope Control, Manual Guide, Focuser, Filter Wheel | Observatory | Only with direct control | Observation Execution, control mode |
+| Guiding Trends and Guiding Target | Observatory | High at night | Observation Execution |
+| Tracking Settings, Safety Limits, Alignment Status | Observatory | Set once, changed rarely | Observatory Manager |
+| Devices and Device Properties | Observatory | Setup and troubleshooting | Observatory Manager |
 
 ## 2. Decisions
 
 Agreed with the user on 2026-10-17:
 
-1. **Three displays, one job each.** Target Planner (by day), Night Control (at night) and
-   Observatory Setup (rarely). They replace Observation Manager and Observatory Manager.
+1. **Three displays, one job each.** Observation Planner (by day), Observation Execution (at
+   night) and Observatory Manager (rarely). Observation Planner replaces Observation Manager.
+   Observatory Manager keeps its name but holds only the equipment setup; its live panels move to
+   Observation Execution.
 2. **Ekos captures now; direct control comes later.** For now the app gives observation
    recommendations and monitors the Ekos session. The capture-control panels stay in the code,
    shown as unavailable, and nothing in this plan may block replacing Ekos with direct control
@@ -84,14 +86,20 @@ Agreed with the user on 2026-10-17:
    its top recommendation and the night's loss so far. It is the same component as the full Data
    Quality panel, in a smaller form.
 4. **Two monitors.** The user has two monitors, so the night screen does not need a device status
-   strip. Observatory Setup, or the Target Planner, opens in a second window on the other monitor
-   (section 5).
+   strip. Observatory Manager, or the Observation Planner, opens in a second window on the other
+   monitor (section 5).
 5. **One current target everywhere.** Choosing a target in one display or window makes it the
-   current target in all of them.
+   current target in all of them, through a backend event (section 5).
+6. **Display names.** Observation Planner, Observation Execution and Observatory Manager.
+7. **The calibration library belongs to Observatory Manager,** with the camera profiles: what
+   calibration frames exist for each camera, gain, offset, binning and temperature.
+8. **Last Image is removed.** A live frame returns only in control mode.
+9. **The app never commands a device while Ekos captures.** In monitor mode no control panel sends
+   a command, with no exceptions (section 4).
 
 ## 3. The three displays
 
-### 3.1 Target Planner
+### 3.1 Observation Planner
 
 Replaces Observation Manager. Used by day, and at night when plans change.
 
@@ -119,9 +127,9 @@ Replaces Observation Manager. Used by day, and at night when plans change.
 - **Night plan** is the Image Planner and Image List, with dither settings folded in. While Ekos
   captures, the plan is shown as a sequence summary to enter in Ekos (section 4).
 
-### 3.2 Night Control
+### 3.2 Observation Execution
 
-Replaces the live part of Observatory Manager. Used at night.
+New. Takes the live panels from Observatory Manager. Used at night.
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -144,15 +152,18 @@ Replaces the live part of Observatory Manager. Used at night.
 - **Control mode** (later): the control panels and the execution queue become active, and the live
   frame returns.
 
-### 3.3 Observatory Setup
+### 3.3 Observatory Manager
 
-New. Used when equipment changes, during commissioning, and for troubleshooting, usually on the
+Keeps its name and becomes the equipment display. Used when equipment changes, during commissioning, and for troubleshooting, usually on the
 second monitor.
 
 - Devices and device properties (the INDI inspector, `IndiStatusPanel`).
 - Safety limits, tracking and alignment settings, guiding settings, alignment status.
 - Camera profiles: the measured gain and read noise for each camera setting, and the call that
   measures a new setting from flat and bias pairs (`QUALITY_METRICS_PLAN.md` decision 7).
+- The calibration library: darks, flats and bias frames held for each camera, gain, offset,
+  binning and temperature, moved from today's Observation Manager. Gaps show beside the camera
+  settings they affect.
 
 ## 4. Ekos now, direct control later
 
@@ -161,7 +172,8 @@ mode). Control mode stays off until direct control is built.
 
 - **In monitor mode** the control panels are visible but unavailable, with one line saying why
   ("Ekos is controlling the equipment"). Two programs commanding the same devices would conflict,
-  so the panels do not send commands. No panel is deleted.
+  so no panel sends a command, with no exceptions (decision 9). No panel is deleted. A test checks
+  that every command call in a control panel is blocked in monitor mode.
 - **Recommendations are typed actions.** The target report's `proposed_action` holds exposure,
   frame count, filter and dither as values. In monitor mode they are shown as a sequence summary
   to enter in Ekos. In control mode the same values fill the night plan and the execution queue.
@@ -175,8 +187,9 @@ mode). Control mode stays off until direct control is built.
 
 ## 5. Two monitors and the current target
 
-- **Suggested layout.** Monitor 1 holds Night Control at night and the Target Planner by day.
-  Monitor 2 holds Observatory Setup, the Image Viewer, or the Target Planner at night when plans
+- **Suggested layout.** Monitor 1 holds Observation Execution at night and the Observation Planner
+  by day. Monitor 2 holds Observatory Manager, the Image Viewer, or the Observation Planner at night
+  when plans
   change.
 - **Windows come back.** Popped-out windows, with their display and monitor, are saved and reopened
   at start, the way the main window already is.
@@ -193,21 +206,21 @@ passing if the backend changes, the user guides updated, and new screenshots fro
 `build/documentation/generate_screenshots.spec.ts`.
 
 0. **Data Quality panel on today's Observation Manager.** Delivered with phase 4 of
-   `QUALITY_METRICS_PLAN.md`. It takes the place of Last Image and Calibration Library, so the
-   recommendations reach the user before the restructure.
+   `QUALITY_METRICS_PLAN.md`. It takes the place of Last Image, so the recommendations reach the
+   user before the restructure. The Calibration Library stays where it is until phase 3 moves it.
 1. **Shared current target and restored windows.** The app-wide target event, and saving and
    reopening popped-out windows. Done when choosing a target in one window changes it in the
    other, and a restart brings both windows back on their monitors.
-2. **Observatory Setup.** The new display, its flag and its mode entry, holding the setup panels
-   moved from Observatory Manager. Done when every setup panel works from the new display.
-3. **Night Control.** Observatory Manager becomes Night Control: the capture-source setting, monitor
-   mode with the live session status (adding a backend RPC method for it if there is none), the
+2. **Observation Execution.** The new display, its flag and its mode entry. It takes the live
+   panels from Observatory Manager and adds the capture-source setting, monitor mode with the live session status (adding a backend RPC method for it if there is none), the
    frame list and the quality strip, and the control panels gated by mode. Execution Queue moves
    here. Done when a real Ekos night shows live status and arriving frames, and every control
-   panel reads as unavailable in monitor mode.
-4. **Target Planner.** Observation Manager becomes Target Planner: the merged visibility panel, the
-   night plan with dither folded in and "Add to plan", the collapsed mosaic planner. Calibration
-   Library moves to Image Processing. Done when a recommendation goes into the night plan in one
+   panel reads as unavailable and sends nothing in monitor mode.
+3. **Observatory Manager.** What is left becomes the equipment display: devices, settings, limits,
+   alignment, camera profiles, and the calibration library moved from Observation Manager. Done
+   when every setup panel works there and no live panel remains.
+4. **Observation Planner.** Observation Manager becomes Observation Planner: the merged visibility panel, the
+   night plan with dither folded in and "Add to plan", the collapsed mosaic planner. Done when a recommendation goes into the night plan in one
    click and the sequence summary matches the plan.
 5. **Documentation.** `User_Manual.md`, `Observatory_Control_and_Automation_Guide.md` and
    `User_Interface_Architecture.md` describe the three displays, the two modes and the two-monitor
@@ -218,11 +231,11 @@ of the display the next one rebuilds.
 
 ## 7. Open questions
 
-- **Display names.** "Target Planner", "Night Control" and "Observatory Setup" are working names.
+- **Display names (settled).** See decision 6.
 - **Equipment settings in the Planetarium.** `EquipmentConfigPanel` lives in the Planetarium today.
-  It may belong in Observatory Setup.
-- **Old mode names.** Saved layouts and local storage hold the mode names "Observation Manager" and
-  "Observatory Manager". Phases 3 and 4 map the old names to the new displays so a saved layout
-  still opens.
+  It may belong in Observatory Manager.
+- **Old mode names.** Saved layouts and local storage hold the mode name "Observation Manager",
+  which phase 4 maps to Observation Planner so a saved layout still opens. "Observatory Manager"
+  keeps its name.
 - **A phone companion.** A future Android companion app is planned. This plan does not build for it,
   except that the current-target event is a backend event any client can receive.

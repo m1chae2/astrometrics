@@ -14,6 +14,7 @@ The plan covers:
 - one shared unit for losses: efficiency,
 - the metrics wanted at each checkpoint,
 - what happens to today's verdicts and gates,
+- the impact of the work and how its risk is kept low,
 - the order of work.
 
 The findings come from a read-only survey of the repository on 2026-10-17. The code is the source
@@ -21,7 +22,8 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 
 ## Status
 
-Status on 2026-10-17: design agreed, nothing built.
+Status on 2026-10-17: design and order of work agreed, nothing built. Phase 0 is next. Tracked in
+issue #93.
 
 ## 1. Findings from the survey
 
@@ -449,17 +451,19 @@ temperature, altitude and the Moon.
 
 ## 6. What happens to today's verdicts and gates
 
-Each existing verdict field and gate is sorted into one of four groups during phase 4.
+Each existing verdict field and gate is sorted into one of four groups during phase 6, one
+pipeline at a time (section 8).
 
 | Group | Rule | Examples |
 | :--- | :--- | :--- |
 | Processing decision | Stays; recorded as a measurement plus `action_taken` | `frame_quarantine`, `gain_homogeneity`, stacking timeout |
 | Self-check | Stays in `astrometricslib` as a `QualityJudgment` | `plate_solve`, `source_detection`, `spectra_extracted`, `search_frames`, `capture_timestamps` |
-| Verdict field | Becomes a measurement with an uncertainty | `is_poor_match`, `is_ambiguous`, `is_class_ambiguous`, `is_trustworthy`, `is_low_confidence`, `catalog_agrees`, `saturation_flagged`, `fwhm_degraded`, periodogram `verdict` |
+| Verdict field | Becomes a measurement with an uncertainty | `is_poor_match`, `is_ambiguous`, `is_class_ambiguous`, `is_trustworthy`, `is_low_confidence`, `catalog_agrees`, `saturation_flagged`, `fwhm_degraded`, the periodogram and transit `verdict`, the spectral feature `verdict` (detected, possible, inconclusive) |
 | Fitness-for-use gate | Moves to a `wayfindinglib` rule with a `QualityLimit` | `stack_sharpness`, `scatter_population`, `variability_discrimination`, `catalog_agreement`, `gaia_xp_agreement` |
 
-The examples are a first sort, not a final one. Each gate is checked against the self-check
-question in decision 2 before it moves.
+The examples are a first sort, not a final one. Before any code changes for a pipeline, a written
+inventory lists each of its verdict fields and gates with its group, every reader of it and its
+replacement. The user approves the inventory, so each move is a deliberate choice.
 
 Two existing structures need care:
 
@@ -470,41 +474,110 @@ Two existing structures need care:
   output. The conformance test splits in two: one for `astrometricslib` self-checks, one for
   `wayfindinglib` rules. The `failed` and `not_checked` test requirement keeps applying to both.
 
-## 7. Order of work
+## 7. Impact and risk
+
+The work is three kinds of change, and only one carries real risk. Agreed with the user on
+2026-10-17: take the clean split (decision 1) as a conscious choice, do the mechanical refactor
+first, and carry out the behavior-changing refactor last, one pipeline at a time, shadowed and
+approved from an inventory.
+
+| Kind | Phases | What it touches (survey of 2026-10-17) | Risk |
+| :--- | :--- | :--- | :--- |
+| Mechanical refactor: moves and renames, no logic change | 0 | About 80 modules and 55 test files import the ten quality model files; 42 files name `run_gates`; 27 files name `QualityDiagnostics`, including READMEs, the backend's API doc generator, the golden suite and `test_public_surface.py` | Low per change but wide. Merge conflicts with open branches are the main hazard. |
+| Enhancement: new code next to the old | 1, 2, 3, 4, 5 | New models, tables and API; the ingest path (phase 2); each pipeline's quality file; `wayfindinglib` session analysis and planning advisory | Low to medium. Today's outputs keep working throughout. |
+| Behavior-changing refactor | 6, 7 | Verdict fields and fitness gates leave `astrometricslib`. Readers outside it are listed below. | High. It changes what users see. |
+
+Readers of today's verdicts outside `astrometricslib`:
+
+- **The desktop app.** `ui/common/utils/starDisplayFormat.ts` and its tests use `isPoorMatch`,
+  `isAmbiguous`, `isClassAmbiguous` and the periodogram and transit `verdict`.
+  `StellarAnalysisDetails.tsx`, `SpectrumViewer.tsx` (spectral feature verdicts) and
+  `PhotometryViewer.tsx` also read them. The generated `ui/common/types/backendTypes.ts` follows
+  the models, so removing a field changes the UI's types.
+- **The planning advisory.** `wayfindinglib/tasks/planning_tasks/quality_advisory_tasks.py` builds
+  the planner's quality advisory from `flagged` and `flag_reasons` on all six summaries.
+- **Validation scripts.** `measure_variability_cutoff.py`, `validate_photometry_injection.py`,
+  `run_empirical_validation.py` and `spectral_registration_quality_analysis.py` read the flags,
+  and validation register entries cite the limits that would move.
+- **The gate machinery.** `test_gate_conformance.py`, the review-guide generator,
+  `Pipeline_Audit_Report.md`, `test_pipeline_doc_parity.py` and the falsification audit work assume
+  every gate is a pipeline output.
+
+Safeguards:
+
+1. **Mechanical refactor alone, first.** Phase 0 is one pull request with moves, renames and import
+   edits only, so `git diff -M` shows nothing else. It merges when few other branches are open, so
+   new code is written in its final place and never moved twice.
+2. **Add before removing.** New measurements are emitted next to today's summaries (phase 3).
+   Readers switch one at a time (phase 4). Nothing is deleted before phase 7.
+3. **Fill the history from existing records.** A one-time script copies the values already stored
+   in `targets.data_json` into the measurement table, so readers can switch without restacking.
+   The raw frames live on remote storage, so a restack is slow. The script's row counts are
+   checked against the JSON.
+4. **Shadow mode for phase 6.** For each pipeline, the new `wayfindinglib` rules run on every
+   target in the live database next to today's verdicts, and the differences are compared. The
+   desktop app switches only once each difference is explained as a bug fixed or a change the
+   user approved.
+5. **A written inventory per pipeline** (section 6), approved by the user before phase 6 code for
+   that pipeline.
+6. **One pull request per phase.** Issue #93 becomes an epic with one sub-issue per phase, each
+   with its own Analysis and Plan.
+7. **Data safety.** The new tables only add; existing table schemas do not change before phase 7.
+   `astrometrics.db` is backed up before the first write and before the history fill.
+8. **Numbers stay fixed through the refactors.** The M 13 golden suite and a real-data spot check
+   (one stack, one photometry run, one spectrum) give identical science numbers after phase 0 and
+   after each pipeline's phase 6.
+
+## 8. Order of work
 
 Each phase ends with its tests passing, `ruff` clean, the import-linter contracts unchanged, and
-the affected READMEs updated.
+the affected READMEs updated. Each phase is one pull request.
 
+0. **Consolidate (mechanical refactor).** Move the quality models into `models/quality/`, move
+   `QualityDiagnostics` to `api/quality.py`, and rename each `run_gates.py` to
+   `record_quality.py`. Update imports, the review-guide generator, the generated guides, the
+   READMEs and `test_public_surface.py`. No logic changes. Done when the full test suite,
+   import-linter, the golden suite and the documentation tests pass, and the diff shows only moves,
+   renames and import edits.
 1. **Foundations.** Add `QualityMeasurement`, `QualitySubject`, `QualityLimit`,
-   `QualityJudgment`, `MetricSpec` and the registry with a handful of metrics. Add the `quality_measurements` and `quality_judgments` tables, the
-   `quality.query` call and the conformance test. Done when a test writes and reads back a
-   measurement and the conformance test runs on the registry.
+   `QualityJudgment`, `MetricSpec`, the `metrics.py` declaration pattern and the assembled
+   registry with a handful of metrics. Add the `quality_measurements` and `quality_judgments`
+   tables through `drivers/quality_store.py`, the `quality.query` call and the conformance test.
+   Done when a test writes and reads back a measurement and the conformance test runs on the
+   registry.
 2. **Frame measurement step.** Measure each light frame once on ingest and write frame-level
    measurements, including what `FrameRecord.measurements` holds today and the quarantine
    measurements of every frame. Add frame efficiency and the night's loss account. Done when a
    real night's frames have measurements and the loss account adds up to the captured time.
-3. **Existing pipeline metrics in the new shape.** Each pipeline's `validate_output` emits
-   measurements next to its current summary. Fix the dropped asteroid `residual_*` counts. Done
-   when every metric in the five summaries has a registered name and appears in the table after a
-   run.
-4. **Verdicts and gates.** Sort them as in section 6. Turn verdict fields into measurements, move
-   fitness-for-use gates to `wayfindinglib` rules, and keep self-checks. Done when no
-   `astrometricslib` model field states a verdict about a result.
-5. **Recommendations from measurements.** Change `Recommendation.evidence` to a typed list of
+3. **Existing pipeline metrics in the new shape.** Each pipeline's `record_quality.py` emits
+   measurements next to its current summary. Fix the dropped asteroid `residual_*` counts. Run the
+   history fill (safeguard 3). Done when every metric in the five summaries has a registered name,
+   appears in the table after a run, and the filled history matches the JSON.
+4. **Recommendations from measurements.** Change `Recommendation.evidence` to a typed list of
    measurement and judgment references. Rules declare the metrics they require. Rank advice by
-   efficiency lost, and show the night's loss account. Done when the existing guiding and capture
-   recommendations read through `quality.query`.
-6. **New metrics.** First key gain and read noise by camera and setting, and add the calibration
+   efficiency lost, and show the night's loss account. Switch readers one at a time, starting with
+   `quality_advisory_tasks.py`. Done when the guiding and capture recommendations and the planning
+   advisory read through `quality.query`.
+5. **New metrics.** First key gain and read noise by camera and setting, and add the calibration
    measurement that computes them from flat and bias pairs (decision 7). Then build the "new" rows
-   of section 5 in order of value: sky noise over read noise, noise over √N from subset
-   stacks, rotation and elongation angle, dithering advice, target clipping through the WCS,
+   of section 5 in order of value: sky noise over read noise, noise over √N from subset stacks,
+   rotation and elongation angle, dithering advice, target clipping through the WCS,
    center-to-corner width, injection tests. Each tuned limit gets a validation register entry.
-7. **Retire duplicates.** Once every reader uses `quality.query`, remove the values that the JSON
-   summaries repeat, and drop `flagged` and `flag_reasons`.
+6. **Verdicts and gates, one pipeline at a time.** Photometry goes first, because its labels and
+   its `variability_discrimination` gate already exist (decision 8). For each pipeline: write and
+   approve the inventory (section 6), build the `wayfindinglib` rules, run them in shadow mode
+   (safeguard 4), switch the desktop app and scripts, then turn that pipeline's verdict fields into
+   measurements and keep its self-checks. Done for a pipeline when its shadow differences are
+   explained and no field of its models states a verdict about a result.
+7. **Retire duplicates.** Only once no reader of a field is left: remove the values that the JSON
+   summaries repeat, and drop `flagged` and `flag_reasons`. Done when a search of the libraries,
+   the backend, the desktop app, the MCP servers and the scripts finds no reader of a removed
+   field.
 
-Phases 2 and 3 can run at the same time once phase 1 is done.
+Phases 2 and 3 can run at the same time once phase 1 is done. Phase 5 can start any time after
+phase 1.
 
-## 8. Documentation
+## 9. Documentation
 
 - `Astrometrics_Library_Architecture.md` gains a section on quality measurement: the three
   records, efficiency and the checkpoints, with no code names.
@@ -514,7 +587,7 @@ Phases 2 and 3 can run at the same time once phase 1 is done.
 - `astrometricslib/models/README.md`, `pipelines/README.md` and the
   `wayfindinglib/session_analysis` READMEs change with the code.
 
-## 9. Open questions and risks
+## 10. Open questions and risks
 
 - **Where metrics are declared (settled).** See decision 6 and section 3.4.
 - **Night boundaries (settled).** `observing_night_id` uses the processing computer's local time.

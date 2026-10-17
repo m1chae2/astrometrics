@@ -384,7 +384,8 @@ status_check() {
   if [ -f "$ELECTRON_PID_FILE" ] && kill -0 "$(cat "$ELECTRON_PID_FILE" 2>/dev/null)" 2>/dev/null; then
     epid="$(cat "$ELECTRON_PID_FILE")"
   else
-    epid=$(pgrep -f "electron .*astrometrics|electron \." | head -n 1 || true)
+    # Match Electron's own program only, for the same reason as Vite below.
+    epid=$(pgrep -f "node_modules/electron/dist/electron --remote-debugging-port" | head -n 1 || true)
   fi
 
   if [ -n "$epid" ] && kill -0 "$epid" 2>/dev/null; then

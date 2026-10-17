@@ -38,7 +38,7 @@ _DEFAULT_MAX_MATCH_DISTANCE_PX = 15.0
 # Default search window, in pixels, for the translation-only offset
 # vote. Generous relative to typical guiding RMS (sub-pixel to a few
 # pixels) to also absorb a modest, consistent mechanical shift from
-# swapping the grism accessory in/out between sessions, while still
+# swapping the grating accessory in/out between sessions, while still
 # far more constrained than a blind full-field search.
 _DEFAULT_MAX_TRANSLATION_OFFSET_PX = 300.0
 

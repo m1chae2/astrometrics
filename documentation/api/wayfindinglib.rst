@@ -24,7 +24,7 @@ three subsystems:
    config = get_configuration()
    wayfinder = Wayfinder(config)
 
-Compositional Sub-APIs
+Compositional sub-APIs
 ----------------------
 
 The :class:`~wayfindinglib.Wayfinder` instance exposes three peer subsystems:
@@ -39,7 +39,7 @@ The :class:`~wayfindinglib.Wayfinder` instance exposes three peer subsystems:
   Automated night queue execution, telescope slewing, capture orchestration,
   divergence tracking, and session telemetry recording.
 
-Top-Level Facade and Models
+Top-level facade and models
 ---------------------------
 
 .. automodapi:: wayfindinglib
@@ -47,7 +47,7 @@ Top-Level Facade and Models
    :skip: IndiInterface
    :skip: SimulatorIndiInterface
 
-Observatory Control API
+Observatory control API
 -----------------------
 
 .. automodapi:: wayfindinglib.api.control.control
@@ -75,13 +75,13 @@ Observatory Control API
 .. automodapi:: wayfindinglib.api.control.equipment
    :no-inheritance-diagram:
 
-Observation Planning API
+Observation planning API
 ------------------------
 
 .. automodapi:: wayfindinglib.api.planning
    :no-inheritance-diagram:
 
-Observation Execution API
+Observation execution API
 -------------------------
 
 .. automodapi:: wayfindinglib.api.execution

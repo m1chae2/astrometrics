@@ -63,7 +63,7 @@ _DATASET_TYPES: dict[str, tuple[str, type]] = {
 
 `calibration_stats` uses `camera_id` as its key, because one record
 holds the calibration inventory of one camera
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Section 3.2).
 """
 
 _ID_FIELD_FOR: dict[str, str] = {"calibration_stats": "camera_id"}

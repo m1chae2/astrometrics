@@ -1,0 +1,10 @@
+# Documentation_Conventions.md §2: only Measured, Partly measured, Design estimate.
+extends: existence
+message: "'%s' is not a status label. Use measured, partly measured or design estimate."
+level: error
+ignorecase: true
+tokens:
+  - designed value
+  - design value
+  - designed limit
+  - designed, not measured

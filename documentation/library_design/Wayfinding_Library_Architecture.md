@@ -1,40 +1,48 @@
-# Wayfinding Library: Architecture and Design
+# Wayfinding library architecture
 
-*Version 2.14 · 2026-10-14 · Status: current*
+*Version 3.1 · 2026-10-15 · Status: current*
 
-## Overview
+## Abstract
 
-This document outlines the architecture for the observatory-side half of the Astrometrics software suite, whose purpose is to operate a single-observer observatory unattended. It is organized around three functions: **Observatory Control**, the direct operation of telescope, camera, enclosure, and mount hardware together with the safety monitoring that protects them; **Observation Planning**, the construction of reusable imaging requests and their arrangement into a feasible night; and **Observation Execution**, the function that carries a planned night out, recording what happened alongside what was intended.
+Amateur and small observatories run their nights with software that mixes three jobs: choosing what to image, operating the equipment, and carrying the plan out. This paper describes the architecture of the Wayfinding library, which runs a single-observer observatory. The library splits the work into three functions over one shared foundation. Observation planning builds reusable imaging requests and places them in a night. Observatory control operates the telescope, camera, enclosure and mount, and protects them. Observation execution carries a planned night out and records what happened next to what was intended. Planning and control never depend on each other, and execution is optional. A per-capability delegation model lets this system take over each job from the third-party software now in charge, one job at a time, on recorded evidence. This paper explains the theory behind each part. It names no code and states no tuned values; the companion implementation paper does both.
+
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Introduction
 
-An observing night involves three separable tasks: deciding what to image and in what order, operating the equipment, and executing the plan while adapting to changing conditions. This architecture separates these concerns so each can be built, used, and verified independently.
+**Statement of need.** An observing night has three separable jobs: deciding what to image and in what order, operating the equipment, and carrying out the plan while conditions change. Today one program, such as KStars with its Ekos module [1], usually does all three, and a separate program such as PHD2 [2] guides the telescope. These programs assume an operator at the telescope. An observatory that runs on its own must also protect itself when no plan is running, say why a target did not fit in the night, and show on real nights that a replacement for the current software acts the same way before it is trusted to act alone.
 
-Observation Planning and Observatory Control are peer functions: an operator can plan a night's targets without ever commanding hardware, and the observatory can protect itself with no plan in existence. Observation Execution sits above both to drive the automation.
+**Approach.** This architecture separates the three jobs so each can be built, used and checked alone. Planning and control are peers: an operator can plan a night without commanding any hardware, and the observatory can protect itself with no plan in existence. Execution sits above both.
 
-This architecture adheres to a strict dual-interface paradigm. The programmatic interfaces that drive these functions are identical to those invoked by any graphical client. Observers can interactively direct the observatory via a user interface, or directly encode those operational maneuvers into scripts for complete automation.
+**Scope.** This paper explains what each part does and why, and the idea behind each setting, not its value. The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the code and lists the settings. The library has no validation register yet, so this paper makes no claim that a setting has been measured.
 
-Section 2 presents the architecture and module mappings to the Sphinx API reference. For a direct map of these theoretical algorithms to their internal Python implementations, see the [Wayfinding Library Implementation](./Wayfinding_Library_Implementation.md). Section 3 discusses the core design assumptions.
+### 1.1 Related work
 
-## 2. Architecture and Design
+**Observatory control software.** KStars with Ekos [1] is an open-source suite that plans, aligns, focuses, guides and captures. This library is designed to replace it in stages. PHD2 [2] is an autoguiding program. INDI [3] is a protocol that lets one program command many kinds of astronomy hardware through drivers. ASCOM Alpaca [4] defines one network interface for each type of device. The library speaks INDI today and follows the Alpaca shape (Section 6.2).
 
-### 2.1 System Architecture
+**Facility control systems.** The Vera C. Rubin Observatory control system [5] gives every component one lifecycle state, separates a scheduler from a queue of work, and treats safety as a layer around operation. Its scheduler [6] scores candidates and picks greedily. This library adopts the state vocabulary and the layered view of safety, and diverges on scale, scope and scheduling timing (Section 2.2).
 
-The architecture is organized as three functions over one shared foundation, illustrated in Figure 1.
+**What the library adds.** Four things are new: a delegation model that moves each job to this system on recorded evidence; a record of every disagreement between the two systems; a closed set of named reasons that a target could not be placed; and limits for judging a night that follow the equipment in use.
+
+## 2. System architecture
+
+### 2.1 Three functions and one foundation
+
+The library is organized as three functions over one foundation, shown in Figure 1.
 
 ```mermaid
 flowchart TB
-    subgraph EXEC["Observation Execution (optional)"]
+    subgraph EXEC["Observation execution (optional)"]
         RUN["Queue advancement & fault recovery"]
         REC["Session recording & divergence recording"]
     end
-    subgraph CTRL["Observatory Control"]
+    subgraph CTRL["Observatory control"]
         HW["Hardware operations & equipment activation"]
         CORR["Pointing, guiding & focus correction"]
         SAFE["Safety monitoring, enclosure & safe state"]
         DEV["Device summary state"]
     end
-    subgraph PLAN["Observation Planning"]
+    subgraph PLAN["Observation planning"]
         SCHED["Scheduling & quality advisory"]
     end
     subgraph FOUND["Foundation"]
@@ -49,66 +57,40 @@ flowchart TB
     PLAN --> FOUND
 ```
 
-**Figure 1.** The three-function architecture. Control and Planning are peers, sharing the Foundation but never importing each other. Execution depends on both; nothing depends on Execution. Safety sits in Control rather than Execution because it must operate whether or not a session is running.
+**Figure 1.** The three-function architecture. Safety sits in control, not execution, because it must work whether or not a session is running.
 
-Five rules govern the architecture and are treated as Design Invariants (§2.2–2.5 restate the ones local to each function):
+Five rules govern the architecture.
 
-1. **Foundation Independence:** domain models and astronomy calculation depend on nothing above themselves.
-2. **Control/Planning Peerage:** Observatory Control and Observation Planning never depend on one another. Either may be exercised in the complete absence of the other.
-3. **Execution Is Optional:** Observation Execution may depend on Control, Planning, and the Foundation; nothing outside Execution depends on it. A system built without Execution is a complete, usable planning-and-control system, not a partial one.
-4. **One Litmus Test Per Boundary:** a capability belongs to the science-side image processing system (see `Astrometrics_Library_Architecture.md`) if it could be exercised by a scientist with archived data and no telescope; otherwise it belongs here. Applied consistently, this keeps the science system usable without observatory hardware and keeps this system free of astrophysical analysis it does not need.
-5. **Delegation Is A Per-Capability State, Not An Architecture Boundary:** which system performs a given hardware-facing capability is configuration read at runtime (§2.1.3), not a structural property of the code. No function may be written such that changing a capability's delegation state requires changing that function's structure.
+1. **Foundation independence.** Domain models and astronomy calculation depend on nothing above themselves.
+2. **Control and planning peerage.** Control and planning never depend on one another. Either can be used with the other absent.
+3. **Execution is optional.** Execution may depend on control, planning and the foundation. Nothing else depends on it, so a system built without it is a complete planning-and-control system.
+4. **One litmus test per boundary.** A capability belongs to the science-side image processing library (see the [Astrometrics library architecture](./Astrometrics_Library_Architecture.md)) if a scientist could use it with archived data and no telescope. Otherwise it belongs here.
+5. **Delegation is a per-capability state, not an architecture boundary.** Which system performs a hardware-facing capability is a setting read at run time (Section 2.3).
 
-#### 2.1.1 Precedent and Deliberate Divergence
+<!-- impl: wayfindinglib.Wayfinder -->
+<!-- impl: wayfindinglib.api.control.control.ObservatoryControl -->
+<!-- impl: wayfindinglib.api.planning.ObservationPlanning -->
+<!-- impl: wayfindinglib.api.execution.ObservationExecution -->
 
-This decomposition draws precedent from the Vera C. Rubin Observatory's control system, which separates several concerns this architecture also separates, and which are easily conflated.
+### 2.2 Precedent and deliberate divergence
 
-The first is **component lifecycle**. Rubin represents each piece of hardware as an independently commandable component running one standardized summary-state machine — offline, standby, disabled, enabled, fault — and publishing that state uniformly regardless of what is underneath, with components communicating as peers over a shared bus rather than through a fixed hierarchy [1]. This architecture adopts that concept directly as Device Summary State (§2.5.2), using the same five states, so that an operator or an executing session can ask any device the same question and get an answer in the same vocabulary — including an explicit fault state that execution must consult before advancing and that unattended recovery acts on.
+The decomposition follows the Rubin control system, which separates three concerns that are easily confused [5].
 
-The second is **work-item lifecycle**. Rubin's nightly operation separates a Scheduler, which decides what to observe, from a ScriptQueue, which sequences the resulting work against the hardware layer; queue entries carry their own progression, distinct from the summary state of the components executing them [1]. This architecture's Planning/Execution split has the same shape, and its queue-entry status progression (§2.4) is the analogue of the ScriptQueue entry's, not of the component summary state.
+- **Component lifecycle.** Rubin runs every component through one summary-state machine with five states. This architecture adopts them (Section 6.3), so any device answers the same question in the same words.
+- **Work-item lifecycle.** Rubin separates a scheduler, which decides what to observe, from a script queue, which runs the work. A queue entry has its own progression, distinct from component state. Planning and execution here have the same shape (Section 5.3).
+- **Safety as a layer, not a step.** Rubin treats monitoring and interlocks as constraints on operation from outside it. Here, safety lives in control, works with or without a session, and is exempt from the shadow requirement (Section 2.3).
 
-The third is **safety as a layer, not a step**. Rubin treats environmental monitoring and interlocking as concerns that constrain operation from outside it, rather than as stages within the observing sequence [1]. This architecture does the same by placing safety in Observatory Control (§2.5.4), where it functions with or without a session, and by exempting it from the delegation model's shadow requirement (§2.1.2).
+Three divergences are deliberate. Rubin splits its hardware into many components, each owned by its own team. Control here is one function that reports a summary state for each device. Rubin's control system includes the scheduler and script queue. Control here excludes both, so it works with no plan in existence. Rubin re-scores candidates continuously during the night. This architecture resolves a queue before the night (Section 4.2).
 
-Three deliberate divergences are worth stating, since each is a design choice rather than an omission:
+### 2.3 Capability delegation
 
-* **Granularity.** Rubin decomposes hardware into many independently owned components, appropriate to a facility with separate engineering teams per subsystem. A single-observer setup has no comparable organizational need, so Observatory Control here is one function covering the whole imaging train and enclosure, exposing per-device summary state without a component per device.
-* **Scope of the term "control".** Rubin's Observatory Control System encompasses the Scheduler and the ScriptQueue in addition to device commanding. This architecture's Observatory Control function is narrower: it excludes both, which live in Observation Planning and Observation Execution respectively. The narrower scope is what makes Control usable with no plan in existence (Design Invariant 2), and readers familiar with Rubin's usage should not carry the wider meaning across.
-* **Scheduling posture.** §2.3.2 treats this in full; in short, Rubin re-scores candidates continuously during the night, while this architecture resolves a queue before the night and advances it statically.
+Every hardware-facing job this system is meant to perform is performed today by the current third-party software, called the *incumbent*. Each job gets a *delegation state* with one of three values.
 
-A full terminology correspondence is given in Appendix D.
+- **Delegated.** The incumbent performs the capability. This system only reads what the incumbent publishes.
+- **Shadowed.** The incumbent still performs the capability and stays the only source of hardware commands. This system computes what it would have done and records every disagreement (Section 5.4). Nothing it computes reaches hardware.
+- **Authoritative.** This system performs the capability and the incumbent is disengaged from it.
 
-#### 2.1.2 Capability Delegation
-
-Every hardware-facing capability this system will ultimately perform is performed today by the incumbent third-party software. Rather than treat that as a fixed boundary or as a single future cutover, the architecture models it as a **delegation state** carried independently by each capability, taking one of three values:
-
-* **Delegated** — the incumbent performs the capability; this system neither computes nor commands it, and observes only what the incumbent published.
-* **Shadowed** — the incumbent still performs the capability and remains the sole source of hardware commands, while this system independently computes what it would have done and records every divergence between the two (§2.4.4). Nothing this system computes reaches hardware.
-* **Authoritative** — this system performs the capability, and the incumbent is disengaged from it.
-
-Six capabilities carry a delegation state, corresponding one-to-one with the functional modules of the software being replaced: mount control, plate-solve alignment, autoguiding, autofocus, capture orchestration, and observatory safety. Because each advances independently, the observatory is fully operational at every intermediate configuration, and a capability that fails to earn promotion can be left delegated indefinitely without blocking the others.
-
-Three invariants govern how a capability may move between states:
-
-* **Computed Corrections Pass Through Shadow:** any capability that computes a *correction* — a pointing adjustment, a guiding pulse, a focus position — may reach the authoritative state only by way of the shadowed state, and only on recorded evidence from real nights. Capabilities that merely actuate an explicit operator command, such as commanding a slew to stated coordinates, have no independently computed counterpart to shadow and are exempt.
-* **Safety Is Never Shadowed:** observatory safety may occupy only the delegated or authoritative state. A shadowed safety system — one that computes that it would close the enclosure while the enclosure stays open — is not a validation step but a system that recognizes a hazard and declines to act on it. Safety is therefore promoted on component-level evidence (that each protective action works when commanded) rather than on divergence evidence, and it must be authoritative before unattended operation is permitted at all.
-* **Single Command Authority:** for any one device, at most one system holds actuation authority at a time. A capability may occupy the authoritative state only while the incumbent is disengaged from that device. Shadowed is safe precisely because it is defined to issue nothing.
-
-#### 2.1.3 Delegation Phase Progression
-
-The delegation states admit many combinations; Table 1 names the six this architecture targets, in order. Each is a working observatory configuration, not a migration waypoint, and each has a promotion gate stated in the companion implementation paper's verification plan. At Phase 5 no capability remains delegated, which is the concrete meaning of replacing the incumbent: it is uninstalled rather than merely idle.
-
-**Table 1.** Targeted delegation phase progression. **D** delegated · **S** shadowed · **A** authoritative.
-
-| Phase | Mount | Align | Guide | Focus | Capture | Safety | What this phase establishes |
-|---|---|---|---|---|---|---|---|
-| **0** Observed Baseline | D | D | D | D | D | D | The incumbent runs the night; this system records telemetry and plans nights without commanding anything. |
-| **1** Direct Control | **A** | D | D | D | D | D | The mount is commanded through this system's own control path, under its own configured pointing envelope, with device summary state reported. |
-| **2** Shadowed Correction | A | **S** | **S** | **S** | D | D | This system's alignment, guiding, and focus algorithms compute corrections on every real night and are measured against the incumbent's, without touching hardware. |
-| **3** Assumed Correction | A | **A** | **A** | **A** | D | D | All three corrections run on this system's algorithms; the incumbent still sequences the night. |
-| **4** Full Authority | A | A | A | A | **A** | D | Planned sessions are executed end to end by this system, including meridian flips and camera thermal management. The incumbent no longer operates the observatory. |
-| **5** Unattended | A | A | A | A | A | **A** | This system protects the observatory itself: environmental monitoring, enclosure control, fault recovery, and safe-state shutdown. The incumbent is removed. |
-
-Figure 2 shows the progression each capability follows independently within that table.
+Six capabilities carry a state, matching the modules of the software being replaced: mount control, plate-solve alignment (finding where an image points by matching its stars to a catalog), autoguiding, autofocus, capture orchestration and observatory safety. Each advances alone, so the observatory works at every intermediate setting. Figure 2 shows the allowed moves.
 
 ```mermaid
 stateDiagram-v2
@@ -121,614 +103,726 @@ stateDiagram-v2
     Shadowed --> Delegated: abandon comparison
 ```
 
-**Figure 2.** Per-capability delegation state progression. Demotion paths exist deliberately: a capability that regresses returns to a state that issues no hardware commands, without requiring a structural change. Safety has no shadow state and so takes the direct edge, for the reason given in §2.1.2.
+**Figure 2.** Delegation state moves for one capability. Safety has no shadow state, so it takes the direct edge.
 
-The ordering across capabilities is not arbitrary. Alignment, guiding, and focus must be authoritative before capture orchestration may leave delegation, because a capture sequence this system runs would depend on corrections it also computes; promoting the dependent capability first would leave a failure with several candidate causes and no way to separate them. Safety comes last not because it matters least but because it is the only capability whose promotion is not validated by comparison: until Phase 5 the operator is present precisely because validation is in progress, and the incumbent retains protective duty during that period.
+Four rules govern how a capability moves.
 
-#### 2.1.4 Domain State Specification
+- **Computed corrections pass through shadow.** A capability that computes a *correction* (a pointing adjustment, a guiding pulse or a focus position) may become authoritative only from the shadowed state, on recorded evidence from real nights. A capability that only carries out an explicit operator command, such as a slew to stated coordinates, has nothing to compare and is exempt.
+- **Safety is never shadowed.** Safety may be only delegated or authoritative. A shadowed safety system would compute that it should close the enclosure while the enclosure stays open: it would see a hazard and do nothing. Safety is promoted on component-level evidence that each protective action works when commanded.
+- **Capture waits for the corrections.** Capture may leave the delegated state only when alignment, guiding and focus are all authoritative. Otherwise a failure would have several possible causes and no way to separate them.
+- **Calibration comes first.** Autoguiding needs a guider calibration, and autofocus needs a focus model, or there is no mapping from a measurement to a command.
 
-Table 2 categorizes the architecture's state by which function owns it and by persistence lifecycle.
+A fifth rule, *single command authority*, applies to every device: at most one system holds actuation authority at a time. The shadowed state is safe because it is defined to issue nothing.
 
-**Table 2.** Formal state specification across the three functions.
+The policy checks these rules when a state changes, comparing the prior state with the requested one. Every hardware command also refuses to run unless its capability is authoritative. Reads need no such check.
 
-| State Category | Domain Element | Description & Rationale |
-|---|---|---|
-| **Foundation — Equipment & Site State** *(Configured rarely, referenced by both peer functions)* | **Telescope Specification** | A physical imaging rig's optics and tracking envelope: focal geometry, the altitude range and hour-angle bound the mount may safely point across, and the hour angle at which a meridian flip is triggered. |
-| | **Camera Specification** | A physical sensor's imaging geometry and thermal envelope: pixel pitch, dimensions, and the cooling limits within which it may be operated. |
-| | **Equipment Catalog** | The configured set of telescope and camera specifications with which of each is active. |
-| | **Site Profile** | The observing location's coordinates and any horizon obstructions. The authoritative source of observer position for every calculation that needs one. |
-| | **Enclosure Specification** | The observatory's roof or dome: its type, its motion envelope, and the mount positions at which closure is mechanically permitted. |
-| | **Guider Calibration** | The measured relationship between guide-camera pixels and mount motion. Required before autoguiding may be computed rather than observed. |
-| | **Focus Model** | The measured relationship between focuser position, temperature, and filter — the per-filter offsets and thermal coefficient autofocus starts from. |
-| | **Calibration Inventory** | Counts of previously captured calibration frames, grouped by camera, exposure, and filter. Read during package authoring; reconciled after a session completes (§2.4.7). |
-| **Foundation — Policy State** *(Configured deliberately, read by every function)* | **Capability Delegation** | Which system performs one hardware-facing capability, and since when (§2.1.2). |
-| | **Delegation Policy** | The delegation state of every capability together, forming the observatory's current phase (Table 1). |
-| | **Safety Rule Set** | The environmental thresholds and staleness bounds at which conditions are judged unsafe (§2.5.4). |
-| | **Recovery Policy** | How many times, and how far apart, a faulted device may be recovered before the observatory is taken to a safe state. |
-| **Foundation — Computed Limits** *(Derived on demand, never persisted)* | **Performance Envelope** | The limits that separate normal from abnormal for the equipment in use now: acceptable guiding error, unusually low guide-star signal, the fastest credible mount speed, the saturation level, and how wide, how elongated, and how often cancelled the equipment's own nights usually are. Worked out from the equipment and its own measured history each time it is asked for, so a change of equipment changes every limit (§2.5.5b). |
-| **Planning — Reusable Request State** *(Authored independent of any specific night)* | **Observation Package** | A reusable imaging request for one target: which exposures — science and calibration alike — how many, through which filters, any inter-exposure pacing and dithering cadence, and any target-specific visibility floor. |
-| | **Mosaic Panel Set** | A group of sibling observation packages generated from one multi-panel imaging request. |
-| **Planning — Computed Advisory State** *(Derived on demand, never persisted)* | **Target Quality Advisory** | What the science-side archive already knows about a target, surfaced to inform, never dictate, package authoring and scheduling priority. |
-| | **Calibration Advisory** | What the calibration inventory already holds for a requested calibration frame, under the same advisory posture. |
-| **Planning/Execution — Session State** *(Persistent, shared ownership by field)* | **Observation Session** | One observing night's record: the equipment, site, and enclosure it was planned against, an ordered queue with its placement diagnostics (written by Planning), and accumulated telemetry, per-entry outcomes, divergence records, and fault records (written by Execution). |
-| | **Queued Observation Package** | One entry in a session's queue: a self-contained frozen snapshot of a package's request, its scheduled start, its execution status, and what actually occurred. |
-| | **Unplaced Package Diagnostic** | A specific, non-boolean reason a package could not be placed — never a silent omission. |
-| **Evidence State** *(Persistent, append-only, produced during operation and commissioning)* | **Divergence Record** | One measured disagreement between an action this system computed and the action the delegated system took, for one capability at one moment — the evidence a promotion gate is decided on (§2.4.4). |
-| | **Fault Record** | One device fault, the recovery attempts made against it, and whether recovery succeeded or the observatory was taken to a safe state (§2.4.6). |
-| | **Commissioning Run** | The outcome of one commissioning drill: which delegation phase it qualifies, what it observed against each of that gate's criteria, and whether it was aborted. Carries the gate evidence that arises outside any observing night — a device survey, an envelope-rejection check, an enclosure cycling drill — and is therefore unrelated to any session in either direction. |
-| | **Session Record** | What the incumbent software recorded of one session apart from guiding: where the mount pointed, every finished and cancelled exposure, every autofocus run, and the plate-solve and guider state changes. Tied to the equipment the session's own data shows (§2.5.5b). |
-| **Control — Live Observatory State** *(Published continuously)* | **Device Summary State** | One device's lifecycle in the uniform five-state vocabulary (§2.5.2), including an explicit fault state and its detail. |
-| | **Enclosure State** | The roof or dome's position in its own motion state machine, including an unknown state that is treated as unsafe. |
-| | **Safety Assessment** | The current environmental verdict, which rule produced it, and how recently it was refreshed (§2.5.4). |
-| **Execution — Volatile Recording State** *(Active only while a session runs)* | **Telemetry Event Stream** | Live, ordered events from whichever system currently holds guiding authority. |
-| | **Accumulated Sample Buffer** | Bounded in-memory buffer of parsed telemetry awaiting the next persistence checkpoint. |
+<!-- impl: wayfindinglib.models.policy.delegation.ObservatoryCapability -->
+<!-- impl: wayfindinglib.models.policy.delegation.DelegationState -->
+<!-- impl: wayfindinglib.models.policy.delegation.DelegationPolicy -->
+<!-- impl: wayfindinglib.data_access.delegation_policy_reader.validate_delegation_policy -->
+<!-- impl: wayfindinglib.data_access.delegation_policy_reader.promote_capability -->
+<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations._require_authoritative -->
 
-Table 3 summarizes each core operation, the function that owns it, and the delegation state it is defined across.
+### 2.4 Delegation phases
 
-**Table 3.** Core operations and their delegation posture.
+Table 1 names the six phases this architecture targets. Each is a working setting with its own promotion gate (Section 7.2). At Phase 5 the incumbent is uninstalled, not merely idle.
 
-| Operation | Function | Delegation | Purpose |
-|---|---|---|---|
-| Mount slew, park, tracking | Control | Mount control | Command mount motion, validated against the active telescope's pointing envelope |
-| Filter and focuser commands | Control | Not delegated | Direct device operation with no incumbent counterpart in use |
-| Device summary state publication | Control | Not delegated | Report every device's lifecycle in one uniform vocabulary |
-| Equipment activation | Control | Not delegated | Choose which configured telescope and camera are active |
-| Pointing correction computation | Control | Plate-solve alignment | Convert a solved field into a mount pointing correction; the solve itself is science-side (§2.5.3) |
-| Guiding correction computation | Control | Autoguiding | Convert measured guide-star drift into signed mount pulse durations |
-| Focus correction computation | Control | Autofocus | Convert a measured focus curve into a focuser position; the star measurement is science-side (§2.5.3) |
-| Camera thermal management | Control | Capture orchestration | Ramp sensor temperature to target before a session and back to ambient after |
-| Environmental safety assessment | Control | Observatory safety | Judge conditions safe, marginal, unsafe, or unknown against configured rules |
-| Enclosure motion | Control | Observatory safety | Open and close the roof or dome, interlocked against mount position |
-| Safe-state sequencing | Control | Observatory safety | Bring the observatory to a physically safe configuration in a defined order |
-| Remote file retrieval | Control | Not delegated | Transfer captured frames from the telescope host; requires a telescope |
-| Night-window resolution | Planning | Not applicable | Bracket the astronomically usable portion of a calendar night |
-| Package placement | Planning | Not applicable | Assign each package a feasible start, or a specific reason it has none |
-| Mosaic panel generation | Planning | Not applicable | Expand one multi-panel request into a sibling set of packages |
-| Archive-informed advising | Planning | Not applicable | Surface target-quality and calibration advisory information |
-| Queue advancement | Execution | Capture orchestration | Carry a session's queue forward, entry by entry |
-| Meridian flip sequencing | Execution | Capture orchestration | Interrupt, flip, re-acquire, and resume across a meridian crossing |
-| Fault recovery | Execution | Observatory safety | Attempt bounded recovery of a faulted device; escalate to safe state on exhaustion |
-| Divergence recording | Execution | Active while any capability is shadowed | Measure computed intent against delegated behavior and persist the comparison |
-| Guiding telemetry capture | Execution | Consumes whichever system holds guiding authority | Convert published guiding events into structured samples |
-| Environment sampling | Execution | Not delegated | Capture ambient conditions from equipment already in use |
-| Session checkpointing | Execution | Not delegated | Persist session state at bounded intervals |
-| Calibration inventory reconciliation | Execution | Not delegated | Update the inventory from what a completed session captured |
-| Quality-record lookup | Execution/Planning | Not applicable | Join operational context to science-side quality records by identifier |
+**Table 1.** Delegation phases. D means delegated, S shadowed and A authoritative.
 
-### 2.2 Foundation: Equipment, Site, and Session Domain
+| Phase | Mount | Align | Guide | Focus | Capture | Safety | What this phase establishes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 Observed baseline | D | D | D | D | D | D | The incumbent runs the night. This system records and plans. |
+| 1 Direct control | A | D | D | D | D | D | The mount is commanded through this system, inside its configured pointing envelope. |
+| 2 Shadowed correction | A | S | S | S | D | D | The three corrections are computed on every real night and compared with the incumbent's. |
+| 3 Assumed correction | A | A | A | A | D | D | The corrections run on this system's algorithms. The incumbent still sequences the night. |
+| 4 Full authority | A | A | A | A | A | D | This system runs planned sessions end to end, including flips and camera cooling. |
+| 5 Unattended | A | A | A | A | A | A | This system protects the observatory. The incumbent is removed. |
 
-#### 2.2.1 Purpose & Interfaces
+Safety comes last because comparison cannot validate it. Until Phase 5 an operator is present and the incumbent keeps the duty of protection.
 
-* **Inputs:** operator-configured equipment, enclosure, and site specifications; measured guider calibration and focus model; the existing calibration inventory; the delegation, safety, and recovery policies; and the accumulating record of one observing night.
-* **Outputs:** the shared domain vocabulary every function above the Foundation operates on.
+### 2.5 Domain state and operations
 
-#### 2.2.2 Theoretical Rationale
+State is either configured (equipment, site, enclosure, calibrations and policies, which a running session never writes), computed on demand and never stored (the performance envelope and the advisories), or recorded as a session or as append-only evidence (Sections 3.3, 5.4 and 6.8). Commissioning runs are drills whose gate evidence arises outside any night.
 
-A telescope's optics and its mount's safe pointing envelope are configured together, changed together, and meaningless apart. The architecture therefore treats a telescope specification as one flat, infrequently edited record, held with camera specifications in an equipment catalog that records the configured set and which of each is active. Reading that catalog is a Foundation concern, since both peer functions need the active specifications; changing which entry is active is an operator action against hardware and belongs to Observatory Control (§2.5).
+Table 2 lists each core operation, its owner and the delegation state that gates it.
 
-The enclosure is specified alongside the equipment rather than as part of it, because its constraint is geometric and mutual: a roof may only close when the mount is within positions that clear it, and the mount may only leave park when the roof is open. Recording the permitted closure positions as configuration rather than deriving them makes that interlock checkable without commanding anything.
+**Table 2.** Core operations and their delegation gate.
 
-Site obstructions are properties of the location, not of any one piece of equipment, so they attach to the site profile as an azimuth range with its own locally raised visibility floor. The site profile is also the architecture's single authoritative source of observer position: any calculation needing latitude, longitude, or elevation resolves them from the site profile rather than from whatever a connected device reports, so that a planning calculation performed with no hardware present and a safety check performed mid-slew agree by construction.
+| Operation | Function | Gated by |
+| --- | --- | --- |
+| Mount slew, park, tracking | Control | Mount control |
+| Mount sync | Control | Plate-solve alignment |
+| Filter change and capture | Control | Capture orchestration |
+| Focuser move | Control | Autofocus |
+| Guide pulse and exposure | Control | Autoguiding |
+| Enclosure open and close | Control | Observatory safety |
+| Correction computation (pointing, guiding, focus) | Control | None (pure computation) |
+| Camera cooling arithmetic | Control | None (pure computation) |
+| Safe-state sequencing | Control | Steps supplied by the caller |
+| Queue advancement | Execution | Each action's own capability |
+| Meridian flip, fault recovery | Execution | Steps supplied by the caller |
+| Divergence recording | Execution | Active while a capability is shadowed |
 
-Guider calibration and the focus model are Foundation state for the same reason equipment specification is: both describe measured, slowly changing physical relationships rather than per-night observations. Each is the precondition for its capability to be *computed* rather than merely observed — a capability cannot enter the shadowed state for autoguiding or autofocus until its calibration exists, since without it there is no mapping from a measurement to a comparable command.
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.Telescope -->
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentCatalog -->
+<!-- impl: wayfindinglib.models.session.observation_session.ObservationSession -->
+<!-- impl: wayfindinglib.models.policy.commissioning.CommissioningRun -->
 
-The delegation, safety, and recovery policies are Foundation state because every function reads them and none writes them during operation. Placing them there is what allows a capability's state, a weather threshold, or a recovery bound to change without any function's structure changing (Design Invariant 5).
+## 3. Foundation: equipment, site and session domain
 
-Calibration frames already captured are Foundation-level reference data: they describe what exists and are consulted by Planning (§2.3.2). Capturing new ones happens through the ordinary package-authoring path, which means the inventory must be brought back into agreement with reality after a session captures such frames — an explicit Execution responsibility performed once a session completes (§2.4.7), so the inventory remains a deliberately updated configured fact rather than live telemetry.
+### 3.1 Purpose and interfaces
 
-The observation session record is the one domain object with genuinely shared ownership: Planning produces its queue, and Execution, when present, fills in what actually happened. A session produced by Planning alone, with every queue entry unexecuted, is already a complete, reviewable plan for the night — the concrete meaning of Design Invariant 3. Because placement depends on the pointing envelope of a specific rig and the obstructions of a specific site, the session records which telescope, camera, and site profile it was planned against.
+- **Inputs:** operator-configured equipment, enclosure and site specifications; the guider calibration and focus model; the calibration inventory; the delegation, safety and recovery policies; and the accumulating record of one night.
+- **Outputs:** the shared vocabulary that every function above the foundation uses.
 
-#### 2.2.3 Design Invariants
+### 3.2 Theoretical rationale
 
-* **Configuration, Not Telemetry:** equipment, enclosure, site, calibration, and policy records are configured facts, changed rarely and deliberately; they are never written by a running session. Calibration inventory is reconciled after a session completes, never during one.
-* **Single Source Of Observer Position:** every calculation requiring observer latitude, longitude, or elevation resolves them from the site profile, never from a connected device's reported position.
-* **Session Field Ownership:** within one session, the queue and its placement diagnostics are written only by Planning; execution status, per-entry outcomes, divergence records, fault records, and accumulated telemetry are written only by Execution.
-* **Template/Instance Separation:** an observation package is a reusable template; a queued observation package is a frozen instance placed into one specific session. A queue entry must carry every value needed to execute it, so that editing or deleting the template after placement cannot change what that session recorded.
-* **Reproducible Placement Context:** a session records the equipment and site its placement was computed against, so its queue remains interpretable after either changes.
-* **Reference-Only Science Linkage:** a session references the science-side target session it corresponds to by identifier only; it never embeds or subclasses science-side records. The reference is nullable and attached after the fact.
+A telescope's optics and its mount's safe pointing envelope are set and changed together, so they form one telescope specification, held with the camera specifications in an equipment catalog. Reading the catalog is a foundation task because both peer functions need the active entries. Changing the active entry is an operator action on hardware, so it belongs to control.
 
-### 2.3 Observation Planning
+The pixel scale $\rho$, in arcseconds of sky per pixel, follows from the pixel pitch $\ell$ in micrometers and the focal length $F$ in millimeters:
 
-#### 2.3.1 Purpose & Interfaces
+$$
+\rho = 206.265\,\frac{\ell}{F}
+\tag{1}
+$$
 
-* **Inputs:** a set of observation packages to attempt, a site profile, the active telescope specification, a target night, and optionally archive-derived quality advisory information.
-* **Outputs:** an observation session's queue, ordered and time-placed, together with a specific diagnostic for every package that could not be placed.
+The field of view follows from the pixel scale and the sensor size. A guide telescope has its own focal length, which sets its camera's pixel scale.
 
-#### 2.3.2 Theoretical Rationale
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.EquipmentConfiguration -->
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment.GuideScope -->
 
-An observation package's exposure list is not restricted to science exposures: a package requests whichever frames — light, dark, flat, or bias — an operator wants for that target, each with its own pacing, alongside an overall dithering cadence. Treating calibration requests as ordinary entries in the same list matches how an operator actually plans a target's imaging and avoids a second, parallel request mechanism.
+The enclosure is specified beside the equipment because its constraint is mutual: a roof can close only when the mount clears it, and the mount can leave park only when the roof is open. The permitted closing position is configuration, a park position with a tolerance, so the interlock can be checked without commanding anything.
 
-A multi-panel imaging request is not a package field but a package *generator*: an operator supplies a tiling of one region and a shared exposure recipe, and Planning expands the request into one sibling package per panel. Each generated package is placed independently by the same rule below, rather than requiring a separate multi-target placement mode.
+<!-- impl: wayfindinglib.models.equipment_and_site.enclosure.Enclosure -->
 
-Placing several packages into one night is a constrained scheduling problem: each has a visibility window shaped by the site, the active telescope's pointing envelope, and its own visibility floor, and all compete for the same finite night. The architecture resolves this with a single, clearly stated placement rule — place whichever remaining package can begin soonest, breaking ties by priority — evaluated fresh at each placement step rather than solved jointly. This follows the same design posture `Astrometrics_Library_Architecture.md` applies to its own threshold choices: one clearly justified rule, scaled to the input, is preferable to an under-validated tuned system, particularly absent a body of historical scheduling outcomes to validate one against.
+Site obstructions belong to the location. They attach to the site profile as an azimuth range with its own raised altitude floor. The site profile is also the one source of observer position for planning and live-status tools (Section 8 states one exception in control).
 
-The relationship to Rubin's scheduler differs along two axes rather than one. Rubin's scheduler likewise selects greedily, scoring candidates against weighted decision factors and choosing the best at each step rather than solving the full survey jointly [2] — so the *algorithmic shape* is shared. The two differ in **dimensionality**: Rubin's scoring function carries on the order of hundreds of weighted factors refined over years of survey-strategy science, where this architecture uses one criterion. They differ more consequentially in **when the scoring runs**. Rubin re-scores continuously *during* the night, in closed loop against live conditions; this architecture resolves an entire queue *before* the night begins, and Execution advances that queue statically. A target that rises late, a package that overruns, or an hour lost to cloud does not currently cause the remaining entries to be re-placed. This is a deliberate scope choice — a static queue is reviewable in advance, reproducible, and diagnosable — but it is a real limitation rather than an equivalence, and closed-loop re-placement is the natural extension once the delegation progression reaches Phase 5 and this system is the one experiencing those conditions directly.
+<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.SiteProfile -->
+<!-- impl: wayfindinglib.models.equipment_and_site.site_profile.AvoidanceZone -->
+<!-- impl: wayfindinglib.data_access.site_profile_reader.resolve_site_location -->
 
-Because operators may want a package to begin at a specific clock time, placement recognizes two starting dispositions: soonest-available and fixed-time. Fixed-time requests are validated and placed first, as anchors the soonest-available placements route around.
+Guider calibration, the focus model, and the delegation, safety and recovery policies are foundation state: every function reads them and none writes them during operation. Guider calibration and the focus model are the preconditions for their capabilities to be computed instead of merely observed.
 
-A scheduling result that silently drops an unplaceable package is not useful; an operator needs to know *why* it did not fit. The architecture therefore distinguishes each outcome explicitly, as a closed set of named reasons rather than free text, reported on a channel separate from the queue itself. This diverges from Rubin, which encodes infeasibility inside the scoring function by scoring an infeasible candidate at negative infinity [2]; efficient for a scheduler no human reads per-decision, but it discards the distinction between "impossible" and "outscored," which is exactly what an operator planning one night needs.
+<!-- impl: wayfindinglib.models.equipment_and_site.guider_calibration.GuiderCalibration -->
+<!-- impl: wayfindinglib.models.equipment_and_site.focus_model.FocusModel -->
 
-Two kinds of archive-derived information inform, without dictating, authoring and placement. Target quality advisory can reasonably influence which packages an operator prioritizes; calibration advisory can reasonably influence whether a calibration entry belongs in a package at all. The architecture treats both strictly as advice: an operator opts a package in to a bounded priority adjustment from target quality; the adjustment only ever raises priority, in response to a concrete flagged condition or outcome, and never lowers it merely because more data already exists. Calibration advisory never adjusts placement. Because an advisory adjustment changes the resulting order, the amount applied is recorded on the queue entry it affected.
+<!-- impl: wayfindinglib.models.policy.safety.SafetyRuleSet -->
+<!-- impl: wayfindinglib.models.policy.recovery.RecoveryPolicy -->
+<!-- impl: wayfindinglib.models.session.correction_config.CorrectionConfig -->
 
-An automatically generated queue is a convenience rather than the only path to one; an operator may also construct or edit a session's queue directly. Both paths write the same structure.
+<!-- impl: wayfindinglib.models.equipment_and_site.calibration.CalibrationStats -->
 
-#### 2.3.3 Subsystem Architecture
+The observation session is the one object with shared ownership. Planning writes its queue, and execution, when present, fills in what happened. A session written by planning alone is already a complete, reviewable plan. It records which telescope, camera and site it was planned against.
 
-Table 4 outlines the sequential steps of automated package placement.
+### 3.3 Design invariants
 
-**Table 4.** Observation planning execution sequence.
+- **Configuration, not telemetry.** A running session never writes equipment, enclosure, site, calibration or policy records.
+- **One source of site position for planning.** Planning and the live-status tools read the site's position from the site settings, never from a device.
+- **Session field ownership.** Only planning writes the queue and its placement diagnostics. Only execution writes statuses, outcomes, divergence and fault records, and telemetry.
+- **Template and instance separation.** A package is a reusable template. A queue entry is a frozen copy with every value needed to run it, so editing the template cannot change what a session recorded.
+- **Live target resolution.** A package names its target by identifier only. The position is read when the package is placed.
+- **Reference-only science link.** A session refers to its science-side target session by identifier only. The reference may be empty and is attached after the fact.
 
-| Step | Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Night Window Resolution | **In:** Site profile, target date<br>**Out:** Astronomically usable window | Bracket the portion of the night suitable for imaging. |
-| 2 | Disposition Split | **In:** Requested packages<br>**Out:** Fixed-time and soonest-available groups | Separate packages by starting disposition. |
-| 3 | Fixed-Time Placement | **In:** Fixed-time group, pointing envelope, obstructions<br>**Out:** Anchors, or conflict diagnostics | Validate and place each fixed-time request; overlapping requests are each diagnosed. |
-| 4 | Advisory-Informed Priority | **In:** Soonest-available group, opted-in advisories<br>**Out:** Adjusted priorities and the adjustment applied | Apply bounded priority boosts, recording each. |
-| 5 | Greedy Placement | **In:** Soonest-available group, anchors, priorities<br>**Out:** Ordered queue entries | Repeatedly place the soonest-placeable remaining package. |
-| 6 | Infeasibility Diagnosis | **In:** Unplaced packages, full night window<br>**Out:** Per-package diagnostic | Distinguish physically impossible placements from those crowded out by earlier choices. |
-| 7 | Session Assembly | **In:** Placed queue, diagnostics, active equipment, site<br>**Out:** Observation session | Assemble the night's session with its placement context. |
+## 4. Observation planning
 
-#### 2.3.4 Design Invariants
+### 4.1 Purpose and interfaces
 
-* **Single Justified Placement Rule:** placement follows one stated rule, not an unstated or per-case heuristic.
-* **Diagnosable Infeasibility:** every unplaced package carries a specific reason from a closed, named set.
-* **Advisory, Not Authority:** archive-derived information never dictates package contents or placement.
-* **Explicable Ordering:** any advisory adjustment that changed a package's placement is recorded on the resulting queue entry.
-* **Manual Parity:** hand-authored and automatically generated queues share one structure.
-* **Planning Is Hardware-Free:** placement reads equipment and site specifications as data and never contacts a device, so a full night may be planned with nothing connected.
+- **Inputs:** observation packages to attempt, a site profile, the active telescope specification, a target night, and optionally advice from the science-side archive.
+- **Outputs:** an observation session's queue, ordered and placed in time, with a specific diagnostic for every package that could not be placed.
 
-### 2.4 Observation Execution
+### 4.2 Theoretical rationale
 
-#### 2.4.1 Purpose & Interfaces
+A package asks for whichever frames an operator wants for a target: light, dark, flat or bias, each with its own pacing, plus a dithering cadence. Dithering is a small deliberate pointing shift between exposures that spreads fixed sensor defects across the sky. Calibration requests are ordinary entries in the same list.
 
-* **Inputs:** an observation session, the Observatory Control function, the delegation and recovery policies, and — while a session runs — guiding events, device summary state, and the current safety assessment.
-* **Outputs:** a session record advanced entry by entry, with per-entry outcomes, accumulated telemetry, divergence records, and fault records.
+<!-- impl: wayfindinglib.models.planning.observation_package.ObservationPackage -->
+<!-- impl: wayfindinglib.models.planning.observation_package.ExposureRequest -->
 
-#### 2.4.2 Theoretical Rationale
+A multi-panel request is a package *generator*, not a package field. A mosaic is a grid of overlapping panels that cover a region too large for one field of view. Neighboring panels are one field apart, less an overlap. Along right ascension the step is divided by the cosine of the declination, because lines of equal right ascension draw together toward the poles. Each generated package is placed like any other.
 
-Carrying a session out is naturally a queue-advancement problem: entries move through one clear state progression as the night runs. Execution is the one function permitted to depend on the other two (Design Invariant 3), because advancing a queue and driving hardware to do so are inseparable once execution is happening — but that dependency runs one way.
+<!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.calculate_panels -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.mosaic_tasks.create_mosaic -->
 
-Execution computes what each queue entry requires identically regardless of delegation state. What the delegation policy determines is only the *disposition* of each computed action: issued through Observatory Control where the relevant capability is authoritative, and recorded for comparison where it is shadowed. One computation path serves every phase in Table 1, which is what makes the phase progression a configuration change rather than a rewrite, and what makes shadow-phase evidence meaningful — what is measured in the shadowed state is exactly what will run once the capability is promoted.
+Placing several packages in one night is a constrained scheduling problem. Each package has a visibility window shaped by the site's obstructions, the telescope's altitude range and its own altitude floor, and all compete for the same night. The architecture uses one stated rule: place whichever remaining package can start soonest, and break ties by priority. One justified rule is better than an under-validated tuned system when no past scheduling outcomes exist to check one against.
 
-Because a session may run while some capabilities are authoritative and others delegated, Execution reads device summary state before acting: a device in the fault state is a condition to act on, not one to command through.
+Placement checks visibility at sampled instants against the altitude floor, the telescope's upper altitude limit and the site's obstructions. The hour-angle bound and meridian flip are not placement constraints.
 
-**Unattended operation changes what a failure means.** With an operator present, a fault can halt and wait. Running unattended, halting *is* a decision — an unrecovered mount left tracking into its own pier, or an open enclosure under advancing rain, are worse outcomes than a lost night. Execution therefore treats a fault as the start of a bounded recovery attempt (§2.4.6) whose exhaustion escalates to the safe-state sequence Control owns (§2.5.5). The bound is what makes this safe: an unbounded retry is indistinguishable from a hang, and a hang is precisely what unattended operation cannot tolerate.
+<!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.place -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.visibility_tasks.visibility_state_at -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.visibility_tasks.effective_altitude_floor -->
 
-#### 2.4.3 Subsystem Architecture — Queue Advancement
+The Rubin scheduler also selects greedily, but it re-scores candidates continuously against live conditions [6]. This architecture resolves the whole queue before the night, and execution advances it as written. A late-rising target or an hour lost to cloud does not cause re-placement. A fixed queue can be reviewed in advance, repeated and diagnosed, but this is also a real limitation (Section 8).
 
-Table 5 outlines one queue-advancement cycle.
+A package may start soonest or at a fixed clock time. Fixed-time requests are placed first, as anchors the others route around. Two overlapping fixed-time requests are both reported and neither is placed.
 
-**Table 5.** Queue advancement execution sequence.
+A silent drop is not useful, so the operator is told *why* a package did not fit. Each outcome is one of a closed set of named reasons, on a channel separate from the queue: the target never clears the altitude floor; it clears the floor only inside a site obstruction; a clear window exists but is too short; a long enough window existed but earlier placements used it; or a fixed-time request cannot be met. Rubin instead gives an impossible candidate a score of negative infinity [6]. That suits a scheduler whose decisions no person reads one by one, but it loses the difference between "impossible" and "outscored", which an operator planning one night needs.
+
+<!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReasonCode -->
+<!-- impl: wayfindinglib.models.session.observation_session.InfeasibilityReason -->
+
+Archive-derived advice informs authoring and placement without dictating them. An operator may opt a package in to a bounded priority boost drawn from the target quality advisory. The boost only raises priority, for a flagged quality condition or a notable science outcome. It changes the order only when two packages could start together, because priority is the tie-breaker. The amount is recorded on the queue entry. The calibration advisory shows what the inventory already holds and never changes placement.
+
+<!-- impl: wayfindinglib.models.planning.quality_advisory.TargetQualityAdvisory -->
+<!-- impl: wayfindinglib.models.equipment_and_site.calibration.CalibrationAdvisory -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.quality_advisory_tasks.build_target_quality_advisory -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.calibration_advisory_tasks.build_calibration_advisory -->
+
+An operator may also build or edit a queue by hand. Both paths write the same structure. Planning also answers visibility questions that place nothing.
+
+<!-- impl: wayfindinglib.tasks.planning_tasks.visibility_report.build_visibility_report -->
+<!-- impl: wayfindinglib.models.planning.visibility.VisibilityReport -->
+
+### 4.3 Placement sequence
+
+Table 3 lists the steps of automatic package placement.
+
+**Table 3.** Observation planning sequence.
 
 | Step | Phase | Description |
-|---|---|---|
-| 1 | Safety Gate | Confirm the current safety assessment permits observing; an unsafe or stale assessment suspends advancement. |
-| 2 | Readiness Check | Confirm no device required by the entry is in the fault state. |
-| 3 | Entry Selection | Identify the next pending queue entry whose start time has arrived. |
-| 4 | Meridian Check | Determine whether the entry will cross the flip threshold, and plan the interruption if so (§2.4.5). |
-| 5 | Intent Computation | Compute the actions the entry requires — targeting, timing, exposure sequence — independent of delegation state. |
-| 6 | Disposition | For each computed action, consult the delegation policy: issue through Control where authoritative; record for comparison where shadowed. |
-| 7 | Outcome Capture | Record what actually occurred — start and end times as observed, frames captured — alongside what was intended. |
-| 8 | Status Transition | Advance the entry's status to reflect the outcome. |
-| 9 | Checkpoint | Persist session state, bounding data loss to one cycle. |
+| --- | --- | --- |
+| 1 | Night-window resolution | Bracket the usable night by sampling the solar altitude across a day. This is coarse sampling, not an exact rise and set calculation. |
+| 2 | Disposition split | Separate fixed-time from soonest-available packages. |
+| 3 | Fixed-time placement | Check that the target stays visible for the whole span, and place it. Overlapping requests are each diagnosed. |
+| 4 | Advisory-informed priority | Work out each bounded boost and record it. |
+| 5 | Greedy placement | Repeatedly place the package whose earliest free visible start is soonest. |
+| 6 | Infeasibility diagnosis | Tell physically impossible placements from those crowded out by earlier choices. |
+| 7 | Session assembly | Build the session with its placement context. |
 
-#### 2.4.4 Subsystem Architecture — Divergence Recording
+<!-- impl: wayfindinglib.tasks.planning_tasks.night_window.resolve_night_window -->
+<!-- impl: wayfindinglib.tasks.planning_tasks.scheduling.schedule_session -->
 
-Divergence recording is the mechanism the delegation progression's promotion gates are decided on, and is therefore specified as durable, per-capability evidence rather than diagnostic logging.
+### 4.4 Design invariants
 
-Whenever a capability is shadowed, each action this system computes is paired with the corresponding action the delegated system actually took, and the pair is persisted as a divergence record carrying the capability, the moment of comparison, both actions, the signed magnitude of their disagreement in that capability's natural unit, and whether that magnitude fell within the configured tolerance. Records are written whether or not the comparison agreed: a promotion decision needs the rate of agreement, which cannot be computed from disagreements alone.
+- **Diagnosable infeasibility.** Every unplaced package carries a reason from a closed, named set.
+- **Advisory, not authority.** Archive-derived information never dictates package contents or placement. Any boost applied is recorded on the queue entry.
+- **Planning is hardware-free.** Placement reads equipment and site specifications as data and never contacts a device, so a night can be planned with nothing connected.
 
-Three capabilities are compared this way, and the comparison unit differs:
+## 5. Observation execution
 
-* **Plate-solve alignment** — the pointing correction computed from a solved field, against the correction the delegated aligner applied, in arcseconds of resulting pointing error.
-* **Autoguiding** — the signed per-axis pulse computed from measured guide-star drift, against the pulse the delegated guider issued for that same drift measurement.
-* **Autofocus** — the focuser position computed from a measured focus curve, against the position the delegated focuser selected, in focuser steps and in the resulting star-size difference.
+### 5.1 Purpose and interfaces
 
-The comparison is only meaningful when both systems respond to the *same* measurement, so a divergence record identifies the shared input it was computed from rather than pairing by timestamp proximity alone.
+- **Inputs:** an observation session, observatory control, the delegation and recovery policies, and, while a session runs, guiding events, device summary state and the current safety assessment.
+- **Outputs:** a session record advanced one entry at a time, with outcomes, telemetry, divergence records and fault records.
 
-#### 2.4.5 Subsystem Architecture — Meridian Flip Sequencing
+### 5.2 Theoretical rationale
 
-A target crossing the local meridian requires the mount to reorient, which interrupts an exposure sequence mid-package and invalidates both the pointing solution and the guide star. Under delegation this is the incumbent's responsibility; from Phase 4 it is this system's, and it is the single most failure-prone moment in an unattended night.
+Carrying out a session is a queue-advancement problem. Entries move through one status progression: pending, running, and then completed, failed or skipped. The session itself is planned, running, suspended, completed or aborted. Execution may depend on the other two functions, because advancing a queue and driving hardware are inseparable once the night is running.
 
-The architecture treats a flip as a bounded, ordered interruption rather than as an event handled inline: the current exposure completes or is abandoned, guiding stops, the mount reorients, pointing is re-established by plate solve, a guide star is re-acquired, and the sequence resumes. Each step has an attempt bound, and exhausting any of them is a fault rather than a retry loop — because a flip that cannot re-acquire is a night that must be ended safely, not one that should keep trying while the target sets.
+Execution builds the same list of candidate actions for an entry in every phase, and the delegation policy decides what happens to each. An authoritative capability issues the action through control. A shadowed one computes its intent, compares it with what the incumbent did and records the result. A delegated one issues nothing. Moving between phases is a settings change, not a rewrite, and what is measured in the shadowed state is what will run after promotion.
 
-The flip threshold is a property of the telescope rather than of the night, since it describes where that mount's mechanics require reorientation. It is the same threshold Planning uses when reporting a target's meridian status, expressed in one unit and read by both functions, rather than a control-side and a planning-side value maintained separately.
+**Unattended operation changes what a failure means.** With an operator present, a fault can stop and wait. When unattended, stopping is itself a decision: a mount left tracking into its pier, or an open enclosure under advancing rain, is worse than a lost night. Execution therefore treats a fault as the start of a bounded recovery attempt (Section 5.6). Exhausting the bound escalates to the safe-state sequence that control owns (Section 6.6). An unbounded retry cannot be told from a hang.
 
-#### 2.4.6 Subsystem Architecture — Fault Recovery
+<!-- impl: wayfindinglib.models.session.observation_session.SessionStatus -->
+<!-- impl: wayfindinglib.models.session.observation_session.QueueEntryStatus -->
+<!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.dispose_action -->
 
-A device reporting the fault state under unattended operation begins a recovery attempt governed by the recovery policy: the device is returned to standby and re-enabled, subject to a bounded number of attempts with a bounded interval between them. Each attempt is recorded on a fault record, with its outcome.
+### 5.3 Queue advancement
 
-Recovery is deliberately shallow — it re-establishes a device's lifecycle state and no more. It does not attempt to reason about why the device faulted, because a system that cannot see the observatory cannot distinguish a transient driver disconnection from a mechanical obstruction, and treating the second as the first is how equipment is damaged. Exhausting the attempt bound therefore escalates to the safe-state sequence rather than to a deeper recovery strategy.
+Table 4 lists one queue-advancement cycle. A cycle advances at most one entry. A runner repeats it until the queue is empty, the session ends or is suspended, or the caller asks it to stop.
 
-#### 2.4.7 Subsystem Architecture — Telemetry Recording and Post-Session Reconciliation
+**Table 4.** Queue advancement sequence.
 
-Recording an observing night's operational context remains structured as three cooperating pieces:
+| Step | Phase | Description |
+| --- | --- | --- |
+| 1 | Safety gate | Read the safety assessment. Only a safe verdict permits observing. Any other verdict suspends the session. |
+| 2 | Entry selection | Pick the first pending entry whose start time has arrived. |
+| 3 | Readiness check | Confirm that no device the entry needs is in the fault state. |
+| 4 | Meridian check | If the entry crosses the flip threshold, run the flip sequence (Section 5.5). A flip that does not resume fails the entry. |
+| 5 | Disposition | Consult the delegation policy for each action: issue, compare and record, or do nothing. |
+| 6 | Outcome capture | Record what happened beside what was planned. |
+| 7 | Status transition | Move the entry to its new status. Close the session when all have finished. |
+| 8 | Checkpoint | Save the session, so data loss is bounded to one cycle. |
 
-* **Guiding telemetry** — converts published guiding events into structured samples. While autoguiding is delegated or shadowed, this listens passively to the incumbent's event stream and never commands it; once autoguiding is authoritative, the same sample stream is produced by this system's own correction computation, so downstream consumers are unaffected by the transition.
-* **Environment sampling** — captures ambient conditions from equipment already in use, on a best-effort basis; a missing reading is recorded as absent and never halts recording. It is distinct from the safety assessment (§2.5.4), which must not be best-effort.
-* **Recording orchestration** — drains accumulated telemetry into the session record at a fixed cadence, so a failure loses at most one interval.
+Aborting a session skips every pending entry and records the reason on each, so a night ended by conditions is a closed record that carries its reason.
 
-Once a session reaches a terminal state, Execution performs two reconciliations that deliberately do not happen mid-run: calibration frames the session captured are folded into the calibration inventory, and the session's science-side quality-data linkage is attached once those records exist, which is necessarily after the night.
+<!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.advance_session -->
+<!-- impl: wayfindinglib.tasks.execution_tasks.session_runner.abort_session -->
+<!-- impl: wayfindinglib.tasks.execution_tasks.queue_runner.run_queue -->
 
-A related but distinct reconciliation runs inside Control rather than Execution, on the same "one consumer, uniform regardless of delegation state" pattern as guiding telemetry above: retrieving a night's guide log and refitting the standing mount-mechanical model, and refitting the session's pointing model from that night's alignment attempts (§2.5.5). Both compute and expose a result; attaching either to this session's own record, the way calibration reconciliation attaches here, is deferred until Execution exists to do it.
+### 5.4 Divergence recording
 
-#### 2.4.8 Design Invariants
+Divergence records are the evidence on which promotion gates are decided. They are durable, per-capability evidence and not diagnostic logging.
 
-* **Execution Depends Downward Only:** Execution may use Control and Planning; neither may depend on Execution.
-* **One Intent Path, Every Phase:** intent computation is identical across all delegation states; only the disposition of a computed action differs.
-* **Shadow Issues Nothing:** a shadowed capability produces divergence records and no hardware commands.
-* **Evidence Is Symmetric:** divergence records are written for agreeing comparisons as well as disagreeing ones, since a promotion gate is a rate and not a count.
-* **Unsafe Suspends, Never Continues:** an unsafe or stale safety assessment suspends queue advancement regardless of what the queue contains.
-* **Recovery Is Bounded:** every recovery attempt has an attempt count and an interval; exhaustion escalates to the safe state rather than continuing.
-* **Best-Effort Environment Tolerance:** unavailable environment *telemetry* is recorded as absent and never halts recording — a tolerance that applies to the record, never to the safety assessment.
-* **Checkpoint Durability:** session state persists at bounded intervals, not only at completion.
-* **Graceful Incompleteness:** a session need not have every queue entry reach a terminal status before its record is closed — a night ended by conditions is a valid, closed record carrying its own reason.
+Whenever a capability is shadowed, each action this system computes is paired with the action the incumbent took. The record carries the capability, the moment, both actions, the signed difference (computed minus observed) in the capability's natural unit, the tolerance, and whether the difference fell within it. The sign separates a steady bias from random noise. Records are written whether or not the two agreed, because a rate cannot be computed from disagreements alone. For $n$ comparisons of which $n_{\text{in}}$ fall within tolerance, the agreement rate is
 
-### 2.5 Observatory Control
+$$
+R = \frac{n_{\text{in}}}{n}
+\tag{2}
+$$
 
-#### 2.5.1 Purpose & Interfaces
+and a rate computed from no comparisons is reported as zero, never as perfect agreement.
 
-* **Inputs:** direct commands — slew, park, unpark, filter, focus, enclosure motion, equipment activation — status queries, environmental readings, and the measurements from which corrections are computed.
-* **Outputs:** hardware state changes, per-device summary state, enclosure state, the current safety assessment, and computed pointing, guiding, and focus corrections.
+Three capabilities are compared. Alignment is compared by pointing correction, in arcseconds. Guiding is compared by the signed pulse on each axis for the same drift, in milliseconds. Autofocus is compared by focuser position, in focuser steps. Mount control and capture carry out an explicit intent with nothing to compare, and safety has no shadowed state, so they produce no records.
 
-Observatory Control groups its operations by topic, so each group stays small enough to read as a whole. The root object holds only the device drivers, which tests and the app replace with their own. Seven groups hold the operations, and all of them share one record of the configuration, storage, and drivers. Each group that has readable state offers a single status read, and the caller names the sections it wants.
+Both systems must respond to the *same* measurement, so a record names the shared input. It does not pair actions by timestamp proximity, which could pair unrelated corrections.
 
-* `control.mount`: pointing and tracking — slew to a target or a sky position, optionally centered by plate solving, sync, park, tracking, manual motion, and the pointing correction. Its status also reports the pier side, the park state, and the tracking rate.
-* `control.imaging`: the main camera, filter wheel, and focuser — a capture run of several exposures with one filter change and optional dithering — and the focus correction.
-* `control.guiding`: the guide camera, guide pulses, the guider calibrations, the mount's periodic error model, and the guiding going on now with its root-mean-square (RMS) error. A guiding driver chosen per telescope reads the guider: PHD2, the pulses KStars/Ekos sends the mount, or a simulator that can also run this system's own guide loop.
-* `control.remote`: the telescope computer's folders and files, and copying new frames and logs into the library. One name-matching rule finds a target's remote folder. After a copy, each new frame whose header holds a plate solve gives the mount's pointing error at that moment.
-* `control.history`: past and current observing sessions — the night analyses, the plate-solve alignment record of each night, the live session report, and the performance limits.
-* `control.safety`: weather, the enclosure, the safe state, and which capabilities this system may command.
-* `control.equipment`: the equipment profile, the site, and the device connections.
+<!-- impl: wayfindinglib.tasks.execution_tasks.divergence_recording.record_divergence -->
+<!-- impl: wayfindinglib.models.session.divergence.DivergenceRecord -->
+<!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.summarize_divergence_evidence -->
+<!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.DivergenceEvidenceSummary -->
 
-#### 2.5.1a Hardware Protocol Abstraction
+### 5.5 Meridian flip sequencing
 
-Every command this function issues ultimately reaches one physical device over one wire protocol, but which protocol that is must be a per-device configuration choice, not a fixed assumption baked into Control's own code. INDI is the protocol available today; a second telescope on the same equipment set might reasonably run ASCOM Alpaca instead, and nothing about Control's own logic should have to change for that to be possible.
+A German equatorial mount must turn over when a tracked target crosses the local meridian, the line in the sky from north to south through the zenith. The turn-over interrupts exposures and invalidates both the pointing solution and the guide star. From Phase 4 it is this system's job, and it is the most failure-prone moment of the night.
 
-The architecture resolves this the way ASCOM Alpaca itself does: **one interface per device type, not one interface per protocol.** A `MountDriver`, `CameraDriver`, `FocuserDriver`, `FilterWheelDriver`, and `EnclosureDriver` each define the operations that device type supports — slew and park for a mount, expose and read temperature for a camera — independent of how those operations reach the device underneath. Observatory Control composes one instance of each per active equipment selection, resolved from the equipment catalog's per-device protocol field, so a mount on one protocol and a camera on another coexist within one equipment set without Control itself branching on protocol anywhere. INDI is the first implementation of every interface; a second protocol implements the same five interfaces and requires no change to Control, Planning, or Execution to be usable.
+A flip is a bounded, ordered interruption: end the exposure, stop guiding, turn the mount over, re-establish pointing by repeated plate solves, re-acquire a guide star, and resume. The first failing step stops the sequence and records its reason. The two repeating steps each have an attempt bound, and exhausting either is a fault, not a retry loop. A night that cannot re-acquire must end safely, not keep trying while the target sets.
 
-File retrieval (downloading captured frames and guide logs from a telescope host) is a deliberately separate, independently pluggable abstraction, `RemoteTransferDriver` — it has no connection lifecycle or device-state notion the way a hardware-control protocol does, since it is not part of INDI or ASCOM, and conflating the two would force every hardware-control protocol implementation to also solve file transfer whether or not it needs to.
+The flip threshold is a property of the telescope, stored once as an hour angle past transit. The delay in minutes follows at the sidereal rate of 15° of hour angle per hour:
 
-#### 2.5.2 Theoretical Rationale — Device State and Direct Operation
+$$
+t_{\text{flip}} = 60\,\frac{H_{\text{flip}}}{15}
+\tag{3}
+$$
 
-Direct hardware operation is useful on its own — an operator jogging the mount, parking at the end of a session, or checking alignment performance has no need for a plan to exist. Observatory Control is therefore built with no dependency on Observation Planning (Design Invariant 2), and is exercised identically whether or not any session or package exists. Safety monitoring makes this more than a convenience: the observatory must be able to protect itself when nothing is running, which is only possible if protection lives in a function that does not require a plan.
+Control and planning read this one threshold, so they cannot disagree.
 
-**Device summary state.** Every device this function operates — mount, cameras, filter wheel, focuser, enclosure, environmental sensors — exposes its lifecycle in one uniform five-state vocabulary: offline, standby, disabled, enabled, and fault, adopted directly from the Rubin precedent (§2.1.1) [1]. A uniform vocabulary lets a caller reason about readiness without knowing the device type: an executing session's readiness check asks the same question of a mount and of a roof. The fault state is what gives Execution something to recover from, and what gives an operator a place to see that a device has reported a specific failure rather than merely gone quiet.
+<!-- impl: wayfindinglib.tasks.execution_tasks.meridian_flip.execute_meridian_flip -->
+<!-- impl: wayfindinglib.models.session.meridian_flip.MeridianFlipOutcome -->
+<!-- impl: wayfindinglib.data_access.equipment_catalog_reader.get_meridian_flip_delay_min -->
 
-#### 2.5.3 Theoretical Rationale — Correction Computation
+A lost guide star outside a flip follows the same bounded pattern.
 
-Pointing, guiding, and focus corrections are computed here rather than in the science-side library, and the litmus test (Design Invariant 4) draws the same line through all three. Solving a field's astrometric position from an image, measuring a star's centroid, and measuring a star's size are each exercisable by a scientist with archived data and no telescope, and belong to the science library. Converting a solved position into a mount pointing correction, converting a measured drift into a signed mount pulse, and converting a measured size curve into a focuser position each require knowing the mount's orientation, the guider's calibrated scale and rotation, the mount's response rate, or the focuser's backlash and thermal behavior — none of which mean anything without a telescope.
+<!-- impl: wayfindinglib.tasks.execution_tasks.guide_star_loss_recovery.attempt_guide_star_recovery -->
 
-This function therefore consumes the science library's measurements and computes only the telescope-dependent remainder. That the same seam appears three times, independently, is evidence the litmus test is describing a real boundary rather than rationalizing an arbitrary one. It is also why guider calibration and the focus model are Foundation-level configured facts rather than quantities recomputed per night.
+### 5.6 Fault recovery
 
-#### 2.5.4 Theoretical Rationale — Environmental Safety
+A device that reports the fault state during unattended operation starts a recovery attempt. The device is returned to standby, enabled again, and its state is read back. Recovery succeeds only if the device reports enabled. The attempts are bounded, and the wait before each one after the first grows by a fixed factor. For attempt $j$, with first wait $t_1$ and growth factor $m$:
 
-Unattended operation requires the observatory to judge, continuously and on its own, whether conditions permit it to stay open. Three properties of that judgment are architectural rather than incidental.
+$$
+t_j =
+\begin{cases}
+0 & j = 1 \\
+t_1\, m^{\,j-2} & j \ge 2
+\end{cases}
+\tag{4}
+$$
 
-**Absence of information is not safety.** A safety assessment has four possible verdicts — safe, marginal, unsafe, and unknown — and unknown is treated exactly as unsafe once a staleness bound elapses. A sensor that stops reporting, a driver that disconnects, or a reading that cannot be parsed must produce closure, not silence. This is the one place the architecture's general tolerance for missing readings (§2.4.7) is explicitly reversed: environment *telemetry* may be absent, an environment *verdict* may not.
+Each attempt is recorded on a fault record with its outcome.
 
-**Reopening is not the inverse of closing.** Conditions that oscillate around a threshold would, under a symmetric rule, produce an enclosure that cycles continuously — mechanically damaging and worse than staying closed. Closure is therefore immediate on an unsafe verdict, while reopening requires conditions to have been continuously safe for a configured settling period.
+Recovery is deliberately shallow. It re-establishes a device's lifecycle state and nothing more, because a system that cannot see the observatory cannot tell a passing driver disconnection from a mechanical obstruction. Treating the second as the first damages equipment. Exhausting the bound escalates to the safe state, not to a deeper recovery.
 
-**Safety authority is not observing authority.** The safety assessment constrains operation from outside it, which is why it lives in Control rather than in Execution's loop, and why it may not occupy the shadowed delegation state (§2.1.2). A session consults it; the absence of a session does not disable it.
+<!-- impl: wayfindinglib.tasks.execution_tasks.fault_recovery.recover_fault -->
+<!-- impl: wayfindinglib.models.policy.recovery.FaultRecord -->
 
-#### 2.5.5 Subsystem Architecture — Enclosure and the Safe State
+### 5.7 Telemetry recording and post-session reconciliation
 
-The enclosure is mechanically coupled to the mount: a roof or dome may only move through positions that clear the telescope, and the telescope may only leave park when the enclosure is open. This is expressed as a mutual interlock evaluated before either is commanded, not as an ordering convention.
+A recorder attaches to a session that planning created. At a fixed interval it collects guiding samples and takes a best-effort weather snapshot, then saves the session, so a failure loses at most one interval. It only listens and never commands the guider or the mount. A missing weather reading is stored as absent. This tolerance is separate from the safety assessment (Section 6.5), which must not be best-effort.
 
-Reaching a safe state is therefore a defined ordered sequence rather than a set of independent actions, given in Table 6. Each step is bounded, and each records its outcome, so a partially completed safe state is a diagnosable condition rather than an unknown one.
+<!-- impl: wayfindinglib.tasks.execution_tasks.session_recorder.ObservationSessionRecorder -->
 
-**Table 6.** Safe-state sequence. Executed on an unsafe verdict, on recovery exhaustion, or on loss of the controlling process.
+When a session reaches a terminal status, execution runs two reconciliations that deliberately do not happen mid-run. Captured calibration frames are folded into the calibration inventory, which is recomputed from every finished session each time, so running the step twice never counts a frame twice. The session's science-side link is attached by finding the science-side target sessions of each imaged target for the same night, which is possible only after the night.
 
-| Step | Action | Why this position in the order |
-|---|---|---|
-| 1 | Abandon the current exposure | Frames are expendable; waiting for one to finish spends the time the sequence exists to save. |
-| 2 | Stop guiding | Guiding commands must cease before the mount is commanded elsewhere, or the two contend. |
-| 3 | Park the mount | The enclosure cannot close until the telescope is within the clearance positions park guarantees. |
-| 4 | Close the enclosure | The protective action proper; every preceding step exists to make it possible. |
-| 5 | Ramp the sensor to ambient | Uncontrolled warming risks condensation on optics that closure has just sealed in. |
-| 6 | Close the session with its reason | The night becomes a complete record carrying why it ended, not a truncated one. |
+<!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.reconcile_session -->
+<!-- impl: wayfindinglib.tasks.execution_tasks.post_session_reconciliation.compute_calibration_stats -->
+
+Two related refits run inside control, not execution: the standing mount-mechanical model and the session's pointing model (Section 6.7).
+
+### 5.8 Design invariants
+
+- **Execution depends downward only.** Neither control nor planning may depend on execution.
+- **One construction path for every phase.** Candidate actions are built the same way in all delegation states. Only the disposition differs.
+- **Shadow issues nothing.** A shadowed capability produces divergence records and no hardware commands.
+- **Evidence is symmetric.** Records are written for agreeing and disagreeing comparisons, because a promotion gate is a rate and not a count.
+- **Recovery is bounded.** Every recovery sequence has an attempt count and a wait, and exhaustion escalates to the safe state.
+
+## 6. Observatory control
+
+### 6.1 Purpose and interfaces
+
+- **Inputs:** direct commands, status queries, environmental readings, and the measurements from which corrections are computed.
+- **Outputs:** hardware state changes, device summary state, enclosure state, the safety assessment, and computed corrections.
+
+Control groups its operations by topic: mount, imaging, guiding, remote file transfer, session history, safety and equipment. Every hardware step of the application goes through this one front door, so all of them pass the same authority checks and drivers. A guiding driver is chosen for each telescope: PHD2, the guider inside KStars and Ekos, or a simulator.
+
+<!-- impl: wayfindinglib.api.control.mount.MountControl -->
+<!-- impl: wayfindinglib.api.control.imaging.ImagingControl -->
+<!-- impl: wayfindinglib.api.control.guiding.GuidingControl -->
+<!-- impl: wayfindinglib.api.control.remote.RemoteControl -->
+<!-- impl: wayfindinglib.api.control.history.HistoryControl -->
+<!-- impl: wayfindinglib.api.control.safety.SafetyControl -->
+<!-- impl: wayfindinglib.api.control.equipment.EquipmentControl -->
+
+### 6.2 Hardware protocol abstraction
+
+Every command reaches one physical device over one wire protocol, and the protocol must be a per-device setting. INDI is available today. A second telescope could use ASCOM Alpaca, with no change to control's own logic. The architecture follows Alpaca here: **one interface for each device type, not one for each protocol.** Separate interfaces exist for the mount, camera, focuser, filter wheel, enclosure, switch bank and weather source. Each defines the operations its device type supports, such as slew and park for a mount, independent of how they reach the device. Control builds one instance of each for the active equipment, using the protocol named in the equipment catalog, and never branches on protocol. INDI is the first implementation of every interface.
+
+Guiding has its own interface, because the guider is chosen for each telescope and is not always a device on the same server. A simulator guider can also run this system's own guide loop, in which every pulse still passes the delegation check. File retrieval is a separate pluggable abstraction with no device state, so no hardware protocol is forced to solve file transfer.
+
+<!-- impl: wayfindinglib.drivers.interfaces.base_protocol_driver.ProtocolDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.mount_driver.MountDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.camera_driver.CameraDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.focuser_driver.FocuserDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.filter_wheel_driver.FilterWheelDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.enclosure_driver.EnclosureDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.switch_driver.SwitchDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.weather_driver.WeatherDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.guiding_driver.GuidingDriver -->
+<!-- impl: wayfindinglib.drivers.interfaces.remote_transfer_driver.RemoteTransferDriver -->
+
+### 6.3 Device state and direct operation
+
+Direct hardware operation is useful alone: an operator jogging or parking the mount needs no plan, so control has no dependency on planning. The observatory must also protect itself when nothing is running, which is possible only if protection lives in a function that needs no plan.
+
+Every device exposes its lifecycle in the five-state vocabulary adopted from Rubin [5]. A device not present on the server is *offline*. One present but not connected is in *standby*. One connected with commands withheld is *disabled*. One connected and commandable is *enabled*. One that reports an alert, or whose command failed in a way that needs attention, is in *fault*. A caller can reason about readiness without knowing the device type. The fault state gives execution something to recover from and shows an operator that a device reported a failure.
+
+The library maps raw device signals to a state but does not yet gather the signals for every device role (Section 8).
+
+<!-- impl: wayfindinglib.models.policy.device_state.DeviceSummaryState -->
+<!-- impl: wayfindinglib.tasks.control_tasks.device_state_tasks.classify_device_state -->
+
+### 6.4 Correction computation
+
+Pointing, guiding and focus corrections are computed here, not in the science library. Solving a field's position, measuring a star's centroid and measuring a star's size can be done with archived data and no telescope, so they belong to the science library. Turning a solved position into a mount correction, a drift into a mount pulse, and a size curve into a focuser position needs the mount's orientation, the guider's calibration, or the focuser's backlash and thermal behavior. Control takes the science library's measurements and computes only the telescope-dependent remainder.
+
+Each correction is a pure function of its inputs. Issuing it is a separate, delegation-gated step, so one computation serves both the shadowed and the authoritative states.
+
+**Pointing.** After a plate solve, the pointing error is the angular separation $\theta$ between the commanded and the solved position. The correction is the signed offset in right ascension and declination from the solved position to the commanded one. Alignment has converged when $\theta$ is at or below a tolerance $\epsilon_{\text{align}}$. When a fitted model of the mount's systematic pointing error is supplied, control predicts the offset $(\Delta\alpha_{\text{model}}, \Delta\delta_{\text{model}})$ the model implies at the commanded position. It judges convergence on what the model does not explain:
+
+$$
+r = \sqrt{(\Delta\alpha - \Delta\alpha_{\text{model}})^2 + (\Delta\delta - \Delta\delta_{\text{model}})^2}, \qquad r \le \epsilon_{\text{align}}
+\tag{5}
+$$
+
+An error the model fully explains is a known, steady bias, not a failure. A model with too little data is ignored.
+
+**Guiding.** The guide-star drift is rotated onto the mount's axes by the calibrated camera angle and converted to arcseconds with the guider's pixel scale. For one axis with drift $d$ in arcseconds, guide rate $v$ in arcseconds per second, aggressiveness $g$ between zero and one, deadband $\epsilon_{\text{dead}}$ and longest pulse $p_{\max}$, the signed pulse duration in seconds is
+
+$$
+p =
+\begin{cases}
+0 & |d| < \epsilon_{\text{dead}} \\
+\operatorname{sign}(d)\,\min\!\left(\dfrac{g\,|d|}{v},\; p_{\max}\right) & |d| \ge \epsilon_{\text{dead}}
+\end{cases}
+\tag{6}
+$$
+
+This is one control law. An optional feed-forward term uses the standing mount-mechanical model (Section 6.7). In right ascension, the dominant worm-gear harmonic is one sinusoid with peak-to-peak amplitude $A$ and period $P$, so the predicted error at time $t$ since guiding began is
+
+$$
+e(t) = \frac{A}{2}\,\sin\!\left(\frac{2\pi t}{P}\right)
+\tag{7}
+$$
+
+A pulse that cancels $e(t)$ is computed by the same law and added to the reactive pulse. It is applied even inside the deadband, because the point is to correct before the error is seen. In declination, a reversal of direction adds a lead-in pulse as long as the learned backlash delay, which takes up the slack first. The sum on each axis is limited to the longest pulse.
+
+**Focus.** Autofocus samples a curve of star width against focuser position. Every sample is approached from the same direction, because mixed directions fold backlash into the curve. The star widths $w_i$ at focuser positions $x_i$ are fitted by least squares with a parabola $\hat{w}(x) = a x^2 + b x + c$. At least three points are needed. The quality of the fit is
+
+$$
+Q = 1 - \frac{\sum_i \left(w_i - \hat{w}_i\right)^2}{\sum_i \left(w_i - \bar{w}\right)^2}
+\tag{8}
+$$
+
+The fit is accepted when $a > 0$ and $Q$ is at or above a quality floor. The selected position is the vertex of the parabola:
+
+$$
+x^{*} = -\frac{b}{2a}
+\tag{9}
+$$
+
+limited to the sampled range, so a poorly conditioned fit cannot command an extrapolated position. A rejected fit leaves the focuser where it started and reports no convergence.
+
+<!-- impl: wayfindinglib.tasks.control_tasks.pointing_correction.compute_pointing_correction -->
+<!-- impl: wayfindinglib.tasks.control_tasks.guiding_correction.compute_guiding_correction -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_correction.compute_focus_correction -->
+<!-- impl: wayfindinglib.tasks.control_tasks.focus_correction.sample_focus_curve -->
+<!-- impl: wayfindinglib.analytics.pointing_model.predict_pointing_error -->
+
+Centering combines these pieces. A slew alone lands near the target because the mount's idea of where it points is off. Centering plate solves a short exposure and stops if the error is within tolerance. Otherwise it syncs the mount to the solved position and slews again.
+
+<!-- impl: wayfindinglib.tasks.control_tasks.centering.center_on -->
+
+### 6.5 Environmental safety
+
+An unattended observatory must judge, continuously and alone, whether conditions let it stay open. Three properties of that judgment are architectural.
+
+**Absence of information is not safety.** A safety assessment has four verdicts: safe, marginal, unsafe and unknown. A reading that is missing, older than its age bound, or unparseable gives unknown for the rules that name it, and so does a missing rule set. Only a safe verdict permits observing, so unknown is treated as unsafe. A silent sensor must produce closure. This reverses the tolerance in telemetry recording (Section 5.7): environment *telemetry* may be absent, but an environment *verdict* may not. When several rules apply, the most severe definite verdict wins.
+
+**Reopening is not the inverse of closing.** Conditions that swing around a limit would, under a symmetric rule, make the enclosure cycle without end, which is mechanically damaging. Closure is therefore immediate on an unsafe verdict. Reopening requires every rule to have read safe continuously for a settling period.
+
+**Safety authority is not observing authority.** The assessment constrains operation from outside it. That is why it lives in control and not in execution, and why it cannot be shadowed (Section 2.3). A session consults it. The absence of a session does not disable it.
+
+Readings reach the monitor as a plain mapping of names to values and read times, so the rules can be tested with no hardware.
+
+<!-- impl: wayfindinglib.tasks.control_tasks.safety_monitor.SafetyMonitor -->
+<!-- impl: wayfindinglib.models.policy.safety.SafetyAssessment -->
+<!-- impl: wayfindinglib.models.policy.safety.SafetyVerdict -->
+<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations.refresh_safety_assessment -->
+
+### 6.6 Enclosure and the safe state
+
+The enclosure is mechanically coupled to the mount. A roof or dome may move only through positions that clear the telescope, and the telescope may leave park only when the enclosure is open. This mutual interlock is evaluated before either is commanded. An unknown enclosure state blocks mount motion like a closed one. An enclosure whose motion outlasts its timeout is reported as faulted.
+
+Reaching a safe state is a defined, ordered sequence (Table 5). Every step is tried even if an earlier one failed, except that closing the enclosure is skipped, not forced, when the mount did not reach a clearing position. Each step records its outcome and the first failure is named, so a partly completed safe state is diagnosable.
+
+**Table 5.** Safe-state sequence. It runs on an unsafe verdict, on recovery exhaustion, or on loss of the controlling process.
+
+| Step | Action | Why this place in the order |
+| --- | --- | --- |
+| 1 | Abandon the current exposure | Frames are expendable. Waiting for one wastes time. |
+| 2 | Stop guiding | Guiding must stop before the mount is commanded elsewhere. |
+| 3 | Park the mount | The enclosure cannot close until the telescope clears it. |
+| 4 | Close the enclosure | The protective action itself. |
+| 5 | Warm the sensor toward ambient | Uncontrolled warming risks condensation on optics that closure has just sealed in. |
+| 6 | Close the session with its reason | The night becomes a complete record that says why it ended. |
 
 :::{warning}
-Step 3 is the sequence's single point of failure: a mount that cannot park leaves an enclosure that cannot safely close. No software arrangement resolves this, because the failure is mechanical and the software has already lost the ability to move the obstruction. An unattended observatory therefore requires a hardware interlock independent of this system — one that prevents enclosure motion into an obstructed telescope regardless of what any software commands. That interlock is outside this architecture's scope, and this architecture is not safe to run unattended without it.
+Step 3 is the sequence's single point of failure. A mount that cannot park leaves an enclosure that cannot safely close, and no software can fix a mechanical obstruction. An unattended observatory needs a hardware interlock, independent of this system, that stops enclosure motion into an obstructed telescope. That interlock is outside this architecture's scope. The architecture is not safe to run unattended without it.
 :::
 
-**Loss of the controlling process** is the failure mode a safe-state sequence inside that process cannot handle. Unattended operation therefore requires a liveness signal emitted by the running system and observed from outside it, such that its cessation triggers the same sequence. A watchdog that shares the fate of what it watches provides no protection.
+**Loss of the controlling process** is the failure that a safe-state sequence inside that process cannot handle. A watchdog that shares the fate of what it watches gives no protection. The design uses a heartbeat file written by the running system and a watchdog in a separate process that shares no code path with it. A stopped heartbeat triggers the same sequence, and a missing or unreadable heartbeat counts as stale. Section 8 says what is not yet connected.
 
-The enclosure's own hardware commands — reading its state and opening or closing it — are issued through an `EnclosureDriver` interface, one of several per-device-type driver interfaces Observatory Control composes so a device's hardware-control protocol is a per-device configuration choice rather than a fixed assumption (INDI is the first implementation of each). `control.safety.close_enclosure()` applies the **Interlock Before Motion** invariant directly: it evaluates the mount's current position against the configured clearance envelope before dispatching to the driver, refusing rather than commanding closure into an obstructed telescope.
+Closing the enclosure checks the mount's position against the configured clearance before it reaches the driver, and requires the safety capability to be authoritative.
 
-Retrieving files from a telescope host (light/calibration frames, PHD2 and Ekos guide logs) is a separate, independently pluggable abstraction from hardware control — it is not part of INDI or ASCOM. A `RemoteTransferDriver` interface plays the same role for this concern that the six device-type drivers above play for hardware commands; `StellarMateInterface` is its first implementation. Once a guide log lands locally, the same download → parse → analyze chain that used to be hand-orchestrated separately across three backend services runs as one pipeline inside Control (`guiding_log_ingestion.py`), persisting the refit periodic-error/backlash spectrum as standing, cross-night mount-mechanical state. Plate-solve alignment attempts need no such fetch — they are already recorded locally as they happen — so the matching pointing-model pipeline (`pointing_log_ingestion.py`) only fits and exposes a fresh, session-scoped result; its polar-misalignment terms describe tonight's setup, not the mount, and are deliberately never persisted or fed forward to a later session.
+<!-- impl: wayfindinglib.tasks.control_tasks.safe_state.execute -->
+<!-- impl: wayfindinglib.tasks.control_tasks.safe_state.SafeStateSteps -->
+<!-- impl: wayfindinglib.models.session.safe_state.SafeStateOutcome -->
+<!-- impl: wayfindinglib.tasks.control_tasks.enclosure_control.can_close_enclosure -->
+<!-- impl: wayfindinglib.tasks.control_tasks.enclosure_control.can_leave_park -->
+<!-- impl: wayfindinglib.tasks.control_tasks.enclosure_control.check_motion_timeout -->
+<!-- impl: wayfindinglib.tasks.control_tasks.hardware_operations.close_enclosure -->
+<!-- impl: wayfindinglib.watchdog.heartbeat.heartbeat_is_stale -->
+<!-- impl: wayfindinglib.watchdog.watchdog_process.check_and_escalate -->
+<!-- impl: wayfindinglib.tasks.control_tasks.cooling_control.compute_ramped_setpoint -->
 
-This standing mount-mechanical model closes the loop from "we learned this about the mount" to "we command the mount better because of it." `control.guiding.compute_correction` feeds the persisted periodic-error/backlash spectrum forward as an anticipatory correction on top of its reactive pulse: the dominant worm harmonic is modeled as a single sinusoid and countered before the error grows large enough to clear the reactive deadband, and a learned backlash delay is taken up with a lead-in pulse the moment the Dec axis is commanded to reverse. `control.mount.compute_pointing_correction` takes the session-scoped fitted model as an optional parameter instead, evaluating the same geometric equations the fit solves in their forward direction to predict the systematic error a given position implies; a measured pointing error the model already fully explains is a known, stable bias rather than a real failure still needing correction, so convergence is judged against what is left over once that prediction is subtracted out. Three orchestrating routines produce and refine these models from deliberate, controlled measurement runs rather than waiting to observe them incidentally: `control.guiding.run_calibration` (pixel-scale calibration), `control.guiding.run_backlash_calibration` (the reversal-delay component of the mount-mechanical model), and `control.mount.run_polar_alignment_assist` (a live, repeatable fit-and-report loop for tonight's own polar alignment, run before imaging starts). Every hardware-facing step in these routines is injected as a callable, the same pattern the safe-state sequence already uses, so no production wiring is fabricated ahead of the underlying image-capture pipeline actually existing. When a separate `GuideScope` is configured (a guide optic distinct from the main imaging telescope), `control.guiding.run_calibration`'s pixel-scale math uses its focal length rather than the main telescope's, since the two can differ substantially; guiding through the main OTA, the common case, is unaffected.
+### 6.7 Mount-mechanical models and bulk delegation modes
 
-Two more device-type drivers, `SwitchDriver` and `WeatherDriver`, extend §2.5.1a's "one interface per device type" pattern to the observatory's power distribution and environmental sensing — the same heuristically-discovered powerbox device already read for status-display telemetry, now generalized into commandable outlets/dew-heater channels and into the `SensorReadings` shape `control.safety.assess` consumes. The safety status read (`control.safety.status`, its assessment section) is the concrete orchestration this finally gives the safety assessment: reading the active `WeatherDriver` and evaluating it against the recorded `SafetyRuleSet` in one call, where before the assessment had no live caller anywhere in the codebase (§2.5.4) and existed only as machinery a test could exercise directly.
+The standing mount-mechanical model feeds a stored periodic-error and backlash model forward into the guiding correction (Equation (7)). The model comes from the guide error left after the guider's own corrections, so it is a cross-night fact about the mount. The analysis splits the guide samples into continuous stretches, analyzes each with its true time stamps using a Lomb-Scargle periodogram, and combines them. Peaks slower than any plausible gear period count as slow drift.
 
-**Monitoring and controller mode.** The six capabilities' delegation states are set individually, but an operator commonly wants to move all of them together — "go hands-off" or "take control" — the same convenience N.I.N.A. gives by bundling per-device driver choices into one profile switch. `set_all_capabilities` provides this without bypassing any per-capability rule: it replays the existing promotion path once per capability, in dependency order, reporting any capability that cannot yet legally reach the requested state rather than skipping or forcing it. Moving every capability toward `DELEGATED` ("monitoring mode") always fully succeeds, since that state has no precondition of its own. Moving toward `AUTHORITATIVE` ("controller mode") only succeeds for capabilities already positioned to make that jump — safety and mount control have no precondition, the three correction capabilities must already be `SHADOWED`, and capture orchestration must wait for all three of those to be `AUTHORITATIVE` first — so a fresh policy's bulk request to enter controller mode typically returns a partial result, which the caller (a settings toggle, in this codebase's UI) is expected to surface rather than swallow. This is also the toggle's actual backing: the informal global "Safe Mode" flag this design invariant set once lived inside the INDI driver itself is removed outright, since a per-protocol flag with no awareness of which capability was being commanded was a second authority competing with the one described here.
+The pointing correction takes a session-scoped fitted model instead. The classic geometric pointing model splits plate-solve offsets across the sky into physical mount terms, such as index errors, polar axis misalignment, cone error and tube flexure. Evaluating the fit forward predicts the systematic error at a position (Equation (5)). The polar-misalignment terms describe tonight's setup, not the mount, so they are never fed forward to a later session.
 
-Every hardware step of the application goes through this facade: centering by plate solving, capture runs, guiding, the imaging queue, and remote syncs. A mount sync during centering, a guide pulse, and a remote file transfer therefore pass through the same authority checks and pluggable drivers as everything else in this section. The application only starts and stops the long-running loops on its own threads.
+Three routines build these models from deliberate runs: a guider calibration that sends a known pulse on each axis, a backlash calibration that reverses declination in small steps, and a polar-alignment assistant that fits tonight's model from the plate solves so far. The caller supplies each routine's hardware step.
 
-#### 2.5.5b Incumbent Session Logs and Equipment-Derived Limits
+<!-- impl: wayfindinglib.analytics.guiding_spectrum.analyze_guiding_telemetry -->
+<!-- impl: wayfindinglib.analytics.pointing_model.fit_pointing_model -->
+<!-- impl: wayfindinglib.tasks.control_tasks.calibration_routines.run_guider_calibration -->
+<!-- impl: wayfindinglib.tasks.control_tasks.calibration_routines.run_backlash_calibration -->
+<!-- impl: wayfindinglib.tasks.control_tasks.calibration_routines.run_polar_alignment_assist -->
+<!-- impl: wayfindinglib.tasks.control_tasks.guiding_log_ingestion.ingest_guide_log_file -->
+<!-- impl: wayfindinglib.tasks.control_tasks.pointing_log_ingestion -->
 
-While the incumbent software runs the night (Phase 0 of Table 1), it also records the night: the guiding error frame by frame, every exposure, every autofocus run, and where the mount pointed. Control reads those records so the observatory can judge its own performance. The judgement depends on what "normal" means for the equipment in use, and that changes whenever a telescope, camera, or guide scope changes. This section states how Control records the logs and how it decides what is normal.
+An operator often wants to move all six delegation states together. The bulk operation replays the single-capability path for each capability, in dependency order, and reports any capability that cannot legally reach the requested state. It never skips or forces one. Moving every capability toward delegated (*monitoring mode*) always succeeds. Moving toward authoritative (*controller mode*) succeeds only for capabilities already positioned for the jump: safety and mount control have no precondition, the three corrections must already be shadowed, and capture must wait until all three are authoritative. A bulk request from a fresh policy therefore usually returns a partial result, which the caller shows. A flag blind to which capability is commanded would be a second authority competing with the per-capability one.
+
+<!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.set_all_capabilities -->
+<!-- impl: wayfindinglib.tasks.control_tasks.capability_promotion.BulkDelegationOutcome -->
+
+### 6.8 Incumbent session logs and equipment-derived limits
+
+While the incumbent runs the night (Phase 0 of Table 1), it also records it: guiding error frame by frame, every exposure, every autofocus run and where the mount pointed. Control reads those records to judge its own performance. What counts as normal depends on the equipment in use, and that changes whenever a telescope, camera or guide telescope changes.
 
 **Recording.** Four rules govern how logs become stored data.
 
-* *Estimates are not measurements.* Every stored guiding sample names its origin. A sample reconstructed from the guide pulses the mount received is an estimate, because its drift value is a model's output and no camera measured it. Analysis reads measured samples only. A sample whose origin was never recorded is treated as unverified, not as measured.
-* *Units are converted, never guessed.* Guide logs give errors in guide-camera pixels. Control converts them to arcseconds with the plate scale written in the same log section. A section with no known plate scale yields no samples.
-* *Sessions have one name.* An observing night is named for the local date on which it began, so a night that crosses midnight is one session.
-* *Reading is repeatable.* Reading the same log again replaces its earlier samples. It never adds a second copy, and a database write that fails is reported as a failure, not as stored data.
+- *Estimates are not measurements.* Every guiding sample names its origin. A sample rebuilt from the pulses the mount received is an estimate, because no camera measured it. Analysis reads measured samples only.
+- *Units are converted, never guessed.* Control converts guide-camera pixels to arcseconds with the pixel scale in the same log section. A section with no known pixel scale yields no samples.
+- *Reading is repeatable.* A night is named for the local date on which it began, and reading a log again replaces its earlier samples.
 
-**Equipment identity comes from the data.** Each session is tied to the equipment it used, read from the session itself. The guide log states the focal length and plate scale the guider used, and the frames captured during the session name the imaging telescope and camera. Reading identity from the data, not from today's configuration, keeps each past session attached to the equipment that produced it after the equipment changes. A part that cannot be determined stays unknown, and a session with unknown parts is never pooled with a fully known one.
+**Equipment identity comes from the data.** Each session is tied to the equipment it used, read from the session itself: the guide log states the focal length and pixel scale, and the frames name the imaging telescope and camera. A past session thus stays attached to its own equipment after a change. A part that cannot be determined stays unknown, and such a session is never pooled with a fully known one.
 
-**The performance envelope.** The envelope holds every limit Control needs to call something normal or abnormal. It is computed each time it is requested and stored nowhere, so it cannot go stale. Its limits come in four kinds:
+**The performance envelope.** The envelope holds every limit control needs to call something normal or abnormal. It is computed on request and never stored, so it cannot go stale. Its limits come in three kinds.
 
-1. *Geometry.* Limits that follow from dimensions and physics: the plate scales, the half-width of the guide camera's field (a measured offset larger than that is a different star), and the sidereal rate as the ceiling on any mount guide speed.
-2. *Sensor profile.* The saturation level, taken from the camera's stored profile together with how each number was obtained.
-3. *Physical budget.* How much guiding error or trailing the equipment's own images can absorb. Adding an independent blur of width $b$ to a star of width $w$ gives $\sqrt{w^2 + b^2}$. Requiring this to stay within $(1 + f)\,w$ gives $b \le w\sqrt{(1+f)^2 - 1}$. Guiding error with standard deviation $s$ per axis blurs a star by $2\sqrt{2\ln 2}\,s$, so the error limit is that budget divided by $2\sqrt{2\ln 2}$, and the trailing limit is the budget itself. The star width $w$ is the median over the equipment's own frames, using only exposures long enough to span several guide cycles, because a shorter exposure does not show the guiding error. The tolerance $f$ is the one policy choice, the largest fraction by which guiding may widen a star.
-4. *Own baseline.* How low a guide-star signal, or how high a guiding error, is unusual for this equipment, taken from its own earlier sessions. These quantities are positive and change by factors, so the median and spread are taken on logarithms. A limit is not judged until enough sessions exist.
+*Geometry and sensor.* Limits from dimensions, physics and the camera's stored profile: the pixel scales, the half-width of the guide camera's field (a larger offset is a different star), the sidereal rate as the ceiling on guide speed, and the saturation level.
 
-A limit that cannot be worked out reports why and carries no value. It is never replaced by a default.
+*Physical budget.* How much guiding error or trailing the equipment's own images can absorb. Adding an independent blur of width $\beta$ to a star of width $W$ gives a width of $\sqrt{W^2 + \beta^2}$. Requiring this to stay within $(1 + \phi)\,W$ gives
+
+$$
+\beta \le W\sqrt{(1+\phi)^2 - 1}
+\tag{10}
+$$
+
+A guiding error with standard deviation $s$ per axis blurs a star by $2\sqrt{2\ln 2}\,s$. The error limit is the budget divided by that factor, and the trailing limit is the budget itself:
+
+$$
+s_{\max} = \frac{\beta}{2\sqrt{2\ln 2}}
+\tag{11}
+$$
+
+The star width $W$ is the median over the equipment's own frames, using only exposures long enough to span several guide cycles. The tolerance $\phi$ is the one policy choice: the largest accepted widening.
+
+*Own baseline.* How low a guide-star signal, or how high a guiding error, is unusual for this equipment, from its earlier sessions. These quantities change by factors, so the median and spread are taken on logarithms. With $\tilde{y}$ the median of the logged values, $\hat{\sigma}$ their robust spread, and $k$ a multiplier, the limits are
+
+$$
+L_{\text{low}} = \exp\!\left(\tilde{y} - k\,\hat{\sigma}\right), \qquad L_{\text{high}} = \exp\!\left(\tilde{y} + k\,\hat{\sigma}\right)
+\tag{12}
+$$
+
+A limit is not judged until enough sessions exist. For fractions that are zero on most good nights, such as the share of lost frames, a high percentile replaces the median and spread. A limit that cannot be worked out reports why and carries no value. It is never replaced by a default.
+
+The envelope also carries a *tracking-risk map*. It scores each part of the sky, by hour angle and declination, from zero (safe) to one (likely to trail). Each score starts from a prior set by geometry alone, then moves toward what measured targets showed, by the scatter of their repeated plate solves.
 
 :::{warning}
-Two equipment setups must never share a baseline. Sessions are grouped by an equipment fingerprint made from the imaging telescope, the imaging camera, and the guide optics. When the equipment changes, the fingerprint changes, and the new setup starts with an empty history.
+Two equipment setups must never share a baseline. Sessions are grouped by an equipment fingerprint made from the imaging telescope, imaging camera and guide optics. A change of equipment changes the fingerprint, and the new setup starts with an empty history.
 :::
 
-#### 2.5.5c Session-Quality Analysis
+<!-- impl: wayfindinglib.analytics.performance_envelope.derive_performance_envelope -->
+<!-- impl: wayfindinglib.analytics.performance_envelope.robust_median_and_spread -->
+<!-- impl: wayfindinglib.models.equipment_and_site.performance_envelope.PerformanceEnvelope -->
+<!-- impl: wayfindinglib.models.equipment_and_site.equipment_fingerprint.build_equipment_fingerprint -->
+<!-- impl: wayfindinglib.tasks.control_tasks.ekos_log_ingestion -->
+<!-- impl: wayfindinglib.drivers.phd2.guide_log_parser -->
+<!-- impl: wayfindinglib.drivers.ekos.analyze_log_parser -->
+<!-- impl: wayfindinglib.models.session.telemetry.GuidingSampleSource -->
+<!-- impl: wayfindinglib.analytics.tracking_risk.build_tracking_risk_map -->
+<!-- impl: wayfindinglib.drivers.control_record_store.ControlRecordStore -->
 
-The recorded logs of §2.5.5b answer a practical question: did the night go well, and should anything change? Control answers it in the same three stages the science-side processing pipelines use, so a reader who knows one knows the other.
+### 6.9 Session-quality analysis
 
-1. *Pre-processing* asks whether the data is good. It reports problems in how the data was gathered: frames the guider lost, a guide star too weak for its own history, jumps to the wrong star, a calibration that measured an impossible mount speed, and guide optics that differ from the configuration. These are reported before anything is interpreted, because a night with a lost star produces error numbers that say little about the mount.
-2. *Processing* measures what the data shows: the guiding error, what that error does to the width of a star, and how far the guider moved the mount along declination. The error is a robust one, so a few excursions cannot distort it.
-3. *Post-processing* turns the measurements into recommendations. Each names the evidence behind it, the equipment-derived limit it was compared with, and a confidence. The confidence is lowered when the limits come from equipment that only partly matches the night's, or when the guide signal was poor enough that the error numbers describe a bad measurement.
+The logs of Section 6.8 answer a practical question: did the night go well, and should anything change? Control answers it in the three stages the science-side pipelines use.
 
-The same three stages judge a night of captured frames.
+1. *Pre-processing* asks whether the data is good. It reports lost guide frames, a guide star too weak for its own history, jumps to the wrong star, an impossible measured mount speed, and guide optics that differ from the configuration. A night with a lost star says little about the mount, so these come first.
+2. *Processing* measures the guiding error, what it does to the width of a star, and how far the guider moved the mount along declination. The error is a robust one, so a few excursions cannot distort it.
+3. *Post-processing* turns the measurements into recommendations. Each names its evidence, the limit it was compared with, and a confidence. The confidence drops when the limits come from equipment that only partly matches the night's, or when the guide signal was poor.
 
-1. *Pre-processing* compares what the incumbent software says it finished with what reached the frame library. An exposure the incumbent logged that has no frame means the night is only partly there. It also reports exposures the incumbent cancelled, frames that lack measurements later steps need, and sensor temperatures too far apart for one set of dark frames.
-2. *Processing* measures whether a star clipped at each exposure length, how sharp and round the stars were, and how much of the night was spent exposing.
-3. *Post-processing* recommends a shorter exposure for a spectroscopy star that clips, flags a night whose stars were wider or more elongated than the equipment's earlier nights, and reports the gaps found in pre-processing.
+The same stages judge a night of captured frames: what the incumbent says it finished against what reached the frame library; whether stars clipped at each exposure length, and how sharp and round they were; and a shorter exposure for a spectroscopy star that clips.
 
-*How long an exposure can guiding hold?* The guiding analysis also answers this directly. For each exposure length the equipment is used with, it tries every start time during the night's guiding and asks whether an exposure started then would have had clean guiding for its whole length: the star never lost, no jump, and the error within what the equipment can absorb. The share of clean start times is the chance that an exposure of that length would have worked. It is a model of the exposures and not a measurement of the frames, and exposures that would run past the end of guiding are not counted against the guider.
+*How long an exposure can guiding hold?* For each exposure length in use, the analysis tries every start time during the night's guiding and asks whether an exposure started then would have had clean guiding for its whole length. The share of clean start times is the chance that such an exposure would have worked. It models the exposures and does not measure the frames.
 
-*Is the guide star bright enough?* Pre-processing also compares the light the guide star delivered with the equipment's earlier nights. Brightness does not depend on the noise, so it shows directly whether something in the guide camera's path changed, and the message says how much of a drop a shorter guide exposure could explain. A live test of the guide camera answers the follow-up question, whether a longer exposure is needed. It takes short series of guide frames at several exposure lengths while the mount tracks without guiding, and measures the star's brightness, saturation and frame-to-frame position noise at each. A short exposure is judged by the noise it adds beyond the best length tried, because seeing moves the star at every length, against the guiding error the equipment can absorb.
+*Where in the sky does it perform worse?* A cross-night analysis compares each part of the sky (altitude band, compass direction, side of the pier) with the rest of the same nights, which removes each night's seeing. Findings that recur are listed together, because one bad night can be weather and a repeat points at the equipment.
 
-*Where in the sky does it perform worse?* A third analysis judges every night together. It compares each part of the sky (altitude band, compass direction, side of the pier) with the rest of the same nights, which removes each night's seeing. A night counts toward a comparison only if it observed at least two parts of the sky, and a part is judged only when several nights support it. It also reports the parts of the sky no night reached, so they are not mistaken for parts that performed well. A separate summary lists the findings that recur on several nights, because one bad night can be weather and a repeat points at the equipment or the routine.
+Four rules keep the analysis honest.
 
-**Verdicts about the data are reused, not repeated.** Whether a star clips at an exposure length is a property of the pixels alone, so the science side judges it when it stacks a target, and Control quotes that verdict and its recommended exposure. Control counts saturated pixels itself only for a target the science side has not stacked. Saturation advice covers spectroscopy only: in a deep imaging field the brightest stars clip at any useful exposure, and the frame records do not say which star is the target.
+- **Verdicts about the data are reused.** Whether a star clips depends on the pixels alone, so the science side judges it when it stacks a target, and control quotes that verdict. Saturation advice covers spectroscopy only, since in a deep imaging field the brightest stars clip at any useful exposure.
+- **A night is judged only against earlier nights.** Otherwise a bad night would raise its own limit. A night with too little earlier history gets its numbers but no verdict.
+- **Limits follow the match.** A past night on the same guide optics but different imaging equipment is judged with lower confidence. A night on different guide optics is not judged.
+- **Results are not stored.** A stored recommendation would be wrong as soon as the equipment, and so every limit, changed.
 
-**A night is judged only against earlier nights.** The baseline limits of §2.5.5b come from the equipment's own history. A history that contained the night being judged, or nights after it, would let a bad night raise the limit it is compared with, and a run of poor nights would make each other look normal. Each night is therefore compared with the equipment's nights before it, and a night with too little earlier history gets its numbers but no verdict.
+**No polar alignment estimate.** The incumbent does not keep its polar alignment result, and this architecture makes no estimate of it from guiding. A polar misalignment makes declination drift follow a fixed pattern in hour angle, and the net declination corrections recorded on real nights did not follow it. They are reported only as the distance the guider moved the mount.
 
-**Limits apply by how well the equipment matches.** The limits are worked out for the equipment in use now. A past night on the same guide optics but unknown or different imaging equipment is judged with lower confidence, and a night on different guide optics is not judged at all.
+<!-- impl: wayfindinglib.session_analysis.pipeline_base.SessionAnalysisPipeline -->
+<!-- impl: wayfindinglib.session_analysis.guiding.pipeline.GuidingSessionPipeline -->
+<!-- impl: wayfindinglib.session_analysis.capture.pipeline.CaptureSessionPipeline -->
+<!-- impl: wayfindinglib.session_analysis.sky.pipeline.SkySessionPipeline -->
+<!-- impl: wayfindinglib.session_analysis.recurring_issues.find_recurring_issues -->
+<!-- impl: wayfindinglib.session_analysis.live_status.summarize_live_session -->
+<!-- impl: wayfindinglib.session_analysis.guiding.processing.measure_exposure_feasibility -->
+<!-- impl: wayfindinglib.analytics.guide_exposure_ladder.analyze_guide_exposure_ladder -->
+<!-- impl: wayfindinglib.analytics.alignment_sessions.group_alignment_attempts -->
 
-**Results are not stored.** A stored recommendation would be wrong as soon as the equipment, and so every limit, changed. Each analysis is computed from the stored samples and the equipment's current limits.
+### 6.10 Design invariants
 
-**No polar alignment estimate.** The incumbent software does not keep the result of its polar alignment routine, and this architecture makes no estimate of it from guiding. The net declination corrections were tested as a stand-in. A polar misalignment makes declination drift follow a fixed pattern in hour angle, and the corrections recorded on real nights did not follow it: corrections of opposite sign appeared at nearly the same hour angle. They are reported as what they are, the distance the guider moved the mount, and nothing more.
+- **No upward dependency.** Control never depends on planning or execution.
+- **One interface for each device type, not each protocol.** A second protocol needs no change above the driver layer.
+- **Configured envelope respected.** A commanded slew is checked against the active telescope's configured altitude range and, where enabled, its hour-angle bound before it is issued.
+- **Corrections are pure.** Correction computation is a pure function of its inputs. Issuing is a separate, delegation-gated step.
+- **Unknown is unsafe.** A stale, unparseable or unavailable assessment is treated as unsafe.
+- **Asymmetric enclosure hysteresis.** Closure is immediate. Reopening needs a settling period of safe readings.
+- **Estimates are not measurements.** Analysis reads only samples measured from a real star.
+- **Limits follow the equipment.** No limit is stored. Changing the equipment changes the limit.
 
-#### 2.5.6 Design Invariants
+## 7. Verification
 
-* **No Upward Dependency:** Observatory Control never depends on Observation Planning or Observation Execution.
-* **One Interface Per Device Type, Not Per Protocol:** a device's hardware-control interface is defined by what kind of device it is (mount, camera, focuser, filter wheel, enclosure), never by which wire protocol commands it; a device's protocol is a per-device configuration choice, and a second protocol implementing the same interfaces requires no change above the driver layer.
-* **Configured Envelope Respected:** commanded pointing is validated against the active telescope's configured altitude and hour-angle envelope, resolved from the equipment catalog and evaluated at the site profile's position, before being issued.
-* **Uniform Device Vocabulary:** every device exposes summary state in the same five-state vocabulary, whatever its type or underlying driver.
-* **Authority Is Checked, Not Assumed:** a correction computed by this function is issued to hardware only where the delegation policy records that capability as authoritative.
-* **Corrections Are Pure:** correction computation is a pure function of its measurement and calibration inputs; issuing is a separate, delegation-gated step. This is what allows the identical computation to serve the shadowed and authoritative states.
-* **Unknown Is Unsafe:** a safety assessment that is stale, unparseable, or unavailable is treated as unsafe, never as permission to continue.
-* **Asymmetric Enclosure Hysteresis:** closure is immediate on an unsafe verdict; reopening requires a configured continuously-safe settling period.
-* **Interlock Before Motion:** enclosure and mount motion are each validated against the other's position before being commanded.
-* **Safe State Is Ordered And Bounded:** the safe-state sequence executes in the specified order with a bound on each step, recording the outcome of each.
-* **Estimates Are Not Measurements:** a stored sample names its origin, and analysis reads only samples measured from a real star.
-* **Limits Follow The Equipment:** no performance limit is stored. Every limit is derived from the equipment in use, so changing the equipment changes the limit with no other step.
-* **Earlier Nights Only:** a night is compared with its equipment's history before it, never with itself or later nights.
-* **Science Verdicts Are Reused:** a property of the data alone, such as whether a star clipped, is judged once on the science side. Control quotes that verdict and does not repeat the judgement.
-* **Insufficient Data Is Stated:** a limit without enough data behind it reports that and carries no value. It is never replaced by a default.
+Verification favors real transport and real persistence over mocks wherever practical, backed by a hardware simulator for end-to-end coverage.
 
-## 3. Discussion
+### 7.1 Library-wide structural checks
 
-This architecture revises five assumptions common in amateur observatory automation:
+Five checks apply across the whole library. A *static* check reads the import graph of the source without running it. A *runtime* check starts a fresh interpreter, runs the code, and lists the modules it loaded. Imports made only for type checking are ignored by both.
 
-1. **A session concerns one target.** Structuring the session record around an ordered queue rather than a single reference makes the multi-target night the normal case rather than an unsupported one.
-2. **Replacing incumbent control software is a cutover.** Treating it as one discards proven behavior in a single unmeasured step. Modeling delegation as a per-capability state with a defined six-phase progression (§2.1.3) keeps the observatory operational throughout, makes each transfer of responsibility an evidence-gated decision, and defines removal of the incumbent as the endpoint rather than leaving it as an option.
-3. **Validating a replacement requires running it.** The shadowed state rejects this. Because intent computation is identical across delegation states and only the disposition differs, a capability is measured against the incumbent on every real night, at full fidelity, while issuing nothing — so the evidence for promoting it is gathered at zero operational risk, about the exact code that will later run.
-4. **Safety is a feature of the observing loop.** Placing environmental monitoring and enclosure control inside the sequence that runs a night makes protection conditional on that sequence running, which is precisely wrong: the hours an observatory most needs protection are the ones when nothing is observing. Placing safety in Control, exempt from the shadow requirement and functional with no session present, makes protection independent of intent.
-5. **Planning, control, and execution are one undifferentiated concern.** Separating what to image from how to operate equipment from carrying a plan out — with Execution alone permitted to depend on the other two — means the two lower functions can each be proven correct on their own.
+- **Layering conformance (static).** Contracts assert foundation independence, control and planning peerage, and execution's downward-only dependency.
+- **Execution is optional (static and runtime).** Only the composition root, the entry point that builds all three functions, may import execution. A runtime test uses control and planning and asserts that no execution module was loaded.
+- **Safety runs without execution (runtime).** A test runs the safety monitor, the enclosure interlock and the safe-state sequence and asserts that no execution module was loaded, since safety that needs a session is not safety.
+- **Planning is hardware-free (static and runtime).** Planning may not reach any hardware driver, directly or through the foundation. A runtime test plans a night and asserts that no driver or control module was loaded.
+- **Cross-library dependency (static).** The science library imports nothing from this one.
 
-## 4. Conclusion
+The [Wayfinding library implementation](./Wayfinding_Library_Implementation.md) paper names the files that hold each check.
 
-This paper presented a three-function architecture whose purpose is to operate a single-observer observatory unattended and to replace the incumbent third-party control software in doing so. Observatory Control and Observation Planning are independent peer functions, with Observation Execution built on top of both and required by neither; environmental safety and enclosure control sit in Control, where they function with no plan and no session in existence. Cutting across the three is a per-capability delegation model in which six capabilities — mount control, alignment, guiding, focus, capture orchestration, and safety — independently occupy a delegated, shadowed, or authoritative state, progressing through the six phases of Table 1 on recorded evidence, ending with no capability delegated and the incumbent removed. Section 2 above details the concrete implementation and the promotion gate defined for each phase.
+<!-- impl: wayfindinglib.test.import_probe.wayfindinglib_modules_loaded_by -->
+
+### 7.2 Delegation promotion gates
+
+A phase of Table 1 is entered only when its gate is met. Table 6 states each gate in words, and the implementation paper gives the counts and rates. Every one is a conservative design estimate, because no past divergence measurements exist to derive one from. The library records the evidence a gate needs, which is divergence records and commissioning runs (drills whose evidence arises outside any night), but does not apply a gate. The operator reads the evidence and decides, and the policy then checks the rules of Section 2.3.
+
+**Table 6.** Delegation phase promotion gates.
+
+| Entering phase | Gate | Threshold origin |
+| --- | --- | --- |
+| 1 Direct control | Mount commands run through this system over several nights with the incumbent disengaged. The envelope check rejects an out-of-envelope command on real hardware. No unintended motion occurs. | Design estimate. |
+| 2 Shadowed correction | A guider calibration and a focus model exist. All three corrections run on every real night with no commanded motion attributable to this system. | None. Shadowing issues nothing. |
+| 3 Assumed correction | Alignment and guiding each reach a large number of paired comparisons, and focus a smaller number. The agreement rate is high for each. The mean signed difference is within half the tolerance, which rules out a steady bias. No sign or axis is inverted. | Design estimates. |
+| 4 Full authority | With corrections authoritative, guiding RMS is not worse than the Phase 2 baseline by more than a small allowance. No guide-star loss goes unrecovered. Several meridian flips complete, spanning both pier sides. Cooling reaches its target every session. | Design estimates. |
+| 5 Unattended | A hardware enclosure interlock independent of this system is installed and verified. The safety monitor gives correct verdicts for induced stale, absent and unsafe readings. The safe-state sequence is verified end to end from each trigger (an unsafe verdict, recovery exhaustion and watchdog expiry), including with the controlling process killed. Fault recovery is exercised against an induced fault. | Design estimates. The interlock is a categorical precondition. |
+
+The Phase 4 guiding baseline can be measured only during the shadow phases. The no-issue behavior of shadowing must be shown against a stand-in control layer before any shadow drill runs on hardware.
+
+## 8. Limitations and assumptions
+
+Several parts of the architecture are units that take their hardware steps from the caller, and the code that wires them to hardware is not all present.
+
+- **Static placement.** Placement is resolved before the night and not repeated. The greedy rule is not guaranteed to give the best arrangement.
+- **Placement constraints.** Placement does not apply the hour-angle bound or plan around a flip. The night window comes from coarse sampling of the solar altitude.
+- **Imaging queue wiring.** The queue the application runs wires only a mount slew and a capture of each entry's exposures. The safe-state sequence, flip sequence, fault recovery and calibration routines take their hardware steps from the caller, and the queue calls none of them.
+- **Watchdog.** The watchdog and heartbeat format exist, but nothing writes the heartbeat or starts the watchdog, so loss of the controlling process is not yet covered.
+- **Enclosure interlock.** The check that lets the mount leave park only when the enclosure is open exists but the mount commands do not call it. Closing does check the mount's position. A hardware interlock is still required.
+- **Observer position.** Control reads the position from the mount first and falls back to the settings, so the single-source rule of Section 3.3 holds for planning only.
+- **Device summary state.** The library does not yet read the raw signals for every device role, and the queue passes no device states to execution.
+- **Own guide loop and protocols.** This system's own guide loop runs only against a simulated guider, and only INDI implements the hardware interfaces.
+- **Advice.** The variable-star count in the target quality advisory is always zero, because the star catalog cannot yet list a target's stars cheaply.
+- **Equipment-derived limits.** A new setup gets numbers without verdicts until its history builds. The periodic-error model assumes a single sinusoid.
+
+## 9. Conclusion
+
+This paper presented a three-function architecture for operating a single-observer observatory unattended and for replacing the current third-party control software in stages. Control and planning are independent peers, with execution built on both and required by neither. Safety sits in control, where it works with no plan and no session. A per-capability delegation model moves six capabilities through the phases of Table 1 on recorded evidence until the incumbent is removed. Planning places packages with one stated rule and names a reason for every package that does not fit. Control derives its limits from the equipment in use, judges each night only against earlier nights, and treats missing safety information as unsafe.
+
+The main limits are in Section 8. Future work follows from them: closed-loop re-placement, wiring the flip, recovery and safe-state sequences into the queue, connecting the watchdog, a validation register for the library's settings, and the first measured spread of divergence sizes from the shadow phase.
 
 ## Acknowledgments
 
-This architecture builds on the open-source observatory control ecosystem — the PHD2 autoguiding application [3], the INDI device control protocol [4], and the KStars/Ekos suite [5] whose functions it is designed to assume — and on the layered, domain-model-centered design established for this repository's `Astrometrics_Library_Architecture.md`. It also draws on the published control-system and scheduler design of the Vera C. Rubin Observatory [1], [2] as precedent for its uniform device state vocabulary, its treatment of safety as a constraining layer, and its planner-feeds-a-queue execution structure.
+This architecture builds on the open-source observatory control ecosystem: the PHD2 autoguiding application [2], the INDI device control protocol [3], and the KStars and Ekos suite [1] whose functions it is designed to assume. It follows the layered, domain-model-centered design of the Astrometrics library architecture. It also draws on the published control-system and scheduler design of the Vera C. Rubin Observatory [5], [6] as precedent for its device state vocabulary, its treatment of safety as a constraining layer, and its planner-feeds-a-queue execution structure. The one-interface-for-each-device-type pattern follows ASCOM Alpaca [4].
 
 ## References
 
-[1] Vera C. Rubin Observatory, "Rubin Observatory Controls Documentation," 2024. [Online]. Available: https://obs-controls.lsst.io/
+<!-- vale off -->
 
-[2] E. Naghib, P. Yoachim, R. J. Vanderbei, A. J. Connolly, and R. L. Jones, "A Framework for Telescope Schedulers: With Applications to the Rubin Observatory LSST," *The Astronomical Journal*, vol. 157, no. 4, p. 151, 2019.
+[1] <a id="ref-1"></a>J. Mutlaq et al., "KStars: Free, open source, cross-platform astronomy software," KDE Project. Accessed: Oct. 15, 2026. [Online]. Available: <https://edu.kde.org/kstars>
 
-[3] A. Galasso, B. Waddington *et al.*, "PHD2: Open Source Telescope Autoguiding Software," Open PHD Guiding Project, 2024. [Online]. Available: https://openphdguiding.org
+[2] <a id="ref-2"></a>Open PHD Guiding Project, "PHD2: Open source telescope autoguiding software." Accessed: Oct. 15, 2026. [Online]. Available: <https://openphdguiding.org>
 
-[4] E. C. Downey, "INDI: Instrument-Neutral Distributed Interface," Protocol specification, 2023. [Online]. Available: https://www.indilib.org
+[3] <a id="ref-3"></a>INDI Library, "INDI: Instrument-Neutral Distributed Interface." Accessed: Oct. 15, 2026. [Online]. Available: <https://www.indilib.org>
 
-[5] J. Mutlaq *et al.*, "KStars/Ekos: Astronomy Software and Observatory Control Suite," KDE Project, 2024. [Online]. Available: https://edu.kde.org/kstars
+[4] <a id="ref-4"></a>ASCOM Initiative, "ASCOM Alpaca API reference," Version 10, Jul. 2025. [Online]. Available: [https://ascom-standards.org/](https://ascom-standards.org/AlpacaDeveloper/ASCOMAlpacaAPIReference.html)
 
-## Appendices
+[5] <a id="ref-5"></a>Vera C. Rubin Observatory, "Rubin Observatory controls documentation," 2024. [Online]. Available: <https://obs-controls.lsst.io/>
 
-### Appendix A: Capability Roadmap
+[6] <a id="ref-6"></a>E. Naghib, P. Yoachim, R. J. Vanderbei, A. J. Connolly, and R. L. Jones, "A framework for telescope schedulers: With applications to the Large Synoptic Survey Telescope," *Astron. J.*, vol. 157, no. 4, p. 151, 2019.
 
-Table 7 tracks capability status against the roadmap, sequenced to the delegation phases of Table 1. Each phase must be independently useful, and a night's science must never depend on unfinished code.
+<!-- vale on -->
 
-**Table 7.** Capability roadmap, sequenced by delegation phase.
+## Appendix A. Notation
 
-| Capability | Phase | Status | Target direction |
-|---|---|---|---|
-| Session recording | 0 | Completed. Passive telemetry and environment capture with checkpointed persistence. | Broaden device coverage as later phases require. |
-| Incumbent session log ingestion | 0 | Completed. Guiding and session logs read, tied to the equipment they used, and stored so that reading twice gives the same result. | Feed the session-quality analyses. |
-| Equipment-derived performance envelope | 0 | Completed for geometry, sensor, physical-budget, and baseline limits. | Applied to every stage of session-quality analysis. |
-| Guiding session-quality analysis | 0 | Completed: pre-processing, processing, and post-processing for one night of guiding, computed on demand. | Focus and cross-night sky-coverage analyses. |
-| Exposure-length view, sky-position analysis, recurring issues | 0 | Completed: computed on demand from the recorded nights. | Guide-signal analysis across nights, focus analysis. |
-| Capture session-quality analysis | 0 | Completed: pre-processing, processing, and post-processing for one night of captured frames, reusing the science side's saturation verdicts. | Exposure-count advice once the camera's noise is measured, focus, and cross-night sky-coverage analyses. |
-| Multi-target night scheduling | 0 | Specified by this revision. | Constraint-based placement with diagnosable infeasibility. Usable at every phase, since planning needs no hardware. |
-| Quality-informed target suggestions | 0 | Specified by this revision. | Archive-state advisory feeding authoring and, optionally, priority. |
-| Site-aware constraint modeling | 0 | Specified by this revision. | Horizon obstructions and per-package visibility floors. |
-| Persisted per-rig pointing envelope | 1 | Specified by this revision. | Replace the global safety constraint with a per-telescope envelope evaluated at the site profile's position. |
-| Uniform device summary state | 1 | Specified by this revision. | Five-state vocabulary published per device, including fault. |
-| Direct mount command authority | 1 | Specified by this revision. | Slew, park, and tracking commanded through this system with the incumbent disengaged. |
-| Guider calibration capture | 2 | Specified by this revision. | Measure and persist the pixel-to-mount-motion relationship. |
-| Focus model capture | 2 | Specified by this revision. | Measure and persist per-filter offsets and the thermal coefficient. |
-| Pointing correction computation | 2 | Specified by this revision. | Convert solved fields into mount corrections; shadowed against the incumbent aligner. |
-| Guiding correction computation | 2 | Specified by this revision. | Convert centroids into signed mount pulses; shadowed against the incumbent guider. |
-| Focus correction computation | 2 | Specified by this revision. | Convert measured focus curves into focuser positions; shadowed against the incumbent focuser. |
-| Divergence recording and promotion gating | 2 | Specified by this revision. | Durable per-capability comparison evidence, and the gate each promotion is decided on. |
-| Alignment, guiding, and focus authority | 3 | Absent. | Promote all three on recorded evidence; disengage the incumbent from each. |
-| Capture sequencing authority | 4 | Absent. | Execute a planned capture sequence end to end. |
-| Meridian flip sequencing | 4 | Specified by this revision. | Bounded interrupt-flip-reacquire-resume across a meridian crossing (§2.4.5). |
-| Camera thermal management | 4 | Absent. | Controlled cooldown before a session and warm-up after. |
-| Environmental safety assessment | 5 | Specified by this revision. | Continuous four-verdict assessment with staleness treated as unsafe (§2.5.4). |
-| Enclosure control and interlock | 5 | Specified by this revision. | Roof or dome as a first-class device, mutually interlocked with mount position. |
-| Safe-state sequencing | 5 | Specified by this revision. | The ordered, bounded sequence of Table 6. |
-| Bounded fault recovery | 5 | Specified by this revision. | Recovery attempts governed by policy, escalating to safe state on exhaustion (§2.4.6). |
-| External liveness watchdog | 5 | Specified by this revision. | Out-of-process observation of the controlling system's liveness (§2.5.5). |
-| Hardware enclosure interlock | 5 | **Out of scope — externally required.** | Independent of this system; unattended operation is unsafe without it (§2.5.5). |
-| Closed-loop re-placement | Beyond 5 | Absent. | Re-place remaining queue entries during the night in response to observed conditions (§2.3.2). |
+Each symbol has one meaning in this paper. Equations are numbered in order of appearance.
 
-### Appendix B: Glossary
+| Symbol | Meaning | Unit |
+| --- | --- | --- |
+| $\rho$, $\ell$, $F$ | Pixel scale; pixel pitch; focal length | arcsec/pixel; µm; mm |
+| $R$; $n$, $n_{\text{in}}$ | Agreement rate; comparisons, and comparisons within tolerance | none; count |
+| $H_{\text{flip}}$, $t_{\text{flip}}$ | Hour angle past transit at which a flip starts; flip delay after transit | °; min |
+| $j$, $t_j$; $t_1$, $m$ | Recovery attempt index; wait before attempt $j$; first wait and growth factor | count; s; s, none |
+| $\Delta\alpha$, $\Delta\delta$; $\Delta\alpha_{\text{model}}$, $\Delta\delta_{\text{model}}$ | Measured pointing offset; offset predicted by the pointing model | arcsec |
+| $r$; $\epsilon_{\text{align}}$ | Pointing error not explained by the model; alignment tolerance | arcsec |
+| $d$, $v$; $g$, $\epsilon_{\text{dead}}$ | Guide-star drift; guide rate; aggressiveness; deadband | arcsec; arcsec/s; none; arcsec |
+| $p$, $p_{\max}$ | Signed guide pulse duration; longest pulse | s |
+| $A$, $P$; $e(t)$ | Peak-to-peak amplitude and period of the periodic error; predicted error at time $t$ | arcsec; s; arcsec |
+| $x_i$, $w_i$; $\hat{w}$, $\bar{w}$ | Focuser position and star width of sample $i$; fitted and mean star width | steps; pixel |
+| $a$, $b$, $c$; $Q$; $x^{*}$ | Parabola coefficients; fit quality; selected focuser position | various; none; steps |
+| $W$; $\phi$ | Star width (FWHM) over the equipment's own frames; largest accepted fractional widening | arcsec; none |
+| $\beta$; $s_{\max}$ | Blur width that guiding error or trailing may add; largest acceptable guiding error per axis | arcsec |
+| $k$; $\tilde{y}$, $\hat{\sigma}$; $L_{\text{low}}$, $L_{\text{high}}$ | Baseline multiplier; median and robust spread of logged values; lower and upper limits | none; ln of the quantity; unit of the quantity |
 
-| Term | Definition |
-|---|---|
-| Authoritative (delegation state) | The state in which this system performs a capability and the incumbent is disengaged from it. |
-| Autoguiding | Closed-loop correction of mount tracking errors using a continuously imaged guide star. |
-| Avoidance Zone | A site-specific azimuth range with a locally raised visibility floor, representing a horizon obstruction. |
-| Calibration Advisory | Archive-derived information on existing calibration frame inventory, surfaced during package authoring. |
-| Capability Delegation | The state — delegated, shadowed, or authoritative — recording which system performs one hardware-facing capability. |
-| Checkpoint | Persistence of the session record mid-run, bounding data loss to one recording interval. |
-| Commissioning Run | The append-only record of one commissioning drill and what it observed against a phase gate's criteria. |
-| Delegated (delegation state) | The state in which the incumbent performs a capability and this system neither computes nor commands it. |
-| Delegation Phase | One named combination of every capability's delegation state, forming a fully operational configuration (Table 1). |
-| Device Summary State | A device's lifecycle in the uniform five-state vocabulary: offline, standby, disabled, enabled, fault. |
-| Dew Point | Temperature at which ambient moisture condenses; optics approaching it risk condensation. |
-| Dither | Deliberate small pointing offset between exposures that decorrelates fixed sensor defects. |
-| Divergence Record | One measured comparison between an action this system computed and the action the delegated system took, persisted whether or not the two agreed. |
-| Enclosure | The observatory's roof or dome, modelled as a first-class device with its own motion state and interlock. |
-| Fault Record | One device fault, the bounded recovery attempts made against it, and their outcome. |
-| Fixed-Time Disposition | A placement request pinned to a specific clock time rather than the soonest available window. |
-| Focus Model | The measured relationship between focuser position, temperature, and filter. |
-| Frame Type | The role of a requested exposure — light, dark, flat, or bias — within an observation package. |
-| Guider Calibration | The measured relationship between guide-camera pixels and mount motion: angular scale, camera rotation, per-axis rate. |
-| Guiding Sample | Structured record of one guiding measurement: drift, issued correction, signal quality. |
-| Half-Flux Radius | The radius containing half a star's total flux; the star-size measure a focus curve is built from. |
-| Meridian Flip | Mount reorientation required when a tracked target crosses the local meridian. |
-| Mosaic Panel Set | A group of sibling observation packages generated from one multi-panel imaging request. |
-| Night Window | The astronomically usable portion of a calendar night, bracketed by a configured solar-altitude threshold. |
-| Observation Package | A reusable imaging request for one target, authored independent of any specific night. |
-| Observation Session | The durable record of one observing night: its planned queue, placement context, telemetry, divergence records, and fault records. |
-| Pointing Correction | The mount adjustment computed from a solved field's difference from the commanded position. |
-| Promotion Gate | The recorded-evidence criterion a capability must meet to advance its delegation state. |
-| Queued Observation Package | One placed, time-scoped, self-contained instance of a package within a session's queue. |
-| Safe State | The physically protected observatory configuration reached by the ordered sequence of Table 6. |
-| Safety Assessment | The current environmental verdict — safe, marginal, unsafe, or unknown — with the rule that produced it. |
-| Settling Period | The interval conditions must remain continuously safe before the enclosure may reopen. |
-| Shadowed (delegation state) | The state in which the incumbent still performs a capability while this system independently computes and records what it would have done, issuing nothing. |
-| Staleness Bound | The age past which a safety reading is treated as unknown, and therefore as unsafe. |
-| Telemetry | Continuous operational measurements produced by running equipment, as opposed to science data. |
-| Watchdog | An out-of-process observer of the controlling system's liveness, whose loss triggers the safe state. |
-| Weather Sample | Structured record of ambient conditions at one point in time, recorded for context rather than for safety. |
+## Appendix B. Design rules
 
-### Appendix C: Architectural Concepts
+Table 7 indexes the named rules of this paper. Each is stated in full in the section given.
 
-| Concept | Description |
-|---|---|
-| Execution Is Optional | The standing rule that nothing outside Observation Execution may depend on it. |
-| Litmus Test Boundary | The rule separating this library from the image-processing library: hardware-dependent capability lives here; capability usable from archived data alone does not. |
-| Per-Capability Delegation | Treating which system performs a capability as runtime configuration carried independently per capability, rather than as a structural boundary. |
-| Computed Corrections Pass Through Shadow | The rule that any capability computing a correction reaches authority only by way of a measured shadow phase. |
-| Safety Is Never Shadowed | The rule that safety may occupy only the delegated or authoritative state, since a safety system that recognizes a hazard without acting is worse than none. |
-| Single Command Authority | The rule that at most one system holds actuation authority for a device at a time. |
-| One Intent Path, Every Phase | The rule that intent computation is identical across delegation states, so shadow evidence describes exactly the code that will later run. |
-| Evidence Is Symmetric | The rule that divergence records capture agreement as well as disagreement, since a promotion gate is a rate. |
-| Uniform Device Vocabulary | The rule that every device publishes lifecycle state in one five-state vocabulary, adopted from Rubin. |
-| One Interface Per Device Type, Not Per Protocol | The rule that a device's hardware-control interface follows what kind of device it is, never which wire protocol commands it, so a second protocol needs no change above the driver layer. |
-| Unknown Is Unsafe | The rule that a missing or stale safety verdict produces closure, reversing the architecture's general tolerance for absent readings. |
-| Asymmetric Enclosure Hysteresis | The rule that closing is immediate and reopening requires a settling period, so a threshold-straddling night cannot cycle the roof. |
-| Interlock Before Motion | The rule that enclosure and mount motion are each validated against the other's position before being commanded. |
-| Recovery Is Bounded | The rule that fault recovery has an attempt bound whose exhaustion escalates to the safe state, since an unbounded retry is indistinguishable from a hang. |
-| Single Source Of Observer Position | The rule that observer coordinates always resolve from the site profile, never from a connected device. |
-| Template/Instance Separation | The distinction between a reusable observation package and its frozen, self-contained, session-scoped queued instance. |
-| Diagnosable Infeasibility | The requirement that every unplaced package carry a specific reason from a closed named set. |
-| Explicable Ordering | The requirement that a session record enough to reconstruct why its queue is ordered as it is. |
-| Advisory, Not Authority | The rule that archive-derived information may only ever inform a package's standing. |
-| Package Generation | Expanding one composite request into a sibling set of independently placed packages. |
-| Quality-Data Conduit | Identifier reference from a session to a science-side target session, followed to read quality records with no dedicated API. |
+**Table 7.** Index of design rules.
 
-### Appendix D: Terminology Correspondence with the Rubin Control System
-
-Table 8 maps this architecture's vocabulary onto the Vera C. Rubin Observatory's. Where the correspondence is partial, the divergence is stated; §2.1.1 discusses the three structural divergences in full.
-
-**Table 8.** Terminology correspondence.
-
-| This architecture | Rubin equivalent | Correspondence |
-|---|---|---|
-| Device Summary State | Commandable component summary state | Direct — the same five states, adopted deliberately [1]. |
-| Observatory Control (function) | Observatory Control System | **Partial.** Rubin's term also encompasses the scheduler and script queue; this architecture's excludes both (§2.1.1). |
-| Observation Planning (function) | Scheduler | Same role: decide what to observe and in what order. |
-| Observation Execution (function) | Script queue | Same role: sequence placed work against the hardware layer. |
-| Observation Package | Observing block / script | Partial: Rubin's is a validated executable procedure; this is a declarative request expanded at execution time. |
-| Queued Observation Package | Script queue entry | Direct — a placed instance with its own status progression. |
-| Safety Assessment | Environmental awareness monitoring | Same role: a continuously refreshed environmental verdict that constrains operation from outside it. |
-| Safe State | Safe / shutdown state | Same role, far smaller scope: one mount, one enclosure, one sensor. |
-| Enclosure | Dome component | Same role; Rubin's is an independently owned component, this is one device within a single Control function. |
-| Watchdog | Heartbeat monitoring | Same role: liveness observed from outside the observed process. |
-| Fault Record and bounded recovery | Fault state and recovery to standby | Direct in shape — recover through standby, escalate on exhaustion. |
-| Night Window | Almanac-derived observing window | Same role; this architecture resolves it by coarse solar-altitude sampling rather than exact ephemeris bracketing. |
-| Priority, with bounded advisory adjustment | Basis function weights | **Partial.** Rubin composes hundreds of weighted factors; this uses one criterion plus a capped, opted-in boost. |
-| Unplaced Package Diagnostic | Basis function returning negative infinity | **Deliberate divergence.** Rubin encodes infeasibility inside the score; this reports it on a separate channel as a named reason (§2.3.2). |
-| Placement resolved before the night | Continuous in-night re-scoring | **Deliberate divergence.** Rubin re-decides in closed loop; this resolves a static, reviewable queue in advance (§2.3.2). |
-| Session telemetry record | Engineering facilities database | **Partial.** Rubin routes telemetry to a dedicated time-series store; this embeds bounded samples in the session record. |
-| Commissioning Run | Commissioning campaign record | Same role at vastly different scale: durable evidence that a capability met its criteria before being trusted operationally. |
-| Capability Delegation | *(no direct equivalent)* | This architecture's own construct, motivated by incremental replacement of incumbent software — a concern a purpose-built facility does not have. |
-
-### Appendix E: Headless API Correspondence with KStars / Ekos
-
-Table 9 maps `wayfindinglib`'s headless Python API functions onto the desktop GUI modules of **KStars / Ekos**. Where Ekos operates interactively via Qt GUI dialogs, `wayfindinglib` exposes equivalent capabilities programmatically via astrometrics methods (`Wayfinder.control`, `.planning`, `.execution`).
-
-**Table 9.** KStars / Ekos GUI module to `wayfindinglib` API mapping.
-
-| Ekos Subsystem / Feature | `wayfindinglib` High-Level Interface API & Subsystem | Functional Equivalency |
-|---|---|---|
-| **Ekos Mount Module** | `wayfinder.control.mount.slew()`, `park()`, `unpark()`, `set_tracking()` | Direct API equivalent for mount slewing, park/unpark, and tracking rate configuration (`hardware_operations.py`). |
-| **Ekos Align Module** | `wayfinder.control.mount.compute_pointing_correction()` | Headless plate-solving alignment and pointing error correction ($\Delta \text{RA}, \Delta \text{Dec}$) calculation (`pointing_correction.py`). |
-| **Ekos Focus Module** | `wayfinder.control.imaging.compute_focus_correction()`, `run_autofocus()` | Headless V-curve autofocus fitting and thermal temperature compensation ($dT/dz$) (`focus_correction.py`). |
-| **Ekos Guide Module** | `wayfinder.control.guiding.compute_correction()`, `status(include=["live"])`, `wayfinder.control.imaging.capture_image(dither=...)` | Headless PHD2 guider event stream ingestion, pulse correction calculation, and dither orchestration (`guiding_correction.py`). |
-| **Ekos Scheduler** | `wayfinder.planning.create_plan(kind="scheduled_session")` | Headless night window calculation, target visibility scoring, and sequence queue scheduling (`scheduling.py`). |
-| **Ekos Capture Module** | `wayfinder.planning.create_plan(kind="package")` | Declarative request authoring for light and calibration exposure sequences (`observation_package.py`). |
-| **Ekos Dome & Weather Interlock** | `wayfinder.control.safety.execute_safe_state()`, `safety_monitor` | Headless out-of-process safety monitoring, rain/cloud interlock execution, and emergency parking (`safe_state.py`). |
-| **Ekos Session Recording** | `wayfinder.execution.advance_session()`, `session_recorder` | Live session recording, status progression tracking, and divergence logging against incumbent software (`session_runner.py`). |
-
-
-## 3. Verification
-
-Verification follows the posture established for this library's recording-only predecessor: real transport and real persistence over mocks wherever practical, supplemented by a hardware simulator for end-to-end coverage.
-
-**Library-wide structural checks.** Five checks apply across the whole library. They take two forms. A *static* check reads the import graph of the source code without running it; it sees every import, including ones made only on a rarely used path. A *runtime* check starts a fresh interpreter, runs the code, and lists the modules it loaded; it needs a fresh interpreter because the test run as a whole loads every layer on purpose. Imports made only for type checking are ignored by both, since they never run.
-
-* **Layering conformance** (static). Import-graph contracts in the project's lint configuration assert Foundation independence, Control/Planning peerage, and Execution's downward-only dependency. Within the Foundation, they also assert that the domain models import no calculation, reader, or store, so the models stay plain schemas.
-* **Execution is optional** (static and runtime). A contract allows only the composition root (the entry point that builds all three functions together) to import Execution. A runtime test in the library's own test suite builds Control and Planning, uses both, and asserts that no Execution module was loaded.
-* **Safety runs without Execution** (runtime). A test in the same place runs the safety monitor, the enclosure interlock, and the full safe-state sequence as the watchdog triggers it, and asserts that no Execution module was loaded, since safety that requires a session is not safety.
-* **Planning is hardware-free** (static and runtime). A contract forbids Planning from reaching any hardware driver, counting indirect chains through the Foundation as violations. A runtime test with the Planning tests imports Planning, reads the equipment catalog, and builds a session for the active rig, then asserts that no hardware-driver or Control module was loaded.
-* **Cross-library dependency** (static). A contract asserts that the science library imports nothing from this library.
-
-`Wayfinding_Library_Implementation.md` names the files that hold each check.
-
-**Delegation promotion gates.** Each phase of the architecture paper's Table 1 is entered only when the prior phase's gate is met. Table 7 states each. Every threshold is an unvalidated design estimate chosen to be conservative rather than derived from prior data — there is no body of historical divergence measurements to derive one from, the same disclosure posture Appendix A applies to configuration defaults. Thresholds are expected to be revised once Phase 2 produces the first real distribution of divergence magnitudes.
-
-**Table 7.** Delegation phase promotion gates.
-
-| Entering phase | Gate | Threshold origin |
-|---|---|---|
-| **1** Direct Control | Mount slew, park, unpark, and tracking commanded through this system across ≥ 2 nights and ≥ 20 commands with the incumbent disengaged from the mount; envelope validation demonstrated to reject an out-of-envelope command on real hardware; every device reporting a `DeviceSummaryState`; zero unintended motion events. | Design estimate; command count chosen to exercise each operation several times, not statistically derived. |
-| **2** Shadowed Correction | A `GuiderCalibration` and a `FocusModel` exist for the active pairing; all three correction functions execute on every real night without issuing commands, asserted by the spy test and confirmed by zero commanded motion attributable to this system. | No numeric gate — the shadowed state is safe by construction, since it issues nothing. |
-| **3** Assumed Correction | Over ≥ 5 nights: alignment and guiding each ≥ 500 paired comparisons, focus ≥ 30 paired sweeps; agreement rate ≥ 95% per capability; mean signed divergence within half the tolerance, ruling out systematic bias; zero sign or axis inversions; alignment converging within its iteration limit on ≥ 95% of attempts. | Design estimates. The 95% rate and half-tolerance bias bound are conservative choices; comparison counts approximate one night of guiding at typical cadence taken five times, and focus sweeps at typical trigger frequency. |
-| **4** Full Authority | Over ≥ 5 nights with corrections authoritative: guiding RMS not worse than the Phase 2 delegated baseline by more than 20%; zero unrecovered guide-star losses; ≥ 10 meridian flips completed and resumed with zero unrecovered; cooling reaching and holding target on every session. | Design estimates; the 20% allowance is a judgment about acceptable regression, not a measured tolerance. Flip count chosen to span both pier sides several times. |
-| **5** Unattended | **A hardware enclosure interlock independent of this system is installed and verified** (§2.5.7). Safety monitor yields correct verdicts against induced stale, absent, and unsafe readings; enclosure opens and closes under interlock across ≥ 20 cycles with zero interlock violations; `safe_state.execute()` verified end to end from each of its three triggers — unsafe verdict, recovery exhaustion, watchdog expiry — including with the controlling process killed; fault recovery exercised against an induced device fault. | Design estimates, except the interlock, which is a categorical precondition rather than a threshold. Cycle count chosen to exercise the mechanism repeatedly rather than derived. |
-
-Table 7 states what each gate requires; `Wayfinding_Library_Commissioning_Plan.md` states which script produces it, in what order, and what must already be built. That plan also records two sequencing constraints this table does not make visible: the delegated guiding baseline the Phase 4 gate compares against can only be measured during the shadow phases, and the shadow no-op assertion must pass against a spy control layer before any shadow drill runs on hardware.
-
-Each subsystem's own verification is detailed in its Empirical Verification Results subsection; all are currently pending.
+| Rule | Section |
+| --- | --- |
+| Execution is optional | 2.1 |
+| Litmus test boundary | 2.1 |
+| Computed corrections pass through shadow | 2.3 |
+| Safety is never shadowed | 2.3 |
+| Single command authority | 2.3 |
+| Template and instance separation | 3.3 |
+| Diagnosable infeasibility | 4.4 |
+| Advisory, not authority | 4.4 |
+| Recovery is bounded | 5.6 |
+| Evidence is symmetric | 5.8 |
+| One interface for each device type | 6.2 |
+| Unknown is unsafe | 6.5 |
+| Asymmetric enclosure hysteresis | 6.5 |
+| Interlock before closing | 6.6 |

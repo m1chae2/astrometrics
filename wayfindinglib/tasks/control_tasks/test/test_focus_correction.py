@@ -3,8 +3,8 @@
 Description: Verifies a known minimum is recovered from a synthetic
 V-curve, an ill-conditioned fit is rejected without moving, a fitted
 minimum outside the sampled span is clamped to it, and every sampled
-position is approached from one direction -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+position is approached from one direction -- the behavior
+`Wayfinding_Library_Architecture.md` Section 6.4 describes.
 """
 
 import pytest

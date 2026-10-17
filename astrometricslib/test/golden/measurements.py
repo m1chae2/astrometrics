@@ -81,15 +81,16 @@ SEQUENCE_REFERENCE_FRAME = LUMINANCE_FRAMES[0]
 SEQUENCE_MEASURED_RANKS = (10, 70)
 """Detections ranked 10 up to (not including) 70 are the measured stars.
 
-The ten brightest are skipped because they come closest to saturating. The
-rule follows ``VariabilityAnalyzer``, whose star list also starts below the
-brightest sources."""
+The ten brightest are skipped because they come closest to saturating. This
+slice is a fixed choice of this test. The pipeline's own star list
+(``VariabilityAnalyzer``) starts at the brightest detection."""
 
 SEQUENCE_ANCHOR_RANKS = (50, 100)
 """Detections ranked 50 up to (not including) 100 are the alignment anchors.
 
-This is the slice ``VariabilityAnalyzer.process_sequence`` hands to the
-worker as ``(x, y, flux)`` tuples."""
+This slice is a fixed choice of this test, handed to the worker as
+``(x, y, flux)`` tuples. The pipeline picks its anchors differently, with
+``select_alignment_anchors``."""
 
 SEQUENCE_EDGE_MARGIN_PX = 50
 """Measured stars closer than this to a frame edge are dropped.
@@ -103,8 +104,9 @@ CAMERA_NAME = "ZWO ASI533MM Pro"
 CLUSTER_CORE_ROW_COLUMN = (1493.0, 1485.0)
 """Where the cluster core sits in the spectroscopy frames, as (row, column).
 
-M 13 is a crowded cluster, so no single star is "the" zero-order star and the
-library's finder rejects the frames (that rejection is itself pinned). The
+M 13 is a crowded cluster, so no single star is "the" zero-order star. The
+library's point-source search finds nothing, and its extended-target search
+lands within a few pixels of the core (that result is itself pinned). The
 point used here is the brightest spot of the frame smoothed with a Gaussian
 of sigma 8 px, searched within 100 px of the frame centre. It is the same,
 to a pixel, on all five spectroscopy frames.
@@ -486,9 +488,11 @@ def measure_photometry(
 def measure_photometry_sequence() -> dict[str, float]:
     """Run the photometry worker over the five luminance lights.
 
-    The steps copy ``VariabilityAnalyzer.process_sequence``. The first light
-    is searched for stars with ``SourceDetector`` (3 sigma, FWHM 4 px, the
-    analyzer's first setting). Detections in `SEQUENCE_MEASURED_RANKS` that
+    The steps follow ``VariabilityAnalyzer.process_sequence``, except that the
+    measured stars and the anchors are fixed rank slices chosen by this test
+    (the pipeline picks anchors with ``select_alignment_anchors``). The first
+    light is searched for stars with ``SourceDetector`` (3 sigma, FWHM 4 px,
+    the analyzer's first setting). Detections in `SEQUENCE_MEASURED_RANKS` that
     sit at least `SEQUENCE_EDGE_MARGIN_PX` from every edge are the measured
     stars. Detections in `SEQUENCE_ANCHOR_RANKS` become the ``(x, y, flux)``
     anchors that line the later lights up with the first. The first light is

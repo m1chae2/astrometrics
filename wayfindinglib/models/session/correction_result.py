@@ -1,12 +1,14 @@
 """Purpose: Correction Algorithm Result Domain Models.
 
 Description: The computed records returned by the three Observatory
-Control correction algorithms (`Wayfinding_Library_Architecture.md`'s class
-diagram). Kept separate from `correction_config.py`,
+Control correction algorithms (`Wayfinding_Library_Architecture.md`
+Section 6.4; the classes are listed in `Wayfinding_Library_Implementation.md`
+Section 6.4). Kept separate from `correction_config.py`,
 which holds the tunable parameters these algorithms read rather than
 anything they produce.
 
-Per the "Corrections Are Pure" invariant, computing one of
+Per `Wayfinding_Library_Architecture.md` Section 6.10 ("Corrections are
+pure"), computing one of
 these records issues nothing to hardware -- issuing is a separate,
 delegation-gated step layered on top. Each record is recorded through
 the `DivergenceRecord` it contributes to while its capability is
@@ -20,8 +22,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class PointingCorrection(BaseModel):
     """One iteration of plate-solve pointing alignment.
 
-    `model_predicted_error_arcsec`/`unexplained_residual_arcsec` (M7b)
-    are `None` unless a session-scoped `MountPointingModel` was
+    `model_predicted_error_arcsec`/`unexplained_residual_arcsec`
+    (`Wayfinding_Library_Architecture.md` Section 6.7) are `None` unless a
+    session-scoped `MountPointingModel` was
     supplied: the systematic error the model predicts at this exact
     position, and the measured error still left over once that
     prediction is subtracted out. `converged` is judged against the
@@ -47,12 +50,13 @@ class PointingCorrection(BaseModel):
 
 
 class GuidingCorrection(BaseModel):
-    """One computed guiding pulse pair from a measured drift (Eq. 2).
+    """One computed guiding pulse pair from a measured drift (Equation (6)).
 
     `pulse_ra_ms`/`pulse_dec_ms` are signed: the magnitude is the pulse
     duration, the sign names the direction (issuing maps sign to the
     `TELESCOPE_TIMED_GUIDE_NS`/`_WE` pair `pulse_guide` already
-    writes), per the architecture document's "signed per-axis pulse durations."
+    writes), per `Wayfinding_Library_Architecture.md` Section 6.4 (the signed
+    pulse of Equation (6)).
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -80,7 +84,8 @@ class FocusCurvePoint(BaseModel):
 class FocusCorrection(BaseModel):
     """One autofocus run's sampled curve, fit, and selected position.
 
-    Per `Wayfinding_Library_Architecture.md`.
+    Per `Wayfinding_Library_Architecture.md` Section 6.4 (Equations (8) and
+    (9)).
     """
 
     model_config = ConfigDict(populate_by_name=True)

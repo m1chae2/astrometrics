@@ -2,13 +2,13 @@
 
 Description: What the science-side archive already knows about a
 target, surfaced to inform, never dictate, package authoring and
-scheduling priority (`Wayfinding_Library_Architecture.md`).
+scheduling priority (`Wayfinding_Library_Architecture.md` Section 4.2).
 Computed on demand from astrometricslib's public high-level interface, never
 recorded. `variable_star_candidate_count` is currently always zero --
 the science library's own stellar-object listing does not yet filter by
 target identifier, so the cross-reference is deferred rather than
 implemented against a workaround
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Section 8, "Advice").
 """
 
 from datetime import UTC, datetime

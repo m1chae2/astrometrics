@@ -2,7 +2,7 @@
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
 backed by `wayfindinglib/drivers/indi/enclosure_controller.py`'s
-`EnclosureController` (M6) -- the standard INDI Dome Interface's
+`EnclosureController` -- the standard INDI Dome Interface's
 ``DOME_SHUTTER`` switch, the same property both roll-off-roof and
 dome INDI drivers publish for shutter motion.
 """

@@ -2,7 +2,7 @@
 
 Description: The template classifier (`spectral_classifier`) compares the
 whole shape of a spectrum with reference spectra. At the resolution of a
-slitless grism (about 100 to 150 Angstroms in the green and red) that shape
+slitless grating (about 100 to 150 Angstroms in the green and red) that shape
 is mostly the continuum slope, and the slope mixes the star's temperature
 with interstellar reddening and with small errors in the instrument response.
 

@@ -6,22 +6,23 @@ of that gate's criteria, and whether the operator aborted it. It exists
 because several gate criteria are established outside any observing
 night -- a device summary survey, an envelope-rejection check, an
 enclosure cycling drill -- producing evidence with no `ObservationSession`
-to attach to (`Wayfinding_Library_Architecture.md`).
+to attach to (`Wayfinding_Library_Architecture.md` Section 7.2 and the
+"Commissioning run" entry of the site glossary, `documentation/Glossary.md`).
 
 Append-only rather than configuration: unlike every other model in this
 subsystem, a `CommissioningRun` is written once at drill completion and
 never revised. A drill re-run produces a new record, so a superseded
-result remains visible rather than being overwritten (the "Commissioning
-Evidence Is Append-Only" invariant). Carries no reference to
+result remains visible rather than being overwritten. Carries no
+reference to
 `ObservationSession` in either direction -- a commissioning run may
 occur with no session, and a session may contain evidence produced by
 no commissioning run.
 
-`criterion` on each `CommissioningObservation` must name the exact gate
-criterion from `Wayfinding_Library_Architecture.md` --
-`gate_report.py` (`Wayfinding_Library_Commissioning_Plan.md` Appendix B)
-matches on that string, so a drill that invents its own wording produces
-evidence the report cannot find.
+`criterion` on each `CommissioningObservation` names the gate criterion
+the drill checked. The criteria are those of Table 12 in
+`Wayfinding_Library_Implementation.md` (Section 7.2), which is an
+operator procedure: no module in this library applies a gate or matches
+on this string, so the operator reads these records against the table.
 """
 
 from datetime import UTC, datetime

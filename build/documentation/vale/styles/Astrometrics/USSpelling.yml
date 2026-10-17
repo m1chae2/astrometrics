@@ -1,0 +1,39 @@
+# Documentation_Conventions.md §4: US spelling. Code identifiers in backticks are ignored.
+extends: substitution
+message: "Use US spelling: '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  colour: color
+  colours: colors
+  coloured: colored
+  centre: center
+  centres: centers
+  centred: centered
+  catalogue: catalog
+  catalogues: catalogs
+  catalogued: cataloged
+  neighbour: neighbor
+  neighbours: neighbors
+  neighbouring: neighboring
+  behaviour: behavior
+  behaviours: behaviors
+  normalise: normalize
+  normalised: normalized
+  normalises: normalizes
+  normalising: normalizing
+  normalisation: normalization
+  analyse: analyze
+  analysed: analyzed
+  analysing: analyzing
+  grey: gray
+  artefact: artifact
+  artefacts: artifacts
+  modelling: modeling
+  modelled: modeled
+  labelled: labeled
+  labelling: labeling
+  optimise: optimize
+  optimised: optimized
+  minimise: minimize
+  maximise: maximize

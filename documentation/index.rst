@@ -1,83 +1,72 @@
 .. ==============================================================================
-.. Purpose: Main entry point index file for Astrometrics Sphinx documentation portal.
-.. Provides landing hero, grid card links, and consolidated navbar toctrees.
-.. Three navbar dropdowns: Introduction, Tutorials, API.
+.. Purpose: Main entry point of the Astrometrics Sphinx documentation portal.
+.. Shows one card per documentation section and holds the root toctree. The
+.. root toctree lists only the seven section pages (get_started, tutorials,
+.. how_to/index, explanation, reference, evidence, about), so the top
+.. navigation bar shows the sections and each section page lists its own pages.
+.. Every page must be in exactly one toctree (sphinx-build -W and
+.. astrometricslib/test/test_documentation_site.py).
 .. ==============================================================================
 
-Astrometrics Documentation
+Astrometrics documentation
 ==========================
 
-Welcome to the Astrometrics documentation.
+Astrometrics is a desktop application and a pair of Python libraries for astrophotography, photometry, spectroscopy and observatory control. It captures images of the night sky, processes them into measurements, and records how reliable each measurement is.
 
-Astrometrics is a desktop application for astrophotography, photometry, spectroscopy, and automated observatory control. It provides a complete set of tools to capture and process images of the night sky.
+The documentation is grouped by what you want to do. :doc:`About_These_Docs` maps every document.
 
 .. grid:: 1 2 2 3
     :gutter: 3
 
-    .. grid-item-card:: Installation
-        :link: Installation
+    .. grid-item-card:: Get started
+        :link: get_started
         :link-type: doc
 
-        Learn how to install Astrometrics and its requirements on your computer.
+        Install the application, take a first tour of the desktop app, or make a first call to the Python library.
 
-    .. grid-item-card:: Getting Started
-        :link: Getting_Started
+    .. grid-item-card:: Tutorials
+        :link: tutorials
         :link-type: doc
 
-        Core concepts, hardware requirements, and launching the application.
+        Learn by doing: one guided path through image processing, and runnable notebooks.
 
-    .. grid-item-card:: Desktop Application
-        :link: user_interface/index
+    .. grid-item-card:: How-to guides
+        :link: how_to/index
         :link-type: doc
 
-        User manual and step-by-step guides for learning how to use the application.
+        Recipes for one task each: control the observatory, tune the processing for your setup, change a tuned value.
 
-For users with a technical background looking to perform customized data processing or automate hardware outside of the desktop interface, the underlying Python libraries can be imported directly:
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: Interactive Tutorials
-        :link: notebooks/index
+    .. grid-item-card:: Explanation
+        :link: explanation
         :link-type: doc
 
-        Step-by-step Jupyter Notebook guides covering FITS frame calibration, star detection, photometry, spectroscopy, and telescope control.
+        How the software works and why: the theory of each library, and how the desktop app is built.
 
-    .. grid-item-card:: Python API Reference
-        :link: api/index
+    .. grid-item-card:: Reference
+        :link: reference
         :link-type: doc
 
-        Complete API reference for the astrometricslib and wayfindinglib Python packages.
+        Look things up: the Python API, the user manual, the pipeline review guides and the implementation papers.
 
-For users interested in understanding the mathematical models and logic powering the application, the algorithm architecture is documented below:
-
-.. grid:: 1 2 2 2
-    :gutter: 3
-
-    .. grid-item-card:: Image Processing Architecture
-        :link: library_design/Astrometrics_Library_Architecture
+    .. grid-item-card:: Evidence
+        :link: evidence
         :link-type: doc
 
-        Theoretical framework and mathematical derivations for astrometry, photometry, and spectroscopy.
+        How each tuned value was checked, and a generated check that the documents agree with the code.
 
-    .. grid-item-card:: Wayfinding Architecture
-        :link: library_design/Wayfinding_Library_Architecture
+    .. grid-item-card:: About the docs
+        :link: about
         :link-type: doc
 
-        Logic models for target selection, INDI hardware abstraction, and dynamic observation planning.
+        How the documentation is organized and the rules it follows.
 
 .. toctree::
-   :maxdepth: 2
    :hidden:
 
-   Installation <Installation>
-   Getting Started <Getting_Started>
-   Desktop App <user_interface/index>
-   Tutorials <notebooks/index>
-   API <api/index>
-   Image Processing Architecture <library_design/Astrometrics_Library_Architecture>
-   Wayfinding Architecture <library_design/Wayfinding_Library_Architecture>
-   Image Processing Implementation <library_design/Astrometrics_Library_Implementation>
-   Wayfinding Implementation <library_design/Wayfinding_Library_Implementation>
-   Pipeline Audit Report <library_design/Pipeline_Audit_Report>
-   Pipeline Review Guides <library_design/pipelines/index>
+   get_started
+   tutorials
+   how_to/index
+   explanation
+   reference
+   evidence
+   about

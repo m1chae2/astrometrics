@@ -2,8 +2,8 @@
 
 Description: Verifies every device maps to exactly one
 `DeviceSummaryState` and an alert property produces `FAULT` with
-detail -- the cases `Wayfinding_Library_Architecture.md`
-calls out.
+detail -- the behavior `Wayfinding_Library_Architecture.md` Section 6.3
+describes.
 """
 
 from wayfindinglib.models.policy.device_state import DeviceRole, DeviceSummaryState

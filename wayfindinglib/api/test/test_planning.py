@@ -440,7 +440,8 @@ def test_sky_engine_is_constructed_once_under_concurrent_first_access(
 def test_planning_module_tree_imports_no_device_driver() -> None:
     """Using Planning loads no hardware driver and no Control module.
 
-    "Planning Is Hardware-Free" (`Wayfinding_Library_Architecture.md`).
+    "Planning is hardware-free" (`Wayfinding_Library_Architecture.md`
+    Sections 4.4 and 7.1).
     The check runs in a fresh Python process, because other tests in this
     pytest session import the INDI drivers on purpose. The child imports
     `wayfindinglib.api.planning`, reads the equipment catalog (which

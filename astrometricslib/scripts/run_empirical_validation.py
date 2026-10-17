@@ -109,7 +109,7 @@ def run_photometry_validation(astrometrics: Astrometrics, camera_name: str) -> d
                 status = res.get("status", "completed")
                 stars_found = res.get("starsFound", 0)
                 stars_proc = res.get("starsProcessed", 0)
-                cand_count = len(res.get("variable_candidates", []))
+                cand_count = len(res.get("variableCandidates", []))
                 print(f"  Target {target.id} Photometry Status: {status}")
                 print(f"  Stars Found: {stars_found}, Saturated/Processed: {stars_proc}")
                 print(f"  Variable Star Candidates: {cand_count}")

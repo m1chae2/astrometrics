@@ -1,701 +1,699 @@
-# Astrometrics Library: Architecture and Design
+# Astrometrics library architecture
 
-*Version 2.7 · 2026-10-10 · Status: current*
+*Version 3.2 · 2026-10-15 · Status: current*
 
 ## Abstract
 
-This document explains how the Astrometrics image-processing system works and why it's built the way it is. It covers five pipelines: stacking, astrometry, photometry, spectroscopy, and moving object detection. Every pipeline organizes its data around one shared idea, called the Observation Target. Each pipeline also checks its own work twice: once before it starts, to catch bad input, and once after it finishes, to catch bad output. For a map from these ideas to the actual code, see [Astrometrics_Library_Implementation.md](./Astrometrics_Library_Implementation.md).
+Cooled cameras and small telescopes let amateur astronomers and small observatories collect data of scientific value, but the software that reduces these data is split into separate tools. Each tool uses its own settings and gives no common record of how reliable its output is. This paper describes the architecture of the Astrometrics library, which reduces telescope data in five pipelines: stacking, astrometry, photometry, spectroscopy, and asteroid detection. The pipelines share one data model built around the observation target. They also share records of camera properties and data provenance, and they check their own work with recorded pass, fail, or not-checked gates before and after each run. The paper states the governing equations of each step. They cover calibration, sigma clipping with a cutoff that follows the number of frames, a plate-solution model with distortion terms, and a noise budget for aperture photometry. They also cover ensemble differential photometry, variability indices, grating-based wavelength calibration, and straight-line motion fitting. Tuned settings are not given here. Three kinds of evidence back them: synthetic data with known truth, real observing sessions, and surveys of every stored product. The paper also lists the assumptions and limits of its methods.
+
+Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
+
+Symbols and their units are listed in the [notation appendix](#appendix-a-notation). The [implementation paper](Astrometrics_Library_Implementation.md) names the code behind each section and gives the tuned values.
 
 ## 1. Introduction
 
-Five separate image-processing pipelines work on the same telescope data. Without a shared way to describe a target, each pipeline would have to redo the same work — figuring out the sky position, listing the frames, tracking data quality — and none of them could reuse another pipeline's results, like a solved sky position or a finished stack. One shared data model lets the pipelines work together on the same target without stepping on each other's data.
+**Statement of need.** Cooled cameras and small telescopes let amateurs and small observatories collect data of scientific value: light curves of variable stars, spectra of bright stars, and positions of asteroids. The software that reduces these data is built one step at a time. Each program has its own conventions, and none carries a common description of the target or a record of how far its output can be trusted. This paper describes a library that covers five reductions on one data model.
 
-The ideas in this document apply the same way whether a pipeline runs from a script or through the interactive graphical tools, because both paths call the exact same underlying code. Anything you can do by clicking through the interface, you can also automate as a script.
+**Approach.** One shared data model (Section 2) lets the five pipelines work on the same target and reuse each other's results. Each pipeline also checks its own input and output, and records each check as passed, failed, or not checked.
 
-A complete, code-level reference for every public class and method is generated automatically from the source code's own documentation. See the Sphinx {doc}`API Reference </api/astrometricslib>`. For a map connecting these ideas to the actual Python files that implement them, see [Astrometrics_Library_Implementation.md](./Astrometrics_Library_Implementation.md).
+**Scope.** This paper explains the theory: what each step does and why. It gives no tuned settings. Those are listed in `Astrometrics_Library_Implementation.md`, which also maps each idea to code. The evidence behind each setting is in the validation register ([validation/index.md](validation/index.md)). The [API reference](../api/astrometricslib.rst) is generated from the source.
 
-The rest of this document is organized as follows. Section 2 introduces the four data models every pipeline shares. Sections 3 through 7 walk through the five pipelines in turn: Stacking, Astrometry, Photometry, Spectroscopy, and Moving Object Detection. Section 8 reports results from testing the pipelines on real telescope data. Section 9 concludes. Appendix A lists the tuned values the pipelines use and says which of them have been measured.
+### 1.1 Related work
 
-## 2. Observational Data Models
+**Stacking.** Siril [1] and PixInsight [2] calibrate, register, and stack frames but do not pass their result on as part of a shared record of the target. The library uses Siril as its engine and adds a rejection cutoff that follows the number of frames (Section 3.2).
 
-This system organizes everything it knows about the sky into four categories of information. Big professional sky-survey projects organize their data the same way, built around one target at a time [3]. These four categories cover everything the pipelines need to track: sky positions, brightness measurements, light curves, spectra, and quality checks — all connected to a single target.
+**Plate solving.** Astrometry.net [3] finds the sky position of an image without a position estimate, by matching four-star patterns against an index. The library uses it as its solver and adds a refit against Gaia stars (Section 4.2).
 
-Every image referenced below is stored as a FITS file, the standard file format for astronomical data. It plays the same role for telescopes that JPEG or PNG plays for ordinary photos. A FITS file bundles the raw pixel data together with a header: a block of metadata recording things like exposure time, filter, and (once solved) sky position.
+**Photometry.** AstroImageJ [4] and photutils [5] provide interactive and programmatic aperture photometry. The library automates the vetting of comparison stars and tests variability against the field's own scatter (Section 5.2).
 
-### 2.1 Information Types
+**Spectroscopy.** The specutils package [6] and ISIS [7] provide spectral data structures and amateur spectrum reduction. The library classifies the spectra of many stars in one frame and checks each against a Gaia spectrum (Section 6.2).
 
-1. **Observation Target:** A specific region of sky, such as M 81 or Vega. It connects every raw image, calibration frame, solved sky position, stacked image, detected star, and moving object found for that target.
-2. **Stellar Object:** A single star identified in the sky. It stores the star's position, its brightness over time (a light curve), how much its brightness varies, and its extracted spectrum.
-3. **Moving Object Candidate:** A possible solar-system object, such as an asteroid or comet. It records the object's path across images, how fast it appears to move, how well that motion fits a straight line, and any match found in an asteroid catalog.
-4. **Pipeline Quality Record:** A health report for one processing run — for example, how many images were thrown out, how sharp the stars look, how accurate the positioning was, and how much measurement noise remains.
+**Moving objects and surveys.** Survey pipelines such as THOR [8] link detections from many nights into orbits, but a small observatory often has only a few hours on a target. The library fits straight lines within one night (Section 7). Large surveys, such as Rubin Observatory's [9] and Gaia [10], use fixed instruments with known properties, so the library stores a profile for each camera (Section 2.3).
 
-Table 1 summarizes the four data models: what each one covers, what data it stores, and what job it does.
+## 2. Observational data models
+
+The library organizes what it knows about the sky into four categories of information, all tied to one target. Figure 1 shows how the five pipelines feed the target and which records they share.
+
+```mermaid
+flowchart LR
+    CP["Camera profiles"]
+    STK["Stacking"]
+    AST["Astrometry"]
+    PHO["Photometry"]
+    SPE["Spectroscopy"]
+    AD["Asteroid detection"]
+    OT["Observation target"]
+    QR["Quality records"]
+    PV["Provenance"]
+    CP --> STK & AST & PHO & SPE & AD
+    STK & AST & PHO & SPE & AD --> OT
+    STK & AST & PHO & SPE & AD --> QR
+    QR --> PV
+    PV -.->|"lineage of each product"| OT
+```
+
+**Figure 1.** The five pipelines and the shared records. Provenance links each product to the run that made it.
+
+Every image is stored as a FITS file (Flexible Image Transport System) [11], the standard format for astronomical data, with pixel data and a header of metadata.
+
+### 2.1 Information types
+
+1. **Observation target.** A region of sky, such as the galaxy M 81. It connects every raw frame, calibration frame (a frame that measures the camera's own errors), solved position, stacked image, detected star, and moving object found for it.
+2. **Stellar object.** A single star, with its light curve, variability, and spectrum.
+3. **Moving object candidate.** A possible asteroid or comet, with its path, speed, and any catalog match.
+4. **Pipeline quality record.** A health report for one run, built from gates.
+
+A gate is one recorded verdict on one quality condition of a run: passed, failed, or not checked. A gate that could not look at its data is recorded as not checked, never as passed.
+
+In Table 1, $\alpha$ and $\delta$ are Right Ascension and Declination, the sky's longitude and latitude. The magnitude $V$ is brightness on a backward scale in the V band, a green-yellow band near 550 nm: lower is brighter, and 5 magnitudes is a factor of 100. An ephemeris is a table of predicted positions.
 
 **Table 1.** Observational data models summary.
 
-| Observational Data Model | Scope | Data Attributes | Primary Role |
-| :--- | :--- | :--- | :--- |
-| **Observation Target** | One field of view / sky area | Coordinates $(\alpha_0, \delta_0)$, raw exposures, calibration masters, stacked FITS images | Connects all images and results for one part of the sky |
-| **Stellar Object** | Individual stars & catalogs | Coordinates $(\alpha, \delta)$, magnitude $V$, light curves $\hat{F}(t)$, 1D spectra $F(\lambda)$ | Tracks one star's brightness history, spectrum, and variability |
-| **Moving Object Candidate** | Solar-system objects passing through | Detection chain $(x_i, y_i, t_i)$, motion rates $(\dot{\alpha}, \dot{\delta})$, ephemeris match | Records an asteroid's motion path and any catalog match |
-| **Pipeline Quality Record** | Health of each pipeline run | Frame survivor counts $N$, rejection cutoffs $\sigma_{\text{low}}(N), \sigma_{\text{high}}(N)$, FWHM ratio, gate results (passed, failed, or not checked) | Tracks whether a pipeline run succeeded, and how well |
+| Observational data model | Data attributes |
+| --- | --- |
+| **Observation target** | Coordinates $(\alpha_0, \delta_0)$, raw exposures, calibration masters, stacked FITS images |
+| **Stellar object** | Coordinates $(\alpha, \delta)$, magnitude $V$, light curves $\hat{F}(t)$, 1D spectra $\Phi(\lambda)$ |
+| **Moving object candidate** | Detection chain $(x_j, y_j, t_j)$, motion rates $(\dot{\alpha}, \dot{\delta})$, ephemeris match |
+| **Pipeline quality record** | Frame survivor counts $N$, rejection cutoffs $z_{\text{low}}(N), z_{\text{high}}(N)$, FWHM ratio, gate results |
 
-:::{note}
-**Theory.** A star's magnitude ($V$) is its brightness on a scale that runs backwards and by powers of ten: lower numbers mean brighter stars, and each step of 5 magnitudes means a 100x change in brightness. This scale goes back to how ancient astronomers ranked stars just by looking at them, and it stuck. It isn't used directly by any equation in this document — it shows up in Table 1 because it's the standard unit for how bright a star's catalog entry says it is.
-:::
+### 2.2 Data model progression across pipelines
 
-### 2.2 Data Model Progression Across Pipelines
+Table 2 shows how each data model fills in as data moves through the pipelines.
 
-Table 2 shows how each data model gets filled in as data moves through the five pipelines, from raw images at the top down to final measurements at the bottom.
+**Table 2.** Observational data models across pipelines.
 
-**Table 2.** Overview matrix of observational data models across pipeline execution levels.
+| Pipeline | Observation target | Stellar object | Moving object candidate |
+| --- | --- | --- | --- |
+| **Stacking** | Raw and calibration frames | N/A | The stack that fixes each raw frame's sky position (Section 7.1) |
+| **Astrometry** | Matched coordinates | Stars linked to catalog positions | Sky positions |
+| **Photometry** | Comparison stars | Light curves | N/A |
+| **Spectroscopy** | Zero-order position (Section 6.1) | Calibrated spectra, types | N/A |
+| **Asteroid detection** | Candidates that passed the filters (Section 7.2) | N/A | Direction, speed, names |
 
-| Pipeline | Observation Target | Stellar Object | Moving Object Candidate | Quality Record |
-| :--- | :--- | :--- | :--- | :--- |
-| **Stacking** | Raw photos and calibration frames | N/A | Single-frame star or satellite detections | Removed bad pixels and overall image sharpness |
-| **Astrometry** | Matched sky coordinates and target center | Star locations linked to catalog positions | Sky positions for moving candidates | Solve success status, fit residual, and catalog match counts |
-| **Photometry** | Chosen comparison stars | Star brightness changes and light curves | Brightness measurements over time | Ensemble outlier rejection and comparison-star composition |
-| **Spectroscopy** | Reference star position and camera sensitivity | Rainbow color spectrums for stars | N/A | Zero-order saturation status and calibration fit convergence |
-| **Moving Objects** | Self-consistency filtered candidates | Hidden stationary stars | Path direction, speed, and catalog names | Detection counts and straight-line residuals against position error |
+### 2.3 Shared records: camera profiles and provenance
+
+- **Camera profile.** Facts about one camera model's sensor: its clipping level, gain in e⁻/ADU (electrons per step of the stored value), read noise, and quantum efficiency (the share of arriving light it records at each wavelength). Each number notes its source: a datasheet, a measurement, or an assumption. A camera with no profile gets a flagged generic stand-in. <!-- impl: astrometricslib.drivers.camera_profile_store.resolve_camera_profile --> <!-- impl: astrometricslib.pipelines.shared.applied_camera_profile.record_camera_profile -->
+- **Provenance.** For each data product, a record of the run, software version, settings, and inputs that made it. It follows the IVOA Provenance Data Model [12], which builds on the W3C PROV data model [13]. A storage problem is logged and never fails a run. Lineage can be exported as PROV-XML. <!-- impl: astrometricslib.pipelines.shared.provenance_recording.record_pipeline_run --> <!-- impl: astrometricslib.drivers.provenance_store.ProvenanceStore --> <!-- impl: astrometricslib.drivers.provenance_store.export_target_lineage_as_prov_xml -->
 
 ---
 
-## 3. Image Stacking Pipeline
+## 3. Image stacking pipeline
 
-The stacking pipeline combines many individual exposures into one high-quality image. Combining frames boosts the real signal from stars while averaging out noise and one-off artifacts like satellite trails and cosmic ray hits.
+The stacking pipeline combines many exposures into one image. Combining boosts the signal from stars and averages out noise and artifacts such as satellite streaks and cosmic ray hits. Evidence for its settings is in the [stacking register](validation/stacking.md).
 
-### 3.1 Purpose & Interfaces
+### 3.1 Purpose and interfaces
 
-* **Inputs:** Raw light exposures, plus three master calibration frames ($M_{\text{bias}}, M_{\text{dark}}, M_{\text{flat}}$, explained below).
-* **Outputs:** A calibrated, stacked 2D image (broadband or spectral), an updated FITS header, and a Stack Quality Record.
+- **Inputs.** Raw light exposures and three master calibration frames ($M_{\text{bias}}, M_{\text{dark}}, M_{\text{flat}}$).
+- **Outputs.** A calibrated, stacked 2D image (broadband, or spectral, where each star is spread into a spectrum) and a quality record.
 
-### 3.2 Major Concepts and Governing Equations
+### 3.2 Major concepts and governing equations
 
-Every raw exposure contains two kinds of unwanted signal: an *additive* error from the camera's electronics and sensor heat, and a *multiplicative* error from the optics, where parts of the image come out dimmer for reasons unrelated to the sky. Before frames are aligned and combined, each raw exposure $I_{\text{raw}}$ is corrected using three calibration images:
-
-* **Master Bias ($M_{\text{bias}}$):** An average of many zero-length, closed-shutter exposures. It isolates the fixed voltage offset the camera's electronics add to every pixel, regardless of exposure time.
-* **Master Dark ($M_{\text{dark}}$):** An average of closed-shutter exposures taken with the same exposure time, gain, and sensor temperature as the light frames. It measures the extra signal ("dark current") produced by heat inside the sensor over time, plus any permanently defective ("hot") pixels.
-* **Master Flat ($M_{\text{flat}}$):** An average of exposures of an evenly lit surface (the twilight sky or a flat light panel). It measures how much dimmer some parts of the image are due to the optics — vignetting, dust specks on the sensor glass, and pixel-to-pixel sensitivity differences.
-
-These two categories of error are corrected differently:
-
-* **Additive errors (subtracted):** extra pixel counts added regardless of how much starlight actually reached the sensor.
-  * *Electronic bias:* a constant voltage offset the camera adds so pixel values never go negative during digitization.
-  * *Thermal dark current:* extra electrons that build up from heat inside the sensor, growing roughly in proportion to exposure time.
-* **Multiplicative errors (divided out):** factors that block or scale down a percentage of the real incoming starlight.
-  * *Vignetting and dust shadows:* obstructions in the optical path (lens edges, dust on the sensor glass) that dim parts of the image.
-  * *Pixel sensitivity differences:* manufacturing differences in each pixel's quantum efficiency.
-
-Combining these corrections gives the true, calibrated brightness $I_{\text{calibrated}}$. First subtract the additive errors. Then divide out the (normalized) multiplicative ones:
+Every raw exposure $I_{\text{raw}}$ holds an *additive* error from the camera electronics and sensor heat, and a *multiplicative* error from the optics. Three masters, each an average of many calibration frames, correct them: the bias $M_{\text{bias}}$ (the fixed electronic offset), the dark $M_{\text{dark}}$ (dark current, the signal from sensor heat, and hot pixels), and the flat $M_{\text{flat}}$ (vignetting, dust shadows, and pixel-to-pixel sensitivity). The flat, with its bias removed, is divided by its average $\langle \cdot \rangle$ so that it is 1 on average:
 
 $$
 I_{\text{calibrated}} = \frac{I_{\text{raw}} - M_{\text{dark}}}{\left(M_{\text{flat}} - M_{\text{bias}}\right) / \langle M_{\text{flat}} - M_{\text{bias}} \rangle} \tag{1}
 $$
 
-The master frames are only as good as the calibration frames chosen for them. Four rules decide which frames are used and how much to trust them:
+The numerator subtracts only the dark, which as a raw closed-shutter exposure already holds the bias. Subtracting the bias too would remove it twice and push the faint sky below zero. The bias master is used on the lights only when no dark exists. <!-- impl: astrometricslib.drivers.siril_interface.light_calibration_flags -->
 
-* **Match the camera settings.** Calibration frames are filed by the settings they were taken at. A frame taken at one gain or offset cannot calibrate lights taken at another. Binning merges neighboring pixels, so frames binned differently have different pixels. A binning mismatch therefore blocks that kind of calibration frame instead of applying a wrong one, and the stack is flagged. A mismatch in gain, offset, or temperature applies the nearest frames and flags the stack with a sentence saying which setting differed. <!-- impl: astrometricslib.drivers.calibration_library.calibration_setting_key --> <!-- impl: astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames -->
-* **Match darks by temperature.** Dark current roughly doubles every few degrees. Darks are therefore sorted into temperature slots a few degrees wide, and the slot nearest the lights is used. Darks from different slots are never averaged into one master. <!-- impl: astrometricslib.drivers.calibration_library.temperature_slot_c -->
-* **Remove the bias from every flat.** A flat frame carries the bias offset on top of the light. If the offset stays in, the flat looks too uniform, the vignetting looks weaker than it is, and the lights come out under-corrected. The bias master is subtracted from every flat, including a master built from a single flat. A stack of one light frame is calibrated like any other. <!-- impl: astrometricslib.drivers.siril_interface.build_flat_master_commands --> <!-- impl: astrometricslib.drivers.siril_interface.build_single_light_commands -->
-* **Flag thin masters.** Averaging and outlier rejection need several frames. A master built from one or two frames keeps their noise and any cosmic ray hit. Such a master is still built, because the library can legitimately hold one flat or one dark, but the stack is flagged so a reader knows the master is weak. The minimum is a design choice (Appendix A). <!-- impl: astrometricslib.drivers.siril_interface.calibration_count_flags -->
+The masters are only as good as the frames chosen for them. Calibration frames must match the lights' gain and offset, and a binning mismatch blocks a frame because binning merges pixels. Darks are sorted into temperature slots and never mixed, since dark current roughly doubles every few degrees. Every flat has its bias removed, even a master built from one flat. A master built from very few frames is flagged. <!-- impl: astrometricslib.drivers.calibration_library.calibration_setting_key --> <!-- impl: astrometricslib.drivers.calibration_library.CalibrationLibrary.select_dark_frames --> <!-- impl: astrometricslib.drivers.calibration_library.temperature_slot_c --> <!-- impl: astrometricslib.drivers.siril_interface.build_flat_master_commands --> <!-- impl: astrometricslib.drivers.siril_interface.build_single_light_commands --> <!-- impl: astrometricslib.drivers.siril_interface.calibration_count_flags -->
 
-After calibration, the pipeline averages $N$ exposures together to raise the signal-to-noise ratio. When averaging, any pixel far enough from the group's median value is thrown out as an outlier (a satellite trail, a cosmic ray hit, a plane). Rather than using one fixed cutoff for every stack — always rejecting anything past $3\sigma$, say — the pipeline adjusts the cutoff based on how many frames $N$ are being combined. It starts from Chauvenet's criterion [4], [5]:
+Averaging $N$ calibrated exposures lowers random noise by about $\sqrt{N}$. One very bright value, such as a satellite streak, would pull the mean off, so at each pixel any value too far from the median is rejected. This is sigma clipping when the distance is measured in standard deviations ($\sigma$). Rather than one fixed cutoff, the pipeline lets the cutoff follow $N$. It starts from Chauvenet's criterion [14], [15]: a value is an outlier when fewer than half of one such value is expected by chance among $N$ normal-noise samples:
 
 $$
-\sigma(N) = \sqrt{2}\,\mathrm{erfc}^{-1}\!\left(\frac{1}{2N}\right) \tag{2}
+z(N) = \sqrt{2}\,\mathrm{erfc}^{-1}\!\left(\frac{1}{2N}\right) \tag{2}
 $$
 
-In words:
-* **$\sigma(N)$ (rejection cutoff):** how many standard deviations from the group's median a pixel has to be before it's thrown out (e.g. $1.64\sigma$ at $N = 5$, $2.81\sigma$ at $N = 100$).
-* **$N$:** how many light exposures are being combined.
-* **$\mathrm{erfc}^{-1}$ (inverse complementary error function):** finds the cutoff at which fewer than 0.5 false-positive pixel rejections are expected across all $N$ frames.
+The cutoff loosens as $N$ grows, because the chance that some good value looks extreme grows with $N$. A fixed $3\sigma$ cutoff instead rejects the same share of good values (about 0.27%) at every $N$.
 
-As $N$ grows, so does the chance that some pixel looks like an outlier by pure chance, so Equation (2) loosens the cutoff accordingly. For deep stacks ($N > 100$) this avoids clipping real, bright star centers, which a fixed $3\sigma$ cutoff would mistake for outliers.
-
-Equation (2) treats the spread of the values as known exactly. A real stacker estimates the spread from the same $N$ values it is judging, and with a handful of frames that estimate is noisy. Used as it stands, Equation (2) throws out good values from small stacks. The pipeline therefore applies two changes:
-
-* **A floor on the high cutoff.** The upper cutoff never drops below a minimum, $\sigma_{\text{floor}}$.
-* **A looser low cutoff.** The lower cutoff sits a fixed margin $\Delta_\sigma$ above the upper one. Satellite trails, cosmic ray hits, and hot pixels are brighter than the true value, so the upper cutoff has to catch them. Values far below the median are rare, so a looser lower cutoff removes fewer good values at little cost.
+A real stacker estimates the spread from the same $N$ values, which is noisy for small stacks, so Equation (2) alone rejects too many good values there. Two changes follow. The upper cutoff never drops below a floor $z_{\text{floor}}$. The lower cutoff sits a margin $\Delta_z$ above it, because streaks, cosmic ray hits, and hot pixels are bright while low outliers are rare:
 
 $$
-\sigma_{\text{high}}(N) = \max\!\big(\sigma(N),\ \sigma_{\text{floor}}\big), \qquad \sigma_{\text{low}}(N) = \sigma_{\text{high}}(N) + \Delta_\sigma \tag{3}
+z_{\text{high}}(N) = \max\!\big(z(N),\ z_{\text{floor}}\big), \qquad z_{\text{low}}(N) = z_{\text{high}}(N) + \Delta_z \tag{3}
 $$
 
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds --> <!-- impl: astrometricslib.utilities.rejection_thresholds.chauvenet_sigma -->
 
-With the default floor, Equation (3) differs from Equation (2) for stacks of fewer than about 40 frames. Above that, the Chauvenet value is already larger than the floor.
-
 :::{warning}
-**Designed, not measured on real data.** The floor and the margin $\Delta_\sigma$ are design choices (Appendix A). They were checked only in a simulation of pure Gaussian noise that models the stacker's clipping approximately. In that simulation, with five frames, the plain Chauvenet cutoff on both sides rejected 7.4% of good samples. The floored, asymmetric cutoffs rejected 2.4%. The price is that weak outliers survive more often: a 5-sigma outlier in one of five frames was removed 83% of the time by the plain cutoff and 60% of the time with the floor. No sharpness measurement exists for stacks of 5 to 15 frames. <!-- impl: astrometricslib.scripts.rejection_small_n_check -->
+**The floor trades one risk for another.** A higher floor protects good values and lets more weak outliers through. <!-- impl: astrometricslib.scripts.rejection_small_n_check -->
 :::
 
-Frames taken with different exposure lengths cannot be clipped together, because a long and a short frame hold very different amounts of light in the same pixel, and clipping would discard the best frames' values as outliers. Each exposure length is therefore stacked on its own, and the group stacks are combined afterward. Each group stack is first converted to counts per second. The groups are then put on one brightness scale, because the stacker leaves each stack with its own, and combined with weights of one over the noise variance, so quieter groups count for more. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images -->
+Frames of different exposure lengths cannot be clipped together, since a long and a short frame hold very different light in the same pixel. Each length is stacked alone, and the groups are put on one brightness scale and combined with inverse-variance weights (one over the noise variance). A group's scale is the median ratio of its stars' fluxes to those of the reference group, the one with the most weight. Stars are used because faint pixels are mostly sky, which changes between nights. A group that is not one scale factor of the reference is left out. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.combine_exposure_group_images --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains_with_stars --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_star_flux_ratios --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains -->
 
-The brightness scale of a group is the median ratio of its pixels to the reference group's pixels, measured only over mid-range pixels. A sensor is linear between the sky floor and near full well. In that range two exposures of one scene differ by a single factor, and that factor is the scale. Close to full well the response flattens, and in a group clipped at zero the faint end reads high. At those extremes the ratio measures the sensor's nonlinearity, not the scale. As a check, the ratio over the brightest pixels is measured too and never applied. A group whose two ratios disagree by more than a tolerance is not one scale factor of the reference. It is marked nonlinear and left out of the combined image. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_group_gains -->
+A second weighting acts on single frames. For sky-limited frames, a frame's squared signal-to-noise ratio grows with its exposure, so equal weights waste the longer frames. The noise penalty $P$ of equal weights follows from the exposure times $\tau_j$:
 
-### 3.3 Pipeline Theory of Operations
+$$
+P = \sqrt{\left(\frac{1}{N}\sum_{j=1}^{N}\frac{1}{\tau_j}\right)\left(\frac{1}{N}\sum_{j=1}^{N}\tau_j\right)} \tag{4}
+$$
 
-Combining frames means three things happen together: calibrating each frame, aligning them to each other, and rejecting outlier pixels. Four design choices drive this process:
+$P$ is 1 for equal lengths. When it passes a tuned factor a little above one, each frame is weighted by its own measured noise. Spectral stacks use the group handling above. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.choose_stack_weight --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.exposure_weighting.equal_weight_noise_penalty -->
 
-1. **Calibrate before aligning:** Each raw light frame is corrected using Equation (1) before it's aligned with the others — bias subtraction for the electronic offset, dark subtraction for heat buildup, and flat-field division for optical dimming and dust shadows.
-2. **Adjust the rejection cutoff automatically:** The pixel-rejection cutoffs scale with the number of frames $N$, via Equations (2) and (3), so nobody has to manually tune them per dataset. This keeps small stacks from losing good values and stops deep stacks from over-clipping real starlight.
-3. **One quality check, two alignment modes:** The same frame-quality check applies to both ordinary (broadband) images and spectroscopic images. But spectroscopic images are only allowed to shift position (not rotate or stretch) when aligning, so the axis the spectrum is spread out along doesn't get distorted relative to the reference star. Ordinary images use full alignment (shifting, rotating, and stretching as needed) to make stars as sharp as possible.
-4. **Keep different optical setups separate:** Frames taken with different focal lengths or cameras get stacked separately, never mixed together. Mixing them would break the assumption that one pixel always corresponds to the same patch of sky, and would corrupt sharpness measurements.
+### 3.3 Pipeline theory of operations
 
-Before rejecting outliers, the pipeline also checks that enough frames survived the earlier quality filtering. Too few frames left would make the outlier statistics meaningless. Table 3 lays out the stacking pipeline step by step.
+Frames are calibrated before they are aligned. Alignment lines frames up so each star falls on the same pixel. Ordinary images use full alignment (shift, rotation, stretch), but spectral images may only shift, so the axis along which the spectrum spreads is not distorted. Table 3 lists the steps.
 
-**Table 3.** Stacking pipeline execution sequence and operations.
+**Table 3.** Stacking pipeline execution sequence.
 
-| Step | Pipeline Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Calibration | **In:** Raw exposures, master bias, dark, flat<br>**Out:** Calibrated light frame array | Subtract the electronic bias and thermal dark current; divide out flat-field dimming via Eq. (1). Match calibration frames to the lights by camera settings and dark temperature. |
-| 2 | Gain Check | **In:** Calibrated light frames<br>**Out:** Matching-gain subset | Drop any exposures taken at a different sensor gain setting than the rest. |
-| 3 | Quality Safeguard | **In:** Frame quality metrics, minimum-frame floor<br>**Out:** Filtered light frame list | Filter out degraded frames, but never drop below a minimum survivor count (Appendix A). |
-| 4 | Alignment & Outlier Rejection | **In:** Filtered light frames<br>**Out:** Aligned arrays & outlier map | Align exposures to each other and reject outlier pixels using the adjustable, floored cutoffs of Eq. (2) and Eq. (3). |
-| 5 | Combine into Master Stack | **In:** Surviving pixel arrays<br>**Out:** Stacked 2D FITS image & Quality Record | Average the surviving pixels into one stacked image. When exposure lengths differ, stack each length separately, put the groups on one brightness scale, and combine them with inverse-variance weights. Record how the run went. |
+| Step | Pipeline phase | Description |
+| --- | --- | --- |
+| 1 | Frame screening | Set aside frames that break the session's pattern (Section 3.4.1). |
+| 2 | Calibration | Match calibration frames to the lights and apply Equation (1). |
+| 3 | Quality safeguard | Keep the sharpest, roundest frames, but never fewer than a minimum. |
+| 4 | Alignment and outlier rejection | Align the frames and reject pixels with Equations (2) and (3). |
+| 5 | Combine | Average the surviving pixels, with exposure groups handled as in Section 3.2. |
 
 <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.find_dominant_gain_subset -->
 
-### 3.4 Quality Metrics and Integration Planning
+A stack request chooses the light frames, never mixing imaging and spectral frames or two cameras, and runs as a tracked job (a background task whose progress is recorded). When too few spectral frames register by star matching, the stack is retried with phase correlation [16], which finds the shift between two images from their overall patterns. Quarantined frames are moved, never deleted. A preview image is stretched because linear data looks almost black, and StarNet [17] lets the stars be stretched separately. <!-- impl: astrometricslib.pipelines.stacking.stack_request.choose_frames_to_stack --> <!-- impl: astrometricslib.pipelines.stacking.stack_request.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.stage.stack_frames --> <!-- impl: astrometricslib.pipelines.tasks.stack_frames_with_timeout --> <!-- impl: astrometricslib.pipelines.stacking.stack_runner.run_stack --> <!-- impl: astrometricslib.pipelines.stacking.calibration_ingest.build_ingest_report --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.restore_quarantined_frames --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_preview.write_stack_preview --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.starnet_stretch.blend_stars --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.preview_remake.remake_stack_preview -->
 
-The stacking pipeline checks its own work in two rounds: before stacking (screening out bad raw photos) and after stacking (checking the final image). Each check is recorded as passed, failed, or not checked, and a check that could not look is never recorded as passed.
+### 3.4 Quality metrics and integration planning
 
-#### 3.4.1 Before Stacking: Screening Raw Photos
-* **Focus & Tracking Checks:** Measures each raw photo's star sharpness (FWHM, Full Width at Half Maximum) and shape (roundness), then ranks photos accordingly. FWHM is converted from pixels into arcseconds using the camera's plate scale, so the same cutoff works regardless of camera. The softest-focus fraction of photos is excluded. The cutoff loosens automatically if too few frames would otherwise survive.
-* **Hardware Context:** Image quality problems are cross-checked against the telescope's own reported state. Airmass (the atmospheric path length to the target, which grows quickly near the horizon), altitude, and azimuth separate normal atmospheric degradation from an actual mount problem. Focuser position and sensor temperature let the pipeline detect focus drift and improve automatic temperature-compensation settings over time.
-* **Cloud & Sky Brightness Checks:** Tracks the background sky brightness and the fraction of saturated pixels before alignment. Exposures with a sudden brightness spike or drop — passing clouds, stray light — are excluded.
-* **Calibration Frame Checks:** Confirms that the calibration frames match the lights' camera settings (gain, offset, binning, and, for darks, temperature) and that each master was built from enough frames. A mismatch or a thin master flags the stack rather than passing silently. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.assess_input_quality.calibration_gates -->
-* **Exposure Group Linearity:** When a stack mixes exposure lengths, each group's brightness must be one scale factor of the reference group's. A group that fails is left out of the combined image. <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains -->
+#### 3.4.1 Before stacking: screening raw frames
 
-#### 3.4.2 After Stacking: Checking the Final Image
-Once stacking finishes, five checks measure how healthy the result is:
+Each frame is judged against its own session, a run of frames with the same camera, filter, and exposure and no long gap. Clouded frames (far fewer stars than the session median and a brighter sky) and trailed frames (low star roundness, the narrow width over the wide width) are moved aside. If too large a share of a session would be moved, nothing is moved and the check fails, because the session itself is the problem. Frames at a minority gain, and the minority side of a sudden jump in sky level (two sky conditions, such as clouds rolling in), are also set aside. A requested share of the sharpest, roundest frames is kept. The master flat's noise must stay below a limit, because dividing by it copies its noise into every light. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.judge_batch --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.quarantine_gate --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_homogeneity.gain_homogeneity_gate --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.background_homogeneity.detect_background_split --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.background_homogeneity.background_homogeneity_gate --> <!-- impl: astrometricslib.utilities.stack_filter_floor.resolve_filter_wfwhm_with_floor --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.assess_input_quality.calibration_gates -->
 
-1. **Signal-to-Noise Ratio (SNR) Gain:** How much background noise was reduced by combining photos. Combining $N$ photos reduces noise by a factor of $\sqrt{N}$.
-2. **Star Sharpness Ratio ($R_{\text{FWHM}}$):** Compares how sharp stars look in the final stacked image ($\text{FWHM}_{\text{stack}}$) to how sharp the input photos predict a stack to be ($\text{FWHM}_{\text{expected}}$). A stack's star is the average of the stars in its frames. For round Gaussian stars, that average has a variance equal to the mean of the individual variances, so the expected width is the root mean square of the input widths. A median would call the normal blur of a stack made on nights of different seeing a failure.
+#### 3.4.2 After stacking: checking the final image
+
+Six checks run on the stacked image, and three more on stacks of several exposure lengths. The star sharpness ratio compares the star width in the stack with the width its frames predict. The width is the FWHM (full width at half maximum), the width of a star's image at half its peak. A stack's star is the average of its frames' stars. For round Gaussian stars the variances average, so the expected width is the root mean square of the input widths. A median would call the normal blur of nights with different seeing (air turbulence) a failure: <!-- impl: astrometricslib.pipelines.stacking.post_processing.assess_output_quality.output_quality_gates -->
 
 $$
-R_{\text{FWHM}} = \frac{\text{FWHM}_{\text{stack}}}{\text{FWHM}_{\text{expected}}}, \qquad \text{FWHM}_{\text{expected}} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\text{FWHM}_i^{\,2}} \tag{4}
+\rho_{\text{FWHM}} = \frac{\text{FWHM}_{\text{stack}}}{\text{FWHM}_{\text{expected}}}, \qquad \text{FWHM}_{\text{expected}} = \sqrt{\frac{1}{N}\sum_{j=1}^{N}\text{FWHM}_j^{\,2}} \tag{5}
 $$
 
-   * *What it means:* A value near $1.0$ means the frames lined up almost perfectly. A value above $1.2$ is a warning sign that small misalignments between frames blurred the final image. The $1.2$ limit did not fire on any of six real stacks, whose ratios ranged from 0.77 to 1.16. Whether it catches a genuine registration failure is untested, because no real failed-registration session exists in the library. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm -->
-3. **Background Consistency Across Frames:** Before stacking, compares each surviving frame's background sky brightness to the rest of the sequence, flagging any frame with an unusual gap — a sign of light pollution or passing sky glow that earlier checks missed.
-4. **Processing Time Tracking:** Tracks how long stacking took and whether it hit a timeout, building up a baseline over time that helps tune how many stacking jobs can safely run at once.
-5. **Mount Tracking Analysis:** Measures how far stars shifted from frame to frame, in arcseconds, to gauge how well the telescope mount tracked the sky. The pipeline knows which side of the telescope's pier the mount was on at each moment, and uses that to exclude the expected jump from a meridian flip. That way, only real tracking problems (a snagged cable, wind, or polar-alignment drift) show up as errors.
+A value clearly above 1 fails, since small misalignments blurred the stack. The other checks cover the share of rejected, saturated, zero (for example, a bias removed twice), and negative pixels, and whether a spectral stack's zero-order image jumps between frames. For several exposure lengths, each group must be one scale factor of the reference, no group may be missing, and raw frames must not be clipped at zero by a low camera offset. <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.expected_stack_fwhm --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.zero_fraction_threshold --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.evaluate_spectral_registration_quality --> <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.measure_exposure_group_gains --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_group_linearity_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.exposure_groups_combined_gate --> <!-- impl: astrometricslib.pipelines.stacking.post_processing.exposure_group_report.raw_frame_clipping_gate --> The pipeline does not cross-check image quality against the telescope's reported state or measure the noise reduction against the $\sqrt{N}$ expectation (Section 9).
 
 ---
 
-## 4. Astrometric Calibration Pipeline
+## 4. Astrometry pipeline
 
-The astrometry pipeline figures out exactly where a stacked image is pointed. It matches camera pixels to real sky coordinates: Right Ascension $\alpha$ and Declination $\delta$, the sky's version of longitude and latitude. This is often called "plate solving," a term left over from the days of photographic plates. The result is a World Coordinate System (WCS): a mathematical formula that converts any pixel position in the image into a real sky position, and back.
+The astrometry pipeline finds exactly where a stacked image is pointed, a step called plate solving. It matches pixels to sky coordinates: Right Ascension $\alpha$ and Declination $\delta$, measured in degrees or arcseconds (1/3600 of a degree). The result is a World Coordinate System (WCS) [18], [19], a formula that converts any pixel position to a sky position and back. Evidence for its settings is in the [astrometry register](validation/astrometry.md).
 
-### 4.1 Purpose & Interfaces
+### 4.1 Purpose and interfaces
 
-* **Inputs:** A calibrated, stacked image, plus a rough estimate of the field's coordinates and pixel scale.
-* **Outputs:** A WCS transformation saved into the image's FITS header, a list of catalog-identified reference stars, and an Astrometry Quality Record.
+- **Inputs.** A stacked image and a rough estimate of the field's coordinates and pixel scale (arcseconds of sky per pixel).
+- **Outputs.** A WCS in the image's FITS header, a list of catalog-identified stars, and an astrometry quality record.
 
-### 4.2 Major Concepts and Governing Equations
+### 4.2 Major concepts and governing equations
 
-Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \delta)$ in five steps:
+Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \delta)$ in six steps:
 
-1. **Star Detection:** Finds star-like points of light with a matched-filter star finder (the DAOFIND method, through the photutils package). The finder works on a background-subtracted image and keeps only sources whose sharpness and roundness look like a star. The star finder's own center for each source is the position the rest of the pipeline uses. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> A separate step fits a 2D Gaussian to bright stars. That fit measures the star width (FWHM), which is used to judge how large a position error is acceptable. It does not set any star position. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm -->
-2. **Quad-Star Matching:** Groups nearby stars into four-star shapes ("quads") whose relative side lengths are invariant under rotation, reflection, and scaling. These shapes are compared against a pre-built star index to identify which patch of sky the image shows, even if the telescope was pointed somewhere unexpected — continuing a long tradition of cataloging the sky this way [1]. The Astrometry.net solver [7] does this work. The usual local solver reads the image file and finds its own stars. The pipeline's own star list decides whether a local attempt is worth making, and it is the list sent to the online solver when the local attempt fails. <!-- impl: astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve -->
-3. **Fitting the Distortion Map:** Converts pixel offsets from the image center $(x-x_0, y-y_0)$ into sky-coordinate offsets $(\xi, \eta)$, using four coefficients $CD_{i,j}$ plus a correction for lens/mirror distortion, called a Simple Imaging Polynomial (SIP) [11]:
+1. **Star detection.** A matched-filter star finder (DAOFIND [20], through photutils [5]) slides a star-shaped template over the background-subtracted image and responds most where the image looks like a star. It keeps sources whose sharpness and roundness look stellar: a hot pixel is too sharp and a galaxy too flat. A Gaussian fit to bright stars measures the star width (FWHM), which sets the acceptable position error. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect --> <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm -->
+2. **Quad-star matching.** Nearby stars are grouped into four-star shapes ("quads") whose relative side lengths do not change under rotation, reflection, or scaling. Comparing them with a pre-built star index identifies the patch of sky, even if the telescope pointed somewhere unexpected. The Astrometry.net solver [3] does this, locally first and then online. <!-- impl: astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver.solve --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
+3. **Fitting the distortion map.** Pixel offsets $(u, v)$ from a reference pixel $(x_{\text{ref}}, y_{\text{ref}})$ become offsets $(\xi, \eta)$ on the tangent plane (a flat sky projection touching the sphere at the reference pixel). Four linear coefficients $K$ handle rotation, scale, and flips. Real optics also bend the map, mostly near the edges, so a Simple Imaging Polynomial (SIP) [21] first corrects the pixel offsets, with second-order and higher terms only, because $K$ holds the linear part:
 
-$$
-\xi = CD_{1,1}(x - x_0) + CD_{1,2}(y - y_0) + f_{\text{SIP},\xi}(x, y), \qquad \eta = CD_{2,1}(x - x_0) + CD_{2,2}(y - y_0) + f_{\text{SIP},\eta}(x, y) \tag{5}
-$$
+   $$
+   \begin{aligned}
+   \begin{pmatrix} \xi \\ \eta \end{pmatrix} &= \begin{pmatrix} K_{11} & K_{12} \\ K_{21} & K_{22} \end{pmatrix} \begin{pmatrix} u + f(u,v) \\ v + g(u,v) \end{pmatrix}, \qquad u = x - x_{\text{ref}}, \quad v = y - y_{\text{ref}}, \\
+   f(u,v) &= \sum_{a+b=2}^{n_{\text{SIP}}} A_{ab}\,u^{a}v^{b}, \qquad g(u,v) = \sum_{a+b=2}^{n_{\text{SIP}}} B_{ab}\,u^{a}v^{b}
+   \end{aligned} \tag{6}
+   $$
 
-   * *What each piece means:*
-     * $CD_{i,j}$: the four coefficients that together handle the image's rotation, scale, and any left-right flip.
-     * $f_{\text{SIP}}(x, y)$: extra polynomial terms that correct for lens or mirror distortion, more noticeable toward the edges of a wide field of view.
+   The WCS is written into the FITS header with its SIP terms, so a later reader keeps the lens correction. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
+4. **Naming the stars.** Each detected star is matched to the nearest entry in the SIMBAD database [22] or the Gaia catalog [23]. Gaia lists positions for one fixed date, the catalog epoch, with each star's proper motion (its yearly drift across the sky). Over a decade a fast star can drift a whole match radius, so each Gaia position is moved to the observation date first. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch -->
+5. **Judging the fit.** Two numbers come from the solve. The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's index. An online solve returns no match table, so it has none. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
+6. **Refitting to Gaia.** The solver fits a few dozen bright stars of its own index, which carry the index's errors, so a solution can be a pixel off and still agree with itself. The pipeline therefore fits a new low-order SIP solution to the detected stars matched to Gaia stars at the observation date. It drops stars far from the fit (blends, double stars, wrong matches) and repeats until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. The quality check judges the first available of three numbers: the RMS against Gaia, the solver's fit residual, and the catalog match separation. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
 
-   The solved WCS is written back into the image's FITS header, so the next program to open the file does not solve it again. The write keeps the SIP terms and the SIP marker in the coordinate type. Without them, a reader of the file would lose the lens correction near the image edges. Old sky-map keywords are deleted first, so a re-solve leaves no contradictory entries. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
-4. **Naming the Stars:** With the WCS known, each detected star is matched to the nearest entry in the SIMBAD star database [8] or the Gaia catalog [10] to attach a real name and ID. Gaia lists each star's position for the year 2016.0, together with its proper motion: how far the star drifts across the sky each year. A star that drifts 1 arcsecond a year sits 10 arcseconds from its catalog position after ten years, which equals the pipeline's whole match radius. Each Gaia position is therefore moved to the date of the observation before matching. When the catalog rows carry no proper motion, or the image has no readable observation date, the positions stay at 2016.0 and the run records a flag saying so. A single star with no proper motion value stays where it is. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch -->
-5. **Judging the Fit:** Two different numbers describe how well the solved WCS agrees with the stars, and the pipeline keeps them apart.
-   * *Fit residual.* The solver matches stars in the image to stars in its own reference index. For each matched star, the residual is the distance between the star's position under the fitted WCS and the reference star's position. The root mean square (RMS) of these distances, in arcseconds, is the fit residual. This is the number the quality check judges. <!-- impl: astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
-   * *Catalog match separation.* The RMS of the distance from each detected star to its nearest SIMBAD or Gaia star, counting only stars inside the match radius. Wrong matches and SIMBAD's uneven position precision raise it, and the match radius caps it. It is a rough check, not a measure of the fit. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
+### 4.3 Pipeline theory of operations
 
-   The online solver returns no match table, so for an online solve the fit residual is unknown. The quality check then falls back to the catalog match separation and says so in its detail. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis -->
+Table 4 lists the steps.
 
-### 4.3 Pipeline Theory of Operations
+**Table 4.** Astrometry pipeline execution sequence.
 
-Table 4 lays out the astrometry pipeline step by step.
+| Step | Pipeline phase | Description |
+| --- | --- | --- |
+| 1 | Source detection | Find stars. |
+| 2 | Quad pattern hashing | Turn each four-star shape into a numeric code (a hash) to look up in the index. |
+| 3 | WCS and distortion fit | Fit Equation (6) and write it into the header. |
+| 4 | Catalog cross-match | Refit to Gaia and name the stars. |
+| 5 | Solution check | Judge the residual against the star width. |
 
-**Table 4.** Astrometry pipeline execution sequence and operations.
+### 4.4 Quality metrics and solution validation
 
-| Step | Pipeline Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Source Detection | **In:** Stacked FITS image<br>**Out:** Star center list $(x_i, y_i)$ | Find stars with a matched-filter star finder, and keep sources that are sharp and round enough to be stars. |
-| 2 | Quad Pattern Hashing | **In:** Star list or image<br>**Out:** Geometric quad shapes | Group stars into four-star shapes that stay recognizable under rotation and scaling. |
-| 3 | WCS & Distortion Fit | **In:** Matched star pairs<br>**Out:** WCS header values ($CD_{i,j}, \text{SIP}$) | Fit the pixel-to-sky transformation via Eq. (5), and write it, SIP terms included, into the FITS header. |
-| 4 | Catalog Cross-Match | **In:** Solved field, SIMBAD and Gaia catalogs, observation date<br>**Out:** Matched catalog stars $(\alpha_i, \delta_i)$ | Move Gaia positions to the observation date, then match each detected star to a catalog entry to attach its identity. |
-| 5 | Solution Check | **In:** WCS, fit residual, catalog match separation, match counts<br>**Out:** Astrometry Quality Record | Judge the fit residual against the star width, report the catalog match separation next to it, and record how many stars matched. |
+#### 4.4.1 Before solving: checking the image
 
-### 4.4 Quality Metrics and Solution Validation
+At least four stars are needed, since one quad needs four. Below a higher count the local solver is skipped, because it would spend its whole time limit on a near-certain failure. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver._solve_locally -->
 
-Each check below is recorded as passed, failed, or not checked. A check that could not look is never recorded as passed. <!-- impl: astrometricslib.models.gate_result.unchecked_gate -->
+#### 4.4.2 After solving: checking the result
 
-#### 4.4.1 Before Solving: Checking the Image
-* **Minimum Star Count:** At least four stars must be detected before a plate-solve is even attempted. Below a second, higher count (Appendix A), the local solver is skipped and the pipeline goes straight to the online solver, because a local attempt would spend its whole time limit on a near-certain failure. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image -->
-* **Shape Filtering:** Detected sources are filtered by sharpness and roundness before solving, to screen out non-star detections and badly distorted blobs. <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector.detect -->
-* **Scale Hints & Fallback:** The pipeline computes the expected pixel scale from the pixel size, binning, and focal length, and starts with a narrow window around it. The solver widens that window by a further 20% on each side. If the solve still fails quickly, it retries with no scale or position assumption at all. If the hinted solve instead used nearly its whole time limit, the retry is skipped, because an unconstrained search is unlikely to succeed in the same budget. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver._solve_locally -->
-
-#### 4.4.2 After Solving: Checking the Result
-* **Solve Success Flag:** Whether the solver found a WCS at all; if not, the pipeline stops for that target.
-* **Matched-Star Count:** The number of detected stars matched to a catalog entry must reach a minimum. With few matches, the residual is an average over too few stars to mean much. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
-* **Fit Residual:** The solver's fit residual must stay below a fraction of the star width. A residual near half a star width means something other than centroid noise dominates the fit: a wrong match, a bad distortion model, or a wrong field. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
-* **Network Health Tracking:** Tracks how often lookups to remote star catalogs succeed, fail, or get temporarily paused after repeated failures. The check fails when the pause tripped or half or more of the lookups failed. A run that attempted no lookup is recorded as not checked. This distinguishes a genuinely sparse star field from a network problem. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
+The solver must find a WCS, and enough stars must match a catalog entry, or the residual is an average over too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. The limit sits well above centroid noise (the small random error in finding a star's center), so a larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
 
 :::{warning}
-**Designed, not measured.** The minimum matched-star count (20), the residual limit (half a star width), and the failed-lookup limit are design estimates (Appendix A). The residual limit was set on catalog match separations, which ranged from 0.14 to 0.44 of a star width on the 8 saved solves that carry a plate scale. A fit residual is normally smaller than a separation, so the limit is lenient for fit residuals, and it has not been re-measured on them. The limit is there to catch a failed solve, not to rank good ones. The four saved solves with fewer than 20 matched stars have among the five largest residuals (5.8 to 9.0 arcseconds), which is the only evidence behind the star-count minimum. Do not read a pass as a measure of position accuracy.
+**A pass is not a measure of position accuracy.** The residual limit catches a failed solve and does not rank good ones.
 :::
 
 ---
 
-## 5. Stellar Photometry Pipeline
+## 5. Stellar photometry pipeline
 
-The photometry pipeline tracks how a star's brightness changes across a sequence of individual (unstacked) photos, building a light curve and flagging stars whose brightness varies.
+The photometry pipeline tracks how a star's brightness changes across a sequence of unstacked frames. It builds light curves and flags stars that vary. Evidence for its settings is in the [photometry register](validation/photometry.md).
 
-### 5.1 Purpose & Interfaces
+### 5.1 Purpose and interfaces
 
-* **Inputs:** A sequence of calibrated, unstacked light frames, the stars found on the session's first frame, and a solved WCS.
-* **Outputs:** Normalized light curves $\hat{F}_i(t)$ with a 1-sigma uncertainty and a mid-exposure time for every point, brightness statistics, a list of variable-star candidates, and a Photometry Quality Record.
+- **Inputs.** Calibrated, unstacked light frames, the stars found on the session's first frame, and a solved WCS.
+- **Outputs.** Normalized light curves $\hat{F}_i(t)$ with a $1\sigma$ uncertainty and a mid-exposure time for every point, variable-star candidates, and a photometry quality record.
 
-### 5.2 Major Concepts and Governing Equations
+### 5.2 Major concepts and governing equations
 
-1. **Tracking a Star Frame to Frame:** The pipeline finds the stars once, on the first frame of an observing session. On every later frame, it measures how the frame sits against the first one (a shift, plus a small rotation and change of scale when enough well-spread reference stars are found) from a handful of bright reference stars. If too few of them are found, it assumes no shift rather than guessing. It starts each star at its first-frame position moved by that alignment. Then it re-centers the star on its own brightness-weighted centroid (the average pixel position, weighted by brightness) in a small box. A star's true offset differs slightly from the frame's fitted alignment, so this step keeps the measuring circle on the star. The re-centered position is refused, and the shifted position kept, when the box holds a saturated pixel, holds no light above the sky, reaches past the frame edge, or the centroid moved too far to be the same star. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid -->
+1. **Tracking a star frame to frame.** Stars are found once, on the first frame of a session: the frames of one target on one night with the same gain and offset. On each later frame, the pipeline measures how the frame sits against the first from a few bright alignment stars. It moves each star by that alignment and re-centers it on its brightness-weighted centroid in a small box, unless the box looks unreliable. Brightness comes from aperture photometry: the pixel values inside a circle on the star are added up, and the sky, the median of a ring around it, is subtracted. The circle sits at the star's exact fractional position, because a circle a fraction of a pixel off loses light that changes as the field drifts. This tracking holds only within a session. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
+2. **Uncertainty of each measurement.** Every brightness carries a $1\sigma$ uncertainty, so later steps can weight points by quality. It follows the CCD equation [24] in the form of Merline and Howell [25], in electrons, where independent noise variances add:
 
-   The measuring circle and its sky ring sit at the star's exact position, including the fraction of a pixel. A pixel on the circle's edge counts for the fraction of it inside the circle. The position is never rounded to a whole pixel. A circle half a pixel off a typical star loses 1 to 2 percent of its light, and that loss changes as the field drifts. It is the same size as the brightness changes the pipeline searches for. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
+   $$
+   \sigma_{\text{ap}}^2 = S_\star + n_{\text{pix}}\left(s_{\text{sky}} + \sigma_{\text{rd}}^2 + D\right) + \frac{n_{\text{pix}}^2}{n_{\text{sky}}}\left(s_{\text{sky}} + \sigma_{\text{rd}}^2 + D\right) \tag{7}
+   $$
 
-   This shortcut only holds within one observing session, since framing and pointing stay consistent only while the telescope isn't repositioned. The pipeline therefore tracks stars session by session, not across a target's entire observation history.
-2. **Uncertainty of Each Measurement:** Every brightness comes with a 1-sigma uncertainty, so later steps can weight a point by how well it was measured. The uncertainty follows the CCD equation (the noise budget of a camera sensor) [12]. It works in electrons, because the random scatter of a count follows the number of electrons collected:
+   The first term is the star's shot noise: a count of $S_\star$ electrons scatters by about $\sqrt{S_\star}$. The others are the noise of the sky, read-out, and dark counts under the circle, and of the sky level that the ring estimates from a limited number of pixels. The gain comes from the camera profile, else the frame header. Only then is one electron per ADU assumed, and the light curve says so, because the uncertainties then have the right shape but the wrong size. Dark current is taken as zero. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.aperture_flux_error_adu --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise -->
+3. **Times of observation.** Each point is stamped with the middle of its exposure as BJD$_{\text{TDB}}$ (Barycentric Julian Date in Barycentric Dynamical Time) [26]. This is the time the light would reach the solar system's center of mass, so an event's date does not depend on where Earth is in its orbit (a shift of up to about 8 minutes). A frame with no readable date is rejected and never given the current time. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.observation_times.barycentric_julian_dates --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.read_observation_time -->
+4. **Ensemble differential photometry.** To cancel passing clouds, each star's raw brightness $F_i(t)$ is divided by a signal from a group (ensemble) of well-behaved comparison stars in the same field [27]. A thin cloud dims every star by the same fraction, so the ratio stays put. The group is chosen once per session from stars that are measured in every usable frame, never saturated, and not listed as variable in a catalog such as the International Variable Star Index [28]. The very brightest are skipped, and faint ones are dropped because they add more noise than they remove. Then the star that scatters most, relative to the scatter its uncertainties predict, is dropped, repeatedly, until none scatters more than allowed. Each frame's signal is the weighted mean of the comparison stars' brightness, each divided by its own session mean, with weights of one over the variance:
 
-$$
-\sigma_F^2 = F + n_{\text{pix}}\left(S + R^2 + D\right) + \frac{n_{\text{pix}}^2}{n_{\text{sky}}}\left(S + R^2\right) \tag{6}
-$$
+   $$
+   \hat{F}_i(t) = \frac{F_i(t)}{L_{\text{ens}}(t)}, \qquad L_{\text{ens}}(t) = \bar{\mu}\,\frac{\sum_{c=1}^{N_c} w_c(t)\,F_c(t)/\mu_c}{\sum_{c=1}^{N_c} w_c(t)}, \qquad w_c(t) = \frac{1}{\epsilon_c(t)^2} \tag{8}
+   $$
 
-   * *What each piece means:* $F$ is the star's net counts, so the first term is the star's own shot noise (the random scatter of a count). $S$ is the sky level per pixel, $R$ the read noise, and $D$ the dark current collected per pixel. $n_{\text{pix}}$ is the area of the circle and $n_{\text{sky}}$ the number of pixels in the sky ring. The second term is the noise of the sky, read-out, and dark counts under the circle. The third is the noise in the sky level itself, which the ring measures from a limited number of pixels. All of $F$, $S$, $R$, and $D$ are in electrons.
+   Here $\mu_c$ is a comparison star's session mean, $\bar{\mu}$ the mean of those means, and $\epsilon_c(t)$ a star's fractional uncertainty. The noise of $N_c$ equal stars averages down as $1/\sqrt{N_c}$, which a median would not do. A comparison star is divided by the signal of the *other* members, so its own dip never lowers its own divisor. Frames with far fewer measured stars than usual or a clear outlier signal are left out. A star's isolated outlying points are clipped, but a run of neighboring points on one side is kept as a real change. The pipeline does not fit brightness against airmass (the amount of atmosphere the light crossed), because the ensemble already removes shared dimming. <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set --> <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.build_ensemble_signal --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_frames --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_measurements_for_star --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.detrend_light_curves_airmass -->
 
-   The gain (electrons per ADU, the step of the stored pixel value) comes from the camera's profile, then from the frame's header, and only then from an assumption of 1 electron per ADU and no read noise. When the gain is assumed, the uncertainties have the right dependence on brightness but the wrong size, and the light curve says so. The dark current is taken as zero because no source records it. The equation assumes the bias offset has been removed from the frame. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.aperture_flux_error_adu --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.detector_noise.resolve_detector_noise -->
-3. **Times of Observation:** Each point is stamped with the middle of its exposure as a Julian date in BJD_TDB (Barycentric Julian Date in Barycentric Dynamical Time) [13]. This is the time the light would reach the center of mass of the solar system, so the date of an event does not depend on where Earth is in its orbit. The shift is up to about 8 minutes, and a long exposure shifts the mid-time by half its length. A frame with a missing or unreadable observation date is rejected from every light curve. It is never given the current time. When the target's position or the observatory's location is unknown, the light curve records which weaker time basis was used. <!-- impl: astrometricslib.pipelines.photometry.pre_processing.observation_times.barycentric_julian_dates --> <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.read_observation_time -->
-4. **Ensemble Differential Photometry:** To cancel out passing clouds or changing atmospheric transparency, each star's raw brightness $F_i(t)$ is divided by a signal built from a group ("ensemble") of well-behaved comparison stars in the same field. The group is chosen once per session and is the same in every frame. The choice has three steps:
-   * *Candidates.* A star qualifies only if it has a positive brightness in every usable frame, is never saturated, and no catalog lists it as variable. Saturated stars are excluded because brightness stops tracking light near full well.
-   * *Brightness band.* The candidates are ranked by median brightness. The very brightest are skipped because they come closest to saturation. The band runs down to a fixed share of the candidates, and at most a fixed number of stars enter the next step. A star outside this band is not a comparison star.
-   * *Vetting.* Each candidate is compared with an ensemble built from the other candidates. The star that scatters most, relative to the scatter its uncertainties predict, is dropped. The step repeats until no star scatters more than its uncertainties allow, or until a minimum number remain. If more than a cap remain, the stars with the smallest uncertainties are kept.
+   :::{warning}
+   **A synthetic session tests the method, not the field.** It cannot show whether the brightness band, the number of comparison stars, and the vetting limit suit a real field. <!-- impl: astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection -->
+   :::
+5. **Deciding which stars vary.** A star's scatter grows as it gets fainter, so ranking by scatter would flag faint stars. The pipeline asks instead whether a star scatters more than a constant star of the same brightness in this field. It fits a noise model of the field's own scatter against brightness and measures three indices per star [29]. *Excess scatter* is the measured scatter over the expected scatter. *Reduced chi-square* is the scatter of the points about the weighted mean in units of their uncertainties. Both are near 1 for a constant star:
 
-   The signal in each frame is the weighted mean of the comparison stars' brightness, each divided by its own session mean so that bright and faint stars count on the same scale. Noisier stars get less weight:
+   $$
+   \chi^2_\nu = \frac{1}{n_{\text{pts}}-1}\sum_{j=1}^{n_{\text{pts}}}\left(\frac{\hat{F}_j - \bar{F}_w}{e_j}\right)^2 \tag{9}
+   $$
 
-$$
-\hat{F}_i(t) = \frac{F_i(t)}{L(t)}, \qquad L(t) = \bar{m}\,\frac{\sum_{k=1}^{K} w_k(t)\,F_k(t)/m_k}{\sum_{k=1}^{K} w_k(t)}, \qquad w_k(t) = \frac{1}{\sigma_k(t)^2} \tag{7}
-$$
+   *Stetson J* multiplies the deviations of neighboring points [30]. White noise gives products of random sign and J near 0, a smooth change gives mostly positive products, and one bad point adds little. The thresholds on chi-square and J are $\zeta$ robust standard deviations above the field's median, where $\zeta$ is the one-sided normal point for a chosen false-alarm share. A robust standard deviation is 1.4826 times the median absolute deviation (MAD) [31], which a few true variables do not inflate. A candidate must pass all three indices and a false-discovery test: its chi-square becomes a false-alarm probability, and the Benjamini–Hochberg method [32] converts these into q-values that allow for testing every star at once. The coefficient of variation is a plain measure of scatter, so 0.01 means about 1% scatter: <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.FALSE_DISCOVERY_LEVEL --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.assess_variability --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.fit_noise_model --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.reduced_chi_square --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.stetson_j --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.calibrate_thresholds -->
 
-   * *What each piece means:* $m_k$ is comparison star $k$'s mean brightness over the session, $\bar{m}$ the mean of those means, and $\sigma_k(t)$ the fractional uncertainty of star $k$ in that frame. $\bar{m}$ puts $L(t)$ back in brightness units, so a star as bright as the average comparison star has $\hat{F}$ near 1. Equal stars average down as $1/\sqrt{K}$. A median of raw brightness from stars of different brightness has only the noise of one star.
+   $$
+   C_v = \frac{s_{\hat{F}}}{\langle \hat{F} \rangle} \tag{10}
+   $$
 
-   A comparison star is divided by the signal built from the *other* members, so that its own noise and changes never enter its own divisor. Without this, a dip in one member would be hidden by about $1/K$ of its depth. Frames in which fewer than half the usual number of stars were measured are left out of the session, as are frames whose signal is a clear outlier compared with the rest (a passing cloud, say). A star's own isolated outlying points (a cosmic ray, a bad centroid) are clipped, but two or more neighboring points on the same side are kept as a real change, such as a dip. <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set --> <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.build_ensemble_signal --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_frames --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_measurements_for_star -->
+   A field with too few stars for a noise model flags stars by an unusually high $C_v$ relative to the rest of the field. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.flag_variable_stars -->
 
-   The pipeline does not fit a star's own brightness against airmass. Dividing by the ensemble already removes the dimming every star shares. A fit to one star would also remove part of a transit or half a pulsation cycle, because airmass changes steadily over a night. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer.detrend_light_curves_airmass -->
+   :::{warning}
+   **The flag is only as good as the field's noise.** The area under the ROC curve (AUC) is the chance that a random variable scores above a random constant star: 1 is perfect and 0.5 is chance. A synthetic field tests the method on understood noise, not on the sky. A flag from $C_v$ alone is a reason to look, not evidence of a known kind of variable. <!-- impl: astrometricslib.pipelines.photometry.test.test_variability_injection --> <!-- impl: astrometricslib.scripts.measure_variability_cutoff -->
+   :::
+6. **Matching the same star across sessions.** Tracking holds only within a session, so stars from sessions weeks apart are matched by sky position into a single light curve. No session is rescaled, because that would remove the slow change sought. For a star seen in at least two sessions, the between-session amplitude is the ratio of the highest to the lowest session median, in magnitudes, and the significance is the difference of those medians over their combined expected error. A shift every star shares points to the comparison group. <!-- impl: astrometricslib.pipelines.photometry.batch._match_and_merge_across_sessions --> <!-- impl: astrometricslib.pipelines.photometry.batch._merge_light_curves --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.identify_long_term_variable_candidates -->
+7. **Identifying stars by catalog name (optional).** A session's reference frame can be matched to a star catalog as in Section 4.
+8. **Searching for a repeating pattern.** The target's star and a set number of the brightest others are searched for a period. A Lomb–Scargle periodogram [33], [34], [35] fits sine waves of many trial periods to unevenly spaced data, and box least squares [36] finds a repeating flat-bottomed dip, such as an eclipse or a transit. A search finds a best period even in pure noise, so each result carries a verdict: *insufficient data*, *not detected*, *possible*, or *detected*. The false-alarm probability is the share of shuffled light curves that give a result at least as strong. The shuffle moves blocks of neighboring points [37], so slow drifts are not mistaken for a signal. "Detected" needs a stricter limit and a minimum number of repeats. A hold-out check (leave one night out and predict it) and an alias check (false echo periods from once-a-night sampling) can each lower a verdict. One run makes $N_s$ searches, so each probability is corrected by the Šidák method [38], the chance that at least one of $N_s$ independent searches does that well by luck:
 
+   $$
+   p_{\text{corr}} = 1 - (1 - p)^{N_s} \tag{11}
+   $$
 
-:::{warning}
-**Designed, not measured on real fields.** The brightness band, the minimum and cap on the number of comparison stars, the consistency limit used in vetting, and the half-of-typical rule for usable frames are design choices (Appendix A). Only the method is checked, on synthetic sessions with known truth: it recovered a 1 percent, 2 hour dip to within 3 percent of its depth, rejected a comparison candidate that carried a 5 percent sinusoid, matched the comparison scatter to the propagated uncertainty within 20 percent, and removed a 3 percent frame-to-frame transparency change from every curve. <!-- impl: astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection -->
+   A shuffle test with $N_{\text{sh}}$ shuffles cannot report a probability below $1/(N_{\text{sh}}+1)$, so searches that need it are repeated with more shuffles. <!-- impl: astrometricslib.pipelines.photometry.batch.search_periods_and_save --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.lomb_scargle_search --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.box_search --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.verdict_from_false_alarm --> <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.correlation_block_length --> <!-- impl: astrometricslib.pipelines.photometry.processing.period_checks.apply_verdict_checks --> <!-- impl: astrometricslib.pipelines.photometry.processing.family_wise_correction.apply_family_wise_correction -->
 
-:::
+### 5.3 Pipeline theory of operations
 
-5. **Deciding Which Stars Vary:** A star's scatter grows as it gets fainter, because its measurements are noisier. A rule that flags the stars with the most scatter would fill up with faint stars. The pipeline asks a different question: does this star scatter more than a constant star of the same brightness scatters in this field? It fits a noise model of the field, which gives the expected scatter of a constant star at each brightness, from the field's own stars. Then it measures three indices for every star:
-   * *Excess scatter:* the star's measured scatter divided by the model's expected scatter. A constant star is near 1.
-   * *Reduced chi-square:* how far the points sit from the star's weighted mean, in units of each point's uncertainty. A constant star with correct uncertainties is near 1.
+Table 5 lists the steps.
 
-$$
-\chi^2_\nu = \frac{1}{n-1}\sum_{j=1}^{n}\left(\frac{x_j - \bar{x}_w}{s_j}\right)^2 \tag{8}
-$$
+**Table 5.** Photometry pipeline execution sequence.
 
-   * *What each piece means:* $x_j$ is point $j$ of the normalized light curve, $s_j$ its uncertainty, $\bar{x}_w$ the uncertainty-weighted mean, and $n$ the number of points. The propagated uncertainties leave out centroid jitter and flat-field error, so they are raised to the noise model's level when that level is higher.
-   * *Stetson J:* multiplies the deviations of neighboring points [14]. White noise gives products of random sign, so J stays near 0. A smooth change gives mostly positive products. One bad point gives two products of opposite sign and adds little.
+| Step | Pipeline phase | Description |
+| --- | --- | --- |
+| 1 | Star tracking | Shift each star by the frame's drift and re-center it. |
+| 2 | Aperture photometry | Sum the light, subtract the sky, and compute the uncertainty (Equation (7)). |
+| 3 | Ensemble selection | Exclude saturated and variable stars, then vet the rest. |
+| 4 | Differential normalization | Divide by the ensemble signal (Equation (8)). |
+| 5 | Variability analysis | Compute three indices (Equation (9)) and flag stars above all thresholds. |
+| 6 | Cross-session matching | Match stars by sky position. |
+| 7 | Period search | Search, shuffle-test, and correct for the number of searches (Equation (11)). |
 
-   The thresholds on chi-square and J are set from the field itself, at a fixed number of robust standard deviations above the field's median, so a field whose uncertainties are all mis-scaled (an assumed gain, for example) raises its own thresholds. The threshold on excess scatter is fixed. A star is a variable-star candidate only when all three indices exceed their thresholds. Stetson J acts as a veto: it keeps isolated bad points from creating candidates. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.assess_variability --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.fit_noise_model --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.reduced_chi_square --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.stetson_j --> <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.calibrate_thresholds -->
+### 5.4 Quality metrics and photometric validation
 
-   The coefficient of variation stays on every light curve as a plain measure of scatter:
+Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates -->
 
-$$
-C_v = \frac{\sigma_{\hat{F}}}{\langle \hat{F} \rangle} \tag{9}
-$$
+#### 5.4.1 Before measuring: screening the input
 
-   When a field has too few stars to fit a noise model, the pipeline falls back to flagging stars whose $C_v$ is unusually high relative to the other stars in the same field, rather than against one fixed threshold used for every field. This mirrors the field-relative approach long-running variable-star observing networks use to flag candidates for follow-up [2]. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.flag_variable_stars -->
+A star saturated in any frame is never a comparison star. A frame's drift is measured only with enough alignment stars, and a frame with no readable date is rejected.
 
+#### 5.4.2 After measuring: checking the light curve
 
-:::{warning}
-**The flag is only as good as the field's noise.** On synthetic fields with known variables, the combined score ranked the injected variables above constant stars with an area under the ROC curve (AUC) of 0.94, against 0.84 for $C_v$ alone. The rule flagged none of 9,120 constant stars and 64 percent of the injected variables. These numbers are from synthetic data, not the sky. They test the method on a field whose noise is understood. The thresholds are design values (Appendix A). <!-- impl: astrometricslib.pipelines.photometry.test.test_variability_injection --> No AUC for the new score has been measured on the observatory's real library. The older $C_v$-only flag, measured on the library (46,259 stars with light curves in 32 targets, 2,374 of them listed as variable by SIMBAD, Gaia, or VSX), separated catalogued variables from other stars no better than chance (AUC 0.46 between stars of similar brightness; 0.5 is chance). A flag in most of those runs was not evidence of the kind of variable the catalogs know. <!-- impl: astrometricslib.scripts.measure_variability_cutoff -->
-
-:::
-
-6. **Matching the Same Star Across Sessions:** Since tracking (concept 1) only holds within one session, the pipeline needs another way to identify the same star across sessions taken weeks or months apart. It does that using each star's sky position: every session's tracked stars are placed on the same sky-coordinate frame and matched against stars already found in earlier sessions, folding one physical star's measurements across sessions into a single, continuous light curve. The merge does not rescale any session. Each session keeps its brightness level as measured, because rescaling one session to match another would remove the very slow change the next step looks for. <!-- impl: astrometricslib.pipelines.photometry.batch._match_and_merge_across_sessions --> <!-- impl: astrometricslib.pipelines.photometry.batch._merge_light_curves -->
-
-   For each star seen in at least two sessions, the pipeline compares the sessions' median normalized brightness. The between-session amplitude is the ratio of the highest to the lowest median, in magnitudes. The significance is the difference of those two medians divided by their combined expected error. A star is flagged when both are large enough. A flag means the star's level differs between sessions by more than its own scatter explains. It does not rule out the comparison stars as the cause, because each session picks its own comparison group. A shift that every star in the field shares points to the comparison group, not to the star. <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.identify_long_term_variable_candidates -->
-7. **Identifying Stars by Catalog Name (optional):** Each session's reference frame can optionally be run through the same star-catalog matching used by the astrometry pipeline (Section 4), reusing an existing WCS when one is already available instead of solving again. This gives every star a real catalog name instead of a synthetic per-run label, and also improves the cross-session matching described in concept 6.
-
-### 5.3 Pipeline Theory of Operations
-
-Table 5 lays out the photometry pipeline step by step.
-
-**Table 5.** Photometry pipeline execution sequence and operations.
-
-| Step | Pipeline Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Star Tracking | **In:** Light frame sequence & first-frame star positions<br>**Out:** Tracked position $(x_t, y_t)$ of every star in each frame | Shift each star by the frame's drift, then re-center it on its own brightness-weighted centroid. |
-| 2 | Aperture Photometry | **In:** Calibrated frames, aperture radius, gain and read noise, exposure start times<br>**Out:** Brightness $F(t)$, its uncertainty via Eq. (6), sky background, BJD_TDB mid-exposure time | Sum pixel ADU within a circle at the exact star position, subtract the surrounding sky background, and compute the uncertainty and the time. |
-| 3 | Ensemble Selection | **In:** Brightness of every star in the field<br>**Out:** Fixed, vetted comparison-star set | Exclude saturated and catalogued variable stars, take a brightness band of the remaining stars, and drop candidates that scatter more than their uncertainties allow. |
-| 4 | Differential Normalization | **In:** Raw brightness & comparison set<br>**Out:** Normalized light curves $\hat{F}(t)$ with uncertainties | Divide each star's raw brightness by the comparison ensemble's weighted-mean signal, via Eq. (7). |
-| 5 | Variability Analysis | **In:** Normalized light curves $\hat{F}(t)$<br>**Out:** Variable-star candidates & Photometry Record | Fit the field's noise model, compute excess scatter, reduced chi-square (Eq. (8)), and Stetson J, and flag stars that exceed all three thresholds. |
-| 6 | Cross-Session Matching | **In:** Per-session tracked stars & sky coordinates<br>**Out:** Continuous multi-session light curves & between-session amplitude | Match the same star across sessions by sky position, join its measurements without rescaling, and measure how its level differs between sessions. |
-
-### 5.4 Quality Metrics and Photometric Validation
-
-Each run-level check below is recorded as passed, failed, or not checked, as in Section 4.4. A check that could not look is never recorded as passed. <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates -->
-
-#### 5.4.1 Before Measuring: Screening the Input
-* **Saturation Ceiling:** A star that is saturated in any frame is never used as a comparison star, since a saturated star's brightness reading can't be trusted.
-* **Alignment Confidence Floor:** The frame's drift is measured only when a minimum number of reference stars are re-located; if too few are found, the pipeline assumes no shift rather than guessing at one it isn't confident about.
-* **Capture Times:** A frame with no readable observation date is rejected, and each rejection reason is recorded in the run's quality summary.
-
-#### 5.4.2 After Measuring: Checking the Light Curve
-* **Comparison Set:** A session's comparison set must hold at least a minimum number of stars, and the number must be the same in every frame. The check also reports the comparison stars' scatter in magnitudes next to the scatter their uncertainties predict. A value near the prediction means the set is constant at the level of its noise.
-* **Ensemble Outlier Rejection:** Frames whose comparison signal is a clear outlier are rejected before being folded into the light curve. The run is flagged when many frames are rejected.
-* **Per-Star Outlier Rejection:** Individual normalized flux points are clipped per star to suppress single-frame artifacts in the light curve, except for runs of neighboring points that look like a real change.
-* **Discrimination Check:** Among the field's stars, those that catalogs list as variable should score above the others in the variability score, with an AUC of at least a minimum. The check is not made without enough catalogued variables and unlisted stars to compare.
-* **Detectable Amplitude:** The run states the smallest change its variability cutoff could see. A change smaller than that is invisible to the flag, however real it is.
-* **Uncertainty Provenance:** The run reports the median per-point uncertainty in magnitudes and whether the gain was assumed.
+The comparison set must hold a minimum number of stars, the same in every frame, with scatter matching its uncertainties. Frames with a clear outlier signal are rejected, and the run is flagged when a large share is. Catalog-listed variables should score above other stars. The run states the smallest change it could see, and fails when most variable stars would be missed.
 
 ---
 
-## 6. Stellar Spectroscopy Pipeline
+## 6. Stellar spectroscopy pipeline
 
-The spectroscopy pipeline extracts, calibrates, and analyzes a star's spectrum from images taken through a grism. A grism is a lens-like attachment that spreads a star's light out into a rainbow (a spectrum) without needing a narrow slit.
+The spectroscopy pipeline extracts, calibrates, and classifies a star's spectrum from images taken through a transmission grating (a plate ruled with fine parallel lines, here a Star Analyser 200) in front of the camera. The grating spreads each star's light into a spectrum without a slit (slitless spectroscopy). Each star leaves an undispersed point image, the zero order, and beside it the first-order spectrum, which the pipeline measures. Evidence for its settings is in the [spectroscopy register](validation/spectroscopy.md).
 
-### 6.1 Purpose & Interfaces
+### 6.1 Purpose and interfaces
 
-* **Inputs:** A stacked spectral image, the position of the "zero-order" star image (the star's normal, undispersed position, used as a fixed reference point), the target's aperture size (different for point-like stars vs. extended objects), the camera's Quantum Efficiency (QE) curve, the instrument response (explained below), and the airmass from the frame's header.
-* **Outputs:** A wavelength-calibrated 1D spectrum $F(\lambda)$, any detected hydrogen (Balmer) absorption or emission features, the automatically measured dispersion angle, a record of whether the airmass correction was applied, the closest spectral type with a measure of how clearly it beats its neighbors, and a Spectroscopy Quality Record.
+- **Inputs.** A stacked spectral image, the zero-order star position, the target's aperture size, the camera's quantum efficiency (QE) curve, the instrument response, and the airmass from the header.
+- **Outputs.** A wavelength-calibrated 1D spectrum $\Phi(\lambda)$, detected hydrogen (Balmer) lines, the dispersion angle, the closest spectral type with a measure of how clearly it wins, and a quality record.
 
-### 6.2 Major Concepts and Governing Equations
+### 6.2 Major concepts and governing equations
 
-1. **Finding the Spectrum's Angle:** Automatically measures the dispersion angle $\theta_{\text{disp}}$ relative to the sensor's pixel grid, along with orientation (horizontal or vertical, and direction), using the zero-order star position $(x_0, y_0)$ as the anchor point.
-2. **Extracting the Spectrum:** Sums pixel intensity across the trail at each step along the dispersion trace, inside a reading box, and subtracts the sky background from every reading:
+1. **Finding the spectrum's angle.** The pipeline measures the dispersion angle $\theta_{\text{disp}}$, the direction in which the grating spreads the light relative to the pixel grid, anchored on the zero-order position $(x_0, y_0)$.
+2. **Extracting the spectrum.** Each spectrum lies on the image as a short band, the trail. At each step along it, the pipeline sums the pixels across the trail inside a reading box and subtracts the sky, giving one point of the profile $T(\ell)$. Here $\ell$ is the distance along the trail from the zero-order star and $q$ is the pixel offset across it:
 
-$$
-F(x) = \sum_{y} w(y)\,\big[\,I(x, y) - S(x)\,\big] \tag{10}
-$$
+   $$
+   T(\ell) = \sum_{q} m(q)\,\big[\,I(\ell, q) - b(\ell)\,\big] \tag{12}
+   $$
 
-   * *What each piece means:* $I(x,y)$ is the pixel intensity, $S(x)$ the sky level per pixel at that step, and $w(y)$ the fraction of pixel $y$ that lies inside the reading box, from 0 to 1. Pixels at the box edge count in part, and the box center keeps its fractional position. Without this, the box would change size in whole-pixel jumps, and each jump would show up in the spectrum as a step the star did not cause.
+   Here $I$ is the pixel intensity, $b(\ell)$ the sky level, and $m(q)$ the fraction of pixel $q$ inside the box. Edge pixels count in part, or the box would change size in whole-pixel jumps that show up as false steps in the spectrum. The sky is measured in two strips beside the box. Their mean is used when their medians agree within noise. Otherwise the brighter strip is treated as contaminated, since a neighbor's light can only add, and the cleaner strip is used alone. For a point-like star the box reaches a fixed multiple of the trail's fitted width to each side, smoothed first so a noisy fit does not make the spectrum jump. Extended objects such as nebulae and comets get a wider box sized from their cataloged angular size. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.measure_sky --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SpectrumExtractor._sum_aperture_minus_sky --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.box_pixel_weights --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.traced_aperture_half_widths_px --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.smooth_aperture_sigmas --> <!-- impl: astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline._derive_extraction_radius_px -->
+3. **Converting pixels to wavelength.** The grating bends longer wavelengths through larger angles. The angle follows from the distance on the sensor and the grating-to-sensor distance $L_g$, and the grating equation turns it into a wavelength:
 
-   The sky level is measured in two strips, one on each side of the box. A gap separates each strip from the box, so the star's faint outer glow is not counted as sky. Each strip is cleaned of outlier pixels (hot pixels, cosmic rays, the edge of a passing trail) and its median is taken. If the two medians agree to within noise, the sky level is their mean. If they differ by more than noise explains, the brighter strip is treated as contaminated, since a neighbor's light can only add to a strip, and the cleaner strip is used alone. If only one strip lies on the image, that strip is used. Taking the lower of the two medians every time would read low, because the smaller of two noisy numbers sits below their true value, and it would leave sky light in a faint star's total. The extractor counts how often each case occurred. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.measure_sky --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SpectrumExtractor._sum_aperture_minus_sky --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.box_pixel_weights -->
-   * *Point sources vs. extended objects:* For a point-like star, the box reaches a fixed multiple of the trail's width to each side of its center. The width comes from a Gaussian fitted to the trail's cross-section at each step. That fit is noisy from step to step, so the width is smoothed with a running median before it sizes the box. A box that followed every fit directly would change size at each step, and the spectrum would jump by a couple of percent for reasons that have nothing to do with the star. Where the width cannot be fitted, a fixed radius is used. Extended objects like nebulae or comets get a wider box, whose radius comes from the object's catalogued angular size. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.traced_aperture_half_widths_px --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.smooth_aperture_sigmas --> <!-- impl: astrometricslib.pipelines.astrometry.pipeline.AstrometryPipeline._derive_extraction_radius_px -->
-3. **Converting Pixels to Wavelength:** Converts the distance $x$ from the zero-order center, measured along the trail, into a wavelength $\lambda$, via the grating equation, fitting one free parameter: the grating-to-sensor distance $L$.
+   $$
+   \lambda(\ell) = d\,\sin\!\left(\arctan\frac{\ell_{\text{mm}}}{L_g}\right) \tag{13}
+   $$
 
-$$
-\lambda(x) = d\,\sin\!\left(\arctan\frac{x_{\text{mm}}}{L}\right) \tag{11}
-$$
+   Here $d$ is the groove spacing and $\ell_{\text{mm}}$ is $\ell$ in millimeters. The Star Analyser 200 has 200 grooves per millimeter, so $d = \frac{1}{200}\,\text{mm}$. $L_g$ is the one free parameter. A separate step fits it once on Vega, which has strong hydrogen lines, by matching its Balmer absorption dips to their known air wavelengths ($\mathrm{H}\beta = 4861.3\text{ Å}, \mathrm{H}\gamma = 4340.5\text{ Å}, \mathrm{H}\delta = 4101.7\text{ Å}$; 1 Å is $10^{-10}$ m, or 0.1 nm). It tries every group of three dips against the three lines and keeps the group with the smallest RMS wavelength error. <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance -->
+4. **Correcting for the instrument and the air.** Three effects of the equipment and sky, not the star, are removed. The flux is divided by the QE curve $\text{QE}(\lambda)$. The grating, coatings, and air also favor some colors. The instrument response $R_{\text{ins}}(\lambda)$ is measured by observing Vega, dividing by its reference spectrum (the A0V template of a library of observed spectra [39]), and smoothing. Air dims blue light more than red, and more at higher airmass (the amount of air the light crossed, 1.0 straight overhead). The response already holds the dimming at the standard star's airmass, so a target at another airmass is rescaled with an extinction curve $k_{\text{ext}}(\lambda)$, in magnitudes per airmass:
 
-   Here $d$ is the grating's groove spacing, and $x_{\text{mm}}$ is the distance converted to physical length via the sensor's pixel pitch.
-   * *Distance along the trail:* A tilted trail is longer than the number of columns it covers, so the pipeline records, for every sample it keeps, the distance from the zero-order star measured along the trail. Samples that fall off the image or below the camera's shortest wavelength are dropped, so a sample's index is not its distance. The calibration step locates each absorption dip by this recorded distance and never by counting samples from the start. Counting would shift every dip by the number of dropped samples and bias the fitted $L$. <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance -->
-   * *Reference lines:* $L$ is calibrated using the Balmer series ($\mathrm{H}\beta = 4861.3\text{ Å}, \mathrm{H}\gamma = 4340.5\text{ Å}, \mathrm{H}\delta = 4101.7\text{ Å}$), whose wavelengths are already known precisely. The tuner tries every group of three dips against the three lines and keeps the group with the smallest RMS wavelength error. If no group fits within a coarse tolerance, the fit is rejected with an error. <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._fit_grating_distance -->
-4. **Correcting for the Instrument and the Air:** Three effects that belong to the equipment and the sky, not to the star, are removed from the extracted flux:
-   * *Sensor color sensitivity.* The flux is divided by the sensor's QE curve, $\text{QE}(\lambda)$.
-   * *Instrument tilt.* The grating, the telescope's coatings, and the air each favor some colors. Their combined effect is larger than the real differences between stellar types. It is measured by observing a star whose true spectrum is known (Vega), dividing the observation by the reference spectrum, and smoothing the result. This smooth curve is the instrument response, $R(\lambda)$. Dividing any other star's spectrum by it removes the tilt. The response is derived from QE-corrected spectra, so it is only applied to one.
-   * *Airmass.* Air dims blue light more than red, and dims both more at higher airmass (how much air the light crossed: 1.0 straight overhead). The response already contains the dimming at the airmass of the standard star. A target observed at another airmass would keep a leftover blue-to-red tilt, so the spectrum is rescaled using an extinction curve $k(\lambda)$ in magnitudes per airmass.
+   $$
+   \Phi_{\text{cal}}(\lambda) = \frac{T\big(\ell(\lambda)\big)}{\text{QE}(\lambda)\,R_{\text{ins}}(\lambda)}\;10^{\,0.4\,k_{\text{ext}}(\lambda)\,(X_{\text{target}} - X_{\text{ref}})} \tag{14}
+   $$
 
-   Together:
+   Here $X_{\text{target}}$ and $X_{\text{ref}}$ are the airmasses of the frame and the standard star, so the last factor is 1 when they are equal. The stored curve is the Kitt Peak mean curve distributed with IRAF [40]. Because only a difference of airmasses enters, another site's curve errs by a small fraction of the correction.
 
-$$
-F_{\text{cal}}(\lambda) = \frac{F\big(x(\lambda)\big)}{\text{QE}(\lambda)\,R(\lambda)}\;10^{\,0.4\,k(\lambda)\,(X_{\text{target}} - X_{\text{ref}})} \tag{12}
-$$
-
-   Here $X_{\text{target}}$ is the airmass of the frame and $X_{\text{ref}}$ the airmass of the standard star. The correction is skipped, and the reason recorded, when the header has no usable airmass or the response records no reference airmass. Without a QE curve, neither the response nor the airmass step is applied. The stored extinction curve describes a dry, high-altitude site. A site at lower altitude has somewhat more extinction in the blue, but the correction depends only on the difference between two airmasses, so the error from using another site's curve is a small fraction of the correction. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction.apply_quantum_efficiency_correction --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.apply_instrument_response --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.apply_extinction_correction -->
-5. **Classifying the Spectrum:** The corrected spectrum is compared with a library of reference spectra, each blurred to the instrument's resolution and scaled to the same overall brightness. Regions where Earth's atmosphere absorbs light are left out of the comparison. Each reference gets one score: the root-mean-square (RMS) difference as a fraction of the spectrum's average brightness. Lower is closer, and the best-scoring reference gives the likely spectral type. A score is not a probability. The pipeline reports how clearly the best reference wins as a gap in RMS: the second-best reference's RMS minus the best one's. A small gap means the data cannot choose between the two. Two gaps are kept. One is to the runner-up, which is usually a neighboring subtype and says the subtype is uncertain. The other is to the best reference of a different spectral class, which says the class itself is uncertain. A best match whose own RMS is too high is called a poor match, and a much worse one gets no type at all. <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.classify_spectral_type --> <!-- impl: astrometricslib.models.stellar_source.rms_gap_to_second_best --> <!-- impl: astrometricslib.models.stellar_source.rms_gap_to_next_class --> <!-- impl: astrometricslib.models.stellar_source.is_rms_gap_ambiguous -->
-6. **An Alternative Path for Unstacked Frames:** Alongside the single-stacked-image approach above, a second path works directly on a target's raw, unstacked frames, grouped into observing sessions the same way the photometry pipeline is (Section 5.2, concept 1). Each session's stars are identified once against a real catalog, reusing an existing WCS from the frame's own file when available (Section 4), and every frame in that session extracts a spectrum for those same identified stars. This gives each extracted spectrum a stable, real star identity shared across the session, rather than each frame's own disconnected, unidentified detection.
+   All three curves depend on wavelength, so wavelengths are fixed first. Air bends blue light more than red, so a star's blue and red light enter the grating from slightly different directions (atmospheric differential refraction [41]), and each wavelength is shifted back. The wavelength zero point, the offset of the whole scale, is then measured from known absorption lines and removed when at least two significant lines agree. Dust between the star and Earth also reddens it. When Gaia Data Release 3 [42] gives the color excess $E(B-V)$ (how much redder dust has made the star), an average Galactic dust law [43] removes the reddening before classification. Last, the spectrum is compared with the star's Gaia XP spectrum [44], measured above the atmosphere. A straight tilt of the ratio points at the response or airmass correction, and a shift of the features at the wavelength scale. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.quantum_efficiency_correction.apply_quantum_efficiency_correction --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.instrument_response.apply_instrument_response --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.apply_extinction_correction --> <!-- impl: astrometricslib.pipelines.spectroscopy.pipeline.SpectroscopyPipeline._apply_result_to_stellar_object --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.differential_refraction.correct_differential_refraction --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.wavelength_zero_point.measure_wavelength_zero_point --> <!-- impl: astrometricslib.pipelines.spectroscopy.processing.star_reddening.look_up_star_reddening --> <!-- impl: astrometricslib.pipelines.spectroscopy.processing.interstellar_extinction.deredden_spectrum --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.compare_to_gaia_xp -->
+5. **Classifying the spectrum.** A spectral type is a letter (O, B, A, F, G, K, M, from hottest to coolest), a subtype from 0 to 9, and a luminosity class numeral. V is a main-sequence star, so A0V is a hot main-sequence star like Vega. The corrected spectrum is compared with a library of reference spectra [39], each blurred to the instrument's resolution and scaled to the same overall brightness, with telluric bands (where Earth's air absorbs) left out. Each reference gets a score, the RMS difference as a fraction of the spectrum's mean brightness. The lowest score gives the likely type, and a score is not a probability. The pipeline reports how clearly the best reference wins as RMS gaps: to the runner-up (the subtype may be uncertain) and to the best reference of a different class (the class may be uncertain). A best match whose RMS is too high is a poor match, and a much worse one gets no type. <!-- impl: astrometricslib.pipelines.spectroscopy.processing.spectral_classifier.classify_spectral_type --> <!-- impl: astrometricslib.models.stellar_source.rms_gap_to_second_best --> <!-- impl: astrometricslib.models.stellar_source.rms_gap_to_next_class --> <!-- impl: astrometricslib.models.stellar_source.is_rms_gap_ambiguous -->
 
 :::{warning}
-**Classification limits are measured on few stars.** The poor-match limit separates stars matched within three spectral-type steps of their catalog type (scores 0.046 to 0.105) from stars matched to a wrong type (0.181 to 0.283), but only 14 stars were used. A low score means the reference is close to the spectrum, not that the type is right: two known-wrong matches scored low. The gap limit is the smallest RMS distance between two neighboring references in the library, so a gap below it means the spectrum cannot prefer one reference over its neighbor even in principle. All limits are listed in Appendix A. <!-- impl: astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS --> <!-- impl: astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP -->
+**A low score is not a correct type.** A wrong reference can also score low. The poor-match limit is only as good as the sample of stars used to place it. The gap limit is the smallest RMS distance between two neighboring references, so a smaller gap means the spectrum cannot prefer one over its neighbor even in principle. <!-- impl: astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS --> <!-- impl: astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP -->
 :::
 
-### 6.3 Pipeline Theory of Operations
+### 6.3 Pipeline theory of operations
 
-Table 6 lays out the spectroscopy pipeline step by step.
+Table 6 lists the steps.
 
-**Table 6.** Spectroscopy pipeline execution sequence and operations.
+**Table 6.** Spectroscopy pipeline execution sequence.
 
-| Step | Pipeline Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Zero-Order Anchoring | **In:** Spectral image & star positions<br>**Out:** Zero-order centroid $(x_0, y_0)$ | Locate the star's normal (undispersed) position to serve as the dispersion origin. |
-| 2 | Angle Detection | **In:** Spectral image & zero-order origin<br>**Out:** Dispersion angle $\theta_{\text{disp}}$ & direction | Measure the physical dispersion tilt to align the extraction axis. |
-| 3 | Trace Extraction | **In:** Image, angle $\theta_{\text{disp}}$, aperture rule<br>**Out:** 1D flux profile $F(x)$, sky-measurement record | Sum pixels inside the reading box along the trace and subtract the sky at every step via Eq. (10). The box follows the smoothed trail width. |
-| 4 | Wavelength Calibration | **In:** 1D profile $F(x)$, recorded distances along the trail & known Balmer lines<br>**Out:** Wavelength map $\lambda(x)$ | Fit the grating equation (Eq. (11)) using the known Balmer absorption lines, locating each dip by its recorded distance. |
-| 5 | Instrument and Airmass Correction | **In:** Wavelength map $\lambda(x)$, QE curve, instrument response, frame airmass<br>**Out:** Calibrated spectrum $F_{\text{cal}}(\lambda)$, extinction record | Divide raw spectral flux by the QE curve and the instrument response, then rescale to the standard star's airmass via Eq. (12). |
-| 6 | Classification | **In:** Calibrated spectrum, reference library<br>**Out:** Spectral type, RMS gaps | Score every reference by relative RMS and report the best match with its gap to the runner-up and to the next class. |
+| Step | Pipeline phase | Description |
+| --- | --- | --- |
+| 1 | Zero-order anchoring | Locate the undispersed position as the dispersion origin. |
+| 2 | Angle detection | Measure the dispersion tilt. |
+| 3 | Trace extraction | Sum the box and subtract the sky (Equation (12)). |
+| 4 | Wavelength calibration | Fit the grating equation (Equation (13)) with Balmer lines. |
+| 5 | Instrument and airmass correction | Divide by QE and response and rescale the airmass (Equation (14)). |
+| 6 | Classification | Remove reddening, score every reference, and compare with Gaia XP. |
 
-### 6.4 Quality Metrics and Spectral Validation
+### 6.4 Quality metrics and spectral validation
 
-Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates -->
+The pipeline keeps run gates, recorded as passed, failed, or not checked as in Section 4.4, and checkpoint metrics, numbers stored with each spectrum at four points of its processing. There are nine run gates. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates -->
 
-#### 6.4.1 Before Extracting: Checking the Input
-* **Zero-Order Saturation Ceiling:** The reference star's center must not approach full-well capacity, or the dispersion origin $(x_0, y_0)$ is unreliable.
-* **Sky Contamination:** The extractor records the share of readings where one sky strip was dropped because a neighbor's light lay beside the trail. A share well above a few percent means the spectrum deserves a closer look. The share, the dominant sky mode, and the count of each mode travel with the star's saved result. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction -->
+#### 6.4.1 Before extracting: checking the input
 
-#### 6.4.2 After Extracting: Checking the Spectrum
-* **Calibration Fit Rejection Gate:** When fewer than three absorption dips are found, the tuner first relaxes its dip-detection depth and then flattens the continuum before searching again. The wavelength-calibration fit is rejected if the best group of dips still leaves an RMS error above a coarse tolerance. <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips -->
-* **Extinction Record:** Each spectrum carries a record saying whether the airmass correction was applied, the two airmasses, the curve used, and the reason if it was skipped. When it was skipped, a tilt of roughly the size of the gap between neighboring spectral types can remain, so a classification made without the correction is less certain. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection -->
-* **Classification Ambiguity:** The classification gate fails when the best match is a poor match, or when its gap to the best reference of another spectral class is below the gap limit. A tie between neighboring subtypes alone does not fail the gate, and the number of such ties is reported. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates -->
+A gate fails when a star's zero-order image holds many saturated pixels, which makes the dispersion origin unreliable, or when no star produced a spectrum. A metric records how often a sky strip was dropped for a neighbor's light. <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.ExtractionDiagnostics.contaminated_sky_fraction -->
+
+#### 6.4.2 After extracting: checking the spectrum
+
+The leftover zero-point offsets across the run must scatter by less than about one pixel of wavelength. The median tilt of observed spectra over their Gaia XP spectra must stay below a limit, since a tilt shared by most stars points at the response or the airmass correction. The classification gate fails on a poor match or a gap to another class below the gap limit, but not on a tie between neighboring subtypes alone. Further gates compare the measured type with the catalog's, check line-feature probabilities and the measured resolution, and count spectra that fail a checkpoint metric. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.wavelength_scale_gate --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips -->
 
 ---
 
-## 7. Moving Object Detection Pipeline
+## 7. Asteroid detection pipeline
 
-The moving object detection pipeline finds, tracks, and identifies solar-system objects — asteroids and comets — across a sequence of individual (unstacked) photos.
+The asteroid detection pipeline finds, tracks, and identifies moving objects, meaning asteroids and comets, across unstacked frames. Stars stay fixed against each other, while a moving object shifts from frame to frame. Evidence for its settings is in the [asteroid detection register](validation/asteroid_detection.md).
 
-### 7.1 Purpose & Interfaces
+### 7.1 Purpose and interfaces
 
-* **Inputs:** A sequence of unstacked light frames, their observation timestamps $t_i$, and a WCS for each frame. A raw frame usually has no solved WCS of its own, so the pipeline estimates one from the mount's reported pointing and then shifts it so the frame's stars line up with the stack's stars. <!-- impl: astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg -->
-* **Outputs:** Straight-line motion tracks, each candidate's velocity $(\dot{\alpha}, \dot{\delta})$, ephemeris cross-matches, an Asteroid Recovery Quality Record, and, on request, Minor Planet Center (MPC) observation lines.
+- **Inputs.** Unstacked light frames, their times $t_j$, and a WCS for each. A raw frame has no solved WCS, so one is estimated from the mount's reported pointing and shifted so the frame's stars line up with the stack's. <!-- impl: astrometricslib.pipelines.asteroid_detection.frame_wcs_composer.estimate_frame_wcs_from_mount_pointing --> <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline._estimate_bulk_pointing_correction_deg -->
+- **Outputs.** Straight-line tracks, each candidate's velocity $(\dot{\alpha}, \dot{\delta})$, ephemeris cross-matches (matches against predicted positions of known objects), and a quality record.
 
-### 7.2 Major Concepts and Governing Equations
+### 7.2 Major concepts and governing equations
 
-Stacking averages moving objects away, since they land in a different spot in every frame. Detection has to work on individual, unstacked photos instead, in five steps:
+Stacking averages moving objects away, so detection works on single frames, in five steps:
 
-1. **Single-Frame Detection:** Locates every bright point source in each raw exposure, with the same star finder the astrometry pipeline uses. After the pointing correction, the scatter that remains between a frame's stars and the stack's stars gives that frame's position error. A faint dot's center is less certain than a bright star's, so a further centroid error is added in quadrature (the square root of the sum of squares). <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline._detect_sources_in_one_frame -->
-2. **Chaining Within One Observing Night:** Detections are grouped by observing night, and the dots in each night are linked on their own. A track may take a new dot only if the dot lies within a match radius of the track's last dot. The radius is the fastest plausible rate times the time elapsed, capped at a few arcminutes. Without the cap, a gap of hours or weeks grows the radius to a whole field of view, and two unrelated stars seen far apart in time link into a false mover. Each dot goes to the nearest open track. A chain needs detections in at least $M \ge 3$ frames, which eliminates single-frame cosmic ray hits. A mover seen on two nights comes out as two separate candidates, because joining them needs an orbit-style fit over days. Right Ascension wraps from 360° to 0°, so every difference in it is measured the short way around the circle. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence --> <!-- impl: astrometricslib.utilities.observing_night.observing_night_id --> <!-- impl: astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg -->
-3. **Filtering Out Obvious Non-Movers:** Discards any chain whose position spread is implausibly small, either in pixels (a stuck hot pixel) or in sky coordinates (a stationary star an earlier step missed). This filtering requires no external star catalog. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._evaluate_reference_frame_test -->
-4. **Fitting a Straight-Line Path and Judging It by Its Residuals:** Independently fits each surviving chain's Right Ascension offset ($\Delta\alpha_m\cos\delta$) and Declination offset ($\Delta\delta_m$) against timestamps $t_m$ via ordinary least-squares regression:
+1. **Single-frame detection.** Bright point sources are found in each frame with the star finder of Section 4. The scatter left between a frame's stars and the stack's stars is the frame's position error. It is much larger than a plate solution's error, because the frame's position comes from the mount's pointing. A centroid error for faint dots is added in quadrature (the square root of the sum of squares). <!-- impl: astrometricslib.pipelines.asteroid_detection.pipeline._detect_sources_in_one_frame -->
+2. **Chaining within one night.** The dots of each observing night are linked on their own. A track takes a new dot only within a match radius of its last dot: the fastest plausible rate times the time elapsed, capped so that a long gap cannot link unrelated stars. A chain needs detections in at least $n_{\min}$ frames, never fewer than three, the fewest that can test a straight line. This removes single-frame cosmic ray hits. A mover seen on two nights is two candidates, because joining them needs an orbit-style fit. Differences in Right Ascension are measured the short way around the circle, from 360° to 0°. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._chain_detections_by_persistence --> <!-- impl: astrometricslib.utilities.observing_night.observing_night_id --> <!-- impl: astrometricslib.pipelines.shared.angles.wrapped_ra_difference_deg -->
+3. **Filtering out non-movers.** A chain whose position spread is implausibly small is discarded, whether in pixels (a stuck hot pixel) or on the sky (a stationary star). <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._evaluate_reference_frame_test -->
+4. **Fitting a straight-line path.** Over a few hours an asteroid moves at nearly constant speed, so its position against time is a straight line whose slope is its rate. Each chain is fit on each sky axis by ordinary least squares. The factor $\cos\delta$ turns a change in Right Ascension into a true angle, since lines of Right Ascension close together toward the poles:
 
-$$
-\Delta\alpha_m \cos\delta = \dot{\alpha}\,t_m + c_\alpha, \qquad \Delta\delta_m = \dot{\delta}\,t_m + c_\delta \tag{13}
-$$
+   $$
+   \Delta\alpha_j \cos\delta = \dot{\alpha}\,t_j + c_\alpha, \qquad \Delta\delta_j = \dot{\delta}\,t_j + c_\delta \tag{15}
+   $$
 
-   The track is judged by how far its dots miss the fitted line, in arcseconds, compared with the position error of one picture. Four conditions must all hold:
-   * *Rate.* The total rate lies inside the allowed range.
-   * *Residuals.* On each axis, the RMS distance of the dots from the line is at most a small multiple of the position error.
-   * *Displacement.* The fitted line carries the object, between the first and last picture, a few times farther than the position error. Without this, a star whose measured position only jitters would pass, because a flat scatter fits a line with small residuals.
-   * *Direction.* Projected onto the direction of the fitted motion, the dots never move backward by more than the combined position error of the two dots compared. A real mover only goes forward. This catches a star whose measured center flips between two points, which fits a line well but alternates along it.
+   A track is judged by how far its dots miss the line, compared with the frame position error. Four conditions must all hold. The rate lies in the allowed range. The RMS miss on each axis is at most a small multiple of the position error. The line carries the object a few times farther than the position error between the first and last frame, or a star that only jitters would pass. Along the fitted motion the dots never move backward by more than their combined position error, which catches a star whose center flips between two points. The coefficient of determination $R^2$ is stored but decides nothing, because it is near 1 for any chain with a large displacement, even when the dots miss the line by many arcseconds. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._fit_rate_linearity --> <!-- impl: astrometricslib.pipelines.asteroid_detection.detection._reverses_direction -->
+5. **Checking against known objects.** Each track is matched against SkyBoT [45], a service that predicts where known solar-system objects are at a given time. A known object matches only if it lies within a fixed radius of the track at both its first and last detection. A confirmed mover with no match deserves a manual look. Failed lookups are counted, so a failure is never mistaken for an empty field. <!-- impl: astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher.cross_match_candidates -->
 
-   The coefficient of determination, $R^2$, is still computed and stored. It decides nothing, because it is close to 1 for any chain with a large displacement, even when the dots miss the line by many arcseconds. <!-- impl: astrometricslib.pipelines.asteroid_detection.detection.MovingObjectDetector._fit_rate_linearity --> <!-- impl: astrometricslib.pipelines.asteroid_detection.detection._reverses_direction -->
-5. **Checking Against Known Objects:** Matches each surviving track against SkyBoT [9], a solar-system ephemeris service, by asking which known minor planets lie near the track's first detection at that detection's time, and again near its last detection at that detection's time. A known object matches only if it lies within a fixed radius of the track at both moments. A match confirms the object's identity. A confirmed mover with no match is a real moving object that is not yet identified as a known body. That is worth a manual look, and it is not by itself a discovery. The matcher counts its queries and its failed queries, so a failed lookup is never mistaken for a field with no known asteroids. <!-- impl: astrometricslib.pipelines.asteroid_detection.ephemeris.EphemerisCrossMatcher.cross_match_candidates -->
+Two further tools exist for a confirmed track, but no pipeline step calls either: a report in the Minor Planet Center (MPC) format [46] or as ADES text [47], and a rotation-period search with the period search of Section 5.2. <!-- impl: astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate --> <!-- impl: astrometricslib.pipelines.asteroid_detection.rotation_period.find_rotation_period -->
 
-A confirmed track can be written as MPC observation lines: designation, UTC date to 1e-5 day, position, and observatory code. The time written is the middle of the exposure. The detections carry an instrumental brightness, not a calibrated magnitude, so the magnitude column is left blank. Nothing in the pipeline submits a report. <!-- impl: astrometricslib.pipelines.asteroid_detection.mpc_report.mpc_lines_for_candidate -->
+### 7.3 Pipeline theory of operations
 
-### 7.3 Pipeline Theory of Operations
+Table 7 lists the steps.
 
-Table 7 lays out the moving object detection pipeline step by step.
+**Table 7.** Asteroid detection pipeline execution sequence.
 
-**Table 7.** Moving object detection pipeline execution sequence and operations.
+| Step | Pipeline phase | Description |
+| --- | --- | --- |
+| 1 | Single-frame detection | Detect point sources, each with a position error. |
+| 2 | Per-night chaining | Link dots and keep chains seen in at least $n_{\min}$ frames. |
+| 3 | Filtering non-movers | Discard chains with implausibly small spread. |
+| 4 | Straight-line fitting | Fit Equation (15) and test rate, residuals, displacement, and direction. |
+| 5 | Catalog cross-match | Check each track against known objects. |
 
-| Step | Pipeline Phase | Inputs & Outputs | Description |
-|---|---|---|---|
-| 1 | Single-Frame Detection | **In:** Unstacked frames with estimated WCS<br>**Out:** Raw point-source positions $(x_i, y_i)$ with a position error each | Detect point sources on each individual exposure. |
-| 2 | Per-Night Chaining & Persistence | **In:** Detections grouped by observing night, with timestamps $t_m$<br>**Out:** Multi-frame detection chains | Link dots within each night using a capped match radius, and keep only chains detected in $M \ge 3$ frames, to reject cosmic ray hits. |
-| 3 | Filtering Non-Movers | **In:** Detection chains<br>**Out:** Likely moving candidate list | Discard chains whose position spread is implausibly small, in pixels or sky coordinates, to isolate real moving candidates. |
-| 4 | Straight-Line Fitting | **In:** Candidate chains<br>**Out:** Velocity $(\dot{\alpha}, \dot{\delta})$, residual RMS per axis & $R^2$ | Fit a straight-line path via Eq. (13) on each axis. Reject tracks whose residuals, displacement, rate, or direction fail. |
-| 5 | Catalog Cross-Match | **In:** Motion paths & SkyBoT database<br>**Out:** Asteroid matches & Recovery Record | Check each motion path against known solar-system object positions at its first and last detection to confirm its identity. |
-
-### 7.4 Quality Metrics and Motion Track Validation
+### 7.4 Quality metrics and motion track validation
 
 Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. A search that finds nothing says little unless it could have found something, so the first check records whether it could. <!-- impl: astrometricslib.pipelines.asteroid_detection.run_gates.asteroid_run_gates -->
 
-#### 7.4.1 Before Fitting: Checking Detections
-* **Single-Frame Detection Threshold:** Point-source detection uses a fixed multiple of the background noise level, so a candidate must be bright enough to appear on a single unstacked photo.
-* **Enough Frames:** The search is not checked when fewer frames could be searched than a track needs, because no mover could have been found.
-* **Pointing Metadata:** A frame that lacks pointing or image-size entries in its header cannot be given a WCS and fails the check.
+#### 7.4.1 Before fitting: checking detections
 
-#### 7.4.2 After Fitting: Checking the Track
-* **Straight-Line Residuals:** Each track's RMS residual is compared with the position error of its pictures. When a picture has no measured position error, an assumed value stands in, the track is marked as using it, and the check fails so the result is not taken at face value.
-* **Ephemeris Cross-Match:** A track is accepted as a SkyBoT match only if a known object lies within a fixed angular radius at both its first and last detection. The check fails when the database could not be reached.
-* **Unmatched Movers:** A mover that moved in a straight line but matched no known asteroid is reported for a manual look.
+Detection uses a fixed multiple of the background noise, so a candidate must show on one unstacked frame. The search is not checked when too few frames could be searched, and a frame without pointing entries fails.
+
+#### 7.4.2 After fitting: checking the track
+
+Each track's RMS residual is compared with its frames' position error, and the check fails when that error had to be assumed. The ephemeris check fails when the database could not be reached. A straight-line mover with no known match also fails, to flag the run for a person to look at it. It may be an unknown object or a false track.
 
 :::{warning}
-**What the detector can and cannot find.** On synthetic fields (eight frames 300 seconds apart, 12 fields per cell, with the SkyBoT query stubbed out), a mover was recovered 67% to 100% of the time when its peak was at least 8 sigma above the sky noise and it moved 20 to 150 arcseconds per hour. A mover was not found below about 8 sigma. A slow mover was not found at any brightness: at 5 arcseconds per hour it moves only 1.6 pixels in the 40 minutes of such a sequence, less than the 1.5 pixel tolerance for calling a track stationary, so it is rejected as a star. In 40 synthetic fields with no mover, the residual test alone confirmed one false track, a star whose center flipped between two positions 2.8 pixels apart. The direction check now rejects that field. The other 39 fields and the recovery table were not re-run after the direction check was added. The synthetic frames share one pointing, so these numbers test detection and chaining, not the position error of real frames. The limits of the residual test are not validated on real fields. <!-- impl: astrometricslib.scripts.validate_asteroid_detection -->
+**What the detector can and cannot find.** A mover has to show on a single frame, so the faintest mover found is set by one frame's depth. A mover so slow that its motion stays within the stationary tolerance is rejected as a star. Synthetic frames test detection and chaining, not the position error of real frames. <!-- impl: astrometricslib.scripts.validate_asteroid_detection -->
 :::
 
 ---
 
-## 8. Empirical Validation Campaign & Session Results
+## 8. Validation
 
-To check how well this design works in practice, it was tested on real observing sessions captured with a ZWO ASI 533MM Pro camera ($3.76\,\mu\text{m}$ pixel size).
+A pipeline can follow its theory and still give wrong answers on real data, because it also depends on tuned settings chosen for this observatory's telescope, camera, and sky. This paper states no tuned value, so it states no validation result. The evidence lives in the validation register ([validation/index.md](validation/index.md)). Each entry says what was checked, on what data, what came out, and how to repeat the check on another telescope's frames.
 
-### 8.1 Validation Datasets and Setup
+The register labels each tuned setting *measured* (real data chose or confirmed it), *partly measured* (the measurement is incomplete, such as synthetic data only, one target, or a small sample), or *design estimate* (chosen by reasoning, not measured).
 
-Eight observing sessions were processed through all five pipelines:
-1. **Vega Session (Spectroscopy):** A Star Analyzer 200 grism sequence ($N = 160$ light exposures, 270s total exposure time).
-2. **M 13 Session (Spectroscopy & Stacking):** A dense star cluster grism field ($N = 86$ light exposures, 2520s total exposure time).
-3. **Alcor Session (Spectroscopy):** A multi-frame grism sequence ($N = 138$ light exposures, 1080s total exposure time).
-4. **NGC 2244 Session (Photometry):** An open star cluster time-series sequence ($N = 29$ light exposures, 10,800s total exposure time).
-5. **M 81 Session (Photometry & Stacking):** A deep spiral-galaxy sequence, originally $N = 46$ light exposures (7,230s total exposure time) at the time of the stacking/astrometry results below. Since then, ongoing observation grew the same target's data to $N = 258$ light exposures across 8 separate observing sessions (2023-05 through 2026-05). That growth in the *number of sessions*, not just the number of frames, is what exposed the photometry cross-session tracking problem covered in Finding 6 (Section 8.3). It's a separate result from the single-session stacking/astrometry numbers below.
-6. **NGC 2903 Session (Photometry):** A deep galaxy field time series ($N = 36$ light exposures, 14,400s total exposure time).
-7. **NGC 2403 Session (Stacking, Astrometry & Moving Objects):** A wide-field galaxy sequence ($N = 70$ light exposures, 13,740s total exposure time).
-8. **NGC 1893 Session (Stacking & Astrometry):** An open cluster field ($N = 49$ light exposures, 7,800s total exposure time).
+Three kinds of evidence cover each other's weaknesses: synthetic data with known truth, real sessions, and library-wide surveys. A check that never fires has not been shown to work, so checks are tested on data they should pass and on data they should fail.
 
-All eight sessions were run through the full pipeline sequence described in Sections 3–7: calibration and outlier rejection, sky-position solving, brightness comparison, spectrum extraction, and moving-object tracking. Each session then went through its pipeline's own after-the-fact quality check.
+The warnings in Sections 3 to 7 mark limits with register evidence:
 
-### 8.2 Empirical Results Across All Five Pipelines
+- The rejection cutoffs for small stacks (Section 3.2): [STK-08](validation/stacking.md#stk-08), partly measured.
+- The residual limit of the astrometry check (Section 4.4.2): [AST-04](validation/astrometry.md#ast-04), partly measured.
+- The comparison ensemble on synthetic sessions (Section 5.2): [PHO-01](validation/photometry.md#pho-01), partly measured.
+- The variability flag (Section 5.2): [PHO-06](validation/photometry.md#pho-06), partly measured, and [PHO-10](validation/photometry.md#pho-10), measured.
+- The poor-match and ambiguity limits of spectral classification (Section 6.2): [SPE-16](validation/spectroscopy.md#spe-16), partly measured, and [SPE-18](validation/spectroscopy.md#spe-18), measured.
+- What the asteroid detector can find (Section 7.4.2): [MOV-01](validation/asteroid_detection.md#mov-01), [MOV-02](validation/asteroid_detection.md#mov-02), and [MOV-03](validation/asteroid_detection.md#mov-03), all partly measured.
 
-Table 8 summarizes the results.
+## 9. Limitations and assumptions
 
-**Table 8.** Multi-pipeline empirical validation metrics across ZWO ASI 533MM Pro observing sessions.
+The methods in Sections 3 to 7 rest on assumptions that real data meet only in part. Section 8 names the register entries that hold the measured side of each limit.
 
-| Subsystem | Target Session | Key Metric Tested | Measured Value | Standard / Floor | Verdict |
-|---|---|---|---|---|---|
-| **Stacking** | M 81 Session | Rejection Cutoff $\sigma(N)$ & Sharpness Ratio $R_{\text{FWHM}}$ | $R_{\text{FWHM}} = 1.03$, Rejected: $0.42\%$ | $R_{\text{FWHM}} \le 1.20$ | **Passed** (Nominal) |
-| **Stacking** | NGC 2403 Session | Optical Alignment Jitter Detection | $R_{\text{FWHM}} = 1.20$, Rejected: $0.85\%$ | $R_{\text{FWHM}} \ge 1.20$ flag | **Flagged** (Jitter Warning) |
-| **Astrometry** | NGC 1893 Session | WCS Solve & SIMBAD Star Matching | WCS Resolved, 10 SIMBAD Matches | Success Flag = True | **Passed** (Nominal) |
-| **Astrometry** | M 45 Session | Bright Cluster Star Matching & Distortion Fit | WCS Resolved, 12 SIMBAD Matches | Success Flag = True | **Passed** (Nominal) |
-| **Photometry** | NGC 2244 Session | Ensemble Brightness Scatter Floor | $\sigma_m \le 0.012\text{ mag}$ for non-variable stars, measured with the 100th- to 300th-brightest stars combined by median | Scatter near the propagated uncertainty (checked on synthetic data only) | **Not repeated** (current comparison set) |
-| **Photometry** | M 81 Session (8-session, current) | Cross-Session Tracking Bug & Fix | Before fix: 85–94% zero-brightness frames, 75% of the brightest fifth of stars wrongly flagged variable. After fix: 223/258 frames processed correctly, remaining false flags matched the faintest stars as expected | 0 cross-session tracking failures | **Passed** (Post-Fix) |
-| **Photometry** | M 81 Session (8-session, current) | Cross-Session Star Matching, Repeatability | 11,392 session-scoped stars matched down to 8,422 (2,970 merges); a repeat run added, removed, or changed 0 rows | Same result every time it's run | **Passed** (Nominal) |
-| **Spectroscopy** | Vega Session | Balmer Line Wavelength Calibration Fit | $\text{RMS}_{\Delta \lambda} = 0.42\text{ nm}$ ($\mathrm{H}\beta, \mathrm{H}\gamma, \mathrm{H}\delta$) | $\text{RMS}_{\Delta \lambda} \le 1.0\text{ nm}$ | **Passed** (Nominal) |
-| **Spectroscopy** | M 13 Session | Cluster Zero-Order Star Tracking | 86 frames extracted, 0 tracking failures | Position stable to $\pm 0.2\text{px}$ | **Passed** (Nominal) |
-| **Asteroid Recovery** | NGC 2403 Session | Full Detection & Filtering Sequence | One confirmed mover that matched no known asteroid, on a field far from the ecliptic (35-frame run). On synthetic fields: 67% to 100% recovery of movers of 8 sigma or brighter at 20 to 150 arcsec/h; 0% at 5 arcsec/h | 0 unexplained moving-object tracks | **Flagged** (unexplained mover; false-track rate not measured) |
+- **Gaussian noise.** Equations (2), (7), and (9) treat noise as normally distributed. Real frames have heavier tails from cosmic ray hits, hot pixels, and clouds.
+- **Independent tests.** The Šidák correction (Equation (11)) and the Benjamini–Hochberg method assume independent tests, but the two searches on one star, and stars that share clouds, are not independent. The corrected probabilities are approximate.
+- **Borrowed references.** The instrument response treats the A0V template as the true spectrum of Vega. The extinction curve comes from another site, and the dereddening law is a Galactic average.
+- **Instrument model.** The stacker assumes a linear sensor between the sky floor and near full well. Photometry assumes one electron per ADU when no gain is recorded, and zero dark current. The wavelength calibration assumes a plain grating with light arriving perpendicular to it.
+- **Moving objects.** Detection links dots within one night only and finds only objects that show on one frame.
+- **Online services.** Names, Gaia data, reddening, variable-star flags, and known-object matches come from network services. When one is unreachable, the affected gates fail or are not checked.
+- **Checks not made.** The stacking pipeline does not cross-check image quality against the telescope's reported state, measure the noise reduction against the $\sqrt{N}$ expectation, or use mount tracking or pier side to tell a meridian flip from a tracking error. Photometry stays in instrumental magnitudes.
 
-:::{warning}
-**Table 8 predates the current algorithms.** The stacking, plate-solve, photometry, spectroscopy, and moving-object figures above were measured with earlier versions of the stacking rejection cutoffs, the plate-solve gates, the comparison ensemble and variability flag, the spectrum extraction, and the track tests. They have not been repeated with the current algorithms, except where a row says so. Treat them as evidence about the data and the shape of the method, not as current performance. The astrometry rows in particular predate the minimum matched-star count and the residual check of Section 4.4.2, and have not been judged against them.
-:::
+## 10. Conclusion
 
-### 8.3 Key Empirical Findings
+This paper described the architecture of the Astrometrics library: five pipelines that reduce small-observatory data around one observation target. It makes four contributions:
 
-1. **Sharpness Ratio Catches What Rejection Rate Misses:** In the NGC 2403 session, small alignment jitter between frames blurred the stars. Only 0.85% of pixels were rejected as outliers — low enough that a simple "how many pixels got thrown out" check would have missed the problem entirely. But the whole-image sharpness score correctly flagged it, hitting the 1.20 warning threshold. This shows that measuring overall star sharpness catches session-level quality problems that a pixel-rejection count alone would miss.
-2. **Wavelength Calibration Precision:** Fitting the grating equation to the Vega spectrum came out very close to correct: the average error across the reference hydrogen lines used for calibration was 0.42 nm, comfortably inside the 1.0 nm accuracy needed for reliable results.
-3. **Ensemble Photometry Stability:** On the 3-hour NGC 2244 sequence, each star's brightness was compared to a group of similarly bright stars in the same field. This canceled out atmospheric brightness changes so well that non-variable stars showed less than 0.012 magnitudes of noise. That measurement used 200 stars (the 100th- to 300th-brightest) combined by their median. The pipeline now builds a fixed comparison set another way. It skips the brightest 2 percent of the usable candidates, takes the band down to the brightest 30 percent, passes at most the 100 brightest stars of that band to a constancy check, keeps at most 20 stars that survive it, and combines them with an inverse-variance weighted mean (Section 5.2, concept 4). The 0.012 magnitude figure has not been repeated with this selection. For the current selection, the method itself is checked on synthetic sessions with known truth, not on NGC 2244. <!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.select_comparison_set --> <!-- impl: astrometricslib.pipelines.photometry.test.test_comparison_ensemble_injection -->
-4. **Moving-Object Filtering: What the Evidence Shows:** Requiring a candidate to appear in at least 3 frames, and its motion to fit a straight line with residuals no larger than a small multiple of the position error, removes single-frame cosmic rays and stationary hot pixels by design. The evidence for how well it works is limited. On synthetic fields with known movers, movers of 8 sigma or brighter at 20 to 150 arcseconds per hour were recovered 67% to 100% of the time, and slow or faint ones were not found (Section 7.4). On the real NGC 2403 sequence (35 frames), one confirmed mover matched no known asteroid, on a field far from the ecliptic where such a mover is almost certainly not an asteroid. The pipeline's false-track rate on real fields has therefore not been measured, and the real-field counts predate the residual test and the per-night chaining. <!-- impl: astrometricslib.scripts.validate_asteroid_detection -->
-5. **A Faster Way to Match Nearby Stars:** Before comparing angular distances between stars, the pipeline now first narrows the search to only the stars that could plausibly be close together on the sky, using a quick bounding-box check. On a dense field like M 81 (150,000 detected sources across 46 frames), this eliminated 99.9% of star pairs that were never going to be close enough to match anyway. It cut the total run time for this step from over 20 minutes down to a few seconds — a 50 to 100 times speedup — while producing exactly the same matches every time as the slower, exhaustive approach.
-6. **A Real Bug in Cross-Session Photometry:** As the M 81 target's data grew to 8 observing sessions, testing found a bug: its brightness-tracking step was tracking stars across the *entire* observation history in one pass, using a single reference frame from whichever session happened to come first. A star's exact pixel position is only stable within one observing session, so this corrupted almost all of the affected stars' measurements. 85–94% of frames read exactly zero brightness for a given star, across every brightness range. The resulting noise measurements wrongly flagged the brightest stars far too often: 3 out of 4 of the brightest fifth of stars got flagged as variable, versus fewer than 1 in 10 of the rest. That's backwards — noise problems are supposed to hit faint stars hardest, not bright ones. A single-session comparison target (NGC 2903) showed none of this problem. The fix scopes each brightness-tracking run to one observing session at a time (Section 5.2). Re-tested against the same real M 81 data, incorrect "brightest star" flagging dropped from 75% down to 14%, and the remaining variability correctly shifted to the faintest fifth of stars (46%, closely matching NGC 2903's own baseline of 47%) — the expected pattern once the bug was fixed. The number of distinct stars found also rose, from 1,353 (one shared reference frame for all 8 sessions) to 11,392 (each of the 8 sessions using its own reference frame, counted separately rather than merged — see Finding 7).
-7. **Matching the Same Star Across Sessions:** Fixing Finding 6 made each session's measurements correct on their own. But it left every session's stars as unrelated entries, with no way to combine them into one continuous light curve per star. The cross-session star-matching described in Section 5.2 (concept 6) was implemented and tested against the same real 8-session M 81 data. It combined the previous 11,392 separate entries down to 8,422 — 2,970 successful merges of the same star seen in different sessions. Running the exact same match twice in a row produced identical results both times, confirming it's fully repeatable. Testing at this real-world scale (thousands of stars per session) surfaced two problems that smaller test data hadn't. First, identifying stars by catalog name was accidentally also triggering a live lookup to an online star catalog for every single star on every successful run. That added a lot of unnecessary network delay for a step that only actually needed the already-solved sky position, so the lookup was removed once it was no longer needed. Second, an early version of the cross-session matching compared every star to every other star one pair at a time, which doesn't scale: on the real M 81 data, this took over 45 minutes without finishing. It was replaced with a much faster search that solved an equivalent test case in 0.17 seconds. Separately, one of M 81's 8 sessions turned out to reference a different target's stacked image altogether, due to a pre-existing data-labeling mistake in the library unrelated to the matching logic itself. This pipeline correctly excluded just that one session from the results, confirming that one bad session doesn't spoil the other seven (Table 5, step 6).
+1. A shared data model with camera profile and provenance records.
+2. The governing equations and design reasons for each step.
+3. Gates that record each quality condition as passed, failed, or not checked, and never as passed when the check could not look.
+4. A validation register that ties every tuned setting to its evidence and status.
 
-### 8.4 Future Recommended Target Additions
-
-While the current 8-target validation set covers all five pipelines, the following additional target types are recommended for future testing:
-
-1. **Eclipsing Binary or Exoplanet Transit Target (Photometry):** Observations of a known short-period eclipsing star pair or exoplanet host (e.g., *Algol / $\beta$ Persei*, *RR Lyrae*, or *WASP-12b*) to test the pipeline's ability to detect a periodic dimming pattern and measure its depth (about $\Delta m \approx 0.015\text{ mag}$).
-2. **Emission-Line Nebula Target (Spectroscopy):** Grism observations of a planetary nebula (e.g., *Ring Nebula / M 57* or *Dumbbell Nebula / M 27*) to test wavelength calibration against bright emission lines — $[\mathrm{OIII}]$ ($500.7\text{ nm}$) and $\mathrm{H}\alpha$ ($656.3\text{ nm}$) — alongside Vega's absorption-line spectrum.
-3. **Asteroid Field Near the Ecliptic (Moving Object Detection):** A field along the ecliptic plane (the sky path the planets and most asteroids follow) containing known, cataloged asteroids, to test matching against an official minor-planet catalog alongside SkyBoT.
-
-## 9. Conclusion
-
-This document presented a single, unified design for amateur astronomy image processing. By organizing every pipeline around one shared Observation Target, the design connects stacking, astrometry, photometry, spectroscopy, and moving object detection into one consistent system.
+The main limits are the Gaussian and independence assumptions, borrowed reference data, one-night linking of moving objects, and dependence on online catalogs (Section 9). Future work includes cross-checks against the telescope's reported state, linking moving objects across nights, and measurements on more telescopes and skies.
 
 ---
 
 ## Acknowledgments
 
-This design builds on several open-source tools and public services rather than reimplementing their work. Siril handles frame stacking and registration. Astropy [6] and its affiliated packages photutils and specutils handle FITS handling, source detection, aperture photometry, and spectral data structures. Astrometry.net [7] provides blind plate solving. The SIMBAD astronomical database [8] and the Gaia catalog [10] provide star identification and star motions. SkyBoT [9] provides solar-system ephemeris cross-matching.
+This design builds on open-source tools and public services. Siril [1] handles frame stacking and registration, and StarNet [17] separates stars from the rest of an image when a preview is made. Astropy [48], [49], [50] and its affiliated packages photutils [5] and specutils [6] handle FITS access, source detection, aperture photometry, and spectral data structures. NumPy [51] and SciPy [52] supply the array and numerical routines, and astroquery [53] reaches the online services. Astrometry.net [3] provides blind plate solving.
+
+This research has made use of the SIMBAD database [22], operated at CDS, Strasbourg, France, and of the VizieR catalog access tool, CDS, Strasbourg, France [54]. This work has made use of data from the European Space Agency (ESA) mission Gaia (<https://www.cosmos.esa.int/gaia>), processed by the Gaia Data Processing and Analysis Consortium (DPAC, <https://www.cosmos.esa.int/web/gaia/dpac/consortium>). Funding for the DPAC has been provided by national institutions, in particular the institutions participating in the Gaia Multilateral Agreement. The Gaia mission is described in [10] and the data used here in [23]. Known-object matches use SkyBoT [45], a service provided by IMCCE (Observatoire de Paris).
 
 ---
 
 ## References
 
-[1] <a id="ref-1"></a>M. Perryman, *The Making of History's Greatest Map of the Stars*. Berlin: Springer, 2012.
-[2] <a id="ref-2"></a>E. O. Waagen, "The AAVSO International Database," *JAAVSO*, vol. 40, p. 982, 2012.
-[3] <a id="ref-3"></a>Vera C. Rubin Observatory Data Management Team, "Data Management Architecture," Rubin Observatory LSE-61, 2023.
-[4] <a id="ref-4"></a>W. Chauvenet, *A Manual of Spherical and Practical Astronomy*. Philadelphia, PA: J. B. Lippincott & Co., 1863.
-[5] <a id="ref-5"></a>J. R. Taylor, *An Introduction to Error Analysis*. Sausalito, CA: University Science Books, 1997.
-[6] <a id="ref-6"></a>Astropy Collaboration et al., "The Astropy Project: Sustaining and Growing a Community-Oriented Open-Source Project and the Latest Major Release (v5.0)," *Astrophys. J.*, vol. 935, no. 2, p. 167, 2022.
-[7] <a id="ref-7"></a>D. Lang, D. W. Hogg, K. Mierle, M. Blanton, and S. Roweis, "Astrometry.net: Blind Astrometric Calibration of Arbitrary Astronomical Images," *Astron. J.*, vol. 139, no. 5, pp. 1782–1800, 2010.
-[8] <a id="ref-8"></a>M. Wenger et al., "The SIMBAD Astronomical Database," *Astron. Astrophys. Suppl. Ser.*, vol. 143, no. 1, pp. 9–22, 2000.
-[9] <a id="ref-9"></a>J. Berthier, F. Vachier, W. Thuillot, et al., "SkyBoT, a New VO Service to Identify Solar System Objects," in *Astronomical Data Analysis Software and Systems XV*, ASP Conf. Ser., vol. 351, p. 367, 2006.
-[10] <a id="ref-10"></a>Gaia Collaboration, A. Vallenari et al., "Gaia Data Release 3: Summary of the content and survey properties," *Astron. Astrophys.*, vol. 674, p. A1, 2023.
-[11] <a id="ref-11"></a>D. L. Shupe et al., "The SIP Convention for Representing Distortion in FITS Image Headers," in *Astronomical Data Analysis Software and Systems XIV*, ASP Conf. Ser., vol. 347, p. 491, 2005.
-[12] <a id="ref-12"></a>S. B. Howell, *Handbook of CCD Astronomy*, 2nd ed. Cambridge: Cambridge University Press, 2006.
-[13] <a id="ref-13"></a>J. Eastman, R. Siverd, and B. S. Gaudi, "Achieving Better Than 1 Minute Accuracy in the Heliocentric and Barycentric Julian Dates," *Publ. Astron. Soc. Pac.*, vol. 122, no. 894, pp. 935–946, 2010.
-[14] <a id="ref-14"></a>P. B. Stetson, "On the Automatic Determination of Light-Curve Parameters for Cepheid Variables," *Publ. Astron. Soc. Pac.*, vol. 108, p. 851, 1996.
+[1] <a id="ref-1"></a>C. Richard, V. Hourdin, C. Melis, and A. Knagg-Baugh, "Siril: An advanced tool for astronomical image processing," *J. Open Source Softw.*, vol. 9, no. 102, p. 7242, 2024, doi: 10.21105/joss.07242.
+
+[2] <a id="ref-2"></a>Pleiades Astrophoto, S.L., "PixInsight." Accessed: Oct. 15, 2026. [Online]. Available: <https://pixinsight.com/>
+
+[3] <a id="ref-3"></a>D. Lang, D. W. Hogg, K. Mierle, M. Blanton, and S. Roweis, "Astrometry.net: Blind astrometric calibration of arbitrary astronomical images," *Astron. J.*, vol. 139, no. 5, pp. 1782–1800, 2010, doi: 10.1088/0004-6256/139/5/1782.
+
+[4] <a id="ref-4"></a>K. A. Collins et al., "AstroImageJ: Image processing and photometric extraction for ultra-precise astronomical light curves," *Astron. J.*, vol. 153, no. 2, p. 77, 2017, doi: 10.3847/1538-3881/153/2/77.
+
+[5] <a id="ref-5"></a>L. Bradley et al., "Photutils," Zenodo software release (all versions), doi: 10.5281/zenodo.596036.
+
+[6] <a id="ref-6"></a>N. Earl et al., "specutils," Zenodo software release (all versions), doi: 10.5281/zenodo.1421356.
+
+[7] <a id="ref-7"></a>C. Buil, "ISIS software." Accessed: Oct. 15, 2026. [Online]. Available: <https://buil.astrosurf.com/isis-software.html>
+
+[8] <a id="ref-8"></a>J. Moeyens et al., "THOR: An algorithm for cadence-independent asteroid discovery," *Astron. J.*, vol. 162, p. 143, 2021, doi: 10.3847/1538-3881/ac042b.
+
+[9] <a id="ref-9"></a>Ž. Ivezić et al., "LSST: From science drivers to reference design and anticipated data products," *Astrophys. J.*, vol. 873, p. 111, 2019, doi: 10.3847/1538-4357/ab042c.
+
+[10] <a id="ref-10"></a>Gaia Collaboration, T. Prusti et al., "The Gaia mission," *Astron. Astrophys.*, vol. 595, p. A1, 2016, doi: 10.1051/0004-6361/201629272.
+
+[11] <a id="ref-11"></a>W. D. Pence, L. Chiappetti, C. G. Page, R. A. Shaw, and E. Stobie, "Definition of the Flexible Image Transport System (FITS), version 3.0," *Astron. Astrophys.*, vol. 524, p. A42, 2010, doi: 10.1051/0004-6361/201015362.
+
+[12] <a id="ref-12"></a>M. Servillat et al., "IVOA Provenance Data Model, Version 1.0," International Virtual Observatory Alliance, IVOA Recommendation, Apr. 2020, doi: 10.5479/ADS/bib/2020ivoa.spec.0411S.
+
+[13] <a id="ref-13"></a>L. Moreau and P. Missier, Eds., "PROV-DM: The PROV data model," World Wide Web Consortium, W3C Recommendation, Apr. 30, 2013. [Online]. Available: <https://www.w3.org/TR/2013/REC-prov-dm-20130430/>
+
+[14] <a id="ref-14"></a>W. Chauvenet, *A Manual of Spherical and Practical Astronomy*. Philadelphia, PA, USA: J. B. Lippincott & Co., 1863.
+
+[15] <a id="ref-15"></a>J. R. Taylor, *An Introduction to Error Analysis*. Sausalito, CA, USA: University Science Books, 1997.
+
+[16] <a id="ref-16"></a>C. D. Kuglin and D. C. Hines, "The phase correlation image alignment method," in *Proc. IEEE Int. Conf. Cybernetics and Society*, 1975, pp. 163–165.
+
+[17] <a id="ref-17"></a>StarNet Software, "StarNet." Accessed: Oct. 15, 2026. [Online]. Available: <https://www.starnetastro.com/>
+
+[18] <a id="ref-18"></a>E. W. Greisen and M. R. Calabretta, "Representations of world coordinates in FITS," *Astron. Astrophys.*, vol. 395, no. 3, pp. 1061–1075, 2002, doi: 10.1051/0004-6361:20021326.
+
+[19] <a id="ref-19"></a>M. R. Calabretta and E. W. Greisen, "Representations of celestial coordinates in FITS," *Astron. Astrophys.*, vol. 395, no. 3, pp. 1077–1122, 2002, doi: 10.1051/0004-6361:20021327.
+
+[20] <a id="ref-20"></a>P. B. Stetson, "DAOPHOT: A computer program for crowded-field stellar photometry," *Publ. Astron. Soc. Pac.*, vol. 99, p. 191, 1987, doi: 10.1086/131977.
+
+[21] <a id="ref-21"></a>D. L. Shupe et al., "The SIP convention for representing distortion in FITS image headers," in *Astronomical Data Analysis Software and Systems XIV*, ASP Conf. Ser., vol. 347, 2005, pp. 491–495, bibcode: 2005ASPC..347..491S.
+
+[22] <a id="ref-22"></a>M. Wenger et al., "The SIMBAD astronomical database: The CDS reference database for astronomical objects," *Astron. Astrophys. Suppl. Ser.*, vol. 143, no. 1, pp. 9–22, 2000, doi: 10.1051/aas:2000332.
+
+[23] <a id="ref-23"></a>Gaia Collaboration, A. Vallenari et al., "Gaia Data Release 3: Summary of the content and survey properties," *Astron. Astrophys.*, vol. 674, p. A1, 2023, doi: 10.1051/0004-6361/202243940.
+
+[24] <a id="ref-24"></a>S. B. Howell, *Handbook of CCD Astronomy*, 2nd ed. Cambridge, U.K.: Cambridge Univ. Press, 2006, doi: 10.1017/CBO9780511807909.
+
+[25] <a id="ref-25"></a>W. J. Merline and S. B. Howell, "A realistic model for point-sources imaged on array detectors: The model and initial results," *Exp. Astron.*, vol. 6, nos. 1–2, pp. 163–210, 1995, doi: 10.1007/BF00421131.
+
+[26] <a id="ref-26"></a>J. Eastman, R. Siverd, and B. S. Gaudi, "Achieving better than 1 minute accuracy in the heliocentric and barycentric Julian dates," *Publ. Astron. Soc. Pac.*, vol. 122, no. 894, pp. 935–946, 2010, doi: 10.1086/655938.
+
+[27] <a id="ref-27"></a>R. K. Honeycutt, "CCD ensemble photometry on an inhomogeneous set of exposures," *Publ. Astron. Soc. Pac.*, vol. 104, p. 435, 1992, doi: 10.1086/133015.
+
+[28] <a id="ref-28"></a>C. L. Watson, A. A. Henden, and A. Price, "The International Variable Star Index (VSX)," *Soc. Astron. Sci. Annu. Symp.*, vol. 25, p. 47, 2006, bibcode: 2006SASS...25...47W.
+
+[29] <a id="ref-29"></a>K. V. Sokolovsky et al., "Comparative performance of selected variability detection techniques in photometric time series data," *Mon. Not. R. Astron. Soc.*, vol. 464, no. 1, pp. 274–292, 2017, doi: 10.1093/mnras/stw2262.
+
+[30] <a id="ref-30"></a>P. B. Stetson, "On the automatic determination of light-curve parameters for Cepheid variables," *Publ. Astron. Soc. Pac.*, vol. 108, p. 851, 1996, doi: 10.1086/133808.
+
+[31] <a id="ref-31"></a>P. J. Rousseeuw and C. Croux, "Alternatives to the median absolute deviation," *J. Am. Stat. Assoc.*, vol. 88, no. 424, pp. 1273–1283, 1993, doi: 10.1080/01621459.1993.10476408.
+
+[32] <a id="ref-32"></a>Y. Benjamini and Y. Hochberg, "Controlling the false discovery rate: A practical and powerful approach to multiple testing," *J. R. Stat. Soc. B*, vol. 57, no. 1, pp. 289–300, 1995, doi: 10.1111/j.2517-6161.1995.tb02031.x.
+
+[33] <a id="ref-33"></a>N. R. Lomb, "Least-squares frequency analysis of unequally spaced data," *Astrophys. Space Sci.*, vol. 39, no. 2, pp. 447–462, 1976, doi: 10.1007/BF00648343.
+
+[34] <a id="ref-34"></a>J. D. Scargle, "Studies in astronomical time series analysis. II. Statistical aspects of spectral analysis of unevenly spaced data," *Astrophys. J.*, vol. 263, p. 835, 1982, doi: 10.1086/160554.
+
+[35] <a id="ref-35"></a>J. T. VanderPlas, "Understanding the Lomb–Scargle periodogram," *Astrophys. J. Suppl. Ser.*, vol. 236, no. 1, p. 16, 2018, doi: 10.3847/1538-4365/aab766.
+
+[36] <a id="ref-36"></a>G. Kovács, S. Zucker, and T. Mazeh, "A box-fitting algorithm in the search for periodic transits," *Astron. Astrophys.*, vol. 391, no. 1, pp. 369–377, 2002, doi: 10.1051/0004-6361:20020802.
+
+[37] <a id="ref-37"></a>H. R. Künsch, "The jackknife and the bootstrap for general stationary observations," *Ann. Statist.*, vol. 17, no. 3, pp. 1217–1241, 1989, doi: 10.1214/aos/1176347265.
+
+[38] <a id="ref-38"></a>Z. Šidák, "Rectangular confidence regions for the means of multivariate normal distributions," *J. Am. Stat. Assoc.*, vol. 62, no. 318, pp. 626–633, 1967, doi: 10.1080/01621459.1967.10482935.
+
+[39] <a id="ref-39"></a>A. J. Pickles, "A stellar spectral flux library: 1150–25000 Å," *Publ. Astron. Soc. Pac.*, vol. 110, no. 749, pp. 863–878, 1998, doi: 10.1086/316197.
+
+[40] <a id="ref-40"></a>D. Tody, "The IRAF data reduction and analysis system," in *Proc. SPIE*, vol. 627, 1986, p. 733, doi: 10.1117/12.968154.
+
+[41] <a id="ref-41"></a>A. V. Filippenko, "The importance of atmospheric differential refraction in spectrophotometry," *Publ. Astron. Soc. Pac.*, vol. 94, p. 715, 1982, doi: 10.1086/131052.
+
+[42] <a id="ref-42"></a>R. Andrae et al., "Gaia Data Release 3: Analysis of the Gaia BP/RP spectra using the General Stellar Parameterizer from Photometry," *Astron. Astrophys.*, vol. 674, p. A27, 2023, doi: 10.1051/0004-6361/202243462.
+
+[43] <a id="ref-43"></a>J. A. Cardelli, G. C. Clayton, and J. S. Mathis, "The relationship between infrared, optical, and ultraviolet extinction," *Astrophys. J.*, vol. 345, p. 245, 1989, doi: 10.1086/167900.
+
+[44] <a id="ref-44"></a>F. De Angeli et al., "Gaia Data Release 3: Processing and validation of BP/RP low-resolution spectral data," *Astron. Astrophys.*, vol. 674, p. A2, 2023, doi: 10.1051/0004-6361/202243680.
+
+[45] <a id="ref-45"></a>J. Berthier et al., "SkyBoT, a new VO service to identify Solar System objects," in *Astronomical Data Analysis Software and Systems XV*, ASP Conf. Ser., vol. 351, 2006, p. 367, bibcode: 2006ASPC..351..367B.
+
+[46] <a id="ref-46"></a>Minor Planet Center, "Format for optical astrometric observations of comets, minor planets and natural satellites." Accessed: Oct. 15, 2026. [Online]. Available: [minorplanetcenter.net](https://www.minorplanetcenter.net/iau/info/OpticalObs.html)
+
+[47] <a id="ref-47"></a>International Astronomical Union, "Astrometry Data Exchange Standard (ADES)." Accessed: Oct. 15, 2026. [Online]. Available: <https://github.com/IAU-ADES/ADES-Master>
+
+[48] <a id="ref-48"></a>Astropy Collaboration, T. P. Robitaille et al., "Astropy: A community Python package for astronomy," *Astron. Astrophys.*, vol. 558, p. A33, 2013, doi: 10.1051/0004-6361/201322068.
+
+[49] <a id="ref-49"></a>Astropy Collaboration, A. M. Price-Whelan et al., "The Astropy Project: Building an open-science project and status of the v2.0 core package," *Astron. J.*, vol. 156, no. 3, p. 123, 2018, doi: 10.3847/1538-3881/aabc4f.
+
+[50] <a id="ref-50"></a>Astropy Collaboration, A. M. Price-Whelan et al., "The Astropy Project: Sustaining and growing a community-oriented open-source project and the latest major release (v5.0) of the core package," *Astrophys. J.*, vol. 935, no. 2, p. 167, 2022, doi: 10.3847/1538-4357/ac7c74.
+
+[51] <a id="ref-51"></a>C. R. Harris et al., "Array programming with NumPy," *Nature*, vol. 585, pp. 357–362, 2020, doi: 10.1038/s41586-020-2649-2.
+
+[52] <a id="ref-52"></a>P. Virtanen et al., "SciPy 1.0: Fundamental algorithms for scientific computing in Python," *Nat. Methods*, vol. 17, pp. 261–272, 2020, doi: 10.1038/s41592-019-0686-2.
+
+[53] <a id="ref-53"></a>A. Ginsburg et al., "astroquery: An astronomical web-querying package in Python," *Astron. J.*, vol. 157, no. 3, p. 98, 2019, doi: 10.3847/1538-3881/aafc33.
+
+<!-- vale Astrometrics.USSpelling = NO -->
+
+[54] <a id="ref-54"></a>F. Ochsenbein, P. Bauer, and J. Marcout, "The VizieR database of astronomical catalogues," *Astron. Astrophys. Suppl. Ser.*, vol. 143, pp. 23–32, 2000, doi: 10.1051/aas:2000169.
+
+<!-- vale Astrometrics.USSpelling = YES -->
 
 ---
 
-## Appendix A. Design Parameters and Validation Status
+## Appendix A. Notation
 
-This appendix lists the tuned values the pipelines use and says which ones have been measured. *Measured* means a test or validation script produced the supporting number, and the source is named. *Designed* means the value is a reasoned choice that nothing has yet verified on real data. Values are defaults and can be changed in the configuration.
+Each symbol has one meaning in this paper. The index symbols $i$, $c$, $j$, and $q$ run over stars, comparison stars, the items of a sequence, and pixels. Equations are numbered in order of appearance.
 
-**Table A1.** Design parameters and their validation status.
-
-| Pipeline | Parameter | Default | Empirically validated? |
-|---|---|---|---|
-| Stacking | Floor on the high rejection cutoff | 2.5 $\sigma$ | Designed. Checked only in a Gaussian-noise simulation. |
-| Stacking | Margin of the low cutoff above the high one | 0.5 $\sigma$ | Designed. The simulation cannot show the benefit for real, mostly bright, outliers. |
-| Stacking | Minimum frames per master calibration frame | 3 | Designed. |
-| Stacking | Dark temperature slot width | 3 °C | Designed. A first-pass estimate, not fitted to the camera's dark-current curve. Checked against one real incident. |
-| Stacking | Minimum frames kept after quality filtering | 5 | Partly measured. On one real session (M 13), stacks of 5 to 20 frames degraded smoothly, with no failure at 5. The exact value is not calibrated. |
-| Stacking | Brightness scale measured on pixels between percentiles | 20th to 80th | Designed. |
-| Stacking | Bright-end fraction and nonlinearity tolerance | 1% of pixels; 5% | Designed. |
-| Stacking | Star sharpness warning ratio | 1.2 | Measured on six real stacks (none fired). Sensitivity to a real failure is untested. |
-| Astrometry | Star detection threshold; sharpness and roundness ranges | 5 $\sigma$; 0.2 to 1.0; $\pm$0.6 | Designed. |
-| Astrometry | Minimum stars to attempt a solve; minimum for a local solve | 4; 10 | Designed. The local minimum comes from one incident of repeated time-outs. |
-| Astrometry | Pixel-scale window; further widening by the solver | $\pm$5%; 20% | Designed. |
-| Astrometry | Catalog match radius | 10 arcsec | Designed. |
-| Astrometry | Minimum catalog-matched stars | 20 | Designed. Supported only by the four saved solves with fewer matches having among the five largest residuals. |
-| Astrometry | Residual limit | 0.5 of a star width | Designed. Set on catalog separations (0.14 to 0.44 of a star width on 8 saved solves), not on solver fit residuals. |
-| Astrometry | Failed catalog lookups allowed | under 50% | Designed. |
-| Photometry | Aperture radius; sky ring radii | 4 px; 7 to 12 px | Designed. |
-| Photometry | Re-centering box; refinement passes; largest allowed move | 11 px; 3; 1.5 px | Designed. |
-| Photometry | Comparison band: brightest skipped; band ends at | 2%; 30% of candidates | Designed. |
-| Photometry | Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Designed. |
-| Photometry | Vetting consistency limit; share of typical stars for a usable frame | 3 $\sigma$; one half | Designed. |
-| Photometry | Frame outlier clip; per-star outlier clip | 3 $\sigma$ (at least 5 frames); 5 $\sigma$ | Designed. |
-| Photometry | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Designed. |
-| Photometry | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust $\sigma$ | Designed. Checked on synthetic fields only. |
-| Photometry | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Designed. |
-| Photometry | Discrimination AUC floor | 0.7 | Designed. |
-| Photometry | Largest change the variability flag can see | about 0.3 mag | Designed. |
-| Spectroscopy | Reading box half-width; width smoothing | 2.5 times the trail width; 61 steps | Designed. Chosen by judgement. |
-| Spectroscopy | Sky strip gap and width | 6 px; 10 px | Measured on one frame (Vega), then used unchanged on a crowded field. |
-| Spectroscopy | Sky contamination limit; fewest pixels in a strip | 3 $\sigma$; 4 | Designed. |
-| Spectroscopy | Poor-match limit | 0.15 relative RMS | Measured on 14 stars with known types. |
-| Spectroscopy | No-type limit | 0.45 relative RMS | Measured on 55 classified stars. |
-| Spectroscopy | Ambiguity gap | 0.02 relative RMS | Measured as the smallest RMS distance between neighboring reference spectra. |
-| Spectroscopy | Catalog disagreement | 20 subtype steps | Measured on 29 stars with a catalog type. |
-| Spectroscopy | Wavelength-fit rejection tolerance | 10 nm RMS | Designed. |
-| Moving objects | Frames needed for a track | 3 | Designed. |
-| Moving objects | Rate range; chaining radius cap | 1 to 300 arcsec/h; 300 arcsec | Designed. |
-| Moving objects | Stationary tolerances | 1.5 px; 3 arcsec | Designed. |
-| Moving objects | Residual multiple; displacement multiple | 2; 3 times the position error | Designed. Synthetic fields only. |
-| Moving objects | Assumed position error; centroid error | 10 arcsec; 0.5 px | Designed. |
-| Moving objects | Ephemeris match radius | 10 arcsec | Designed. Close to a single frame's position error. |
-| Moving objects | Detection threshold; detection width | 5 $\sigma$; 4 px | Designed. Recovery measured on synthetic fields only. |
-
-<!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
-<!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
-<!-- impl: astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_BRIGHTEST_FRACTION -->
-<!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.DEFAULT_GAIN_DISAGREEMENT_TOLERANCE -->
-<!-- impl: astrometricslib.pipelines.stacking.post_processing.stack_quality.DEFAULT_FWHM_DEGRADATION_RATIO -->
-<!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
-<!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
-<!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION -->
-<!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
-<!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX -->
-<!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.MAX_CENTROID_SHIFT_PX -->
-<!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_REFINEMENT_PASSES -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.BRIGHTEST_SKIPPED_FRACTION -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.FAINTEST_BAND_FRACTION -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MAXIMUM_VETTING_CANDIDATES -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_COMPARISON_STARS -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.DEFAULT_MAXIMUM_COMPARISON_STARS -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.EXCESS_SCATTER_SIGMA -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.comparison_ensemble.MINIMUM_USABLE_FRAME_FRACTION -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.VariabilityAnalyzer._reject_outlier_frames -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_FOR_NOISE_MODEL -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MINIMUM_STARS_PER_NOISE_BIN -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.MAXIMUM_NOISE_BINS -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.EXCESS_SCATTER_THRESHOLD -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG -->
-<!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD -->
-<!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC -->
-<!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_MULTIPLIER -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.APERTURE_SIGMA_SMOOTHING_STEPS -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_GAP_PX -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_WIDTH_PX -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CONTAMINATION_SIGMA -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_BAND_MINIMUM_SAMPLE_COUNT -->
-<!-- impl: astrometricslib.models.stellar_source.NO_GOOD_MATCH_RMS -->
-<!-- impl: astrometricslib.models.stellar_source.UNRELIABLE_MATCH_RMS -->
-<!-- impl: astrometricslib.models.stellar_source.AMBIGUOUS_RMS_GAP -->
-<!-- impl: astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES -->
-<!-- impl: astrometricslib.models.moving_object_config.MovingObjectConfig -->
+| Symbol | Meaning | Unit | Where used |
+| --- | --- | --- | --- |
+| $\alpha$, $\delta$ | Right Ascension and Declination of a sky position | ° | Table 1, Eq. (15) |
+| $\alpha_0$, $\delta_0$ | Sky position of the target center | ° | Table 1 |
+| $V$ | Magnitude in the V band | mag | Table 1 |
+| $\lambda$ | Wavelength | Å | Eqs. (13), (14) |
+| $\Phi(\lambda)$, $\Phi_{\text{cal}}(\lambda)$ | Spectral flux (raw and calibrated), a relative energy flux per unit wavelength | relative | Table 1, Eq. (14) |
+| $N$ | Number of light frames in a stack | frames | Eqs. (2) to (5) |
+| $z(N)$ | Chauvenet rejection cutoff for a stack of $N$ frames | $\sigma$ | Eq. (2) |
+| $z_{\text{high}}(N)$, $z_{\text{low}}(N)$ | Upper and lower pixel-rejection cutoffs | $\sigma$ | Eq. (3), Table 1 |
+| $z_{\text{floor}}$ | Lowest value allowed for the upper cutoff | $\sigma$ | Eq. (3) |
+| $\Delta_z$ | Margin of the lower cutoff beyond the upper cutoff | $\sigma$ | Eq. (3) |
+| $\sigma$ | One standard deviation, used as a unit of distance from the center of a distribution | none | Sections 3.2, 5.2 |
+| $I_{\text{raw}}$, $I_{\text{calibrated}}$ | Raw and calibrated pixel value | ADU | Eq. (1) |
+| $M_{\text{bias}}$, $M_{\text{dark}}$, $M_{\text{flat}}$ | Master bias, master dark, and master flat | ADU | Eq. (1) |
+| $\langle \cdot \rangle$ | Mean over all pixels of the frame or over all points of a light curve | unit of its argument | Eqs. (1), (10) |
+| $\tau_j$ | Exposure time of frame $j$ | s | Eq. (4) |
+| $P$ | Noise penalty of equal weights | none | Eq. (4) |
+| $\text{FWHM}_{\text{stack}}$, $\text{FWHM}_j$, $\text{FWHM}_{\text{expected}}$ | Star width in the stack, in frame $j$, and expected for the stack | px | Eq. (5) |
+| $\rho_{\text{FWHM}}$ | FWHM ratio of a stack | none | Eq. (5), Table 1 |
+| $(x, y)$ | Pixel column and row | px | Eq. (6), Section 4.2 |
+| $(x_{\text{ref}}, y_{\text{ref}})$ | Reference pixel of the distortion model | px | Eq. (6) |
+| $u$, $v$ | Pixel offsets from the reference pixel | px | Eq. (6) |
+| $\xi$, $\eta$ | Offsets on the tangent plane | ° | Eq. (6) |
+| $K_{11}$, $K_{12}$, $K_{21}$, $K_{22}$ | Linear coefficients of the pixel-to-sky map | °/px | Eq. (6) |
+| $f(u,v)$, $g(u,v)$ | SIP polynomial corrections to the pixel offsets | px | Eq. (6) |
+| $A_{ab}$, $B_{ab}$ | Coefficients of $f$ and $g$ for the term $u^a v^b$ | px to the power $1-a-b$ | Eq. (6) |
+| $n_{\text{SIP}}$ | Order of the SIP polynomials | none | Eq. (6) |
+| $\sigma_{\text{ap}}$ | Uncertainty of the sky-subtracted aperture sum | e⁻ | Eq. (7) |
+| $S_\star$ | Net counts of the star in the aperture | e⁻ | Eq. (7) |
+| $s_{\text{sky}}$ | Sky level per pixel | e⁻/px | Eq. (7) |
+| $\sigma_{\text{rd}}$ | Read noise per pixel | e⁻/px | Eq. (7) |
+| $D$ | Dark current collected per pixel | e⁻/px | Eq. (7) |
+| $n_{\text{pix}}$, $n_{\text{sky}}$ | Number of pixels in the aperture and in the sky ring | px | Eq. (7) |
+| $t$ | Mid-exposure time of a frame, on the BJD$_{\text{TDB}}$ scale | days | Eqs. (8), (9), (10) |
+| $i$, $c$, $j$ | Index of a star, of a comparison star, and of an item in a sequence (a frame, a light-curve point, or a detection); $q$ indexes pixels (Eq. (12)) | none | Section 5.2, Eqs. (4), (8), (9), (15) |
+| $F_i(t)$, $F_c(t)$ | Raw brightness of star $i$ and of comparison star $c$ | ADU/s | Eq. (8) |
+| $\hat{F}_i(t)$, $\hat{F}_j$ | Normalized brightness (light curve) of a star | none | Eqs. (8), (9), (10) |
+| $L_{\text{ens}}(t)$ | Ensemble signal built from the comparison stars | ADU/s | Eq. (8) |
+| $N_c$ | Number of comparison stars | none | Eq. (8) |
+| $\mu_c$, $\bar{\mu}$ | Session mean brightness of comparison star $c$, and the mean of those means | ADU/s | Eq. (8) |
+| $\epsilon_c(t)$, $w_c(t)$ | Fractional uncertainty of comparison star $c$ in a frame, and its weight | none | Eq. (8) |
+| $e_j$, $\bar{F}_w$, $n_{\text{pts}}$ | Uncertainty of point $j$, uncertainty-weighted mean of the points, and number of points | none | Eq. (9) |
+| $\chi^2_\nu$ | Reduced chi-square | none | Eq. (9) |
+| $\zeta$ | Threshold of an index, in robust standard deviations above the field median | none | Section 5.2 |
+| $C_v$, $s_{\hat{F}}$ | Coefficient of variation, and the standard deviation of the normalized light curve | none | Eq. (10) |
+| $p$, $p_{\text{corr}}$ | False-alarm probability of one search, and after the Šidák correction | none | Eq. (11) |
+| $N_s$, $N_{\text{sh}}$ | Number of period searches in a run, and number of shuffles per search | none | Eq. (11) |
+| $\ell$, $\ell_{\text{mm}}$ | Distance along the spectrum trail from the zero-order star | px, mm | Eqs. (12), (13) |
+| $q$ | Pixel offset across the spectrum trail | px | Eq. (12) |
+| $I(\ell, q)$, $b(\ell)$ | Pixel intensity, and sky level per pixel at distance $\ell$ | ADU | Eq. (12) |
+| $m(q)$ | Fraction of pixel $q$ inside the reading box | none | Eq. (12) |
+| $T(\ell)$ | Summed profile along the trail | ADU | Eqs. (12), (14) |
+| $(x_0, y_0)$, $\theta_{\text{disp}}$ | Zero-order star position, and dispersion angle | px, ° | Section 6.2 |
+| $d$ | Groove spacing of the grating | Å | Eq. (13) |
+| $L_g$ | Grating-to-sensor distance | mm | Eq. (13) |
+| $\text{QE}(\lambda)$ | Quantum efficiency of the sensor | none (0 to 1) | Eq. (14) |
+| $R_{\text{ins}}(\lambda)$ | Instrument response | relative | Eq. (14) |
+| $k_{\text{ext}}(\lambda)$ | Extinction curve | mag/airmass | Eq. (14) |
+| $X_{\text{target}}$, $X_{\text{ref}}$ | Airmass of the frame and of the standard star | none | Eq. (14) |
+| $E(B-V)$ | Color excess from interstellar dust | mag | Section 6.2 |
+| $t_j$ | Time of detection $j$ of a chain, from a fixed reference time | h | Eq. (15) |
+| $\Delta\alpha_j \cos\delta$, $\Delta\delta_j$ | Offsets of detection $j$ from the chain's mean position | arcsec | Eq. (15) |
+| $\dot{\alpha}$, $\dot{\delta}$ | Rates of motion on the sky | arcsec/h | Eq. (15), Table 1 |
+| $c_\alpha$, $c_\delta$ | Intercepts of the straight-line fit | arcsec | Eq. (15) |
+| $n_{\min}$ | Fewest frames a chain needs | frames | Section 7.2 |
+| $R^2$ | Coefficient of determination of the straight-line fit | none | Section 7.2 |

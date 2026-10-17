@@ -70,7 +70,7 @@ def test_get_readings_reports_every_element_with_a_current_timestamp() -> None:
     `IndiInterface.get_environmentals` only ever reads the first two
     elements (temperature, humidity) into fixed status-dict fields --
     this generalizes to whatever `WEATHER_PARAMETERS` actually
-    publishes, the M12 extension over that fixed two-element read.
+    publishes, which extends that fixed two-element read.
     """
     before = datetime.now(UTC)
     weather_parameters = _FakeVector([

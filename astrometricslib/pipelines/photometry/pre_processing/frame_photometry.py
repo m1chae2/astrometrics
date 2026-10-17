@@ -1061,7 +1061,7 @@ def aperture_flux_error_adu(
     electrons collected:
 
     ``variance_e = F_e + n_pix * (S_e + RN**2 + D_e)
-    + (n_pix**2 / n_sky) * (S_e + RN**2)``
+    + (n_pix**2 / n_sky) * (S_e + RN**2 + D_e)``
 
     where ``F_e`` is the star's net counts in electrons (its own shot
     noise), ``S_e`` the sky level per pixel in electrons, ``RN`` the read
@@ -1071,7 +1071,9 @@ def aperture_flux_error_adu(
     the sky ring. The first term is the star's own noise. The second is the
     noise of the sky, read-out and dark counts inside the aperture. The third
     is the noise in the sky level itself, which the sky ring measures from
-    finitely many pixels. The result is converted back to ADU by dividing by
+    finitely many pixels. Each ring pixel carries the same sky, read-out and
+    dark noise as an aperture pixel, so the third term has the same three
+    parts. The result is converted back to ADU by dividing by
     the gain.
 
     The sky level is in the same units as the data. The equation assumes the
@@ -1107,8 +1109,8 @@ def aperture_flux_error_adu(
     gain = noise.gain_e_per_adu
     source_e = max(net_flux_adu, 0.0) * gain
     sky_e = max(sky_adu_per_pixel, 0.0) * gain
-    background_per_pixel_e = sky_e + noise.read_noise_e**2
-    variance_e = source_e + aperture_pixels * (background_per_pixel_e + dark_current_e_per_pixel)
+    background_per_pixel_e = sky_e + noise.read_noise_e**2 + dark_current_e_per_pixel
+    variance_e = source_e + aperture_pixels * background_per_pixel_e
     if sky_pixels > 0:
         variance_e += (aperture_pixels**2 / sky_pixels) * background_per_pixel_e
     return math.sqrt(variance_e) / gain

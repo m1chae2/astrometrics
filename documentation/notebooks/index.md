@@ -1,15 +1,13 @@
-# Learn Astrometrics: Interactive Notebook Tutorials
+# Notebook tutorials
 
-Welcome to **Learn Astrometrics**, an automatically discovered collection of
-executable Jupyter Notebook tutorials (`.ipynb`) covering scientific image
-processing, target catalog queries, photometry, spectroscopy, moving object
-recovery, observation planning, and telescope control using `astrometricslib`
-and `wayfindinglib`.
+*Generated from the notebooks at each documentation build.*
 
-Each tutorial is an executable Jupyter Notebook stored in the
-`documentation/notebooks/` directory. You can open and run them interactively
-in VS Code or JupyterLab, or click any card below to view the rendered notebook
-in the browser.
+These tutorials are Jupyter notebooks that call the two Python libraries
+directly. They cover image processing, catalog queries, photometry,
+spectroscopy, asteroid detection, observation planning and telescope control.
+
+Each notebook lives in `documentation/notebooks/`. Open it in VS Code or
+JupyterLab to run it, or choose a card below to read it here.
 
 ---
 

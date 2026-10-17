@@ -2,8 +2,8 @@
 
 Description: Verifies correctly signed pulses per axis, deadband
 suppression, max-pulse clamping, and camera-rotation handling at 0 deg,
-90 deg, and a non-right angle -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+90 deg, and a non-right angle -- the behavior
+`Wayfinding_Library_Architecture.md` Section 6.4 describes.
 """
 
 import math
@@ -100,7 +100,7 @@ def test_calibration_required_no_default() -> None:
 
 
 def test_no_mount_model_disables_all_feedforward() -> None:
-    """Verify omitting mount_model reproduces pre-M7b reactive-only output."""
+    """Verify omitting mount_model reproduces reactive-only output."""
     without_model = compute_guiding_correction("f-8", 0.0, 0.0, _calibration(), _config())
     with_none_elapsed = compute_guiding_correction(
         "f-8", 0.0, 0.0, _calibration(), _config(), mount_model=None, elapsed_guiding_seconds=100.0

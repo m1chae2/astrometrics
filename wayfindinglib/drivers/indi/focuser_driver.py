@@ -1,7 +1,7 @@
 """INDI implementation of the `FocuserDriver` protocol ABC.
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`, per
-`Wayfinding_Library_Architecture.md`.
+`Wayfinding_Library_Architecture.md` Section 6.2.
 """
 
 import asyncio

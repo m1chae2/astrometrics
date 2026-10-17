@@ -11,6 +11,8 @@ on:
     paths: &paths
       - 'wayfindinglib/**'
       - 'astrometricslib/**'
+      # test_documentation_papers.py reads the Wayfinding library papers.
+      - 'documentation/library_design/Wayfinding_Library_*.md'
       - 'pyproject.toml'
       - 'build/linux/run_tests.sh'
       - 'build/linux/setup_venv.sh'

@@ -1,6 +1,7 @@
-"""Purpose: Unit tests for the pointing-model ingestion pipeline (M7a).
+"""Purpose: Unit tests for the pointing-model ingestion pipeline.
 
-Description: Verifies `pointing_log_ingestion.compute_pointing_model`
+Description: Verifies (`Wayfinding_Library_Architecture.md` Section 6.7)
+that `pointing_log_ingestion.compute_pointing_model`
 reads local alignment attempts (session-scoped or all-history) and
 fits them with the active rig's observer latitude, using fake
 `ObservatoryControl`/`ControlRecordStore` stand-ins -- no remote fetch, no
@@ -113,9 +114,10 @@ def test_compute_pointing_model_falls_back_to_default_latitude_when_unconfigured
 def test_compute_pointing_model_never_persists_anything() -> None:
     """Verify the session-scoped model carries no id/persistence fields.
 
-    Regression guard for the plan's explicit invariant: `MountPointingModel`
-    must never gain a persisted-standing-state shape the way
-    `GuidingSpectrumAnalysis` did in M7a, since its terms describe
+    Regression guard for the rule in `Wayfinding_Library_Architecture.md`
+    Section 6.7 (the polar-misalignment terms are never stored):
+    `MountPointingModel` must never gain a persisted-standing-state shape
+    the way `GuidingSpectrumAnalysis` has, since its terms describe
     tonight's setup, not the mount.
     """
     records = _FakeRecordStore(all_attempts=_ATTEMPTS)

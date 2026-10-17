@@ -40,6 +40,23 @@ repos:
         entry: ./build/hooks/check_commit_message.sh
         language: system
         stages: [commit-msg]
+      - id: documentation-rules
+        name: Documentation Rules
+        # The fast documentation tests: where content lives, the validation
+        # register, implementation links, and the generated review guides.
+        entry: .venv/bin/pytest -q -p no:cacheprovider astrometricslib/test/test_documentation_rules.py astrometricslib/test/test_documentation_style.py astrometricslib/test/test_documentation_notation.py astrometricslib/test/test_documentation_site.py wayfindinglib/test/test_documentation_papers.py astrometricslib/test/test_architecture_doc_claims.py astrometricslib/test/test_validation_register.py astrometricslib/pipelines/test/test_pipeline_doc_parity.py
+        language: system
+        pass_filenames: false
+        files: ^(documentation/|build/documentation/|(astrometricslib|wayfindinglib)/.*(README\.md|\.py)$)
+      - id: documentation-lint
+        name: Documentation Lint (Vale and markdownlint)
+        # Spelling, terms, units, status labels and Markdown mechanics; see
+        # documentation/Documentation_Conventions.md. Needs vale
+        # (.venv/bin/pip install vale) and Node.js for markdownlint-cli2.
+        entry: build/documentation/lint_docs.sh
+        language: system
+        pass_filenames: false
+        files: ^(documentation/.*\.md|astrometricslib/.*README\.md|\.vale\.ini|\.markdownlint-cli2\.jsonc|build/documentation/vale/)
       - id: generate-types
         name: Generate Types
         entry: ./build/codegen/generate-types.sh

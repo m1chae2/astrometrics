@@ -1,6 +1,6 @@
 """The instrument's resolution element: how much it blurs every spectrum.
 
-A slitless grism spectrum is blurred. Each star is a small disc on the
+A slitless grating spectrum is blurred. Each star is a small disc on the
 sensor, not a point, and the grating spreads that disc out into a trail.
 So every sharp feature in the star's light, such as an absorption line,
 comes out as a wide, shallow dip. The width of that blur, in Angstroms, is

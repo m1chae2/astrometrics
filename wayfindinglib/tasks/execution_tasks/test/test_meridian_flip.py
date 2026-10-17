@@ -4,8 +4,8 @@ Description: Verifies the flip completes and resumes when every step
 succeeds, and each of the sequence's bounds -- exposure handling,
 guiding stop, slew, realign iteration limit, and guide reacquire
 attempts -- produces a non-resumed outcome with a failure_detail when
-exhausted, without proceeding past the failing step -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+exhausted, without proceeding past the failing step -- the behavior
+`Wayfinding_Library_Architecture.md` Section 5.5 describes.
 """
 
 from typing import Any

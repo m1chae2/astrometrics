@@ -8,8 +8,8 @@ top-level import: `butler.py` is also a submodule of this package,
 needed by Observation Planning for recording alone, and eagerly
 importing INDI hardware modules here would mean importing it
 transitively imports device drivers --
-directly undermining "Planning Is Hardware-Free"
-(`Wayfinding_Library_Architecture.md`). Since Python must execute
+directly undermining "Planning is hardware-free"
+(`Wayfinding_Library_Architecture.md` Section 4.4). Since Python must execute
 a package's `__init__.py` before any of its submodules are reachable,
 this package's own `__init__` must not import hardware modules eagerly.
 The `TYPE_CHECKING`-guarded import below never executes at runtime, so

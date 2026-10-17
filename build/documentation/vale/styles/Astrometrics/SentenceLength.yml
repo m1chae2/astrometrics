@@ -1,0 +1,7 @@
+# Documentation_Conventions.md §7: rewrite any sentence over 40 words.
+extends: occurrence
+message: "Sentence longer than 40 words; split it."
+level: warning
+scope: sentence
+max: 40
+token: '\b(\w+)\b'

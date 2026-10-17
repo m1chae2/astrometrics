@@ -7,6 +7,11 @@ constant that implements it. This test imports every named object. A claim
 whose implementation no longer exists fails the test, so a refactor cannot
 leave the document describing code that is gone. A claim with no link is a
 design goal, and the document says so in its own words.
+
+The tuned values themselves live in
+``documentation/library_design/Astrometrics_Library_Implementation.md``,
+whose parameter tables carry the same kind of link to the constant that holds
+each value. Those links are checked here too.
 """
 
 import importlib
@@ -21,6 +26,7 @@ ARCHITECTURE_DOCUMENT = (
     / "library_design"
     / "Astrometrics_Library_Architecture.md"
 )
+IMPLEMENTATION_DOCUMENT = ARCHITECTURE_DOCUMENT.with_name("Astrometrics_Library_Implementation.md")
 IMPL_COMMENT = re.compile(r"<!-- impl: ([^ ]+?) -->")
 MINIMUM_LINKED_CLAIMS = 100
 
@@ -78,6 +84,17 @@ def test_every_architecture_claim_names_code_that_exists() -> None:
 def test_the_architecture_document_keeps_its_claims_linked() -> None:
     """The document does not silently lose its implementation links."""
     assert len(_linked_claims()) >= MINIMUM_LINKED_CLAIMS
+
+
+def test_every_implementation_document_link_names_code_that_exists() -> None:
+    """Each ``impl`` link in the implementation document resolves."""
+    names = IMPL_COMMENT.findall(IMPLEMENTATION_DOCUMENT.read_text(encoding="utf-8"))
+    assert names, f"{IMPLEMENTATION_DOCUMENT.name} has no impl links"
+    unresolved = sorted({name for name in names if _resolve(name) is None})
+    assert not unresolved, (
+        f"{len(unresolved)} impl link(s) in {IMPLEMENTATION_DOCUMENT.name} name code that does not "
+        f"exist: {unresolved}. Update the document or the link when the code moves."
+    )
 
 
 @pytest.mark.parametrize("name", sorted(set(_linked_claims()))[:3])

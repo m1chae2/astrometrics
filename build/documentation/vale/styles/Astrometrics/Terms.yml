@@ -1,0 +1,10 @@
+# Documentation_Conventions.md §5: one term per concept.
+extends: substitution
+message: "Use '%s' instead of '%s' (Documentation_Conventions.md §5)."
+level: warning
+ignorecase: true
+swap:
+  pictures?: frame
+  sub-exposures?: frame
+  plate scale: pixel scale
+  grism: grating

@@ -35,7 +35,7 @@ so a detection threshold or a preview could change between two runs on the
 same frame. See `KNOWN_UNSEEDED_RANDOM_SITES`.
 
 A fourth ratchet keeps imports pointing down the layers (issue #78). The
-library's "Ratchet Rule" (see
+library's layer rule (see Appendix A and Table 9 of
 `documentation/library_design/Astrometrics_Library_Implementation.md`) says
 no layer imports from a layer above it. The scan reads every import,
 including the ones written inside a function body, which hide a dependency

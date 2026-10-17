@@ -16,7 +16,8 @@ fault records, and accumulated telemetry are written only by Execution.
 package it came from -- `exposure_requests`, `dither_config`,
 `minimum_altitude_deg`, and `priority` are all frozen at placement time,
 so editing or deleting the template afterward cannot change what a
-session recorded (the "Template/Instance Separation" invariant).
+session recorded (`Wayfinding_Library_Architecture.md` Section 3.3,
+"Template and instance separation").
 `QueueEntryStatus` has no `INFEASIBLE` value: unplaced packages never
 enter the queue, so no entry could ever hold it -- infeasibility is
 reported on `unplaced_package_diagnostics`, a separate channel.

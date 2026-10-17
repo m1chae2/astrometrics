@@ -44,7 +44,8 @@ class EnclosureController:
         -------
         state : `EnclosureState`
             `UNKNOWN` if the device or property is unavailable or
-            ambiguous, per the "Unknown Is Unsafe" invariant.
+            ambiguous, per `Wayfinding_Library_Architecture.md` Section 6.5
+            ("Absence of information is not safety").
         """
         if not enclosure_device:
             return EnclosureState.UNKNOWN

@@ -1,9 +1,17 @@
-"""Sphinx extension to dynamically generate the tutorials/index.md page."""
+"""Purpose: Sphinx extension that writes the notebook tutorials index.
+
+Description: At the start of each build it finds every notebook under
+``documentation/notebooks/`` and writes ``documentation/notebooks/index.md``:
+one card per notebook, grouped by library, and a hidden toctree.
+"""
 
 import json
 import logging
 import textwrap
 from pathlib import Path
+from typing import Any
+
+from sphinx.application import Sphinx
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +22,14 @@ logger = logging.getLogger(__name__)
 _PROSE_WRAP_WIDTH = 79
 
 
-def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
-    """Automatically discover notebooks and generate tutorials/index.md."""
+def generate_tutorials_index(app: Sphinx) -> None:
+    """Find the notebooks and write ``notebooks/index.md``.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application; its source folder holds the notebooks.
+    """
     doc_dir = Path(app.srcdir)
     notebooks_dir = doc_dir / "notebooks"
     if not notebooks_dir.exists():
@@ -73,21 +87,19 @@ def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argumen
                 })
 
     intro_paragraph = (
-        "Welcome to **Learn Astrometrics**, an automatically discovered collection of "
-        "executable Jupyter Notebook tutorials (`.ipynb`) covering scientific image "
-        "processing, target catalog queries, photometry, spectroscopy, moving object "
-        "recovery, observation planning, and telescope control using `astrometricslib` "
-        "and `wayfindinglib`."
+        "These tutorials are Jupyter notebooks that call the two Python libraries "
+        "directly. They cover image processing, catalog queries, photometry, "
+        "spectroscopy, asteroid detection, observation planning and telescope control."
     )
     usage_paragraph = (
-        "Each tutorial is an executable Jupyter Notebook stored in the "
-        "`documentation/notebooks/` directory. You can open and run them interactively "
-        "in VS Code or JupyterLab, or click any card below to view the rendered "
-        "notebook in the browser."
+        "Each notebook lives in `documentation/notebooks/`. Open it in VS Code or "
+        "JupyterLab to run it, or choose a card below to read it here."
     )
 
     out = [
-        "# Learn Astrometrics: Interactive Notebook Tutorials",
+        "# Notebook tutorials",
+        "",
+        "*Generated from the notebooks at each documentation build.*",
         "",
         *textwrap.fill(intro_paragraph, width=_PROSE_WRAP_WIDTH).splitlines(),
         "",
@@ -134,8 +146,13 @@ def generate_tutorials_index(app):  # ruff: ignore[missing-type-function-argumen
         f.write("\n".join(out))
 
 
-def setup(app):  # ruff: ignore[missing-type-function-argument, missing-return-type-undocumented-public-function]
+def setup(app: Sphinx) -> dict[str, Any]:
     """Register Sphinx extension hooks.
+
+    Parameters
+    ----------
+    app : `sphinx.application.Sphinx`
+        The running Sphinx application.
 
     Returns
     -------

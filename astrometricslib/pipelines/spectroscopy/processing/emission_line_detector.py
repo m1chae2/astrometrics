@@ -9,7 +9,7 @@ humps instead.
 
 Two things make the humps different from a lab spectrum:
 
-* **Wide lines.** A slitless grism has no slit, so every part of the
+* **Wide lines.** A slitless grating has no slit, so every part of the
   nebula makes its own copy of each line, shifted sideways by where that
   part sits. The line is as wide as the nebula's image is across, not as
   wide as the instrument's blur. For M 57 the extraction box is 37 pixels

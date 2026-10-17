@@ -1,11 +1,12 @@
 """Purpose: Site Profile Domain Models.
 
 Description: The observing location's coordinates and horizon
-obstructions. Per `Wayfinding_Library_Architecture.md`, this is
-the architecture's single authoritative source of observer position:
-any calculation needing latitude, longitude, or elevation resolves them
-from `SiteProfile` rather than from a connected device's reported
-position (the "Single Source Of Observer Position" invariant).
+obstructions. Per `Wayfinding_Library_Architecture.md` Section 3.3
+("One source of site position for planning"), this is the single source
+of observer position for planning and the live-status tools: they read
+latitude, longitude, and elevation from `SiteProfile` rather than from a
+connected device's reported position. Section 8 of that paper says where
+control reads the position differently.
 """
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator

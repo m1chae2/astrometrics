@@ -1,54 +1,69 @@
-# Post-processing
+# Stacking post-processing
 
-This step judges the finished stack and makes a picture of it for people. It never changes the stack file.
+This stage judges the finished stack and makes a preview image of it for people. It never changes the stack file.
 
-## What it does
+Terms are defined in the [glossary](../../../../documentation/Glossary.md). This document also defines each term the first time it appears.
 
-1. **Output judgement** (`assess_output_quality.py`). Turns the measurements made on the stack into a `StackingOutputQuality` (`models/stacking_quality.py`).
-2. **Thresholds** (`stack_quality.py`). The limits for the rejected-pixel share, the zero-pixel share and the negative-pixel warning.
-3. **Saturation check** (`exposure_saturation.py`). Finds whether an exposure length saturates the brightest star and recommends one that does not.
-4. **Exposure-group report** (`exposure_group_report.py`). Describes each exposure group in the summary.
-5. **Preview** (`stack_preview.py`, `sky_level.py`, `star_tone.py`, `bright_object.py`). Makes the stretched JPEG. See `../README.md`, step 7.
-6. **Previous stack** (`previous_stack.py`). Before a restack overwrites a stack, moves the old stack and its companion files (rejection map, registration table, preview, stretched FITS) into a staging folder. If the restack works, those files go into `_previous` and replace that stack's older version; the other stacks of the target keep theirs. If it fails, everything moves back. Only one previous version is kept. `discard_previous_stack` deletes it and `swap_with_previous_stack` exchanges it with the current stack. The setting `keep_previous_stack_enabled` (default `true`) turns this off. `interrupted_jobs.py` puts back the old stack when the program running a restack was killed before it finished: the package root registers `restore_interrupted_stacks`, and `close_interrupted_jobs` calls it for each stacking job it closes.
-7. **Stack comparison** (`stack_comparison.py`). Measures two stacks the same way (sky level, pixel noise, large-scale flatness, star width) and reports the change in each as a number and a sentence. It does not pick a winner: new flats should lower the flatness number and leave the noise alone, while more frames should lower the noise and leave the flatness alone.
+## What this stage does, in order
 
-## The quality metrics
+These terms appear throughout:
 
-- **Rejected pixel fraction.** The share of pixel values the stacker threw out, 0 to 1. A high value means many artifacts or a poor alignment.
-- **Saturated pixel fraction.** The share of pixels at the camera's saturation level.
-- **Zero pixel fraction.** The share of exactly-zero pixels. For a colour stack it is the share in the worst channel. A mostly-zero stack is blank, because calibration removed more than the sky.
-- **Negative pixel maximum percent.** The worst "many negative pixels" warning Siril printed after dark subtraction.
-- **Stacked, median input and expected FWHM.** Star width (full width at half maximum, in pixels, from a Gaussian fit to each star) in the stack and in a sample of the input frames spread over the whole set, images only. The expected width is the root mean square of the sampled frame widths, which is the width a stack of those frames should have. A stack more than 1.2 times wider than expected means alignment blurred it. A stack combined from exposure groups is measured without the stars whose cores were replaced by a shorter group's data. Those patched cores are the brightest stars in the combined image, because it has no saturated plateau left for the check to skip, and measured alone they read too wide. On the M 57 stack of 2026-10-03 they read 3.40 px against 2.38 px for the other stars.
-- **Spectral registration concern count.** Spectral frames the registration check questioned.
-- **Flag reasons.** One sentence per failed threshold. They feed the summary's flag reasons.
+- A *stack* is the single image made by aligning and averaging many frames of one target. It is saved as a FITS file, the standard astronomy image format.
+- *Linear* and *stretched* data differ in how they show brightness. A stack's pixel values are proportional to the light collected (linear), so it looks almost black on a screen. A *stretch* is a non-linear brightness curve that lifts the faint detail for display.
+- *Siril* is the external image-processing program that stacks and stretches the images. *GraXpert*, *Cosmic Clarity* and *StarNet* are external tools for removing sky gradients, removing noise and separating stars from the background.
+- The *rejection map* is an image, saved beside the stack, of how many values the stacker threw out at each pixel.
 
-For exact thresholds, read the code.
+The steps are:
 
-## Colour calibration compared with Siril's
+1. Output judgment (`assess_output_quality.py`). It turns the measurements made on the stack into a `StackingOutputQuality` (`models/stacking_quality.py`).
+2. Thresholds (`stack_quality.py`). They hold the limits for the rejected-pixel share, the zero-pixel share and the negative-pixel warning.
+3. Saturation check (`exposure_saturation.py`). It finds whether an exposure length saturates the brightest star and recommends one that does not.
+4. Exposure-group report (`exposure_group_report.py`). It describes each exposure group in the summary.
+5. Preview (`stack_preview.py`, `colour_calibration.py`, `sky_level.py`, `starnet_stretch.py`, `star_tone.py`, `bright_object.py`). It makes the stretched JPEG and FITS images. The steps are color calibration of a color stack, the stretch (or the optional StarNet star-separated stretch), star toning, and the separate route for a bright object such as the Moon. `preview_remake.py` runs this step again on an existing stack without restacking. See [step 7 of the stacking README](../README.md#the-preview-image-step-7).
+6. Previous stack (`previous_stack.py`). Before a restack overwrites a stack, it moves the old stack and its companion files (rejection map, registration table, preview, stretched FITS) into a staging folder. If the restack works, those files go into `_previous` and replace that stack's older version, and the other stacks of the target keep theirs. If it fails, everything moves back. The stage keeps only one previous version. `discard_previous_stack` deletes it and `swap_with_previous_stack` exchanges it with the current stack. `interrupted_jobs.py` puts back the old stack when the program running a restack was killed before it finished. The package root registers `restore_interrupted_stacks`, and `close_interrupted_jobs` calls it for each stacking job it closes.
+7. Stack comparison (`stack_comparison.py`). It measures two stacks the same way (sky level, pixel noise, large-scale flatness, star width) and reports the change in each as a number and a sentence. It does not pick a winner. New flats should lower the flatness number and leave the noise alone, while more frames should lower the noise and leave the flatness alone.
+8. Stack reports (`stack_quality_report.py`). It builds what `QualityDiagnostics.stack_quality` and `ProcessingPipelines.stack_summary` return. It finds a target's stack file and measures the stack's star width, share of rejected pixels (from the rejection map beside the stack) and frame registration (from the `_Registration.seq` file beside it). It optionally compares the stack with the previous stack or another stack file, and reads back the summary the stage saved. It writes no file.
 
-The preview uses Siril's PCC by default and falls back to the star-based method when PCC cannot run. The comparison below is why PCC was chosen as the default: it was the user's choice, made after seeing the pictures, not the most accurate method. SPCC is more accurate in principle, because it uses the camera's own sensitivity curves, but it takes about 45 seconds and the pictures differed little. The difference between PCC and SPCC pictures comes mostly from the white reference each assumes, and SPCC can be set to a warmer white reference.
+### Color calibration compared with Siril's
 
-`colour_calibration.py` balances the colours of a colour stack from its own stars. Siril has two calibrations of its own, both run here through `siril-cli` on the same gradient-flattened data (Siril 1.4.4):
+The preview uses Siril's PCC (photometric color calibration, which balances the color channels by matching the image's stars to a star catalog) by default. It falls back to the star-based method of `colour_calibration.py` when PCC cannot run. Siril has a second calibration, SPCC (spectrophotometric color calibration), which also uses the camera's measured sensitivity curves.
 
-- `pcc` (photometric colour calibration) matches the stars to the Gaia DR3 catalogue.
-- `spcc` (spectrophotometric colour calibration) also uses the camera's measured sensitivity curves. It was run with the "Nikon D5300" sensor and the "Average Spiral Galaxy" white reference.
+- **PCC.** It matches the stars to the Gaia DR3 catalog (the star catalog from the European Space Agency's Gaia satellite, third data release). It needs a plate solution (the mapping from pixel position to sky coordinates) and a network connection.
+- **SPCC.** It uses the camera's own sensitivity curves, and it takes longer per stack. The difference between PCC and SPCC images comes mostly from the white reference each assumes (the kind of light the calibration treats as white). SPCC can be set to a warmer white reference.
+- **The star-based method.** It works offline in a few seconds. It assumes the median star is neutral, which is the largest source of error. Its printed uncertainty is the scatter between stars only.
 
-Gains are the factors for red and blue with green fixed at 1 (Siril reports factors for all three channels, so its red and blue are divided by its green).
+Siril warns that PCC and SPCC give an imprecise solution when the image still holds a gradient, so both run after GraXpert. The three methods agree on the direction and rough size of the correction and differ from each other by 10 to 20%. The star-based method adds too much blue on Milky Way fields (measured; see [STK-27](../../../../documentation/library_design/validation/stacking.md#stk-27)).
 
-| Target | Star-based red / blue | PCC red / blue | SPCC red / blue |
-|---|---|---|---|
-| M 51 | 1.48 / 1.34 | 1.79 / 1.10 | 1.68 / 1.29 |
-| M 31 | 1.78 / 1.33 | 1.85 / 1.29 | 1.60 / 1.29 |
-| M 106 | 1.69 / 1.33 | 1.93 / 1.24 | 1.72 / 1.29 |
-| NGC 6992 | 1.42 / 1.56 | 1.58 / 1.61 | 1.61 / 1.41 |
-| IC 1805 | 1.51 / 1.66 | 1.62 / 1.74 | 1.78 / 1.41 |
-| NGC 6888 | 1.60 / 1.51 | 1.84 / 1.52 | 1.86 / 1.30 |
+## Settings
 
-What the numbers show:
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `keep_previous_stack_enabled` | on | Turns the previous-stack backup off |
+| Limits in `stack_quality.py` | Listed in the [stacking README](../README.md#quality-outputs) | Set the thresholds for the gates |
+| Preview settings in `[Processing.Siril]`, `[Processing.GraXpert]` and `[Processing.CosmicClarity]` | See the [stacking README](../README.md#settings) | Turn each preview sub-step on or off and tune it |
 
-- **The three methods agree on the direction and rough size.** Every method raises red by 1.4 to 1.9 and blue by 1.1 to 1.7. Uncalibrated, these stacks are strongly green.
-- **They disagree with each other by 10 to 20 percent.** PCC and SPCC differ from each other as much as the star-based gains differ from either. The blue gain of M 51 is 1.10 (PCC) against 1.29 (SPCC). Which one is right depends on the white reference and the colour model, not on arithmetic.
-- **The star-based gains are close to SPCC on galaxy fields and off on Milky Way fields.** On M 51, M 31 and M 106 the blue gain is within 3 percent of SPCC. On NGC 6992, IC 1805 and NGC 6888, which lie in the Milky Way, it is 11 to 18 percent higher. A likely reason, not tested: dust reddens the stars in those fields, so the median star is redder than a typical star, and the star-based method then adds too much blue. Its red gain is 2 to 15 percent below SPCC in five of six fields.
-- **The printed uncertainty of the star-based gain (0.1 to 1.2 percent) is the scatter between stars only.** It leaves out the assumption that the median star is neutral, which is the larger error.
-- **Siril needs a plate solution, an online catalogue and 10 seconds (PCC) to 45 seconds (SPCC) per stack.** The star-based method takes a few seconds and works offline. Siril warns that PCC and SPCC give an imprecise solution when the image still holds a gradient, so both were run after GraXpert.
-- **The pictures differ little.** With a shared stretch, M 51 and M 31 look alike under all three. PCC gives the warmest, yellowest galaxy core. The star-based and SPCC pictures are more neutral.
+## Quality metrics
+
+| Field | Unit | Limit (status) | High or low means | Read by |
+| --- | --- | --- | --- | --- |
+| `rejectedPixelFraction` | Fraction, 0 to 1 | 15% (partly measured; see [STK-24](../../../../documentation/library_design/validation/stacking.md#stk-24)) | The share of pixel values the stacker threw out. High means many artifacts or a poor alignment | The `rejected_pixel_fraction` gate |
+| `saturatedPixelFraction` | Fraction | 0.1% (design estimate; see [stacking design estimates](../../../../documentation/library_design/validation/stacking.md#design-estimates)) | The share of pixels at the camera's saturation level, the highest value it can record, where the true brightness is lost. High means lost star cores | The `saturated_pixel_fraction` gate |
+| `zeroPixelFraction` | Fraction | Half of an image stack, 5% of a spectral stack (measured; see [STK-26](../../../../documentation/library_design/validation/stacking.md#stk-26)) | The share of exactly-zero pixels. For a color stack it is the share in the worst channel. High means a blank stack, because calibration removed more than the sky | The `zero_pixel_fraction` gate |
+| `negativePixelMaxPercent` | % | 50% (measured; see [STK-26](../../../../documentation/library_design/validation/stacking.md#stk-26)) | The worst "many negative pixels" warning Siril printed after dark subtraction, which removes the heat signal measured in dark frames. High means the dark subtraction over-corrected | The `negative_pixels` gate |
+| `stackedFwhmPx`, `medianInputFwhmPx`, `expectedStackFwhmPx` | px | Stacked width over expected width above 1.2 (partly measured; see [STK-25](../../../../documentation/library_design/validation/stacking.md#stk-25)) | Star width (FWHM, full width at half maximum, from a Gaussian fit to each star) in the stack and in a sample of the input frames spread over the whole set. Images only. The expected width is the root mean square of the sampled frame widths. A stacked star is the average of the frames' stars, and for round Gaussian (bell-shaped) stars the average's variance is the mean of the individual variances, so its width is the root mean square of theirs. A stack more than 1.2 times wider than expected means alignment blurred it | The `stack_sharpness` gate |
+| `spectralRegistrationConcernCount` | Frames | None | Spectral frames the registration check questioned. High means the zero-order star moved or faded | The `spectral_registration` gate |
+| `flagReasons` | Sentences | None | One sentence per failed threshold | The summary's flag reasons |
+
+**Combined stacks.** The width measurement skips the stars whose cores a shorter group's data replaced in a stack combined from exposure groups. The measurement normally skips saturated stars by their flat, clipped tops (the saturated plateau). In a combined image the brightest stars' cores come from a shorter, unsaturated group, so they have no plateau for the measurement to find. Measured with the rest, they read too wide (measured; see [STK-25](../../../../documentation/library_design/validation/stacking.md#stk-25)).
+
+## Files
+
+- `assess_output_quality.py`: the `StackingOutputQuality` judgment.
+- `stack_quality.py`: the gate thresholds.
+- `exposure_saturation.py`, `exposure_group_report.py`: the saturation check and the exposure-group report.
+- `colour_calibration.py`, `sky_level.py`, `starnet_stretch.py`, `star_tone.py`, `bright_object.py`, `stack_preview.py`, `preview_remake.py`: the preview.
+- `previous_stack.py`, `interrupted_jobs.py`: the previous-stack backup and its recovery.
+- `stack_comparison.py`, `stack_quality_report.py`: the comparison and the stack reports.
+- `stack_crop.py`: the noisy-edge trim.
+
+For exact behavior, read the code.

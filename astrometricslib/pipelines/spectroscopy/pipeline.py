@@ -792,7 +792,8 @@ class SpectroscopyPipeline:
             fitted with the stored profile and is not changed, so switching
             this on makes the classification blur and the response
             disagree. Do not switch it on until it has been checked on real
-            spectra (see the spectroscopy README, "Measured line spread").
+            spectra (see "Measured line spread" in the spectroscopy
+            pre_processing README).
         """
         self.use_measured_line_spread = use_measured_line_spread
         if config is None:

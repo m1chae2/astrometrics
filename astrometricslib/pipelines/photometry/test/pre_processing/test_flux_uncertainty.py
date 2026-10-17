@@ -72,7 +72,7 @@ def _measured(value: float) -> ProvenancedValue:
 
 
 def test_the_ccd_equation_matches_a_hand_worked_example() -> None:
-    """Each of the four terms adds what the equation says it should.
+    """Each term adds what the equation says it should.
 
     The star has 1000 ADU, the sky 10 ADU per pixel, the gain is 2 e-/ADU and
     the read noise 5 e-. The aperture has 50 pixels and the sky ring 300.
@@ -80,7 +80,9 @@ def test_the_ccd_equation_matches_a_hand_worked_example() -> None:
     * Star: 1000 x 2 = 2000 e-.
     * Aperture sky and read noise: 50 x (20 + 25) = 2250 e-.
     * Sky level: (50**2 / 300) x (20 + 25) = 375 e-.
-    * Dark current of 3 e- per pixel: 50 x 3 = 150 e-.
+    * Dark current of 3 e- per pixel: 50 x 3 = 150 e- in the aperture, and
+      (50**2 / 300) x 3 = 25 e- in the sky level, because each ring pixel
+      carries the same dark noise.
     """
     noise = DetectorNoise(
         gain_e_per_adu=2.0, read_noise_e=5.0, gain_is_assumed=False, read_noise_is_assumed=False
@@ -90,7 +92,7 @@ def test_the_ccd_equation_matches_a_hand_worked_example() -> None:
     with_dark = aperture_flux_error_adu(1000.0, 10.0, 50.0, 300.0, noise, dark_current_e_per_pixel=3.0)
 
     assert without_dark == pytest.approx(math.sqrt(2000.0 + 2250.0 + 375.0) / 2.0)
-    assert with_dark == pytest.approx(math.sqrt(2000.0 + 2250.0 + 375.0 + 150.0) / 2.0)
+    assert with_dark == pytest.approx(math.sqrt(2000.0 + 2250.0 + 375.0 + 150.0 + 25.0) / 2.0)
 
 
 def test_with_unit_gain_and_no_noise_the_error_is_the_square_root_of_the_counts() -> None:

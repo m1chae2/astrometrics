@@ -111,9 +111,10 @@ class _AnalysisView:
             return
 
         # 1. Render Image Layer
-        title = (
-            "Slitless Grism Spectrum FITS Image" if self.mode == "spectroscopy" else "Target Field FITS Image"
-        )
+        if self.mode == "spectroscopy":
+            title = "Slitless Grating Spectrum FITS Image"
+        else:
+            title = "Target Field FITS Image"
         self.layer_image.render(self.context.image.data, self.config.default_percentile, title=title)
 
         # 2. Render Star & Dispersion Overlays

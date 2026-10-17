@@ -1,112 +1,97 @@
-# Astrometrics: Image Processing and Science Analysis Tutorial
+# Image processing tutorial
 
-*Version 2.1 · 2026-08-21 · Status: current*
+*Version 2.0 · 2026-10-15 · Status: current*
 
-## Overview
+In this tutorial you take the frames of one target from raw files to a measured light curve. A light curve is a plot of a star's brightness over time. You will check your frames, stack them, plate solve them, and read the brightness of a star. Each step tells you what you should see before you move on.
 
-This tutorial provides end-to-end instructions for calibrating, registering, and stacking astronomical images, as well as conducting differential photometry, exoplanet transit detection, and 1D spectroscopy analysis within the Astrometrics User Interface.
+![Image Processing](./assets/image_processing.png)
 
----
+## What you need
 
-## 1. Introduction
+- Astrometrics is running. See [Getting started](../../Getting_Started.md).
+- One target with at least 10 light frames in your image library. A light frame is one camera exposure of the sky. To copy frames from the telescope, use the recipe [Download captured frames](Observatory_Control_and_Automation_Guide.md#download-captured-frames).
+- Matching dark frames in the library. A dark frame is an exposure with the camera covered. It records the heat noise of the sensor.
+- Plate solving set up. Plate solving matches the stars in an image to a star catalog to learn where the image points. In Settings > Processing, enter an astrometry.net API Key, or install a local solver.
+- Siril installed. Siril is the outside program that stacks the frames. Settings > Processing > Siril Executable names it.
 
-This guide details the step-by-step workflow for using Astrometrics to process images, from basic calibration and stacking to photometry and spectroscopy.
+## Step 1: Open your target
 
+1. Click the mode button in the status header and choose Image Processing.
+2. In the Targets list on the left, click your target. Use the search box or the Filter Targets tabs if the list is long.
 
----
+**What you should see.** The FITS Viewer in the middle shows one of your frames. FITS is the standard file format for astronomy images. The File Browser under it lists every frame of the target, one row each, with Date, Camera, Filter and Exp (s). The viewer picks the frame with the longest exposure.
 
-## 2. Calibration & Pre-Processing
+## Step 2: Check your frames and calibration
 
-Before frames can be aligned and stacked, they must be calibrated to remove sensor read noise, thermal dark current, and optical vignetting.
+Calibration cleans each frame before stacking. The app subtracts the dark frames and the other calibration frames it finds in your library. You do not run a separate calibration step. You only check that the calibration frames are there.
 
-![Image Processing Workbench](./assets/image_processing.png)
+1. In the Frame Analysis panel on the right, click the Data tab.
+2. Find the Session Frames table. Each row is one exposure length.
+3. Read the Session column. It is the number of light frames.
+4. Read the Library Match column. A check mark with a number means that many matching dark frames are in the library.
+5. Click a row in the File Browser to look at a single frame. Click the Header Info button to read its FITS header, the notes the camera saved with the image.
 
-### 2.1 Calibration Workflow
-1. Switch to **Image Processing** mode.
-2. Select a target name from the **Observation Targets** list in the left sidebar.
-3. Under **Calibration Assets**, select the matching master calibration frames that correspond to the camera's temperature, gain, and optical train:
-   - **Master Bias**: Subtracts sensor read noise. Ensure the bias frame matches the camera gain.
-   - **Master Dark**: Subtracts thermal dark current (heat noise). Ensure the dark frame matches the exposure time and sensor temperature of the light frames.
-   - **Master Flat**: Corrects optical vignetting (dark corners) and dust donuts. Ensure the flat frame was taken with the exact same optical setup.
+**What you should see.** Every row of Session Frames shows a check mark in Library Match. If a row says Missing, the library has no dark frame for that exposure length. Add dark frames with the Ingest From Telescope dialog before you go on.
 
+## Step 3: Stack the frames
 
+Stacking lines up your frames so each star falls on the same pixel, and then combines them. Real stars add up. Random noise averages out. Bad pixels from satellites and cosmic rays are thrown out.
 
-:::{warning}
-Do not mix and match calibration frames from different temperatures or binning modes. Applying an incompatible Master Flat will over-correct or under-correct vignetting, leaving bright or dark rings in the final image.
-:::
+1. Leave every box in the File Browser unticked to stack all frames. Tick boxes only to use a chosen set.
+2. In the Image Controls panel, click Stack Frames.
+3. In the Frame Analysis panel, click the Analysis tab.
+4. Watch the status box until it reads Processing Successful.
 
----
+**What you should see.** The status box reads Processing Active with a spinner, and the log fills with lines from the job. When the job ends, the box reads Processing Successful and the log ends with a success line. If the button reads Stacking requires matching cameras, your frames come from more than one camera. Tick the frames of one camera and try again.
 
-## 3. Quality Filtering & Frame Selection
+Now look at the result.
 
-Even with perfect calibration, passing clouds, wind gusts, or satellite trails can ruin individual sub-exposures. The pipeline must reject these degraded frames before stacking.
+1. Click the Data tab.
+2. Find the Final Stack row. Click View.
+3. If the image looks dark, look at the button above the viewer. If it reads Linear, click it to switch to the stretched view. A stretch brightens faint detail.
 
-### 3.1 Frame Rejection
-1. Inspect the **Frame Analysis** metric table, which lists the computed FWHM (Full Width at Half Maximum) and background sky brightness for every frame.
-2. Drag the **FWHM Cutoff** slider to reject sub-exposures where star FWHM exceeds the target threshold (e.g., $>3.5''$). This ensures only the sharpest frames contribute to the final stack.
-3. Adjust the **Roundness Floor** to reject trailed frames caused by wind gusts or guiding errors ($\text{Roundness} < 0.75$).
-4. Check the **Background ADU Ceiling** to exclude sub-exposures contaminated by moonlight, passing clouds, or twilight glow.
+**What you should see.** The Final Stack row names the stack file, and its button now reads Viewing. A Total Exposure line shows the exposure time of the stack. The FITS Viewer shows the stack. It has less noise than a single frame, and faint stars stand out. Scroll to zoom in and drag to move around.
 
----
+## Step 4: Plate solve and measure the stars
 
-## 4. Alignment & Star Registration
+The next job plate solves your frames and then measures the brightness of every star in each frame.
 
-To stack the images, the engine must precisely align them by mapping the star patterns between each frame.
+1. In the File Browser, click the check box in the table header. This ticks every frame.
+2. In the Image Controls panel, click Analyze Target.
+3. Click the Analysis tab and watch the log until the job ends.
+4. Click the Data tab.
 
-### 4.1 Registration Workflow
-1. Select a **Reference Frame**. Choose a frame from the middle of the session with a high star count, low FWHM, and high roundness.
-2. Set the **Alignment Algorithm** to `Triangle Matching` (ideal for deep-sky fields) or `Phase Correlation` (ideal for planetary or sparse fields).
-3. Click **Align Frames**. The engine maps the star patterns in every image and rotates/translates them to perfectly match the reference frame.
+**What you should see.** The log shows the job running, and the button changes to Cancel until the job ends. The Data tab then shows three counts: Total Images, Stars Found and Frames Processed. Stars Found is above zero.
 
----
+Now check the plate solve.
 
-## 5. Sigma-Clipped Frame Stacking
+1. Click the Astrometry button above the viewer.
 
-Stacking combines the aligned frames to increase the Signal-to-Noise Ratio (SNR) and mathematically reject transient artifacts like satellite trails and cosmic rays.
+**What you should see.** Small labels appear on the image. Each label sits on a star and carries the star's catalog name. The labels exist because the plate solve worked. If a message says no stars were identified, the solve did not work. Check your plate solver in Settings > Processing and run Analyze Target again.
 
-### 5.1 Stacking Workflow
-1. Under **Stacking Engine Configuration**, select the rejection algorithm.
-   - **Winsorized Sigma Clipping**: Recommended for stacks $>15$ frames. Iteratively rejects pixels that deviate significantly from the median, replacing them with the threshold limit before averaging.
-   - **Linear Fit Clipping**: Recommended for stacks with changing sky gradients (e.g., imaging through twilight).
-2. Set the Rejection Sigmas: typically $\sigma_{\text{low}} = 3.0$ and $\sigma_{\text{high}} = 3.0$. A lower high-sigma (e.g., $2.5$) is more aggressive at removing satellite trails but risks clipping the cores of bright stars.
-3. Click **Process Target**.
-4. The engine processes the sequence and outputs a calibrated, 32-bit floating-point FITS file (`<Target>_Stacked.fits`).
+## Step 5: Read a light curve
 
----
+1. In the viewer, click the label of a bright star.
+2. A message says that the star is opening in the Astronomy Manager. The view changes to the Astronomy Manager.
+3. Look at the star list on the left. Rows with a P badge have photometry. Photometry means brightness measurements. If you see the note No photometry has been recorded for this star, click another star with a P badge.
+4. Look at the Photometry panel in the middle.
+5. Look at the Stellar Analysis panel on the right. Under Light Curve, read Measurements and Time span.
+6. Drag the two Timeline sliders to look at part of the time range.
+7. If a Run period analysis button shows under Period Search, click it. The search looks for brightness that rises and falls on a regular schedule.
 
-## 6. Differential Photometry & Exoplanet Transit Analysis
+**What you should see.** The Photometry panel plots brightness against time, with one point for each frame. For most stars the points scatter around a flat line. That is normal, because most stars do not change. After a period search, a Repeating Patterns section appears. It gives Detected period or Possible period, and Chance of noise. A low Chance of noise is more convincing.
 
-Astrometrics can extract precise light curves to detect variable stars or exoplanet transits.
+## What you did
 
-![Astronomy Manager Interface](./assets/astronomy_manager.png)
+You checked that your frames had matching calibration frames, stacked them into one clean image, plate solved the frames, and read a star's brightness over time. You used four views of the app: Image Processing, the FITS Viewer, the Astrometry labels and the Astronomy Manager.
 
-### 6.1 Photometry Workflow
-1. Switch to **Astronomy Manager** mode.
-2. Load the stacked sequence and select a target variable star or exoplanet host star.
-3. Select 3-5 stable comparison stars in the same field of view. The engine uses these reference stars to cancel out passing clouds and changing atmospheric transparency.
-4. Click **Run BLS Transit Search** to automatically search for periodic dips in the light curve:
-   - Set the Period Range (e.g., $0.5$ to $10.0$ days).
-   - Click **Execute**.
-   - Review the best-fit transit light curve, calculated orbital period, transit depth, and the phase-folded plot.
+## Where to go next
 
-:::{note}
-**Time Standard.** Time series light curves record observation midpoints as **Barycentric Julian Date in Barycentric Dynamical Time ($\text{BJD}_{\text{TDB}}$)**, accounting for solar system light-travel time delays.
-:::
+The [user manual](User_Manual.md) describes every control you used here. The [Astronomy Manager section](User_Manual.md#astronomy-manager) also covers spectra, for frames taken through a diffraction grating.
 
----
+## See also
 
-## 7. 1D Spectroscopy Calibration & Equivalent Width
-
-For targets captured with a diffraction grating (e.g., Star Analyser 100), Astrometrics extracts and calibrates 1D spectral profiles.
-
-### 7.1 Spectroscopy Workflow
-1. Select a target object that contains `SPEC` (spectroscopy) sub-exposures.
-2. Click **Extract Profile** to perform optimal aperture extraction along the dispersion axis.
-3. Wavelength Calibration: Match known arc lamp emission lines or prominent absorption lines to build a wavelength scale (in Angstroms).
-4. Click **Fit Continuum** and drag a selection over an absorption line to automatically calculate the Equivalent Width, a physical measure of the line's strength.
-
-:::{note}
-**Relative Flux Status.** Extracted 1D spectra represent instrumental flux (ADU) along the calibrated wavelength axis. Absolute energy flux ($F_\lambda$) requires dividing by an instrument response curve derived from a spectrophotometric standard star.
-:::
-
-*(For polynomial fitting degrees and Equivalent Width integration math, see the {py:class}`~astrometricslib.api.stars.StellarCatalog` API Reference)*
+- [User manual](User_Manual.md)
+- [Observatory control guide](Observatory_Control_and_Automation_Guide.md)
+- [Getting started](../../Getting_Started.md)
+- [Pipeline review guides](../../library_design/pipelines/index.md)

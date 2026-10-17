@@ -1,6 +1,6 @@
 """Finds the bundled reference spectrum a star's spectrum most resembles.
 
-A slitless grism can't resolve spectral lines finely enough to derive a
+A slitless grating can't resolve spectral lines finely enough to derive a
 star's physical properties from first principles, and it can't tell you
 a catalog name either. What it can do is compare the overall shape of an
 observed spectrum -- continuum slope, Balmer line strength -- against a
@@ -35,7 +35,9 @@ contain counts against the star, or is absorbed by a wrong type:
 * Reddening. The references are not reddened, and dust between us and the
   star tilts the spectrum toward the red. A hot star can then match a cooler
   type, and this is why an O/B/A star's self-determined type commonly comes
-  out about one subtype too cool against its catalog type, even for bright,
+  out about one reference step too cool against its catalog type (the
+  reference list skips some subtypes, so one step can be two subtypes, as for
+  the A stars in validation register SPE-16), even for bright,
   high-signal spectra (Vega included). Three different fixes were tried and
   all failed the same way, which is the real reason reddening is NOT
   modelled rather than an oversight:
@@ -62,16 +64,17 @@ contain counts against the star, or is absorbed by a wrong type:
   this reference library, interstellar reddening and the difference between
   two neighboring spectral types are the same size and shape of effect, so
   nothing this module can fit or threshold tells them apart. Treat a
-  self-determined O/B/A type as reading about one subtype cool of the truth,
-  rather than expecting it to be corrected here. The correction comes from
-  outside the spectrum instead: when a catalog gives the star's E(B-V), the
-  pipeline removes the reddening before it calls this module (see
+  self-determined O/B/A type as reading about one reference step cool of the
+  truth, rather than expecting it to be corrected here. The correction comes
+  from outside the spectrum instead: when a catalog gives the star's E(B-V),
+  the pipeline removes the reddening before it calls this module (see
   `spectrum_analysis.analyze_spectrum` and `interstellar_extinction`), and a
   star with no catalog E(B-V) still reads cool.
-* Airmass. The spectrum is not corrected for how much air the light crossed.
-  On the 2026-09-25 spectra the airmass ran from 1.01 to 1.46 (Mirfak),
-  which is too small a range, and the wrong direction, to explain the
-  tilts in the stars checked.
+* Airmass. The pipeline removes the atmosphere's dimming, which grows with
+  airmass, before it calls this module (`apply_extinction_correction` in
+  `pre_processing/atmospheric_extinction.py`). Airmass also could not explain
+  the tilts: on the 2026-09-25 spectra it ran from 1.01 to 1.46 (Mirfak),
+  too small a range, and in the wrong direction.
 * Luminosity class. The ladder is main-sequence only (see
   `GIANT_REFERENCE_SPECTRAL_TYPES`). Deneb (catalog A2Ia) matches A2I best
   at rms 0.036, against 0.063 for its stored A5V, so the class does matter
@@ -118,7 +121,7 @@ _TEMPLATE_DIR = Path(__file__).parent.parent / "data"
 # Pickles (1998) stellar flux library (Pickles, A.J. 1998, PASP, 110, 863).
 # Each covers 3000-10000 A at 5 A sampling, normalized to 1.0 at 5556 A --
 # enough range to capture the Balmer lines and the overall continuum slope
-# a low-resolution slitless grism can actually resolve. This is the full
+# a low-resolution slitless grating can actually resolve. This is the full
 # non-metallicity-variant main-sequence ladder the library offers (every
 # single- or double-subtype rung from O5V to M6V), not just a coarse
 # sample -- a denser ladder means a star between two rungs has a closer
@@ -431,7 +434,7 @@ def _get_blurred_templates(
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Give every reference spectrum blurred to a given resolution.
 
-    The references are much sharper than a grism spectrum, so they are
+    The references are much sharper than a grating spectrum, so they are
     blurred to the instrument's resolution before being compared.
     Comparing sharp references with a blurred observation would add a
     mismatch that has nothing to do with the star's type.

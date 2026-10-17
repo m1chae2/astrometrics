@@ -24,9 +24,14 @@ The fix here has three parts:
    exposure length can be compared, and put the groups on one brightness
    scale (Siril leaves each stack with its own) after leaving out each
    group's saturated pixels (`estimate_saturation_mask_level`,
-   `estimate_group_gains`). The scale is measured on mid-range pixels, and
-   a group whose bright-end ratio disagrees with it is left out (see
-   `measure_group_gains`).
+   `measure_exposure_group_gains`). For an imaging stack the scale is the
+   median ratio of the aperture fluxes of isolated, unsaturated stars
+   (`measure_group_gains_with_stars`), and a group whose faintest or
+   brightest quarter of stars disagrees with it is left out. A group with
+   too few such stars, and every group of a spectral stack, is measured on
+   mid-range pixels instead, and left out when its brightest pixels
+   disagree (`measure_group_gains`). A group whose sky is far brighter
+   than the reference's is also left out (`SKY_RATIO_LIMIT`).
 3. Combine the groups with inverse-variance weights, measured from each
    stack's own background noise (`combine_exposure_group_images`). A group
    that is quieter per second counts for more, so long exposures and
@@ -141,22 +146,26 @@ SATURATION_FRACTION_OF_FULL_SCALE = 0.95
 # rest) live in astrometricslib.pipelines.shared.quality.saturation, where the
 # stack-wide saturation check shares them.
 
-# Each group's stack also carries its own overall brightness scale. Against
-# the 2 s group, the Vega session's per-second brightness was 0.84-0.88 (1 s),
-# 0.71-0.74 (3 s) and 0.65-0.71 (5 s), almost the same for faint and bright
-# pixels, so it is a scale factor (a gain), not an offset. Mixing groups at
-# their face value puts a step in the spectrum wherever the light source
-# switches from one group to another. The gain of each group is therefore
-# measured against the group with the highest weight, as the median ratio of
-# their per-second brightness over the pixels in the middle of the
-# reference's brightness range: the 20th to the 80th percentile of the pixels
-# that neither group saturates or masks (GAIN_MID_RANGE_PERCENTILES). Those
-# pixels sit above the sky floor and below the bright end, where a sensor
-# leaves its linear range (near full well) or a clipped group reads zero. In
-# the linear range the ratio of two exposures is the ratio of their light per
-# second, which is the gain. Fewer than GAIN_MINIMUM_PIXELS such pixels leaves
-# the gain at 1. The percentiles and the pixel count are unvalidated choices:
-# 60% of a 3008 x 3008 image is about 5 million pixels.
+# Each group's stack also carries its own overall brightness scale. The
+# constants from here to SKY_CLIP_PASSES belong to the pixel method
+# (`measure_group_gains`), the fallback for a group with too few stars and the
+# only method for a spectral stack; the star-flux method that imaging stacks
+# use first comes after PLAUSIBLE_GAIN_RANGE. Against the 2 s group, the Vega
+# session's per-second brightness was 0.84-0.88 (1 s), 0.71-0.74 (3 s) and
+# 0.65-0.71 (5 s), almost the same for faint and bright pixels, so it is a
+# scale factor (a gain), not an offset. Mixing groups at their face value puts
+# a step in the spectrum wherever the light source switches from one group to
+# another. The gain of each group is therefore measured against the group with
+# the highest weight, as the median ratio of their per-second brightness over
+# the pixels in the middle of the reference's brightness range: the 20th to the
+# 80th percentile of the pixels that neither group saturates or masks
+# (GAIN_MID_RANGE_PERCENTILES). Those pixels sit above the sky floor and below
+# the bright end, where a sensor leaves its linear range (near full well) or a
+# clipped group reads zero. In the linear range the ratio of two exposures is
+# the ratio of their light per second, which is the gain. Fewer than
+# GAIN_MINIMUM_PIXELS such pixels leaves the gain at 1. The percentiles and the
+# pixel count are unvalidated choices: 60% of a 3008 x 3008 image is about 5
+# million pixels.
 GAIN_MID_RANGE_PERCENTILES = (20.0, 80.0)
 GAIN_MINIMUM_PIXELS = 200
 
@@ -181,25 +190,27 @@ GAIN_SOURCE_SIGMAS = 10.0
 SKY_CLIP_SIGMAS = 3.0
 SKY_CLIP_PASSES = 5
 
-# The brightest pixels give a second, diagnostic ratio: the median ratio over
-# the top GAIN_BRIGHTEST_FRACTION of the shared pixels (1% of a 3008 x 3008
-# image is about 90,000 pixels). This was the only estimator once. The
-# brightest pixels are where nonlinearity shows first, so on a camera that is
-# not linear there this ratio drifts away from the mid-range one. On the Vega
-# session it read 0.65-0.88 between groups of one camera, which is what a
-# compressed bright end looks like and not what a gain looks like. The
-# pipeline records both ratios and compares them (see
+# In the pixel method, the brightest pixels give a second, diagnostic ratio:
+# the median ratio over the top GAIN_BRIGHTEST_FRACTION of the shared pixels
+# (1% of a 3008 x 3008 image is about 90,000 pixels). This was the only
+# estimator once. The brightest pixels are where nonlinearity shows first, so
+# on a camera that is not linear there this ratio drifts away from the
+# mid-range one. On the Vega session it read 0.65-0.88 between groups of one
+# camera, which is what a compressed bright end looks like and not what a gain
+# looks like. The pipeline records both ratios and compares them (see
 # DEFAULT_GAIN_DISAGREEMENT_TOLERANCE).
 GAIN_BRIGHTEST_FRACTION = 0.01
 
-# How far the bright-end ratio may differ from the mid-range gain, as a
-# fraction of the gain, before the group is treated as nonlinear and left out
-# of the combined image. A truly linear pair of groups agrees to well under
-# 1% when the photon noise is small (the unit tests reach 0.5%). 5% allows for
-# noise in the 90,000 bright pixels and for small flat-field residuals, and is
-# far below the 35% disagreement seen in the field. It is a design choice, not
-# a validated limit; `AppConfiguration.get_exposure_group_gain_tolerance`
-# lets an observer change it.
+# How far, in the pixel method, the bright-end ratio may differ from the
+# mid-range gain, as a fraction of the gain, before the group is treated as
+# nonlinear and left out of the combined image. The star-flux method uses the
+# same tolerance on its faint and bright quarters (next comment). A truly
+# linear pair of groups agrees to well under 1% when the photon noise is small
+# (the unit tests reach 0.5%). 5% allows for noise in the 90,000 bright pixels
+# and for small flat-field residuals, and is far below the 35% disagreement
+# seen in the field. It is a design choice, not a validated limit;
+# `AppConfiguration.get_exposure_group_gain_tolerance` lets an observer change
+# it.
 DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
 
 # With star fluxes (the star-flux gain below), the same tolerance bounds how
@@ -209,7 +220,8 @@ DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
 # NGC 2403, M 81, M 27 L) and 4.5% (M 57 30 s), the quarter medians of 200 to
 # 1,500 stars being good to about 1%. M 51's 60 s group, whose bright stars
 # read 8% from its gain, is the case it catches. 5% sits between them and is
-# still a design choice.
+# still a design choice (see documentation/library_design/validation/
+# stacking.md, STK-20).
 
 # A measured gain outside this range is not believed and the group keeps a
 # gain of 1. The gains measured on the Vega session were 0.65 to 1 (see
@@ -219,23 +231,29 @@ DEFAULT_GAIN_DISAGREEMENT_TOLERANCE = 0.05
 # against the reference's brightest pixels, where they hold almost nothing:
 # their gains came out 1.4e-18 and 6e-31, dividing by them made the combined
 # image peak at 1e29, and only 32 stars were then detected in it. The range
-# is a judgement, wide enough for the real spread and far from those failures.
+# is a judgement, wide enough for the real spread and far from those failures
+# (see documentation/library_design/validation/stacking.md, STK-21). It
+# applies to the star-flux gain and to the pixel gain alike.
 PLAUSIBLE_GAIN_RANGE = (0.25, 4.0)
 
-# Star-flux gains (the way a group's brightness scale is measured when the
-# field has stars; the pixel ratios above are the fallback). The pixel method
-# above looks at pixels at least GAIN_SOURCE_SIGMAS noises above the sky. On a
-# Nikon D5300 stack that floor is only 5-8% of the sky level, so those pixels
-# are mostly sky gradients and the difference in star width between two nights,
-# and the mid-range and bright-end ratios disagree even when the camera is
-# linear (investigated 2026-10-13: NGC 6888 60 s read 0.96 mid-range and 1.06
-# at the bright end, and a real aperture measurement of the same stars gave
-# 1.07 at every brightness). So the gain is the median ratio of each star's
-# own flux: the light inside a circle of STAR_GAIN_APERTURE_RADIUS_PIXELS
-# minus the sky measured in the ring between STAR_GAIN_SKY_INNER_PIXELS and
-# STAR_GAIN_SKY_OUTER_PIXELS, from the same isolated stars in both groups.
-# A circle that large keeps the same fraction of a star's light whether the
-# star is a pixel wider or narrower in one group, which the pixel ratio cannot.
+# Star-flux gains (`measure_group_gains_with_stars`): the way an imaging
+# group's brightness scale is measured first. The pixel ratios above are the
+# fallback for a group that shares too few clean stars with the reference
+# (STAR_GAIN_MINIMUM_STARS) and the method for every spectral stack, which has
+# no field of stars. The pixel method above looks at pixels at least
+# GAIN_SOURCE_SIGMAS noises above the sky. On a Nikon D5300 stack that floor is
+# only 5-8% of the sky level, so those pixels are mostly sky gradients and the
+# difference in star width between two nights, and the mid-range and bright-end
+# ratios disagree even when the camera is linear (investigated 2026-10-13:
+# NGC 6888 60 s read 0.96 mid-range and 1.06 at the bright end, and a real
+# aperture measurement of the same stars gave 1.07 at every brightness). So the
+# gain is the median ratio of each star's own flux: the light inside a circle
+# of STAR_GAIN_APERTURE_RADIUS_PIXELS minus the sky measured in the ring
+# between STAR_GAIN_SKY_INNER_PIXELS and STAR_GAIN_SKY_OUTER_PIXELS, from the
+# same isolated stars in both groups. A circle that large keeps the same
+# fraction of a star's light whether the star is a pixel wider or narrower in
+# one group, which the pixel ratio cannot (see
+# documentation/library_design/validation/stacking.md, STK-19).
 STAR_GAIN_APERTURE_RADIUS_PIXELS = 14.0
 STAR_GAIN_SKY_INNER_PIXELS = 19.0
 STAR_GAIN_SKY_OUTER_PIXELS = 25.0
@@ -271,7 +289,8 @@ STAR_GAIN_CLIP_FRACTION_OF_CEILING = 0.5
 # quarter look too bright. On M 106 (10 frames of 120 s against 51 frames of
 # 182 s) the faintest quarter of 1,600 stars read 1.62 against an overall
 # 1.137, and in the faintest octiles half the stars' ratios spread over 0.9
-# to 2.8. The number is filled in from the sweep below. STAR_PLACEHOLDER_SNR
+# to 2.8. Dropping stars below 10 times the noise removes that bias (see
+# documentation/library_design/validation/stacking.md, STK-19).
 STAR_GAIN_MINIMUM_SIGNAL_TO_NOISE = 10.0
 
 # How many empty apertures are measured to find the noise, how far from every
@@ -285,8 +304,9 @@ STAR_GAIN_EMPTY_APERTURE_SEED = 20261013
 # The fewest stars two groups must share (isolated, with no pixel at or above
 # the saturation level in the circle or its sky ring, in either group) for
 # the star gain to be used, and STAR_GAIN_MINIMUM_STARS_PER_QUARTILE the fewest
-# in the faint quarter and the bright quarter for the linearity test.
-# STAR_PLACEHOLDER_LIMITS
+# in the faint quarter and the bright quarter for the linearity test. A group
+# below either count falls back to the pixel method. The counts are design
+# choices (see documentation/library_design/validation/stacking.md, STK-19).
 STAR_GAIN_MINIMUM_STARS = 16
 STAR_GAIN_MINIMUM_STARS_PER_QUARTILE = 4
 
@@ -304,8 +324,10 @@ STAR_GAIN_MINIMUM_STARS_PER_QUARTILE = 4
 # against 4.5% for its reference). 3 lies between the 1.98 that is kept and
 # the 3.9 that is not (their geometric middle is 2.8). It rests on those two
 # bad groups; the 13 other imaging pairs (ASI533MM and Nikon) read 0.59 to
-# 1.58, so it is a judgement from a thin gap, not a validated limit. Only a
-# brighter sky is judged: a darker sky is no harm.
+# 1.58, so it is a judgement from a thin gap, not a validated limit (see
+# documentation/library_design/validation/stacking.md, STK-21). Only a
+# brighter sky is judged: a darker sky is no harm. The sky is compared only
+# for imaging stacks (with `use_star_fluxes`).
 SKY_RATIO_LIMIT = 3.0
 
 
@@ -766,17 +788,23 @@ class GroupGainMeasurement:
     ----------
     gain : `float`
         The scale applied to the group: how many times brighter (per second)
-        it reads than the reference, measured on mid-range pixels. It is 1.0
-        for the reference group and when no believable value could be
-        measured.
+        it reads than the reference. For ``"stars"`` it is the median
+        aperture-flux ratio of the isolated, unsaturated stars the two groups
+        share; for ``"pixels"`` it is the median ratio over mid-range pixels.
+        It is 1.0 for the reference group and when no believable value could
+        be measured.
     bright_end_ratio : `float` or `None`
-        The same ratio measured on the reference's brightest pixels only. It
-        is a diagnostic and is never applied. `None` when too few bright
-        pixels are shared with the reference.
+        The same ratio measured on the brightest quarter of the stars
+        (``"stars"``) or on the reference's brightest pixels only
+        (``"pixels"``). It is a diagnostic and is never applied. `None` when
+        too few bright pixels are shared with the reference.
     disagreement : `float` or `None`
-        The size of the difference between the two ratios as a fraction of
-        the gain, ``abs(bright_end_ratio - gain) / gain``. `None` when either
-        ratio could not be measured.
+        How far the diagnostic ratios sit from the gain, as a fraction of the
+        gain. For ``"stars"`` it is the larger of
+        ``abs(faint_ratio - gain)`` and ``abs(bright_end_ratio - gain)``,
+        divided by the gain; for ``"pixels"`` it is
+        ``abs(bright_end_ratio - gain) / gain``. `None` when a ratio could
+        not be measured.
     nonlinear : `bool`
         `True` when `disagreement` is larger than the tolerance. The group's
         brightness is then not one scale factor, and the group should not be
@@ -1592,13 +1620,14 @@ def measure_exposure_group_gains(
 ) -> tuple[int, list[GroupGainMeasurement]]:
     """Measure the gain of every group exactly as the combination will.
 
-    This builds the same per-second images, weights and trusted-pixel masks
-    as `combine_exposure_group_images` and runs `measure_group_gains` on
-    them. A caller uses it before combining, to leave out the groups marked
-    `nonlinear`. Parameters are those of `combine_exposure_group_images`,
-    plus `tolerance`. Lists that do not line up, or an exposure or frame
-    noise that is not positive, raise `InvalidArgumentError`. A group whose
-    background noise cannot be measured raises `ProcessingError`.
+    This builds the same per-second images, weights and trusted-pixel masks as
+    `combine_exposure_group_images` and runs `measure_group_gains_with_stars`
+    on them (or `measure_group_gains` when `use_star_fluxes` is `False`). A
+    caller uses it before combining, to leave out the groups marked
+    `nonlinear`. Parameters are those of `combine_exposure_group_images`, plus
+    `tolerance`. Lists that do not line up, or an exposure or frame noise that
+    is not positive, raise `InvalidArgumentError`. A group whose background
+    noise cannot be measured raises `ProcessingError`.
 
     Parameters
     ----------
@@ -1618,8 +1647,9 @@ def measure_exposure_group_gains(
     covered_masks : `list` [`numpy.ndarray`], optional
         For each group, a 2-D mask of the pixels that hold real data.
     tolerance : `float`, optional
-        How far the bright-star ratio may differ from the faint-star ratio, as
-        a fraction of the gain, before the group is marked `nonlinear`.
+        How far the faint-star or bright-star ratio may be from the gain (the
+        bright-end pixel ratio on the pixel method), as a fraction of the
+        gain, before the group is marked `nonlinear`.
     clip_ceiling_adu : `float`, optional
         The camera's clip ceiling in ADU, used to set the saturation level of
         a group whose stack shows no plateau (see
@@ -1683,8 +1713,9 @@ def combine_exposure_group_images(
     pixels too close to zero to be trusted (see `CLIPPING_FLOOR_SIGMAS`); if
     that leaves no group at a pixel, the clipped group is used after all.
     Before averaging, each group is put on the same brightness scale as
-    the group with the most weight (see `measure_group_gains`, which measures
-    the scale on mid-range pixels), because Siril leaves every group stack
+    the group with the most weight (see `measure_group_gains_with_stars`, which
+    measures the scale on star fluxes and falls back to the mid-range pixels
+    of `measure_group_gains`), because Siril leaves every group stack
     with its own overall scale. This function applies the scale to every group
     it is given. A caller that wants to refuse groups whose brightness is not
     one scale factor checks them first with `measure_exposure_group_gains`.

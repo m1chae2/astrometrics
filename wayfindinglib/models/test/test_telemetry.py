@@ -2,7 +2,7 @@
 
 Description: Verifies GuidingSample.total_drift and
 AlignmentAttempt.pointing_error's Euclidean-norm calculations
-(`Wayfinding_Library_Architecture.md`), plus basic
+(`Wayfinding_Library_Architecture.md` Section 6.4), plus basic
 construction coverage for the previously untested telemetry models.
 """
 

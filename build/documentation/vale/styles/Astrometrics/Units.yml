@@ -1,0 +1,11 @@
+# Documentation_Conventions.md §6.1: unit notation.
+extends: existence
+message: "Unit notation: '%s'. Write Å, 5%%, 20°, 5σ (see Documentation_Conventions.md §6.1)."
+level: error
+nonword: true
+tokens:
+  - '\b\d+(?:\.\d+)? A\b(?!\(| (?:star|stars|type|types|class|dwarf|giant)\b)'
+  - '\b\d+(?:\.\d+)? %'
+  - '\b\d+(?:\.\d+)? deg\b'
+  - '\b\d+(?:\.\d+)?[- ]sigma\b'
+  - '\b\d+(?:\.\d+)? angstroms?\b'

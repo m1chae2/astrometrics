@@ -8,8 +8,8 @@ per active rig by `ObservatoryControl`.
 
 Concrete-class imports stay inside each function body so importing
 this module never pulls in `PyIndi`
-(`Wayfinding_Library_Architecture.md`, "Planning Is
-Hardware-Free").
+(`Wayfinding_Library_Architecture.md` Section 4.4, "Planning is
+hardware-free").
 
 The protocol names come from
 `wayfindinglib/models/equipment_and_site/driver_protocols.py`, which the

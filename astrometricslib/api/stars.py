@@ -522,8 +522,10 @@ class StellarCatalog:
         Returns
         -------
         wcs : `astropy.wcs.WCS` or `None`
-            The pixel-to-sky mapping, or `None` when the star pattern could
-            not be matched.
+            The pixel-to-sky mapping, or `None` when the image cannot be
+            read or too few stars are found to try a solve. When a solve is
+            tried and the star pattern cannot be matched, the star
+            identifier raises `PlateSolveFailedError` instead.
         """
         from astrometricslib.pipelines.astrometry.processing.star_identifier import StarIdentifier
 

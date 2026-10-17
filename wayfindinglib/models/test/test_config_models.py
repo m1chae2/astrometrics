@@ -1,8 +1,8 @@
 """Purpose: Unit tests for planning and correction configuration models.
 
 Description: Verifies PlanningConfig and CorrectionConfig construct with
-the documented default values (`Wayfinding_Library_Architecture.md`
-Appendix A).
+the documented default values (`Wayfinding_Library_Implementation.md`
+Tables 4 and 7).
 """
 
 import pytest
@@ -12,7 +12,10 @@ from wayfindinglib.models.session.correction_config import CorrectionConfig
 
 
 def test_planning_config_defaults_match_documented_values() -> None:
-    """Verify PlanningConfig's defaults match Appendix A exactly."""
+    """Verify PlanningConfig's defaults match the implementation paper.
+
+    The values are those of `Wayfinding_Library_Implementation.md` Table 4.
+    """
     config = PlanningConfig()
     assert config.night_window_time_step_min == pytest.approx(5.0)
     assert config.twilight_sun_altitude_deg == pytest.approx(-12.0)
@@ -24,7 +27,10 @@ def test_planning_config_defaults_match_documented_values() -> None:
 
 
 def test_correction_config_defaults_match_documented_values() -> None:
-    """Verify CorrectionConfig's defaults match Appendix A exactly."""
+    """Verify CorrectionConfig's defaults match the implementation paper.
+
+    The values are those of `Wayfinding_Library_Implementation.md` Table 7.
+    """
     config = CorrectionConfig()
     assert config.guiding_aggressiveness == pytest.approx(0.7)
     assert config.guiding_deadband_arcsec == pytest.approx(0.15)

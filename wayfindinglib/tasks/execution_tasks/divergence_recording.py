@@ -2,10 +2,11 @@
 
 Description: Builds one `DivergenceRecord` per comparison between a
 computed action and the action the delegated system actually took, per
-`Wayfinding_Library_Architecture.md`. A record is written
+`Wayfinding_Library_Architecture.md` Section 5.4. A record is written
 whether or not the comparison agreed, since a capability-promotion gate
 is an agreement *rate*, which cannot be computed from disagreements
-alone (the "Evidence Is Symmetric" invariant). Pairing is by
+alone (`Wayfinding_Library_Architecture.md` Section 5.8, "Evidence is
+symmetric"). Pairing is by
 `comparison_input_id` -- the identifier of the shared measurement both
 systems responded to -- rather than by timestamp proximity, which would
 silently pair a computed correction against an unrelated one under
@@ -14,8 +15,8 @@ load.
 `MOUNT_CONTROL`, `CAPTURE_ORCHESTRATION`, and `OBSERVATORY_SAFETY`
 produce no divergence records: the first two actuate explicit intent
 with no independently computed counterpart, the third has no shadowed
-state at all (`Wayfinding_Library_Architecture.md`, "Safety Is
-Never Shadowed").
+state at all (`Wayfinding_Library_Architecture.md` Section 2.3, "Safety
+is never shadowed").
 """
 
 from astrometricslib import InvalidArgumentError

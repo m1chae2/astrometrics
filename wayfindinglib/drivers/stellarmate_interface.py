@@ -5,7 +5,7 @@ discovery, and rsync-based downloads from StellarMate or SSH-enabled
 telescopes.
 
 Relocated here from astrometricslib per the cross-library litmus test
-(`Wayfinding_Library_Architecture.md` Design Invariant 4): pulling files
+(`Wayfinding_Library_Architecture.md` Section 2.1, rule 4): pulling files
 off a telescope host requires a telescope to be present, so it belongs
 in the observatory-control library rather than the science library.
 

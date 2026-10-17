@@ -1,11 +1,12 @@
 """Purpose: Autofocus Curve Fitting and Position Selection.
 
 Description: `compute_focus_correction` per
-`Wayfinding_Library_Architecture.md` -- a pure function that
-fits a parabola to a sampled focus curve and selects its minimum,
-clamped to the sampled span so an ill-conditioned fit cannot command
-an extrapolated position. Star-size measurement (`measure_image_fwhm`,
-exposed through `TargetCatalog.measure_stack_fwhm`) requires no
+`Wayfinding_Library_Architecture.md` Section 6.4 (Equations (8) and (9))
+-- a pure function that fits a parabola to a sampled focus curve and
+selects its minimum, clamped to the sampled span so an ill-conditioned
+fit cannot command an extrapolated position. Star-size measurement
+(`measure_image_fwhm`, exposed through
+`TargetCatalog.measure_stack_fwhm`) requires no
 telescope and belongs on the science side per the litmus test;
 converting a measured curve into a focuser position requires backlash
 direction, per-filter offsets, and thermal behavior, none of which
@@ -14,7 +15,8 @@ mean anything without the instrument, so that step lives here.
 `sample_focus_curve` is the orchestration half: it drives the focuser
 through `move_focuser`/`get_position` (injected so this module carries
 no hardware import) always approaching from `FocusModel.approach_direction`,
-per the "Single Approach Direction" invariant -- a curve sampled with
+per `Wayfinding_Library_Architecture.md` Section 6.4 (every sample is
+approached from the same direction) -- a curve sampled with
 mixed approach directions has backlash folded into its shape and
 produces a minimum that is an artifact of traversal order.
 """

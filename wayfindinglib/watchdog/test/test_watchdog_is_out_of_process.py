@@ -1,7 +1,8 @@
 """Purpose: Verify the watchdog is out of process from what it watches.
 
-Description: A static source-text scan for "Watchdog Is Out Of Process"
-(`Wayfinding_Library_Architecture.md`): the watchdog module tree must
+Description: A static source-text scan that the watchdog is out of process
+(`Wayfinding_Library_Architecture.md` Section 6.6, "Loss of the
+controlling process"): the watchdog module tree must
 never name the session runner, since a hang in the process being watched
 must not also disable the mechanism meant to catch it. The runtime check,
 that the watchdog loads no Execution module at all, is

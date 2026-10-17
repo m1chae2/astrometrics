@@ -4,8 +4,8 @@ Description: Verifies UNKNOWN for a stale, absent, and unconfigured
 rule set, that `permits_observing()` is false for each, that the worst
 verdict across rules wins and names its rule, and that reopening does
 not occur until the settling period has elapsed after the last
-non-safe reading -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+non-safe reading -- the behavior
+`Wayfinding_Library_Architecture.md` Section 6.5 describes.
 """
 
 from datetime import UTC, datetime, timedelta

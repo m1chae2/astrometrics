@@ -2,7 +2,7 @@
 
 Wraps the same shared `IndiInterface` session as `IndiMountDriver`,
 backed by `wayfindinglib/drivers/indi/weather_controller.py`'s
-`WeatherController` (M12) -- the heuristically-discovered powerbox
+`WeatherController` -- the heuristically-discovered powerbox
 device's `WEATHER_PARAMETERS` property, the same one
 `IndiInterface.get_environmentals` already reads for its status dict.
 """

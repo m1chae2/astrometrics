@@ -2,8 +2,8 @@
 
 Description: Verifies the ramp respects the configured rate (and the
 sensor's own maximum), reports settled only within tolerance, and
-flags a settle timeout -- the cases
-`Wayfinding_Library_Architecture.md` calls out.
+flags a settle timeout -- the behavior
+`Wayfinding_Library_Architecture.md` Section 2.5 describes.
 """
 
 from typing import Any

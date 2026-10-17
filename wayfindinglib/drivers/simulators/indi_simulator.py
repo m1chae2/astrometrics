@@ -280,7 +280,8 @@ class _SimulatedEnclosureController:
     """Stand-in for indi.enclosure_controller.EnclosureController.
 
     No roll-off-roof/dome is simulated -- `get_state` honestly reports
-    `UNKNOWN` (the "Unknown Is Unsafe" invariant) rather than
+    `UNKNOWN` (`Wayfinding_Library_Architecture.md` Section 6.5, "Absence of
+    information is not safety") rather than
     fabricating an open/closed value, and `open`/`close` report failure
     rather than pretending to move hardware that doesn't exist.
     """

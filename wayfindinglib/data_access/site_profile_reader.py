@@ -18,7 +18,7 @@ then falls back to a default site (Denver) and logs a warning, because a
 wrong site makes every altitude, rise time and set time wrong.
 `get_or_seed_default_site_profile` stores that resolved site as the
 default `SiteProfile` the first time it is asked for
-(`Wayfinding_Library_Architecture.md`).
+(`Wayfinding_Library_Architecture.md` Section 3.2).
 """
 
 import logging

@@ -13,9 +13,10 @@ it could not be worked out, why not. A limit with not enough data behind it
 says so (`ThresholdStatus.INSUFFICIENT_DATA`) and carries no value; it is
 never replaced by a guess.
 
-`Wayfinding_Library_Architecture.md` treats equipment as configured
-Foundation state. The envelope is computed Foundation state: derived on
-demand from that configuration and from measurements, never persisted.
+`Wayfinding_Library_Architecture.md` Section 3.2 treats equipment as
+configured Foundation state (and Section 6.8 describes the envelope).
+The envelope is computed Foundation state: derived on demand from that
+configuration and from measurements, never persisted.
 """
 
 from enum import StrEnum

@@ -8,7 +8,8 @@ give the rest of a session (pointing, temperature, exposures, autofocus,
 plate-solve and guider states); they are stored as session records.
 
 Ekos is the incumbent control software, still in charge of the hardware
-(Delegated phase, `Wayfinding_Library_Architecture.md`). This module
+(Delegated phase, `Wayfinding_Library_Architecture.md` Sections 2.3 and
+6.8). This module
 only reads what it recorded. It issues no commands and computes no
 corrections.
 

@@ -70,7 +70,7 @@ _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 # * Above 8000 A the sensor's quantum efficiency falls from 27% to 6%, so
 #   correcting for it multiplies the noise by 4 to 16, the atmosphere's
 #   water and oxygen bands take over, and light from the blue arrives in
-#   second order. A grism sends light of wavelength L to a second position
+#   second order. A grating sends light of wavelength L to a second position
 #   as well, where it overlaps first-order light of 2 x L. The extraction
 #   starts at 3800 A, so second-order light from there lands at 7600 A and
 #   pollutes every longer wavelength, most for blue-bright stars.
@@ -82,9 +82,9 @@ _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 # 0.19-0.28 to 0.5-1.8, and weighting the comparison by the sensor's
 # sensitivity did not fix that.
 #
-# The second-order reasoning above holds for the grism this default was
+# The second-order reasoning above holds for the grating this default was
 # chosen for: a Star Analyzer 200, used with no blocking filter in front
-# of it to remove second-order light. For THAT grism, 8000 A is the
+# of it to remove second-order light. For THAT grating, 8000 A is the
 # physically appropriate cutoff, not a conservative placeholder waiting
 # to be relaxed. A star-dependent cutoff (trusting a red star's own
 # second-order-light-poor spectrum further than a blue star's) would be
@@ -93,15 +93,15 @@ _MINIMUM_LINE_SKIP_HALF_WIDTH_ANGSTROM = 60.0
 # fix for a wrong number here, since there is nothing wrong with 8000 A
 # for a blue star on the SA-200.
 #
-# This module has no way to check which grism is actually in use: a
+# This module has no way to check which grating is actually in use: a
 # response is looked up by camera name only (`load_instrument_response`),
-# and nothing here records the grism, its line density, or whether a
-# blocking filter is fitted. A different grism changes where second-order
-# light lands (it depends on the grism's own dispersion, not just where
+# and nothing here records the grating, its line density, or whether a
+# blocking filter is fitted. A different grating changes where second-order
+# light lands (it depends on the grating's own dispersion, not just where
 # extraction starts) and may not need this cutoff at all -- particularly
 # one built with a blocking filter, which removes second-order light at
 # its source rather than needing a cutoff to guess around it. Whoever
-# re-derives this response for a new grism should re-check this range
+# re-derives this response for a new grating should re-check this range
 # rather than assume 8000 A still applies; deriving it over the full
 # camera range is supported (see `derive_instrument_response`).
 DEFAULT_RESPONSE_WAVELENGTH_RANGE_ANGSTROM = (4200.0, 8000.0)
@@ -339,11 +339,11 @@ def derive_instrument_response(
 ) -> InstrumentResponse:
     """Fit the response from an observation of a star of known type.
 
-    The reference spectrum is much sharper than a slitless grism spectrum,
+    The reference spectrum is much sharper than a slitless grating spectrum,
     so it is blurred to the instrument's resolution before the two are
     compared. Blurring it to the wrong width would leave a mismatch around
     every line, and the fit would wrongly treat that as part of the
-    instrument's response. The line spread of a slitless grism spectrum
+    instrument's response. The line spread of a slitless grating spectrum
     grows with wavelength (about 42 A at 4200 A to 148 A at 6563 A for the
     ASI533 setup), so the reference is blurred with the camera's stored
     line-spread profile when one exists, the same profile the classifier

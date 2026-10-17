@@ -1,17 +1,26 @@
-Astrometrics Desktop Application
-================================
+:orphan:
 
-The Astrometrics Desktop Application is a program used to capture and analyze images of the night sky. It provides a visual interface to control observatory equipment and process astronomy photos.
+.. ==============================================================================
+.. Purpose: Overview of the desktop app's documentation.
+.. The desktop app pages each sit in the site section that matches their kind
+.. (tutorial, how-to, reference, explanation), so this page is not in a toctree.
+.. It stays at this path because older links and the app's built-in viewer
+.. point here. backend/services/infrastructure/api_doc_generator.py builds the
+.. viewer's own copy of this index; keep the two in step.
+.. ==============================================================================
+
+Desktop app
+===========
+
+The Astrometrics desktop app captures and analyzes images of the night sky. It gives you a visual way to control observatory equipment and to process astronomy images.
 
 .. note::
-   The application currently handles image processing and basic telescope control. Planning and running automated observing nights is recommended to be managed by a dedicated INDI-compatible client like `KStars/Ekos <https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html>`_.
+   The app handles image processing and basic telescope control. For planning and running whole automated observing nights, use a dedicated INDI client such as `KStars/Ekos <https://docs.kde.org/trunk5/en/kstars/kstars/ekos.html>`_.
 
-This section contains the user manual and step-by-step guides for using the application.
+The desktop app's pages:
 
-.. toctree::
-   :maxdepth: 2
-   :caption: User Guides
-
-   user_guides/User_Manual
-   user_guides/Observatory_Control_and_Automation_Guide
-   user_guides/Image_Processing_and_Analysis_Tutorial
+- :doc:`/Getting_Started`: a first session with the app.
+- :doc:`user_guides/Image_Processing_and_Analysis_Tutorial`: one guided path from raw frames to a measured result.
+- :doc:`user_guides/Observatory_Control_and_Automation_Guide`: recipes for connecting and running the telescope.
+- :doc:`user_guides/User_Manual`: every view and control of the app.
+- :doc:`technical_reference/User_Interface_Architecture`: how the app is built.

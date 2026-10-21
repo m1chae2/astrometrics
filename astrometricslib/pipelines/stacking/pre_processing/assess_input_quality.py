@@ -3,15 +3,15 @@
 The builder here looks only at what was known before the stacking engine
 ran: the frames set aside by the pre-checks, whether the sky background
 changed during the session, and how good the flat frames were. It returns a
-`StackingInputQuality` (see `models/stacking_quality.py`) that carries its
-own flag reasons.
+`StackingInputQuality` (see `models/quality/stacking_quality.py`) that carries
+its own flag reasons.
 """
 
 from typing import Any
 
 from astrometricslib.drivers.calibration_library import CALIBRATION_MATCH_BLOCKING_FLAGS_KEY
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.stacking_quality import StackingInputQuality
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.stacking_quality import StackingInputQuality
 from astrometricslib.pipelines.stacking.pre_processing.flat_calibration import (
     BRIGHT_FLAT_ISSUE_PREFIX,
     FAINT_FLAT_ISSUE_PREFIX,

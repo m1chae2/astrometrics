@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.models.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
 from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (

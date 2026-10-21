@@ -30,8 +30,8 @@ instrument response, the airmass correction and the wavelength scale.
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
+from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
     OutputQualityAssessment,
     StageQualityCheckpoint,

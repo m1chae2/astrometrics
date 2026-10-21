@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint
 from astrometricslib.models.target import Target
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary, WavelengthZeroPointRecord
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result

@@ -12,10 +12,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from astrometricslib.models.gaia_xp_comparison import GaiaXpRunSummary
-from astrometricslib.models.gate_result import GateResult, GateStatus
-from astrometricslib.models.spectroscopy_quality import StageQualityRollup
-from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpRunSummary
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityRollup
+from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 

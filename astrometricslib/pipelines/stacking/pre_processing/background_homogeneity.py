@@ -9,7 +9,7 @@ the moon rising).
 import statistics
 from typing import Any
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import describe_background_splits
 
 __all__ = [

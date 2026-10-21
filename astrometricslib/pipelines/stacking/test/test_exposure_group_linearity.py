@@ -19,7 +19,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.gate_result import GateStatus
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.pipelines.stacking import stack_runner
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     EXPOSURE_GROUP_LINEARITY_GATE_NAME,

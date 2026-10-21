@@ -30,8 +30,8 @@ import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.spectroscopy_quality import (
     STAGE_ORDER,
     StageQualityCheckpoint,
     StageQualityRollup,

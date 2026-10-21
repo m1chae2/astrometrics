@@ -45,8 +45,8 @@ from scipy.stats import median_abs_deviation
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.foundation.observatory_site import ObservatorySite
-from astrometricslib.models.photometry_quality import InputQualityAssessment
-from astrometricslib.models.quality_summary import ExcludedFrame, FrameEnsembleComposition
+from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
+from astrometricslib.models.quality.quality_summary import ExcludedFrame, FrameEnsembleComposition
 from astrometricslib.models.stellar_source import (
     MINIMUM_POINTS_FOR_PERIOD_SEARCH,
     MINIMUM_POINTS_FOR_TRANSIT_SEARCH,

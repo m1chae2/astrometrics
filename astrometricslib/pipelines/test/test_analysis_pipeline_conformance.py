@@ -12,7 +12,7 @@ before a caller notices a summary is missing where it should be.
 
 import pytest
 
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionQualitySummary,
     AstrometryQualitySummary,
     PhotometryQualitySummary,
@@ -42,7 +42,7 @@ def test_adapter_pipeline_name_matches_its_quality_summary(adapter_class, summar
     (or `target.asteroid_detection.quality_summary`) using
     `adapter.pipeline_name`, but the summary object itself carries its own
     `pipeline_name` field,
-    set independently in `models/quality_summary.py`. Nothing forces
+    set independently in `models/quality/quality_summary.py`. Nothing forces
     these two to agree except this test.
     """
     adapter = adapter_class()

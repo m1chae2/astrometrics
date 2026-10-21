@@ -13,9 +13,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison, OutputQualityAssessment
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_quality import (

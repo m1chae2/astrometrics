@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric
 from astrometricslib.models.stellar_source import SpectroscopyResult, StellarObject
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
 from astrometricslib.pipelines.spectroscopy import pipeline as pipeline_module

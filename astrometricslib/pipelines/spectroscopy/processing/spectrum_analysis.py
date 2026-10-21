@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from astrometricslib.drivers.interfaces.reddening_driver import ReddeningEstimate
+from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.stellar_source import ladder_steps_between
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_catalog import compare_to_catalog
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction import ExtinctionCorrection

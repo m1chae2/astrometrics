@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking import stage
 
 MEASURE = "astrometricslib.pipelines.astrometry.pre_processing.fwhm.measure_image_fwhm"

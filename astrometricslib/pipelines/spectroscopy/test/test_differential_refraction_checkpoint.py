@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.foundation.observatory_site import ObservatorySite
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric
 from astrometricslib.models.stellar_source import (
     DifferentialRefractionRecord,
     SpectroscopyResult,

@@ -40,7 +40,7 @@ other unless the pipeline is built with `use_measured_line_spread=True`.
 import numpy as np
 
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FWHM_PER_SIGMA,
     MINIMUM_RESOLUTION_ELEMENT_PIXELS,

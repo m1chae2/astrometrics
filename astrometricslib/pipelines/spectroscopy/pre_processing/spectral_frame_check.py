@@ -460,7 +460,7 @@ def check_spectral_frames(
     import os
 
     from astrometricslib.foundation.jobs.runner import get_current_job
-    from astrometricslib.models.quality_reports import SpectralFrameCheckReport
+    from astrometricslib.models.quality.quality_reports import SpectralFrameCheckReport
     from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
     from astrometricslib.pipelines.shared.quality.frame_selection import select_library_frames
     from astrometricslib.pipelines.stacking.processing.group_derotation import MINIMUM_TRAIL_CONTRAST_SIGMA

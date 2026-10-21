@@ -55,9 +55,9 @@ The models that hold "a number about quality" also differ:
 
 | Shape | Where | Unit | Uncertainty | Limit source |
 | :--- | :--- | :--- | :--- | :--- |
-| `GateResult` | `models/gate_result.py`, every pipeline | no | no | free text |
-| `StageQualityMetric` | `models/spectroscopy_quality.py` | yes | no | no |
-| `*PipelineQualityMetrics` (five) | `models/quality_summary.py` | in the field name | rarely | none |
+| `GateResult` | `models/quality/gate_result.py`, every pipeline | no | no | free text |
+| `StageQualityMetric` | `models/quality/spectroscopy_quality.py` | yes | no | no |
+| `*PipelineQualityMetrics` (five) | `models/quality/quality_summary.py` | in the field name | rarely | none |
 | `FrameRecord.measurements` | `models/target.py` | in the field name | no | none |
 | `ProvenancedValue` | `models/camera_profile.py` | no | no | yes |
 | `PerformanceThreshold` | `wayfindinglib/models/equipment_and_site/performance_envelope.py` | yes | sample count only | yes (tier) |
@@ -1010,7 +1010,7 @@ The observing advice `astrometricslib` holds today:
   `recommend_stack_exposure_seconds` in
   `astrometricslib/pipelines/stacking/post_processing/exposure_saturation.py`, and
   `recommended_exposure_for_groups` in `exposure_group_report.py`, fill
-  `StackingPipelineQualityMetrics.recommended_exposure_seconds` (`models/quality_summary.py`).
+  `StackingPipelineQualityMetrics.recommended_exposure_seconds` (`models/quality/quality_summary.py`).
   `wayfindinglib` reads it as `science_recommended_exposure_seconds`
   (`wayfindinglib/models/session/capture_quality.py`, read in
   `session_analysis/capture/post_processing/recommend_for_capture.py`). `astrometricslib` keeps

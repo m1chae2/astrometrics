@@ -35,7 +35,7 @@ from astrometricslib import (
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces import PipelineSteps
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.test.synthetic import SyntheticStar, make_photometry_fits
 
 # The picture is this many pixels on a side.

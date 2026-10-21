@@ -10,7 +10,7 @@ the wrong object).
 
 import numpy as np
 
-from astrometricslib.models.spectroscopy_quality import CatalogComparison
+from astrometricslib.models.quality.spectroscopy_quality import CatalogComparison
 from astrometricslib.models.stellar_source import DIFFERS_FROM_CATALOG_SUBTYPES, types_differ_on_ladder
 from astrometricslib.pipelines.spectroscopy.processing.spectral_classifier import (
     is_catalog_giant,

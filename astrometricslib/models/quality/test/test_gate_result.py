@@ -7,13 +7,13 @@ a failed gate flags its run.
 
 import pytest
 
-from astrometricslib.models.gate_result import (
+from astrometricslib.models.quality.gate_result import (
     GateStatus,
     failed_gate,
     passed_gate,
     unchecked_gate,
 )
-from astrometricslib.models.quality_summary import AstrometryQualitySummary
+from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary
 
 
 def _empty_summary() -> AstrometryQualitySummary:

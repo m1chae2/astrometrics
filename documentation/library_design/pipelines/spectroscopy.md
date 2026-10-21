@@ -206,18 +206,18 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `pipeline_version` | `str` | Version number of the pipeline's processing rules. |
 | `target_id` | `str` | Identifier of the target (the sky object being studied). |
 | `target_session_ids` | `list[str]` | Identifiers of the observing sessions (usually one night each) used in the run. |
-| `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
+| `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
-| `gates` | `list[astrometricslib.models.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
+| `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
 | `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
-| `spectroscopy_metrics` | `astrometricslib.models.quality_summary.SpectroscopyPipelineQualityMetrics` | The spectroscopy measurements (Section 7.2). |
+| `spectroscopy_metrics` | `astrometricslib.models.quality.quality_summary.SpectroscopyPipelineQualityMetrics` | The spectroscopy measurements (Section 7.2). |
 
 ### 7.2 Domain scientific metrics schema (`SpectroscopyPipelineQualityMetrics`)
 
@@ -233,7 +233,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `median_trail_width_px` | `float \| None` | Median Gaussian sigma (not FWHM) of the spectrum trail cross-section, in pixels. |
 | `poor_match_classification_count` | `int` | Number of stars whose classification misfit (RMS) is above the rejection limit. |
 | `ambiguous_classification_count` | `int` | Number of stars whose classification is ambiguous between spectral classes. |
-| `flagged_spectral_classifications` | `list[astrometricslib.models.quality_summary.SpectralClassificationConcern]` | Details of each star whose classification is in doubt. |
-| `stage_quality_summary` | `list[astrometricslib.models.spectroscopy_quality.StageQualityRollup] \| None` | Summary of the quality metrics at each extraction checkpoint. |
-| `gaia_xp_summary` | `astrometricslib.models.gaia_xp_comparison.GaiaXpRunSummary \| None` | Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission). |
+| `flagged_spectral_classifications` | `list[astrometricslib.models.quality.quality_summary.SpectralClassificationConcern]` | Details of each star whose classification is in doubt. |
+| `stage_quality_summary` | `list[astrometricslib.models.quality.spectroscopy_quality.StageQualityRollup] \| None` | Summary of the quality metrics at each extraction checkpoint. |
+| `gaia_xp_summary` | `astrometricslib.models.quality.gaia_xp_comparison.GaiaXpRunSummary \| None` | Comparison with Gaia DR3 synthetic XP spectra (low-resolution spectra from the Gaia space mission). |
 | `wavelength_scale_summary` | `astrometricslib.models.wavelength_scale.WavelengthScaleSummary \| None` | Scatter and drift of the wavelength zero points (offsets of the wavelength scale). |

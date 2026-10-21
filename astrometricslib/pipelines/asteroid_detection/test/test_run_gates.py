@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from pytest_mock import MockerFixture
 
-from astrometricslib.models.gate_result import GateStatus
 from astrometricslib.models.moving_object_config import MovingObjectConfig
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.pipelines.asteroid_detection import run_gates as rg
 from astrometricslib.pipelines.asteroid_detection.pipeline import AsteroidDetectionPipeline
 from astrometricslib.pipelines.asteroid_detection.runner import AsteroidDetectionPipelineAdapter

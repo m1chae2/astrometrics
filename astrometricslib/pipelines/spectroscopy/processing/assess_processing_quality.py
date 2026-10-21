@@ -36,8 +36,12 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
+from astrometricslib.models.quality.spectroscopy_quality import (
+    StageQualityCheckpoint,
+    StageQualityMetric,
+    metric,
+)
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric, metric
 from astrometricslib.models.stellar_source import (
     AMBIGUOUS_RMS_GAP,
     DIFFERS_FROM_CATALOG_SUBTYPES,

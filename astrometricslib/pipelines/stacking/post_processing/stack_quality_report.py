@@ -20,7 +20,7 @@ from collections.abc import Collection
 from typing import Literal
 
 from astrometricslib.foundation.errors import NotFoundError
-from astrometricslib.models.quality_reports import StackQualityReport, StackSummary
+from astrometricslib.models.quality.quality_reports import StackQualityReport, StackSummary
 from astrometricslib.models.target import Target
 
 __all__ = ["STACK_QUALITY_SECTIONS", "stack_path_of", "stack_quality_report", "summarize_stack"]

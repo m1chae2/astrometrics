@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking import stage
 from astrometricslib.pipelines.stacking.post_processing.exposure_group_report import (
     EXPOSURE_GROUPS_COMBINED_GATE_NAME,

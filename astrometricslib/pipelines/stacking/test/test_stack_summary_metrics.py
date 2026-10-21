@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )

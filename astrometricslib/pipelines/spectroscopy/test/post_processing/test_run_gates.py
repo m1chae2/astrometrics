@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from astrometricslib.models.gate_result import GateResult, GateStatus
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, metric
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint, metric
 from astrometricslib.models.target import Target
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result

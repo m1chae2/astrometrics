@@ -14,12 +14,12 @@ from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import AstrometricsError, ConflictError, ProcessingError
 from astrometricslib.foundation.jobs.runner import get_current_job
-from astrometricslib.models.gate_result import GateResult, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, unchecked_gate
 from astrometricslib.models.target import Target
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
-    from astrometricslib.models.quality_summary import StackQualitySummary
+    from astrometricslib.models.quality.quality_summary import StackQualitySummary
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def stack_frames(
             output_file = output_file.removesuffix(".fits") + f"_{configuration_tag}.fits"
 
     frames_submitted = len(target_frames)
-    from astrometricslib.models.quality_summary import ExcludedFrame
+    from astrometricslib.models.quality.quality_summary import ExcludedFrame
 
     excluded_frames: list[ExcludedFrame] = []
     gate_results: list[GateResult] = []
@@ -507,7 +507,7 @@ def stack_frames(
             target.stacking.stacked_image = stacked_path
 
         from astrometricslib.models.provenance import DatasetEntity
-        from astrometricslib.models.quality_summary import STACKING_PIPELINE_VERSION
+        from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
         from astrometricslib.pipelines.shared.provenance_recording import (
             record_pipeline_run,
             stacked_image_entity_id,
@@ -872,7 +872,7 @@ def _base_stack_quality_summary(
         stacking parameters. Every measured metric (pixel fractions,
         FWHM, registration) is still at its default.
     """
-    from astrometricslib.models.quality_summary import (
+    from astrometricslib.models.quality.quality_summary import (
         StackingPipelineQualityMetrics,
         StackQualitySummary,
     )
@@ -1208,7 +1208,7 @@ def _check_spectral_registration_quality(summary, stacked_path: str, diagnostics
 
     Sets `summary.stacking_metrics.spectral_registration_flags` in place.
     """
-    from astrometricslib.models.quality_summary import ExcludedFrame
+    from astrometricslib.models.quality.quality_summary import ExcludedFrame
     from astrometricslib.pipelines.spectroscopy.utilities.registration_quality import (
         evaluate_spectral_registration_quality,
     )
@@ -1233,7 +1233,7 @@ def _record_exposure_groups(summary, diagnostics: dict) -> None:  # ruff: ignore
     diagnostics : `dict`
         What the stacking run reported (see `run_stack`).
     """
-    from astrometricslib.models.quality_summary import ExposureGroupSummary
+    from astrometricslib.models.quality.quality_summary import ExposureGroupSummary
 
     summary.stacking_metrics.exposure_groups = [
         ExposureGroupSummary(**entry) for entry in diagnostics.get("exposure_group_summaries", [])

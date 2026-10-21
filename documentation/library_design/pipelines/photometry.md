@@ -284,18 +284,18 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `pipeline_version` | `str` | Version number of the pipeline's processing rules. |
 | `target_id` | `str` | Identifier of the target (the sky object being studied). |
 | `target_session_ids` | `list[str]` | Identifiers of the observing sessions (usually one night each) used in the run. |
-| `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
+| `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
-| `gates` | `list[astrometricslib.models.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
+| `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
 | `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
-| `photometry_metrics` | `astrometricslib.models.quality_summary.PhotometryPipelineQualityMetrics` | The photometry measurements (Section 7.2). |
+| `photometry_metrics` | `astrometricslib.models.quality.quality_summary.PhotometryPipelineQualityMetrics` | The photometry measurements (Section 7.2). |
 
 ### 7.2 Domain scientific metrics schema (`PhotometryPipelineQualityMetrics`)
 
@@ -307,12 +307,12 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `stars_processed` | `int` | Number of stars tracked through the light curves (brightness over time). |
 | `stars_found` | `int` | Number of stars detected on the reference frame (the frame every other frame is aligned to). |
 | `frames_processed` | `int` | Number of calibrated frames measured. |
-| `rejected_frames` | `list[astrometricslib.models.quality_summary.ExcludedFrame]` | Frames rejected because their comparison-star level was out of line with the rest. |
-| `frame_ensemble_composition` | `list[astrometricslib.models.quality_summary.FrameEnsembleComposition]` | For each frame, which comparison stars were used. |
+| `rejected_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames rejected because their comparison-star level was out of line with the rest. |
+| `frame_ensemble_composition` | `list[astrometricslib.models.quality.quality_summary.FrameEnsembleComposition]` | For each frame, which comparison stars were used. |
 | `variable_candidate_count` | `int` | Number of stars flagged as short-term variable candidates. |
 | `light_curve_scatter_rms_mag` | `float \| None` | Median scatter (RMS, in magnitudes) of the light curves of non-variable field stars. |
 | `cross_session_match_count` | `int` | Number of stars matched across sessions from different nights. |
-| `noise_model_curve` | `list[astrometricslib.models.quality_summary.NoiseModelPoint]` | The noise model: typical measured scatter (RMS) against instrumental magnitude (-2.5 log10 of the mean raw flux in ADU per second), in brightness bins. |
+| `noise_model_curve` | `list[astrometricslib.models.quality.quality_summary.NoiseModelPoint]` | The noise model: typical measured scatter (RMS) against instrumental magnitude (-2.5 log10 of the mean raw flux in ADU per second), in brightness bins. |
 | `sessions_missing_wcs` | `list[str]` | Sessions with no plate-solved WCS (pixel-to-sky map). |
 | `long_term_variable_candidate_count` | `int` | Number of stars flagged as long-term variable candidates. |
 | `astrometry_identified_star_count` | `int` | Stars matched to a SIMBAD or Gaia DR3 catalog star on each session's reference frame, summed over sessions (a star seen in two sessions counts twice). 0 when catalog identification is turned off. |

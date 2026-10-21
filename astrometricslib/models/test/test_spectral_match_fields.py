@@ -188,7 +188,7 @@ def test_a_star_saved_before_the_new_verdicts_still_loads() -> None:
     Requiring those two fields made every pipeline that records stars for
     their targets stop with a validation error.
     """
-    from astrometricslib.models.spectroscopy_quality import OutputQualityAssessment
+    from astrometricslib.models.quality.spectroscopy_quality import OutputQualityAssessment
 
     older = {
         "catalogAgrees": None,

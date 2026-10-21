@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 from astrometricslib.pipelines.shared.applied_camera_profile import (
     build_applied_camera_profile,
     camera_name_for_paths,

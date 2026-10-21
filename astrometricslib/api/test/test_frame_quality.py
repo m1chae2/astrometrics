@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrometricslib.api.processing import QualityDiagnostics
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.target import FrameRecord, Target
 

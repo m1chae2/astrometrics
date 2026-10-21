@@ -6,8 +6,8 @@ read "not checked" when it could not look.
 
 import pytest
 
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.quality_summary import AstrometryPipelineQualityMetrics
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.pipelines.astrometry.post_processing import run_gates as rg
 
 

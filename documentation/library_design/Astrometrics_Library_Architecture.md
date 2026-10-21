@@ -235,7 +235,7 @@ At least four stars are needed, since one quad needs four. Below a higher count 
 
 #### 4.4.2 After solving: checking the result
 
-The solver must find a WCS, and enough stars must match a catalog entry, or the residual is an average over too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. The limit sits well above centroid noise (the small random error in finding a star's center), so a larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
+The solver must find a WCS, and enough stars must match a catalog entry, or the residual is an average over too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. The limit sits well above centroid noise (the small random error in finding a star's center), so a larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.quality.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
 
 :::{warning}
 **A pass is not a measure of position accuracy.** The residual limit catches a failed solve and does not rank good ones.

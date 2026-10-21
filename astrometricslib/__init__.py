@@ -100,7 +100,6 @@ from astrometricslib.models.catalog_queries import (
     TargetReindexChange,
     TargetStarCount,
 )
-from astrometricslib.models.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
 from astrometricslib.models.moving_object_config import MovingObjectConfig
 from astrometricslib.models.processing_results import PreviewRemakeResult, ProcessTargetResult, StackResult
@@ -128,14 +127,15 @@ from astrometricslib.models.provenance import (
     WasConfiguredBy,
     WasGeneratedBy,
 )
-from astrometricslib.models.quality_reports import (
+from astrometricslib.models.quality.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
     SpectralFrameCheckReport,
     StackQualityReport,
     StackSummary,
 )
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
@@ -176,7 +176,8 @@ from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
-    from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines, QualityDiagnostics
+    from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
+    from astrometricslib.api.quality import QualityDiagnostics
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
@@ -212,7 +213,7 @@ _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
-    "QualityDiagnostics": "astrometricslib.api.processing",
+    "QualityDiagnostics": "astrometricslib.api.quality",
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",

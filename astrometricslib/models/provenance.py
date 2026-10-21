@@ -1,8 +1,8 @@
 """Data structures for the IVOA Provenance Data Model (PROV-DM).
 
 Every pipeline run today records its own rich, domain-specific quality
-report (see `quality_summary.py`), but nothing links that report -- or a
-star's own `PhotometryResult`/`SpectroscopyResult` -- back to *which run,
+report (see `quality/quality_summary.py`), but nothing links that report --
+or a star's own `PhotometryResult`/`SpectroscopyResult` -- back to *which run,
 at what software version, consuming which inputs* produced it. The IVOA
 Provenance Data Model (a 2020 formal recommendation built on the general
 W3C PROV standard) exists to answer exactly that question, and is

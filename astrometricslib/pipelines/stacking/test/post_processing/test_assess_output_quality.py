@@ -7,7 +7,7 @@ flagged has no reasons.
 
 import pytest
 
-from astrometricslib.models.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
 from astrometricslib.pipelines.stacking.post_processing.assess_output_quality import assess_output_quality
 
 

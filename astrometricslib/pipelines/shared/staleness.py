@@ -13,8 +13,8 @@ produced a given result through `ProvenanceStore` and comparing the
 import logging
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore
-from astrometricslib.models.astrometry_quality import CatalogMatchQuality
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.quality_summary import (
     ASTROMETRY_PIPELINE_VERSION,
     PHOTOMETRY_PIPELINE_VERSION,
     SPECTROSCOPY_PIPELINE_VERSION,

@@ -203,7 +203,7 @@ Two scripts support this work (see the [scripts README](../../../scripts/README.
 
 ## What this stage produces
 
-This stage produces a calibrated spectrum, brightness by wavelength, for each identified star, corrected for everything that is not the star's own light, plus an [`InputQualityAssessment`](../../../models/spectroscopy_quality.py) that records how trustworthy the raw data was.
+This stage produces a calibrated spectrum, brightness by wavelength, for each identified star, corrected for everything that is not the star's own light, plus an [`InputQualityAssessment`](../../../models/quality/spectroscopy_quality.py) that records how trustworthy the raw data was.
 
 ## The input quality assessment
 

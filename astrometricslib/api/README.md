@@ -44,7 +44,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `processing.py`
 
-`processing.py` holds `ProcessingPipelines` and its two children, `QualityDiagnostics` and `CalibrationCatalog`.
+`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds its other child, `QualityDiagnostics`.
 
 `ProcessingPipelines` makes stacks and runs the analysis.
 

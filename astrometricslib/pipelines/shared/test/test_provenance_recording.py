@@ -15,7 +15,7 @@ import pytest
 from astrometricslib.drivers.provenance_store import ProvenanceStore
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 from astrometricslib.pipelines.shared.provenance_recording import (
     note_stacked_image_upstream,
     record_pipeline_run,

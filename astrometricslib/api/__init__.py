@@ -10,7 +10,8 @@ classes from the main `astrometricslib` package instead.
 """
 
 from astrometricslib.api.jobs import Jobs
-from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines, QualityDiagnostics
+from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization

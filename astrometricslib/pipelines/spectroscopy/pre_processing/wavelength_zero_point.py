@@ -74,7 +74,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2
 
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointLine, WavelengthZeroPointRecord
 from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import ATMOSPHERIC_BANDS_ANGSTROM

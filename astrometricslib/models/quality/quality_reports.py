@@ -26,8 +26,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from astrometricslib.models.excluded_frames import SetAsideFrame
-from astrometricslib.models.stack_comparison import StackComparison
+from astrometricslib.models.quality.excluded_frames import SetAsideFrame
+from astrometricslib.models.quality.stack_comparison import StackComparison
 
 __all__ = [
     "InputQualityReport",

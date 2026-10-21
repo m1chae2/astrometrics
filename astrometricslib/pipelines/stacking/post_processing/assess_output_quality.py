@@ -4,18 +4,18 @@ The builder here reads the measurements already made on the stacked image
 (rejected, saturated and zero pixel shares, sharpness, spectral registration
 concerns) and turns the ones past their limits into plain-language flag
 reasons. The limits live in `stack_quality` and `shared/quality`. The result
-is a `StackingOutputQuality` (see `models/stacking_quality.py`).
+is a `StackingOutputQuality` (see `models/quality/stacking_quality.py`).
 """
 
-from astrometricslib.models.gate_result import (
+from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
     failed_gate,
     passed_gate,
     unchecked_gate,
 )
-from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics
-from astrometricslib.models.stacking_quality import StackingOutputQuality
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics
+from astrometricslib.models.quality.stacking_quality import StackingOutputQuality
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.stacking.post_processing.stack_quality import (
     DEFAULT_FWHM_DEGRADATION_RATIO,

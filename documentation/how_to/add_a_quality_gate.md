@@ -11,7 +11,7 @@ Terms are defined in the [glossary](../Glossary.md). This document also defines 
 ## 1. Steps
 
 1. **Define the name in the pipeline code.** Add a module-level constant named `GATE_NAME`, or ending in `_GATE_NAME`, with a string value, for example `GATE_NAME = "frame_quarantine"` in `astrometricslib/pipelines/stacking/pre_processing/frame_quarantine.py`. The generator and the parity test find gates by reading the source for this pattern, in every non-test file of the pipeline package.
-2. **Record the gate in the run.** Return it from the module's gate function with `passed_gate`, `failed_gate` or `unchecked_gate` (in `astrometricslib/models/gate_result.py`), using the constant as the name.
+2. **Record the gate in the run.** Return it from the module's gate function with `passed_gate`, `failed_gate` or `unchecked_gate` (in `astrometricslib/models/quality/gate_result.py`), using the constant as the name.
 3. **Describe it for the guide.** Add one entry to `GATE_DESCRIPTIONS` in `generate_pipeline_review_docs.py`, keyed by the gate name. Say when it fails and when it is not checked. Name the limit's constant in backticks.
 4. **Give a tuned limit a status.** If the gate has a tuned limit, add its row to the generator's parameter table with a status label and the register entry ID, using `status_cell`. Add or update the entry as described in [Add a register entry](add_a_register_entry.md).
 5. **Regenerate.** Run `.venv/bin/python build/documentation/generate_pipeline_review_docs.py`. The guides under `documentation/library_design/pipelines/` and their gate counts update. Never edit them by hand.

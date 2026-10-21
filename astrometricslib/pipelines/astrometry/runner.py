@@ -10,8 +10,8 @@ from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.models.gate_result import failed_gate, passed_gate
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
+from astrometricslib.models.quality.quality_summary import (
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )

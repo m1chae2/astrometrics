@@ -36,7 +36,7 @@ from astrometricslib.models.provenance import (
     WasConfiguredBy,
     WasGeneratedBy,
 )
-from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 
 logger = logging.getLogger(__name__)
 

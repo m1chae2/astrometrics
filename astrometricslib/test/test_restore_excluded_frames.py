@@ -8,7 +8,7 @@ passes its options through and saves only when it moved something.
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from astrometricslib.models.excluded_frames import RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.excluded_frames import RestoreReport, SetAsideFrame
 from astrometricslib.scripts import restore_excluded_frames
 
 FRAME = SetAsideFrame(

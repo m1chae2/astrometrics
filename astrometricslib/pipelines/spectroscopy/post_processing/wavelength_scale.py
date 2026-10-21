@@ -19,8 +19,8 @@ from typing import Any
 
 import numpy as np
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 
 WAVELENGTH_SCALE_GATE_NAME = "wavelength_scale"

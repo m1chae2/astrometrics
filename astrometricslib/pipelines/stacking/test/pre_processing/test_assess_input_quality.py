@@ -7,7 +7,7 @@ one flag reason. A clean input has no reasons.
 
 import pytest
 
-from astrometricslib.models.quality_summary import ExcludedFrame
+from astrometricslib.models.quality.quality_summary import ExcludedFrame
 from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
     BACKGROUND_EXCLUSION_REASON,
     GAIN_EXCLUSION_REASON,
@@ -81,7 +81,7 @@ def test_flat_issues_and_mismatches_become_reasons() -> None:
 
 def test_a_short_master_becomes_a_reason_and_a_failed_gate() -> None:
     """A master from too few frames flags the input and fails its gate."""
-    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.models.quality.gate_result import GateStatus
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
         CALIBRATION_FRAME_COUNT_GATE_NAME,
         calibration_gates,
@@ -104,7 +104,7 @@ def test_a_short_master_becomes_a_reason_and_a_failed_gate() -> None:
 
 def test_the_frame_count_gate_passes_with_enough_frames_and_is_unchecked_without_masters() -> None:
     """No flag passes the gate; with no calibration it is not checked."""
-    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.models.quality.gate_result import GateStatus
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
         CALIBRATION_FRAME_COUNT_GATE_NAME,
         calibration_gates,
@@ -131,7 +131,7 @@ TEMPERATURE_FLAG = (
 
 def test_a_refused_calibration_fails_the_metadata_gate_and_names_the_reason() -> None:
     """A binning mismatch applied no dark, yet the gate fails and says why."""
-    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.models.quality.gate_result import GateStatus
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
         CALIBRATION_METADATA_GATE_NAME,
         calibration_gates,
@@ -153,7 +153,7 @@ def test_a_refused_calibration_fails_the_metadata_gate_and_names_the_reason() ->
 
 def test_a_far_temperature_dark_fails_the_metadata_gate_with_its_sentence() -> None:
     """A dark applied from a far temperature fails the gate and is named."""
-    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.models.quality.gate_result import GateStatus
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
         CALIBRATION_METADATA_GATE_NAME,
         calibration_gates,
@@ -194,7 +194,7 @@ def test_the_metadata_gate_names_both_kinds_of_flag_together() -> None:
 
 def test_the_metadata_gate_passes_when_matched_and_is_unchecked_without_calibration() -> None:
     """No flag passes the gate; with nothing applied it is not checked."""
-    from astrometricslib.models.gate_result import GateStatus
+    from astrometricslib.models.quality.gate_result import GateStatus
     from astrometricslib.pipelines.stacking.pre_processing.assess_input_quality import (
         CALIBRATION_METADATA_GATE_NAME,
         calibration_gates,

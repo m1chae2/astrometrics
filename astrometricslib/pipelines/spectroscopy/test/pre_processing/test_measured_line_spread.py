@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.pipelines.spectroscopy import pipeline as pipeline_module
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline

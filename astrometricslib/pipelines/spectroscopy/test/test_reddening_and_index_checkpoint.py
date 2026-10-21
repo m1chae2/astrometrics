@@ -19,8 +19,8 @@ from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.interfaces.reddening_driver import ReddeningDriver, ReddeningEstimate
 from astrometricslib.foundation.errors import ExternalServiceError
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric
 from astrometricslib.models.stellar_source import DIFFERS_FROM_CATALOG_SUBTYPES, StellarObject
 from astrometricslib.pipelines.shared.catalog_star_identity import gaia_dr3_source_id_of
 from astrometricslib.pipelines.spectroscopy.pipeline import SpectroscopyPipeline

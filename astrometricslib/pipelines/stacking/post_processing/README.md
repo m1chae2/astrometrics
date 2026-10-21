@@ -15,7 +15,7 @@ These terms appear throughout:
 
 The steps are:
 
-1. Output judgment (`assess_output_quality.py`). It turns the measurements made on the stack into a `StackingOutputQuality` (`models/stacking_quality.py`).
+1. Output judgment (`assess_output_quality.py`). It turns the measurements made on the stack into a `StackingOutputQuality` (`models/quality/stacking_quality.py`).
 2. Thresholds (`stack_quality.py`). They hold the limits for the rejected-pixel share, the zero-pixel share and the negative-pixel warning.
 3. Saturation check (`exposure_saturation.py`). It finds whether an exposure length saturates the brightest star and recommends one that does not.
 4. Exposure-group report (`exposure_group_report.py`). It describes each exposure group in the summary.

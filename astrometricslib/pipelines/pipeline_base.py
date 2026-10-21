@@ -21,7 +21,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrometricslib.models.quality_summary import PipelineQualitySummaryBase
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 from astrometricslib.models.target import FrameRecord, Target
 
 

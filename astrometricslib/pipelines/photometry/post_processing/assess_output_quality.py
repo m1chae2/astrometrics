@@ -6,7 +6,7 @@ call is distinguishable from a confident one instead of surviving only
 as a single pass/fail boolean.
 """
 
-from astrometricslib.models.photometry_quality import OutputQualityAssessment
+from astrometricslib.models.quality.photometry_quality import OutputQualityAssessment
 
 # One MAD-unit is small next to the default 7.4-sigma gap
 # `DEFAULT_VARIABILITY_SIGMA_THRESHOLD` puts between the population

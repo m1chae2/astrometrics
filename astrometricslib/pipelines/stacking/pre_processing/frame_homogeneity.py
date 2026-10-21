@@ -7,7 +7,7 @@ file finds and drops the images that don't match the rest.
 
 from typing import Any
 
-from astrometricslib.models.gate_result import GateResult, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, passed_gate, unchecked_gate
 from astrometricslib.utilities.iso_text import canonical_iso_text
 
 # The name the gain check goes by in a stack's gate record.

@@ -354,7 +354,7 @@ def test_the_checker_finds_a_gate_built_from_a_bare_string(tmp_path: Path) -> No
     """A gate built from a string literal is reported with its location."""
     source = write(
         tmp_path / "gates.py",
-        "from astrometricslib.models.gate_result import failed_gate\n\n"
+        "from astrometricslib.models.quality.gate_result import failed_gate\n\n"
         'gate = failed_gate("loose_check", "bad")\n',
     )
 

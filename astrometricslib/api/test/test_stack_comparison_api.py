@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.processing import ProcessingPipelines, QualityDiagnostics
+from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import Target

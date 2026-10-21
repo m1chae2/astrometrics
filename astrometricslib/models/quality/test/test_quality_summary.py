@@ -7,7 +7,7 @@ all the necessary information.
 
 import pytest
 
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,

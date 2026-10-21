@@ -3,15 +3,11 @@
 `QualityDiagnostics` is the child of `ProcessingPipelines` that measures
 without changing anything. It is reached as
 `astrometrics.processing.diagnostics`.
-The frame choice helper and the time input type it shares with
-`ProcessingPipelines` live here too, so `processing.py` imports from this
-file and never the other way round.
+The argument helpers it shares with `ProcessingPipelines` live in
+`pipelines/shared/api_arguments.py`.
 """
 
-from datetime import datetime
 from typing import Literal
-
-from astropy.time import Time
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.foundation.config import AppConfiguration
@@ -26,22 +22,18 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.api_arguments import (
+    STACK_KINDS,
+    StackKind,
     TargetLookup,
+    TimeInput,
     check_choice,
     check_include,
+    make_frame_selection,
     reject_unused_arguments,
     resolve_target,
-    to_epoch_seconds,
 )
-from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
 
 __all__ = ["QualityDiagnostics"]
-
-TimeInput = str | datetime | Time | None
-"""A time as these methods accept it: ISO 8601 text, `datetime` or `Time`."""
-
-StackKind = Literal["imaging", "spectral"]
-STACK_KINDS = ("imaging", "spectral")
 
 FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview")
 FRAME_QUALITY_SECTIONS = ("fwhm", "spectra", "excluded")
@@ -74,31 +66,6 @@ _FRAME_QUALITY_SECTIONS_BY_KIND = {
     "raw_check": ("spectra", "excluded"),
     "quarantine_preview": ("excluded",),
 }
-
-
-def _make_selection(
-    filter_name: str | None,
-    first_file: str | None,
-    last_file: str | None,
-    since: TimeInput,
-    until: TimeInput,
-    include_spectra: bool,
-) -> FrameSelection:
-    """Build the frame choice that several methods share.
-
-    Returns
-    -------
-    selection : `FrameSelection`
-        The filter, file range and time window to keep.
-    """
-    return FrameSelection(
-        filter_name=filter_name,
-        first_file=first_file,
-        last_file=last_file,
-        since=to_epoch_seconds(since, "since"),
-        until=to_epoch_seconds(until, "until"),
-        include_spectra=include_spectra,
-    )
 
 
 def _clamp(value: int, lowest: int, highest: int) -> int:
@@ -281,7 +248,9 @@ class QualityDiagnostics:
         if "excluded" in sections and resolved is None:
             raise InvalidArgumentError('include=["excluded"] needs a target.')
         limit = _clamp(limit, 1, 300)
-        selection = _make_selection(filter_name, first_file, last_file, since, until, "spectra" in sections)
+        selection = make_frame_selection(
+            filter_name, first_file, last_file, since, until, "spectra" in sections
+        )
         with registered_job(
             enabled=register_job, job_type="diagnostics", target_id=self._label(resolved, folder_path)
         ):
@@ -379,7 +348,7 @@ class QualityDiagnostics:
         )
 
         resolved = resolve_target(self._targets, target)
-        selection = _make_selection(None, first_file, last_file, since, until, True)
+        selection = make_frame_selection(None, first_file, last_file, since, until, True)
         with registered_job(enabled=register_job, job_type="diagnostics", target_id=resolved.id):
             return check_spectral_frames(
                 resolved, selection, exposure_seconds, predict_exposure_seconds, _clamp(limit, 1, 100)

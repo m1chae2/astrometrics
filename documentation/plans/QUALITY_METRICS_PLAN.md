@@ -26,8 +26,9 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 
 ## Status
 
-Status on 2026-10-17: design, target dataset report and order of work agreed after two board
-reviews, nothing built. Phase 0 is next. Tracked in issue #93.
+Status on 2026-10-21: design, target dataset report and order of work agreed after two board
+reviews. Phase 0 is built and board-reviewed on branch `94-phase0-consolidate` (Appendix C).
+Phase 1 is next. Tracked in issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
@@ -171,6 +172,10 @@ decisions 16 to 21 with the second.
     setting, offset and binning), the checklist and the framing. It is written from the first edit,
     has a revision check so two windows cannot overwrite each other, and raises a plan-changed
     event (section 6.9).
+22. **Real-data checks use data already taken.** Agreed with the user on 2026-10-19: no phase
+    needs a new observing night. Phase 0 ends with a read-only check on a library target. Phase 2
+    first runs on one recorded night of one target, after a database and config backup. The
+    forecast check (section 6.5) replays a target's recorded nights.
 
 ## 3. The shared shape
 
@@ -452,15 +457,17 @@ test failing.
 
 ### 3.8 Where the code lives
 
-Quality code is spread out today: ten model files loose in `models/`, frame checks in
+Quality code was spread out: ten model files loose in `models/`, frame checks in
 `pipelines/shared/quality/`, gate files in four pipelines, and `QualityDiagnostics` inside
-`api/processing.py`. The rule for this work is one quality home per layer. Agreed with the user
+`api/processing.py`. Phase 0 moved the models and `QualityDiagnostics`; the gate files move in
+phase 3. The rule for this work is one quality home per layer. Agreed with the user
 on 2026-10-17:
 
-- All quality models move into one subpackage, `models/quality/`, in phase 0. The top-level
-  imports do not change.
-- The `QualityDiagnostics` module moves from `api/processing.py` to `api/quality.py` in phase 0,
-  keeping the path `astrometrics.processing.diagnostics`. Phase 1 adds the `astrometrics.quality`
+- All quality models moved into one subpackage, `models/quality/`, in phase 0. The top-level
+  imports did not change.
+- `QualityDiagnostics` moved from `api/processing.py` to `api/quality.py` in phase 0, keeping the
+  path `astrometrics.processing.diagnostics`. The stacking argument helpers it shared with
+  `processing.py` went to `pipelines/shared/api_arguments.py` (Appendix C). Phase 1 adds the `astrometrics.quality`
   root and renames the MCP tools (decision 9).
 - Each pipeline's `run_gates.py` is renamed `record_quality.py` in that pipeline's phase 3 change
   (decision 10).
@@ -877,9 +884,11 @@ weights and effective time stay in the append-only history (section 3.5), so the
 stack can be rebuilt from the run before it. This keeps the rule that recommendations are never
 stored.
 
-The check is first tested on a synthetic history with known noise and weights. The first real
-check needs a new night of frames after phase 3, because older runs did not store their
-membership.
+The check is first tested on a synthetic history with known noise and weights. The real check
+replays a target's recorded nights (decision 22): it stacks the frames of the first nights as a
+subset stack, forecasts the next night's gain, then stacks with that night added and compares.
+The subset stacks go to a scratch folder and never replace the library stack. Older runs did not
+store their membership, so the replay builds its own.
 
 Across targets, the forecast checks are evidence about the marginal-value model itself. They feed
 its validation register entry, so the report's confidence in "take N more" is earned from the
@@ -1208,7 +1217,8 @@ the affected READMEs updated. Each phase is one pull request.
    target report; then the night reads, the stored night plan and the tonight ranking. Done when
    the guiding and capture recommendations read through `quality.query`, the loss account's
    attribution is checked on nights with a known cause (section 4.1), and a real target's report
-   gives a "take N more" recommendation whose forecast is checked after the next stack.
+   gives a "take N more" recommendation whose forecast is checked by replaying its recorded
+   nights (section 6.5).
 5. **New metrics.** Built under `QUALITY_SCIENCE_PLAN.md`, in its own order, once phase 1 exists.
    This plan only provides the shape they fill.
 6. **Verdicts and gates, one pipeline at a time.** Photometry goes first, because its labels and
@@ -1340,5 +1350,22 @@ points are decisions 18 to 21.
 | Set-aside reasons exist only after stacking | Engineer | Sections 4.1 and 6.6 |
 | Manual syncs (user decision) | User | Decision 16, section 6.1, phase 2 |
 | Each night's contribution after subset stacking; asteroid completeness deferred (user decision) | User | Decision 17, section 5.1, phase 3 |
+
+No findings were rejected.
+
+## Appendix C. Review board changes (phase 0)
+
+The board reviewed the phase 0 commit (4d19c7c0) on 2026-10-21. The astronomer and the software
+engineer approved; the architect approved with changes. All findings were minor and had one clear
+fix, so none needed a user decision.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| `processing.py` imported stacking argument helpers, including the private `_make_selection`, from `api/quality.py` | Architect, engineer, astronomer | Moved to `pipelines/shared/api_arguments.py` as `make_frame_selection`; section 3.8 |
+| The plan status and section 3.8 still described the code before phase 0 | Architect | Status, section 3.8 |
+| The Public API row of the Implementation doc did not list `api/quality.py` | Engineer | `Astrometrics_Library_Implementation.md` |
+| `AppliedCameraProfile` sits in `models/quality/quality_summary.py`, not beside `models/camera_profile.py` | Architect | Deferred to phase 2, which adds the camera-profile write path |
+| Default `pytest` test paths leave out `astrometricslib/models` and `astrometricslib/pipelines` (true before phase 0) | Engineer | Deferred; phases that add tests there run `build/linux/run_tests.sh`, which names them |
+| The M 57 real-data check is a no-change smoke test, not new evidence | Astronomer | Pull request text; nothing added to the validation register |
 
 No findings were rejected.

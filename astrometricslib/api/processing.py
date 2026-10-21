@@ -19,7 +19,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib.api.quality import STACK_KINDS, QualityDiagnostics, StackKind, TimeInput, _make_selection
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
@@ -34,8 +34,12 @@ from astrometricslib.models.quality.quality_reports import (
 )
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
+    STACK_KINDS,
+    StackKind,
     TargetLookup,
+    TimeInput,
     check_choice,
+    make_frame_selection,
     reject_unused_arguments,
     resolve_target,
 )
@@ -541,7 +545,9 @@ class ProcessingPipelines:
             check_one_camera(resolved, frames)
             chosen = list(frames)
         else:
-            selection = _make_selection(filter_name, first_file, last_file, since, until, kind == "spectral")
+            selection = make_frame_selection(
+                filter_name, first_file, last_file, since, until, kind == "spectral"
+            )
             chosen = choose_frames_to_stack(resolved, kind, selection, camera_id)
         return run_stack(
             resolved,

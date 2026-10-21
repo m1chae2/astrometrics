@@ -22,7 +22,7 @@ The package has six layers. Each layer may import only from the layers below it.
 
 | Layer | Holds | Calls into | Key modules |
 | --- | --- | --- | --- |
-| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/processing.py`, `astrometricslib/__init__.py` |
+| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/processing.py`, `api/quality.py`, `astrometricslib/__init__.py` |
 | 2. Pipeline runners | Stage dispatcher; batch runner | Layer 3 | `pipelines/tasks.py`, `pipelines/target_batch.py` |
 | 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | Layers 4 to 6; sideways between pipelines | `pipelines/<name>/` |
 | 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording, pipeline contract | Layers 5 and 6 | `pipelines/shared/`, `pipelines/pipeline_base.py` |

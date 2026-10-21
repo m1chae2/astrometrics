@@ -12,7 +12,11 @@ checks live here, in one place:
 * `reject_unused_arguments` refuses an argument that the chosen ``kind``
   does not use, so a caller learns about a mistake instead of having the
   argument silently ignored;
-* `to_epoch_seconds` turns any accepted time into seconds since 1970.
+* `to_epoch_seconds` turns any accepted time into seconds since 1970;
+* `TimeInput`, `StackKind` and `STACK_KINDS` name the time and stack kind
+  arguments that several methods share;
+* `make_frame_selection` builds the `FrameSelection` that the quality and
+  stacking methods share.
 
 Each check raises `InvalidArgumentError` or `NotFoundError`, never a
 built-in exception.
@@ -20,19 +24,33 @@ built-in exception.
 
 from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
+
+from astropy.time import Time
 
 from astrometricslib.foundation.errors import InvalidArgumentError, NotFoundError
 from astrometricslib.models.target import Target
+from astrometricslib.pipelines.shared.quality.frame_selection import FrameSelection
 
 __all__ = [
+    "STACK_KINDS",
+    "StackKind",
     "TargetLookup",
+    "TimeInput",
     "check_choice",
     "check_include",
+    "make_frame_selection",
     "reject_unused_arguments",
     "resolve_target",
     "to_epoch_seconds",
 ]
+
+
+TimeInput = str | datetime | Time | None
+"""A time as these methods accept it: ISO 8601 text, `datetime` or `Time`."""
+
+StackKind = Literal["imaging", "spectral"]
+STACK_KINDS = ("imaging", "spectral")
 
 
 class TargetLookup(Protocol):
@@ -224,3 +242,28 @@ def to_epoch_seconds(value: str | datetime | Any | None, name: str = "time") -> 
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
     return moment.timestamp()
+
+
+def make_frame_selection(
+    filter_name: str | None,
+    first_file: str | None,
+    last_file: str | None,
+    since: TimeInput,
+    until: TimeInput,
+    include_spectra: bool,
+) -> FrameSelection:
+    """Build the frame choice that several methods share.
+
+    Returns
+    -------
+    selection : `FrameSelection`
+        The filter, file range and time window to keep.
+    """
+    return FrameSelection(
+        filter_name=filter_name,
+        first_file=first_file,
+        last_file=last_file,
+        since=to_epoch_seconds(since, "since"),
+        until=to_epoch_seconds(until, "until"),
+        include_spectra=include_spectra,
+    )

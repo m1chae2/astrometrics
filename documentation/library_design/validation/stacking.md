@@ -1264,6 +1264,55 @@ Every Python example assumes the library is installed and configured with your o
 - **Guarded by tests:** `astrometricslib/pipelines/shared/quality/test/test_raw_frame_check.py` checks the rules on made-up frames.
 - **Raw record:** None kept.
 
+### STK-35
+
+**Gain and read noise measured from flat and bias pairs in the library**
+
+- **Claim:** `measure_sensor_noise` reproduces the hand-measured gain and read noise of the ASI 533MM Pro at gain setting 0, offset 10 and 1x1 from the stored calibration frames: the gain to within 0.1% and the read noise to within 1.3%.
+- **Settings it supports:**
+  - code constants `MINIMUM_FLAT_PAIRS` = 5 and `MINIMUM_BIAS_PAIRS` = 3 in `pipelines/stacking/pre_processing/sensor_noise.py` (changing them means editing the code). Relation: sanity check only. The run used 15 and 5 pairs, so it does not show that fewer pairs suffice. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_FLAT_PAIRS --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS -->
+  - code constant `CENTRAL_REGION_SHAPE_PIXELS` = (1000, 1000) in the same file. Relation: confirmed by this entry. It is the region the hand measurement used. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.CENTRAL_REGION_SHAPE_PIXELS -->
+  - code constants `MAXIMUM_TEMPERATURE_SPREAD_C` = 1.0 and `EXPOSURE_RELATIVE_TOLERANCE` = 0.001 in the same file. Relation: sanity check only. The frames passed both. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C --> <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.EXPOSURE_RELATIVE_TOLERANCE -->
+- **Status:** Measured. One camera, one setting and one temperature, checked against the hand measurement of [PHO-03](photometry.md#pho-03) on the same frames. Synthetic frames of known gain also pass. The pair minimums are not tested below the data used.
+- **Data you need:** For one camera setting, at one sensor temperature: 5 or more pairs of flat frames of one exposure and 3 or more pairs of bias frames, all indexed in the calibration library.
+- **Procedure:**
+  1. Call `measure_sensor_noise` on the calibration catalog for the camera and setting. Leave `save` off to read without writing.
+  2. Compare the gain and read noise with a hand measurement ([PHO-03](photometry.md#pho-03)) and check that the gain spread across pairs is small.
+
+  ```python
+  from astrometricslib import Astrometrics
+
+  astro = Astrometrics()
+  result = astro.processing.calibration.measure_sensor_noise(
+      "ZWO ASI 533MM Pro", 0, 10, "1x1", temperature=-10, telescope="Apertura 75Q", filter_type="L"
+  )
+  print(result.gain_e_per_adu, result.gain_spread_e_per_adu, result.read_noise_adu, result.read_noise_e)
+  ```
+
+  `CalibrationCatalog.measure_sensor_noise` <!-- impl: astrometricslib.api.processing.CalibrationCatalog.measure_sensor_noise --> pairs the frames in file-name order and calls `measure_sensor_noise`. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.measure_sensor_noise -->
+- **Acceptance criterion:** Not recorded (set after the result).
+- **What to look at:** The gain in electrons per ADU and its spread across the flat pairs, the read noise in ADU (RMS and from the median absolute deviation) and in electrons, and the pair counts.
+- **Our result:** Stored calibration library frames of the ASI 533MM Pro at gain setting 0, offset 10, 1x1, -10 C (mean -9.88 C), 0.55 s flats through the Apertura 75Q; run on 2026-10-22 with the code of branch `94-phase2a-sensor-noise`, on a copy of the configuration, without saving. The hand values are from 2026-10-11 ([PHO-03](photometry.md#pho-03)).
+
+  | Quantity | L flats | SPEC flats | Hand measurement |
+  | --- | --- | --- | --- |
+  | Gain (e-/ADU) | 0.7823 | 0.7825 | 0.783 (L), 0.782 (SPEC) |
+  | Spread across pairs | 0.0024 | 0.0014 | 0.0004 |
+  | Flat pairs | 15 | 15 | 15 |
+  | Signal (ADU) | 28871 | 25629 | about 28,000 |
+  | Read noise, RMS (ADU) | 4.821 | 4.821 | 4.88 |
+  | Read noise, MAD (ADU) | 4.193 | 4.193 | 4.19 |
+  | Read noise (e-) | 3.772 | 3.772 | 3.8 |
+  | Bias pairs | 5 | 5 | 5 |
+
+  The RMS read noise is 1.2% below the hand value. Taking the difference of two frames cancels the bias level, so the mean-bias subtraction is not the cause. The likely causes are that the new code pairs the bias frames in file-name order and takes the median of the five pair values, where the hand figure pooled hand-chosen pairs and the RMS is sensitive to a few hot pixels or cosmic-ray hits in a pair. The MAD figure agrees to 0.1%, which fits that explanation, but the individual pair values of the hand run were not kept, so it is not proven. The gain differs by under 0.1%, inside the pair spread.
+- **Verdict:** Not judged.
+- **Limits:** One camera, one gain setting and one temperature, and the same frames as the hand measurement, so the two are not independent. Both use one signal level, so neither shows whether the sensor is linear. The spread across pairs (0.0024) is larger than the hand run's 0.0004, and the reason is not known. The pair minimums were not tested with fewer pairs.
+- **To tune for your setup:** If the spread across pairs is large, raise `MINIMUM_FLAT_PAIRS`. Measure each gain setting you observe with, and check the result against a hand measurement the first time.
+- **Regenerate with:** The call in the procedure; add `save=True` to write the camera profile.
+- **Guarded by tests:** `astrometricslib/pipelines/stacking/test/pre_processing/test_sensor_noise.py` and `astrometricslib/pipelines/stacking/test/test_sensor_noise_run.py` make flats and biases of known gain (0.8 e-/ADU) and read noise (4 ADU) with Poisson and Gaussian noise and require both back within 2% (3% in the library test).
+- **Raw record:** None kept.
+
 ## Design estimates
 
 These tuned values have not been measured. Each is a reasoned choice; the last column says how you could measure it on your data.

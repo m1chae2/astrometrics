@@ -178,6 +178,7 @@ RPC_METHODS: tuple[str, ...] = (
     "images:last",
     # Calibration frames
     "calibration:get_stats",
+    "calibration:measure_sensor_noise",
     # Mosaics
     "mosaic:preview",
     "mosaic:create",

@@ -86,6 +86,7 @@ Live checks:
 - `query` reports counts, or how a target's light frames (frames of the sky) match the darks.
 - `refresh("flat")` rescans one kind and reports what it found. For flats it also says whether each new flat set is good enough: enough frames, bright enough but not too bright, and a master flat (the combination of the set) that is not too noisy.
 - `assess_flats` runs the same check on the flats already in the library.
+- `measure_sensor_noise(camera_id, gain, offset, binning)` measures the camera's conversion gain (electrons per ADU, one step of the stored pixel value) and its read noise (the electronic noise added when a frame is read out) from the flat and bias frames in the library at exactly that setting. It pairs the frames in file-name order, so it needs at least 5 flat pairs and 3 bias pairs that share one setting, one flat exposure and one temperature. If it cannot measure, the result says why and holds no numbers. Reading never writes. With `save=True` a measured result goes into the camera profile in the configuration file, after a backup. The result's `provenance` sentence is stored as the value's source. Set `exposure_seconds`, `temperature`, `telescope` or `filter_type` to choose among flats of several kinds. It runs as a background job. Its result matched a hand measurement (measured; see [STK-35](../../documentation/library_design/validation/stacking.md#stk-35)).
 
 ### `visualization.py`
 

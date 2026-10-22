@@ -23,6 +23,13 @@
       "interim_block": "",
       "note": "Replaced by calibration_query."
     },
+    "calibration_measure_sensor_noise": {
+      "tool_class": "compute",
+      "category": "calibration",
+      "disposition": "withhold",
+      "interim_block": "",
+      "note": "With save on, it writes a measured gain and read noise into the camera profile in the configuration file. The AI is read-only."
+    },
     "calibration_query": {
       "tool_class": "observe",
       "category": "calibration",

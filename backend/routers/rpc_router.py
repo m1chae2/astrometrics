@@ -207,6 +207,10 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "images:last": ("image_service", "get_last_image"),
     # Calibration frames
     "calibration:get_stats": ("image_processing_service", "get_calibration_stats"),
+    # Measures a camera setting's gain and read noise from the library's
+    # flat and bias frames. With `save` true it writes the camera profile in
+    # the config (after a backup), so the AI's read-only profile withholds it.
+    "calibration:measure_sensor_noise": ("astrometrics.processing.calibration", "measure_sensor_noise"),
     # Mosaics
     "mosaic:preview": ("mosaic_service", "preview_mosaic"),
     "mosaic:create": ("mosaic_service", "create_mosaic"),

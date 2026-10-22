@@ -2603,6 +2603,103 @@ export interface MetricSpec {
 }
 
 /**
+ * Gain and read noise measured at one camera setting.
+ *
+ * Gain and read noise change with the camera's gain setting, offset and
+ * binning, so a measurement belongs to exactly one setting. A measurement
+ * that could not be made has the status ``not_measured`` and a reason, and
+ * holds no numbers.
+ *
+ * Attributes
+ * ----------
+ * status : `MeasurementStatus`
+ * ``measured`` or ``not_measured``.
+ * reason : `str` or `None`
+ * Why nothing was measured. `None` when ``status`` is ``measured``.
+ * camera_id : `str`
+ * The camera the frames came from.
+ * gain_setting : `str`
+ * The camera's gain setting (or the ISO of a DSLR), in standard form.
+ * offset : `str`
+ * The camera offset, in standard form.
+ * binning : `str`
+ * The binning, such as ``"1x1"``.
+ * temperature_c : `float` or `None`
+ * The mean sensor temperature of the frames, in degrees C.
+ * exposure_seconds : `float` or `None`
+ * The exposure of the flat frames, in seconds.
+ * gain_e_per_adu : `float` or `None`
+ * The conversion gain: the median over the flat pairs.
+ * gain_spread_e_per_adu : `float` or `None`
+ * The sample standard deviation of the gain over the flat pairs. It
+ * says how steady the pairs agree, not how accurate the gain is.
+ * read_noise_adu : `float` or `None`
+ * The read noise in ADU (RMS, root mean square): the median over the
+ * bias pairs. This is the figure the noise model uses.
+ * read_noise_adu_robust : `float` or `None`
+ * The same noise from the median absolute deviation, which ignores hot
+ * pixels and cosmic-ray hits. Kept for the record only.
+ * read_noise_e : `float` or `None`
+ * The read noise in electrons: ``read_noise_adu`` times the gain.
+ * signal_level_adu : `float` or `None`
+ * The mean flat signal, bias removed, in ADU. A gain from one signal
+ * level cannot show whether the sensor is linear (a full photon
+ * transfer curve uses many levels), so the level is recorded.
+ * region_shape_pixels : `list` [`int`] or `None`
+ * The height and width, in pixels, of the central region measured
+ * (two numbers).
+ * flat_pair_count : `int`
+ * Flat pairs that gave a gain.
+ * bias_pair_count : `int`
+ * Bias pairs that gave a read noise.
+ * pair_gains_e_per_adu : `list` [`float`]
+ * The gain of each flat pair.
+ * pair_read_noises_adu : `list` [`float`]
+ * The read noise of each bias pair, in ADU.
+ * flat_frame_count : `int`
+ * Flat frames read.
+ * bias_frame_count : `int`
+ * Bias frames read.
+ * provenance : `str` or `None`
+ * A sentence for the camera profile: the method, frames, region and
+ * date. `None` when nothing was measured.
+ * saved : `bool`
+ * `True` when the values were written to the camera profile.
+ * backup_path : `str` or `None`
+ * The config backup made before the write, if one was made.
+ * notes : `list` [`str`]
+ * Plain sentences about choices the measurement made, such as other
+ * flat groups that were not used.
+ */
+export interface SensorNoiseMeasurement {
+  status: MeasurementStatus;
+  reason?: string | null;
+  cameraId: string;
+  gainSetting: string;
+  offset: string;
+  binning: string;
+  temperatureC?: number | null;
+  exposureSeconds?: number | null;
+  gainEPerAdu?: number | null;
+  gainSpreadEPerAdu?: number | null;
+  readNoiseAdu?: number | null;
+  readNoiseAduRobust?: number | null;
+  readNoiseE?: number | null;
+  signalLevelAdu?: number | null;
+  regionShapePixels?: number[] | null;
+  flatPairCount?: number;
+  biasPairCount?: number;
+  pairGainsEPerAdu?: number[];
+  pairReadNoisesAdu?: number[];
+  flatFrameCount?: number;
+  biasFrameCount?: number;
+  provenance?: string | null;
+  saved?: boolean;
+  backupPath?: string | null;
+  notes?: string[];
+}
+
+/**
  * Every RPC method the backend serves, from backend/public_interface.py.
  */
 export const RPC_METHODS = [
@@ -2741,6 +2838,7 @@ export const RPC_METHODS = [
   "images:delete",
   "images:last",
   "calibration:get_stats",
+  "calibration:measure_sensor_noise",
   "mosaic:preview",
   "mosaic:create",
   "execution:list_sessions",

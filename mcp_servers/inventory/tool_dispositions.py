@@ -432,6 +432,11 @@ DECISIONS = {
     ),
     "calibration_save": ToolDecision("withhold", "Writes the calibration index. The AI is read-only."),
     "calibration_assess_flats": ToolDecision("keep", "Checks flats. Writes nothing."),
+    "calibration_measure_sensor_noise": ToolDecision(
+        "withhold",
+        "With save on, it writes a measured gain and read noise into the camera profile in the "
+        "configuration file. The AI is read-only.",
+    ),
     "target_get_header": ToolDecision("keep", "Reads one FITS header."),
     "target_read_saved": ToolDecision(
         "drop",

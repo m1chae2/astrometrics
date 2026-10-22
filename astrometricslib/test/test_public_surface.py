@@ -326,7 +326,16 @@ SUB_API_MEMBERS = {
         "stack_summary",
         "swap_with_previous_stack",
     },
-    "processing.calibration": {"add", "assess_flats", "get", "library", "query", "refresh", "save"},
+    "processing.calibration": {
+        "add",
+        "assess_flats",
+        "get",
+        "library",
+        "measure_sensor_noise",
+        "query",
+        "refresh",
+        "save",
+    },
     "quality": {
         "check_spectral_frames",
         "flag_value_outliers",

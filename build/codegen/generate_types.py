@@ -84,6 +84,7 @@ from astrometricslib.models.quality.spectroscopy_quality import (
     StageQualityRollup,
 )
 from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
@@ -513,6 +514,7 @@ def render_types() -> str:
         generate_interface(MeasurementReference, "MeasurementReference"),
         generate_interface(QualityMeasurement, "QualityMeasurement"),
         generate_interface(MetricSpec, "MetricSpec"),
+        generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
         generate_public_interface(),
     ]
 

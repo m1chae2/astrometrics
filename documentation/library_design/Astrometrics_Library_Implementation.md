@@ -70,6 +70,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (engine run, `PIPELINE_STEPS`). Batch dispatch is in `astrometricslib/pipelines/tasks.py` and `target_batch.py`.
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
+- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which finds a setting's flats and bias frames and calls `pre_processing/sensor_noise.py` (`measure_sensor_noise`). With `save=True` it writes the camera profile, so it lives under `stacking/` and not `shared/quality/`. The result is a `SensorNoiseMeasurement`. The RPC is `calibration:measure_sensor_noise`; the MCP server withholds it. Evidence: [STK-35](validation/stacking.md#stk-35).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`.
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
@@ -164,6 +165,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Floor on the high rejection cutoff | 2.5σ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
 | Margin of the low cutoff above the high one | 0.5σ | Partly measured ([STK-08](validation/stacking.md#stk-08)); simulation only | §3.2 |
 | Minimum frames per master calibration frame | 3 | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.2 |
+| Gain and read noise measurement: fewest flat pairs; fewest bias pairs; temperature spread; region | 5; 3; 1 °C; central 1000 by 1000 px | Measured ([STK-35](validation/stacking.md#stk-35)) | §3.2 |
 | Frame screening: session gap | 4 h | Design estimate ([stacking table](validation/stacking.md#design-estimates)) | §3.4.1 |
 | Frame screening: fewest frames to judge | 8 | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
 | Clouded frame star count; trailed frame roundness | below 0.5 of session median; below 0.80 and 0.15 under median | Partly measured ([STK-01](validation/stacking.md#stk-01)) | §3.4.1 |
@@ -181,6 +183,10 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | Star sharpness warning ratio (fails above) | 1.2 | Partly measured ([STK-25](validation/stacking.md#stk-25)) | §3.4.2 |
 
 <!-- impl: astrometricslib.utilities.rejection_thresholds.rejection_bounds -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_FLAT_PAIRS -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MINIMUM_BIAS_PAIRS -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.MAXIMUM_TEMPERATURE_SPREAD_C -->
+<!-- impl: astrometricslib.pipelines.stacking.pre_processing.sensor_noise.CENTRAL_REGION_SHAPE_PIXELS -->
 <!-- impl: astrometricslib.drivers.calibration_library.DEFAULT_DARK_TEMPERATURE_TOLERANCE_C -->
 <!-- impl: astrometricslib.utilities.stack_filter_floor.DEFAULT_MINIMUM_SURVIVING_FRAMES -->
 <!-- impl: astrometricslib.pipelines.stacking.processing.exposure_groups.GAIN_MID_RANGE_PERCENTILES -->

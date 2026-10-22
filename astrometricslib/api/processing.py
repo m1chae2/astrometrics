@@ -16,6 +16,7 @@ cannot be met, and return a typed result otherwise.
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
@@ -30,6 +31,7 @@ from astrometricslib.models.quality.excluded_frames import RestoreReport
 from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
+from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.api_arguments import (
     STACK_KINDS,
@@ -47,6 +49,7 @@ from astrometricslib.pipelines.stacking.calibration_ingest import (
     build_ingest_report,
     flatten_frame_index,
 )
+from astrometricslib.pipelines.stacking.sensor_noise_run import measure_sensor_noise_from_library
 from astrometricslib.utilities.parallel_batch import BatchRunSummary
 
 if TYPE_CHECKING:
@@ -296,6 +299,80 @@ class CalibrationCatalog:
                 telescope=telescope, camera=camera_id, filter_type=filter_type, gain=gain, offset=offset
             )
             return [assess_flat_group(group) for group in groups]
+
+    @background_job("diagnostics", grace_period_seconds=20.0)
+    def measure_sensor_noise(
+        self,
+        camera_id: str,
+        gain: str | float,
+        offset: str | float,
+        binning: str = "1x1",
+        temperature: float | None = None,
+        exposure_seconds: float | None = None,
+        telescope: str | None = None,
+        filter_type: str | None = None,
+        save: bool = False,
+        register_job: bool = True,
+    ) -> SensorNoiseMeasurement:
+        """Measure a camera setting's gain and read noise.
+
+        The gain (electrons per ADU, where ADU is one step of the stored
+        pixel value) comes from pairs of flat frames, and the read noise
+        from pairs of bias frames, all taken at exactly this setting. The
+        frames are paired in file-name order. Reading never writes: the
+        camera profile changes only when ``save`` is `True` and the
+        measurement succeeded. If it cannot be made (too few pairs, or the
+        frames do not share one setting, exposure or temperature), the result
+        has status ``not_measured`` and a reason, and nothing is written.
+        Saving raises `ConfigurationError` when the camera has no profile or
+        its profile still holds an unmigrated gain.
+
+        Parameters
+        ----------
+        camera_id : `str`
+            The camera whose frames to use.
+        gain : `str` or `float`
+            The camera gain setting (or ISO).
+        offset : `str` or `float`
+            The camera offset.
+        binning : `str`, optional
+            The binning, such as ``"1x1"``. Defaults to ``"1x1"``.
+        temperature : `float`, optional
+            Use only frames within 1 degree C of this sensor temperature.
+        exposure_seconds : `float`, optional
+            Use only flats of this exposure. Needed when the setting's flats
+            were taken at several exposures.
+        telescope : `str`, optional
+            Use only flats taken through this telescope.
+        filter_type : `str`, optional
+            Use only flats taken through this filter.
+        save : `bool`, optional
+            Write a measured result into the camera profile, with a backup
+            of the config first. Defaults to `False`.
+        register_job : `bool`, optional
+            Record the run in the job list. Defaults to `True`.
+
+        Returns
+        -------
+        measurement : `SensorNoiseMeasurement`
+            The gain, read noise, spreads, counts and a source sentence for
+            the profile, or the reason nothing was measured.
+        """
+        with registered_job(enabled=register_job, job_type="diagnostics", target_id="calibration"):
+            return measure_sensor_noise_from_library(
+                self.library,
+                self._config,
+                camera_id,
+                gain,
+                offset,
+                binning,
+                temperature_c=temperature,
+                exposure_seconds=exposure_seconds,
+                telescope=telescope,
+                filter_type=filter_type,
+                save=save,
+                measured_on=datetime.now(UTC).date(),
+            )
 
 
 class _TargetsOnDemand:

@@ -297,6 +297,7 @@ export interface ActionRegistry {
 
     // Calibration
     "calibration:get_stats": { payload: Record<string, never>; response: CalibrationStats };
+    "calibration:measure_sensor_noise": { payload: { camera_id: string; gain: string | number; offset: string | number; binning?: string; temperature?: number; exposure_seconds?: number; telescope?: string; filter_type?: string; save?: boolean }; response: import('../types/backendTypes').SensorNoiseMeasurement };
 
 
 

@@ -145,7 +145,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "build/migrations"]
+testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -281,7 +281,6 @@ known-first-party = ["astrometricslib", "wayfindinglib", "backend", "mcp_servers
 "astrometricslib/drivers/local_database.py" = ["hardcoded-sql-expression"]
 "astrometricslib/foundation/jobs/store.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/control_record_store.py" = ["hardcoded-sql-expression"]
-"build/migrations/move_guiding_alignment_records.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/gaia_catalog_driver.py" = ["hardcoded-sql-expression"]
 "wayfindinglib/drivers/catalog/local_bright_star_catalog_driver.py" = ["hardcoded-sql-expression"]
 "__init__.py" = ["unused-import"] # re-exports for package public API

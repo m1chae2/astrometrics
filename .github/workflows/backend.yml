@@ -26,7 +26,6 @@ on:
       - 'wayfindinglib/**'
       - 'mcp_servers/**'
       - 'build/mcp/**'
-      - 'build/migrations/**'
       - 'ui/mcp/**'
       - 'pyproject.toml'
       - 'build/linux/run_tests.sh'
@@ -74,14 +73,6 @@ jobs:
           ASTROMETRICS_FAST_TEST: "1"
         run: |
           COVERAGE=1 ./build/linux/run_tests.sh backend
-
-      - name: Run Migration Script Tests
-        env:
-          PYTHONPATH: .
-          ASTROMETRICS_TESTING: "1"
-          ASTROMETRICS_FAST_TEST: "1"
-        run: |
-          ./build/linux/run_tests.sh migrations
 
       - name: Comment PR with Code Coverage
         if: github.event_name == 'pull_request'

@@ -16,7 +16,7 @@ a pass. The failed gates' sentences are the run's flag reasons.
 
 from collections.abc import Sequence
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
     MINIMUM_DISCRIMINATION_AUC,
     MINIMUM_KNOWN_VARIABLES,

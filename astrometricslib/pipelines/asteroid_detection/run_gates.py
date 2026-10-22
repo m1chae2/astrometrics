@@ -15,7 +15,7 @@ is not a pass, and an empty result from it is not a clean null result.
 
 from collections.abc import Mapping
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 
 SEARCH_FRAMES_GATE_NAME = "search_frames"
 POINTING_METADATA_GATE_NAME = "pointing_metadata"

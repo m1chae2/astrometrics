@@ -24,7 +24,11 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, StageQualityMetric, metric
+from astrometricslib.models.quality.spectroscopy_quality import (
+    StageQualityCheckpoint,
+    StageQualityMetric,
+    metric,
+)
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_refraction import (
     MINIMUM_ALTITUDE_DEGREES,

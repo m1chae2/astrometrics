@@ -6,7 +6,7 @@ real, typed object instead of letting it evaporate into a batch average
 or a silent tie-break. See `CatalogMatchQuality`'s own docstring.
 """
 
-from astrometricslib.models.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 
 
 def assess_match_quality(

@@ -16,7 +16,7 @@ from astrometricslib.drivers.image import AstrometricsImage
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
 from astrometricslib.foundation.errors import ProcessingError
 from astrometricslib.foundation.observatory_site import ObservatorySite
-from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
 from astrometricslib.models.stellar_source import (
     DifferentialRefractionRecord,
     ExtinctionCorrectionRecord,

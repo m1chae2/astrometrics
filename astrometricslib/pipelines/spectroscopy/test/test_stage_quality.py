@@ -16,7 +16,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.spectroscopy_quality import (
     STAGE_ORDER,
     InputQualityAssessment,
     OutputQualityAssessment,

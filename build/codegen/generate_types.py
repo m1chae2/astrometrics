@@ -20,16 +20,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
-from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
-from astrometricslib.models.gaia_xp_comparison import (
-    GaiaXpBandResidual,
-    GaiaXpBandSummary,
-    GaiaXpComparison,
-    GaiaXpRunSummary,
-)
-from astrometricslib.models.gate_result import GateResult, GateStatus
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
 from astrometricslib.models.moving_object import (
     AsteroidDetectionCandidate,
@@ -38,7 +30,15 @@ from astrometricslib.models.moving_object import (
     FrameDetection,
     MovingObjectTrack,
 )
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.gaia_xp_comparison import (
+    GaiaXpBandResidual,
+    GaiaXpBandSummary,
+    GaiaXpComparison,
+    GaiaXpRunSummary,
+)
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.quality_summary import (
     AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
@@ -57,8 +57,7 @@ from astrometricslib.models.quality_summary import (
     StackQualitySummary,
     TargetSessionContribution,
 )
-from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
     OutputQualityAssessment,
@@ -66,7 +65,8 @@ from astrometricslib.models.spectroscopy_quality import (
     StageQualityMetric,
     StageQualityRollup,
 )
-from astrometricslib.models.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.quality.stacking_quality import StackingInputQuality, StackingOutputQuality
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.stellar_source import (
     AnalysisResult,
     DifferentialRefractionRecord,

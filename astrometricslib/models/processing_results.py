@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from astrometricslib.models.quality_summary import StackQualitySummary
+from astrometricslib.models.quality.quality_summary import StackQualitySummary
 from astrometricslib.models.target import TargetQualitySummaries
 
 __all__ = ["PreviewRemakeResult", "ProcessTargetResult", "StackResult"]

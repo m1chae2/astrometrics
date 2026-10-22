@@ -4,7 +4,7 @@
 
 This file holds the evidence behind the photometry pipeline's tuned values: what was measured, on what data, with which library calls, and what came out. It is written for a reviewer who wants to repeat a measurement on their own camera and sky and tune the pipeline to match. The method itself (what each step does and why) is in the photometry READMEs under `astrometricslib/pipelines/photometry/`. Terms such as light curve, comparison ensemble, CV, MAD and AUC are defined in the [glossary](../../Glossary.md). The status labels (Measured, Partly measured, Design estimate) are defined in [index.md](index.md).
 
-Every procedure below reads a target that the library already holds. A run of the photometry stage goes through the public entry point `Astrometrics().processing.process_target` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.process_target -->, and its run-level checks (gates) are read back with `PhotometryQualitySummary.gate` <!-- impl: astrometricslib.models.quality_summary.PipelineQualitySummaryBase.gate -->. Steps that need a lower-level function say so.
+Every procedure below reads a target that the library already holds. A run of the photometry stage goes through the public entry point `Astrometrics().processing.process_target` <!-- impl: astrometricslib.api.processing.ProcessingPipelines.process_target -->, and its run-level checks (gates) are read back with `PhotometryQualitySummary.gate` <!-- impl: astrometricslib.models.quality.quality_summary.PipelineQualitySummaryBase.gate -->. Steps that need a lower-level function say so.
 
 ## Measured and partly measured values
 
@@ -603,7 +603,7 @@ result = astrometrics.processing.process_target(
 print(result.quality.photometry.gate("comparison_ensemble").detail)
 ```
 
-  1. Read the comparison scatter in magnitudes from the gate detail, and the scatter of the field's constant stars from the run's `noiseModelCurve` (`result.quality.photometry.photometry_metrics.noise_model_curve`). <!-- impl: astrometricslib.models.quality_summary.PhotometryQualitySummary -->
+  1. Read the comparison scatter in magnitudes from the gate detail, and the scatter of the field's constant stars from the run's `noiseModelCurve` (`result.quality.photometry.photometry_metrics.noise_model_curve`). <!-- impl: astrometricslib.models.quality.quality_summary.PhotometryQualitySummary -->
 
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The scatter of non-variable stars, in magnitudes, at each brightness.

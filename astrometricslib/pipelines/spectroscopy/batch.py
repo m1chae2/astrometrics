@@ -510,7 +510,7 @@ def _attach_spectroscopy_quality_summary(
     """
     import statistics
 
-    from astrometricslib.models.quality_summary import (
+    from astrometricslib.models.quality.quality_summary import (
         SpectroscopyPipelineQualityMetrics,
         SpectroscopyQualitySummary,
     )
@@ -599,7 +599,7 @@ def _attach_spectroscopy_quality_summary(
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
     )
 
-    from astrometricslib.models.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
+    from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
     from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run
 
     record_pipeline_run(

@@ -9,7 +9,7 @@ a clean pass.
 from pathlib import Path
 from typing import Any
 
-from astrometricslib.models.gate_result import GateStatus
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.pipelines.stacking.pre_processing.frame_quarantine import (
     GATE_NAME,
     MINIMUM_FRAMES_TO_JUDGE,

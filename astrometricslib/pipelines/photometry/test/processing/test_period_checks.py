@@ -10,7 +10,7 @@ enough to resolve a periodogram peak when the training nights span months.
 
 import numpy as np
 
-from astrometricslib.models.gate_result import GateStatus, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateStatus, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.models.stellar_source import PeriodogramResult, TransitCandidate
 from astrometricslib.pipelines.photometry.processing import period_checks as checks
 from astrometricslib.pipelines.photometry.processing import periodicity_search as search

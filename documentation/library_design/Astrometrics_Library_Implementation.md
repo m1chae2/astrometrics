@@ -22,7 +22,7 @@ The package has six layers. Each layer may import only from the layers below it.
 
 | Layer | Holds | Calls into | Key modules |
 | --- | --- | --- | --- |
-| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/processing.py`, `astrometricslib/__init__.py` |
+| 1. Public API | The `Astrometrics` facade and the root exports | Layers 2 to 5 | `api/processing.py`, `api/quality.py`, `astrometricslib/__init__.py` |
 | 2. Pipeline runners | Stage dispatcher; batch runner | Layer 3 | `pipelines/tasks.py`, `pipelines/target_batch.py` |
 | 3. Pipelines | Stacking, astrometry, photometry, spectroscopy, asteroid detection | Layers 4 to 6; sideways between pipelines | `pipelines/<name>/` |
 | 4. Shared pipeline code | Frame scanning, target records, image conversion, quality primitives, run recording, pipeline contract | Layers 5 and 6 | `pipelines/shared/`, `pipelines/pipeline_base.py` |
@@ -54,8 +54,8 @@ Pydantic classes in `models/` hold fields and validation only (see `models/READM
 | Observation target (§2.1) | `Target`, `FrameRecord`, `ImageType` | `models/target.py` |
 | Stellar object (§2.1) | `StellarObject`, with `PhotometryResult`, `PeriodogramResult`, `TransitCandidate`, `SessionPhotometrySummary`, `StellarSessionMatch` and `SpectroscopyResult` | `models/stellar_source.py`, `models/spectral_cross_checks.py` |
 | Moving object candidate (§2.1) | `AsteroidDetectionCandidate`, `FrameDetection`, `MovingObjectTrack`, `EphemerisMatch`, `CascadeStage` | `models/moving_object.py` |
-| Quality record (§2.1) | `PipelineQualitySummaryBase` and one subclass per pipeline (`StackQualitySummary`, `AstrometryQualitySummary`, and so on); gates are `GateResult` with a `GateStatus` | `models/quality_summary.py`, `models/gate_result.py` |
-| Camera profile (§2.3) | `CameraProfile`, `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/quality_summary.py` |
+| Quality record (§2.1) | `PipelineQualitySummaryBase` and one subclass per pipeline (`StackQualitySummary`, `AstrometryQualitySummary`, and so on); gates are `GateResult` with a `GateStatus` | `models/quality/quality_summary.py`, `models/quality/gate_result.py` |
+| Camera profile (§2.3) | `CameraProfile`, `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/quality/quality_summary.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent`, `Entity`, `Used`, `WasGeneratedBy` | `models/provenance.py` |
 
 Camera profiles: `drivers/camera_profile_store.py` (`resolve_camera_profile`), `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`, `export_target_lineage_as_prov_xml`).

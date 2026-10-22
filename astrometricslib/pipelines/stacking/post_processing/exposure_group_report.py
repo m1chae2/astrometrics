@@ -8,8 +8,8 @@ group stack was lined up and weighted, to a manifest file in the ``groups``
 folder next to the combined stack.
 
 The entries are plain dictionaries with the field names of
-`astrometricslib.models.quality_summary.ExposureGroupSummary`, so the stage can
-put them straight into the quality summary.
+`astrometricslib.models.quality.quality_summary.ExposureGroupSummary`, so the
+stage can put them straight into the quality summary.
 """
 
 import json
@@ -21,7 +21,7 @@ import numpy as np
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import read_data
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
 from astrometricslib.pipelines.stacking.post_processing.exposure_saturation import (
     DEFAULT_STAR_FWHM_PIXELS,
     FrameSaturation,

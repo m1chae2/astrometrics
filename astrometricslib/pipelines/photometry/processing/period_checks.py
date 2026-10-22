@@ -28,7 +28,7 @@ from collections.abc import Sequence
 import numpy as np
 from astropy.timeseries import LombScargle
 
-from astrometricslib.models.gate_result import (
+from astrometricslib.models.quality.gate_result import (
     GateResult,
     GateStatus,
     failed_gate,

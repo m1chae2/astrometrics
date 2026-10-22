@@ -825,7 +825,8 @@ def quality_section(summary_name: str, metrics_name: str) -> str:
     Parameters
     ----------
     summary_name : `str`
-        The quality-summary class in `astrometricslib.models.quality_summary`.
+        The quality-summary class in
+        `astrometricslib.models.quality.quality_summary`.
     metrics_name : `str`
         The metrics class in the same module.
 
@@ -834,7 +835,7 @@ def quality_section(summary_name: str, metrics_name: str) -> str:
     section : `str`
         The Markdown of section 7.
     """
-    module = "astrometricslib.models.quality_summary"
+    module = "astrometricslib.models.quality.quality_summary"
     envelope = get_model_fields_table(require_symbol(module, summary_name))
     metrics = get_model_fields_table(require_symbol(module, metrics_name))
     return (

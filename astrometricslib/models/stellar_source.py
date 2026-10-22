@@ -12,9 +12,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
-from astrometricslib.models.astrometry_quality import CatalogMatchQuality
-from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
-from astrometricslib.models.gate_result import GateResult
 from astrometricslib.models.known_variability import (
     KnownVariability,
     catalogs_consulted,
@@ -22,19 +19,22 @@ from astrometricslib.models.known_variability import (
     is_confirmed_constant,
 )
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
-from astrometricslib.models.photometry_quality import (
+from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
+from astrometricslib.models.quality.gate_result import GateResult
+from astrometricslib.models.quality.photometry_quality import (
     InputQualityAssessment as PhotometryInputQuality,
 )
-from astrometricslib.models.photometry_quality import (
+from astrometricslib.models.quality.photometry_quality import (
     OutputQualityAssessment as PhotometryOutputQuality,
 )
-from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.spectroscopy_quality import (
     CatalogComparison,
     InputQualityAssessment,
     OutputQualityAssessment,
     StageQualityCheckpoint,
 )
+from astrometricslib.models.spectral_cross_checks import LineIndexClassification, ReddeningRecord
 from astrometricslib.models.wavelength_scale import WavelengthZeroPointRecord
 
 # Declares this module's own public surface. Without it, sphinx-automodapi

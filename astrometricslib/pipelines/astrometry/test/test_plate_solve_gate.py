@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from astrometricslib.drivers import astrometry_net_driver
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.quality_summary import AstrometryQualitySummary
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.quality_summary import AstrometryQualitySummary
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.astrometry import runner
 from astrometricslib.pipelines.astrometry.processing import star_identifier

@@ -21,8 +21,8 @@ from astropy.wcs import WCS
 from astrometricslib.drivers.catalog_access import CatalogAccess
 from astrometricslib.foundation import config as config_loader
 from astrometricslib.foundation.config import AppConfiguration
-from astrometricslib.models.gate_result import GateStatus
-from astrometricslib.models.spectroscopy_quality import StageQualityCheckpoint, metric
+from astrometricslib.models.quality.gate_result import GateStatus
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityCheckpoint, metric
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch

@@ -96,7 +96,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.process_image` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.drivers.astrometry_net_driver.AstrometryNetPlateSolveDriver._solve_locally` | RESOLVED | Resolves; used by library code |
-| `astrometricslib.models.gate_result.unchecked_gate` | RESOLVED | Resolves; used by library code |
+| `astrometricslib.models.quality.gate_result.unchecked_gate` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.pre_processing.frame_photometry._process_single_frame_worker` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.refine_star_centroid` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry` | RESOLVED | Resolves; used by library code |

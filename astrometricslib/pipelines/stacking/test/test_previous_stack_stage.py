@@ -13,7 +13,7 @@ import pytest
 
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.models.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
+from astrometricslib.models.quality.quality_summary import StackingPipelineQualityMetrics, StackQualitySummary
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.stacking import stage as stacking_tasks
 from astrometricslib.pipelines.stacking.post_processing.previous_stack import previous_stack_path

@@ -53,7 +53,7 @@ The Gaia satellite measured a low-resolution spectrum, the XP spectrum, for abou
    - the median ratio and the RMS in four bands: 4200 to 5000 Å, 5000 to 6000 Å, 6000 to 7000 Å and 7000 to 8000 Å;
    - the wavelength shift that best correlates the two spectra's logarithmic derivatives (d ln F / dλ, which emphasizes the lines and edges and ignores the overall slope). The sign is positive when the observed features sit at longer wavelengths than XP's. The search covers ±60 Å. A correlation below 0.3 gives no shift. The 0.3 design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates) sits far above chance correlation and far below the correlation of two spectra of the same star (see [SPE-28](../../../../documentation/library_design/validation/spectroscopy.md#spe-28)).
 
-The result is stored on `SpectroscopyResult.gaia_xp_comparison` (`GaiaXpComparison`, in `models/gaia_xp_comparison.py`), together with the normalization levels and whether either spectrum was blurred.
+The result is stored on `SpectroscopyResult.gaia_xp_comparison` (`GaiaXpComparison`, in `models/quality/gaia_xp_comparison.py`), together with the normalization levels and whether either spectrum was blurred.
 
 **Limits.** The 0.05 residual limit is above XP's own 1 to 2% calibration error, 3% per 1000 Å is an 11% change across the compared range, and 11 Å is one pixel (design estimate; see [spectroscopy design estimates](../../../../documentation/library_design/validation/spectroscopy.md#design-estimates)).
 

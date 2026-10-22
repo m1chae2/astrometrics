@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel
 
-from astrometricslib.models.quality_summary import TargetSessionContribution
+from astrometricslib.models.quality.quality_summary import TargetSessionContribution
 from astrometricslib.models.target import FrameRecord
 
 # A session night runs noon-to-noon local time rather than

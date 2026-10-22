@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validat
 
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.moving_object import AsteroidDetectionCandidate
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionQualitySummary,
     AstrometryQualitySummary,
     PhotometryQualitySummary,

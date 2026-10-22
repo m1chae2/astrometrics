@@ -10,7 +10,7 @@ for SPEC filters.
 from unittest.mock import MagicMock, patch
 
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     StackingPipelineQualityMetrics,
     StackQualitySummary,
 )

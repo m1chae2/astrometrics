@@ -92,14 +92,14 @@ from scipy.interpolate import PchipInterpolator
 from scipy.ndimage import gaussian_filter1d
 
 from astrometricslib.drivers.interfaces.gaia_xp_driver import GaiaXpDriver
-from astrometricslib.models.gaia_xp_comparison import (
+from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
     GaiaXpComparison,
     GaiaXpRunSummary,
 )
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.spectroscopy_quality import StageQualityMetric, metric
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.spectroscopy_quality import StageQualityMetric, metric
 from astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_mask import atmospheric_band_mask
 from astrometricslib.pipelines.spectroscopy.pre_processing.spectral_resolution import (
     FALLBACK_RESOLUTION_ELEMENT_ANGSTROM,

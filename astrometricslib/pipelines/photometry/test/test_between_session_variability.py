@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from astrometricslib.models.quality_summary import FrameEnsembleComposition
+from astrometricslib.models.quality.quality_summary import FrameEnsembleComposition
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry.batch import (
     _match_and_merge_across_sessions,

@@ -8,7 +8,7 @@ records the fitted curve on the quality summary so a plot can show it.
 import numpy as np
 import pytest
 
-from astrometricslib.models.quality_summary import NoiseModelPoint, PhotometryPipelineQualityMetrics
+from astrometricslib.models.quality.quality_summary import NoiseModelPoint, PhotometryPipelineQualityMetrics
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject
 from astrometricslib.pipelines.photometry import runner
 from astrometricslib.pipelines.photometry.processing.variability_indices import NoiseModel

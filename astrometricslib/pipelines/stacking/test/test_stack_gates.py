@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 
 from astrometricslib.foundation.enums import FilterType
-from astrometricslib.models.gate_result import GateResult, GateStatus
-from astrometricslib.models.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.quality_summary import ExcludedFrame, StackingPipelineQualityMetrics
 from astrometricslib.models.target import FrameRecord
 from astrometricslib.pipelines.shared.quality.saturation import is_saturation_significant
 from astrometricslib.pipelines.stacking.post_processing import assess_output_quality as aoq

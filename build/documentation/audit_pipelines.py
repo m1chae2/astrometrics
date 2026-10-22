@@ -321,25 +321,25 @@ def audit_pipeline_structures() -> list[dict[str, Any]]:
         (
             "astrometricslib.pipelines.astrometry.runner",
             "AstrometryPipelineAdapter",
-            "astrometricslib.models.quality_summary",
+            "astrometricslib.models.quality.quality_summary",
             "AstrometryQualitySummary",
         ),
         (
             "astrometricslib.pipelines.photometry.runner",
             "PhotometryPipelineAdapter",
-            "astrometricslib.models.quality_summary",
+            "astrometricslib.models.quality.quality_summary",
             "PhotometryQualitySummary",
         ),
         (
             "astrometricslib.pipelines.spectroscopy.runner",
             "SpectroscopyPipelineAdapter",
-            "astrometricslib.models.quality_summary",
+            "astrometricslib.models.quality.quality_summary",
             "SpectroscopyQualitySummary",
         ),
         (
             "astrometricslib.pipelines.asteroid_detection.runner",
             "AsteroidDetectionPipelineAdapter",
-            "astrometricslib.models.quality_summary",
+            "astrometricslib.models.quality.quality_summary",
             "AsteroidDetectionQualitySummary",
         ),
     ]
@@ -403,7 +403,7 @@ def audit_pipeline_structures() -> list[dict[str, Any]]:
             getattr(driver_mod, "SirilStackingDriver", None) is not None,
             getattr(session_mod, "ImageProcessing", None) is not None,
         ))
-        qs_mod = importlib.import_module("astrometricslib.models.quality_summary")
+        qs_mod = importlib.import_module("astrometricslib.models.quality.quality_summary")
         stacking_fields = list(qs_mod.StackQualitySummary.model_fields.keys())
     except ImportError, AttributeError:
         entry_points_exist = False

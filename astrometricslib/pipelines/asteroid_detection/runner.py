@@ -12,7 +12,7 @@ from typing import Any
 
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.moving_object_config import MovingObjectConfigLoader
-from astrometricslib.models.quality_summary import (
+from astrometricslib.models.quality.quality_summary import (
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
 )

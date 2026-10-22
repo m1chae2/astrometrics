@@ -200,20 +200,20 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `pipeline_version` | `str` | Version number of the pipeline's processing rules. |
 | `target_id` | `str` | Identifier of the target (the sky object being studied). |
 | `target_session_ids` | `list[str]` | Identifiers of the observing sessions (usually one night each) used in the run. |
-| `target_session_breakdown` | `list[astrometricslib.models.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
+| `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |
-| `gates` | `list[astrometricslib.models.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
+| `gates` | `list[astrometricslib.models.quality.gate_result.GateResult]` | Every quality gate result: passed, failed or not checked. |
 | `created_at` | `datetime.datetime` | Time the quality summary was made, in UTC. |
 | `provenance_activity_id` | `str \| None` | Identifier of this run in the provenance record (the IVOA-standard log of which run made which data). |
 | `upstream_entity_id` | `str \| None` | Identifier of the exact database record this run read as its input. |
-| `stacking_metrics` | `astrometricslib.models.quality_summary.StackingPipelineQualityMetrics` | The stacking measurements (Section 7.2). |
-| `input_quality` | `astrometricslib.models.stacking_quality.StackingInputQuality \| None` | Structured assessment of the raw frames' quality. |
-| `output_quality` | `astrometricslib.models.stacking_quality.StackingOutputQuality \| None` | Structured assessment of the final stack's quality. |
+| `stacking_metrics` | `astrometricslib.models.quality.quality_summary.StackingPipelineQualityMetrics` | The stacking measurements (Section 7.2). |
+| `input_quality` | `astrometricslib.models.quality.stacking_quality.StackingInputQuality \| None` | Structured assessment of the raw frames' quality. |
+| `output_quality` | `astrometricslib.models.quality.stacking_quality.StackingOutputQuality \| None` | Structured assessment of the final stack's quality. |
 
 ### 7.2 Domain scientific metrics schema (`StackingPipelineQualityMetrics`)
 
@@ -222,7 +222,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `is_spectral` | `bool` | True if the image is a slitless spectrum image (light spread by a grating) rather than a normal image. |
 | `frames_submitted` | `int` | Number of frames offered for calibration and stacking. |
 | `frames_stacked` | `int` | Number of light frames (exposures of the target) aligned and stacked. |
-| `excluded_frames` | `list[astrometricslib.models.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
+| `excluded_frames` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Input frames set aside before stacking, each with its reason. |
 | `rejected_pixel_fraction` | `float \| None` | Share of pixel values rejected (clipped) while building the stack. |
 | `rejected_fraction_flagged` | `bool` | True if pixel rejection was above the warning threshold. |
 | `background_split_detected` | `bool` | True if the frames' sky-background levels split into two groups with a sudden jump between them (gap at least 4 times the spread within a group, checked for each exposure length), for example clouds arriving. The frames outside the larger group are set aside. |
@@ -234,7 +234,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `flat_calibration_issues` | `list[str]` | Messages about problems with the flat calibration. |
 | `saturated_pixel_fraction` | `float \| None` | Share of saturated pixels (clipped at the sensor's maximum) in the final stack. |
 | `saturation_flagged` | `bool` | True if the stack holds a significant share of saturated pixels. |
-| `exposure_groups` | `list[astrometricslib.models.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
+| `exposure_groups` | `list[astrometricslib.models.quality.quality_summary.ExposureGroupSummary]` | One sub-stack per exposure length, with its details. |
 | `recommended_exposure_seconds` | `float \| None` | Estimated exposure, in seconds, that keeps bright stars below clipping. |
 | `zero_pixel_fraction` | `float \| None` | Share of stack pixels that are exactly zero. |
 | `zero_fraction_flagged` | `bool` | True if over-subtraction clipped pixels at zero ADU (zero camera counts). |
@@ -244,7 +244,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `median_input_fwhm_px` | `float \| None` | Median FWHM of all light frames that were kept. |
 | `expected_stack_fwhm_px` | `float \| None` | Expected stack FWHM: the RMS of a sample of input-frame FWHMs. |
 | `fwhm_degraded` | `bool` | True if the stack FWHM over the expected FWHM is above the limit (the stack is blurrier than predicted). |
-| `spectral_registration_flags` | `list[astrometricslib.models.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
+| `spectral_registration_flags` | `list[astrometricslib.models.quality.quality_summary.ExcludedFrame]` | Frames about which the spectral registration (alignment) test raised a concern. |
 | `spectral_registration_checked` | `bool` | Whether the spectral registration (alignment) test ran. |
 | `stacking_duration_seconds` | `float \| None` | How long the stacking run took, in seconds. |
 | `timed_out` | `bool` | True if the stacking run timed out. |

@@ -11,8 +11,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from astrometricslib.models.gate_result import GateResult, GateStatus
-from astrometricslib.models.quality_summary import ExcludedFrame
+from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.quality_summary import ExcludedFrame
 from astrometricslib.models.stellar_source import PhotometryResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner

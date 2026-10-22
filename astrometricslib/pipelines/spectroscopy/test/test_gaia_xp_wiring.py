@@ -15,8 +15,8 @@ import pytest
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.driver_set import Drivers
-from astrometricslib.models.gaia_xp_comparison import GaiaXpComparison
-from astrometricslib.models.gate_result import GateStatus
+from astrometricslib.models.quality.gaia_xp_comparison import GaiaXpComparison
+from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result

@@ -6,7 +6,7 @@ run right after normalization settles a star's final light curve, and
 never needs to change when the variability-flagging logic does.
 """
 
-from astrometricslib.models.photometry_quality import InputQualityAssessment
+from astrometricslib.models.quality.photometry_quality import InputQualityAssessment
 
 # A star missing from more than half of a session's frames has a light
 # curve that is mostly gaps, not signal. Below this share, coverage itself

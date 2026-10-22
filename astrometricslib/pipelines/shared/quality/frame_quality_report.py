@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from astrometricslib.foundation.errors import InvalidArgumentError
-from astrometricslib.models.quality_reports import InputQualityReport, RawFrameCheckReport
+from astrometricslib.models.quality.quality_reports import InputQualityReport, RawFrameCheckReport
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
 from astrometricslib.pipelines.shared.quality import frame_selection, frame_statistics

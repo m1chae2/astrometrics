@@ -22,7 +22,7 @@ of the post-hoc estimate was set on that estimator's own scale, so it does
 not carry over.
 """
 
-from astrometricslib.models.spectroscopy_quality import (
+from astrometricslib.models.quality.spectroscopy_quality import (
     InputQualityAssessment,
     StageQualityCheckpoint,
     StageQualityMetric,

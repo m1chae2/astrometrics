@@ -27,7 +27,7 @@ from skimage.registration import phase_cross_correlation
 
 from astrometricslib.drivers.fits_access import collapse_to_2d, read_data
 from astrometricslib.foundation.errors import ProcessingError
-from astrometricslib.models.stack_comparison import StackComparison, StackMeasurements
+from astrometricslib.models.quality.stack_comparison import StackComparison, StackMeasurements
 from astrometricslib.pipelines.astrometry.pre_processing.fwhm import measure_fwhm_from_data
 
 logger = logging.getLogger(__name__)

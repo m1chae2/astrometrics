@@ -19,8 +19,8 @@ runner; the other four are built here. A catalog lookup that was
 never attempted is ``not_checked``; it is not a pass.
 """
 
-from astrometricslib.models.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
-from astrometricslib.models.quality_summary import AstrometryPipelineQualityMetrics
+from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 
 SOURCE_DETECTION_GATE_NAME = "source_detection"
 RESIDUAL_GATE_NAME = "astrometric_residual"

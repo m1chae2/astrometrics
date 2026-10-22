@@ -9,8 +9,8 @@ as a result known to be current.
 from pathlib import Path
 
 from astrometricslib.drivers.provenance_store import ProvenanceStore
-from astrometricslib.models.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.provenance import Activity, Agent, WasAssociatedWith
+from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
 from astrometricslib.models.stellar_source import PhotometryResult, SpectroscopyResult
 from astrometricslib.pipelines.shared.staleness import (
     catalog_match_quality_is_stale,
@@ -67,7 +67,7 @@ def test_is_result_stale_is_true_when_the_version_differs(tmp_path: Path) -> Non
 
 def test_photometry_result_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the photometry wrapper compares against the live version."""
-    from astrometricslib.models.quality_summary import PHOTOMETRY_PIPELINE_VERSION
+    from astrometricslib.models.quality.quality_summary import PHOTOMETRY_PIPELINE_VERSION
 
     store = make_store(tmp_path)
     record_run(store, "job-1", "photometry", PHOTOMETRY_PIPELINE_VERSION)
@@ -78,7 +78,7 @@ def test_photometry_result_is_stale_reads_its_own_generated_by_job_id(tmp_path: 
 
 def test_spectroscopy_result_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the spectroscopy wrapper compares against the live version."""
-    from astrometricslib.models.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
+    from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 
     store = make_store(tmp_path)
     record_run(store, "job-1", "spectroscopy", "0.9.0")
@@ -89,7 +89,7 @@ def test_spectroscopy_result_is_stale_reads_its_own_generated_by_job_id(tmp_path
 
 def test_catalog_match_quality_is_stale_reads_its_own_generated_by_job_id(tmp_path: Path) -> None:
     """Check the astrometry wrapper compares against the live version."""
-    from astrometricslib.models.quality_summary import ASTROMETRY_PIPELINE_VERSION
+    from astrometricslib.models.quality.quality_summary import ASTROMETRY_PIPELINE_VERSION
 
     store = make_store(tmp_path)
     record_run(store, "job-1", "astrometry", ASTROMETRY_PIPELINE_VERSION)

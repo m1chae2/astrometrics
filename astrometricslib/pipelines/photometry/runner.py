@@ -14,7 +14,7 @@ import statistics
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.quality_summary import NoiseModelPoint
+from astrometricslib.models.quality.quality_summary import NoiseModelPoint
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
@@ -524,7 +524,7 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             cross-session matching, or (when `process_input` found
             nothing to do) the reason why -- any, all, or none of these.
         """
-        from astrometricslib.models.quality_summary import (
+        from astrometricslib.models.quality.quality_summary import (
             ExcludedFrame,
             PhotometryPipelineQualityMetrics,
             PhotometryQualitySummary,

@@ -68,7 +68,7 @@ checkpoint 0 (raw frame) -> pre-processing -> checkpoint 1 (calibrated spectrum)
 
 ### The record
 
-A checkpoint is a `StageQualityCheckpoint` (in `models/spectroscopy_quality.py`). It holds the stage name (`raw_frame`, `pre_processing`, `processing` or `post_processing`), a list of `StageQualityMetric` records, and a list of `flags`. A flag is a short label for a condition worth a reader's attention, such as `zero_order_saturated`. Each stage README lists its checkpoint's flags.
+A checkpoint is a `StageQualityCheckpoint` (in `models/quality/spectroscopy_quality.py`). It holds the stage name (`raw_frame`, `pre_processing`, `processing` or `post_processing`), a list of `StageQualityMetric` records, and a list of `flags`. A flag is a short label for a condition worth a reader's attention, such as `zero_order_saturated`. Each stage README lists its checkpoint's flags.
 
 Each `StageQualityMetric` has these fields:
 
@@ -102,7 +102,7 @@ Each stage README lists its checkpoint's metrics in a table, with the unit, the 
 
 ### Adding a metric
 
-Adding a metric to a checkpoint takes one `metric(...)` call in that checkpoint's builder. `metric` is in `models/spectroscopy_quality.py`:
+Adding a metric to a checkpoint takes one `metric(...)` call in that checkpoint's builder. `metric` is in `models/quality/spectroscopy_quality.py`:
 
 ```python
 metric(name, value, unit, limit=None, higher_is_better=True, note="", *, limit_is_a_pass=True)
@@ -219,7 +219,7 @@ Each star's spectrum moves through all three stages in order. The pipeline store
 
 - **Utilities** (`utilities/`) hold tools that are not part of processing a target's spectra:
   - `calibration_tuner.py` derives a camera's physical calibration ahead of time (see [Calibration tuning](#calibration-tuning)).
-  - `registration_quality.py` checks how well a stack of spectral images aligned. It follows each frame's zero-order star (the star's undispersed image) and flags frames where that star jumps or fades. The stacking stage calls it after it stacks spectral frames (`_check_spectral_registration_quality` in `pipelines/stacking/stage.py`), and `api/processing.py` exposes its outlier test and thresholds.
+  - `registration_quality.py` checks how well a stack of spectral images aligned. It follows each frame's zero-order star (the star's undispersed image) and flags frames where that star jumps or fades. The stacking stage calls it after it stacks spectral frames (`_check_spectral_registration_quality` in `pipelines/stacking/stage.py`), and `api/quality.py` exposes its outlier test and thresholds.
 - The files at this folder's root drive a star or a session through the three stages above. They implement [How this runs in practice](#how-this-runs-in-practice), not a fourth stage:
   - `pipeline.py` holds `SpectroscopyPipeline`, which extracts and analyzes every star in one image.
   - `runner.py` runs one image: it identifies the stars, runs the pipeline and builds the run summary.

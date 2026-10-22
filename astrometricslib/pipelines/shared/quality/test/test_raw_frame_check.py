@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from astrometricslib.api.processing import QualityDiagnostics
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.drivers import camera_profile_store
 from astrometricslib.foundation.config import AppConfiguration, _TomlSectionedConfig
 from astrometricslib.foundation.errors import ConfigurationError

@@ -145,7 +145,7 @@ exclude = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests", "astrometricslib/test", "astrometricslib/foundation", "wayfindinglib/test", "build/migrations", "mcp_servers"]
+testpaths = ["astrometricslib", "wayfindinglib", "backend/tests", "mcp_servers", "build/migrations"]
 pythonpath = ["."]
 addopts = "-v -m 'not trio'"
 markers = [
@@ -614,4 +614,3 @@ forbidden_modules = [
     "wayfindinglib.drivers.control_record_store",
     "wayfindinglib.drivers.catalog",
 ]
-

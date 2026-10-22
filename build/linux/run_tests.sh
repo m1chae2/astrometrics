@@ -11,7 +11,12 @@
 # Usage:
 #   ./build/linux/run_tests.sh                 # every suite, no coverage
 #   ./build/linux/run_tests.sh astrometricslib # one suite
+#   ./build/linux/run_tests.sh migrations      # build/migrations/ scripts
 #   COVERAGE=1 ./build/linux/run_tests.sh backend
+#
+# Suites: astrometricslib, wayfindinglib, backend, mcp_servers, migrations.
+# "all" runs every one. A bare `pytest` collects the same tests, because
+# `testpaths` in pyproject.toml names the same folders (a test checks this).
 #
 # Any additional arguments are forwarded to pytest, e.g.
 #   ./build/linux/run_tests.sh wayfindinglib -k visibility
@@ -45,9 +50,10 @@ SUITE="${1:-all}"
 suite_targets() {
   case "$1" in
     astrometricslib) echo "astrometricslib/" ;;
-    wayfindinglib)   echo "wayfindinglib/ --ignore=wayfindinglib/scripts/commissioning/test" ;;
+    wayfindinglib)   echo "wayfindinglib/" ;;
     backend)         echo "backend/tests/" ;;
     mcp_servers)     echo "mcp_servers/" ;;
+    migrations)      echo "build/migrations/" ;;
     *) echo "unknown suite: $1" >&2; return 1 ;;
   esac
 }
@@ -79,15 +85,15 @@ case "$SUITE" in
   all)
     # Coverage is per-package and each run overwrites coverage.xml, so the
     # combined run is for local use and leaves coverage to the CI jobs.
-    for suite in astrometricslib wayfindinglib backend mcp_servers; do
+    for suite in astrometricslib wayfindinglib backend mcp_servers migrations; do
       COVERAGE=0 run_suite "$suite" "$@"
     done
     ;;
-  astrometricslib|wayfindinglib|backend|mcp_servers)
+  astrometricslib|wayfindinglib|backend|mcp_servers|migrations)
     run_suite "$SUITE" "$@"
     ;;
   *)
-    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers] [pytest args...]" >&2
+    echo "Usage: $0 [all|astrometricslib|wayfindinglib|backend|mcp_servers|migrations] [pytest args...]" >&2
     exit 2
     ;;
 esac

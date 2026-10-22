@@ -14,7 +14,11 @@ into numbers. Two camera facts matter:
 This module picks both numbers in this order:
 
 1. The camera's profile (`astrometricslib.models.camera_profile`), which
-   records where each number came from.
+   records where each number came from. A profile keeps one gain and read
+   noise for each camera setting (gain setting, offset and binning), and a
+   frame uses the entry for its own setting only. A frame whose setting has
+   no entry gets nothing from the profile, never the value of a nearby
+   setting.
 2. The FITS header: ``EGAIN`` for the gain (electrons per ADU) and
    ``RDNOISE`` for the read noise (electrons). The ``GAIN`` card is never
    used as electrons per ADU. Cameras such as the ZWO ASI533 write a gain
@@ -24,15 +28,18 @@ This module picks both numbers in this order:
    that it assumed these, so the uncertainties can be reported as "assume
    unit gain".
 
-The numbers depend on the camera's gain setting. A camera profile holds one
-value, so it is exact only for frames taken at that setting.
+The numbers depend on the camera's gain setting, offset and binning, so the
+result also says why the profile gave nothing when it did not (see
+`DetectorNoise.profile_gap_reason`).
 """
 
 import math
 from dataclasses import dataclass
 from typing import Any
 
-from astrometricslib.models.camera_profile import CameraProfile
+from astrometricslib.drivers.calibration_library import header_binning
+from astrometricslib.models.camera_profile import CameraProfile, SensorSettingNoise
+from astrometricslib.utilities.iso_text import iso_or_gain_text
 
 
 @dataclass(frozen=True)
@@ -51,12 +58,18 @@ class DetectorNoise:
     read_noise_is_assumed : `bool`
         `True` when no source gave the read noise and `read_noise_e` is the
         assumed 0.0.
+    profile_gap_reason : `str` or `None`
+        Why the camera profile did not supply the gain, the read noise, or
+        both (for example, it has no entry for the frame's setting). `None`
+        when the profile supplied both. A header value may still have filled
+        the gap; the ``*_is_assumed`` flags say whether anything was assumed.
     """
 
     gain_e_per_adu: float = 1.0
     read_noise_e: float = 0.0
     gain_is_assumed: bool = True
     read_noise_is_assumed: bool = True
+    profile_gap_reason: str | None = None
 
 
 def _positive_number(value: Any, allow_zero: bool = False) -> float | None:
@@ -84,28 +97,90 @@ def _positive_number(value: Any, allow_zero: bool = False) -> float | None:
     return number
 
 
-def resolve_detector_noise(profile: CameraProfile | None, header: Any = None) -> DetectorNoise:
+def _header_gain_setting(header: Any) -> str | None:
+    """Read the gain setting (or ISO) a frame states in its header.
+
+    Returns
+    -------
+    gain_setting : `str` or `None`
+        The ``ISOSPEED`` or ``GAIN`` card as text, or `None` when the
+        header has neither (or there is no header).
+    """
+    return iso_or_gain_text(header) if header is not None else None
+
+
+def _header_offset_setting(header: Any) -> Any:
+    """Read the offset a frame states in its header.
+
+    Returns
+    -------
+    offset : `Any`
+        The ``OFFSET`` card, else ``BLKLEVEL``, else `None`. A missing offset
+        is treated as 0 when the setting is compared, as the calibration
+        library does.
+    """
+    if header is None:
+        return None
+    offset = header.get("OFFSET")
+    return header.get("BLKLEVEL") if offset is None else offset
+
+
+def resolve_detector_noise(
+    profile: CameraProfile | None,
+    header: Any = None,
+    *,
+    gain_setting: Any = None,
+    offset: Any = None,
+    binning: Any = None,
+) -> DetectorNoise:
     """Pick the gain and read noise for a camera and frame.
 
     Parameters
     ----------
     profile : `CameraProfile` or `None`
-        The camera's profile. Its ``gain_e_per_adu`` and ``read_noise_e``
-        come first.
+        The camera's profile. Its ``sensor_noise`` entry for the frame's
+        setting comes first.
     header : `astropy.io.fits.Header`, optional
-        The frame's header. ``EGAIN`` and ``RDNOISE`` are used for a number
-        the profile does not give.
+        The frame's header. It gives the frame's setting (``ISOSPEED`` or
+        ``GAIN``, ``OFFSET`` or ``BLKLEVEL``, ``XBINNING`` and
+        ``YBINNING``), and its ``EGAIN`` and ``RDNOISE`` are used for a
+        number the profile does not give.
+    gain_setting, offset, binning : `Any`, optional
+        The frame's setting, when it is known from somewhere other than a
+        header (for example a frame record's ``iso``, ``offset`` and
+        ``binning``). Each one given replaces what the header says.
 
     Returns
     -------
     noise : `DetectorNoise`
-        The numbers, with a flag for each one that had to be assumed.
+        The numbers, with a flag for each one that had to be assumed and the
+        reason when the profile gave nothing.
     """
-    gain = profile.gain_e_per_adu.value if profile is not None and profile.gain_e_per_adu else None
+    if gain_setting is None:
+        gain_setting = _header_gain_setting(header)
+    if offset is None:
+        offset = _header_offset_setting(header)
+    if binning is None:
+        binning = header_binning(header) if header is not None else None
+
+    entry: SensorSettingNoise | None = None
+    profile_gap_reason: str | None = None
+    if profile is None:
+        profile_gap_reason = "no camera profile"
+    else:
+        entry = profile.sensor_noise_for(gain_setting, offset, binning) if gain_setting is not None else None
+        if entry is None:
+            profile_gap_reason = profile.sensor_noise_gap_reason(gain_setting, offset, binning)
+        elif entry.gain_e_per_adu is None:
+            profile_gap_reason = "the profile entry for this setting has no gain"
+        elif entry.read_noise_e is None:
+            profile_gap_reason = "the profile entry for this setting has no read noise"
+
+    gain = entry.gain_e_per_adu.value if entry is not None and entry.gain_e_per_adu else None
     if gain is None and header is not None:
         gain = _positive_number(header.get("EGAIN"))
 
-    read_noise = profile.read_noise_e.value if profile is not None and profile.read_noise_e else None
+    read_noise = entry.read_noise_e.value if entry is not None and entry.read_noise_e else None
     if read_noise is None and header is not None:
         read_noise = _positive_number(header.get("RDNOISE"), allow_zero=True)
 
@@ -114,4 +189,5 @@ def resolve_detector_noise(profile: CameraProfile | None, header: Any = None) ->
         read_noise_e=read_noise if read_noise is not None else 0.0,
         gain_is_assumed=gain is None,
         read_noise_is_assumed=read_noise is None,
+        profile_gap_reason=profile_gap_reason,
     )

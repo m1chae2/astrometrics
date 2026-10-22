@@ -198,6 +198,10 @@ class PixelNoiseModel:
     variance_scale : `numpy.ndarray` or `None`
         The image-sized map of that factor, or `None` without a rejection
         map. Not part of the stored record, and not compared.
+    profile_gap_reason : `str` or `None`
+        Why the camera profile gave no gain or read noise for this frame's
+        setting, or `None` when it gave both (see
+        `DetectorNoise.profile_gap_reason`).
     """
 
     gain_e_per_adu: float = 1.0
@@ -209,6 +213,7 @@ class PixelNoiseModel:
     frames_are_assumed: bool = False
     rejection_map_used: bool = False
     variance_scale: np.ndarray | None = field(default=None, compare=False, repr=False)
+    profile_gap_reason: str | None = None
 
     @property
     def poisson_coefficient(self) -> float:
@@ -278,8 +283,8 @@ class PixelNoiseModel:
         record : `dict`
             ``gain_e_per_adu``, ``read_noise_e``, ``gain_is_assumed``,
             ``read_noise_is_assumed``, ``adu_per_stored_unit``,
-            ``frames_averaged``, ``frames_are_assumed`` and
-            ``rejection_map_used``.
+            ``frames_averaged``, ``frames_are_assumed``,
+            ``rejection_map_used`` and ``profile_gap_reason``.
         """
         return {
             "gain_e_per_adu": float(self.gain_e_per_adu),
@@ -290,6 +295,7 @@ class PixelNoiseModel:
             "frames_averaged": int(self.frames_averaged),
             "frames_are_assumed": bool(self.frames_are_assumed),
             "rejection_map_used": bool(self.rejection_map_used),
+            "profile_gap_reason": self.profile_gap_reason,
         }
 
 
@@ -302,7 +308,8 @@ def build_pixel_noise_model(
     """Pick the noise model for one frame.
 
     The gain and read noise come from `resolve_detector_noise` (the camera
-    profile first, then the ``EGAIN`` and ``RDNOISE`` header cards, then an
+    profile's entry for the frame's own gain, offset and binning first, then
+    the ``EGAIN`` and ``RDNOISE`` header cards, then an
     assumed 1 electron per ADU and no read noise). A frame whose brightest
     pixel is at or below 1.0 is a Siril stack in fractions of full scale (see
     `intensity_scale`), so one stored unit is 65535 ADU and the frame count
@@ -352,6 +359,7 @@ def build_pixel_noise_model(
         read_noise_e=noise.read_noise_e,
         gain_is_assumed=noise.gain_is_assumed,
         read_noise_is_assumed=noise.read_noise_is_assumed,
+        profile_gap_reason=noise.profile_gap_reason,
         adu_per_stored_unit=adu_per_unit,
         frames_averaged=frames,
         frames_are_assumed=frames_assumed,

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from astrometricslib import ErrorInfo, FilterType
 from astrometricslib.foundation.jobs.models import ProcessingJob, ProcessStatus
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.calibration_inventory import CalibrationEntry, CalibrationStats
 from astrometricslib.models.catalog_queries import OverlayStar, TargetStarCount
 from astrometricslib.models.measured_line_spread import MeasuredLineSpread
@@ -57,7 +58,6 @@ from astrometricslib.models.quality.metric_spec import (
     UncertaintyKind,
 )
 from astrometricslib.models.quality.quality_summary import (
-    AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
     AstrometryPipelineQualityMetrics,

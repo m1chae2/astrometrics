@@ -91,6 +91,7 @@ from astrometricslib.foundation.storage import (
     require_mounted_storage,
     safe_json_dumps,
 )
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
 from astrometricslib.models.catalog_queries import (
     CalibrationQueryResult,
     OverlayStar,
@@ -154,7 +155,6 @@ from astrometricslib.models.quality.quality_reports import (
     StackSummary,
 )
 from astrometricslib.models.quality.quality_summary import (
-    AppliedCameraProfile,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
     ExposureGroupSummary,

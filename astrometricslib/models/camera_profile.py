@@ -15,7 +15,13 @@ loads the profiles is in `astrometricslib.drivers.camera_profile_store`.
 
 import enum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from astrometricslib.utilities.camera_setting_text import (
+    canonical_binning_setting,
+    canonical_gain_setting,
+    canonical_offset_setting,
+)
 
 
 class ProvenanceKind(enum.StrEnum):
@@ -117,13 +123,130 @@ class QuantumEfficiencyRecord(BaseModel):
         return self
 
 
+class SensorSettingNoise(BaseModel):
+    """The gain and read noise of a camera at one gain, offset and binning.
+
+    A camera's conversion gain (electrons per ADU, where ADU is the
+    analog-to-digital unit, one step of the stored number) and its read noise
+    change with the camera's gain setting, its offset and its binning. A
+    value measured at one setting is therefore not a value for another, so
+    each entry names the setting it was measured at, and a frame uses an
+    entry only when its own setting matches exactly.
+
+    The three setting fields are rewritten into their standard form when the
+    entry is built (``0.0`` becomes ``0``), so ``"10.0"`` and ``"10"`` are the
+    same offset.
+
+    Attributes
+    ----------
+    gain_setting : `str`
+        The camera's gain setting (the header's ``GAIN`` card, a unitless
+        index, not electrons per ADU) or, for a DSLR, its ISO.
+    offset : `str`
+        The camera's offset: the constant it adds to every pixel.
+    binning : `str`
+        The binning, such as ``"1x1"``.
+    gain_e_per_adu : `ProvenancedValue` or `None`
+        The conversion gain at this setting, in electrons per ADU, or `None`
+        when only the read noise was measured.
+    read_noise_e : `ProvenancedValue` or `None`
+        The read noise at this setting, in electrons (RMS, root mean
+        square), or `None` when only the gain was measured.
+    temperature_c : `float` or `None`
+        The sensor temperature, in degrees C, the values were measured at.
+        It is a note about the measurement, not part of the key.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    gain_setting: str = Field(min_length=1)
+    offset: str = "0"
+    binning: str = "1x1"
+    gain_e_per_adu: ProvenancedValue | None = None
+    read_noise_e: ProvenancedValue | None = None
+    temperature_c: float | None = None
+
+    @field_validator("gain_setting", mode="before")
+    @classmethod
+    def write_gain_setting_in_standard_form(cls, value: object) -> str:
+        """Write the gain setting the way frames are compared.
+
+        Returns
+        -------
+        gain_setting : `str`
+            The setting in its standard form.
+        """
+        return canonical_gain_setting(value)
+
+    @field_validator("offset", mode="before")
+    @classmethod
+    def write_offset_in_standard_form(cls, value: object) -> str:
+        """Write the offset the way frames are compared.
+
+        Returns
+        -------
+        offset : `str`
+            The offset in its standard form.
+        """
+        return canonical_offset_setting(value)
+
+    @field_validator("binning", mode="before")
+    @classmethod
+    def write_binning_in_standard_form(cls, value: object) -> str:
+        """Write the binning the way frames are compared.
+
+        Returns
+        -------
+        binning : `str`
+            The binning in its standard form.
+        """
+        return canonical_binning_setting(value)
+
+    @model_validator(mode="after")
+    def check_entry_holds_a_number(self) -> SensorSettingNoise:
+        """Reject an entry that holds neither a gain nor a read noise.
+
+        Returns
+        -------
+        entry : `SensorSettingNoise`
+            This entry, unchanged, when it passes.
+
+        Raises
+        ------
+        ValueError
+            If both ``gain_e_per_adu`` and ``read_noise_e`` are `None`.
+        """
+        if self.gain_e_per_adu is None and self.read_noise_e is None:
+            raise ValueError("a sensor setting entry needs a gain, a read noise, or both")
+        return self
+
+    @property
+    def setting_key(self) -> tuple[str, str, str]:
+        """Give the setting this entry applies to.
+
+        Returns
+        -------
+        key : `tuple` [`str`, `str`, `str`]
+            The gain setting, offset and binning, each in standard form.
+        """
+        return (self.gain_setting, self.offset, self.binning)
+
+
+# The reason given for a frame when the profile still holds the single,
+# setting-less gain and read noise of the old file layout. Decision 7 of the
+# quality-metrics plan: such a value is never applied, because nobody recorded
+# the setting it was measured at. The profile migration script fixes it.
+UNMIGRATED_NOISE_REASON = "camera profile has no setting-keyed gain and read noise; run the profile migration"
+
+
 class CameraProfile(BaseModel):
     """The facts about one camera model that processing code relies on.
 
     Attributes
     ----------
     schema_version : `int`
-        The version of this file layout. It is 1 for now.
+        The version of this file layout. It is 2: gain and read noise are
+        stored per camera setting (version 1 held one value of each).
     camera_name : `str`
         The name this camera is filed under.
     name_aliases : `tuple` [`str`, ...]
@@ -153,18 +276,17 @@ class CameraProfile(BaseModel):
     quantum_efficiency : `QuantumEfficiencyRecord` or `None`
         The sensitivity curve, or `None` when none is known. Without
         one, spectra from this camera are not corrected for sensitivity.
-    gain_e_per_adu : `ProvenancedValue` or `None`
-        The conversion gain, in electrons per ADU: how many electrons the
-        sensor collected for each step of the stored number. Photometry
-        needs it to turn counts into a noise estimate. Gain depends on the
-        camera's gain setting, so this is the value at the setting the
-        frames were taken with. `None` when it has not been measured; the
-        photometry then assumes 1 electron per ADU and says so.
-    read_noise_e : `ProvenancedValue` or `None`
-        The read noise, in electrons (RMS, root mean square): the random
-        error added to every pixel each time the sensor is read out. Like
-        the gain, it depends on the camera's gain setting. `None` when it
-        has not been measured; the photometry then assumes zero.
+    sensor_noise : `tuple` [`SensorSettingNoise`, ...]
+        The conversion gain and read noise measured at each gain setting,
+        offset and binning the camera is used at. Photometry needs them to
+        turn counts into a noise estimate. Each setting appears once. A
+        frame uses an entry only when its own setting matches exactly; it
+        never borrows the value of a nearby setting.
+    has_unkeyed_noise_values : `bool`
+        `True` when the config still holds the old single gain and read
+        noise for this camera. They are ignored, because nobody recorded the
+        setting they were measured at. Run the profile migration to turn
+        them into a setting-keyed entry.
     notes : `str`
         Anything a reader should know that does not fit a field, such as
         a known open question about one of the numbers.
@@ -172,7 +294,7 @@ class CameraProfile(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: int = Field(default=1, ge=1, le=1)
+    schema_version: int = Field(default=2, ge=2, le=2)
     camera_name: str = Field(min_length=1)
     name_aliases: tuple[str, ...] = ()
     record_name: str | None = Field(default=None, min_length=1)
@@ -181,9 +303,93 @@ class CameraProfile(BaseModel):
     saturation_threshold_adu: ProvenancedValue
     photometric_linearity_limit_adu: ProvenancedValue | None = None
     quantum_efficiency: QuantumEfficiencyRecord | None = None
-    gain_e_per_adu: ProvenancedValue | None = None
-    read_noise_e: ProvenancedValue | None = None
+    sensor_noise: tuple[SensorSettingNoise, ...] = ()
+    has_unkeyed_noise_values: bool = False
     notes: str = ""
+
+    @model_validator(mode="after")
+    def check_each_setting_appears_once(self) -> CameraProfile:
+        """Reject two noise entries for the same gain, offset and binning.
+
+        Returns
+        -------
+        profile : `CameraProfile`
+            This profile, unchanged, when it passes.
+
+        Raises
+        ------
+        ValueError
+            If two ``sensor_noise`` entries share a setting.
+        """
+        seen: set[tuple[str, str, str]] = set()
+        for entry in self.sensor_noise:
+            if entry.setting_key in seen:
+                raise ValueError(
+                    f"two sensor_noise entries share gain {entry.gain_setting}, offset {entry.offset}, "
+                    f"binning {entry.binning}"
+                )
+            seen.add(entry.setting_key)
+        return self
+
+    def sensor_noise_for(
+        self, gain_setting: object, offset: object, binning: object
+    ) -> SensorSettingNoise | None:
+        """Find the noise entry recorded for exactly this camera setting.
+
+        Parameters
+        ----------
+        gain_setting : `Any`
+            The frame's gain (or ISO), as text or a number.
+        offset : `Any`
+            The frame's offset. A missing offset counts as 0.
+        binning : `Any`
+            The frame's binning, such as ``"1x1"`` or ``2``.
+
+        Returns
+        -------
+        entry : `SensorSettingNoise` or `None`
+            The entry whose gain, offset and binning all equal the frame's
+            (after each is written in standard form), or `None`. There is no
+            nearest-match fallback.
+        """
+        wanted = (
+            canonical_gain_setting(gain_setting),
+            canonical_offset_setting(offset),
+            canonical_binning_setting(binning),
+        )
+        return next((entry for entry in self.sensor_noise if entry.setting_key == wanted), None)
+
+    def sensor_noise_gap_reason(self, gain_setting: object, offset: object, binning: object) -> str | None:
+        """Say why a frame's setting has no gain and read noise.
+
+        Parameters
+        ----------
+        gain_setting : `Any`
+            The frame's gain (or ISO), or `None` when it does not state one.
+        offset : `Any`
+            The frame's offset.
+        binning : `Any`
+            The frame's binning.
+
+        Returns
+        -------
+        reason : `str` or `None`
+            `None` when `sensor_noise_for` finds an entry. Otherwise one
+            sentence saying why not: the profile still holds only the old
+            single values (`UNMIGRATED_NOISE_REASON`), the frame states no
+            gain, or the profile has no entry for this setting.
+        """
+        if gain_setting is None:
+            return "the frame does not state its gain setting, so no gain and read noise entry can match"
+        if self.sensor_noise_for(gain_setting, offset, binning) is not None:
+            return None
+        if self.has_unkeyed_noise_values and not self.sensor_noise:
+            return UNMIGRATED_NOISE_REASON
+        return (
+            "camera profile has no gain and read noise entry for "
+            f"gain {canonical_gain_setting(gain_setting)}, offset {canonical_offset_setting(offset)}, "
+            f"binning {canonical_binning_setting(binning)}"
+        )
 
     @property
     def saturation_threshold_can_be_reached(self) -> bool:

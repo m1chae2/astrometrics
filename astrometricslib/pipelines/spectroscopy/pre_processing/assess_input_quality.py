@@ -96,6 +96,8 @@ def noise_metrics(
         assumed.append("gain assumed to be 1 electron per ADU")
     if noise_model is not None and noise_model.read_noise_is_assumed:
         assumed.append("read noise assumed to be zero")
+    if noise_model is not None and noise_model.profile_gap_reason and assumed:
+        assumed.append(f"the camera profile gave no gain or read noise ({noise_model.profile_gap_reason})")
     if noise_model is not None and noise_model.frames_are_assumed:
         assumed.append("one frame assumed in the stack")
     assumption_note = f" Assumptions: {'; '.join(assumed)}." if assumed else ""

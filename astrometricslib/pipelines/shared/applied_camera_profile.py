@@ -11,7 +11,8 @@ from collections.abc import Iterable
 from typing import Any
 
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
-from astrometricslib.models.quality.quality_summary import AppliedCameraProfile, PipelineQualitySummaryBase
+from astrometricslib.models.applied_camera_profile import AppliedCameraProfile
+from astrometricslib.models.quality.quality_summary import PipelineQualitySummaryBase
 
 
 def most_common_camera_name(frames: Iterable[Any]) -> str | None:

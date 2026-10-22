@@ -225,7 +225,7 @@ Every run saves a quality summary: a record of what the run measured and how eac
 | `target_session_breakdown` | `list[astrometricslib.models.quality.quality_summary.TargetSessionContribution]` | For each session, how many frames it had and how many the run used. |
 | `upstream_quality_summary_reference` | `str \| None` | Name of the pipeline that had to run first, if any. |
 | `resolved_parameters` | `dict[str, Any]` | The settings the run actually used, after defaults were filled in. |
-| `camera_profile` | `astrometricslib.models.quality.quality_summary.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
+| `camera_profile` | `astrometricslib.models.applied_camera_profile.AppliedCameraProfile \| None` | The camera settings applied, such as the gain (e-/ADU) and the level at which pixels clip. |
 | `quality_processing_applied` | `bool` | Whether the quality gates were run. |
 | `flagged` | `bool` | True if one or more quality gates failed, so a person should look at the run. |
 | `flag_reasons` | `list[str]` | One plain sentence for each reason the run was flagged. |

@@ -724,8 +724,8 @@ def _flux_uncertainty_gate(
         return unchecked_gate(
             FLUX_UNCERTAINTY_GATE_NAME,
             f"errors assume unit gain (1 e-/ADU) because the camera's gain is not known, so the median "
-            f"error of {median_error_mag:.4f} mag is only a guide; add gain_e_per_adu to the camera "
-            "profile to make it a measurement",
+            f"error of {median_error_mag:.4f} mag is only a guide; add a sensor_noise entry for the frames' "
+            "gain, offset and binning to the camera profile to make it a measurement",
             source,
         )
     detail = f"median per-point error {median_error_mag:.4f} mag"

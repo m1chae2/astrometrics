@@ -827,10 +827,16 @@ class VariabilityAnalyzer:
                 reference_header.get("INSTRUME", reference_header.get("CAMERA"))
             )
             saturation_threshold_adu = camera_profile.saturation_threshold_adu.value
-            # The gain and read noise behind the flux errors. Every later
-            # frame is assumed to come from the same camera at the same
-            # settings, like the saturation threshold above.
+            # The gain and read noise behind the flux errors, for the reference
+            # frame's own gain, offset and binning. Every later frame is
+            # assumed to come from the same camera at the same settings, like
+            # the saturation threshold above.
             self.detector_noise = resolve_detector_noise(camera_profile, reference_header)
+            if self.detector_noise.profile_gap_reason:
+                logger.warning(
+                    "The camera profile gave no gain or read noise for the reference frame: %s.",
+                    self.detector_noise.profile_gap_reason,
+                )
             try:
                 reference_timestamp = read_observation_time(reference_header)
             except ObservationTimeError as error:

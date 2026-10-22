@@ -201,6 +201,38 @@ class _TomlSectionedConfig:
         """Set `key` within `section` to `str(value)`."""
         self._document[section][key] = str(value)
 
+    def set_item(self, section: str, key: str, item: object) -> None:
+        """Set `key` within `section` to a native TOML item, not text.
+
+        `set` always stores text. Some settings are real TOML structures,
+        such as the array of inline tables a camera profile keeps its
+        per-setting gain and read noise in. This stores such an item as given.
+
+        Parameters
+        ----------
+        section : `str`
+            The section's full flat name. It must exist.
+        key : `str`
+            The key to set. An existing key keeps its place in the file.
+        item : `object`
+            A `tomlkit` item, or a plain value `tomlkit` can convert.
+        """
+        self._document[section][key] = item
+
+    def remove_key(self, section: str, key: str) -> None:
+        """Delete `key` from `section`, doing nothing if it is not there.
+
+        Parameters
+        ----------
+        section : `str`
+            The section's full flat name. It must exist.
+        key : `str`
+            The key to delete.
+        """
+        table = self._document[section]
+        if key in table:
+            del table[key]
+
     def get(self, section: str, key: str, fallback: object = _UNSET) -> object:
         """Return `section`'s `key`, `configparser.get`-style.
 

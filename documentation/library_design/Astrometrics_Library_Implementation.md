@@ -55,10 +55,10 @@ Pydantic classes in `models/` hold fields and validation only (see `models/READM
 | Stellar object (§2.1) | `StellarObject`, with `PhotometryResult`, `PeriodogramResult`, `TransitCandidate`, `SessionPhotometrySummary`, `StellarSessionMatch` and `SpectroscopyResult` | `models/stellar_source.py`, `models/spectral_cross_checks.py` |
 | Moving object candidate (§2.1) | `AsteroidDetectionCandidate`, `FrameDetection`, `MovingObjectTrack`, `EphemerisMatch`, `CascadeStage` | `models/moving_object.py` |
 | Quality record (§2.1) | `PipelineQualitySummaryBase` and one subclass per pipeline (`StackQualitySummary`, `AstrometryQualitySummary`, and so on); gates are `GateResult` with a `GateStatus` | `models/quality/quality_summary.py`, `models/quality/gate_result.py` |
-| Camera profile (§2.3) | `CameraProfile`, `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/quality/quality_summary.py` |
+| Camera profile (§2.3) | `CameraProfile` (schema 2), `SensorSettingNoise` (gain and read noise per gain setting, offset and binning), `ProvenancedValue`, `QuantumEfficiencyRecord`, `AppliedCameraProfile` | `models/camera_profile.py`, `models/applied_camera_profile.py` |
 | Provenance (§2.3) | IVOA Provenance Data Model [7] classes such as `Agent`, `Entity`, `Used`, `WasGeneratedBy` | `models/provenance.py` |
 
-Camera profiles: `drivers/camera_profile_store.py` (`resolve_camera_profile`), `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`, `export_target_lineage_as_prov_xml`).
+Camera profiles: `drivers/camera_profile_store.py` (`resolve_camera_profile`, `save_sensor_setting_noise`), `drivers/camera_profile_migration.py` (`migrate_camera_profiles`), `pipelines/shared/applied_camera_profile.py` (`record_camera_profile`). Provenance: `pipelines/shared/provenance_recording.py` (`record_pipeline_run`), `drivers/provenance_store.py` (`ProvenanceStore`, `export_target_lineage_as_prov_xml`).
 
 ## 4. Pipelines
 

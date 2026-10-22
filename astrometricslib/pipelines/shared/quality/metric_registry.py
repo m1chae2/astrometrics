@@ -26,6 +26,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "fraction",
     "count",
     "degC",
+    "deg",
     "s",
     "e-",
     "e-/s/px",

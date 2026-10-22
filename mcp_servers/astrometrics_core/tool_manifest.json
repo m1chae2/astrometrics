@@ -121,6 +121,13 @@
       "interim_block": "",
       "note": "The AI is read-only, so a tool that writes is not offered."
     },
+    "quality_check_spectral_frames": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
+    },
     "quality_flag_value_outliers": {
       "tool_class": "compute",
       "category": "image-processing",
@@ -128,12 +135,19 @@
       "interim_block": "",
       "note": "Arithmetic on numbers the caller passes in. The user does not want it."
     },
-    "quality_frame_quality": {
+    "quality_measure_frames": {
       "tool_class": "compute",
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
+    },
+    "quality_measure_stack": {
+      "tool_class": "compute",
+      "category": "image-processing",
+      "disposition": "keep",
+      "interim_block": "",
+      "note": "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with the previous stack or another stack file. Saves nothing."
     },
     "quality_metrics": {
       "tool_class": "observe",
@@ -148,20 +162,6 @@
       "disposition": "keep",
       "interim_block": "",
       "note": "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each subject and metric, or every row). Writes nothing and creates no table."
-    },
-    "quality_spectral_frame_check": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by pier side. Nothing is saved."
-    },
-    "quality_stack_quality": {
-      "tool_class": "compute",
-      "category": "image-processing",
-      "disposition": "keep",
-      "interim_block": "",
-      "note": "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with the previous stack or another stack file. Saves nothing."
     },
     "star_analyze_periodicity": {
       "tool_class": "change-data",

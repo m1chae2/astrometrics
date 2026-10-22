@@ -33,19 +33,19 @@ Every Python example assumes the library is installed and configured with your o
   astro = Astrometrics()
   diagnostics = astro.quality
   # Step 1: per-frame star count, roundness and sky level for one session.
-  check = diagnostics.frame_quality(
+  check = diagnostics.measure_frames(
       "M 27", kind="raw_check", filter_name="L", since="2026-09-24T18:00", until="2026-09-25T06:00", limit=300
   )
   for row in check.frames:
       print(row.get("path"), row.get("star_count"), row.get("roundness"), row.get("sky_median_adu"))
   # Step 2: what the quarantine would move, and why. Nothing is moved.
-  preview = diagnostics.frame_quality("M 27", kind="quarantine_preview", limit=300)
+  preview = diagnostics.measure_frames("M 27", kind="quarantine_preview", limit=300)
   for frame in preview.would_move:
       print(frame.path, frame.reason)
   print(preview.notes)
   ```
 
-  `QualityDiagnostics.frame_quality` <!-- impl: astrometricslib.api.quality.QualityDiagnostics.frame_quality --> runs the same measurement (`measure_raw_frame`, internal function, not part of the public API; may change) <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.measure_raw_frame --> and the same judgment (`judge_batch`, internal function, not part of the public API; may change) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.judge_batch --> as the stacker.
+  `QualityRecords.measure_frames` <!-- impl: astrometricslib.api.quality.QualityRecords.measure_frames --> runs the same measurement (`measure_raw_frame`, internal function, not part of the public API; may change) <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.measure_raw_frame --> and the same judgment (`judge_batch`, internal function, not part of the public API; may change) <!-- impl: astrometricslib.pipelines.stacking.pre_processing.frame_quarantine.judge_batch --> as the stacker.
 - **Acceptance criterion:** A good limit moves every frame you judged bad and none you judged good. For the batch-size check, the median star count of every run of eight consecutive clean frames stays well inside the factor of 2 that the star limit allows.
 - **What to look at:** Each frame's star count divided by the session median (no units; clear frames sit near 1), its median roundness (narrow width over wide width, 1.0 for a circle), and its sky level divided by the session median. A good limit moves every frame you judged bad and none you judged good. For the batch-size check, take the median star count of every run of eight consecutive clean frames and compare it with the median of the whole session: the spread should stay well inside the factor of 2 that the star limit allows.
 - **Our result:** On a 56-frame monochrome target of 2026-10-02 (target name not recorded):
@@ -105,7 +105,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   for target in astro.targets.list():
-      preview = astro.quality.frame_quality(target.id, kind="quarantine_preview", limit=300)
+      preview = astro.quality.measure_frames(target.id, kind="quarantine_preview", limit=300)
       if preview.frames_checked:
           print(target.id, preview.would_move_total, preview.frames_checked, preview.notes)
   ```
@@ -115,7 +115,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Our result:** A dry run on the library picked 4 of 56 frames (7%) of the 2026-10-02 target, 4 of 30 (13%) and 5 of 40 (12%) of two M 27 sessions, and none in the other six batches. A quarter is about twice the largest share.
 - **Verdict:** Not judged.
 - **Limits:** Nine batches, one camera.
-- **To tune for your setup:** If a real cloudy night is refused as a whole, raise the cap; if a mismatched limit moves a third of a good session, keep or lower it and fix the limit (STK-01) instead. The `frame_quarantine` gate (`QualityDiagnostics.stack_quality`, or the stack's gate list) reports the measured share and the limit.
+- **To tune for your setup:** If a real cloudy night is refused as a whole, raise the cap; if a mismatched limit moves a third of a good session, keep or lower it and fix the limit (STK-01) instead. The `frame_quarantine` gate (`QualityRecords.measure_stack`, or the stack's gate list) reports the measured share and the limit.
 - **Regenerate with:** No script; dry run by hand (date not recorded).
 - **Guarded by tests:** `astrometricslib/pipelines/stacking/test/test_frame_quarantine_gate.py`.
 - **Raw record:** None kept.
@@ -131,7 +131,7 @@ Every Python example assumes the library is installed and configured with your o
 - **Status:** Partly measured. The two ranges come from the unit tests, whose sky levels are made up; no record of a real-session measurement exists.
 - **Data you need:** One clear session and one session where cloud arrived suddenly, each with at least three frames of one exposure length.
 - **Procedure:**
-  1. Read each frame's sky level with `QualityDiagnostics.frame_quality(target, kind="raw_check")`.
+  1. Read each frame's sky level with `QualityRecords.measure_frames(target, kind="raw_check")`.
   2. Pass the levels to the detector and read the gap ratio it reports.
 
   ```python
@@ -140,7 +140,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   # One night, one exposure length: narrow the selection with filter_name, since and until.
-  check = astro.quality.frame_quality(
+  check = astro.quality.measure_frames(
       "NGC 2403",
       kind="raw_check",
       filter_name="L",
@@ -189,11 +189,11 @@ Every Python example assumes the library is installed and configured with your o
   flats = sorted(glob.glob("/path/to/flats/L/*.fits"))
   assessment = assess_flats(flats, camera="ZWO ASI533MM Pro")
   print(assessment.frame_count, assessment.noise_fraction, assessment.smoothing_sigma_pixels, assessment.issues)
-  report = astro.quality.stack_quality("M 101", compare_to="previous")
+  report = astro.quality.measure_stack("M 101", compare_to="previous")
   print(report.comparison.before.noise_fraction, report.comparison.after.noise_fraction)
   ```
 
-  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess_flats` is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess_flats --> The comparison uses `QualityDiagnostics.stack_quality`. <!-- impl: astrometricslib.api.quality.QualityDiagnostics.stack_quality -->
+  `assess_flats` is an internal function, not part of the public API; may change. <!-- impl: astrometricslib.pipelines.stacking.pre_processing.flat_calibration.assess_flats --> `CalibrationCatalog.assess_flats` is the public form for flats already in the calibration library. <!-- impl: astrometricslib.api.processing.CalibrationCatalog.assess_flats --> The comparison uses `QualityRecords.measure_stack`. <!-- impl: astrometricslib.api.quality.QualityRecords.measure_stack -->
 - **Acceptance criterion:** If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **What to look at:** `noise_fraction` of the master flat (standard deviation over mean; 0.005 is 0.5%). The stack's `noise_fraction` (pixel-to-pixel noise over the sky level; lower is cleaner). If the flat's noise squared is small next to the stack's noise squared, the flat adds nothing visible.
 - **Our result:** The sky noise of the ZWO ASI533MM Pro stacks of 20 targets was 3% to 6% of the sky level. The master flat of the single-flat library measured 4.5%, and its fixed pattern made up 86% of the fine-scale noise of the undithered M 101 stack. Smoothing that flat halved the stack's noise. Dates not recorded.
@@ -267,7 +267,7 @@ Every Python example assumes the library is installed and configured with your o
   weighted = astro.processing.stack(target, frames=frames, force=True, output_file="/tmp/m27_weighted.fits")
   exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT = 100.0  # equal weights for this run only
   equal = astro.processing.stack(target, frames=frames, force=True, output_file="/tmp/m27_equal.fits")
-  report = astro.quality.stack_quality(weighted.stacked_path, compare_to=equal.stacked_path)
+  report = astro.quality.measure_stack(weighted.stacked_path, compare_to=equal.stacked_path)
   print(report.comparison.changes["noise_fraction"])
   ```
 
@@ -321,7 +321,7 @@ Every Python example assumes the library is installed and configured with your o
              force=True,
              output_file="/tmp/m13_n8.fits",
          )
-         quality = astro.quality.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
+         quality = astro.quality.measure_stack(result.stacked_path, include=["fwhm", "rejected_fraction"])
          print(limits, quality.fwhm_px, quality.rejected_fraction)
      ```
 
@@ -362,7 +362,7 @@ Every Python example assumes the library is installed and configured with your o
   - config keys `rejection_sigma_low` and `rejection_sigma_high` in `[Processing.Siril]` (default 3.0 each, used only in `fixed` mode). Relation: sanity check only.
 - **Status:** Partly measured. Three real targets with 40 or more frames; the result tables were written to the run log folder and are not kept in the repository.
 - **Data you need:** A monochrome luminance session of 40 or more frames of one field, ideally one clear session and one partly clouded.
-- **Procedure:** Run the sweep. It stacks the target's luminance frames once for each pair of limits (2.0 to 4.0) and each Siril sharpness filter (`-filter-wfwhm` off, 90%, 80%), then measures the stacked star width and the rejected share with `QualityDiagnostics.stack_quality(path, include=["fwhm", "rejected_fraction"])`.
+- **Procedure:** Run the sweep. It stacks the target's luminance frames once for each pair of limits (2.0 to 4.0) and each Siril sharpness filter (`-filter-wfwhm` off, 90%, 80%), then measures the stacked star width and the rejected share with `QualityRecords.measure_stack(path, include=["fwhm", "rejected_fraction"])`.
 
   ```bash
   python -m astrometricslib.scripts.rejection_threshold_analysis "M 81" --date 2026-05-23
@@ -402,7 +402,7 @@ Every Python example assumes the library is installed and configured with your o
       result = astro.processing.stack(
           target, frames=frames[:count], generate_rejmap=True, force=True, output_file=f"/tmp/m13_{count}.fits"
       )
-      quality = astro.quality.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
+      quality = astro.quality.measure_stack(result.stacked_path, include=["fwhm", "rejected_fraction"])
       print(count, quality.fwhm_px, quality.rejected_fraction)
   ```
 
@@ -471,7 +471,7 @@ Every Python example assumes the library is installed and configured with your o
   result = astro.processing.stack("Alcor", kind="spectral", force=True)
   for group in result.quality_summary.stacking_metrics.exposure_groups:
       print(group.exposure_seconds, group.frames_submitted, group.frames_stacked)
-  report = astro.quality.stack_quality("Alcor", kind="spectral", include=["registration"])
+  report = astro.quality.measure_stack("Alcor", kind="spectral", include=["registration"])
   print(len(report.registration or []))
   ```
 
@@ -884,7 +884,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  quality = astro.quality.stack_quality("NGC 2403", include=["rejected_fraction"])
+  quality = astro.quality.measure_stack("NGC 2403", include=["rejected_fraction"])
   print(quality.rejected_fraction)
   ```
 
@@ -1233,12 +1233,12 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   diagnostics = astro.quality
-  check = diagnostics.frame_quality("M 13", kind="raw_check", limit=300)
+  check = diagnostics.measure_frames("M 13", kind="raw_check", limit=300)
   for row in check.frames:
       print(row.get("path"), row.get("star_count"), row.get("line_trail_px"), row.get("line_trail_angle_deg"))
   ```
 
-  `QualityDiagnostics.frame_quality` <!-- impl: astrometricslib.api.quality.QualityDiagnostics.frame_quality --> runs `check_raw_frames` (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames -->
+  `QualityRecords.measure_frames` <!-- impl: astrometricslib.api.quality.QualityRecords.measure_frames --> runs `check_raw_frames` (internal function, not part of the public API; may change). <!-- impl: astrometricslib.pipelines.shared.quality.raw_frame_check.check_raw_frames -->
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** Each frame's star count (connected bright regions) divided by the batch median, with no units; the longest straight trail in pixels; and the peak of the trail's regions in noise units (multiples of the noise standard deviation).
 - **Our result:** The star counts for the typical and drifting frames come from a session of 2026-10-02 (STK-01 describes a 56-frame target of the same date; that they are the same session is not recorded). The other rows come from M 13 lights whose date is not recorded. Sample sizes beyond those named are not recorded, and no uncertainty was estimated. The result is in-sample for the trail detector and was measured with an earlier version of the check (code version not recorded).
@@ -1270,11 +1270,11 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 
 | ID | Setting | Value | Where | Risk if wrong | How you could measure it on your data |
 | --- | --- | --- | --- | --- | --- |
-| STK-D01 | Fewest frames per master calibration frame | 3 | config key `[Processing.Siril] minimum_calibration_frames` | Noisy master calibration frames add noise to every stack. | Build masters from 1, 3, 5 and 10 frames and compare stack noise with `QualityDiagnostics.stack_quality(path, compare_to=...)`; the minimum is where the gain stops mattering. |
+| STK-D01 | Fewest frames per master calibration frame | 3 | config key `[Processing.Siril] minimum_calibration_frames` | Noisy master calibration frames add noise to every stack. | Build masters from 1, 3, 5 and 10 frames and compare stack noise with `QualityRecords.measure_stack(path, compare_to=...)`; the minimum is where the gain stops mattering. |
 | STK-D02 | Rejection limits for bias and dark masters | `rej 3 3` | Siril script in `drivers/siril_interface.py` | Masters with more noise or leftover hot pixels. | Stack masters at 2.5 and 3.5 and compare their noise and hot-pixel counts. |
 | STK-D03 | Fewest frames in an exposure group | 5 | code constant `MINIMUM_FRAMES_PER_EXPOSURE_GROUP` in `pipelines/stacking/processing/exposure_groups.py` | Groups that register poorly or reject too many pixels. | Stack groups of 3, 5 and 8 frames with `ProcessingPipelines.stack(frames=...)` and check the registration share and rejected fraction. |
 | STK-D04 | Saturated pixel share that flags a stack | 0.1% | code constant `DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py` | Normal stacks flagged as saturated, or saturated stacks missed. | Run `report_gate_limits` across your stacks and see where normal stacks sit. |
-| STK-D05 | Flat level limits | 10% and 90% of full scale | code constants `MINIMUM_FLAT_LEVEL_FRACTION`, `MAXIMUM_FLAT_LEVEL_FRACTION` in `pipelines/stacking/pre_processing/flat_calibration.py` | Flats that are too dim or too bright give uneven flatness. | Take flats at 5% to 95% of full scale, stack lights with each, and compare flatness with `QualityDiagnostics.stack_quality(..., compare_to=...)`. |
+| STK-D05 | Flat level limits | 10% and 90% of full scale | code constants `MINIMUM_FLAT_LEVEL_FRACTION`, `MAXIMUM_FLAT_LEVEL_FRACTION` in `pipelines/stacking/pre_processing/flat_calibration.py` | Flats that are too dim or too bright give uneven flatness. | Take flats at 5% to 95% of full scale, stack lights with each, and compare flatness with `QualityRecords.measure_stack(..., compare_to=...)`. |
 | STK-D06 | Flat blur width limits | 1 to 8 pixels | code constants `MINIMUM_SMOOTHING_SIGMA_PIXELS`, `MAXIMUM_SMOOTHING_SIGMA_PIXELS` in the same file | Dust shadows blurred away, or noise left in the flat. | Blur a noisy master by several widths and check that dust shadows survive in the stack's flatness measurement. |
 | STK-D07 | Dark exposure match | within 0.1 s | `CalibrationLibrary.select_dark_frames` in `drivers/calibration_library.py` | Mismatched darks over- or under-subtract. | Compare masters of nearby exposures with `CalibrationCatalog.query` and the stack's negative-pixel warning. |
 | STK-D08 | Noise penalty that switches on weighting | 1.05 | code constant `MINIMUM_PENALTY_TO_WEIGHT` (STK-07) | Weighting switched on when it does not help, or off when it does. | Stack mixed sessions with P between 1.0 and 1.2 both ways and compare the noise. |
@@ -1282,12 +1282,12 @@ These tuned values have not been measured. Each is a reasoned choice; the last c
 | STK-D10 | Brightness-scale pixel method | 20th to 80th percentile; brightest 1% | code constants `GAIN_MID_RANGE_PERCENTILES`, `GAIN_BRIGHTEST_FRACTION` in `pipelines/stacking/processing/exposure_groups.py` | A wrong brightness scale between exposure groups. | Compare `measure_group_gains` with `measure_group_gains_with_stars` on imaging groups (STK-19). |
 | STK-D11 | Saturation level of a group stack | 0.95 of full scale | code constant `SATURATION_FRACTION_OF_FULL_SCALE` in the same file | Saturated pixels treated as good data, or good pixels masked. | Read the plateau of a saturated star in your group stacks with `estimate_saturation_mask_level`. |
 | STK-D12 | Clipping floor for clipped groups | 2 frame-noise widths | code constant `CLIPPING_FLOOR_SIGMAS` in the same file | Clipped groups mis-weighted at faint pixels. | Compare a clipped group with an unclipped one of the same field at faint pixels. |
-| STK-D13 | Session gap for the quarantine | 4 hours | code constant `SESSION_GAP_SECONDS` in `pipelines/stacking/pre_processing/frame_quarantine.py` | Frames from one session judged against another session's median. | List the gaps between your frames with `QualityDiagnostics.frame_quality(kind="raw_check")`. |
+| STK-D13 | Session gap for the quarantine | 4 hours | code constant `SESSION_GAP_SECONDS` in `pipelines/stacking/pre_processing/frame_quarantine.py` | Frames from one session judged against another session's median. | List the gaps between your frames with `QualityRecords.measure_frames(kind="raw_check")`. |
 | STK-D14 | Star-pattern matching constants | 150 stars, 8 neighbors, 1% shape tolerance | code constants in `pipelines/stacking/processing/star_pattern_candidates.py` | Star-pattern matches missed or false between group stacks. | Run `find_alignment_from_star_patterns` on group pairs of your camera and count matches found. |
 | STK-D15 | Pre-fetch readers | 4 | config key `[Processing] prefetch_workers` | Slow reads on a network drive. | Time a stack with 1, 2, 4 and 8 readers on your network drive; the job log's `Pre-fetch:` line gives the time. |
 | STK-D16 | Siril runs at once | 2 | config key `[Processing.Parallelism] max_concurrent_jobs` | Slower stacking or failed Siril runs. | Run `python -m astrometricslib.scripts.benchmark_siril_concurrency --target A --target B --slots 1 --slots 2` and pick the fastest count with no failures. |
 | STK-D17 | Color calibration star finder | 8σ; 3.5 px circle; 7 to 11 px ring | code constants `DETECTION_SIGMA`, `APERTURE_RADIUS_PIXELS`, `ANNULUS_INNER_RADIUS_PIXELS`, `ANNULUS_OUTER_RADIUS_PIXELS` in `pipelines/stacking/post_processing/colour_calibration.py` | Color gains that change by more than their uncertainty. | Run `measure_gains` with each value moved and see whether the gains change by more than their uncertainty. |
 | STK-D18 | Flat saturation level | 98% of full scale | code constant `_SATURATED_FRACTION_OF_FULL_SCALE` in `pipelines/stacking/pre_processing/flat_calibration.py` | Saturated flat pixels counted as good, or good ones counted as saturated. | Take flats at rising exposure and note the level where the share of clipped pixels starts to rise. |
-| STK-D19 | Raw-frame check: high star count | 1.4 times the batch median | code constant `HIGH_STAR_MULTIPLE` in `pipelines/shared/quality/raw_frame_check.py` | Good frames flagged for a high count, or frames with trails and light leaks missed. | Run the raw check on many clean batches (`QualityDiagnostics.frame_quality(kind="raw_check")`) and set the limit above the largest normal ratio. |
+| STK-D19 | Raw-frame check: high star count | 1.4 times the batch median | code constant `HIGH_STAR_MULTIPLE` in `pipelines/shared/quality/raw_frame_check.py` | Good frames flagged for a high count, or frames with trails and light leaks missed. | Run the raw check on many clean batches (`QualityRecords.measure_frames(kind="raw_check")`) and set the limit above the largest normal ratio. |
 | STK-D20 | Raw-frame check: faint-trail detector | 4 px blocks; 3σ block threshold; 60σ star mask; trail at least 0.25 of the frame diagonal | code constants `TRAIL_BLOCK_PIXELS`, `TRAIL_THRESHOLD_SIGMA`, `TRAIL_STAR_SIGMA`, `TRAIL_MIN_DIAGONAL_FRACTION` in `pipelines/shared/quality/raw_frame_check.py` | Faint trails missed, or star chains and noise flagged as trails. | Add synthetic trails of known brightness to clean frames and count how many `line_trail_px` finds; run it on clean frames to count false trails. |
 | STK-D21 | Frame-trend limits | at least 4 frames; at least 70% of steps in one direction | code constants `MINIMUM_FRAMES`, `STEADY_STEP_FRACTION` in `pipelines/shared/quality/frame_trends.py` | Slow drifts missed, or noise reported as a trend. | Run the trend check on sessions with a known drift (dew, focus) and on steady ones, and count false and missed trends. |

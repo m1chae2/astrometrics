@@ -35,7 +35,7 @@ The :class:`~astrometricslib.Astrometrics` instance provides access to six speci
   Query SIMBAD and Gaia DR3/XP stellar databases, cross-match field stars, and analyze light curves.
 * :attr:`~astrometricslib.Astrometrics.processing` (:class:`~astrometricslib.ProcessingPipelines`):
   Image stacking and master calibration frame matching (:attr:`~astrometricslib.ProcessingPipelines.calibration`).
-* :attr:`~astrometricslib.Astrometrics.quality` (:class:`~astrometricslib.QualityDiagnostics`):
+* :attr:`~astrometricslib.Astrometrics.quality` (:class:`~astrometricslib.QualityRecords`):
   Stored quality measurements, the list of quality metrics, and live checks of raw frames and stacks.
 * :attr:`~astrometricslib.Astrometrics.visualization` (:class:`~astrometricslib.Visualization`):
   Render high-dynamic-range astronomical previews, apply stretching algorithms, and compute coordinate overlays.
@@ -69,7 +69,7 @@ Entry points and sub-APIs
    ProcessingPipelines
    Visualization
    Jobs
-   QualityDiagnostics
+   QualityRecords
    CalibrationCatalog
    ImageProcessing
 

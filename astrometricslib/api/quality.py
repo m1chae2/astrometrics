@@ -1,11 +1,11 @@
 """The quality root: every quality read starts here.
 
-`QualityDiagnostics` is the child of `Astrometrics` reached as
+`QualityRecords` is the child of `Astrometrics` reached as
 `astrometrics.quality`. It answers two kinds of question:
 
 * Stored: `query` reads the quality measurements that earlier runs saved,
   and `metrics` lists what each metric means.
-* Live: `frame_quality`, `spectral_frame_check` and `stack_quality` measure
+* Live: `measure_frames`, `check_spectral_frames` and `measure_stack` measure
   raw frames and finished stacks now, without changing anything.
 
 The argument helpers it shares with `ProcessingPipelines` live in
@@ -42,7 +42,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
     to_epoch_seconds,
 )
 
-__all__ = ["QualityDiagnostics"]
+__all__ = ["QualityRecords"]
 
 FRAME_QUALITY_KINDS = ("input_quality", "raw_check", "quarantine_preview")
 FRAME_QUALITY_SECTIONS = ("fwhm", "spectra", "excluded")
@@ -88,7 +88,7 @@ def _clamp(value: int, lowest: int, highest: int) -> int:
     return max(lowest, min(int(value), highest))
 
 
-class QualityDiagnostics:
+class QualityRecords:
     """The start of every quality read: stored measurements and live checks.
 
     `query` and `metrics` read what earlier runs stored. The other methods
@@ -229,7 +229,7 @@ class QualityDiagnostics:
         return target.id if target is not None else (folder_path or "library")
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def frame_quality(
+    def measure_frames(
         self,
         target: str | Target | None = None,
         folder_path: str | None = None,
@@ -400,7 +400,7 @@ class QualityDiagnostics:
             return report
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def spectral_frame_check(
+    def check_spectral_frames(
         self,
         target: str | Target,
         first_file: str | None = None,
@@ -469,7 +469,7 @@ class QualityDiagnostics:
             )
 
     @background_job("diagnostics", grace_period_seconds=20.0)
-    def stack_quality(
+    def measure_stack(
         self,
         path_or_target: str | Target,
         kind: StackKind = "imaging",

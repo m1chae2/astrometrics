@@ -141,7 +141,7 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
     target = Target(id="T 1", frames=frames)
     asked: dict[str, object] = {}
 
-    def frame_quality(**arguments: object) -> SimpleNamespace:
+    def measure_frames(**arguments: object) -> SimpleNamespace:
         """Answer like the raw frame check, with one row per frame.
 
         Returns
@@ -157,7 +157,7 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
             ]
         )
 
-    diagnostics = SimpleNamespace(frame_quality=frame_quality)
+    diagnostics = SimpleNamespace(measure_frames=measure_frames)
     library = SimpleNamespace(
         targets=SimpleNamespace(get=lambda _id, refresh=False: target),
         quality=diagnostics,

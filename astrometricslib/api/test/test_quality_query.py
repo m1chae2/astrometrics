@@ -1,6 +1,6 @@
 """Tests for the stored-measurement reads on the quality root.
 
-`QualityDiagnostics.query` reads what earlier runs stored, and `metrics`
+`QualityRecords.query` reads what earlier runs stored, and `metrics`
 lists the declared metrics. The tests use a temporary library folder, so no
 real database is touched.
 """
@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from astrometricslib import Astrometrics
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.capture_setting import CaptureSetting
@@ -52,29 +52,27 @@ def _measurement(run_id: str, measured_at: datetime, **overrides: object) -> Qua
 
 
 @pytest.fixture
-def quality(tmp_path: Path) -> QualityDiagnostics:
+def quality(tmp_path: Path) -> QualityRecords:
     """Make the quality API on a temporary library folder.
 
     Returns
     -------
-    quality : `QualityDiagnostics`
+    quality : `QualityRecords`
         An instance whose library path is empty.
     """
     configuration = SimpleNamespace(get_library_path=lambda: tmp_path)
-    return QualityDiagnostics(configuration, None)
+    return QualityRecords(configuration, None)
 
 
 def test_a_library_with_no_database_gives_an_empty_list_and_creates_nothing(
-    quality: QualityDiagnostics, tmp_path: Path
+    quality: QualityRecords, tmp_path: Path
 ) -> None:
     """Asking before anything is stored creates no file."""
     assert quality.query() == []
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_database_without_the_quality_table_is_left_alone(
-    quality: QualityDiagnostics, tmp_path: Path
-) -> None:
+def test_a_database_without_the_quality_table_is_left_alone(quality: QualityRecords, tmp_path: Path) -> None:
     """A database that lacks the quality table gets none from a read."""
     database = tmp_path / "astrometrics.db"
     with sqlite3.connect(database) as connection:
@@ -89,7 +87,7 @@ def test_a_database_without_the_quality_table_is_left_alone(
     assert tables == {"other"}
 
 
-def test_stored_measurements_come_back_filtered(quality: QualityDiagnostics, tmp_path: Path) -> None:
+def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_path: Path) -> None:
     """The filters narrow the rows, and the newest row wins by default."""
     store = QualityStore(str(tmp_path / "astrometrics.db"))
     setting_id = store.get_or_create_capture_setting(CaptureSetting(camera="ASI533MM"))
@@ -116,7 +114,7 @@ def test_stored_measurements_come_back_filtered(quality: QualityDiagnostics, tmp
     assert [measurement.row_id for measurement in cited] == [1]
 
 
-def test_bad_arguments_are_refused(quality: QualityDiagnostics) -> None:
+def test_bad_arguments_are_refused(quality: QualityRecords) -> None:
     """An unknown level or an unreadable time raises `InvalidArgumentError`."""
     with pytest.raises(InvalidArgumentError):
         quality.query(level="galaxy")
@@ -124,14 +122,14 @@ def test_bad_arguments_are_refused(quality: QualityDiagnostics) -> None:
         quality.query(since="last night")
 
 
-def test_an_unregistered_metric_name_is_refused(quality: QualityDiagnostics) -> None:
+def test_an_unregistered_metric_name_is_refused(quality: QualityRecords) -> None:
     """`query(metric=...)` lists the registered names when it is wrong."""
     with pytest.raises(InvalidArgumentError, match=r"frame\.background_level_adu"):
         quality.query(metric="frame.no_such_metric")
     assert quality.query(metric="frame.background_level_adu") == []
 
 
-def test_metrics_with_a_name_gives_that_one_spec(quality: QualityDiagnostics) -> None:
+def test_metrics_with_a_name_gives_that_one_spec(quality: QualityRecords) -> None:
     """`metrics(name=...)` gives one declaration or refuses an unknown name."""
     one = quality.metrics(name="frame.background_level_adu")
     assert [spec.name for spec in one] == ["frame.background_level_adu"]
@@ -139,7 +137,7 @@ def test_metrics_with_a_name_gives_that_one_spec(quality: QualityDiagnostics) ->
         quality.metrics(name="frame.no_such_metric")
 
 
-def test_metrics_lists_the_declarations(quality: QualityDiagnostics) -> None:
+def test_metrics_lists_the_declarations(quality: QualityRecords) -> None:
     """`metrics` returns the registry's declarations as a list."""
     specs = quality.metrics()
     assert specs
@@ -154,6 +152,6 @@ def test_the_root_object_holds_the_quality_child() -> None:
     from astrometricslib import AppConfiguration
 
     astrometrics = Astrometrics(AppConfiguration(), MagicMock())
-    assert isinstance(astrometrics.quality, QualityDiagnostics)
+    assert isinstance(astrometrics.quality, QualityRecords)
     assert astrometrics.quality._targets is astrometrics.targets
     assert not hasattr(astrometrics.processing, "diagnostics")

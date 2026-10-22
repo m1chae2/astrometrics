@@ -44,7 +44,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `processing.py`
 
-`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds `QualityDiagnostics`, which is a sub-API of its own (see below), not a child of `ProcessingPipelines`.
+`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds `QualityRecords`, which is a sub-API of its own (see below), not a child of `ProcessingPipelines`.
 
 `ProcessingPipelines` makes stacks and runs the analysis.
 
@@ -58,7 +58,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `quality.py`
 
-`QualityDiagnostics` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
+`QualityRecords` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
 
 Stored reads:
 
@@ -67,13 +67,13 @@ Stored reads:
 
 Live checks:
 
-- `frame_quality` measures raw frames:
+- `measure_frames` measures raw frames:
   - `kind="input_quality"` measures them one by one.
   - `kind="raw_check"` checks a folder or a target's frames as a batch.
   - `kind="quarantine_preview"` previews which frames the stacker would set aside.
   - `include=["excluded"]` adds the frames already set aside.
-- `stack_quality` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
-- `spectral_frame_check` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
+- `measure_stack` measures a stack (star width, the share of rejected pixels, frame registration) and compares it with the previous stack or another stack file.
+- `check_spectral_frames` measures a target's raw slitless-spectrum frames. These are frames taken through a grating with no slit, which spreads each star into a spectrum trail of colors. For each frame it reports:
   - where the zero order (the undispersed image of the star) sits;
   - the tilt and width of the spectrum trail, and the sky level;
   - every saturated patch, that is, pixels at the sensor's maximum value, where the true brightness is lost.

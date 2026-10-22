@@ -195,7 +195,7 @@ from astrometricslib.utilities.parallel_batch import BatchRunSummary
 if TYPE_CHECKING:
     from astrometricslib.api.jobs import Jobs
     from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
-    from astrometricslib.api.quality import QualityDiagnostics
+    from astrometricslib.api.quality import QualityRecords
     from astrometricslib.api.stars import StellarCatalog
     from astrometricslib.api.targets import TargetCatalog
     from astrometricslib.api.visualization import Visualization
@@ -231,7 +231,7 @@ _DEFERRED_EXPORTS = {
     "ImageProcessing": "astrometricslib.drivers.siril_interface",
     "CalibrationCatalog": "astrometricslib.api.processing",
     "ProcessingPipelines": "astrometricslib.api.processing",
-    "QualityDiagnostics": "astrometricslib.api.quality",
+    "QualityRecords": "astrometricslib.api.quality",
     "Jobs": "astrometricslib.api.jobs",
     "FrameSelection": "astrometricslib.pipelines.shared.quality.frame_selection",
     "parse_iso_time": "astrometricslib.pipelines.shared.quality.frame_selection",
@@ -321,7 +321,7 @@ class Astrometrics:
     jobs : `Jobs`
         Read-only tracking of running and completed processing jobs
         and lineage.
-    quality : `QualityDiagnostics`
+    quality : `QualityRecords`
         The start of every quality read: stored measurements, the metric
         list, and live checks of raw frames and stacks.
 
@@ -345,7 +345,7 @@ class Astrometrics:
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
-        from astrometricslib.api.quality import QualityDiagnostics
+        from astrometricslib.api.quality import QualityRecords
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
@@ -372,7 +372,7 @@ class Astrometrics:
         self.visualization = Visualization(
             self.config, self.catalog_access, targets=self.targets, stars=self.stars
         )
-        self.quality = QualityDiagnostics(self.config, self.catalog_access, targets=self.targets)
+        self.quality = QualityRecords(self.config, self.catalog_access, targets=self.targets)
         self.jobs = Jobs(self.config, self.catalog_access)
 
 
@@ -459,9 +459,9 @@ __all__ = [
     "ProcessingJob",
     "ProcessingPipelines",
     "ProvenanceStore",
-    "QualityDiagnostics",
     "QualityLimit",
     "QualityMeasurement",
+    "QualityRecords",
     "QualitySubject",
     "QuarantinePreview",
     "RawFrameCheckReport",

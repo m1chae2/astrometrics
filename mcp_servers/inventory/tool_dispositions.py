@@ -219,7 +219,7 @@ DECISIONS = {
         "never deletes.",
         "ingest",
     ),
-    "quality_frame_quality": ToolDecision(
+    "quality_measure_frames": ToolDecision(
         "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
     ),
     "observatory_history_get_live_session_status": ToolDecision(
@@ -275,7 +275,7 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "quality_spectral_frame_check": ToolDecision(
+    "quality_check_spectral_frames": ToolDecision(
         "keep",
         "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
         "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
@@ -316,7 +316,7 @@ DECISIONS = {
         "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
         "reloads the index into memory and writes nothing.",
     ),
-    "quality_stack_quality": ToolDecision(
+    "quality_measure_stack": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
         "the previous stack or another stack file. Saves nothing.",

@@ -431,7 +431,7 @@ def check_spectral_frames(
 ) -> Any:
     """Measure a target's raw spectrum frames and summarize where they clip.
 
-    This is the work behind `QualityDiagnostics.spectral_frame_check`. Each
+    This is the work behind `QualityRecords.check_spectral_frames`. Each
     frame takes about a second. A frame that cannot be read gets an
     ``error`` in its row, and the other frames are still measured.
 

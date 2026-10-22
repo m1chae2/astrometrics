@@ -58,7 +58,7 @@ def test_the_main_sub_apis_are_reflected(registry: ToolRegistry) -> None:
         "target_create",
         "visualization_render_fits",
         "star_query",
-        "quality_stack_quality",
+        "quality_measure_stack",
         "quality_query",
         "quality_metrics",
         "calibration_query",
@@ -82,8 +82,8 @@ async def test_a_reflected_tool_runs(registry: ToolRegistry) -> None:
 
 
 def test_frame_quality_has_the_documented_arguments(registry: ToolRegistry) -> None:
-    """`quality_frame_quality` takes the documented, optional arguments."""
-    schema = registry.tools["quality_frame_quality"]["tool_def"].input_schema
+    """`quality_measure_frames` takes the documented, optional arguments."""
+    schema = registry.tools["quality_measure_frames"]["tool_def"].input_schema
     assert set(schema["properties"]) == {
         "target",
         "folder_path",
@@ -163,7 +163,7 @@ def test_the_quality_root_replaces_the_diagnostics_tools(registry: ToolRegistry)
     """Quality tools are named ``quality_*``; none is ``diagnostics_*``."""
     names = set(registry.tools)
     assert not [name for name in names if name.startswith("diagnostics_")]
-    assert {"quality_frame_quality", "quality_spectral_frame_check", "quality_stack_quality"} <= names
+    assert {"quality_measure_frames", "quality_check_spectral_frames", "quality_measure_stack"} <= names
 
 
 def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolRegistry) -> None:

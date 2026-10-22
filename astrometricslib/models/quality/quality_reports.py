@@ -1,6 +1,6 @@
 """Data structures for the quality checks on frames and stacks.
 
-`QualityDiagnostics` measures raw frames and finished stacks, and
+`QualityRecords` measures raw frames and finished stacks, and
 `ProcessingPipelines.stack_summary` reads back what the stacking stage saved.
 Each check returns one of these structures. A check never saves anything, so
 these only describe; they never change a target.

@@ -24,7 +24,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.drivers.camera_profile_store import resolve_camera_profile
 from astrometricslib.drivers.fits_access import collapse_to_2d
 from astrometricslib.drivers.image import AstrometricsImage
@@ -253,7 +253,7 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
 
     The star count, FWHM, roundness, longest streak, sky level, saturated
     pixels, shift from the previous frame and flags come from
-    ``QualityDiagnostics.frame_quality(kind="raw_check")``. The background
+    ``QualityRecords.measure_frames(kind="raw_check")``. The background
     level and saturated fraction come from `measure_frame_input_quality`. The
     background noise is the standard deviation of the sigma-clipped frame,
     computed the same way as the library's background level, because no
@@ -265,8 +265,8 @@ def measure_raw_frame_quality() -> dict[str, dict[str, float]]:
         One group per frame, plus a ``"batch"`` group of batch medians.
         The first frame has no shift numbers.
     """
-    diagnostics = QualityDiagnostics(AppConfiguration(), MagicMock())
-    report = diagnostics.frame_quality(
+    diagnostics = QualityRecords(AppConfiguration(), MagicMock())
+    report = diagnostics.measure_frames(
         folder_path=str(SAMPLE_FOLDER),
         kind="raw_check",
         filter_name="Luminance",

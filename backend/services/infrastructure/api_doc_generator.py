@@ -264,7 +264,7 @@ def generate_astrometricslib_docs() -> str:
         "- [Processing Pipelines: `ProcessingPipelines`](#class-processingpipelines)",
         "- [Visualization: `Visualization`](#class-visualization)",
         "- [Calibration Catalog: `CalibrationCatalog`](#class-calibrationcatalog)",
-        "- [Quality Diagnostics: `QualityDiagnostics`](#class-qualitydiagnostics)",
+        "- [Quality Diagnostics: `QualityRecords`](#class-qualityrecords)",
         "- [Utility Functions](#utility-functions)",
         "- [Core Data Models](#core-data-models)",
         "",
@@ -337,7 +337,7 @@ def generate_astrometricslib_docs() -> str:
         )
         sections.append("\n---\n")
 
-    # 6. CalibrationCatalog & QualityDiagnostics
+    # 6. CalibrationCatalog & QualityRecords
     sections.append('<a id="class-calibrationcatalog"></a>')
     calib_cls = getattr(astrometricslib, "CalibrationCatalog", None)
     if calib_cls:
@@ -349,13 +349,13 @@ def generate_astrometricslib_docs() -> str:
         )
         sections.append("\n---\n")
 
-    sections.append('<a id="class-qualitydiagnostics"></a>')
-    qual_cls = getattr(astrometricslib, "QualityDiagnostics", None)
+    sections.append('<a id="class-qualityrecords"></a>')
+    qual_cls = getattr(astrometricslib, "QualityRecords", None)
     if qual_cls:
         sections.append(
             format_class_markdown(
                 qual_cls,
-                display_title="QualityDiagnostics",
+                display_title="QualityRecords",
             )
         )
         sections.append("\n---\n")

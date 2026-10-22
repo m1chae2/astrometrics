@@ -1,6 +1,6 @@
-"""Purpose: Build the reports that `QualityDiagnostics.frame_quality` returns.
+"""Purpose: Build the reports that `QualityRecords.measure_frames` returns.
 
-Description: `frame_quality` offers three checks of raw light frames, chosen
+Description: `measure_frames` offers three checks of raw light frames, chosen
 with ``kind``. The API method only checks its arguments; the work for two of
 the kinds is here:
 

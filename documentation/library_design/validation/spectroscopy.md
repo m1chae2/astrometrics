@@ -1117,7 +1117,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 
 - **Claim:** On the M 13 grating session, all 86 frames were extracted with no zero-order tracking failure, and the zero-order position was stable to ±0.2 px.
 - **Settings it supports:**
-  - the registration-quality thresholds (design estimate; see the table below), reached through `QualityDiagnostics.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityDiagnostics.spectral_registration_thresholds -->
+  - the registration-quality thresholds (design estimate; see the table below), reached through `QualityRecords.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityRecords.spectral_registration_thresholds -->
 - **Status:** Partly measured. One session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A session of 30 or more grating frames of one field, and Siril installed.
 - **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs, a high fit RMSE, or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.

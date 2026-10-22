@@ -7,7 +7,7 @@ once and shares: `CalibrationCatalog` keeps track of the dark, bias and
 flat frames that remove a camera's noise from the raw frames.
 
 Quality reads are not here. They start at `astrometrics.quality`
-(`QualityDiagnostics`, in `quality.py`).
+(`QualityRecords`, in `quality.py`).
 
 The methods here check their arguments and hand the work to `pipelines/`.
 They raise an error from `astrometricslib.foundation.errors` when a request
@@ -507,7 +507,7 @@ class ProcessingPipelines:
             The frames chosen and, unless ``plan_only``, the stack's path,
             flags and quality summary (``quality_summary``). To compare
             it with the previous stack, use
-            `Astrometrics.quality.stack_quality`.
+            `Astrometrics.quality.measure_stack`.
 
         Raises
         ------
@@ -978,7 +978,7 @@ class ProcessingPipelines:
         saves it. The next stack may set the same frames aside again. To
         keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
         the configuration first. To only read the list, use
-        ``Astrometrics.quality.frame_quality(include=["excluded"])``.
+        ``Astrometrics.quality.measure_frames(include=["excluded"])``.
 
         Parameters
         ----------

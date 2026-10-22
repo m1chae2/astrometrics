@@ -243,7 +243,7 @@ def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any])
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.quality.stack_quality(
+        row["rejected_fraction"] = astrometrics.quality.measure_stack(
             stacked_path, include=["rejected_fraction"]
         ).rejected_fraction
         print(

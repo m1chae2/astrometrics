@@ -11,7 +11,7 @@ classes from the main `astrometricslib` package instead.
 
 from astrometricslib.api.jobs import Jobs
 from astrometricslib.api.processing import CalibrationCatalog, ProcessingPipelines
-from astrometricslib.api.quality import QualityDiagnostics
+from astrometricslib.api.quality import QualityRecords
 from astrometricslib.api.stars import StellarCatalog
 from astrometricslib.api.targets import TargetCatalog
 from astrometricslib.api.visualization import Visualization
@@ -23,7 +23,7 @@ __all__ = [
     "CatalogAccess",
     "Jobs",
     "ProcessingPipelines",
-    "QualityDiagnostics",
+    "QualityRecords",
     "StellarCatalog",
     "TargetCatalog",
     "Visualization",

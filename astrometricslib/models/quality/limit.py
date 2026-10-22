@@ -11,9 +11,10 @@ that `wayfindinglib` uses. `gate_result.py` stays in place until the later
 phase that migrates its users.
 """
 
+import math
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LimitTier(StrEnum):
@@ -54,6 +55,30 @@ class QualityLimit(BaseModel):
     derivation: str
     sample_count: int | None = Field(default=None, alias="sampleCount")
     register_entry: str | None = Field(default=None, alias="registerEntry")
+
+    @field_validator("value")
+    @classmethod
+    def _require_finite_value(cls, limit_value: float | None) -> float | None:
+        """Refuse NaN and infinity as a limit.
+
+        Parameters
+        ----------
+        limit_value : `float` or `None`
+            The limit being set.
+
+        Returns
+        -------
+        limit_value : `float` or `None`
+            The same value.
+
+        Raises
+        ------
+        ValueError
+            If the limit is NaN or infinite.
+        """
+        if limit_value is not None and not math.isfinite(limit_value):
+            raise ValueError("A limit value must be a finite number, not NaN or infinity.")
+        return limit_value
 
     @model_validator(mode="after")
     def _require_register_entry_for_validated_dataset(self) -> QualityLimit:

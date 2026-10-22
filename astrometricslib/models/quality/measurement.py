@@ -12,11 +12,12 @@ A value that was not measured is never stored as a default number. Such a
 record has the status ``not_measured``, no value and a reason.
 """
 
+import math
 from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrometricslib.models.quality.gate_result import GateStatus
 from astrometricslib.models.quality.limit import QualityLimit
@@ -112,7 +113,7 @@ class QualityMeasurement(BaseModel):
     job_id : `str` or `None`
         A soft link to the activity record of the job.
     measured_at : `datetime`
-        When the measurement was made.
+        When the measurement was made. It must carry a time zone.
     row_id : `int` or `None`
         The store's row id. Filled only when the measurement is read back.
     """
@@ -137,11 +138,62 @@ class QualityMeasurement(BaseModel):
     measured_at: datetime = Field(alias="measuredAt")
     row_id: int | None = Field(default=None, alias="rowId")
 
+    @field_validator("value", "uncertainty")
+    @classmethod
+    def _require_finite_number(cls, number: float | None) -> float | None:
+        """Refuse NaN and infinity, which no measurement may hold.
+
+        Parameters
+        ----------
+        number : `float` or `None`
+            The value or uncertainty being set.
+
+        Returns
+        -------
+        number : `float` or `None`
+            The same number.
+
+        Raises
+        ------
+        ValueError
+            If the number is NaN or infinite.
+        """
+        if number is not None and not math.isfinite(number):
+            raise ValueError("A value or uncertainty must be a finite number, not NaN or infinity.")
+        return number
+
+    @field_validator("measured_at")
+    @classmethod
+    def _require_timezone(cls, moment: datetime) -> datetime:
+        """Refuse a time with no time zone.
+
+        Parameters
+        ----------
+        moment : `datetime`
+            The time being set.
+
+        Returns
+        -------
+        moment : `datetime`
+            The same time.
+
+        Raises
+        ------
+        ValueError
+            If the time has no time zone.
+        """
+        if moment.tzinfo is None or moment.utcoffset() is None:
+            raise ValueError("measured_at must carry a time zone (for example UTC); a naive time is refused.")
+        return moment
+
     @model_validator(mode="after")
     def _check_value_matches_status(self) -> Self:
-        """Check that the value and reason fit the status.
+        """Check that the value, reason and self-check fit the status.
 
-        ``not_measured`` needs a reason and no value; the others need a value.
+        ``not_measured`` needs a reason and no value; the others need a
+        value. ``assumed`` also needs a reason that names the source of the
+        assumption. A self-check that passed or failed needs the limit it
+        used.
 
         Returns
         -------
@@ -151,7 +203,7 @@ class QualityMeasurement(BaseModel):
         Raises
         ------
         ValueError
-            If the value and reason do not fit the status.
+            If the value, reason or limit do not fit the status.
         """
         if self.status == MeasurementStatus.NOT_MEASURED:
             if self.value is not None:
@@ -160,6 +212,10 @@ class QualityMeasurement(BaseModel):
                 raise ValueError("A not_measured measurement must give a reason.")
         elif self.value is None:
             raise ValueError(f"A {self.status.value} measurement must have a value.")
+        if self.status == MeasurementStatus.ASSUMED and not self.reason.strip():
+            raise ValueError("An assumed measurement must give a reason that names the source of the value.")
+        if self.check_outcome in (GateStatus.PASSED, GateStatus.FAILED) and self.check_limit is None:
+            raise ValueError(f"A {self.check_outcome.value} check must give the check_limit it used.")
         return self
 
 

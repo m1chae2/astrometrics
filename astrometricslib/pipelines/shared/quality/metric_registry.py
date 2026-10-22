@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from functools import cache
 from types import MappingProxyType
 
-from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec
+from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS
 
 # The units that a metric declaration may use. "" is a unitless ratio.
@@ -102,46 +102,6 @@ class MetricRegistry:
             The declarations, in declaration order.
         """
         return tuple(self._by_name.values())
-
-    def for_checkpoint(self, checkpoint: Checkpoint) -> tuple[MetricSpec, ...]:
-        """List the declarations measured at one checkpoint.
-
-        Parameters
-        ----------
-        checkpoint : `Checkpoint`
-            The checkpoint to select.
-
-        Returns
-        -------
-        specs : `tuple` of `MetricSpec`
-            The matching declarations.
-        """
-        return tuple(spec for spec in self._by_name.values() if spec.checkpoint == checkpoint)
-
-    def __contains__(self, name: object) -> bool:
-        """Say whether a metric name is registered.
-
-        Parameters
-        ----------
-        name : `object`
-            The name to look for.
-
-        Returns
-        -------
-        found : `bool`
-            True if registered.
-        """
-        return name in self._by_name
-
-    def __len__(self) -> int:
-        """Count the registered metrics.
-
-        Returns
-        -------
-        count : `int`
-            The number of declarations.
-        """
-        return len(self._by_name)
 
 
 def load_pipeline_metrics(pipeline: str) -> tuple[MetricSpec, ...]:

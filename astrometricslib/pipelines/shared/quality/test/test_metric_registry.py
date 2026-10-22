@@ -2,7 +2,6 @@
 
 import pytest
 
-from astrometricslib.models.quality.metric_spec import Checkpoint
 from astrometricslib.pipelines.shared.quality.metric_registry import (
     PIPELINES_WITH_METRICS,
     MetricRegistry,
@@ -10,7 +9,7 @@ from astrometricslib.pipelines.shared.quality.metric_registry import (
     load_pipeline_metrics,
     metrics,
 )
-from astrometricslib.pipelines.shared.quality.metrics import FRAME_METRICS, FRAME_STAR_COUNT
+from astrometricslib.pipelines.shared.quality.metrics import FRAME_DETECTED_REGION_COUNT, FRAME_METRICS
 
 
 def test_registry_holds_every_frame_metric() -> None:
@@ -37,18 +36,11 @@ def test_unknown_name_raises_key_error() -> None:
         get_metric_registry().get("frame.not_a_metric")
 
 
-def test_for_checkpoint_selects_only_that_checkpoint() -> None:
-    """`for_checkpoint` returns only specs of the requested checkpoint."""
-    frame_specs = get_metric_registry().for_checkpoint(Checkpoint.FRAME)
-    assert frame_specs
-    assert all(spec.checkpoint == Checkpoint.FRAME for spec in frame_specs)
-
-
-def test_names_and_contains_agree() -> None:
-    """`names`, `all`, `len` and `in` describe the same set."""
+def test_names_and_all_agree() -> None:
+    """`names`, `all` and `metrics()` describe the same set."""
     registry = get_metric_registry()
-    assert len(registry) == len(registry.names()) == len(registry.all()) == len(metrics())
-    assert FRAME_STAR_COUNT in registry
+    assert len(registry.names()) == len(registry.all()) == len(metrics())
+    assert FRAME_DETECTED_REGION_COUNT in registry.names()
 
 
 def test_every_listed_pipeline_loads() -> None:

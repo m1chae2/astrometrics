@@ -220,6 +220,10 @@ def get_ts_type(py_type: Any) -> str:
         item_type = get_ts_type(args[0]) if args else "any"
         return f"{item_type}[]"
 
+    if origin is tuple and len(args) == 2 and args[1] is Ellipsis:
+        # `tuple[X, ...]` is a list of X of any length.
+        return f"{get_ts_type(args[0])}[]"
+
     if origin is dict or origin is dict:
         key_type = get_ts_type(args[0]) if args else "string"
         val_type = get_ts_type(args[1]) if args else "any"

@@ -62,8 +62,8 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 Stored reads:
 
-- `query` reads the quality measurements that earlier runs saved in `astrometrics.db`. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. A library with no quality table yet gives an empty list; the read creates no file and no table.
-- `metrics` lists every declared metric (a `MetricSpec`): its unit, the checkpoint where it is measured, which way is better and how it is estimated.
+- `query` reads the quality measurements that earlier runs saved in `astrometrics.db`. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. A library with no quality table yet gives an empty list; the read opens the file read-only and creates no file and no table. A `metric` that is not registered raises `InvalidArgumentError`.
+- `metrics` lists every declared metric (a `MetricSpec`), or with `name=` just that one (an unknown name raises `InvalidArgumentError`): its unit, the checkpoint where it is measured, which way is better and how it is estimated.
 
 Live checks:
 

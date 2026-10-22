@@ -21,12 +21,19 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
         definition_version=1,
         unit="fraction",
         checkpoint=Checkpoint.STACKING,
-        levels=frozenset({SubjectLevel.STACK}),
+        levels=(SubjectLevel.STACK,),
         better=Direction.LOWER,
         meaning="The share of pixel values thrown out while combining the frames.",
         decisions=("rejected pixel fraction gate",),
-        estimator="Rejected pixel count reported by the stacking engine, divided by the total pixel count.",
-        sample_definition="Every pixel of every frame in the stack.",
+        estimator=(
+            "The mean over all pixels of Siril's rejection map (`_RejMap.fits`), where each pixel "
+            "holds the fraction of the frames that were rejected at that position."
+        ),
+        sample_definition=(
+            "Every pixel position of the stack; each holds the share of frames rejected there. "
+            "The register entry STK-24 is Partly measured: the normal range is measured, "
+            "the detection side is not."
+        ),
         band="stack filter or channel",
         computed_by="drivers.siril_output_parsing.measure_rejected_fraction",
         uncertainty_kind=UncertaintyKind.NONE,

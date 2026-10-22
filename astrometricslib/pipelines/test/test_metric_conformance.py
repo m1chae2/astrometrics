@@ -242,13 +242,13 @@ def test_not_measured_carries_a_reason_and_no_value() -> None:
     """A not_measured record needs a reason and no value."""
     subject = QualitySubject(level=SubjectLevel.FRAME, subjectId="t/frame.fits")
     common = {
-        "metric": "frame.star_count",
+        "metric": "frame.detected_region_count",
         "definitionVersion": 1,
         "subject": subject,
         "status": MeasurementStatus.NOT_MEASURED,
         "origin": MeasurementOrigin.MEASURED,
         "runId": "run-1",
-        "measuredAt": "2026-10-21T00:00:00",
+        "measuredAt": "2026-10-21T00:00:00+00:00",
     }
     with pytest.raises(ValueError, match="reason"):
         QualityMeasurement(**common)
@@ -268,5 +268,5 @@ def test_checkers_go_red_on_broken_input() -> None:
     assert find_bad_names_and_units((bad_name,))
     bad_entry = good.model_copy(update={"register_entry": "ZZZ-99"})
     assert find_unknown_register_entries((bad_entry,), _register_entry_ids())
-    assert find_literal_metric_names('QualityMeasurement(metric="frame.star_count")') == [1]
-    assert find_literal_metric_names("QualityMeasurement(metric=FRAME_STAR_COUNT)") == []
+    assert find_literal_metric_names('QualityMeasurement(metric="frame.detected_region_count")') == [1]
+    assert find_literal_metric_names("QualityMeasurement(metric=FRAME_DETECTED_REGION_COUNT)") == []

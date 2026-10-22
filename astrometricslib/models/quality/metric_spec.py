@@ -14,7 +14,7 @@ import datetime
 from enum import StrEnum
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from astrometricslib.models.quality.measurement import SubjectLevel
 
@@ -68,8 +68,9 @@ class MetricSpec(BaseModel):
         The unit every measurement of this metric must use.
     checkpoint : `Checkpoint`
         Where in processing the metric is measured.
-    levels : `frozenset` of `SubjectLevel`
-        The subject levels the metric applies to.
+    levels : `tuple` of `SubjectLevel`
+        The subject levels the metric applies to. Stored sorted by value
+        with no repeats, so the JSON form is always the same.
     better : `Direction`
         Which direction is better.
     meaning : `str`
@@ -108,7 +109,7 @@ class MetricSpec(BaseModel):
     definition_version: int = Field(alias="definitionVersion")
     unit: str
     checkpoint: Checkpoint
-    levels: frozenset[SubjectLevel]
+    levels: tuple[SubjectLevel, ...]
     better: Direction
     meaning: str
     decisions: tuple[str, ...] = ()
@@ -123,6 +124,23 @@ class MetricSpec(BaseModel):
     purpose_reason: str = Field(default="", alias="purposeReason")
     exploratory_question: str = Field(default="", alias="exploratoryQuestion")
     review_date: datetime.date | None = Field(default=None, alias="reviewDate")
+
+    @field_validator("levels")
+    @classmethod
+    def _sort_levels(cls, levels: tuple[SubjectLevel, ...]) -> tuple[SubjectLevel, ...]:
+        """Sort the levels and drop repeats, so the JSON form is stable.
+
+        Parameters
+        ----------
+        levels : `tuple` of `SubjectLevel`
+            The levels as given.
+
+        Returns
+        -------
+        levels : `tuple` of `SubjectLevel`
+            The levels sorted by value, each once.
+        """
+        return tuple(sorted(set(levels), key=lambda level: level.value))
 
     @model_validator(mode="after")
     def _check_purpose_fields(self) -> Self:

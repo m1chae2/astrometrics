@@ -2509,7 +2509,7 @@ export interface MeasurementReference {
  * job_id : `str` or `None`
  * A soft link to the activity record of the job.
  * measured_at : `datetime`
- * When the measurement was made.
+ * When the measurement was made. It must carry a time zone.
  * row_id : `int` or `None`
  * The store's row id. Filled only when the measurement is read back.
  */
@@ -2546,8 +2546,9 @@ export interface QualityMeasurement {
  * The unit every measurement of this metric must use.
  * checkpoint : `Checkpoint`
  * Where in processing the metric is measured.
- * levels : `frozenset` of `SubjectLevel`
- * The subject levels the metric applies to.
+ * levels : `tuple` of `SubjectLevel`
+ * The subject levels the metric applies to. Stored sorted by value
+ * with no repeats, so the JSON form is always the same.
  * better : `Direction`
  * Which direction is better.
  * meaning : `str`
@@ -2587,7 +2588,7 @@ export interface MetricSpec {
   levels: SubjectLevel[];
   better: Direction;
   meaning: string;
-  decisions?: any;
+  decisions?: string[];
   estimator: string;
   sampleDefinition: string;
   band: string;

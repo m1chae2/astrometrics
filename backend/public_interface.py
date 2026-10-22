@@ -119,7 +119,9 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:delete_job",
     "processing:jobs_for_target",
     "processing:job_log_tail",
-    # Quality measurements: the stored ones, and what each metric means
+    # Quality measurements: the stored ones, and what each metric means.
+    # Parameter names are the library's snake_case names (target_id, not
+    # targetId); the router drops names it does not know.
     "quality:query",
     "quality:metrics",
     # Photometry and spectroscopy analysis

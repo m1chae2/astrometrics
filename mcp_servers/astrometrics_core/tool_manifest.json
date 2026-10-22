@@ -140,7 +140,7 @@
       "category": "image-processing",
       "disposition": "keep",
       "interim_block": "",
-      "note": "Built 2026-10-21. Lists every declared quality metric: unit, checkpoint, which way is better and how it is estimated. Fixed text, nothing is read from disk."
+      "note": "Built 2026-10-21. Lists the declared quality metrics (or one, given its name): unit, checkpoint, which way is better and how it is estimated. Fixed text, nothing is read from disk."
     },
     "quality_query": {
       "tool_class": "observe",

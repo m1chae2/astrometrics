@@ -6,11 +6,12 @@ the check limit are spread over several columns). Nothing is stored as JSON,
 so any field can be filtered or sorted with plain SQL.
 
 The table is append-only. A second write of the same run, metric, subject
-and channel is ignored, never replaced, so re-running a job cannot change or
-duplicate what is already stored. Nothing in this module deletes rows. The
-view ``quality_measurements_latest`` gives the newest row for each subject,
-metric and channel; "newest" means the latest ``measured_at``, never the
-pipeline version.
+and channel is ignored (``ON CONFLICT ... DO NOTHING``, so any other
+constraint error still raises), never replaced, so re-running a job cannot
+change or duplicate what is already stored. Nothing in this module deletes
+rows. The view ``quality_measurements_latest`` gives the newest row for
+each subject, metric and channel; "newest" means the latest
+``measured_at``, never the pipeline version.
 
 The camera and equipment settings are kept once each in
 ``quality_capture_setting``; a measurement refers to them by id.
@@ -19,6 +20,14 @@ The schema version is kept in ``PRAGMA user_version``. No other store that
 writes to astrometrics.db uses that number. If one ever does, this store
 must move to its own version table. A migration only creates the quality
 tables and view and never touches any other table.
+
+Reading and writing are separate paths. A read opens the file read-only
+(``mode=ro``), takes no write lock, never changes the journal mode and never
+migrates. A file that does not exist, or has no quality tables yet, reads as
+empty. Only a write creates the file and brings the schema up to date.
+
+Times are stored as UTC with the offset ``+00:00``, so text order is time
+order. A naive time is refused.
 
 Every database problem is raised as `StorageError`.
 """
@@ -30,9 +39,10 @@ from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 from astrometricslib.foundation.config import AppConfiguration, get_configuration
-from astrometricslib.foundation.errors import StorageError
+from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
 from astrometricslib.foundation.storage.local_database import connect_db
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.gate_result import GateStatus
@@ -182,8 +192,9 @@ _CAPTURE_SETTING_FIELDS = (
 # These statements are built only from the fixed column names above, never
 # from caller input, so no value can reach the SQL text.
 _INSERT_CAPTURE_SETTING_SQL = (
-    f"INSERT OR IGNORE INTO quality_capture_setting ({', '.join(_CAPTURE_SETTING_FIELDS)}) "  # ruff: ignore[hardcoded-sql-expression]
-    f"VALUES ({', '.join('?' * len(_CAPTURE_SETTING_FIELDS))})"
+    f"INSERT INTO quality_capture_setting ({', '.join(_CAPTURE_SETTING_FIELDS)}) "  # ruff: ignore[hardcoded-sql-expression]
+    f"VALUES ({', '.join('?' * len(_CAPTURE_SETTING_FIELDS))}) "
+    "ON CONFLICT DO NOTHING"
 )
 # "IS" compares NULL equal to NULL, unlike "=".
 _SELECT_CAPTURE_SETTING_ID_SQL = (
@@ -191,30 +202,36 @@ _SELECT_CAPTURE_SETTING_ID_SQL = (
     + " AND ".join(f"{name} IS ?" for name in _CAPTURE_SETTING_FIELDS)
 )
 _INSERT_MEASUREMENT_SQL = (
-    f"INSERT OR IGNORE INTO quality_measurements ({', '.join(_MEASUREMENT_COLUMNS)}) "  # ruff: ignore[hardcoded-sql-expression]
-    f"VALUES ({', '.join('?' * len(_MEASUREMENT_COLUMNS))})"
+    f"INSERT INTO quality_measurements ({', '.join(_MEASUREMENT_COLUMNS)}) "  # ruff: ignore[hardcoded-sql-expression]
+    f"VALUES ({', '.join('?' * len(_MEASUREMENT_COLUMNS))}) "
+    "ON CONFLICT (run_id, metric, subject_level, subject_id, channel) DO NOTHING"
 )
 
 
 def _format_time(moment: datetime) -> str:
-    """Format a time so that text order equals time order.
+    """Format a time as UTC so that text order equals time order.
 
-    An aware time is converted to UTC first, so times written with different
-    offsets still sort correctly.
+    Every stored time and every ``since`` bound goes through here, so there
+    is one stored format: an ISO 8601 string ending in ``+00:00``.
 
     Parameters
     ----------
     moment : `datetime`
-        The time to store.
+        The time to store. It must carry a time zone.
 
     Returns
     -------
     text : `str`
-        An ISO 8601 string with microseconds always present.
+        An ISO 8601 string in UTC with microseconds always present.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the time has no time zone.
     """
-    if moment.tzinfo is not None:
-        moment = moment.astimezone(UTC)
-    return moment.isoformat(timespec="microseconds")
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise InvalidArgumentError("A time given to the quality store must carry a time zone.")
+    return moment.astimezone(UTC).isoformat(timespec="microseconds")
 
 
 def _measurement_to_values(measurement: QualityMeasurement) -> tuple[Any, ...]:
@@ -264,6 +281,34 @@ def _measurement_to_values(measurement: QualityMeasurement) -> tuple[Any, ...]:
 
 def _row_to_measurement(row: sqlite3.Row) -> QualityMeasurement:
     """Build a measurement from one database row.
+
+    Parameters
+    ----------
+    row : `sqlite3.Row`
+        A row of ``quality_measurements`` (or of the latest view).
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        The measurement, with `row_id` filled.
+
+    Raises
+    ------
+    StorageError
+        If the stored row fails the model's checks. The error names the row.
+    """
+    try:
+        return _decode_row(row)
+    except (ValueError, TypeError, KeyError) as error:
+        raise StorageError(
+            "A stored quality measurement could not be read back.",
+            details={"row_id": row["row_id"], "error": str(error)},
+            retryable=False,
+        ) from error
+
+
+def _decode_row(row: sqlite3.Row) -> QualityMeasurement:
+    """Build a measurement from one row, letting validation errors escape.
 
     Parameters
     ----------
@@ -332,66 +377,27 @@ def quality_database_path(app_config: AppConfiguration | None = None) -> str:
     return os.path.join(str(app_config.get_library_path()), "astrometrics.db")
 
 
-def quality_tables_exist(db_path: str) -> bool:
-    """Say whether a database already holds the quality tables.
-
-    This only reads. It never creates the file or the tables, so a reader
-    can ask before it opens a `QualityStore` (which creates them).
-
-    Parameters
-    ----------
-    db_path : `str`
-        Filesystem path to the SQLite database.
-
-    Returns
-    -------
-    exists : `bool`
-        `True` if the file exists and has the ``quality_measurements`` table.
-
-    Raises
-    ------
-    StorageError
-        If the file exists but cannot be read as a database.
-    """
-    if not os.path.isfile(db_path):
-        return False
-    try:
-        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        try:
-            row = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_measurements'"
-            ).fetchone()
-        finally:
-            connection.close()
-    except sqlite3.Error as error:
-        raise StorageError(
-            "The quality database could not be read.", details={"path": db_path, "error": str(error)}
-        ) from error
-    return row is not None
-
-
 class QualityStore:
     """Writes and reads quality measurements in a SQLite database.
+
+    Creating a store touches nothing on disk. A write (`write_measurements`
+    or `get_or_create_capture_setting`) creates the file and the quality
+    tables if they are missing. A read (`query` and `get_capture_setting`)
+    opens the file read-only and never creates or migrates anything.
 
     Parameters
     ----------
     db_path : `str`
         Filesystem path to the SQLite database (normally astrometrics.db).
-        The file and the quality tables are created if missing.
 
     Attributes
     ----------
     db_path : `str`
         The database path.
-
-    Raises
-    ------
-    StorageError
-        If the database cannot be opened or migrated.
     """
 
     def __init__(self, db_path: str) -> None:
-        """Open the database and bring the quality schema up to date.
+        """Remember the database path.
 
         Parameters
         ----------
@@ -399,7 +405,6 @@ class QualityStore:
             Filesystem path to the SQLite database.
         """
         self.db_path = db_path
-        self._migrate()
 
     @classmethod
     def from_configuration(cls, app_config: AppConfiguration | None = None) -> QualityStore:
@@ -419,21 +424,24 @@ class QualityStore:
         return cls(quality_database_path(app_config))
 
     @contextmanager
-    def _transaction(self) -> Generator[sqlite3.Connection]:
-        """Open a connection and run the body as one transaction.
+    def _write_transaction(self) -> Generator[sqlite3.Connection]:
+        """Open a connection, bring the schema up to date and run the body.
 
-        The transaction commits when the body finishes and rolls back if it
-        raises. Any `sqlite3.Error` or `OSError` becomes a `StorageError`.
+        The body runs in the same transaction as the schema check, so two
+        writers never both migrate. The transaction commits when the body
+        finishes and rolls back if it raises. Any `sqlite3.Error` or
+        `OSError` becomes a `StorageError`.
 
         Yields
         ------
         connection : `sqlite3.Connection`
-            A connection with a transaction already begun.
+            A connection with a write transaction already begun.
 
         Raises
         ------
         StorageError
-            If the database cannot be opened, read or written.
+            If the database cannot be opened, migrated or written, or was
+            written by a newer version of this code.
         """
         try:
             connection = connect_db(self.db_path)
@@ -444,6 +452,7 @@ class QualityStore:
             ) from error
         try:
             connection.execute("BEGIN IMMEDIATE")
+            self._migrate(connection)
             yield connection
             connection.commit()
         except (sqlite3.Error, OSError) as error:
@@ -458,19 +467,40 @@ class QualityStore:
         finally:
             connection.close()
 
-    def _migrate(self) -> None:
-        """Bring the quality schema to `SCHEMA_VERSION`.
+    @contextmanager
+    def _read_connection(self) -> Generator[sqlite3.Connection | None]:
+        """Open the database read-only, or give `None` if nothing is there.
 
-        Version 0 means the quality tables do not exist yet. Running this
-        again on an up-to-date database changes nothing. Other tables in the
-        file are never touched.
+        The connection uses ``mode=ro``. It takes no write lock, does not
+        change the journal mode and does not migrate. A missing file, a
+        file with no quality tables and a file whose schema version is older
+        than the code's all give `None`: the writer migrates, so there is
+        nothing to read yet.
+
+        Yields
+        ------
+        connection : `sqlite3.Connection` or `None`
+            A read-only connection, or `None` if there is nothing to read.
 
         Raises
         ------
         StorageError
-            If the database was written by a newer version of this code.
+            If the file cannot be read, or was written by a newer version of
+            this code.
         """
-        with self._transaction() as connection:
+        if not os.path.isfile(self.db_path):
+            yield None
+            return
+        uri = f"file:{quote(self.db_path)}?mode=ro"
+        try:
+            connection = sqlite3.connect(uri, uri=True, timeout=30.0)
+            connection.row_factory = sqlite3.Row
+        except (sqlite3.Error, OSError) as error:
+            raise StorageError(
+                "The quality database could not be opened.",
+                details={"path": self.db_path, "error": str(error)},
+            ) from error
+        try:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             if version > SCHEMA_VERSION:
                 raise StorageError(
@@ -478,10 +508,47 @@ class QualityStore:
                     details={"found": version, "supported": SCHEMA_VERSION},
                     retryable=False,
                 )
-            if version < 1:
-                for statement in _CREATE_SCHEMA_STATEMENTS:
-                    connection.execute(statement)
-                connection.execute("PRAGMA user_version = 1")
+            has_tables = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_measurements'"
+            ).fetchone()
+            yield connection if has_tables is not None and version >= 1 else None
+        except (sqlite3.Error, OSError) as error:
+            raise StorageError(
+                "The quality database could not be read.",
+                details={"path": self.db_path, "error": str(error)},
+            ) from error
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _migrate(connection: sqlite3.Connection) -> None:
+        """Bring the quality schema to `SCHEMA_VERSION`.
+
+        Call this inside a write transaction. Version 0 means the quality
+        tables do not exist yet. Running this again on an up-to-date
+        database changes nothing. Other tables in the file are never touched.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A connection with a write transaction begun.
+
+        Raises
+        ------
+        StorageError
+            If the database was written by a newer version of this code.
+        """
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        if version > SCHEMA_VERSION:
+            raise StorageError(
+                "The quality database is newer than this software understands.",
+                details={"found": version, "supported": SCHEMA_VERSION},
+                retryable=False,
+            )
+        if version < 1:
+            for statement in _CREATE_SCHEMA_STATEMENTS:
+                connection.execute(statement)
+            connection.execute("PRAGMA user_version = 1")
 
     def get_or_create_capture_setting(self, setting: CaptureSetting) -> int:
         """Return the id of a capture setting, adding it if it is new.
@@ -497,7 +564,7 @@ class QualityStore:
             The same id every time for the same settings.
         """
         values = [getattr(setting, name) for name in _CAPTURE_SETTING_FIELDS]
-        with self._transaction() as connection:
+        with self._write_transaction() as connection:
             connection.execute(_INSERT_CAPTURE_SETTING_SQL, values)
             row = connection.execute(_SELECT_CAPTURE_SETTING_ID_SQL, values).fetchone()
         return int(row[0])
@@ -515,7 +582,9 @@ class QualityStore:
         setting : `CaptureSetting` or `None`
             The settings, or `None` if the id is unknown.
         """
-        with self._transaction() as connection:
+        with self._read_connection() as connection:
+            if connection is None:
+                return None
             row = connection.execute(
                 "SELECT * FROM quality_capture_setting WHERE capture_setting_id = ?",
                 (capture_setting_id,),
@@ -543,12 +612,14 @@ class QualityStore:
 
         Notes
         -----
-        A database error is raised as `StorageError` and nothing is stored.
+        A database error is raised as `StorageError` and nothing is stored:
+        the batch commits whole or not at all. This creates the file and
+        the quality tables if they are missing.
         """
         if not measurements:
             return 0
         new_count = 0
-        with self._transaction() as connection:
+        with self._write_transaction() as connection:
             for measurement in measurements:
                 cursor = connection.execute(_INSERT_MEASUREMENT_SQL, _measurement_to_values(measurement))
                 new_count += max(cursor.rowcount, 0)
@@ -583,7 +654,7 @@ class QualityStore:
         telescope : `str`, optional
             Only measurements whose capture setting has this telescope.
         since : `datetime`, optional
-            Only measurements made at or after this time.
+            Only measurements made at or after this time (with a time zone).
         row_ids : `Sequence` of `int`, optional
             Only these rows. When given, exactly these rows are returned
             even if newer ones exist, so a citation always finds what it
@@ -595,7 +666,13 @@ class QualityStore:
         Returns
         -------
         measurements : `list` of `QualityMeasurement`
-            Matching measurements, oldest first, with `row_id` filled.
+            Matching measurements, oldest first, with `row_id` filled. Empty
+            if the file or the quality tables do not exist yet.
+
+        Notes
+        -----
+        A `StorageError` is raised if the file is unreadable, is newer than
+        this code, or a stored row fails the model's checks.
         """
         source = "quality_measurements_latest" if latest_only and row_ids is None else "quality_measurements"
         conditions: list[str] = []
@@ -626,6 +703,8 @@ class QualityStore:
             "ON cs.capture_setting_id = m.capture_setting_id "
             f"{where} ORDER BY m.measured_at, m.row_id"
         )
-        with self._transaction() as connection:
+        with self._read_connection() as connection:
+            if connection is None:
+                return []
             rows = connection.execute(sql, parameters).fetchall()
         return [_row_to_measurement(row) for row in rows]

@@ -269,9 +269,11 @@ export interface ActionRegistry {
     "processing:active_jobs": { payload: Record<string, never>; response: ProcessingJob[] };
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
-    // Quality measurements: the stored ones, and what each metric means
+    // Quality measurements: the stored ones, and what each metric means.
+    // Parameter names are snake_case (target_id, not targetId); the router
+    // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
-    "quality:metrics": { payload: Record<string, never>; response: import('../types/backendTypes').MetricSpec[] };
+    "quality:metrics": { payload: { name?: string }; response: import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };

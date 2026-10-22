@@ -124,6 +124,21 @@ def test_bad_arguments_are_refused(quality: QualityDiagnostics) -> None:
         quality.query(since="last night")
 
 
+def test_an_unregistered_metric_name_is_refused(quality: QualityDiagnostics) -> None:
+    """`query(metric=...)` lists the registered names when it is wrong."""
+    with pytest.raises(InvalidArgumentError, match=r"frame\.background_level_adu"):
+        quality.query(metric="frame.no_such_metric")
+    assert quality.query(metric="frame.background_level_adu") == []
+
+
+def test_metrics_with_a_name_gives_that_one_spec(quality: QualityDiagnostics) -> None:
+    """`metrics(name=...)` gives one declaration or refuses an unknown name."""
+    one = quality.metrics(name="frame.background_level_adu")
+    assert [spec.name for spec in one] == ["frame.background_level_adu"]
+    with pytest.raises(InvalidArgumentError):
+        quality.metrics(name="frame.no_such_metric")
+
+
 def test_metrics_lists_the_declarations(quality: QualityDiagnostics) -> None:
     """`metrics` returns the registry's declarations as a list."""
     specs = quality.metrics()

@@ -69,7 +69,7 @@ def _measurement(**overrides: object) -> QualityMeasurement:
         "sample_count": 120,
         "origin": MeasurementOrigin.MEASURED,
         "run_id": "run-1",
-        "measured_at": datetime.datetime(2026, 10, 2, 3, 0, 0),
+        "measured_at": datetime.datetime(2026, 10, 2, 3, 0, 0, tzinfo=datetime.UTC),
     }
     fields.update(overrides)
     return QualityMeasurement(**fields)
@@ -117,7 +117,7 @@ def _spec(**overrides: object) -> MetricSpec:
         "definition_version": 1,
         "unit": "arcsec",
         "checkpoint": Checkpoint.FRAME,
-        "levels": frozenset({SubjectLevel.FRAME}),
+        "levels": (SubjectLevel.FRAME,),
         "better": Direction.LOWER,
         "meaning": "Median star width over the frame.",
         "decisions": ("focus",),
@@ -240,7 +240,7 @@ def test_exploratory_metric_requires_question_and_review_date() -> None:
 
 
 def test_metric_spec_round_trips_through_json() -> None:
-    """A spec, with its frozenset of levels, survives a JSON round trip."""
+    """A spec, with its tuple of levels, survives a JSON round trip."""
     spec = _spec(register_entry="FRM-01")
     assert MetricSpec.model_validate_json(spec.model_dump_json()) == spec
 
@@ -303,3 +303,44 @@ def test_metric_spec_dumps_camel_case_and_round_trips_by_alias() -> None:
     assert MetricSpec.model_validate(dumped) == spec
     with pytest.raises(ValidationError):
         spec.unit = "pixel"
+
+
+def test_non_finite_value_and_uncertainty_are_refused() -> None:
+    """NaN and infinity are refused for the value, uncertainty and limit."""
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValidationError, match="finite"):
+            _measurement(value=bad)
+        with pytest.raises(ValidationError, match="finite"):
+            _measurement(uncertainty=bad)
+        with pytest.raises(ValidationError, match="finite"):
+            _limit(value=bad)
+
+
+def test_assumed_measurement_needs_a_reason() -> None:
+    """An assumed value must say where it came from."""
+    with pytest.raises(ValidationError, match="source"):
+        _measurement(status=MeasurementStatus.ASSUMED, reason="  ")
+    ok = _measurement(status=MeasurementStatus.ASSUMED, reason="Camera profile default")
+    assert ok.reason == "Camera profile default"
+
+
+def test_passed_or_failed_check_needs_a_limit() -> None:
+    """A passed or failed self-check needs its limit; not_checked does not."""
+    for outcome in (GateStatus.PASSED, GateStatus.FAILED):
+        with pytest.raises(ValidationError, match="check_limit"):
+            _measurement(check_outcome=outcome)
+        assert _measurement(check_outcome=outcome, check_limit=_limit()).check_outcome == outcome
+    assert _measurement(check_outcome=GateStatus.NOT_CHECKED).check_limit is None
+
+
+def test_naive_measured_at_is_refused() -> None:
+    """A time with no time zone is refused with a clear message."""
+    with pytest.raises(ValidationError, match="time zone"):
+        _measurement(measured_at=datetime.datetime(2026, 10, 2, 3, 0, 0))
+
+
+def test_metric_spec_levels_are_a_sorted_tuple() -> None:
+    """Levels are stored sorted, without repeats, and dump as a JSON list."""
+    spec = _spec(levels=[SubjectLevel.STACK, SubjectLevel.FRAME, SubjectLevel.STACK])
+    assert spec.levels == (SubjectLevel.FRAME, SubjectLevel.STACK)
+    assert spec.model_dump(mode="json")["levels"] == ["frame", "stack"]

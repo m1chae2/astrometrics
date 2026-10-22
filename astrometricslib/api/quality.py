@@ -165,23 +165,21 @@ class QualityDiagnostics:
 
         Notes
         -----
-        An unknown ``level`` or a ``since`` that cannot be read as a time
-        raises `InvalidArgumentError`.
+        An unknown ``metric`` (the error lists the registered names), an
+        unknown ``level`` or a ``since`` that cannot be read as a time raises
+        `InvalidArgumentError`. A stored row that fails the model's checks
+        raises `StorageError`.
         """
-        from astrometricslib.drivers.quality_store import (
-            QualityStore,
-            quality_database_path,
-            quality_tables_exist,
-        )
+        from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
+        from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 
+        if metric is not None:
+            check_choice("metric", metric, get_metric_registry().names())
         if level is not None:
             check_choice("level", level, tuple(member.value for member in SubjectLevel))
         since_seconds = to_epoch_seconds(since, "since")
         since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
-        database_path = quality_database_path(self._config)
-        if not quality_tables_exist(database_path):
-            return []
-        return QualityStore(database_path).query(
+        return QualityStore(quality_database_path(self._config)).query(
             metric=metric,
             level=None if level is None else SubjectLevel(level),
             target_id=target_id,
@@ -193,8 +191,13 @@ class QualityDiagnostics:
             latest_only=latest_only,
         )
 
-    def metrics(self) -> list[MetricSpec]:
-        """List every declared quality metric and what it means.
+    def metrics(self, name: str | None = None) -> list[MetricSpec]:
+        """List the declared quality metrics and what they mean.
+
+        Parameters
+        ----------
+        name : `str`, optional
+            One metric name. The list then holds only that metric.
 
         Returns
         -------
@@ -202,10 +205,18 @@ class QualityDiagnostics:
             The declarations, in the order they are registered. Each says
             the unit, the checkpoint, which way is better and how the number
             is estimated.
-        """
-        from astrometricslib.pipelines.shared.quality.metric_registry import metrics
 
-        return list(metrics())
+        Notes
+        -----
+        An unknown ``name`` raises `InvalidArgumentError`.
+        """
+        from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
+
+        registry = get_metric_registry()
+        if name is not None:
+            check_choice("name", name, registry.names())
+            return [registry.get(name)]
+        return list(registry.all())
 
     def _label(self, target: Target | None, folder_path: str | None = None) -> str:
         """Name the subject of a job.

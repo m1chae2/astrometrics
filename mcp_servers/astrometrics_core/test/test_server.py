@@ -181,3 +181,23 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
         "latest_only",
     }
     assert not schema.get("required")
+
+
+async def test_quality_metrics_reply_is_json_with_levels_as_a_list(registry: ToolRegistry) -> None:
+    """`quality_metrics` replies with JSON; `levels` is a list of strings."""
+    reply = await registry.execute("quality_metrics", {})
+    specs = json.loads(reply[0].text)
+    assert specs
+    for spec in specs:
+        assert isinstance(spec["levels"], list)
+        assert all(isinstance(level, str) for level in spec["levels"])
+        assert isinstance(spec["decisions"], list)
+    one = json.loads((await registry.execute("quality_metrics", {"name": specs[0]["name"]}))[0].text)
+    assert [spec["name"] for spec in one] == [specs[0]["name"]]
+
+
+def test_quality_metrics_offers_an_optional_name(registry: ToolRegistry) -> None:
+    """`quality_metrics` takes one optional `name` argument."""
+    schema = registry.tools["quality_metrics"]["tool_def"].input_schema
+    assert set(schema["properties"]) == {"name"}
+    assert not schema.get("required")

@@ -381,8 +381,8 @@ DECISIONS = {
     ),
     "quality_metrics": ToolDecision(
         "keep",
-        "Built 2026-10-21. Lists every declared quality metric: unit, checkpoint, which way is better "
-        "and how it is estimated. Fixed text, nothing is read from disk.",
+        "Built 2026-10-21. Lists the declared quality metrics (or one, given its name): unit, checkpoint, "
+        "which way is better and how it is estimated. Fixed text, nothing is read from disk.",
     ),
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."

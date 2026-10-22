@@ -15,5 +15,7 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 - `frame_quality_report.py` — builds the reports that `QualityDiagnostics.frame_quality` returns (`raw_check_report` and `input_quality_report`).
 - `frame_trends.py` — spots a slow, steady change in one number across a run of frames, using the median of all pairwise slopes (the Theil-Sen slope).
 - `detection_confidence.py` — turns a detection's signal-to-noise into one confidence score from 0 to 1. The curve is a heuristic, not a calibrated detection probability.
+- `metrics.py` — declares the frame metrics that the library already measures (background level, saturated pixel fraction, star width of the brightest stars, star count, sensor and focuser temperature). Each declaration says which function computes the value and why the metric exists.
+- `metric_registry.py` — gathers those declarations and the ones in each pipeline's own `metrics.py` into one read-only registry. It refuses a duplicate name and owns the list of units a declaration may use. `astrometricslib/pipelines/test/test_metric_conformance.py` checks that every declaration points at a real function, uses a known unit, and cites a validation register entry that exists.
 
 For exact behavior, read the code.

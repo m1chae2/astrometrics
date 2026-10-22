@@ -31,7 +31,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  diagnostics = astro.processing.diagnostics
+  diagnostics = astro.quality
   # Step 1: per-frame star count, roundness and sky level for one session.
   check = diagnostics.frame_quality(
       "M 27", kind="raw_check", filter_name="L", since="2026-09-24T18:00", until="2026-09-25T06:00", limit=300
@@ -105,7 +105,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   for target in astro.targets.list():
-      preview = astro.processing.diagnostics.frame_quality(target.id, kind="quarantine_preview", limit=300)
+      preview = astro.quality.frame_quality(target.id, kind="quarantine_preview", limit=300)
       if preview.frames_checked:
           print(target.id, preview.would_move_total, preview.frames_checked, preview.notes)
   ```
@@ -140,7 +140,7 @@ Every Python example assumes the library is installed and configured with your o
 
   astro = Astrometrics()
   # One night, one exposure length: narrow the selection with filter_name, since and until.
-  check = astro.processing.diagnostics.frame_quality(
+  check = astro.quality.frame_quality(
       "NGC 2403",
       kind="raw_check",
       filter_name="L",
@@ -189,7 +189,7 @@ Every Python example assumes the library is installed and configured with your o
   flats = sorted(glob.glob("/path/to/flats/L/*.fits"))
   assessment = assess_flats(flats, camera="ZWO ASI533MM Pro")
   print(assessment.frame_count, assessment.noise_fraction, assessment.smoothing_sigma_pixels, assessment.issues)
-  report = astro.processing.diagnostics.stack_quality("M 101", compare_to="previous")
+  report = astro.quality.stack_quality("M 101", compare_to="previous")
   print(report.comparison.before.noise_fraction, report.comparison.after.noise_fraction)
   ```
 
@@ -267,7 +267,7 @@ Every Python example assumes the library is installed and configured with your o
   weighted = astro.processing.stack(target, frames=frames, force=True, output_file="/tmp/m27_weighted.fits")
   exposure_weighting.MINIMUM_PENALTY_TO_WEIGHT = 100.0  # equal weights for this run only
   equal = astro.processing.stack(target, frames=frames, force=True, output_file="/tmp/m27_equal.fits")
-  report = astro.processing.diagnostics.stack_quality(weighted.stacked_path, compare_to=equal.stacked_path)
+  report = astro.quality.stack_quality(weighted.stacked_path, compare_to=equal.stacked_path)
   print(report.comparison.changes["noise_fraction"])
   ```
 
@@ -321,9 +321,7 @@ Every Python example assumes the library is installed and configured with your o
              force=True,
              output_file="/tmp/m13_n8.fits",
          )
-         quality = astro.processing.diagnostics.stack_quality(
-             result.stacked_path, include=["fwhm", "rejected_fraction"]
-         )
+         quality = astro.quality.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
          print(limits, quality.fwhm_px, quality.rejected_fraction)
      ```
 
@@ -404,9 +402,7 @@ Every Python example assumes the library is installed and configured with your o
       result = astro.processing.stack(
           target, frames=frames[:count], generate_rejmap=True, force=True, output_file=f"/tmp/m13_{count}.fits"
       )
-      quality = astro.processing.diagnostics.stack_quality(
-          result.stacked_path, include=["fwhm", "rejected_fraction"]
-      )
+      quality = astro.quality.stack_quality(result.stacked_path, include=["fwhm", "rejected_fraction"])
       print(count, quality.fwhm_px, quality.rejected_fraction)
   ```
 
@@ -475,7 +471,7 @@ Every Python example assumes the library is installed and configured with your o
   result = astro.processing.stack("Alcor", kind="spectral", force=True)
   for group in result.quality_summary.stacking_metrics.exposure_groups:
       print(group.exposure_seconds, group.frames_submitted, group.frames_stacked)
-  report = astro.processing.diagnostics.stack_quality("Alcor", kind="spectral", include=["registration"])
+  report = astro.quality.stack_quality("Alcor", kind="spectral", include=["registration"])
   print(len(report.registration or []))
   ```
 
@@ -888,7 +884,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  quality = astro.processing.diagnostics.stack_quality("NGC 2403", include=["rejected_fraction"])
+  quality = astro.quality.stack_quality("NGC 2403", include=["rejected_fraction"])
   print(quality.rejected_fraction)
   ```
 
@@ -1236,7 +1232,7 @@ Every Python example assumes the library is installed and configured with your o
   from astrometricslib import Astrometrics
 
   astro = Astrometrics()
-  diagnostics = astro.processing.diagnostics
+  diagnostics = astro.quality
   check = diagnostics.frame_quality("M 13", kind="raw_check", limit=300)
   for row in check.frames:
       print(row.get("path"), row.get("star_count"), row.get("line_trail_px"), row.get("line_trail_angle_deg"))

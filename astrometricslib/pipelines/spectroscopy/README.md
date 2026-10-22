@@ -217,6 +217,7 @@ The counts behind the gates come from `spectrum_facts`, which the batch workers 
 
 Each star's spectrum moves through all three stages in order. The pipeline stores the result of each stage on the star, so a reviewer can see the final classification along with the input quality and output trust score behind it. A quality checkpoint sits before the first stage and after each stage, so a reviewer can also see where quality was lost (see [Quality checkpoints](#quality-checkpoints) below).
 
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
 - **Utilities** (`utilities/`) hold tools that are not part of processing a target's spectra:
   - `calibration_tuner.py` derives a camera's physical calibration ahead of time (see [Calibration tuning](#calibration-tuning)).
   - `registration_quality.py` checks how well a stack of spectral images aligned. It follows each frame's zero-order star (the star's undispersed image) and flags frames where that star jumps or fades. The stacking stage calls it after it stacks spectral frames (`_check_spectral_registration_quality` in `pipelines/stacking/stage.py`), and `api/quality.py` exposes its outlier test and thresholds.

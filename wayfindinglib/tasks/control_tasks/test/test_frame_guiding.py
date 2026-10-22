@@ -160,7 +160,7 @@ def test_image_quality_is_put_on_the_same_row_as_the_guide_error() -> None:
     diagnostics = SimpleNamespace(frame_quality=frame_quality)
     library = SimpleNamespace(
         targets=SimpleNamespace(get=lambda _id, refresh=False: target),
-        processing=SimpleNamespace(diagnostics=diagnostics),
+        quality=diagnostics,
     )
     rows = _samples(1000.0, 20, 1.0) + _samples(1060.0, 20, 4.0)
     report = link_frames_to_guiding(

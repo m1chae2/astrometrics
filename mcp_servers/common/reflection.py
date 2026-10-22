@@ -214,7 +214,7 @@ def register_reflected_tools(registry: Any, api_object: Any, branch_mapping: dic
         Mapping of attribute name on the high-level interface
         (e.g. ``"targets"``) to its tool prefix (e.g. ``"target"``). A
         key of ``""`` maps to root astrometrics methods. A dotted name
-        (e.g. ``"processing.diagnostics"``) walks nested attributes.
+        (e.g. ``"processing.calibration"``) walks nested attributes.
 
     Returns
     -------

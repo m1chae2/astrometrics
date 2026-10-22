@@ -127,7 +127,25 @@ from astrometricslib.models.provenance import (
     WasConfiguredBy,
     WasGeneratedBy,
 )
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview, RestoreReport, SetAsideFrame
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementReference,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    StarResultReference,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.metric_spec import (
+    Checkpoint,
+    Direction,
+    MetricPurpose,
+    MetricSpec,
+    UncertaintyKind,
+)
 from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
@@ -265,9 +283,9 @@ class Astrometrics:
     This class only builds the sub-APIs and holds them. It has no methods
     of its own: stacking, preview pictures and the analysis stages live on
     `processing`, the target list on `targets`, the star catalog on
-    `stars`, pictures and plots on `visualization`, and the job history on
-    `jobs`. Each sub-API is built once here and shared, so they all read
-    and write the same storage.
+    `stars`, pictures and plots on `visualization`, the job history on
+    `jobs`, and quality reads on `quality`. Each sub-API is built once
+    here and shared, so they all read and write the same storage.
 
     Parameters
     ----------
@@ -303,6 +321,9 @@ class Astrometrics:
     jobs : `Jobs`
         Read-only tracking of running and completed processing jobs
         and lineage.
+    quality : `QualityDiagnostics`
+        The start of every quality read: stored measurements, the metric
+        list, and live checks of raw frames and stacks.
 
     Notes
     -----
@@ -324,6 +345,7 @@ class Astrometrics:
     ) -> None:
         from astrometricslib.api.jobs import Jobs
         from astrometricslib.api.processing import ProcessingPipelines
+        from astrometricslib.api.quality import QualityDiagnostics
         from astrometricslib.api.stars import StellarCatalog
         from astrometricslib.api.targets import TargetCatalog
         from astrometricslib.api.visualization import Visualization
@@ -350,6 +372,7 @@ class Astrometrics:
         self.visualization = Visualization(
             self.config, self.catalog_access, targets=self.targets, stars=self.stars
         )
+        self.quality = QualityDiagnostics(self.config, self.catalog_access, targets=self.targets)
         self.jobs = Jobs(self.config, self.catalog_access)
 
 
@@ -379,7 +402,9 @@ __all__ = [
     "Butler",
     "CalibrationCatalog",
     "CalibrationQueryResult",
+    "CaptureSetting",
     "CatalogAccess",
+    "Checkpoint",
     "Collection",
     "ConfigFile",
     "ConfigFileDescription",
@@ -390,6 +415,7 @@ __all__ = [
     "DatasetSpec",
     "DbLogHandler",
     "DeviceInUseError",
+    "Direction",
     "Entity",
     "EntityDescription",
     "ErrorInfo",
@@ -409,6 +435,12 @@ __all__ = [
     "InvalidArgumentError",
     "JobStore",
     "Jobs",
+    "LimitTier",
+    "MeasurementOrigin",
+    "MeasurementReference",
+    "MeasurementStatus",
+    "MetricPurpose",
+    "MetricSpec",
     "MovingObjectConfig",
     "NotFoundError",
     "NumpyEncoder",
@@ -428,6 +460,9 @@ __all__ = [
     "ProcessingPipelines",
     "ProvenanceStore",
     "QualityDiagnostics",
+    "QualityLimit",
+    "QualityMeasurement",
+    "QualitySubject",
     "QuarantinePreview",
     "RawFrameCheckReport",
     "ReddeningDriver",
@@ -446,10 +481,12 @@ __all__ = [
     "StackSummary",
     "StackingDriver",
     "StarQueryResult",
+    "StarResultReference",
     "StellarCatalog",
     "StellarObject",
     "StorageError",
     "StorageNotMountedError",
+    "SubjectLevel",
     "Target",
     "TargetCatalog",
     "TargetFilesResponse",
@@ -457,6 +494,7 @@ __all__ = [
     "TargetReindexChange",
     "TargetSessionContribution",
     "TargetStarCount",
+    "UncertaintyKind",
     "UsageDescription",
     "Used",
     "ValueDescription",

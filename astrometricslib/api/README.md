@@ -44,7 +44,7 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 
 ### `processing.py`
 
-`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds its other child, `QualityDiagnostics`.
+`processing.py` holds `ProcessingPipelines` and its child `CalibrationCatalog`. `quality.py` holds `QualityDiagnostics`, which is a sub-API of its own (see below), not a child of `ProcessingPipelines`.
 
 `ProcessingPipelines` makes stacks and runs the analysis.
 
@@ -56,7 +56,16 @@ Each sub-API checks its arguments and hands the work to `pipelines/`. Three rule
 - A restack keeps the stack it replaces in a `_previous` folder. `discard_previous_stack` deletes it and `swap_with_previous_stack` puts it back.
 - `restore_excluded_frames(target, apply=True)` moves frames the stacker set aside back into the frames folder. The stacker sets a frame aside, into an `_excluded` folder, when clouds or trailed stars (stars smeared into short lines) make it unusable.
 
-`QualityDiagnostics` measures without changing anything.
+### `quality.py`
+
+`QualityDiagnostics` is reached as `astrometrics.quality`. It is the start of every quality read, whether the numbers were stored by an earlier run or are measured now. Nothing it does changes data.
+
+Stored reads:
+
+- `query` reads the quality measurements that earlier runs saved in `astrometrics.db`. It filters by `metric`, `level` (`frame`, `stack` or `run`), `target_id`, `observing_night_id`, `camera`, `telescope` and `since`. It gives the newest row for each subject and metric unless `latest_only=False`, and `row_ids` returns exactly the rows a report cited. A library with no quality table yet gives an empty list; the read creates no file and no table.
+- `metrics` lists every declared metric (a `MetricSpec`): its unit, the checkpoint where it is measured, which way is better and how it is estimated.
+
+Live checks:
 
 - `frame_quality` measures raw frames:
   - `kind="input_quality"` measures them one by one.

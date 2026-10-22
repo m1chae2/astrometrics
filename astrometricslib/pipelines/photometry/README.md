@@ -238,6 +238,7 @@ Registration is the lining up of each frame with the first one. This gate checks
 
 ## Where each piece lives
 
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
 - [`pre_processing/`](pre_processing/README.md) turns a raw frame into one brightness measurement per star, and judges how good that raw measurement was.
 - [`processing/`](processing/README.md) compares stars against each other, decides which ones are variable, and searches for repeating patterns.
 - [`post_processing/`](post_processing/README.md) judges how much to trust a variability result and builds the run's gates.

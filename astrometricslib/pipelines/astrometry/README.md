@@ -143,6 +143,7 @@ The catalog circuit breaker stops further catalog lookups after repeated failure
 
 The [review guide for astrometry](../../../documentation/library_design/pipelines/astrometry.md) summarizes the pipeline's parameters and their status.
 
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
 - `pipeline.py` runs steps 1 through 4 for a single image. It is the coordinator. It does not detect stars or query catalogs itself, but it calls the pieces that do, in the right order.
 - `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a whole session (the frames from one continuous run with the same setup), writes the solved sky position back onto the target's record, and produces a summary of how well the run went.
   - It also saves the solved sky map (the WCS) into the image's FITS header, so the next program to open the file does not solve it again.

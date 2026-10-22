@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from astrometricslib.api.processing import ProcessingPipelines
+from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.shared.quarantine_path import QUARANTINE_FOLDER_NAME
@@ -32,6 +33,19 @@ def pipelines(tmp_path: Path) -> ProcessingPipelines:
     """
     configuration = SimpleNamespace(get_frames_path=lambda: tmp_path / "frames")
     return ProcessingPipelines(configuration, None, targets=MagicMock())
+
+
+@pytest.fixture
+def quality(tmp_path: Path) -> QualityDiagnostics:
+    """Make the quality API whose frames folder is under a temporary folder.
+
+    Returns
+    -------
+    quality : `QualityDiagnostics`
+        The quality API on a stub configuration.
+    """
+    configuration = SimpleNamespace(get_frames_path=lambda: tmp_path / "frames")
+    return QualityDiagnostics(configuration, None, targets=MagicMock())
 
 
 def camera_folder(tmp_path: Path) -> Path:
@@ -161,7 +175,7 @@ def manifest_entry(folder: Path, name: str) -> dict[str, object]:
 
 
 def test_preview_names_the_frames_it_would_move_and_moves_none(
-    pipelines: ProcessingPipelines, tmp_path: Path
+    quality: QualityDiagnostics, tmp_path: Path
 ) -> None:
     """A cloudy frame is reported, and its file stays where it is."""
     folder = camera_folder(tmp_path)
@@ -169,7 +183,7 @@ def test_preview_names_the_frames_it_would_move_and_moves_none(
     cloudy = folder / "frame_011.fits"
 
     with patch(FINDER, side_effect=with_measurement({"frame_011.fits": 100})):
-        preview = pipelines.diagnostics.frame_quality(target, kind="quarantine_preview", register_job=False)
+        preview = quality.frame_quality(target, kind="quarantine_preview", register_job=False)
 
     assert preview.target_id == "M 1"
     assert preview.frames_checked == 12
@@ -180,12 +194,12 @@ def test_preview_names_the_frames_it_would_move_and_moves_none(
     assert len(target.frames) == 12
 
 
-def test_preview_skips_frames_that_are_not_lights(pipelines: ProcessingPipelines, tmp_path: Path) -> None:
+def test_preview_skips_frames_that_are_not_lights(quality: QualityDiagnostics, tmp_path: Path) -> None:
     """Calibration frames are not measured."""
     target = make_target(camera_folder(tmp_path), 12, role="FLAT")
 
     with patch(FINDER, side_effect=with_measurement({})):
-        preview = pipelines.diagnostics.frame_quality(target, kind="quarantine_preview", register_job=False)
+        preview = quality.frame_quality(target, kind="quarantine_preview", register_job=False)
 
     assert preview.frames_checked == 0
     assert preview.would_move == []
@@ -265,7 +279,7 @@ def test_restore_with_apply_does_not_rescan_when_nothing_moved(
 
 
 def test_frame_quality_can_include_the_frames_already_set_aside(
-    pipelines: ProcessingPipelines, tmp_path: Path
+    quality: QualityDiagnostics, tmp_path: Path
 ) -> None:
     """``include=["excluded"]`` adds the manifest's frames to a preview."""
     folder = camera_folder(tmp_path)
@@ -273,7 +287,7 @@ def test_frame_quality_can_include_the_frames_already_set_aside(
     target = make_target(folder, 12)
 
     with patch(FINDER, side_effect=with_measurement({})):
-        preview = pipelines.diagnostics.frame_quality(
+        preview = quality.frame_quality(
             target, kind="quarantine_preview", include=["excluded"], register_job=False
         )
 

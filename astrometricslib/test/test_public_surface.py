@@ -113,6 +113,21 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "ProcessingPipelines",
     "ProvenanceStore",
     "QualityDiagnostics",
+    "CaptureSetting",
+    "Checkpoint",
+    "Direction",
+    "LimitTier",
+    "MeasurementOrigin",
+    "MeasurementReference",
+    "MeasurementStatus",
+    "MetricPurpose",
+    "MetricSpec",
+    "QualityLimit",
+    "QualityMeasurement",
+    "QualitySubject",
+    "StarResultReference",
+    "SubjectLevel",
+    "UncertaintyKind",
     "QuarantinePreview",
     "RPC_CODES",
     "RawFrameCheckReport",
@@ -302,7 +317,6 @@ SUB_API_MEMBERS = {
         "acquire_analysis_slot",
         "acquire_stacking_slot",
         "calibration",
-        "diagnostics",
         "discard_previous_stack",
         "process_target",
         "remake_preview",
@@ -313,9 +327,11 @@ SUB_API_MEMBERS = {
         "swap_with_previous_stack",
     },
     "processing.calibration": {"add", "assess_flats", "get", "library", "query", "refresh", "save"},
-    "processing.diagnostics": {
+    "quality": {
         "flag_value_outliers",
         "frame_quality",
+        "metrics",
+        "query",
         "spectral_frame_check",
         "spectral_registration_thresholds",
         "stack_quality",
@@ -352,6 +368,7 @@ def test_the_root_object_only_holds_its_sub_apis() -> None:
         "config",
         "jobs",
         "processing",
+        "quality",
         "stars",
         "targets",
         "visualization",
@@ -376,6 +393,6 @@ def test_target_catalog_and_processing_share_one_calibration_catalog() -> None:
 
     astrometrics = astrometricslib.Astrometrics(astrometricslib.AppConfiguration(), MagicMock())
     assert astrometrics.processing._targets is astrometrics.targets
-    assert astrometrics.processing.diagnostics._targets is astrometrics.targets
+    assert astrometrics.quality._targets is astrometrics.targets
     assert astrometrics.processing.calibration._targets is astrometrics.targets
     assert astrometrics.visualization._stars is astrometrics.stars

@@ -127,7 +127,7 @@ def _add_image_quality(
     from astrometricslib import InvalidArgumentError, NotFoundError
 
     try:
-        report = astrometrics.processing.diagnostics.frame_quality(
+        report = astrometrics.quality.frame_quality(
             target=target,
             kind="raw_check",
             include=["spectra"] if selection.include_spectra else None,

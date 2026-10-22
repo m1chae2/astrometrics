@@ -243,7 +243,7 @@ def run_filter_sweep(astrometrics: Astrometrics, target, spec_frames: list[Any])
             continue
 
         row["zero_order_fwhm"] = measure_zero_order_stacked_fwhm(astrometrics, stacked_path)
-        row["rejected_fraction"] = astrometrics.processing.diagnostics.stack_quality(
+        row["rejected_fraction"] = astrometrics.quality.stack_quality(
             stacked_path, include=["rejected_fraction"]
         ).rejected_fraction
         print(
@@ -383,15 +383,13 @@ def run_analysis() -> None:
         else:
             position_jumps.append(float(np.hypot(curr["x"] - prev["x"], curr["y"] - prev["y"])))
 
-    thresholds = astrometrics.processing.diagnostics.spectral_registration_thresholds
+    thresholds = astrometrics.quality.spectral_registration_thresholds
     low_star_count_flags = [n < thresholds["min_matched_star_pairs"] for n in nb_stars]
-    high_rmse_flags = astrometrics.processing.diagnostics.flag_value_outliers(
-        rmse_values, thresholds["rmse_outlier_sigma"]
-    )
-    dim_zero_order_flags = astrometrics.processing.diagnostics.flag_value_outliers(
+    high_rmse_flags = astrometrics.quality.flag_value_outliers(rmse_values, thresholds["rmse_outlier_sigma"])
+    dim_zero_order_flags = astrometrics.quality.flag_value_outliers(
         peak_to_background_ratios, thresholds["zero_order_amplitude_outlier_sigma"], low_is_bad=True
     )
-    position_jump_flags = astrometrics.processing.diagnostics.flag_value_outliers(
+    position_jump_flags = astrometrics.quality.flag_value_outliers(
         position_jumps, thresholds["zero_order_position_jump_outlier_sigma"]
     )
 

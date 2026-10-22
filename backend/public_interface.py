@@ -119,6 +119,9 @@ RPC_METHODS: tuple[str, ...] = (
     "processing:delete_job",
     "processing:jobs_for_target",
     "processing:job_log_tail",
+    # Quality measurements: the stored ones, and what each metric means
+    "quality:query",
+    "quality:metrics",
     # Photometry and spectroscopy analysis
     "analysis:analyze_image",
     "analysis:get_results",

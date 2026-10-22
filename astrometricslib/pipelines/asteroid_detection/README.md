@@ -193,6 +193,7 @@ A gate is a run-level pass/fail entry in a quality record. The summary keeps one
 
 The [review guide for asteroid detection](../../../documentation/library_design/pipelines/asteroid_detection.md) summarizes the pipeline's parameters and their status.
 
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
 - `pipeline.py` is the coordinator. It ties together WCS estimation, detection, the pointing correction (step 3, which it implements itself), the rejection cascade and ephemeris matching for one run.
 - `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a target's stored images and writes the results back onto the target's record.
 - `run_gates.py` builds the run gates.

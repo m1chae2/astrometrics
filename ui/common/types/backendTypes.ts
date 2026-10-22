@@ -2357,6 +2357,8 @@ export const RPC_METHODS = [
   "processing:delete_job",
   "processing:jobs_for_target",
   "processing:job_log_tail",
+  "quality:query",
+  "quality:metrics",
   "analysis:analyze_image",
   "analysis:get_results",
   "analysis:cancel",

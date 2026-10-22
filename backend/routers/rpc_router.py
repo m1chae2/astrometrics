@@ -148,6 +148,11 @@ _HANDLERS: dict[str, Callable[..., Any] | tuple[str, str]] = {
     "processing:delete_job": ("job_service", "delete_job"),
     "processing:jobs_for_target": ("job_service", "get_jobs_for_target"),
     "processing:job_log_tail": ("image_processing_service", "fetch_job_log_tail"),
+    # Quality measurements. These read the library's quality root directly:
+    # `query` reads the stored measurements and `metrics` lists the declared
+    # metrics. Neither writes anything.
+    "quality:query": ("astrometrics.quality", "query"),
+    "quality:metrics": ("astrometrics.quality", "metrics"),
     # Photometry and spectroscopy analysis
     "analysis:analyze_image": ("analysis_orchestrator", "analyze_image"),
     "analysis:get_results": ("analysis_orchestrator", "get_analysis_results"),

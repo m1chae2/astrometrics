@@ -337,6 +337,7 @@ The pipeline's per-stage quality metrics are tabled in the stage READMEs: [pre-p
 
 The folders follow the layout in the [pipelines README](../README.md). The [review guide for stacking](../../../documentation/library_design/pipelines/stacking.md) summarizes the pipeline's parameters and their status.
 
+- `metrics.py` declares the quality metrics this pipeline measures (today the share of rejected pixels) for the metric registry. See [shared quality](../shared/quality/README.md).
 - `stack_request.py` is the entry point behind `ProcessingPipelines.stack`. `choose_frames_to_stack` picks the light frames. It never mixes imaging and spectroscopy frames or two cameras. It narrows the choice by filter, file-name range, time window and camera, or takes an exact list. `run_stack` runs `stage.py` on the chosen frames as a tracked job, holds a stacking slot while Siril runs, and saves the target when a stack was made. A request that cannot be met raises an error.
 - `stage.py` is the coordinator. It runs the steps above in order for one target, and the rest of the codebase calls it to stack a target's frames.
 - `calibration_ingest.py` turns a rescan of the calibration library into a report. It compares the library's frame lists from before and after the rescan, lists the groups that gained or lost frames, and measures each new set of flats with the stacker's own flat check (`pre_processing/flat_calibration.py`). `CalibrationCatalog.refresh` and `CalibrationCatalog.assess_flats` call it.

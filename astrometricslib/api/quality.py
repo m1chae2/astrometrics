@@ -1,12 +1,18 @@
-"""Quality diagnostics: measure raw frames and finished stacks.
+"""The quality root: every quality read starts here.
 
-`QualityDiagnostics` is the child of `ProcessingPipelines` that measures
-without changing anything. It is reached as
-`astrometrics.processing.diagnostics`.
+`QualityDiagnostics` is the child of `Astrometrics` reached as
+`astrometrics.quality`. It answers two kinds of question:
+
+* Stored: `query` reads the quality measurements that earlier runs saved,
+  and `metrics` lists what each metric means.
+* Live: `frame_quality`, `spectral_frame_check` and `stack_quality` measure
+  raw frames and finished stacks now, without changing anything.
+
 The argument helpers it shares with `ProcessingPipelines` live in
 `pipelines/shared/api_arguments.py`.
 """
 
+from datetime import UTC, datetime
 from typing import Literal
 
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
@@ -14,6 +20,8 @@ from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview
+from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
+from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
@@ -31,6 +39,7 @@ from astrometricslib.pipelines.shared.api_arguments import (
     make_frame_selection,
     reject_unused_arguments,
     resolve_target,
+    to_epoch_seconds,
 )
 
 __all__ = ["QualityDiagnostics"]
@@ -80,8 +89,10 @@ def _clamp(value: int, lowest: int, highest: int) -> int:
 
 
 class QualityDiagnostics:
-    """Measure raw frames and finished stacks, without changing anything.
+    """The start of every quality read: stored measurements and live checks.
 
+    `query` and `metrics` read what earlier runs stored. The other methods
+    measure raw frames and finished stacks now, without changing anything.
     The checks show whether a night had good tracking and clear skies, which
     frames the stacker would set aside, and whether a restack made the
     stack better or worse. A target id that names no target, or a stack
@@ -103,6 +114,98 @@ class QualityDiagnostics:
         self._config = config
         self._storage = storage
         self._targets = targets
+
+    def query(
+        self,
+        metric: str | None = None,
+        level: str | None = None,
+        target_id: str | None = None,
+        observing_night_id: str | None = None,
+        camera: str | None = None,
+        telescope: str | None = None,
+        since: TimeInput = None,
+        row_ids: list[int] | None = None,
+        latest_only: bool = True,
+    ) -> list[QualityMeasurement]:
+        """Read the quality measurements that earlier runs stored.
+
+        Nothing is measured and nothing is written. A library with no
+        stored measurements yet gives an empty list, and no database file
+        or table is created by asking.
+
+        Parameters
+        ----------
+        metric : `str`, optional
+            Only this metric. See `metrics` for the names.
+        level : `str`, optional
+            Only subjects of this level: ``"frame"``, ``"target"``, and so
+            on (the values of `SubjectLevel`).
+        target_id : `str`, optional
+            Only this target.
+        observing_night_id : `str`, optional
+            Only this observing night.
+        camera : `str`, optional
+            Only measurements made with this camera.
+        telescope : `str`, optional
+            Only measurements made with this telescope.
+        since : `str`, `datetime` or `Time`, optional
+            Only measurements made at or after this time. Text is ISO 8601;
+            no offset means UTC.
+        row_ids : `list` [`int`], optional
+            Only these rows, exactly as stored, even if newer ones exist.
+            ``latest_only`` is then ignored.
+        latest_only : `bool`, optional
+            Give the newest row for each subject, metric and channel
+            (default) instead of every row.
+
+        Returns
+        -------
+        measurements : `list` [`QualityMeasurement`]
+            The matching measurements, oldest first.
+
+        Notes
+        -----
+        An unknown ``level`` or a ``since`` that cannot be read as a time
+        raises `InvalidArgumentError`.
+        """
+        from astrometricslib.drivers.quality_store import (
+            QualityStore,
+            quality_database_path,
+            quality_tables_exist,
+        )
+
+        if level is not None:
+            check_choice("level", level, tuple(member.value for member in SubjectLevel))
+        since_seconds = to_epoch_seconds(since, "since")
+        since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
+        database_path = quality_database_path(self._config)
+        if not quality_tables_exist(database_path):
+            return []
+        return QualityStore(database_path).query(
+            metric=metric,
+            level=None if level is None else SubjectLevel(level),
+            target_id=target_id,
+            observing_night_id=observing_night_id,
+            camera=camera,
+            telescope=telescope,
+            since=since_time,
+            row_ids=None if row_ids is None else [int(row_id) for row_id in row_ids],
+            latest_only=latest_only,
+        )
+
+    def metrics(self) -> list[MetricSpec]:
+        """List every declared quality metric and what it means.
+
+        Returns
+        -------
+        metrics : `list` [`MetricSpec`]
+            The declarations, in the order they are registered. Each says
+            the unit, the checkpoint, which way is better and how the number
+            is estimated.
+        """
+        from astrometricslib.pipelines.shared.quality.metric_registry import metrics
+
+        return list(metrics())
 
     def _label(self, target: Target | None, folder_path: str | None = None) -> str:
         """Name the subject of a job.

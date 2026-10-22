@@ -219,7 +219,7 @@ DECISIONS = {
         "never deletes.",
         "ingest",
     ),
-    "diagnostics_frame_quality": ToolDecision(
+    "quality_frame_quality": ToolDecision(
         "keep", "Built 2026-10-03. Statistics on raw frames. Nothing is saved."
     ),
     "observatory_history_get_live_session_status": ToolDecision(
@@ -275,7 +275,7 @@ DECISIONS = {
         "2026-10-05 it is ProcessingPipelines.stack, which also takes the exact frames to stack.",
         "process",
     ),
-    "diagnostics_spectral_frame_check": ToolDecision(
+    "quality_spectral_frame_check": ToolDecision(
         "keep",
         "Built 2026-10-04. Measures raw spectrum frames: zero-order position, tilt, width, peaks, saturated "
         "patches along the spectrum, a predicted peak at another exposure, and a summary by exposure and by "
@@ -316,7 +316,7 @@ DECISIONS = {
         "Built 2026-10-05. Calibration counts, or how a target's light frames match the darks. refresh "
         "reloads the index into memory and writes nothing.",
     ),
-    "diagnostics_stack_quality": ToolDecision(
+    "quality_stack_quality": ToolDecision(
         "keep",
         "Built 2026-10-05. Measures a stack (star width, rejected share, registration) and compares it with "
         "the previous stack or another stack file. Saves nothing.",
@@ -373,6 +373,16 @@ DECISIONS = {
         "keep",
         "Built 2026-10-03. Reads jobs, log tails, stored results and data lineage from the logs database, "
         "opened read-only. A job stuck at 'started' after the app stopped still shows as active.",
+    ),
+    "quality_query": ToolDecision(
+        "keep",
+        "Built 2026-10-21. Reads the quality measurements that earlier runs stored (the latest for each "
+        "subject and metric, or every row). Writes nothing and creates no table.",
+    ),
+    "quality_metrics": ToolDecision(
+        "keep",
+        "Built 2026-10-21. Lists every declared quality metric: unit, checkpoint, which way is better "
+        "and how it is estimated. Fixed text, nothing is read from disk.",
     ),
     "observatory_mount_abort_motion": ToolDecision(
         "drop", "Commands the mount, so it is dropped with the other hardware tools."
@@ -493,7 +503,7 @@ DECISIONS = {
     "observatory_mount_compute_pointing_correction": ToolDecision(
         "drop", "Advice for a device command the app will not send. The user does not want it."
     ),
-    "diagnostics_flag_value_outliers": ToolDecision(
+    "quality_flag_value_outliers": ToolDecision(
         "drop", "Arithmetic on numbers the caller passes in. The user does not want it."
     ),
     # ---- Writers with no read-only form ----
@@ -572,7 +582,7 @@ CATEGORY_RULES = (
     (re.compile(r"^calibration_"), "calibration"),
     (re.compile(r"^target_"), "targets"),
     (re.compile(r"^star_"), "stars"),
-    (re.compile(r"^(processing_|diagnostics_|visualization_)"), "image-processing"),
+    (re.compile(r"^(processing_|diagnostics_|quality_|visualization_)"), "image-processing"),
     (re.compile(r"^jobs_"), "jobs-history"),
     (re.compile(r"^(planning_|execution_)"), "planning-sessions"),
     (

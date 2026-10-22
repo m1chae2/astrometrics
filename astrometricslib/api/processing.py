@@ -2,13 +2,12 @@
 
 `ProcessingPipelines` stacks a target's frames, makes the preview picture of a
 stack again, and runs the analysis stages (astrometry, photometry,
-spectroscopy and the asteroid search). It holds two children that it builds
-once and shares:
+spectroscopy and the asteroid search). It holds one child that it builds
+once and shares: `CalibrationCatalog` keeps track of the dark, bias and
+flat frames that remove a camera's noise from the raw frames.
 
-* `QualityDiagnostics` (in `quality.py`) measures raw frames and finished
-  stacks without changing anything.
-* `CalibrationCatalog` keeps track of the dark, bias and flat frames that
-  remove a camera's noise from the raw frames.
+Quality reads are not here. They start at `astrometrics.quality`
+(`QualityDiagnostics`, in `quality.py`).
 
 The methods here check their arguments and hand the work to `pipelines/`.
 They raise an error from `astrometricslib.foundation.errors` when a request
@@ -19,7 +18,6 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Literal
 
-from astrometricslib.api.quality import QualityDiagnostics
 from astrometricslib.drivers.catalog_access import AbstractCatalogAccess
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.foundation.config import AppConfiguration
@@ -362,8 +360,6 @@ class ProcessingPipelines:
     calibration : `CalibrationCatalog`
         Tracking, querying, and refreshing dark, bias, and flat
         calibration frames.
-    diagnostics : `QualityDiagnostics`
-        Measuring raw frame metrics, quarantine previews, and stack quality.
     """
 
     def __init__(
@@ -381,7 +377,6 @@ class ProcessingPipelines:
         self._target_catalog = targets
         lookup = targets if targets is not None else _TargetsOnDemand(self)
         self.calibration = calibration or CalibrationCatalog(config, storage, targets=lookup)
-        self.diagnostics = QualityDiagnostics(config, storage, targets=lookup)
 
     @property
     def _targets(self) -> TargetCatalog:
@@ -512,7 +507,7 @@ class ProcessingPipelines:
             The frames chosen and, unless ``plan_only``, the stack's path,
             flags and quality summary (``quality_summary``). To compare
             it with the previous stack, use
-            `QualityDiagnostics.stack_quality`.
+            `Astrometrics.quality.stack_quality`.
 
         Raises
         ------
@@ -983,7 +978,7 @@ class ProcessingPipelines:
         saves it. The next stack may set the same frames aside again. To
         keep them in the stack, turn off ``quarantine_bad_frames_enabled`` in
         the configuration first. To only read the list, use
-        ``QualityDiagnostics.frame_quality(include=["excluded"])``.
+        ``Astrometrics.quality.frame_quality(include=["excluded"])``.
 
         Parameters
         ----------

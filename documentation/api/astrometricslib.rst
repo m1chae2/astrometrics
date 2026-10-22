@@ -27,15 +27,16 @@ sub-APIs:
 Compositional sub-APIs
 ----------------------
 
-The :class:`~astrometricslib.Astrometrics` instance provides access to five specialized sub-APIs:
+The :class:`~astrometricslib.Astrometrics` instance provides access to six specialized sub-APIs:
 
 * :attr:`~astrometricslib.Astrometrics.targets` (:class:`~astrometricslib.TargetCatalog`):
   Query, inspect, and manage celestial observation targets and their associated FITS frames.
 * :attr:`~astrometricslib.Astrometrics.stars` (:class:`~astrometricslib.StellarCatalog`):
   Query SIMBAD and Gaia DR3/XP stellar databases, cross-match field stars, and analyze light curves.
 * :attr:`~astrometricslib.Astrometrics.processing` (:class:`~astrometricslib.ProcessingPipelines`):
-  Image stacking, master calibration frame matching (:attr:`~astrometricslib.ProcessingPipelines.calibration`),
-  and automated pipeline quality verification (:attr:`~astrometricslib.ProcessingPipelines.diagnostics`).
+  Image stacking and master calibration frame matching (:attr:`~astrometricslib.ProcessingPipelines.calibration`).
+* :attr:`~astrometricslib.Astrometrics.quality` (:class:`~astrometricslib.QualityDiagnostics`):
+  Stored quality measurements, the list of quality metrics, and live checks of raw frames and stacks.
 * :attr:`~astrometricslib.Astrometrics.visualization` (:class:`~astrometricslib.Visualization`):
   Render high-dynamic-range astronomical previews, apply stretching algorithms, and compute coordinate overlays.
 * :attr:`~astrometricslib.Astrometrics.jobs` (:class:`~astrometricslib.Jobs`):

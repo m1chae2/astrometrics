@@ -170,7 +170,7 @@ def test_brief_lists_overlapping_tools_and_the_steps(
     assert review.main(["brief", "1"]) == 0
     output = capsys.readouterr().out
     assert "Existing tools that may overlap" in output
-    assert "diagnostics_stack_quality" in output
+    assert "quality_stack_quality" in output
     assert "Steps:" in output
     assert "9. Update the README" in output
     assert review.main(["brief", "99"]) == 1

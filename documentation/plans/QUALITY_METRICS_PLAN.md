@@ -27,8 +27,8 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 ## Status
 
 Status on 2026-10-21: design, target dataset report and order of work agreed after two board
-reviews. Phase 0 is built and board-reviewed on branch `94-phase0-consolidate` (Appendix C).
-Phase 1 is next. Tracked in issue #93.
+reviews. Phase 0 is merged (#100, Appendix C). Phase 1 is built and board-reviewed on branch
+`94-phase1-foundations` (Appendix D). Phase 2 is next. Tracked in issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
@@ -176,6 +176,11 @@ decisions 16 to 21 with the second.
     needs a new observing night. Phase 0 ends with a read-only check on a library target. Phase 2
     first runs on one recorded night of one target, after a database and config backup. The
     forecast check (section 6.5) replays a target's recorded nights.
+23. **The quality root is `QualityRecords`.** Agreed with the user on 2026-10-21, in phase 1, so
+    the public API breaks once, together with the move from `processing.diagnostics`. Its live
+    checks are `measure_frames`, `measure_stack` and `check_spectral_frames`, beside `query` and
+    `metrics`. The MCP tools are `quality_measure_frames`, `quality_measure_stack`,
+    `quality_check_spectral_frames`, `quality_query` and `quality_metrics`.
 
 ## 3. The shared shape
 
@@ -467,8 +472,13 @@ on 2026-10-17:
   imports did not change.
 - `QualityDiagnostics` moved from `api/processing.py` to `api/quality.py` in phase 0, keeping the
   path `astrometrics.processing.diagnostics`. The stacking argument helpers it shared with
-  `processing.py` went to `pipelines/shared/api_arguments.py` (Appendix C). Phase 1 adds the `astrometrics.quality`
-  root and renames the MCP tools (decision 9).
+  `processing.py` went to `pipelines/shared/api_arguments.py` (Appendix C). Phase 1 made it the
+  `astrometrics.quality` root, renamed `QualityRecords`, removed `processing.diagnostics` and
+  renamed the MCP tools (decisions 9 and 23).
+- Every write of a measurement goes through `pipelines/shared/quality/record_measurements.py`,
+  which checks it against the registry (name, definition version, subject level, limit unit and
+  uncertainty kind) before the store saves it. The store cannot do this itself, because `drivers/`
+  may not import `pipelines/` (Appendix D).
 - Each pipeline's `run_gates.py` is renamed `record_quality.py` in that pipeline's phase 3 change
   (decision 10).
 
@@ -507,7 +517,7 @@ astrometricslib/
 │       ├── metrics.py
 │       └── post_processing/record_quality.py    (stacking gains one; its checks stay put)
 ├── drivers/quality_store.py
-└── api/quality.py            QualityDiagnostics module moves here in phase 0
+└── api/quality.py            QualityRecords: the quality root (moved in phase 0, renamed in phase 1)
 
 wayfindinglib/
 ├── analytics/result_quality/
@@ -634,7 +644,7 @@ with its definition and its evidence, is in `QUALITY_SCIENCE_PLAN.md`.
 
 | Metric | Definition | Why now |
 | :--- | :--- | :--- |
-| Star width from many stars across the field, with elongation and its angle | A pixel-integrated Moffat fit to up to about 200 isolated, unsaturated stars on a grid over the field, with no elongation cut. Elongation and its angle come from second moments. Stored in pixels and in arcsec, with the plate-scale source. | Today's `measure_image_fwhm` takes the 15 brightest stars, returns pixels and skips stars with elongation above 1.5, so on a trailed frame it measures only the round stars. Efficiency's seeing factor would inherit that bias. |
+| Star width from many stars across the field, with elongation and its angle | A pixel-integrated Moffat fit to up to about 200 isolated, unsaturated stars on a grid over the field, with no elongation cut. Elongation and its angle come from second moments. Stored in pixels and in arcsec, with the plate-scale source. | Today's `measure_image_fwhm` fits a Gaussian to the first 15 bright stars that fit cleanly and returns pixels. A star stretched by more than 1.5 is kept at its narrow-axis width, so on a trailed frame the value reads sharp (registered as `frame.star_width_gaussian_brightest_px`, Appendix D). Efficiency's seeing factor would inherit that bias. |
 | Sky brightness in electrons | Background in electrons per second per pixel, from the background level, the gain for the frame's setting and the exposure time | Efficiency's sky factor and the read-noise regime |
 | Sky noise and read noise, stored as two parts | The sky noise of the frame in electrons, and the read noise for the frame's setting. The ratio is computed when read, never stored alone. | Decides the noise regime (section 4), says when an exposure is too short, and counts "take N more" in effective time |
 | Gain and read noise for each camera setting | Photon transfer from flat pairs and the noise of bias pairs, at each gain setting, offset and binning in use (decision 7) | Every metric above in electrons depends on it |
@@ -1369,3 +1379,33 @@ fix, so none needed a user decision.
 | The M 57 real-data check is a no-change smoke test, not new evidence | Astronomer | Pull request text; nothing added to the validation register |
 
 No findings were rejected.
+
+## Appendix D. Review board changes (phase 1)
+
+The board reviewed the phase 1 commits (cd61d541, 535688aa) on 2026-10-21. All three reviewers
+approved with changes. Every critical and major claim was checked against the code. The fixes
+are in 67450677; the user's naming decision is decision 23 (57db826a).
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| The width metric's text said elongated stars are skipped; the code keeps them at their narrow-axis width, so a trailed frame reads sharp | Astronomer | Metric renamed `frame.star_width_gaussian_brightest_px`, estimator text corrected; section 5.1 |
+| The rejected-pixel fraction is the mean of Siril's rejection map, not a pixel count | Astronomer | `stacking/metrics.py` |
+| "Star count" counts detected regions, including hot pixels and nebulosity | Astronomer | Renamed `frame.detected_region_count`, direction none |
+| Color planes are averaged before measuring; a raw mosaic is measured as is | Astronomer | Each metric's band text |
+| NaN values were accepted and read back as missing, breaking reads | Engineer, astronomer | Models reject non-finite values; a bad stored row raises `StorageError` |
+| Times with and without a time zone were stored in two forms | Engineer, architect | `measured_at` must carry a time zone; stored as UTC |
+| Every read took the write lock and could migrate the schema | Engineer, architect | Reads open the file read-only; only writes migrate |
+| `INSERT OR IGNORE` hid every constraint error | Engineer | `ON CONFLICT ... DO NOTHING` on the unique key only |
+| `ASSUMED` needed no source; a check outcome could lack its limit | Astronomer | Validators in `measurement.py` |
+| Nothing checked a write against the registry | Astronomer, architect | `record_measurements.py`; section 3.8 |
+| `quality_metrics` returned a Python frozenset as text | Architect | `MetricSpec.levels` is a sorted tuple; codegen handles tuples; MCP JSON test |
+| The root class name would break the API a second time later | Architect | Renamed now (decision 23) |
+| An unknown metric name returned nothing; phase 4 needs lookup by name | Architect | `query` rejects unknown names; `metrics(name=...)` |
+| Unused registry methods | Architect | Removed |
+| Test gaps: batch rollback, two writers, read path under a lock | Engineer | `test_quality_store.py` |
+| `ARCHITECTURE_PLAN.md` still said to keep `processing.diagnostics` | Engineer, architect | Updated |
+| The width metric has no star count or elongation | Astronomer | Deferred to phase 2, where the frame measurement step returns them |
+| RPC parameters with unknown names are dropped silently | Engineer | Comment on `quality:query`; existing router behavior |
+
+No findings were rejected. The cross-library conformance checks (section 3.7) wait for the phase 4
+rules, because `astrometricslib` tests may not import `wayfindinglib`.

@@ -13,6 +13,10 @@
 #   ./build/linux/run_tests.sh astrometricslib # one suite
 #   COVERAGE=1 ./build/linux/run_tests.sh backend
 #
+# Suites: astrometricslib, wayfindinglib, backend, mcp_servers.
+# "all" runs every one. A bare `pytest` collects the same tests, because
+# `testpaths` in pyproject.toml names the same folders (a test checks this).
+#
 # Any additional arguments are forwarded to pytest, e.g.
 #   ./build/linux/run_tests.sh wayfindinglib -k visibility
 #
@@ -45,7 +49,7 @@ SUITE="${1:-all}"
 suite_targets() {
   case "$1" in
     astrometricslib) echo "astrometricslib/" ;;
-    wayfindinglib)   echo "wayfindinglib/ --ignore=wayfindinglib/scripts/commissioning/test" ;;
+    wayfindinglib)   echo "wayfindinglib/" ;;
     backend)         echo "backend/tests/" ;;
     mcp_servers)     echo "mcp_servers/" ;;
     *) echo "unknown suite: $1" >&2; return 1 ;;

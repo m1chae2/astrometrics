@@ -9,7 +9,7 @@ UI can only name methods and routes the backend serves.
 
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
@@ -31,6 +31,7 @@ from astrometricslib.models.moving_object import (
     MovingObjectTrack,
 )
 from astrometricslib.models.quality.astrometry_quality import CatalogMatchQuality
+from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpBandResidual,
     GaiaXpBandSummary,
@@ -38,6 +39,23 @@ from astrometricslib.models.quality.gaia_xp_comparison import (
     GaiaXpRunSummary,
 )
 from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.limit import LimitTier, QualityLimit
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementReference,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    StarResultReference,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.metric_spec import (
+    Checkpoint,
+    Direction,
+    MetricPurpose,
+    MetricSpec,
+    UncertaintyKind,
+)
 from astrometricslib.models.quality.quality_summary import (
     AppliedCameraProfile,
     AsteroidDetectionPipelineQualityMetrics,
@@ -176,7 +194,7 @@ def get_ts_type(py_type: Any) -> str:
         return "boolean"
     if py_type is Any:
         return "any"
-    if py_type is datetime:
+    if py_type is datetime or py_type is date:
         return "string"
     if py_type is type(None) or py_type is None:
         return "null"
@@ -198,7 +216,7 @@ def get_ts_type(py_type: Any) -> str:
                 unique_types.append(t)
         return " | ".join(unique_types)
 
-    if origin is list or origin is list:
+    if origin in (list, set, frozenset):
         item_type = get_ts_type(args[0]) if args else "any"
         return f"{item_type}[]"
 
@@ -476,6 +494,21 @@ def render_types() -> str:
         ),
         generate_interface(AsteroidDetectionQualitySummary, "AsteroidDetectionQualitySummary"),
         generate_interface(WeatherSample, "WeatherSample"),
+        generate_enum(SubjectLevel, "SubjectLevel"),
+        generate_enum(MeasurementStatus, "MeasurementStatus"),
+        generate_enum(MeasurementOrigin, "MeasurementOrigin"),
+        generate_enum(LimitTier, "LimitTier"),
+        generate_enum(Checkpoint, "Checkpoint"),
+        generate_enum(Direction, "Direction"),
+        generate_enum(UncertaintyKind, "UncertaintyKind"),
+        generate_enum(MetricPurpose, "MetricPurpose"),
+        generate_interface(QualitySubject, "QualitySubject"),
+        generate_interface(QualityLimit, "QualityLimit"),
+        generate_interface(CaptureSetting, "CaptureSetting"),
+        generate_interface(StarResultReference, "StarResultReference"),
+        generate_interface(MeasurementReference, "MeasurementReference"),
+        generate_interface(QualityMeasurement, "QualityMeasurement"),
+        generate_interface(MetricSpec, "MetricSpec"),
         generate_public_interface(),
     ]
 

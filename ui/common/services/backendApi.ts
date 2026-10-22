@@ -270,8 +270,8 @@ export interface ActionRegistry {
     "processing:job_log_tail": { payload: { job_id: string; lines?: number }; response: string[] };
 
     // Quality measurements: the stored ones, and what each metric means
-    "quality:query": { payload: { metric?: string; level?: string; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean }; response: Array<Record<string, any>> };
-    "quality:metrics": { payload: Record<string, never>; response: Array<Record<string, any>> };
+    "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
+    "quality:metrics": { payload: Record<string, never>; response: import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };

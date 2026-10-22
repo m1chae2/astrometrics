@@ -2268,6 +2268,340 @@ export interface WeatherSample {
 }
 
 /**
+ * What a measurement describes. There is no night or target level.
+ */
+export enum SubjectLevel {
+  FRAME = "frame",
+  STACK = "stack",
+  RUN = "run"
+}
+
+/**
+ * Whether a value was measured, assumed, or not measured at all.
+ */
+export enum MeasurementStatus {
+  MEASURED = "measured",
+  ASSUMED = "assumed",
+  NOT_MEASURED = "not_measured"
+}
+
+/**
+ * How a stored row came to exist.
+ */
+export enum MeasurementOrigin {
+  MEASURED = "measured",
+  BACKFILLED = "backfilled"
+}
+
+/**
+ * How a limit was obtained, from most fixed to most data-driven.
+ */
+export enum LimitTier {
+  GEOMETRY = "geometry",
+  SENSOR_PROFILE = "sensor_profile",
+  PHYSICAL_BUDGET = "physical_budget",
+  OWN_BASELINE = "own_baseline",
+  VALIDATED_DATASET = "validated_dataset"
+}
+
+/**
+ * The point in processing where a metric is measured.
+ */
+export enum Checkpoint {
+  FRAME = "frame",
+  CALIBRATION = "calibration",
+  STACKING = "stacking",
+  ASTROMETRY = "astrometry",
+  PHOTOMETRY = "photometry",
+  SPECTROSCOPY = "spectroscopy",
+  ASTEROID_DETECTION = "asteroid_detection"
+}
+
+/**
+ * Which direction of a metric is better.
+ */
+export enum Direction {
+  LOWER = "lower",
+  HIGHER = "higher",
+  NONE = "none"
+}
+
+/**
+ * What kind of uncertainty a metric reports.
+ */
+export enum UncertaintyKind {
+  STATISTICAL_1_SIGMA = "statistical_1_sigma",
+  SYSTEMATIC_BOUND = "systematic_bound",
+  NONE = "none"
+}
+
+/**
+ * Why a metric exists.
+ */
+export enum MetricPurpose {
+  DECISION = "decision",
+  CONTEXT = "context",
+  EXPLORATORY = "exploratory"
+}
+
+/**
+ * The thing a measurement is about.
+ *
+ * Parameters
+ * ----------
+ * level : `SubjectLevel`
+ * Whether the subject is a frame, a stack or a run.
+ * subject_id : `str`
+ * A stable id: target plus relative frame path, stack id or run id.
+ * Never a mount path.
+ * target_id : `str` or `None`
+ * The target the subject belongs to.
+ * observing_night_id : `str` or `None`
+ * A plain time label for the observing night.
+ * capture_setting_id : `int` or `None`
+ * Row in the capture-setting table.
+ * channel : `str` or `None`
+ * The color channel for a one-shot-color camera, else ``None``.
+ */
+export interface QualitySubject {
+  level: SubjectLevel;
+  subjectId: string;
+  targetId?: string | null;
+  observingNightId?: string | null;
+  captureSettingId?: number | null;
+  channel?: string | null;
+}
+
+/**
+ * One limit that a measurement can be compared with.
+ *
+ * Parameters
+ * ----------
+ * value : `float` or `None`
+ * The limit itself. ``None`` when the limit could not be computed.
+ * unit : `str`
+ * The unit of `value`, such as ``"arcsec"``.
+ * tier : `LimitTier`
+ * How the limit was obtained.
+ * derivation : `str`
+ * A plain-language statement of how the value was found.
+ * sample_count : `int` or `None`
+ * The number of samples behind the limit, when it comes from data.
+ * register_entry : `str` or `None`
+ * The validation register entry that holds the evidence, such as
+ * ``"STK-07"``. Required when `tier` is ``validated_dataset``.
+ */
+export interface QualityLimit {
+  value: number | null;
+  unit: string;
+  tier: LimitTier;
+  derivation: string;
+  sampleCount?: number | null;
+  registerEntry?: string | null;
+}
+
+/**
+ * One combination of equipment and exposure settings.
+ *
+ * Parameters
+ * ----------
+ * camera : `str`
+ * The camera model name.
+ * telescope : `str` or `None`
+ * The telescope or lens name.
+ * focal_length_mm : `float` or `None`
+ * The focal length in millimeters.
+ * pixel_scale_arcsec : `float` or `None`
+ * The size of one pixel on the sky, in arcseconds per pixel.
+ * filter_name : `str` or `None`
+ * The filter in the light path, such as ``"L"`` or ``"Ha"``.
+ * exposure_seconds : `float` or `None`
+ * The exposure time of one frame, in seconds.
+ * gain_setting : `int` or `None`
+ * The camera's gain setting (a unitless number in the FITS ``GAIN``
+ * card, not electrons per ADU).
+ * offset : `int` or `None`
+ * The constant the camera adds to every pixel.
+ * binning : `int` or `None`
+ * The binning factor (1 means no binning).
+ */
+export interface CaptureSetting {
+  camera: string;
+  telescope?: string | null;
+  focalLengthMm?: number | null;
+  pixelScaleArcsec?: number | null;
+  filterName?: string | null;
+  exposureSeconds?: number | null;
+  gainSetting?: number | null;
+  offset?: number | null;
+  binning?: number | null;
+}
+
+/**
+ * Points at one per-star result, which has no row id of its own.
+ *
+ * Parameters
+ * ----------
+ * star_id : `str`
+ * The star's identifier.
+ * run_id : `str`
+ * The run that produced the result.
+ * metric : `str`
+ * A registered metric name.
+ */
+export interface StarResultReference {
+  starId: string;
+  runId: string;
+  metric: string;
+}
+
+/**
+ * Points at the exact measurement a judgment or report used.
+ *
+ * Exactly one of `row_id` and `star_result` is set.
+ *
+ * Parameters
+ * ----------
+ * row_id : `int` or `None`
+ * A row in the measurement store.
+ * star_result : `StarResultReference` or `None`
+ * A per-star result.
+ */
+export interface MeasurementReference {
+  rowId?: number | null;
+  starResult?: StarResultReference | null;
+}
+
+/**
+ * One measured fact about a subject.
+ *
+ * Parameters
+ * ----------
+ * metric : `str`
+ * A registered metric name, such as ``"frame.star_width_moffat_arcsec"``.
+ * definition_version : `int`
+ * The registered definition version of that metric.
+ * subject : `QualitySubject`
+ * What the measurement is about.
+ * status : `MeasurementStatus`
+ * Measured, assumed or not measured.
+ * value : `float` or `None`
+ * The value. ``None`` exactly when the status is ``not_measured``.
+ * uncertainty : `float` or `None`
+ * The uncertainty of the value, in the same unit.
+ * sample_count : `int` or `None`
+ * The number of samples behind the value, such as the number of stars.
+ * reason : `str`
+ * Why the value is missing or assumed. Required for ``not_measured``.
+ * check_outcome : `GateStatus` or `None`
+ * For a self-check, whether it passed, failed or was not checked.
+ * check_limit : `QualityLimit` or `None`
+ * For a self-check, the limit it used.
+ * action_taken : `str` or `None`
+ * For a processing decision, what was done, such as
+ * ``"frame moved to _excluded/"``.
+ * origin : `MeasurementOrigin`
+ * Whether a pipeline run wrote the row or it was backfilled.
+ * pipeline_version : `str` or `None`
+ * The pipeline version. ``None`` when a backfilled row did not record it.
+ * run_id : `str`
+ * The job id, or a generated id when there was no job.
+ * job_id : `str` or `None`
+ * A soft link to the activity record of the job.
+ * measured_at : `datetime`
+ * When the measurement was made.
+ * row_id : `int` or `None`
+ * The store's row id. Filled only when the measurement is read back.
+ */
+export interface QualityMeasurement {
+  metric: string;
+  definitionVersion: number;
+  subject: QualitySubject;
+  status: MeasurementStatus;
+  value?: number | null;
+  uncertainty?: number | null;
+  sampleCount?: number | null;
+  reason?: string;
+  checkOutcome?: GateStatus | null;
+  checkLimit?: QualityLimit | null;
+  actionTaken?: string | null;
+  origin: MeasurementOrigin;
+  pipelineVersion?: string | null;
+  runId: string;
+  jobId?: string | null;
+  measuredAt: string;
+  rowId?: number | null;
+}
+
+/**
+ * The declaration of one registered metric.
+ *
+ * Parameters
+ * ----------
+ * name : `str`
+ * The metric name, such as ``"frame.star_width_moffat_arcsec"``.
+ * definition_version : `int`
+ * Raised whenever the estimator, sample or constants change.
+ * unit : `str`
+ * The unit every measurement of this metric must use.
+ * checkpoint : `Checkpoint`
+ * Where in processing the metric is measured.
+ * levels : `frozenset` of `SubjectLevel`
+ * The subject levels the metric applies to.
+ * better : `Direction`
+ * Which direction is better.
+ * meaning : `str`
+ * One line in plain words.
+ * decisions : `tuple` of `str`
+ * The decisions the metric informs. Documentation only.
+ * estimator : `str`
+ * How the value is estimated.
+ * sample_definition : `str`
+ * What is sampled, such as which stars.
+ * band : `str`
+ * The filter or color channel the metric applies to.
+ * computed_by : `str`
+ * Dotted path of the function that computes it, relative to
+ * ``astrometricslib``.
+ * uncertainty_kind : `UncertaintyKind`
+ * The kind of uncertainty reported.
+ * uncertainty_method : `str`
+ * How the uncertainty is found.
+ * register_entry : `str` or `None`
+ * The validation register entry an auditor checks.
+ * purpose : `MetricPurpose`
+ * Why the metric exists.
+ * purpose_reason : `str`
+ * Required for a decision or context metric.
+ * exploratory_question : `str`
+ * The question an exploratory metric answers. Required for exploratory.
+ * review_date : `datetime.date` or `None`
+ * When an exploratory metric must be promoted or removed. Required for
+ * exploratory.
+ */
+export interface MetricSpec {
+  name: string;
+  definitionVersion: number;
+  unit: string;
+  checkpoint: Checkpoint;
+  levels: SubjectLevel[];
+  better: Direction;
+  meaning: string;
+  decisions?: any;
+  estimator: string;
+  sampleDefinition: string;
+  band: string;
+  computedBy: string;
+  uncertaintyKind: UncertaintyKind;
+  uncertaintyMethod: string;
+  registerEntry?: string | null;
+  purpose: MetricPurpose;
+  purposeReason?: string;
+  exploratoryQuestion?: string;
+  reviewDate?: string | null;
+}
+
+/**
  * Every RPC method the backend serves, from backend/public_interface.py.
  */
 export const RPC_METHODS = [

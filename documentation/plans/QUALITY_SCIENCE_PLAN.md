@@ -296,3 +296,24 @@ half-stacks (`STK-38`).
 
 No findings were rejected. The architect also suggested dropping the stored aperture area and
 linearity limit; both stay, as inputs to the expected noise and the peak.
+
+## Appendix C. Review board changes, batch S2
+
+The board reviewed batch S2 on 2026-10-23, and all three reviewers approved it with changes. The
+systems engineer settled every finding; the user reviews those choices in the pull request.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| A stored night spread and a stored airmass contradict decision 18 of `QUALITY_METRICS_PLAN.md`. | Architect | Both metrics dropped; the spread stays a library helper for UC15 (`PHO-16`) |
+| The median over a changing star set moves when stars join or leave, and faint stars leave first under cloud. | Astronomer | A fixed star set per session and a differential frame value (`PHO-15`) |
+| The bootstrap error was labelled as the absolute error and is about five times the frame-to-frame precision. | Astronomer | The frame value carries its own precision; the level's star-sample error is a separate metric |
+| Choosing the band by star count follows the catalog's state. | Astronomer, with the engineer | Gaia G preferred whenever it has enough stars (`PHO-D24`) |
+| The fixed aperture makes the zero point depend on star width. | Astronomer | Stated in the metric text; on M 57 the slope is not resolved (`PHO-15`) |
+| Stars above the linearity limit entered the sample. | Astronomer | Cut at the camera profile's linearity limit |
+| One error in the new rows would drop every photometry row of the run. | Engineer | Its own record call |
+| Frames without a path were stored under "Unknown", and frames could collide. | Engineer, with the architect | Paths kept in light-curve order; a frame without one is skipped and logged |
+| No test of the runner join. | Engineer | Two-session test |
+| Statistics helpers in the wrong module, a duplicate MAD factor, British spelling, two wrong comments. | Architect, with the engineer | `frame_statistics.py`, `mad_std`, US spelling, comments corrected |
+
+No findings were rejected. The night's spread now lives only in the library helper, so `PHO-16`
+is evidence for that helper, not for a stored metric.

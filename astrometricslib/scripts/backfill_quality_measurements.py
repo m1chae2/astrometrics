@@ -1389,9 +1389,8 @@ _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
     "photometry.catalog_zero_point_gaia_g_mag",
     "photometry.catalog_zero_point_simbad_v_mag",
     "photometry.catalog_zero_point_color_slope",
-    "photometry.frame_airmass",
-    "photometry.catalog_zero_point_scatter_gaia_g_mag",
-    "photometry.catalog_zero_point_scatter_simbad_v_mag",
+    "photometry.catalog_zero_point_star_sample_error_gaia_g_mag",
+    "photometry.catalog_zero_point_star_sample_error_simbad_v_mag",
 )
 
 _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (

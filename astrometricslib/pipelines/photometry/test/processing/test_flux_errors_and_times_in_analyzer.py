@@ -41,7 +41,7 @@ FRAME_COUNT = 12
 EXPOSURE_S = 30.0
 SKY_ADU = 200.0
 READ_NOISE_ADU = 5.0
-SITE = ObservatorySite(latitude_deg=45.7, longitude_deg=-110.7, elevation_m=1500.0)
+SITE = ObservatorySite(latitude_deg=39.74, longitude_deg=-104.99, elevation_m=1609.0)
 TARGET_POSITION_DEG = (250.4, 36.5)
 SPIKE_FRAME = 5
 

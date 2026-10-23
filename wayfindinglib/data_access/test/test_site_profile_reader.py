@@ -113,17 +113,17 @@ def _config(**location: str) -> SimpleNamespace:
 
 def test_full_section_is_read_as_numbers() -> None:
     """Latitude, longitude and elevation come back as floats."""
-    site = configured_observer_location(_config(latitude="45.76", longitude="-110.74", elevation="1450"))
-    assert site == {"latitude": 45.76, "longitude": -110.74, "elevation": 1450.0}
+    site = configured_observer_location(_config(latitude="39.74", longitude="-104.99", elevation="1609"))
+    assert site == {"latitude": 39.74, "longitude": -104.99, "elevation": 1609.0}
 
 
 def test_missing_elevation_is_zero() -> None:
     """An unset elevation means unknown, which is 0 metres."""
-    site = configured_observer_location(_config(latitude="45.76", longitude="-110.74"))
+    site = configured_observer_location(_config(latitude="39.74", longitude="-104.99"))
     assert site["elevation"] == pytest.approx(0.0)
 
 
-@pytest.mark.parametrize("keys", [{}, {"latitude": "45.76"}, {"longitude": "-110.74"}])
+@pytest.mark.parametrize("keys", [{}, {"latitude": "39.74"}, {"longitude": "-104.99"}])
 def test_missing_latitude_or_longitude_gives_none(keys: dict[str, str]) -> None:
     """A site needs both latitude and longitude."""
     assert configured_observer_location(_config(**keys)) is None

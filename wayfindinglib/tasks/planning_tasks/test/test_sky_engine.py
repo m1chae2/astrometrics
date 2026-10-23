@@ -330,7 +330,7 @@ def _sky_with(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> SkyEn
 
 def test_sky_uses_the_configured_site_and_elevation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Planning reads the same site and elevation as the live-status tools."""
-    config = _location_config(latitude="45.76", longitude="-110.74")
+    config = _location_config(latitude="39.74", longitude="-104.99")
     sky = _sky_with(monkeypatch, config)
     site = configured_observer_location(config)
     assert (sky.latitude, sky.longitude, sky.elevation) == (

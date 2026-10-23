@@ -816,8 +816,8 @@ def _configured_site(**overrides: str) -> Any:
         An object with an `app_config` carrying the site settings.
     """
     values = {
-        ("Observatory.Location", "latitude"): "45.76",
-        ("Observatory.Location", "longitude"): "-110.74",
+        ("Observatory.Location", "latitude"): "39.74",
+        ("Observatory.Location", "longitude"): "-104.99",
         ("Observatory.Location", "elevation"): "1500",
     }
     values.update({("Observatory.Location", key): value for key, value in overrides.items()})
@@ -839,8 +839,8 @@ def test_observer_location_falls_back_to_the_configuration_when_mount_offline(
     manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
 
     assert ops.observer_location(manager) == {
-        "latitude": 45.76,
-        "longitude": -110.74,
+        "latitude": 39.74,
+        "longitude": -104.99,
         "elevation": 1500.0,
     }
 
@@ -851,7 +851,7 @@ def test_observer_location_falls_back_when_the_mount_reports_nothing(mocker: Moc
     mount_driver.get_observer_location = mocker.AsyncMock(return_value=None)
     manager = _FakeManager(mount_driver=mount_driver, config=_configured_site())
 
-    assert ops.observer_location(manager)["latitude"] == pytest.approx(45.76)
+    assert ops.observer_location(manager)["latitude"] == pytest.approx(39.74)
 
 
 def test_observer_location_prefers_the_mount_over_the_configuration(mocker: MockerFixture) -> None:

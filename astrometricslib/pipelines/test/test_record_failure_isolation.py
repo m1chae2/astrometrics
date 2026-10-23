@@ -10,7 +10,7 @@ run the four pipelines that share the guard (`build_and_record_measurements`).
 import logging
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -129,10 +129,13 @@ def _record_photometry(damage: str, _unused: bool) -> int:
     if damage == "nan":
         metrics = metrics.model_copy(update={"light_curve_scatter_rms_mag": math.nan})
         gates = [gate.model_copy(update={"measured_value": math.nan}) for gate in gates]
+    inputs = photometry_fixture_inputs()
     if damage == "raise":
+        # Both guarded calls are damaged: the run rows and the zero points.
         metrics = None  # type: ignore[assignment]
+        inputs = replace(inputs, session_zero_points=None)  # type: ignore[arg-type]
     context = PipelineRunContext("M 99", "photometry", "1.3.0", "job-1", "job-1", MEASURED_AT)
-    return photometry_record.record_photometry_quality(metrics, gates, photometry_fixture_inputs(), context)
+    return photometry_record.record_photometry_quality(metrics, gates, inputs, context)
 
 
 def _record_spectroscopy(damage: str, _unused: bool) -> int:

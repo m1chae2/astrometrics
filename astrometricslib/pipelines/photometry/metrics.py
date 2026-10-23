@@ -18,11 +18,12 @@ There are three kinds.
   failed or not checked) and the limit each used. They stay self-checks: they
   flag the run for a look and say nothing about the sky.
 
-Six more come from the catalog zero point work (see
-`processing/catalog_zero_point.py`). The zero point of a frame, its color
-slope and its airmass are about one frame. The spread of one night's frame
-zero points is about one session of the run. All six are exploratory or
-context: they measure and do not judge.
+Five more come from the catalog zero point work (see
+`processing/catalog_zero_point.py`). They are about one frame each: its zero
+point in one catalog band, the error of the zero point's absolute level from
+the star sample, and its color slope. They are exploratory or context: they
+measure and do not judge. A night's summary of them is made when it is read,
+on the observatory side.
 
 All the others are about one run, so their subject level is ``run``. Per-star
 results (a star's CV, its variability score, its periods and its two period
@@ -63,20 +64,22 @@ PHOTOMETRY_CENTROID_FALLBACK_FRACTION = "photometry.centroid_fallback_worst_frac
 
 PHOTOMETRY_CATALOG_ZERO_POINT_GAIA_G_MAG = "photometry.catalog_zero_point_gaia_g_mag"
 PHOTOMETRY_CATALOG_ZERO_POINT_SIMBAD_V_MAG = "photometry.catalog_zero_point_simbad_v_mag"
-PHOTOMETRY_CATALOG_ZERO_POINT_COLOUR_SLOPE = "photometry.catalog_zero_point_color_slope"
-PHOTOMETRY_FRAME_AIRMASS = "photometry.frame_airmass"
-PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_GAIA_G_MAG = "photometry.catalog_zero_point_scatter_gaia_g_mag"
-PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_SIMBAD_V_MAG = "photometry.catalog_zero_point_scatter_simbad_v_mag"
+PHOTOMETRY_CATALOG_ZERO_POINT_COLOR_SLOPE = "photometry.catalog_zero_point_color_slope"
+PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_GAIA_G_MAG = (
+    "photometry.catalog_zero_point_star_sample_error_gaia_g_mag"
+)
+PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_SIMBAD_V_MAG = (
+    "photometry.catalog_zero_point_star_sample_error_simbad_v_mag"
+)
 
 # The metrics that come from the catalog zero point work. They are about
-# frames and sessions, and a record step with no zero points emits none.
+# frames, and a record step with no zero points emits none.
 PHOTOMETRY_ZERO_POINT_METRIC_NAMES: frozenset[str] = frozenset({
     PHOTOMETRY_CATALOG_ZERO_POINT_GAIA_G_MAG,
     PHOTOMETRY_CATALOG_ZERO_POINT_SIMBAD_V_MAG,
-    PHOTOMETRY_CATALOG_ZERO_POINT_COLOUR_SLOPE,
-    PHOTOMETRY_FRAME_AIRMASS,
-    PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_GAIA_G_MAG,
-    PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_SIMBAD_V_MAG,
+    PHOTOMETRY_CATALOG_ZERO_POINT_COLOR_SLOPE,
+    PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_GAIA_G_MAG,
+    PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_SIMBAD_V_MAG,
 })
 
 PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION = "photometry.gate_ensemble_frame_rejection"
@@ -274,30 +277,39 @@ def _gate_metric(
 _ZERO_POINT_REVIEW_DATE = datetime.date(2027, 4, 30)
 _ZERO_POINT_FRAME_ONLY = (SubjectLevel.FRAME,)
 _ZERO_POINT_ESTIMATOR = (
-    "For each catalog star of the session's chosen band that lies in the central region (within "
-    "0.5 of the half-diagonal of the frame from its center) and passes the frame's cuts (positive flux, "
-    "not saturated, flux at least 20 times its own error), the offset is the catalog magnitude plus "
-    "2.5 log10 of the flux in ADU per second. The value is the median of the offsets. No color term and "
-    "no airmass term is applied. The frame is not flat-fielded, so the value carries whatever vignetting "
-    "is left in the central region. Fewer than 10 stars give no value."
+    "A differential zero point from a fixed star set. The session's stars of the chosen band that lie in "
+    "the central region (within 0.5 of the half-diagonal of the frame from its center) and pass the cuts "
+    "(positive flux, not saturated, peak pixel not above the camera profile's photometric linearity "
+    "limit, flux at least 20 times its own error) in at least 80 percent of the frames form the set; "
+    "fewer than 10 give no value. A star's offset in a frame is its catalog magnitude plus 2.5 log10 of "
+    "its flux in ADU per second. Its reference is the median of its offsets over the session. The session "
+    "level is the median of the references. The value is the level plus the median, over the stars that "
+    "pass in this frame (at least 10), of the offset minus the star's reference. Gaia G is used when its "
+    "set has at least 10 stars, else SIMBAD V. The value is for a star of the field's median color, with "
+    "no color, extinction or aperture correction. The aperture is 4 px in radius with no aperture "
+    "correction, so the value falls as the stars widen: about 0.1 to 0.2 mag at a star width of 3.3 px. "
+    "The frame is not flat-fielded, so the central region carries whatever vignetting is left. The flux "
+    "errors behind the signal-to-noise cut use the camera profile's gain; when no gain is known they "
+    "assume 1 e-/ADU and the row is marked assumed."
 )
 _ZERO_POINT_SAMPLE = (
     "The session's catalog stars of one band, in the central region of the frame, with an unambiguous "
-    "catalog match."
+    "catalog match, that pass the cuts in at least 80 percent of the session's frames."
 )
 _ZERO_POINT_UNCERTAINTY = (
-    "The standard deviation of the medians of 1000 seeded bootstrap resamples of the stars' offsets. "
-    "It is the error of the absolute zero point: how much a different set of catalog stars would move "
-    "it. The star-to-star scatter of the offsets (color, catalog error, vignetting) dominates it. It "
-    "is larger than the frame-to-frame repeatability, which comes from the same stars each time (see "
-    "PHO-15)."
+    "The standard error of the median of the stars' offset changes in this frame: 1.2533 times the "
+    "robust sigma (1.4826 times the median absolute deviation) over the square root of the star count. "
+    "It is the frame-to-frame precision, because the same stars are used each time. It does not include "
+    "the error of the absolute level from the star sample (see the star sample error metric of the "
+    "same band) or any systematic effect (color, L filter against the catalog band, aperture loss, "
+    "unflattened frame, mixed SIMBAD sources)."
 )
 _ZERO_POINT_QUESTION = (
-    "Does the median offset between the catalog magnitudes and the instrumental magnitudes of a frame's "
-    "stars stay steady over a night, and does it fall when cloud or haze passes? The observatory has "
-    "no night labeled photometric, so the value has not been checked against a truth."
+    "Does the differential zero point of a frame stay steady over a night, and does it fall when cloud "
+    "or haze passes, once the change of star width with focus and seeing is accounted for? The "
+    "observatory has no night labeled photometric, so the value has not been checked against a truth."
 )
-_ZERO_POINT_COMPUTED_BY = "pipelines.photometry.processing.catalog_zero_point.estimate_frame_zero_point"
+_ZERO_POINT_COMPUTED_BY = "pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates"
 
 
 def _zero_point_metric(name: str, band_name: str, filter_text: str) -> MetricSpec:
@@ -315,7 +327,7 @@ def _zero_point_metric(name: str, band_name: str, filter_text: str) -> MetricSpe
     Returns
     -------
     spec : `MetricSpec`
-        An exploratory frame metric in magnitudes with a bootstrap error.
+        An exploratory frame metric in magnitudes with a standard error.
     """
     return MetricSpec(
         name=name,
@@ -324,7 +336,10 @@ def _zero_point_metric(name: str, band_name: str, filter_text: str) -> MetricSpe
         checkpoint=Checkpoint.PHOTOMETRY,
         levels=_ZERO_POINT_FRAME_ONLY,
         better=Direction.NONE,
-        meaning=f"The magnitude that one ADU per second has in one frame, tied to {band_name} magnitudes.",
+        meaning=(
+            f"The magnitude that one ADU per second has in one frame, tied to {band_name} magnitudes, for a "
+            "star of the field's median color, with no color, extinction or aperture correction."
+        ),
         estimator=_ZERO_POINT_ESTIMATOR,
         sample_definition=_ZERO_POINT_SAMPLE,
         band=filter_text,
@@ -338,8 +353,8 @@ def _zero_point_metric(name: str, band_name: str, filter_text: str) -> MetricSpe
     )
 
 
-def _zero_point_scatter_metric(name: str, band_name: str) -> MetricSpec:
-    """Declare the spread of one night's frame zero points for one band.
+def _star_sample_error_metric(name: str, band_name: str, zero_point_name: str) -> MetricSpec:
+    """Declare the star-sampling error of one band's absolute zero point level.
 
     Parameters
     ----------
@@ -347,43 +362,43 @@ def _zero_point_scatter_metric(name: str, band_name: str) -> MetricSpec:
         The metric name.
     band_name : `str`
         The catalog band, as the meaning line words it.
+    zero_point_name : `str`
+        The name of the zero point metric of the same band.
 
     Returns
     -------
     spec : `MetricSpec`
-        An exploratory run metric in magnitudes with a bootstrap error.
+        A context frame metric in magnitudes.
     """
     return MetricSpec(
         name=name,
         definition_version=1,
         unit="mag",
         checkpoint=Checkpoint.PHOTOMETRY,
-        levels=_RUN_ONLY,
-        better=Direction.LOWER,
-        meaning=f"How much the {band_name} frame zero points of one session wander.",
+        levels=_ZERO_POINT_FRAME_ONLY,
+        better=Direction.NONE,
+        meaning=(
+            f"The statistical error of the absolute level of the {band_name} zero point from the star "
+            "sample; systematics (color, L against the catalog band, aperture loss, unflattened frame, "
+            "mixed SIMBAD sources) are not included."
+        ),
         estimator=(
-            "1.4826 times the median absolute deviation of the session's frame zero points (frames with "
-            "no zero point are left out, so heavy cloud makes the value look better than the night was). "
-            "At least 10 frames are needed. The value is stored once for each session of the run, on "
-            "the session's night. It is never combined across targets and it does not call the night "
-            "photometric."
+            "1.2533 times the robust sigma (1.4826 times the median absolute deviation) of the fixed "
+            "stars' reference offsets over the square root of the star count. It is the same for every "
+            f"frame of a session and is stored with each frame that has a value of {zero_point_name}."
         ),
-        sample_definition="The frames of one session that have a frame zero point in the same catalog band.",
-        band=f"The session's catalog band, {band_name}, the same as the frame zero points it summarizes.",
-        computed_by="pipelines.photometry.processing.catalog_zero_point.zero_point_scatter",
-        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
-        uncertainty_method=(
-            "The standard deviation of the spread over 1000 seeded bootstrap resamples of the frames. "
-            "It treats the frames as independent, which neighboring frames in a slow cloud are not."
+        sample_definition="The session's fixed star set of the band (see the zero point metric).",
+        band=f"{band_name} against the frame's own filter.",
+        computed_by="pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates",
+        uncertainty_kind=UncertaintyKind.NONE,
+        uncertainty_method=_NO_UNCERTAINTY_MEASURED,
+        register_entry="PHO-15",
+        purpose=MetricPurpose.CONTEXT,
+        purpose_reason=(
+            "A reader comparing the absolute zero point of two sessions or two fields needs the error of "
+            "the star sample beside it, because that error is much larger than the frame-to-frame "
+            "precision stored with the zero point."
         ),
-        register_entry="PHO-16",
-        purpose=MetricPurpose.EXPLORATORY,
-        exploratory_question=(
-            "Is the spread of a night's frame zero points a usable measure of how steady the "
-            "transparency was, and what spread separates a steady night from a cloudy one? The "
-            "observatory has no night labeled photometric, so no limit can be set."
-        ),
-        review_date=_ZERO_POINT_REVIEW_DATE,
     )
 
 
@@ -657,7 +672,7 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         "zero point.",
     ),
     MetricSpec(
-        name=PHOTOMETRY_CATALOG_ZERO_POINT_COLOUR_SLOPE,
+        name=PHOTOMETRY_CATALOG_ZERO_POINT_COLOR_SLOPE,
         definition_version=1,
         unit="",
         checkpoint=Checkpoint.PHOTOMETRY,
@@ -665,15 +680,16 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         better=Direction.NONE,
         meaning="How much a star's offset changes for each magnitude of its B-V color, in one frame.",
         estimator=(
-            "The Theil-Sen slope of the offset (the same stars and offsets as the SIMBAD V zero point) "
-            "against the star's B-V color, in magnitudes per magnitude. It is fitted only for SIMBAD V "
-            "frames when at least 20 used stars have a B-V color spanning at least 0.4 mag (5th to 95th "
-            "percentile). Gaia G stars carry no color in this library, so their frames have no slope. "
-            "The slope is not applied to the zero point."
+            "The Theil-Sen slope of the offset (catalog magnitude plus 2.5 log10 of the flux, not the "
+            "change from the star's reference) of the fixed set's stars that pass the cuts in this "
+            "frame, against the star's B-V color, in magnitudes per magnitude. It is stored only for "
+            "SIMBAD V sessions, and fitted only when at least 20 used stars have a B-V color spanning at "
+            "least 0.4 mag (5th to 95th percentile). Gaia G stars carry no color in this library, so a "
+            "Gaia G session stores no slope. The slope is not applied to the zero point."
         ),
-        sample_definition="The used SIMBAD V stars of the frame that have a B-V color.",
+        sample_definition="The used stars of the session's SIMBAD V fixed set that have a B-V color.",
         band="SIMBAD V against the frame's own filter.",
-        computed_by="pipelines.photometry.processing.catalog_zero_point.estimate_frame_zero_point",
+        computed_by="pipelines.photometry.processing.catalog_zero_point.differential_frame_estimates",
         uncertainty_kind=UncertaintyKind.NONE,
         uncertainty_method="No uncertainty is reported.",
         register_entry="PHO-15",
@@ -685,31 +701,14 @@ PHOTOMETRY_METRICS: tuple[MetricSpec, ...] = (
         ),
         review_date=_ZERO_POINT_REVIEW_DATE,
     ),
-    MetricSpec(
-        name=PHOTOMETRY_FRAME_AIRMASS,
-        definition_version=1,
-        unit="",
-        checkpoint=Checkpoint.PHOTOMETRY,
-        levels=_ZERO_POINT_FRAME_ONLY,
-        better=Direction.NONE,
-        meaning="The airmass the photometry run used for one frame.",
-        estimator=(
-            "The frame header's AIRMASS, CENTAIRM or AIRM keyword when it is between 1 and 10, else the "
-            "airmass computed from its CENTALT, ALTITUDE or ALT keyword. A frame whose header gives "
-            "neither is not measured: the pipeline then uses 1.0 as a stand-in, and a stored airmass of "
-            "exactly 1.0 is read as that stand-in."
-        ),
-        sample_definition="One frame.",
-        band="Not applicable.",
-        computed_by="pipelines.photometry.pre_processing.frame_photometry.compute_frame_airmass",
-        uncertainty_kind=UncertaintyKind.NONE,
-        uncertainty_method=_NO_UNCERTAINTY_MEASURED,
-        purpose=MetricPurpose.CONTEXT,
-        purpose_reason=(
-            "A reader judging the frame zero points needs the airmass beside them, because a trend of the "
-            "zero point with airmass is extinction and the zero point is stored uncorrected."
-        ),
+    _star_sample_error_metric(
+        PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_GAIA_G_MAG,
+        "Gaia G",
+        PHOTOMETRY_CATALOG_ZERO_POINT_GAIA_G_MAG,
     ),
-    _zero_point_scatter_metric(PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_GAIA_G_MAG, "Gaia G"),
-    _zero_point_scatter_metric(PHOTOMETRY_CATALOG_ZERO_POINT_SCATTER_SIMBAD_V_MAG, "SIMBAD V"),
+    _star_sample_error_metric(
+        PHOTOMETRY_CATALOG_ZERO_POINT_STAR_SAMPLE_ERROR_SIMBAD_V_MAG,
+        "SIMBAD V",
+        PHOTOMETRY_CATALOG_ZERO_POINT_SIMBAD_V_MAG,
+    ),
 )

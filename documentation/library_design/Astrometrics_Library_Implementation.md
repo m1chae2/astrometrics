@@ -4,7 +4,7 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence. It is written for developers who review or change the algorithms.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence.
 
 Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
@@ -298,18 +298,17 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 | --- | --- | --- | --- |
 | Aperture radius; sky ring radii | 4 px; 7 to 12 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
 | Re-centering box; refinement passes; largest move | 11 px; 3; 1.5 px | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 1) |
-| Comparison band: brightest skipped; band ends at | 2%; 30% of candidates | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Candidates vetted; minimum and cap of comparison stars | 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Vetting limit; share of typical stars for a usable frame | 3σ; one half | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
-| Frame outlier clip; per-star outlier clip | 3σ (at least 5 frames); 5σ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Comparison stars: brightest skipped; band ends at; candidates vetted; minimum and cap | 2%; 30%; 100; 5 and 20 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
+| Vetting limit; usable-frame share; frame and per-star outlier clips | 3σ; one half; 3σ (at least 5 frames), 5σ | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 4) |
 | Share of frames rejected before the run is flagged | 25% | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
 | Noise model: minimum stars; stars per bin; most bins | 20; 10; 10 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 5) |
 | Thresholds: excess scatter; chi-square and Stetson J | 1.5; field median + 2.326 robust σ | Partly measured ([PHO-06](validation/photometry.md#pho-06)); synthetic only | §5.2 (concept 5) |
 | Small-field cutoff on the coefficient of variation | median + 7.4 MAD (about 5 robust σ), never below 0.02 | Measured ([PHO-10](validation/photometry.md#pho-10)) | §5.2 (concept 5) |
 | Period verdicts: false-alarm limit for "possible"; for "detected"; shuffles | 0.05; 0.01 with at least 3 cycles; 300 | Partly measured ([PHO-12](validation/photometry.md#pho-12)); synthetic only | §5.2 (concept 8) |
 | Between-session flag: significance; amplitude | above 3; at least 0.02 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.2 (concept 6) |
-| Discrimination AUC floor | 0.7 | Design estimate ([photometry table](validation/photometry.md#design-estimates)) | §5.4.2 |
-| Largest acceptable smallest detectable change (peak to peak) | 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); real-field value in [PHO-09](validation/photometry.md#pho-09) | §5.4.2 |
+| Zero point cuts: `CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION`; `MINIMUM_STARS_FOR_ZERO_POINT`; `MINIMUM_SIGNAL_TO_NOISE`; `SESSION_STAR_FRAME_SHARE`; linearity limit from the camera profile | 0.5; 10; 20; 80% | Design estimate (PHO-D24); partly measured ([PHO-15](validation/photometry.md#pho-15)) | §5.2 (concept 9) |
+| Zero point extras: `MINIMUM_STARS_FOR_COLOR_SLOPE`; `MINIMUM_COLOR_RANGE_MAG`; `MINIMUM_FRAMES_FOR_SCATTER`; `STANDARD_ERROR_OF_MEDIAN_FACTOR` | 20; 0.4 mag; 10; 1.2533 | Design estimate (PHO-D25, PHO-D26) | §5.2 (concept 9) |
+| Discrimination AUC floor; largest acceptable smallest detectable change (peak to peak) | 0.7; 0.3 mag | Design estimate ([photometry table](validation/photometry.md#design-estimates)); real-field value in [PHO-09](validation/photometry.md#pho-09) | §5.4.2 |
 
 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.measure_aperture_photometry -->
 <!-- impl: astrometricslib.pipelines.photometry.pre_processing.frame_photometry.CENTROID_BOX_HALF_WIDTH_PX -->
@@ -330,6 +329,14 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_indices.CALIBRATION_SIGMAS -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.CENTRAL_RADIUS_HALF_DIAGONAL_FRACTION -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_ZERO_POINT -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_SIGNAL_TO_NOISE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.SESSION_STAR_FRAME_SHARE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_STARS_FOR_COLOR_SLOPE -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_COLOR_RANGE_MAG -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.MINIMUM_FRAMES_FOR_SCATTER -->
+<!-- impl: astrometricslib.pipelines.photometry.processing.catalog_zero_point.STANDARD_ERROR_OF_MEDIAN_FACTOR -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG -->

@@ -132,7 +132,7 @@ def _measure_sequence(
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, star_fluxes, _, _, _, _, star_positions, _, _ = result
+        _, star_fluxes, _, _, _, _, star_positions, _, _, _ = result
         fluxes[index] = [star_fluxes[f"star{i}"][0] for i in range(len(stars))]
         positions.append([star_positions[f"star{i}"] for i in range(len(stars))])
     return fluxes, positions
@@ -523,7 +523,7 @@ def test_noisy_global_shift_is_not_pulled_toward_zero(tmp_path: Path) -> None:
     ))
 
     assert isinstance(result, tuple)
-    _, _, shift_x, shift_y, _, _, _, _, _ = result
+    _, _, shift_x, shift_y, _, _, _, _, _, _ = result
     assert shift_x == pytest.approx(2.7, abs=0.15)
     assert shift_y == pytest.approx(-1.8, abs=0.15)
 

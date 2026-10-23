@@ -114,7 +114,7 @@ def _measure_offsets(
             DetectorNoise(),
         ))
         assert isinstance(result, tuple), f"frame {index} was not measured: {result!r}"
-        _, _, shift_x, shift_y, _, _, positions, _, _ = result
+        _, _, shift_x, shift_y, _, _, positions, _, _, _ = result
         offsets, fallbacks = centroid_offsets_px(positions, reference_positions, shift_x, shift_y)
         offsets_by_frame[timestamp] = offsets
         measurement_count += len(positions)

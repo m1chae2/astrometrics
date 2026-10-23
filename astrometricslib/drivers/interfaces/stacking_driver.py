@@ -154,9 +154,11 @@ class StackingDriver(ABC):
         -------
         artifacts : `dict`
             ``"registration_frames"``, one dictionary per registered frame
-            (``dx``, ``dy``, ``fwhm_x``, ``fwhm_y``, ``roundness``, ``rmse``
-            and ``nb_stars``), in the order of the diagnostics'
-            ``"symlinked_light_paths"``. ``"rejected_pixel_fraction"``, the
+            (``dx``, ``dy``, ``fwhm_px``, ``weighted_fwhm_px``,
+            ``roundness``, ``quality``, ``background_level``,
+            ``star_count``, ``rotation_deg`` and ``scale``), in the order of
+            the diagnostics' ``"symlinked_light_paths"``.
+            ``"rejected_pixel_fraction"``, the
             share of pixel values thrown out, 0 to 1, or `None`.
             ``"registration_included"``, one flag per image in the same order:
             `False` for an image the engine dropped while registering. A value

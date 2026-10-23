@@ -372,8 +372,8 @@ def run_analysis() -> None:
             f"for {len(spec_frames)} input frames -- some frames may have failed registration."
         )
 
-    nb_stars = [f["nb_stars"] for f in seq_frames]
-    rmse_values = [f["rmse"] for f in seq_frames]
+    nb_stars = [f["star_count"] for f in seq_frames]
+    rmse_values = [f["background_level"] for f in seq_frames]
     peak_to_background_ratios = [s["peak_to_background_ratio"] if s else None for s in zero_order_stars]
 
     position_jumps: list[float | None] = [None]
@@ -397,7 +397,7 @@ def run_analysis() -> None:
     print("\n==========================================")
     print("SPECTRAL REGISTRATION QUALITY SUMMARY")
     print("==========================================")
-    print(f"{'frame':>5} {'nb_stars':>9} {'rmse':>10} {'zo_ratio':>10} {'zo_jump':>9}  flags")
+    print(f"{'frame':>5} {'nb_stars':>9} {'background':>10} {'zo_ratio':>10} {'zo_jump':>9}  flags")
     for i, frame in enumerate(spec_frames):
         seq_entry = seq_frames[i] if i < len(seq_frames) else {}
         zero_order = zero_order_stars[i] if i < len(zero_order_stars) else None
@@ -414,8 +414,8 @@ def run_analysis() -> None:
 
         row = {
             "path": frame.path,
-            "nb_stars": seq_entry.get("nb_stars"),
-            "rmse": seq_entry.get("rmse"),
+            "nb_stars": seq_entry.get("star_count"),
+            "background_level": seq_entry.get("background_level"),
             "roundness": seq_entry.get("roundness"),
             "zero_order_peak_to_background_ratio": (
                 zero_order["peak_to_background_ratio"] if zero_order else None
@@ -426,7 +426,7 @@ def run_analysis() -> None:
         }
         results.append(row)
 
-        rmse_str = f"{row['rmse']:.5f}" if row["rmse"] is not None else "n/a"
+        rmse_str = f"{row['background_level']:.5f}" if row["background_level"] is not None else "n/a"
         ratio_str = (
             f"{row['zero_order_peak_to_background_ratio']:.1f}"
             if row["zero_order_peak_to_background_ratio"] is not None

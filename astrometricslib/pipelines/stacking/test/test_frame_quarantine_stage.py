@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.foundation.enums import FilterType
 from astrometricslib.foundation.errors import StorageError
 from astrometricslib.models.quality.gate_result import GateStatus, failed_gate
@@ -172,11 +173,25 @@ def test_a_failed_quarantine_gate_survives_the_flag_rebuild() -> None:
 
 
 MEASURED_AT = datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
-RECORDING = FrameQualityRecording(configuration=MagicMock(), calibration_library=MagicMock())
 HOOK = "astrometricslib.pipelines.stacking.frame_measurement_run.record_stage_frame_quality"
 
 
-def test_stage_hands_every_quarantine_measurement_to_the_quality_hook() -> None:
+@pytest.fixture
+def recording(config_in_tmp_path: AppConfiguration) -> FrameQualityRecording:
+    """Give the stage a recording context with its database in `tmp_path`.
+
+    Returns
+    -------
+    recording : `FrameQualityRecording`
+        A context with the test's own configuration, so nothing is written
+        outside the test's folder.
+    """
+    return FrameQualityRecording(configuration=config_in_tmp_path, calibration_library=MagicMock())
+
+
+def test_stage_hands_every_quarantine_measurement_to_the_quality_hook(
+    recording: FrameQualityRecording,
+) -> None:
     """Kept frames' quarantine numbers reach the hook, not only moved ones."""
     target = make_target()
     measurements = [
@@ -188,7 +203,7 @@ def test_stage_hands_every_quarantine_measurement_to_the_quality_hook() -> None:
         patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK) as hook,
     ):
-        run_stage(target, MEASURED_AT, RECORDING)
+        run_stage(target, MEASURED_AT, recording)
 
     hook.assert_called_once()
     assert hook.call_args.args[2] == measurements
@@ -199,14 +214,16 @@ def test_stage_hands_every_quarantine_measurement_to_the_quality_hook() -> None:
     "error",
     [StorageError("database is locked"), RuntimeError("photutils broke"), MemoryError("out of memory")],
 )
-def test_a_failing_quality_hook_never_stops_the_stack(error: Exception) -> None:
+def test_a_failing_quality_hook_never_stops_the_stack(
+    error: Exception, recording: FrameQualityRecording
+) -> None:
     """Any error in the hook is logged and the stack still runs."""
     report = QuarantineReport(batches_judged=1)
     with (
         patch(QUARANTINE_STEP, side_effect=lambda target, frames: (list(frames), report)),
         patch(HOOK, side_effect=error),
     ):
-        driver, _summary_builder = run_stage(make_target(), MEASURED_AT, RECORDING)
+        driver, _summary_builder = run_stage(make_target(), MEASURED_AT, recording)
 
     driver.process_target.assert_called_once()
 

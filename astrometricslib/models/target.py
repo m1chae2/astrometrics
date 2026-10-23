@@ -72,13 +72,27 @@ class FrameMeasurements(BaseModel):
     # Alignment data. When the pipeline aligns the images (registration),
     # it calculates these values (like how far the stars shifted).
     # They stay None until that pipeline runs.
+    # Siril's plain FWHM in pixels. The name says "x" for history; Siril
+    # reports one FWHM, not one per axis.
     registration_fwhm_x_px: float | None = Field(default=None, alias="registrationFwhmXPx")
+    # No longer filled. Stored values written before the fix were Siril's
+    # weighted FWHM, not a width along y. Removal belongs to issue #97.
     registration_fwhm_y_px: float | None = Field(default=None, alias="registrationFwhmYPx")
+    # Siril's weighted FWHM in pixels (stars counted by fit quality).
+    registration_weighted_fwhm_px: float | None = Field(default=None, alias="registrationWeightedFwhmPx")
     # How round the stars look after alignment (1.0 is a perfect circle).
     # A lower number can mean the telescope drifted during the photo.
     registration_roundness: float | None = Field(default=None, alias="registrationRoundness")
-    # How far off, on average, the alignment was when lining this
-    # picture up with the others, in pixels. Lower is better.
+    # Siril's registration quality score for this picture.
+    registration_quality: float | None = Field(default=None, alias="registrationQuality")
+    # Sky background level in the picture, normalized to 0 to 1.
+    registration_background_level: float | None = Field(default=None, alias="registrationBackgroundLevel")
+    # Rotation of this picture relative to the reference, in degrees,
+    # from the registration transform.
+    registration_rotation_deg: float | None = Field(default=None, alias="registrationRotationDeg")
+    # No longer filled. Stored values written before the fix were the sky
+    # background level (0.02 or so), not an alignment error in pixels.
+    # Removal belongs to issue #97.
     registration_rmse: float | None = Field(default=None, alias="registrationRmse")
     registration_star_count: int | None = Field(default=None, alias="registrationStarCount")
     registration_dx_px: float | None = Field(default=None, alias="registrationDxPx")

@@ -1196,11 +1196,17 @@ def _update_frame_registration_results(
             run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
             if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
                 continue
-            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_x"]
-            frame.measurements.registration_fwhm_y_px = registration_facts["fwhm_y"]
+            # `registration_fwhm_y_px` and `registration_rmse` are no longer
+            # filled: their old values were the weighted FWHM and the sky
+            # background level (see `FrameMeasurements`). The field named
+            # `..._fwhm_x_px` holds Siril's plain FWHM.
+            frame.measurements.registration_fwhm_x_px = registration_facts["fwhm_px"]
+            frame.measurements.registration_weighted_fwhm_px = registration_facts["weighted_fwhm_px"]
             frame.measurements.registration_roundness = registration_facts["roundness"]
-            frame.measurements.registration_rmse = registration_facts["rmse"]
-            frame.measurements.registration_star_count = registration_facts["nb_stars"]
+            frame.measurements.registration_quality = registration_facts["quality"]
+            frame.measurements.registration_background_level = registration_facts["background_level"]
+            frame.measurements.registration_rotation_deg = registration_facts["rotation_deg"]
+            frame.measurements.registration_star_count = registration_facts["star_count"]
             frame.measurements.registration_dx_px = registration_facts["dx"]
             frame.measurements.registration_dy_px = registration_facts["dy"]
 

@@ -1125,7 +1125,7 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
 - **What to look at:** The count of flagged frames and the zero-order position scatter (pixels).
 - **Our result:** M 13 session (DS-M13; 86 frames, 2520 s total): 86 extracted, 0 tracking failures, position stable to ±0.2 px.
 - **Verdict:** Not judged.
-- **Limits:** Predates the current extraction and registration checks; not repeated.
+- **Limits:** Predates the current extraction and registration checks; not repeated. Note added 2026-10-23: the per-frame number this check called the fit RMSE is the frame's sky background level, because Siril's sequence file holds no registration error. The check still tests that number. The evidence above is unchanged.
 - **To tune for your setup:** If good frames are flagged, raise the sigma thresholds; if bad frames pass, lower them.
 - **Regenerate with:** `python -m astrometricslib.scripts.spectral_registration_quality_analysis "M 13" [--date 2026-05-23] [--camera "ZWO ASI 533MM Pro"] [--sweep-filters]`; `python -m astrometricslib.scripts.run_empirical_validation`.
 - **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/utilities/test/test_spectral_registration_quality.py`.

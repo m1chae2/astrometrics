@@ -86,7 +86,7 @@ def evaluate_spectral_registration_quality(
     frame_paths : `list` of `str`
         The file locations for the images being checked.
     seq_frames : `list` of `dict`
-        Alignment stats from Siril (like 'nb_stars' and 'rmse').
+        Alignment stats from Siril (like 'star_count' and 'background_level').
     zero_order_stars : `list` of `dict` or `None`
         Details about the zero-order star in each frame (x/y position,
         brightness).
@@ -106,8 +106,11 @@ def evaluate_spectral_registration_quality(
     if len(seq_frames) != n or len(zero_order_stars) != n:
         return []
 
-    nb_stars = [f.get("nb_stars") for f in seq_frames]
-    rmse_values = [f.get("rmse") for f in seq_frames]
+    nb_stars = [f.get("star_count") for f in seq_frames]
+    # TODO(#94): see report. This list was long called "rmse", but Siril's
+    # sequence file holds no registration error: the number is each frame's
+    # sky background level. The check still tests that, unchanged.
+    rmse_values = [f.get("background_level") for f in seq_frames]
     peak_to_background_ratios = [s["peak_to_background_ratio"] if s else None for s in zero_order_stars]
 
     position_jumps: list[float | None] = [None]

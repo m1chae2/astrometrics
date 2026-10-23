@@ -135,7 +135,7 @@ def measure_frame_input_quality(
         if metrics["saturated_pixel_fraction"] is not None:
             frame.measurements.saturated_pixel_fraction = metrics["saturated_pixel_fraction"]
         if metrics["fwhm_px"] is not None:
-            # Deliberately NOT written into registration_fwhm_x/y_px.
+            # Deliberately NOT written into registration_fwhm_x_px.
             # Siril's registration PSF fit and this photutils measurement
             # are not on the same absolute scale -- measured on identical
             # NGC 4438 frames, photutils reports ~1.53x Siril's value
@@ -144,10 +144,10 @@ def measure_frame_input_quality(
             # Mixing them in one field would make a frame appear to jump
             # ~50% in seeing purely from which stage measured it, which
             # is precisely the false signal any trend analysis over these
-            # numbers must not see. Siril's pair is also genuinely
-            # per-axis (fwhm_x != fwhm_y on 228 of 238 measured frames),
-            # carrying elongation information a single circularized
-            # median cannot represent.
+            # numbers must not see. (Siril's second number was once read as
+            # a width along y, from a count of 228 of 238 frames where the
+            # two differed. It is the weighted FWHM, so that count did not
+            # show elongation.)
             frame.measurements.measured_fwhm_px = metrics["fwhm_px"]
         counts["measured"] += 1
 

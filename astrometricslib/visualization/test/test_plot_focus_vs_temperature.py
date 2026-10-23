@@ -51,7 +51,6 @@ def make_frames(count: int, width_slope_px_per_c: float | None = None) -> list[F
         if width_slope_px_per_c is not None:
             width = 4.2 + width_slope_px_per_c * (22.3 - temperature)
             fields["registrationFwhmXPx"] = width
-            fields["registrationFwhmYPx"] = width
         record = FrameRecord(**fields)
         frames.append(record)
     return frames

@@ -20,9 +20,11 @@ def test_frame_record_measurements_default_to_none_and_round_trip() -> None:
     assert frame.measurements.saturated_pixel_fraction is None
 
     frame.measurements.registration_fwhm_x_px = 2.6
-    frame.measurements.registration_fwhm_y_px = 2.7
+    frame.measurements.registration_weighted_fwhm_px = 2.7
     frame.measurements.registration_roundness = 0.9
-    frame.measurements.registration_rmse = 0.15
+    frame.measurements.registration_quality = 0.0
+    frame.measurements.registration_background_level = 0.0238
+    frame.measurements.registration_rotation_deg = 0.001
     frame.measurements.registration_star_count = 42
     frame.measurements.registration_dx_px = 1.2
     frame.measurements.registration_dy_px = -0.8

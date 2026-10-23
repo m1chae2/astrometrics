@@ -7,8 +7,10 @@ measurement, so they live alongside the Siril driver rather than with the
 quality math in `pipelines/shared/quality/`.
 """
 
+import math
 import os
 import re
+from typing import Any
 
 import numpy as np
 
@@ -88,12 +90,20 @@ def parse_stacked_image_count(line: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
+def parse_seq_file(seq_path: str) -> list[dict[str, Any]]:
     """Read the registration results file from Siril.
 
     Siril creates a `.seq` file when it aligns images. This function reads
     that file to get the quality measurements (like how blurry the stars are)
     for each image.
+
+    Each registration line has the form
+    ``R<layer> fwhm weighted_fwhm roundness quality background_level
+    star_count H h00 h01 h02 h10 h11 h12 h20 h21 h22`` (checked against
+    Siril's own reader, ``src/io/seqfile.c``). The line holds no
+    registration error. Older versions of this function read the
+    ``background_level`` field as ``rmse`` and the ``weighted_fwhm`` field
+    as ``fwhm_y``; both names were wrong.
 
     Parameters
     ----------
@@ -103,8 +113,35 @@ def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
     Returns
     -------
     frames : `list` of `dict`
-        A list containing the quality measurements for each image. Returns
-        an empty list if the file doesn't exist.
+        A list containing the quality measurements for each image, in file
+        order. Returns an empty list if the file doesn't exist. Each
+        dictionary holds:
+
+        ``fwhm_px``
+            Width of the stars in pixels (Siril's plain FWHM).
+        ``weighted_fwhm_px``
+            Siril's weighted FWHM in pixels, which counts each star by how
+            well its fit went.
+        ``roundness``
+            Star roundness, 0 to 1 (1 is a perfect circle).
+        ``quality``
+            Siril's registration quality score for the image.
+        ``background_level``
+            Sky background level, normalized to the 0 to 1 image range. It
+            is a brightness, not an alignment error.
+        ``star_count``
+            Number of stars Siril matched in the image.
+        ``homography``
+            The 3 by 3 transform that moves the image onto the reference,
+            as nine numbers in row order.
+        ``dx``, ``dy``
+            The shift in pixels: the homography's ``h02`` and ``h12``.
+        ``rotation_deg``
+            Rotation in degrees, `atan2(h10, h00)` of the homography's top
+            left 2 by 2 part, in Siril's image coordinates.
+        ``scale``
+            Scale factor, the square root of the absolute determinant of
+            that 2 by 2 part (1.0 means the same size as the reference).
     """
     frames = []
     if not os.path.exists(seq_path):
@@ -114,14 +151,20 @@ def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
             if not _REGISTRATION_LINE_PATTERN.match(line):
                 continue
             parts = line.split()
+            homography = [float(value) for value in parts[8:17]]
+            h00, h01, h02, h10, h11, h12 = homography[:6]
             frames.append({
-                "fwhm_x": float(parts[1]),
-                "fwhm_y": float(parts[2]),
+                "fwhm_px": float(parts[1]),
+                "weighted_fwhm_px": float(parts[2]),
                 "roundness": float(parts[3]),
-                "rmse": float(parts[5]),
-                "nb_stars": int(parts[6]),
-                "dx": float(parts[10]),
-                "dy": float(parts[13]),
+                "quality": float(parts[4]),
+                "background_level": float(parts[5]),
+                "star_count": int(parts[6]),
+                "homography": homography,
+                "dx": h02,
+                "dy": h12,
+                "rotation_deg": math.degrees(math.atan2(h10, h00)),
+                "scale": math.sqrt(abs(h00 * h11 - h01 * h10)),
             })
     return frames
 
@@ -170,6 +213,10 @@ def parse_zero_order_star(lst_path: str) -> dict[str, float] | None:
     -------
     result : `dict` or `None`
         The star's properties, or None if the file doesn't exist or is empty.
+        ``psf_fit_rmse`` is the root-mean-square residual of Siril's fit of
+        the star's profile (column 12 of the star list). It is a fit error
+        for this one star, not a registration error. Earlier versions named
+        it ``rmse``.
     """
     if not os.path.exists(lst_path):
         return None
@@ -188,7 +235,7 @@ def parse_zero_order_star(lst_path: str) -> dict[str, float] | None:
                 "y": float(fields[6]),
                 "fwhm_x_px": float(fields[7]),
                 "fwhm_y_px": float(fields[8]),
-                "rmse": float(fields[12]),
+                "psf_fit_rmse": float(fields[12]),
             }
     return None
 

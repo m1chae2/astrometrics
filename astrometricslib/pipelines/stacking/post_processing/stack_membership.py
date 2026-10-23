@@ -115,7 +115,7 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     ----------
     diagnostics : `dict`
         What the stacking run reported. ``registration_frames`` (one dict per
-        frame with ``dx``, ``dy`` and ``nb_stars``) and
+        frame with ``dx``, ``dy`` and ``star_count``) and
         ``symlinked_light_paths`` are read.
 
     Returns
@@ -132,7 +132,7 @@ def registration_reference_from_diagnostics(diagnostics: dict[str, Any]) -> tupl
     if len(zero_shift_indices) != 1 or len(registration_frame_paths) != len(registration_frames):
         return None
     reference_index = zero_shift_indices[0]
-    return registration_frame_paths[reference_index], registration_frames[reference_index]["nb_stars"]
+    return registration_frame_paths[reference_index], registration_frames[reference_index]["star_count"]
 
 
 def determine_stack_members(

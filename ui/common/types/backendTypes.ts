@@ -95,7 +95,11 @@ export interface FrameMeasurements {
   measuredFwhmPx?: number | null;
   registrationFwhmXPx?: number | null;
   registrationFwhmYPx?: number | null;
+  registrationWeightedFwhmPx?: number | null;
   registrationRoundness?: number | null;
+  registrationQuality?: number | null;
+  registrationBackgroundLevel?: number | null;
+  registrationRotationDeg?: number | null;
   registrationRmse?: number | null;
   registrationStarCount?: number | null;
   registrationDxPx?: number | null;

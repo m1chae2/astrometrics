@@ -79,6 +79,21 @@ def test_evaluate_spectral_registration_quality_flags_low_star_count() -> None:
     assert "low matched star count" in next(f["reason"] for f in flagged if f["path"] == "frame_5.fits")
 
 
+def test_unusual_background_level_is_not_flagged() -> None:
+    """Verify a frame with an odd sky background level is not flagged.
+
+    Siril's "rmse" column is the frame's sky background level, not a
+    registration error, so the check no longer tests it.
+    """
+    n = 15
+    paths = [f"frame_{i}.fits" for i in range(n)]
+    seq_frames = [{"star_count": 120, "background_level": 0.004} for _ in range(n)]
+    seq_frames[7]["background_level"] = 0.5  # far outside the other frames
+    zero_order_stars = [{"x": 100.0, "y": 100.0, "peak_to_background_ratio": 150.0} for _ in range(n)]
+
+    assert evaluate_spectral_registration_quality(paths, seq_frames, zero_order_stars) == []
+
+
 def test_evaluate_spectral_registration_quality_handles_mismatched_lengths() -> None:
     """Verifies misaligned input lists return no flags rather than raising."""
     assert evaluate_spectral_registration_quality(["a.fits"], [{"star_count": 1}], []) == []

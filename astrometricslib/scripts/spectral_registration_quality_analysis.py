@@ -5,7 +5,7 @@ production spectral stacking path in siril_interface.py) against a
 target's Star Analyzer 200 ("SPEC") frames, then parses the resulting
 .seq registration summary and per-frame .lst star lists to flag
 frames where registration looks untrustworthy: too few matched star
-pairs, elevated fit RMSE, or the zero-order star's position/amplitude
+pairs, or the zero-order star's position/amplitude
 drifting sharply frame-to-frame.
 
 The registration-quality check alone only registers frames -- it does
@@ -278,7 +278,7 @@ def run_analysis() -> None:
     Parses CLI arguments, symlinks the target's matching SPEC frames
     into a scratch Siril work directory, runs Siril's shift-only
     registration, then parses the resulting .seq and .lst outputs to
-    flag frames with too few matched star pairs, elevated fit RMSE,
+    flag frames with too few matched star pairs,
     or a zero-order star whose position or amplitude jumps sharply
     frame-to-frame. Writes the full per-frame results to a JSON file
     under the configured logs path, then removes the scratch work
@@ -373,7 +373,6 @@ def run_analysis() -> None:
         )
 
     nb_stars = [f["star_count"] for f in seq_frames]
-    rmse_values = [f["background_level"] for f in seq_frames]
     peak_to_background_ratios = [s["peak_to_background_ratio"] if s else None for s in zero_order_stars]
 
     position_jumps: list[float | None] = [None]
@@ -385,7 +384,6 @@ def run_analysis() -> None:
 
     thresholds = astrometrics.quality.spectral_registration_thresholds
     low_star_count_flags = [n < thresholds["min_matched_star_pairs"] for n in nb_stars]
-    high_rmse_flags = astrometrics.quality.flag_value_outliers(rmse_values, thresholds["rmse_outlier_sigma"])
     dim_zero_order_flags = astrometrics.quality.flag_value_outliers(
         peak_to_background_ratios, thresholds["zero_order_amplitude_outlier_sigma"], low_is_bad=True
     )
@@ -405,8 +403,6 @@ def run_analysis() -> None:
         flags = []
         if i < len(low_star_count_flags) and low_star_count_flags[i]:
             flags.append("low_star_count")
-        if i < len(high_rmse_flags) and high_rmse_flags[i]:
-            flags.append("high_rmse")
         if i < len(dim_zero_order_flags) and dim_zero_order_flags[i]:
             flags.append("dim_zero_order")
         if i < len(position_jump_flags) and position_jump_flags[i]:
@@ -426,7 +422,7 @@ def run_analysis() -> None:
         }
         results.append(row)
 
-        rmse_str = f"{row['background_level']:.5f}" if row["background_level"] is not None else "n/a"
+        background_str = f"{row['background_level']:.5f}" if row["background_level"] is not None else "n/a"
         ratio_str = (
             f"{row['zero_order_peak_to_background_ratio']:.1f}"
             if row["zero_order_peak_to_background_ratio"] is not None
@@ -438,7 +434,7 @@ def run_analysis() -> None:
             else "n/a"
         )
         print(
-            f"{i:>5} {row['nb_stars']!s:>9} {rmse_str:>10} {ratio_str:>10} "
+            f"{i:>5} {row['nb_stars']!s:>9} {background_str:>10} {ratio_str:>10} "
             f"{jump_str:>9}  {','.join(flags) or '-'}"
         )
 

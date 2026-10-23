@@ -600,7 +600,6 @@ class QualityRecords:
 
         return {
             "min_matched_star_pairs": srq.MIN_MATCHED_STAR_PAIRS,
-            "rmse_outlier_sigma": srq.RMSE_OUTLIER_SIGMA,
             "zero_order_amplitude_outlier_sigma": srq.ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA,
             "zero_order_position_jump_outlier_sigma": srq.ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA,
         }

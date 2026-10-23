@@ -1120,12 +1120,12 @@ Call (a) is called "the raw extraction" below and call (b) "the calibrated resul
   - the registration-quality thresholds (design estimate; see the table below), reached through `QualityRecords.spectral_registration_thresholds`. Relation: sanity check only. <!-- impl: astrometricslib.QualityRecords.spectral_registration_thresholds -->
 - **Status:** Partly measured. One session, measured with an earlier version of the extraction (see the first validation campaign, [index.md](index.md#6-validation-sessions) Section 6).
 - **Data you need:** A session of 30 or more grating frames of one field, and Siril installed.
-- **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs, a high fit RMSE, or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.
+- **Procedure:** Run the script on the target and date. It registers the frames with Siril's shift-only transform, parses the per-frame star lists and flags frames with too few matched pairs or a zero-order star that jumps or fades. `--sweep-filters` also stacks with several sharpness filters and measures the stacked zero-order FWHM.
 - **Acceptance criterion:** Not recorded (set after the result).
 - **What to look at:** The count of flagged frames and the zero-order position scatter (pixels).
 - **Our result:** M 13 session (DS-M13; 86 frames, 2520 s total): 86 extracted, 0 tracking failures, position stable to ±0.2 px.
 - **Verdict:** Not judged.
-- **Limits:** Predates the current extraction and registration checks; not repeated. Note added 2026-10-23: the per-frame number this check called the fit RMSE is the frame's sky background level, because Siril's sequence file holds no registration error. The check still tests that number. The evidence above is unchanged.
+- **Limits:** Predates the current extraction and registration checks; not repeated. Note added 2026-10-23: the per-frame number this check called the fit RMSE is the frame's sky background level, because Siril's sequence file holds no registration error. The check no longer tests that number (removed 2026-10-23). The evidence above is unchanged.
 - **To tune for your setup:** If good frames are flagged, raise the sigma thresholds; if bad frames pass, lower them.
 - **Regenerate with:** `python -m astrometricslib.scripts.spectral_registration_quality_analysis "M 13" [--date 2026-05-23] [--camera "ZWO ASI 533MM Pro"] [--sweep-filters]`; `python -m astrometricslib.scripts.run_empirical_validation`.
 - **Guarded by tests:** `astrometricslib/pipelines/spectroscopy/utilities/test/test_spectral_registration_quality.py`.
@@ -1159,7 +1159,7 @@ These tuned values have not been measured. Each is a reasoned choice.
 | SPE-D20 | Response agreement tolerance | 0.02 | `DEFAULT_TOLERANCE` in `scripts/compare_instrument_responses.py` | Different responses accepted as the same. | Derive responses from pairs of standard stars on the same night and take the spread. |
 | SPE-D21 | Calibration fit rejection | 10 nm RMS | literal in `SpectroscopyCalibrationTuner._fit_grating_distance` | A bad grating-distance fit accepted. | Run the tuner on several standards (SPE-12); good fits land far below. |
 | SPE-D22 | Calibration dip search | 12 candidates; depth 1% (down to 0.1%); 5 × local noise; 101-sample continuum | `_MAX_DIP_CANDIDATES`, `_FIRST_FRACTIONAL_PROMINENCE`, `_LAST_FRACTIONAL_PROMINENCE`, `_NOISE_PROMINENCE_MULTIPLE`, `_CONTINUUM_WINDOW_SAMPLES` in `utilities/calibration_tuner.py` | True lines missed among the dip candidates. | Run the tuner on faint standards and count how often the true lines are among the candidates. |
-| SPE-D23 | Registration checks | 10 matched pairs; 2.5σ RMSE; 3σ position jump; 2.5σ amplitude | `MIN_MATCHED_STAR_PAIRS`, `RMSE_OUTLIER_SIGMA`, `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` in `utilities/registration_quality.py` | Bad frames missed, or good frames flagged. | Run `spectral_registration_quality_analysis.py` on sessions with known bad frames (SPE-29). |
+| SPE-D23 | Registration checks | 10 matched pairs; 3σ position jump; 2.5σ amplitude. 2026-10-23: the 2.5σ background-level ("RMSE") criterion was removed (user decision). It was a sky background check mislabeled as a registration error, so its limit no longer applies. | `MIN_MATCHED_STAR_PAIRS`, `ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA`, `ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA` in `utilities/registration_quality.py` | Bad frames missed, or good frames flagged. | Run `spectral_registration_quality_analysis.py` on sessions with known bad frames (SPE-29). |
 | SPE-D24 | Extinction curve | Kitt Peak mean curve | `data/atmospheric_extinction_kpno.txt` | A wrong airmass correction across wavelength. | Observe one standard at two airmasses and fit k(λ) from the ratio. |
 
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.spectrum_extractor.SKY_CLIP_SIGMA -->
@@ -1186,6 +1186,5 @@ These tuned values have not been measured. Each is a reasoned choice.
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._NOISE_PROMINENCE_MULTIPLE -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner._CONTINUUM_WINDOW_SAMPLES -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.MIN_MATCHED_STAR_PAIRS -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.RMSE_OUTLIER_SIGMA -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.ZERO_ORDER_POSITION_JUMP_OUTLIER_SIGMA -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.registration_quality.ZERO_ORDER_AMPLITUDE_OUTLIER_SIGMA -->

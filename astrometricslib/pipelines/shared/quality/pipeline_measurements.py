@@ -15,6 +15,9 @@ Rules the helpers keep:
   advance which values will be missing. `build_measurement` keeps it only for
   a missing value, for an ``assumed`` value (where it names the source of the
   assumption) and for a self-check (where it is the check's own detail).
+- A value that is NaN or infinite is never stored. It becomes a
+  ``not_measured`` record with the reason "the value was not finite", so a bad
+  number in a summary cannot stop the record step (plan section 3.5).
 - A measurement carries the registered ``definition_version`` of its metric,
   so a pipeline never repeats it.
 - Storing is best effort. A storage failure is logged and never stops the
@@ -23,8 +26,9 @@ Rules the helpers keep:
 """
 
 import logging
+import math
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -47,6 +51,56 @@ logger = logging.getLogger(__name__)
 
 # Shown when a gate that could not measure anything also gave no sentence.
 _NO_DETAIL_REASON = "The check could not measure a value and gave no further detail."
+
+# Shown when a value is NaN or infinite. The model refuses such a number, so
+# the record says why there is none.
+NOT_FINITE_REASON = "the value was not finite"
+
+
+@dataclass(frozen=True)
+class GateLimitSource:
+    """Which metric stands for a gate and how the gate's limit was obtained.
+
+    Each pipeline's record step keeps one table of these, named
+    ``GATE_LIMIT_SOURCES``. The record step and the history fill both read
+    that table, so a limit is described in one place.
+
+    Parameters
+    ----------
+    metric_name : `str`
+        The name of the metric that stands for the gate.
+    tier : `LimitTier`
+        How the limit was obtained. ``geometry`` is for a limit that follows
+        from how the data are used. ``sensor_profile`` is for a limit read
+        from the camera profile. ``physical_budget`` is for a limit derived
+        from physics. ``design_estimate`` is for a limit that was designed
+        and has not been measured. ``own_baseline`` and
+        ``validated_dataset`` are for limits found from data.
+    register_entry : `str` or `None`, optional
+        The validation register entry that backs the limit: a numbered entry
+        (such as ``"AST-05"``) or a row of the register's design-estimates
+        table (such as ``"AST-D09"``). `None` when none applies.
+    """
+
+    metric_name: str
+    tier: LimitTier
+    register_entry: str | None = None
+
+
+def is_finite_number(value: float | None) -> bool:
+    """Say whether a value is a real, finite number.
+
+    Parameters
+    ----------
+    value : `float` or `None`
+        The value to test.
+
+    Returns
+    -------
+    finite : `bool`
+        `True` for a finite number. `False` for `None`, NaN and infinity.
+    """
+    return value is not None and math.isfinite(value)
 
 
 def make_run_id(job_id: str | None) -> str:
@@ -166,8 +220,10 @@ class PipelineRunContext:
         Parameters
         ----------
         stack_file_name : `str`
-            The stack file's path relative to the stacks folder. Never a
-            mount path.
+            The stack file's bare name, such as ``"M13_stack.fits"``. It is
+            not a path and never a mount path. (A stack kept in a
+            sub-folder of the stacks folder is named ``"folder/name.fits"``,
+            as stacking does for its exposure-group stacks.)
 
         Returns
         -------
@@ -203,7 +259,8 @@ def build_measurement(
     spec : `MetricSpec`
         The metric's declaration. Its name and definition version are used.
     value : `float` or `None`
-        The value. `None` makes the record ``not_measured``.
+        The value. `None` makes the record ``not_measured``. So does NaN or
+        infinity, with the reason "the value was not finite".
     context : `PipelineRunContext`
         The run's shared facts.
     subject : `QualitySubject`
@@ -216,7 +273,8 @@ def build_measurement(
         A self-check (one with a `check_outcome`) keeps it as the check's
         detail.
     uncertainty : `float` or `None`, optional
-        The value's uncertainty, in the metric's unit.
+        The value's uncertainty, in the metric's unit. A NaN or infinite
+        uncertainty is dropped.
     sample_count : `int` or `None`, optional
         How many samples are behind the value.
     status : `MeasurementStatus`, optional
@@ -235,6 +293,11 @@ def build_measurement(
         A measurement with origin ``measured`` and the context's run id, job
         id, pipeline version and time.
     """
+    if value is not None and not math.isfinite(value):
+        value = None
+        reason = NOT_FINITE_REASON
+    if not is_finite_number(uncertainty):
+        uncertainty = None
     final_status = MeasurementStatus.NOT_MEASURED if value is None else status
     if final_status == MeasurementStatus.MEASURED and check_outcome is None:
         reason = ""
@@ -306,7 +369,7 @@ def gate_measurement(
     check_limit = None
     if has_limit_information or needs_limit:
         check_limit = QualityLimit(
-            value=gate.limit,
+            value=gate.limit if is_finite_number(gate.limit) else None,
             unit=spec.unit,
             tier=limit_tier,
             derivation=gate.limit_source or "No limit source was recorded for this check.",
@@ -360,3 +423,44 @@ def record_run_measurements(measurements: Sequence[QualityMeasurement], *, confi
     except AstrometricsError:
         logger.exception("Quality measurements were refused by the metric registry")
     return 0
+
+
+def build_and_record_measurements(
+    build_measurements: Callable[[], Sequence[QualityMeasurement]],
+    description: str,
+    *,
+    config: Any = None,
+) -> int:
+    """Build a run's measurements and store them, never failing the run.
+
+    The rows are built inside the guard because a bad number in a summary,
+    a missing key or a changed field name would otherwise stop the science run
+    that only wanted to record how it went. Stacking guards its record step
+    the same way.
+
+    Parameters
+    ----------
+    build_measurements : `Callable`
+        Takes no arguments and returns the run's measurements.
+    description : `str`
+        Names the run for the log, such as ``"astrometry run on M13"``.
+    config : `AppConfiguration`, optional
+        Where the quality store lives. The process-wide configuration is used
+        if omitted.
+
+    Returns
+    -------
+    new_count : `int`
+        How many rows were new. It is 0 when anything went wrong.
+
+    Notes
+    -----
+    Any exception is logged with its traceback and swallowed. Storing already
+    swallows storage failures (see `record_run_measurements`); this guard
+    covers building the rows as well.
+    """
+    try:
+        return record_run_measurements(build_measurements(), config=config)
+    except Exception:  # quality rows must never stop a science run
+        logger.exception("The quality measurements of the %s were not stored", description)
+        return 0

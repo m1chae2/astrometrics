@@ -672,7 +672,10 @@ class ProcessingPipelines:
         The stack uses the target's normal settings (rejection, weighting,
         exposure groups and edge trim). It is written to
         ``<target's stacks folder>/_subsets/<label>/<label>.fits``, or to
-        ``output_folder``, never to the library stack's path. Nothing is
+        ``output_folder`` when that lies inside the ``_subsets`` folder,
+        never to the library stack's path. While it runs, no library stack
+        and no other subset job of the target can run; a second one is
+        refused with `ConflictError`, not queued. Nothing is
         assigned on the target and the target is not saved. The frame
         quarantine step is not run, so give frames the library stack already
         kept. The stack's noise in the target's stored sky apertures, its
@@ -692,7 +695,8 @@ class ProcessingPipelines:
             Names the subset's folder and file. Letters, digits, dots,
             underscores and hyphens; it may not start with a dot.
         output_folder : `str`, optional
-            Write the stack here instead of the default subset folder.
+            Write the stack here instead of the default subset folder. It
+            must be inside the target's ``_subsets`` folder.
         register_job : `bool`, optional
             Record the run in the job list. Defaults to `True`.
 
@@ -702,6 +706,7 @@ class ProcessingPipelines:
             The subset stack's path, its frame counts and its noise (or why
             there is none).
         """
+        from astrometricslib.pipelines.shared.frame_grouping import frame_is_spectral
         from astrometricslib.pipelines.stacking.subset_noise_run import stack_chosen_subset
 
         resolved = self._resolve(target)
@@ -711,7 +716,11 @@ class ProcessingPipelines:
                 resolved,
                 frames,
                 label,
-                self._library_stack_path(resolved, "imaging", must_exist=False),
+                self._library_stack_path(
+                    resolved,
+                    "spectral" if any(frame_is_spectral(frame) for frame in frames) else "imaging",
+                    must_exist=False,
+                ),
                 context=context,
                 configuration=self._config,
                 drivers=self._drivers,
@@ -784,9 +793,14 @@ class ProcessingPipelines:
 
         if maximum_steps < 1:
             raise InvalidArgumentError("maximum_steps must be at least 1.")
+        from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
+
         resolved = self._resolve(target)
         library_stack_path = self._library_stack_path(resolved, "imaging")
-        with registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job:
+        with (
+            registered_job(enabled=register_job, job_type="stacking", target_id=resolved.id) as job,
+            subset_job_guard(resolved.id),
+        ):
             context = self._subset_context(resolved, job.job_id)
             result = run_noise_growth(
                 resolved,
@@ -818,11 +832,12 @@ class ProcessingPipelines:
         night are stacked into the target's ``_subsets`` folder, and two
         numbers are stored at level ``stack`` on that leave-out stack, with the
         night in the subject's observing night: the night's share of the
-        library stack's total frame weight (``stacking.night_weight_share``)
+        library stack's total frame weight (``stacking.night_weight_fraction``)
         and the noise of the stack without the night
-        (``stacking.noise_without_night``). Compare the second with the
-        library stack's own noise: a lower value means the night made the
-        stack noisier.
+        (``stacking.noise_without_night``), with the paired difference from the
+        library stack's noise (``stacking.noise_difference_without_night``)
+        and the ratio the two stacks' effective frame counts predict
+        (``stacking.subset_expected_noise_ratio``).
 
         Cost: one stack for every night, each close to the library stack's own
         cost. It never runs by itself after a stack; call it when you want
@@ -887,7 +902,8 @@ class ProcessingPipelines:
         if stacking.stacked_image:
             return str(stacking.stacked_image)
         folder = os.path.join(str(self._config.get_stacks_path()), "lights", target.id)
-        return os.path.join(folder, f"{target.id.replace(' ', '_')}_Stacked.fits")
+        tag = "_SPEC" if kind == "spectral" else ""
+        return os.path.join(folder, f"{target.id.replace(' ', '_')}{tag}_Stacked.fits")
 
     def _subset_context(self, target: Target, job_id: str | None) -> PipelineRunContext | None:
         """Make the shared facts of one subset-stack run.

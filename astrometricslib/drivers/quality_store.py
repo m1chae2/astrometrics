@@ -20,9 +20,12 @@ The schema version is kept in its own table, ``quality_schema_version``
 (one row). This store never reads or writes ``PRAGMA user_version``, because
 that number is one value for the whole file and other code has used it. A
 database written by the first version of this code has the quality tables
-but no version table; it is recognized as version 1 and gets the table. A
-migration only creates the quality tables, view and version table and never
-touches any other table.
+but no version table; it is recognized as version 1 and gets the table.
+Version 2 adds the column ``variant`` (the label of a subset stack, empty for
+a library stack); the move from version 1 adds the column, fills it for the
+subset rows that already exist, and rebuilds the "latest" view. A migration
+only touches the quality tables, view and version table and never any other
+table.
 
 Reading and writing are separate paths. A read opens the file read-only
 (``mode=ro``), takes no write lock, never changes the journal mode and never
@@ -61,7 +64,7 @@ from astrometricslib.models.quality.measurement import (
 logger = logging.getLogger(__name__)
 
 #: The schema version this code writes and expects.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _MEASUREMENT_COLUMNS = (
     "metric",
@@ -72,6 +75,7 @@ _MEASUREMENT_COLUMNS = (
     "observing_night_id",
     "capture_setting_id",
     "channel",
+    "variant",
     "status",
     "value",
     "uncertainty",
@@ -91,6 +95,24 @@ _MEASUREMENT_COLUMNS = (
     "job_id",
     "measured_at",
 )
+
+# The view is made again by the migration to version 2, because SQLite fixes
+# the columns a view named with ``*`` when the view is created.
+_CREATE_LATEST_VIEW_STATEMENT = """
+    CREATE VIEW IF NOT EXISTS quality_measurements_latest AS
+    SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY subject_level, subject_id, metric, channel
+            ORDER BY measured_at DESC, row_id DESC
+        ) AS recency_rank
+        FROM quality_measurements
+    )
+    WHERE recency_rank = 1
+"""
+
+# The folder name that marks a subset stack in a subject id written before
+# the ``variant`` column existed (``<target>/_subsets/<label>/<file>``).
+_LEGACY_SUBSET_MARKER = "/_subsets/"
 
 _CREATE_SCHEMA_STATEMENTS = (
     """
@@ -134,6 +156,7 @@ _CREATE_SCHEMA_STATEMENTS = (
         observing_night_id TEXT,
         capture_setting_id INTEGER REFERENCES quality_capture_setting (capture_setting_id),
         channel TEXT NOT NULL DEFAULT '',
+        variant TEXT,
         status TEXT NOT NULL,
         value REAL,
         uncertainty REAL,
@@ -167,17 +190,7 @@ _CREATE_SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS quality_measurements_subject
     ON quality_measurements (subject_id)
     """,
-    """
-    CREATE VIEW IF NOT EXISTS quality_measurements_latest AS
-    SELECT * FROM (
-        SELECT *, ROW_NUMBER() OVER (
-            PARTITION BY subject_level, subject_id, metric, channel
-            ORDER BY measured_at DESC, row_id DESC
-        ) AS recency_rank
-        FROM quality_measurements
-    )
-    WHERE recency_rank = 1
-    """,
+    _CREATE_LATEST_VIEW_STATEMENT,
 )
 
 _CAPTURE_SETTING_FIELDS = (
@@ -261,6 +274,7 @@ def _measurement_to_values(measurement: QualityMeasurement) -> tuple[Any, ...]:
         subject.observing_night_id,
         subject.capture_setting_id,
         subject.channel or "",
+        subject.variant,
         measurement.status.value,
         measurement.value,
         measurement.uncertainty,
@@ -344,6 +358,7 @@ def _decode_row(row: sqlite3.Row) -> QualityMeasurement:
             observing_night_id=row["observing_night_id"],
             capture_setting_id=row["capture_setting_id"],
             channel=row["channel"] or None,
+            variant=row["variant"] if "variant" in row.keys() else None,
         ),
         status=MeasurementStatus(row["status"]),
         value=row["value"],
@@ -576,12 +591,49 @@ class QualityStore:
         if version < 1:
             for statement in _CREATE_SCHEMA_STATEMENTS:
                 connection.execute(statement)
+        elif version < 2:
+            QualityStore._migrate_from_version_1(connection)
         has_version_table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
         ).fetchone()
         if has_version_table is None:
             connection.execute("CREATE TABLE quality_schema_version (version INTEGER NOT NULL)")
-            connection.execute("INSERT INTO quality_schema_version (version) VALUES (1)")
+        connection.execute("DELETE FROM quality_schema_version")
+        connection.execute("INSERT INTO quality_schema_version (version) VALUES (?)", (SCHEMA_VERSION,))
+
+    @staticmethod
+    def _migrate_from_version_1(connection: sqlite3.Connection) -> None:
+        """Add the ``variant`` column to a version-1 database.
+
+        Rows written before the column existed keep their subject ids. A row
+        whose subject id holds ``/_subsets/<label>/`` is a subset stack, and
+        gets that label as its variant, so a reader can filter on the column
+        for old rows too.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            A connection with a write transaction begun.
+        """
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(quality_measurements)")}
+        if "variant" not in columns:
+            connection.execute("ALTER TABLE quality_measurements ADD COLUMN variant TEXT")
+        subject_ids = [
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT subject_id FROM quality_measurements WHERE variant IS NULL "
+                "AND instr(subject_id, ?) > 0",
+                (_LEGACY_SUBSET_MARKER,),
+            )
+        ]
+        for subject_id in subject_ids:
+            label = subject_id.split(_LEGACY_SUBSET_MARKER, 1)[1].split("/", 1)[0]
+            if label:
+                connection.execute(
+                    "UPDATE quality_measurements SET variant = ? WHERE subject_id = ?", (label, subject_id)
+                )
+        connection.execute("DROP VIEW IF EXISTS quality_measurements_latest")
+        connection.execute(_CREATE_LATEST_VIEW_STATEMENT)
 
     def get_or_create_capture_setting(self, setting: CaptureSetting) -> int:
         """Return the id of a capture setting, adding it if it is new.
@@ -669,6 +721,8 @@ class QualityStore:
         since: datetime | None = None,
         row_ids: Sequence[int] | None = None,
         latest_only: bool = True,
+        variant: str | None = None,
+        library_only: bool = False,
     ) -> list[QualityMeasurement]:
         """Read stored measurements.
 
@@ -695,6 +749,12 @@ class QualityStore:
         latest_only : `bool`, optional
             Read the newest row for each subject, metric and channel
             (the latest view) instead of every row. Defaults to `True`.
+        variant : `str`, optional
+            Only the rows of the subset stack with this label.
+        library_only : `bool`, optional
+            Only rows that are not about a subset stack (their variant is
+            empty). The default, `False`, gives library and subset rows
+            alike, so a caller that wants one kind asks for it by field.
 
         Returns
         -------
@@ -702,11 +762,21 @@ class QualityStore:
             Matching measurements, oldest first, with `row_id` filled. Empty
             if the file or the quality tables do not exist yet.
 
+        Raises
+        ------
+        InvalidArgumentError
+            If both ``variant`` and ``library_only`` are given.
+
         Notes
         -----
         A `StorageError` is raised if the file is unreadable, is newer than
-        this code, or a stored row fails the model's checks.
+        this code, or a stored row fails the model's checks. A
+        version-1 file has no variant column: it holds no subset rows the
+        store can name, so ``library_only`` reads everything and ``variant``
+        reads nothing.
         """
+        if variant is not None and library_only:
+            raise InvalidArgumentError("Ask for a subset label or for library rows only, not both.")
         source = "quality_measurements_latest" if latest_only and row_ids is None else "quality_measurements"
         conditions: list[str] = []
         parameters: list[Any] = []
@@ -728,16 +798,24 @@ class QualityStore:
             conditions.append(f"m.row_id IN ({', '.join('?' * len(row_ids))})")
             parameters.extend(row_ids)
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        # `source` and the conditions are fixed strings chosen above; every
-        # caller value travels as a bound parameter.
-        sql = (
-            f"SELECT m.* FROM {source} AS m "  # ruff: ignore[hardcoded-sql-expression]
-            "LEFT JOIN quality_capture_setting AS cs "
-            "ON cs.capture_setting_id = m.capture_setting_id "
-            f"{where} ORDER BY m.measured_at, m.row_id"
-        )
         with self._read_connection() as connection:
             if connection is None:
                 return []
+            has_variant_column = self._read_schema_version(connection) >= 2
+            if (variant is not None or library_only) and has_variant_column:
+                variant_condition = "m.variant = ?" if variant is not None else "m.variant IS NULL"
+                where = f"{where} AND {variant_condition}" if where else f"WHERE {variant_condition}"
+                if variant is not None:
+                    parameters.append(variant)
+            elif variant is not None:
+                return []
+            # `source` and the conditions are fixed strings chosen above; every
+            # caller value travels as a bound parameter.
+            sql = (
+                f"SELECT m.* FROM {source} AS m "  # ruff: ignore[hardcoded-sql-expression]
+                "LEFT JOIN quality_capture_setting AS cs "
+                "ON cs.capture_setting_id = m.capture_setting_id "
+                f"{where} ORDER BY m.measured_at, m.row_id"
+            )
             rows = connection.execute(sql, parameters).fetchall()
         return [_row_to_measurement(row) for row in rows]

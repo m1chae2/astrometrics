@@ -39,6 +39,7 @@ from astrometricslib.models.quality.metric_spec import MetricSpec
 from astrometricslib.models.quality.quality_summary import ExposureGroupSummary, StackQualitySummary
 from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
     build_measurement,
     gate_measurement,
@@ -48,6 +49,7 @@ from astrometricslib.pipelines.stacking.metrics import (
     GATE_METRIC_BY_NAME,
     STACKING_DURATION_S,
     STACKING_EFFECTIVE_FRAME_COUNT,
+    STACKING_EFFECTIVE_TIME_READ_NOISE_S,
     STACKING_EFFECTIVE_TIME_S,
     STACKING_EMPTY_APERTURE_NOISE_ADU,
     STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
@@ -84,6 +86,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
     determine_stack_members,
     effective_exposure_seconds,
     effective_frame_count,
+    effective_read_noise_time_seconds,
     normalized_weights,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
@@ -91,13 +94,16 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     NO_WCS_REASON,
     StackNoiseOutcome,
     measure_stack_noise,
+    save_noise_sums,
 )
 from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "GATE_LIMIT_SOURCES",
     "exposure_group_subject",
+    "gate_for_measurement",
     "measure_noise_safely",
     "membership_count_measurements",
     "noise_measurements",
@@ -107,27 +113,51 @@ __all__ = [
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_METRICS}
 
-# How each gate's limit was obtained. Gates whose limits the validation
-# register marks as measured use the validated tier (the register entry goes
-# with it); the rest are rules the design chose or follow from how the data
-# are used.
-_TIER_BY_GATE: dict[str, tuple[LimitTier, str | None]] = {
-    "gain_homogeneity": (LimitTier.PHYSICAL_BUDGET, None),
-    "frame_quarantine": (LimitTier.PHYSICAL_BUDGET, None),
-    "background_homogeneity": (LimitTier.PHYSICAL_BUDGET, None),
-    "flat_level": (LimitTier.PHYSICAL_BUDGET, None),
-    "flat_noise": (LimitTier.PHYSICAL_BUDGET, None),
+# How each gate's limit was obtained (decision 26); `GATE_LIMIT_SOURCES`
+# below joins it with the metric that stores each gate. A limit that the
+# validation register marks as measured is a validated-dataset limit, and its
+# register entry goes with it. A limit derived from physics is a physical
+# budget. A limit that is a designed value nobody has measured yet, even when
+# a register entry holds the evidence so far, is a design estimate; the entry
+# is cited where one exists. A rule that follows from how the data are used
+# (a mismatch count, a dropped group) is geometry. The saturation level that
+# the saturated-pixel check counts comes from the camera profile, but the
+# share of saturated pixels that flags a stack does not, so that gate is a
+# design estimate too.
+_GATE_TIERS: dict[str, tuple[LimitTier, str | None]] = {
+    # No limit at all: setting a minority gain aside corrects the stack.
+    "gain_homogeneity": (LimitTier.GEOMETRY, None),
+    # STK-03: the 25% cap is a sanity check (13% is the largest normal share).
+    "frame_quarantine": (LimitTier.DESIGN_ESTIMATE, "STK-03"),
+    # STK-04: the gap ratio of 4 rests on unit tests with made-up sky levels.
+    "background_homogeneity": (LimitTier.DESIGN_ESTIMATE, "STK-04"),
+    # The 10% and 90% of full scale are common practice, "design estimates"
+    # in the code, with no validation on this observatory's data.
+    "flat_level": (LimitTier.DESIGN_ESTIMATE, None),
+    # STK-05: 0.5% adds under 3% to the stack's noise variance (arithmetic on
+    # measured noise levels), so it is a budget derived from physics.
+    "flat_noise": (LimitTier.PHYSICAL_BUDGET, "STK-05"),
     "calibration_metadata": (LimitTier.GEOMETRY, None),
     "calibration_frame_count": (LimitTier.GEOMETRY, None),
-    "exposure_group_linearity": (LimitTier.PHYSICAL_BUDGET, None),
+    # STK-20: the 5% value is a design choice inside a measured range.
+    "exposure_group_linearity": (LimitTier.DESIGN_ESTIMATE, "STK-20"),
     "exposure_groups_combined": (LimitTier.GEOMETRY, None),
-    "raw_frame_clipping": (LimitTier.PHYSICAL_BUDGET, None),
-    "rejected_pixel_fraction": (LimitTier.PHYSICAL_BUDGET, None),
-    "stack_sharpness": (LimitTier.PHYSICAL_BUDGET, None),
+    # STK-22: the 20% zero share was placed between two groups of one session.
+    "raw_frame_clipping": (LimitTier.DESIGN_ESTIMATE, "STK-22"),
+    # STK-24: the normal range is measured, the detection side is not.
+    "rejected_pixel_fraction": (LimitTier.DESIGN_ESTIMATE, "STK-24"),
+    # STK-25: the false-positive side is measured, the detection side is not.
+    "stack_sharpness": (LimitTier.DESIGN_ESTIMATE, "STK-25"),
     "spectral_registration": (LimitTier.GEOMETRY, None),
-    "saturated_pixel_fraction": (LimitTier.PHYSICAL_BUDGET, None),
+    # The 0.1% share is "a guess so far" in the code.
+    "saturated_pixel_fraction": (LimitTier.DESIGN_ESTIMATE, None),
     "zero_pixel_fraction": (LimitTier.VALIDATED_DATASET, "STK-26"),
     "negative_pixels": (LimitTier.VALIDATED_DATASET, "STK-26"),
+}
+
+GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
+    gate_name: GateLimitSource(GATE_METRIC_BY_NAME[gate_name], tier, register_entry)
+    for gate_name, (tier, register_entry) in _GATE_TIERS.items()
 }
 
 # Summary fields on `StackingPipelineQualityMetrics`: the metric each fills and
@@ -279,7 +309,7 @@ def _value_measurement(
     )
 
 
-def _gate_for_measurement(gate: GateResult) -> GateResult:
+def gate_for_measurement(gate: GateResult) -> GateResult:
     """Put a gate's number in the unit its metric declares.
 
     The negative-pixel check quotes whole percent; its metric is a fraction,
@@ -336,7 +366,7 @@ def noise_measurements(
                 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
             )
         ]
-    return [
+    rows = [
         build_measurement(
             _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_ADU],
             result.noise_adu,
@@ -362,6 +392,18 @@ def noise_measurements(
             sample_count=result.aperture_count,
         ),
     ]
+    # A measured row keeps a note about how it was made: where the stack's
+    # sky positions were moved to, and how well the stars agreed afterwards.
+    notes = [result.position_note]
+    if result.saturated_reference_stars:
+        notes.append(
+            f"{result.saturated_reference_stars} stored reference star(s) were left out because they "
+            f"reach the camera's saturation level ({result.saturation_source})."
+        )
+    note = " ".join(part for part in notes if part)
+    if not note:
+        return rows
+    return [row.model_copy(update={"reason": note}) for row in rows]
 
 
 def membership_count_measurements(
@@ -387,18 +429,20 @@ def membership_count_measurements(
     Returns
     -------
     measurements : `list` of `QualityMeasurement`
-        The effective frame count, then the effective time. A stack with no
-        members, or with weights that are unknown, gets not-measured records
+        The effective frame count, the effective time, then the effective
+        time for read noise. A stack with no members, or with weights that
+        are unknown, gets not-measured records
         with the reason. A member list that may include frames Siril's
         filters dropped makes the records ``assumed``.
     """
     effective_count_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT]
     effective_time_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_TIME_S]
+    read_noise_time_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_TIME_READ_NOISE_S]
     if membership is None or not membership.members:
         reason = unavailable_reason or "the stack has no member frames"
         return [
-            build_measurement(effective_count_spec, None, context, stack_subject, reason=reason),
-            build_measurement(effective_time_spec, None, context, stack_subject, reason=reason),
+            build_measurement(spec, None, context, stack_subject, reason=reason)
+            for spec in (effective_count_spec, effective_time_spec, read_noise_time_spec)
         ]
     weights = normalized_weights(membership)
     exposures = [
@@ -406,6 +450,7 @@ def membership_count_measurements(
     ]
     count = effective_frame_count(weights)
     seconds = effective_exposure_seconds(weights, exposures)
+    read_noise_seconds = effective_read_noise_time_seconds(weights, exposures)
     unknown_reason = membership.weights_reason or "the frames' weights are unknown"
     status = MeasurementStatus.ASSUMED if membership.membership_reason else MeasurementStatus.MEASURED
     return [
@@ -418,7 +463,11 @@ def membership_count_measurements(
             sample_count=len(membership.members),
             status=status,
         )
-        for spec, value in ((effective_count_spec, count), (effective_time_spec, seconds))
+        for spec, value in (
+            (effective_count_spec, count),
+            (effective_time_spec, seconds),
+            (read_noise_time_spec, read_noise_seconds),
+        )
     ]
 
 
@@ -552,15 +601,15 @@ def stacking_measurements(
         if metric_name is None:
             logger.warning("The stacking gate %r has no declared metric, so it was not stored.", gate.name)
             continue
-        tier, register_entry = _TIER_BY_GATE[gate.name]
+        limit_source = GATE_LIMIT_SOURCES[gate.name]
         measurements.append(
             gate_measurement(
-                _gate_for_measurement(gate),
+                gate_for_measurement(gate),
                 _SPEC_BY_NAME[metric_name],
                 context,
                 stack_subject,
-                limit_tier=tier,
-                register_entry=register_entry,
+                limit_tier=limit_source.tier,
+                register_entry=limit_source.register_entry,
             )
         )
 
@@ -673,6 +722,10 @@ def record_stacking_quality(
         except Exception as error:  # a by-product again
             logger.exception("The member frames of the stack %s could not be worked out", stack_path)
             membership_reason = f"the member frames could not be worked out: {type(error).__name__}"
+        if noise.result is not None:
+            # The library stack's sums, kept for the leave-one-night-out
+            # comparison (see `paired_noise_difference`).
+            save_noise_sums(stack_path, noise.result)
         measurements = stacking_measurements(
             summary, context, os.path.basename(stack_path), noise, membership, membership_reason
         )

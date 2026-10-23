@@ -126,6 +126,64 @@ def stack_frames(
         stack that was skipped as unchanged, the location of the stack that
         is already there.
 
+    Notes
+    -----
+    A `ConflictError` is raised when the target has no frames to stack, mixes
+    spectral and standard imaging frames, has frames from more than one
+    camera, or has a subset-stack job running (see `target_stack_guard.py`).
+    A `ProcessingError` is raised when no usable frames are left after
+    filtering out mismatched or bad frames.
+    """
+    from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard
+
+    with library_stack_guard(target.id):
+        return _stack_frames_guarded(
+            target,
+            log_file,
+            frames_to_stack,
+            filter_type,
+            rejection_sigma,
+            filter_wfwhm,
+            filter_round,
+            stack_weight,
+            generate_rejmap,
+            output_file,
+            job_id,
+            force,
+            preview_settings,
+            drivers,
+            measured_at,
+            quality_recording,
+        )
+
+
+def _stack_frames_guarded(
+    target: Target,
+    log_file: str | None = None,
+    frames_to_stack: list[Any] | None = None,
+    filter_type: Any | None = None,
+    rejection_sigma: tuple[float, float] | None = None,
+    filter_wfwhm: str | None = None,
+    filter_round: str | None = None,
+    stack_weight: str | None = None,
+    generate_rejmap: bool | None = None,
+    output_file: str | None = None,
+    job_id: str | None = None,
+    force: bool = False,
+    preview_settings: Any | None = None,
+    drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
+) -> str | None:
+    """Do the work of `stack_frames` while the target's guard is held.
+
+    Takes the same parameters as `stack_frames`.
+
+    Returns
+    -------
+    stacked_path : `str` or `None`
+        What `stack_frames` returns.
+
     Raises
     ------
     ConflictError
@@ -413,12 +471,10 @@ def stack_frames(
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
 
     engine = (drivers or Drivers()).stacking_or_default()
-    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
+    from astrometricslib.pipelines.stacking.stack_settings import choose_weight_for_frames
 
-    stack_weight = choose_stack_weight(
-        [float(frame.exposure) for frame in target_frames if frame.exposure],
-        stack_weight if stack_weight is not None else get_configuration().get_stack_weight(),
-        is_spectral=has_spectral,
+    stack_weight = choose_weight_for_frames(
+        target_frames, stack_weight, get_configuration(), is_spectral=has_spectral
     )
 
     # Skip a stack that would come out the same: the same frames, the same
@@ -496,13 +552,9 @@ def stack_frames(
     # are covered by fewer frames and are noisier. Trim them off. The check
     # leaves a stack with clean edges as it is. It runs before the stack is
     # measured and pictured, so both describe the trimmed stack.
-    crop_offset = (0, 0)
-    if stacked_path and not has_spectral and get_configuration().get_trim_noisy_stack_edges_enabled():
-        from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
+    from astrometricslib.pipelines.stacking.stack_settings import trim_noisy_stack_edges
 
-        crop_box = crop_stack_edges(stacked_path)
-        if crop_box is not None:
-            crop_offset = (crop_box.x0, crop_box.y0)
+    crop_offset = trim_noisy_stack_edges(stacked_path, get_configuration(), is_spectral=has_spectral)
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])
@@ -1195,6 +1247,10 @@ def _update_frame_registration_results(
             )
             run_offers_real_shift = bool(registration_facts["dx"] or registration_facts["dy"])
             if has_existing_facts and not (stored_shift_is_degenerate and run_offers_real_shift):
+                # A frame stacked before these fields existed keeps its
+                # first-run facts. Its empty fields are filled, so a restack
+                # records them.
+                _fill_empty_registration_fields(frame.measurements, registration_facts)
                 continue
             # `registration_fwhm_y_px` and `registration_rmse` are no longer
             # filled: their old values were the weighted FWHM and the sky
@@ -1209,6 +1265,39 @@ def _update_frame_registration_results(
             frame.measurements.registration_star_count = registration_facts["star_count"]
             frame.measurements.registration_dx_px = registration_facts["dx"]
             frame.measurements.registration_dy_px = registration_facts["dy"]
+
+
+# The registration fields that later versions added to a frame's record, and
+# the key of Siril's per-frame facts that fills each. The first-run fields
+# (`registration_fwhm_x_px`, `registration_dx_px` and `registration_dy_px`) are
+# not in this list because a restack never overwrites them.
+_LATER_REGISTRATION_FIELDS: dict[str, str] = {
+    "registration_weighted_fwhm_px": "weighted_fwhm_px",
+    "registration_roundness": "roundness",
+    "registration_quality": "quality",
+    "registration_background_level": "background_level",
+    "registration_rotation_deg": "rotation_deg",
+    "registration_star_count": "star_count",
+}
+
+
+def _fill_empty_registration_fields(measurements: Any, registration_facts: dict[str, Any]) -> None:
+    """Fill a frame's empty later registration fields, and no others.
+
+    Frames stacked before the later fields existed keep their first-run
+    shift and width. A restack gives them the new fields, because it is the
+    only time Siril measures them again.
+
+    Parameters
+    ----------
+    measurements : `FrameMeasurements`
+        The frame's measurements. Only fields that are `None` change.
+    registration_facts : `dict`
+        Siril's facts for the frame in this run, as `parse_seq_file` returns.
+    """
+    for field_name, fact_key in _LATER_REGISTRATION_FIELDS.items():
+        if getattr(measurements, field_name) is None and registration_facts.get(fact_key) is not None:
+            setattr(measurements, field_name, registration_facts[fact_key])
 
 
 def _measure_one_frame_fwhm(path: str) -> float | None:

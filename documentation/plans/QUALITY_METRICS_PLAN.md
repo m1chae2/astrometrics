@@ -29,8 +29,8 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 Status on 2026-10-23: design, target dataset report and order of work agreed after two board
 reviews. Phase 0 is merged (#100, Appendix C). Phase 1 is built and board-reviewed on branch
 `94-phase1-foundations` (Appendix D, PR #103). Phase 2 is built and board-reviewed on branch
-`94-phase2a-sensor-noise` (Appendix E). Phase 3 is built on branch `94-phase3-pipeline-metrics`; the
-board review is next. Tracked in issue #93.
+`94-phase2a-sensor-noise` (Appendix E, PR #107). Phase 3 is built and board-reviewed on branch
+`94-phase3-pipeline-metrics` (Appendix F). The science metrics are next. Tracked in issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
@@ -194,6 +194,11 @@ decisions 16 to 21 with the second.
     tested alignment; it is dropped, because the quarantine's cloud check and the
     background-homogeneity check already watch the sky. A real alignment check comes with the
     field-rotation metric (`QUALITY_SCIENCE_PLAN.md`).
+26. **A limit tier for design estimates.** Agreed with the user on 2026-10-23, in phase 3:
+    `LimitTier` gains `design_estimate`, for a limit that was set by design and not yet
+    measured, matching the validation register's "Design estimate" status. Such limits were filed as
+    `physical_budget`, which overstated them; `physical_budget` now means a limit derived from
+    physics only.
 
 ## 3. The shared shape
 
@@ -896,11 +901,17 @@ takes more frames and stacks them, the report checks the forecast against the ne
 - **Three numbers.** The check reports the forecast made when the session was planned, the
   forecast given the frames actually taken (so worse new frames from Moon or cloud lower it
   fairly), and the measured result. Each has a tolerance from the uncertainty of the aperture
-  noise, about $1/\sqrt{2(n-1)}$ for $n$ apertures.
+  noise. The noise is $1.4826$ times the median absolute deviation of the $n$ aperture sums, so its
+  error is about $1.17/\sqrt{n}$ of itself (not the $1/\sqrt{2(n-1)}$ of a standard deviation),
+  about 12% for 100 apertures. A comparison of two stacks measured in the same apertures uses the
+  paired error, which resamples the apertures together and is smaller.
 - **Outcome.** The gain arrived as forecast, fell short for a known reason (the new frames' lower
   efficiency), or fell short for no known reason.
-- **Noise floor.** A floor is inferred only from a fit of $\sigma^2 = a/t_\mathrm{eff} + b$ over two
-  or more steps, never from one shortfall. A fitted floor raises the "more frames will not help"
+- **Noise floor.** A floor is inferred only from a fit of $\sigma^2 = a/t_\mathrm{eff} + c\,\mathrm{RN}^2/\tau^2 + b$ over two
+  or more steps, never from one shortfall. Here $t_\mathrm{eff}$ is `stacking.effective_time_s`
+  (photon noise) and $\tau$ is `stacking.effective_time_read_noise_s` (read noise, which weights frames
+  by $1/t^2$ instead of $1/t$), with the read noise RN from phase 2a. With frames of one length the two
+  terms are the same shape and the fit needs only $t_\mathrm{eff}$. A fitted floor raises the "more frames will not help"
   warning.
 - The recommendation is then recomputed from the new stack.
 
@@ -1464,3 +1475,48 @@ Real data after the fixes:
 No findings were rejected. One minor engineer finding (a header gain fallback could pick up a wrong
 maker value) was checked against sampled ASI 533 and Nikon frames: none carry `EGAIN` or
 `RDNOISE`, so it cannot happen with today's data, and it stays a note.
+
+## Appendix F. Review board changes (phase 3)
+
+The board reviewed phase 3 (ddbe05cf to 57a4c0de) on 2026-10-23. All three reviewers approved with
+changes. Every critical and major claim was checked against the code. Several findings came from
+real data before the review: a real stack of M 57 (night 2026-10-03, 61 frames) on copies of the
+configuration and database, with quarantine off and the light frames untouched. The user's
+decisions are 25 and 26.
+
+| Finding | Raised by | Where it landed |
+| :--- | :--- | :--- |
+| Siril's sequence columns were mislabeled since before #94: field 2 is the weighted FWHM, field 5 the background level (not an RMSE) | Systems engineer, from Siril's `seqfile.c` | Parser and `FrameMeasurements` fields; old fields left for #97 |
+| The spectral registration check tested the background level | Systems engineer | Dropped (decision 25) |
+| Stack noise was never measured on real data: the reference-frame check dropped the brightest stars, and Ekos writes the commanded pointing as CRVAL | Systems engineer, on real data | Saturation cut fixed; WCS shifted onto reference stars, always checked; rotation over 0.1° refused |
+| Siril's `wfwhm` weights were not recorded | Systems engineer, on real data | Rebuilt with Siril's formula (`median_and_mean.c`) |
+| A measured row carried a not-measured reason | Systems engineer, on real data | `build_measurement` |
+| The noise error used the standard-deviation formula on a MAD spread (about 1.65 times too small) | Astronomer | 1.1664σ/√n; STK-36 and section 6.5 |
+| The flux scale used the scatter between stars, depended on seeing, and judged saturation by the stack itself | Astronomer | Large aperture, ratios to first-stack values, camera-profile saturation |
+| T_eff holds only when sky noise dominates | Astronomer | `stacking.effective_time_read_noise_s` |
+| Leave-one-night-out errors were treated as independent; its text interpreted the result | Astronomer | `stacking.noise_difference_without_night` with a paired error; `stacking.subset_expected_noise_ratio`; wording removed |
+| The history fill wrote old values under today's definition version | Astronomer | Unknown version 0 unless the estimator history is checked |
+| The history fill could store a run twice; its run id lacked the summary kind | Engineer | Skips summaries with live rows (by time and job id); kind in the run id; no frame-time fallback |
+| A NaN or other error while building rows could fail a science run | Engineer | Non-finite values become not measured; every record step is guarded |
+| `stack_subset` could write over protected stacks; two subset jobs could share a work folder | Engineer | Output confined to `_subsets/`; per-target lock that refuses; label in the work folder |
+| Subset rows looked like library rows | Architect | `QualitySubject.variant`, store schema 2, `query(variant, library_only)` |
+| The subset stack copied the stage's settings | Architect | `pipelines/stacking/stack_settings.py` shared by both |
+| The history fill copied the gate adjustments | Architect | Each pipeline publishes `GATE_LIMIT_SOURCES` and `gate_for_measurement` |
+| Metric names followed no unit rule | Architect | About 55 renames; a test that each name ends with its unit |
+| Limits that are design estimates were filed as physical budget | Astronomer | `design_estimate` tier (decision 26); every gate re-tiered with its register entry |
+| Two test files of one name in two non-package folders | Systems engineer, full suite | Stacking's renamed |
+| A test wrote a stray folder outside its temporary path; a concurrency test failed under load | Systems engineer | Fixed |
+
+Real data after the fixes:
+
+- **Stack noise, M 57:** the normalized noise of the library stack is 2.65e-4 (± 3.1e-5) on the new flux scale.
+- **Subsets of 15, 30 and 45 frames:** their noise is within 0.26σ, 0.87σ and 0.22σ of the prediction.
+- **History fill:** it is re-run on a database copy under the new rules before its counts are quoted.
+
+Deferred:
+
+- the 12 Gaia XP band names, which carry the band edges in the name (kept: the bands are fixed today);
+- thinning the 49 spectroscopy checkpoint medians (kept as context metrics);
+- making `stack_subset` private (kept public for phase 4's add-a-night check).
+
+No findings were rejected.

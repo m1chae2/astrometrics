@@ -80,9 +80,11 @@ def test_query_returns_measurements_as_json(library_folder: Path, monkeypatch: p
 
     monkeypatch.setattr(container.astrometrics.quality, "query", fake_query)
 
-    result = serialize_rpc_result(asyncio.run(rpc_registry.execute("quality:query", {"target_id": "M31"})))
+    result = serialize_rpc_result(
+        asyncio.run(rpc_registry.execute("quality:query", {"target_id": "M31", "library_only": True}))
+    )
 
-    assert asked == {"target_id": "M31"}
+    assert asked == {"target_id": "M31", "library_only": True}
     assert len(result) == 1
     assert result[0]["value"] == pytest.approx(2.5)
     assert result[0]["measuredAt"].startswith("2026-10-01T03:00")

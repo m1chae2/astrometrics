@@ -297,7 +297,7 @@ def test_foreign_user_version_is_ignored_and_kept(tmp_path: Path) -> None:
 
 
 def test_first_release_database_gets_version_table(tmp_path: Path) -> None:
-    """Quality tables with no version table read as version 1, then upgrade."""
+    """Tables with no version table read as version 1, then upgrade."""
     path = tmp_path / "astrometrics.db"
     QualityStore(str(path)).write_measurements([make_measurement()])
     with sqlite3.connect(path) as connection:
@@ -307,7 +307,9 @@ def test_first_release_database_gets_version_table(tmp_path: Path) -> None:
     assert len(store.query()) == 1
     store.write_measurements([make_measurement(run_id="second")])
     with sqlite3.connect(path) as connection:
-        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [(1,)]
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [
+            (SCHEMA_VERSION,)
+        ]
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
         count = connection.execute("SELECT COUNT(*) FROM quality_measurements").fetchone()[0]
     assert count == 2
@@ -447,3 +449,113 @@ def test_undecodable_row_raises_storage_error_naming_the_row(store: QualityStore
     with pytest.raises(StorageError) as caught:
         store.query()
     assert caught.value.details["row_id"] == 1
+
+
+# The version-1 schema, copied from the store as it was before the ``variant``
+# column: the table, and the view that was made with ``SELECT *``.
+_VERSION_1_TABLE_SQL = """
+    CREATE TABLE quality_measurements (
+        row_id INTEGER PRIMARY KEY,
+        metric TEXT NOT NULL,
+        definition_version INTEGER NOT NULL,
+        subject_level TEXT NOT NULL,
+        subject_id TEXT NOT NULL,
+        target_id TEXT,
+        observing_night_id TEXT,
+        capture_setting_id INTEGER,
+        channel TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        value REAL,
+        uncertainty REAL,
+        sample_count INTEGER,
+        reason TEXT NOT NULL DEFAULT '',
+        check_outcome TEXT,
+        check_limit_value REAL,
+        check_limit_unit TEXT,
+        check_limit_tier TEXT,
+        check_limit_derivation TEXT,
+        check_limit_sample_count INTEGER,
+        check_limit_register_entry TEXT,
+        action_taken TEXT,
+        origin TEXT NOT NULL,
+        pipeline_version TEXT,
+        run_id TEXT NOT NULL,
+        job_id TEXT,
+        measured_at TEXT NOT NULL,
+        UNIQUE (run_id, metric, subject_level, subject_id, channel)
+    )
+"""
+_VERSION_1_VIEW_SQL = """
+    CREATE VIEW quality_measurements_latest AS
+    SELECT * FROM (
+        SELECT *, ROW_NUMBER() OVER (
+            PARTITION BY subject_level, subject_id, metric, channel
+            ORDER BY measured_at DESC, row_id DESC
+        ) AS recency_rank
+        FROM quality_measurements
+    )
+    WHERE recency_rank = 1
+"""
+
+
+def _make_version_1_database(path: Path) -> None:
+    """Write a version-1 database with one library row and one subset row.
+
+    Parameters
+    ----------
+    path : `pathlib.Path`
+        Where to write the database.
+    """
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE quality_capture_setting (capture_setting_id INTEGER PRIMARY KEY, camera TEXT)"
+        )
+        connection.execute(_VERSION_1_TABLE_SQL)
+        connection.execute(_VERSION_1_VIEW_SQL)
+        connection.execute("CREATE TABLE quality_schema_version (version INTEGER NOT NULL)")
+        connection.execute("INSERT INTO quality_schema_version (version) VALUES (1)")
+        for subject_id in ("M 57/M_57_L_Stacked.fits", "M 57/_subsets/M_57.nights-1/M_57.nights-1.fits"):
+            connection.execute(
+                "INSERT INTO quality_measurements (metric, definition_version, subject_level, subject_id, "
+                "target_id, status, value, origin, run_id, measured_at) VALUES "
+                "('stacking.frames_stacked', 1, 'stack', ?, 'M 57', 'measured', 5.0, 'measured', 'run-0', "
+                "'2026-10-01T00:00:00.000000+00:00')",
+                (subject_id,),
+            )
+
+
+def test_a_version_1_database_gains_the_variant_column_and_fills_it_for_subset_rows(tmp_path: Path) -> None:
+    """A first write to a version-1 file adds the column and labels."""
+    path = tmp_path / "astrometrics.db"
+    _make_version_1_database(path)
+    store = QualityStore(str(path))
+    # A read never migrates: the old rows read as library rows.
+    assert {row.subject.variant for row in store.query()} == {None}
+    store.write_measurements([make_measurement(run_id="run-1")])
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [
+            (SCHEMA_VERSION,)
+        ]
+    labels = {row.subject.subject_id: row.subject.variant for row in store.query()}
+    assert labels["M 57/M_57_L_Stacked.fits"] is None
+    assert labels["M 57/_subsets/M_57.nights-1/M_57.nights-1.fits"] == "M_57.nights-1"
+    # The "latest" view was made again, so it carries the new column too.
+    assert [row.subject.variant for row in store.query(variant="M_57.nights-1")] == ["M_57.nights-1"]
+
+
+def test_the_variant_filters_pick_subset_rows_or_library_rows(store: QualityStore) -> None:
+    """A subset row carries its label; the filters select by that field."""
+    library = QualitySubject(level=SubjectLevel.STACK, subject_id="M31/stack.fits", target_id="M31")
+    subset = QualitySubject(
+        level=SubjectLevel.STACK,
+        subject_id="M31/_subsets/half/half.fits",
+        target_id="M31",
+        variant="half",
+    )
+    store.write_measurements([make_measurement(subject=library), make_measurement(subject=subset)])
+    assert len(store.query()) == 2
+    assert [row.subject.variant for row in store.query(library_only=True)] == [None]
+    assert [row.subject.variant for row in store.query(variant="half")] == ["half"]
+    assert store.query(variant="other") == []
+    with pytest.raises(InvalidArgumentError):
+        store.query(variant="half", library_only=True)

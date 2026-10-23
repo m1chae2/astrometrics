@@ -369,7 +369,8 @@ def test_the_residual_gate_stores_the_fraction_of_a_star_width_and_its_limit() -
     assert residual.value == pytest.approx(5.7 / (1.9 * 3.0))
     assert residual.check_limit is not None
     assert residual.check_limit.value == pytest.approx(rg.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM)
-    assert residual.check_limit.tier is LimitTier.PHYSICAL_BUDGET
+    assert residual.check_limit.tier is LimitTier.DESIGN_ESTIMATE
+    assert residual.check_limit.register_entry == "AST-04"
 
 
 def test_the_lookup_gate_always_stores_the_failed_share() -> None:
@@ -446,3 +447,39 @@ def test_validate_output_records_the_run_and_a_storage_failure_does_not_fail_it(
     )
     broken = validate_with_options(monkeypatch, {"job_id": "job-4", "measured_at": MEASURED_AT}, object())
     assert broken.gates
+
+
+# Summary fields that are not measurements, with the reason each is left out.
+_NOT_MEASUREMENT_FIELDS = {
+    "solve_attempted": "a yes/no verdict; the plate-solve gate and the attempt count hold the facts",
+    "plate_solve_succeeded": "a yes/no verdict; the plate-solve gate holds it as a 0 or 1",
+    "astrometry_flags": "a list of flag sentences; the gates carry them",
+    "remote_catalog_circuit_breaker_tripped": "a yes/no verdict; the catalog-lookup gate holds it",
+}
+
+
+def test_every_summary_field_is_a_measurement_or_listed_as_not_one() -> None:
+    """A new summary field needs a metric or a reason."""
+    from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
+
+    fields = set(AstrometryPipelineQualityMetrics.model_fields)
+    mapped = set(rg._VALUE_METRIC_BY_FIELD)
+    assert fields == mapped | set(_NOT_MEASUREMENT_FIELDS)
+    assert not mapped & set(_NOT_MEASUREMENT_FIELDS)
+    declared = {spec.name for spec in ASTROMETRY_METRICS}
+    assert set(rg._VALUE_METRIC_BY_FIELD.values()) <= declared
+
+
+def test_the_gate_limit_table_covers_every_gate_and_uses_registered_metrics() -> None:
+    """Each gate has a registered metric; no limit is validated."""
+    declared = {spec.name for spec in ASTROMETRY_METRICS}
+    assert {source.metric_name for source in rg.GATE_LIMIT_SOURCES.values()} <= declared
+    assert set(rg.GATE_LIMIT_SOURCES) == {
+        rg.PLATE_SOLVE_GATE_NAME,
+        rg.SOURCE_DETECTION_GATE_NAME,
+        rg.MATCHED_STARS_GATE_NAME,
+        rg.RESIDUAL_GATE_NAME,
+        rg.CATALOG_LOOKUP_GATE_NAME,
+    }
+    assert all(source.tier is not LimitTier.VALIDATED_DATASET for source in rg.GATE_LIMIT_SOURCES.values())
+    assert rg.GATE_LIMIT_SOURCES[rg.CATALOG_LOOKUP_GATE_NAME].tier is LimitTier.DESIGN_ESTIMATE

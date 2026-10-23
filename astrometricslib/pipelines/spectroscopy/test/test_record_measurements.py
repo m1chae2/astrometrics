@@ -144,9 +144,9 @@ def test_every_numeric_summary_field_is_declared() -> None:
     assert verdict_fields | per_star_or_rollup <= set(SpectroscopyPipelineQualityMetrics.model_fields)
     declared = _declared_names()
     for name in (
-        "zero_order_saturated_fraction_max",
-        "dispersion_angle_first_star",
-        "trail_width_median",
+        "zero_order_saturated_max_fraction",
+        "dispersion_angle_first_star_deg",
+        "trail_width_median_px",
         "catalog_matched_star_count",
         "position_only_star_count",
         "unresolved_star_count",
@@ -190,7 +190,7 @@ def test_a_run_with_nothing_measured_stores_not_measured_with_a_reason() -> None
         SPECTROSCOPY_WAVELENGTH_SCALE_RMS_AFTER,
         stage_metric_name("processing", "classification_rms"),
         gaia_xp_band_metric_name(0, "median_ratio"),
-        "spectroscopy.zero_order_saturated_fraction_max",
+        "spectroscopy.zero_order_saturated_max_fraction",
     ):
         assert by_metric[name].status is MeasurementStatus.NOT_MEASURED
         assert by_metric[name].value is None
@@ -209,7 +209,7 @@ def test_the_batch_path_does_not_store_default_identification_counts() -> None:
     assert by_metric[SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT].status is MeasurementStatus.NOT_MEASURED
     assert "does not count" in by_metric[SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT].reason
     assert by_metric["spectroscopy.unresolved_star_count"].value is None
-    assert by_metric["spectroscopy.trail_width_median"].value == pytest.approx(3.1)
+    assert by_metric["spectroscopy.trail_width_median_px"].value == pytest.approx(3.1)
 
 
 def test_gates_keep_their_outcome_value_and_limit() -> None:
@@ -400,5 +400,5 @@ def test_the_session_batch_writes_one_row_per_metric(tmp_path: Path, monkeypatch
     assert {row.metric for row in rows} == _declared_names()
     by_metric = {row.metric: row for row in rows}
     assert by_metric[SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT].value is None
-    assert by_metric["spectroscopy.trail_width_median"].value == pytest.approx(3.5)
-    assert by_metric["spectroscopy.dispersion_angle_first_star"].value == pytest.approx(12.5)
+    assert by_metric["spectroscopy.trail_width_median_px"].value == pytest.approx(3.5)
+    assert by_metric["spectroscopy.dispersion_angle_first_star_deg"].value == pytest.approx(12.5)

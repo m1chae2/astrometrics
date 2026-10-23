@@ -272,7 +272,11 @@ def test_every_numeric_summary_field_and_gate_is_declared() -> None:
         "residual_worst_accepted_ratio",
     } <= fields
     declared = _declared_names()
-    assert {f"asteroid_detection.{field}" for field in fields} <= declared
+    # A count's registered name ends with its unit; the ratio has no unit.
+    assert {
+        f"asteroid_detection.{field}" if field.endswith("_ratio") else f"asteroid_detection.{field}_count"
+        for field in fields
+    } <= declared
     assert {
         f"asteroid_detection.gate_{name}"
         for name in (

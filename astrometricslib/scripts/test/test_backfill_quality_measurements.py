@@ -44,7 +44,6 @@ from astrometricslib.pipelines.photometry.post_processing import record_quality 
 from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.spectroscopy.post_processing import record_quality as spectroscopy_record
-from astrometricslib.pipelines.stacking.metrics import GATE_METRIC_BY_NAME
 from astrometricslib.pipelines.stacking.post_processing import record_quality as stacking_record
 from astrometricslib.scripts import backfill_quality_measurements as backfill
 
@@ -419,26 +418,23 @@ def test_every_registered_metric_of_a_pipeline_is_mapped_or_marked_as_not_held()
 
 
 def test_the_gate_table_matches_the_metric_and_tier_each_pipeline_uses() -> None:
-    """A gate stored here has the metric and limit tier a new run gives it."""
-    privates = {
-        "astrometry": astrometry_record._GATE_METRIC_AND_TIER,
-        "photometry": photometry_record._GATE_METRIC_AND_TIER,
-        "spectroscopy": spectroscopy_record._GATE_METRIC_AND_TIER,
-        "asteroid_detection": asteroid_record._GATE_METRIC_AND_TIER,
+    """A stored gate has the metric, tier and entry a new run gives it."""
+    published = {
+        "astrometry": astrometry_record.GATE_LIMIT_SOURCES,
+        "photometry": photometry_record.GATE_LIMIT_SOURCES,
+        "spectroscopy": spectroscopy_record.GATE_LIMIT_SOURCES,
+        "asteroid_detection": asteroid_record.GATE_LIMIT_SOURCES,
     }
     for kind in backfill.SUMMARY_KINDS:
         if kind.pipeline_name == "stacking":
-            assert {m.gate_name: f"stacking.gate_{m.gate_name}" for m in kind.gates} == GATE_METRIC_BY_NAME
-            for mapping in kind.gates:
-                tier, entry = stacking_record._TIER_BY_GATE[mapping.gate_name]
-                assert (mapping.tier, mapping.register_entry) == (tier, entry)
-            continue
-        table = privates[kind.pipeline_name]
+            table = stacking_record.GATE_LIMIT_SOURCES
+        else:
+            table = published[kind.pipeline_name]
         assert {m.gate_name for m in kind.gates} == set(table)
         for mapping in kind.gates:
-            metric, tier = table[mapping.gate_name]
-            assert metric == f"{kind.pipeline_name}.gate_{mapping.gate_name}"
-            assert mapping.tier is tier
+            source = table[mapping.gate_name]
+            assert source.metric_name == f"{kind.pipeline_name}.gate_{mapping.gate_name}"
+            assert (mapping.tier, mapping.register_entry) == (source.tier, source.register_entry)
 
 
 def test_the_group_subject_equals_the_one_the_stacking_record_step_uses() -> None:
@@ -549,10 +545,13 @@ def test_rows_keep_the_pipeline_version_the_time_and_the_subjects_of_a_new_run(t
     assert rejected.pipeline_version == "1.3.0"
     assert rejected.measured_at == datetime.fromisoformat(CREATED_AT)
     # The run id keeps the stored time text (pydantic writes "Z").
-    assert rejected.run_id == f"backfill-{TARGET}-{CREATED_AT.replace('+00:00', 'Z')}"
+    assert rejected.run_id == f"backfill-{TARGET}-stacking-{CREATED_AT.replace('+00:00', 'Z')}"
     assert rejected.status is MeasurementStatus.MEASURED
     assert rejected.subject.level is SubjectLevel.STACK
-    assert "definition version 1" in rejected.reason
+    # Nobody checked this metric's estimator against the code's history, so
+    # the definition version is the explicit "unknown" value.
+    assert rejected.definition_version == 0
+    assert "definition version is unknown" in rejected.reason
 
     negative = row_for(rows, "stacking.negative_pixel_max_fraction", f"{TARGET}/{STACK_NAME}")
     assert negative.value == pytest.approx(0.12)
@@ -569,14 +568,14 @@ def test_rows_keep_the_pipeline_version_the_time_and_the_subjects_of_a_new_run(t
 
     group = row_for(rows, "stacking.group_alignment_shift_px", f"{TARGET}/groups/M31_10s.fits")
     assert group.value == pytest.approx(5.0)
-    unstacked = row_for(rows, "stacking.group_frames_stacked", f"{TARGET}/{STACK_NAME}#group-1-30s")
+    unstacked = row_for(rows, "stacking.group_frames_stacked_count", f"{TARGET}/{STACK_NAME}#group-1-30s")
     assert unstacked.value == pytest.approx(0.0)
 
     solved = row_for(rows, "astrometry.gate_plate_solve")
     assert solved.value == pytest.approx(1.0)
     assert solved.subject.level is SubjectLevel.RUN
     assert solved.subject.subject_id.startswith(f"{TARGET}/astrometry/backfill-")
-    attempts = row_for(rows, "astrometry.plate_solve_attempts")
+    attempts = row_for(rows, "astrometry.plate_solve_attempts_count")
     assert attempts.subject.level is SubjectLevel.RUN
     width = row_for(rows, "astrometry.star_width_gaussian_px")
     assert width.subject.subject_id == f"{TARGET}/{STACK_NAME}"
@@ -619,7 +618,7 @@ def test_what_the_json_never_held_is_counted_not_written(tmp_path: Path) -> None
     """Noise, weights and run-data gates are skipped and counted."""
     database = make_database(tmp_path, {TARGET: full_document()})
     report = backfill.run_backfill(database, log=lambda _: None)
-    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 8
+    assert report.skipped["stacking", backfill.SkipReason.NOT_HELD] == 11
     assert report.skipped["photometry", backfill.SkipReason.NOT_HELD] == 5
     assert report.skipped["photometry", backfill.SkipReason.NEEDS_RUN_DATA] == 1
     rows = backfill_rows_planned(database)
@@ -647,10 +646,9 @@ def backfill_rows_planned(database: str) -> set[str]:
     return names
 
 
-def test_an_old_flat_summary_with_no_time_or_gates_is_read(tmp_path: Path) -> None:
-    """Old top-level names, the old separation name and no time work."""
+def test_an_old_flat_summary_with_no_gates_is_read(tmp_path: Path) -> None:
+    """Old top-level names, the old separation name and no gates work."""
     old_astrometry = astrometry_summary(version="1.2.0")
-    del old_astrometry["createdAt"]
     old_astrometry["gates"] = []
     metrics = old_astrometry["astrometryMetrics"]
     metrics["astrometricResidualRmsArcsec"] = 2.5
@@ -678,13 +676,12 @@ def test_an_old_flat_summary_with_no_time_or_gates_is_read(tmp_path: Path) -> No
 
     separation = row_for(rows, "astrometry.catalog_match_separation_rms_arcsec")
     assert separation.value == pytest.approx(2.5)
-    assert separation.measured_at == datetime.fromtimestamp(FRAME_TIME + 60, tz=UTC)
-    assert "newest frame time" in separation.reason
-    assert separation.run_id.startswith(f"backfill-{TARGET}-")
+    assert separation.measured_at == datetime.fromisoformat("2026-10-03T01:00:00+00:00")
+    assert separation.run_id.startswith(f"backfill-{TARGET}-astrometry-")
     names = {row.metric for row in rows}
     assert "astrometry.gaia_fit_rms_arcsec" not in names
     assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_OLDER] == 4
-    assert "stacking.frames_accepted" not in names
+    assert "stacking.frames_accepted_count" not in names
     assert not any(name.startswith("astrometry.gate_") for name in names)
 
 
@@ -700,14 +697,19 @@ def test_a_summary_with_no_pipeline_version_keeps_it_empty(tmp_path: Path) -> No
     assert report.skipped["astrometry", backfill.SkipReason.ESTIMATOR_UNKNOWN] == 5
     rows = all_rows(database)
     assert {row.pipeline_version for row in rows} == {None}
-    assert "unknown" in row_for(rows, "astrometry.sources_detected").reason
+    assert "unknown" in row_for(rows, "astrometry.sources_detected_count").reason
 
 
-def test_a_summary_with_no_time_anywhere_is_skipped_and_counted(tmp_path: Path) -> None:
-    """The clock is never read: no time anywhere gives no rows."""
+def test_a_summary_with_no_creation_time_is_skipped_even_when_frames_have_times(tmp_path: Path) -> None:
+    """No createdAt gives no rows, whatever the frame times."""
     summary = photometry_summary()
     del summary["createdAt"]
-    database = make_database(tmp_path, {TARGET: {"id": TARGET, "quality": {"photometry": summary}}})
+    document = {
+        "id": TARGET,
+        "frames": [{"path": "a.fits", "timestamp": FRAME_TIME}],
+        "quality": {"photometry": summary},
+    }
+    database = make_database(tmp_path, {TARGET: document})
     report = backfill.run_backfill(
         database, apply=True, make_backup=fake_backup(database), log=lambda _: None
     )
@@ -794,7 +796,7 @@ def test_the_row_count_check_catches_a_stored_value_that_differs(tmp_path: Path)
     backfill.run_backfill(database, apply=True, make_backup=fake_backup(database), log=lambda _: None)
     connection = sqlite3.connect(database)
     connection.execute(
-        "UPDATE quality_measurements SET value = value + 1 WHERE metric = 'stacking.frames_stacked'"
+        "UPDATE quality_measurements SET value = value + 1 WHERE metric = 'stacking.frames_stacked_count'"
     )
     connection.commit()
     connection.close()
@@ -806,7 +808,7 @@ def test_the_row_count_check_catches_a_stored_value_that_differs(tmp_path: Path)
     matched, mismatches = backfill.check_rows_against_plans(QualityStore(database), [plan])
     assert matched["stacking"] == len(plan.measurements) - 1
     assert len(mismatches) == 1
-    assert "stacking.frames_stacked" in mismatches[0]
+    assert "stacking.frames_stacked_count" in mismatches[0]
 
 
 def test_target_and_limit_choose_which_targets_are_read(tmp_path: Path) -> None:
@@ -838,8 +840,8 @@ def test_values_that_are_not_finite_numbers_are_skipped(tmp_path: Path) -> None:
     )
     assert report.skipped["photometry", backfill.SkipReason.BAD_VALUE] == 2
     names = {row.metric for row in all_rows(database)}
-    assert "photometry.stars_found" not in names
-    assert "photometry.stars_processed" in names
+    assert "photometry.stars_found_count" not in names
+    assert "photometry.stars_processed_count" in names
 
 
 def test_the_estimator_table_compares_versions_by_number() -> None:
@@ -850,7 +852,7 @@ def test_the_estimator_table_compares_versions_by_number() -> None:
     assert backfill.estimator_problem(metric, "1.3.9") is backfill.SkipReason.ESTIMATOR_OLDER
     assert backfill.estimator_problem(metric, "x") is backfill.SkipReason.ESTIMATOR_UNKNOWN
     assert backfill.estimator_problem(metric, None) is backfill.SkipReason.ESTIMATOR_UNKNOWN
-    assert backfill.estimator_problem("stacking.frames_stacked", None) is None
+    assert backfill.estimator_problem("stacking.frames_stacked_count", None) is None
     assert set(backfill.ESTIMATOR_CHANGED_AT) <= set(get_metric_registry().names())
 
 
@@ -888,3 +890,190 @@ def test_main_dry_run_then_apply_on_a_copy_of_the_database(
     assert "row-count check passed" in output
     assert len(list(tmp_path.glob("astrometrics.db.*.bak"))) == 1
     assert quality_tables_exist(database)
+
+
+def test_a_metric_with_a_checked_estimator_history_keeps_its_registered_version(tmp_path: Path) -> None:
+    """Only checked metrics keep their version; the rest are unknown."""
+    database = make_database(tmp_path, {TARGET: full_document()})
+    backfill.run_backfill(database, apply=True, make_backup=fake_backup(database), log=lambda _: None)
+    rows = all_rows(database)
+    registry = get_metric_registry()
+    checked = row_for(rows, "astrometry.gaia_fit_rms_arcsec")
+    assert checked.definition_version == registry.get("astrometry.gaia_fit_rms_arcsec").definition_version
+    assert "estimator as registered" in checked.reason
+    for row in rows:
+        if row.metric in backfill.ESTIMATOR_CHANGED_AT:
+            assert row.definition_version != 0
+        else:
+            assert row.definition_version == 0, row.metric
+
+
+def test_the_registry_accepts_the_unknown_version_only_for_backfilled_rows() -> None:
+    """A measured row with definition version 0 is refused."""
+    from astrometricslib.foundation.errors import InvalidArgumentError
+    from astrometricslib.pipelines.shared.quality.record_measurements import (
+        check_measurement_against_registry,
+    )
+
+    plan = backfill.plan_summary(TARGET, full_document(), backfill.SUMMARY_KINDS[2], astrometry_summary())
+    unknown = next(row for row in plan.measurements if row.definition_version == 0)
+    check_measurement_against_registry(unknown)
+    with pytest.raises(InvalidArgumentError, match="definition_version"):
+        check_measurement_against_registry(unknown.model_copy(update={"origin": MeasurementOrigin.MEASURED}))
+
+
+def _live_row_for(metric: str, run_id: str, measured_at: datetime, subject_id: str) -> Any:
+    """Build a live (measured) astrometry row.
+
+    Returns
+    -------
+    row : `QualityMeasurement`
+        A measured row for the test target.
+    """
+    from astrometricslib.models.quality.measurement import QualityMeasurement, QualitySubject
+
+    spec = get_metric_registry().get(metric)
+    return QualityMeasurement(
+        metric=metric,
+        definitionVersion=spec.definition_version,
+        subject=QualitySubject(level=SubjectLevel.RUN, subjectId=subject_id, targetId=TARGET),
+        status=MeasurementStatus.MEASURED,
+        value=3.0,
+        origin=MeasurementOrigin.MEASURED,
+        pipelineVersion="1.4.0",
+        runId=run_id,
+        measuredAt=measured_at,
+    )
+
+
+def test_a_summary_is_skipped_when_its_own_live_run_already_stored_rows(tmp_path: Path) -> None:
+    """The run that made the latest summary is not stored a second time."""
+    summary = astrometry_summary()
+    summary["provenanceActivityId"] = "job-77"
+    document = {"id": TARGET, "stacking": {"stackedImage": STACK_PATH}, "quality": {"astrometry": summary}}
+    database = make_database(tmp_path, {TARGET: document})
+    # A live run measures before its summary is created, so the time
+    # rule alone would miss it.
+    early = datetime.fromisoformat("2026-10-03T00:59:00+00:00")
+    live = _live_row_for(
+        "astrometry.plate_solve_attempts_count", "job-77", early, f"{TARGET}/astrometry/job-77"
+    )
+    QualityStore(database).write_measurements([live])
+    report = backfill.run_backfill(database, log=lambda _: None)
+    assert report.rows_planned["astrometry"] == 0
+    assert report.skipped["astrometry", backfill.SkipReason.LIVE_ROWS_EXIST] == 1
+
+
+def test_a_summary_is_skipped_when_a_live_row_is_at_or_after_its_time(tmp_path: Path) -> None:
+    """A live row measured after the summary blocks the fill."""
+    document = {
+        "id": TARGET,
+        "stacking": {"stackedImage": STACK_PATH},
+        "quality": {"astrometry": astrometry_summary()},
+    }
+    database = make_database(tmp_path, {TARGET: document})
+    later = datetime.fromisoformat("2026-10-03T01:00:00+00:00")
+    QualityStore(database).write_measurements([
+        _live_row_for(
+            "astrometry.plate_solve_attempts_count", "run-abc", later, f"{TARGET}/astrometry/run-abc"
+        )
+    ])
+    report = backfill.run_backfill(database, log=lambda _: None)
+    assert report.skipped["astrometry", backfill.SkipReason.LIVE_ROWS_EXIST] == 1
+
+
+def test_older_live_rows_and_other_pipelines_do_not_block_the_fill(tmp_path: Path) -> None:
+    """Only a recent live row of the same pipeline blocks the fill."""
+    document = {
+        "id": TARGET,
+        "stacking": {"stackedImage": STACK_PATH},
+        "quality": {"astrometry": astrometry_summary()},
+    }
+    database = make_database(tmp_path, {TARGET: document})
+    older = datetime.fromisoformat("2026-09-01T00:00:00+00:00")
+    newer = datetime.fromisoformat("2026-10-09T00:00:00+00:00")
+    QualityStore(database).write_measurements([
+        _live_row_for(
+            "astrometry.plate_solve_attempts_count", "run-old", older, f"{TARGET}/astrometry/run-old"
+        ),
+        _live_row_for(
+            "asteroid_detection.candidates_detected_count",
+            "run-other",
+            newer,
+            f"{TARGET}/asteroid_detection/run-other",
+        ),
+    ])
+    report = backfill.run_backfill(database, log=lambda _: None)
+    assert report.rows_planned["astrometry"] > 0
+    assert ("astrometry", backfill.SkipReason.LIVE_ROWS_EXIST) not in report.skipped
+
+
+def test_two_kinds_of_stacking_summary_get_different_run_ids() -> None:
+    """The summary kind is part of the run id."""
+    document = full_document()
+    ids = set()
+    for kind in backfill.SUMMARY_KINDS[:2]:
+        summary = backfill.find_summary(document, kind)
+        assert summary is not None
+        ids.add(backfill.plan_summary(TARGET, document, kind, summary).run_id)
+    assert len(ids) == 2
+
+
+def test_every_stacking_summary_field_is_a_measurement_or_listed_as_not_one() -> None:
+    """A new stacking summary field needs a metric or a reason."""
+    not_measurements = {
+        "is_spectral": "a yes/no label of the stack kind",
+        "excluded_frames": "a list of excluded frames",
+        "rejected_fraction_flagged": "a verdict",
+        "background_split_detected": "a verdict",
+        "background_split_detail": "text",
+        "calibration_mismatch_flags": "a list of flag sentences",
+        "flat_calibration_issues": "a list of sentences",
+        "saturation_flagged": "a verdict",
+        "exposure_groups": "a list; the group metrics hold each group's numbers",
+        "recommended_exposure_seconds": "a recommendation, not a measurement",
+        "zero_fraction_flagged": "a verdict",
+        "negative_pixels_flagged": "a verdict",
+        "fwhm_degraded": "a verdict",
+        "spectral_registration_flags": "a list of flagged frames",
+        "spectral_registration_checked": "a yes/no fact; the spectral-registration gate holds it",
+        "timed_out": "a verdict",
+        "debayer_applied": "a yes/no setting",
+        "stacking_engine": "text",
+        "stacking_engine_version": "text",
+        "registration_reference_frame": "a file name",
+    }
+    fields = set(StackingPipelineQualityMetrics.model_fields)
+    mapped = set(stacking_record._METRICS_FIELDS)
+    assert fields == mapped | set(not_measurements)
+    assert not mapped & set(not_measurements)
+
+
+def test_a_filled_history_reconciles_with_a_stored_json_document(tmp_path: Path) -> None:
+    """Fill from a stored JSON file, then check each number against its row."""
+    fixture = Path(__file__).parent / "data" / "stored_target_document.json"
+    document = json.loads(fixture.read_text(encoding="utf-8"))
+    database = make_database(tmp_path, {TARGET: document})
+    report = backfill.run_backfill(
+        database, apply=True, make_backup=fake_backup(database), log=lambda _: None
+    )
+    assert report.mismatches == []
+    rows = all_rows(database)
+    by_metric: dict[str, list[Any]] = {}
+    for row in rows:
+        by_metric.setdefault(row.metric, []).append(row)
+    pipelines_seen = set()
+    for kind in backfill.SUMMARY_KINDS:
+        summary = backfill.find_summary(document, kind)
+        assert summary is not None
+        pipelines_seen.add(kind.key)
+        for mapping in kind.values:
+            stored = backfill.as_number(backfill.first_present(summary, mapping.paths))
+            if stored is None:
+                continue
+            candidates = by_metric.get(mapping.metric, [])
+            assert candidates, f"{kind.key}: {mapping.metric} was not stored"
+            assert any(row.value == pytest.approx(stored / mapping.divisor) for row in candidates), (
+                mapping.metric
+            )
+    assert pipelines_seen == {kind.key for kind in backfill.SUMMARY_KINDS}

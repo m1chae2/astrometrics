@@ -24,24 +24,41 @@ What the script does
   per pipeline, says which stored field fills which registered metric.
 * Every row has ``origin = backfilled``. The pipeline version is the one the
   summary stored, or empty if it stored none. Nothing is guessed.
-* The row's time is the summary's ``createdAt``. If the summary has none, the
-  target's newest frame time is used and the row's reason says so. If the
-  target has neither, the summary is skipped and counted. The clock is never
+* The row's time is the summary's ``createdAt``. A summary with no
+  ``createdAt`` is skipped and counted: the target's newest frame time is not
+  used in its place, because it changes whenever a frame is added and would
+  give the same summary a different time on a later run. The clock is never
   read.
 * A row keeps the definition version the metric is registered with only if the
-  stored value was made by that estimator. The pipeline version numbers are
-  coarse, so the script keeps a short table of the estimator changes that the
-  code documents (``ESTIMATOR_CHANGED_AT``). A metric in that table is
-  written only when the summary's pipeline version is known and at least the
-  version that introduced the estimator. Every other metric is written for
-  any version.
+  stored value was made by that estimator, and that was checked. The pipeline
+  version numbers are coarse (they move when the shape of a summary changes,
+  not when an estimator changes), so a pipeline version does not tell which
+  estimator made a number. The script keeps a short table of the estimator
+  changes that were checked against the code's history
+  (``ESTIMATOR_CHANGED_AT``). A metric in that table is written only when the
+  summary's pipeline version is known and at least the version that
+  introduced the estimator, and keeps its registered definition version.
+  Every other metric is written with the definition version 0, which means
+  "unknown (backfilled)" (plan safeguard 3), because nobody has checked that
+  an older summary used today's estimator. The metric registry accepts 0 only
+  for backfilled rows.
+* A summary is skipped (and counted) when the quality table already holds a
+  row that a live run of the same pipeline wrote for the same target at or
+  after the summary's ``createdAt``. That run's own rows are the record of
+  the latest run, so the same run is not stored twice.
 * Each row's reason says it was backfilled, from which summary, and which
   definition version and pipeline version it carries. That is the tag that
   tells a reader which estimator made the number.
-* The run id is ``backfill-<target>-<summary createdAt>``, so a second run
-  writes nothing new.
+* The run id is ``backfill-<target>-<kind of summary>-<summary createdAt>``
+  (the kind is, for example, ``stacking`` or ``spectralStacking``, which share
+  one pipeline name), so a second run writes nothing new and two kinds of
+  summary never share a run.
 * Gates become self-check rows (outcome, number and limit) like the rows the
-  pipelines now write.
+  pipelines now write. The limit tiers and register entries, and the way each
+  pipeline gives a gate a steady number, come from the pipelines' own record
+  steps (``GATE_LIMIT_SOURCES`` and ``gate_for_measurement``), so a backfilled
+  gate means what a live one does. Stacking's record step publishes the
+  same two.
 * Values that sit on a stack (the stack's own numbers, and astrometry's) are
   filed under the stack's subject, ``<target>/<stack file name>``, the same
   subject a new run uses. The file name comes from the target's stored stacked
@@ -96,7 +113,7 @@ from astrometricslib.drivers.local_database import backup_catalog_database, snap
 from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.config import get_configuration
 from astrometricslib.foundation.errors import InvalidArgumentError, StorageError
-from astrometricslib.models.quality.gate_result import GateResult, GateStatus
+from astrometricslib.models.quality.gate_result import GateResult
 from astrometricslib.models.quality.limit import LimitTier
 from astrometricslib.models.quality.measurement import (
     MeasurementOrigin,
@@ -105,13 +122,37 @@ from astrometricslib.models.quality.measurement import (
     SubjectLevel,
 )
 from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.pipelines.asteroid_detection.record_quality import (
+    GATE_LIMIT_SOURCES as ASTEROID_GATE_LIMIT_SOURCES,
+)
+from astrometricslib.pipelines.asteroid_detection.record_quality import (
+    gate_for_measurement as asteroid_gate_for_measurement,
+)
+from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+    GATE_LIMIT_SOURCES as ASTROMETRY_GATE_LIMIT_SOURCES,
+)
+from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+    gate_for_measurement as astrometry_gate_for_measurement,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+    GATE_LIMIT_SOURCES as PHOTOMETRY_GATE_LIMIT_SOURCES,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+    PhotometryRunInputs,
+    steady_number_needs_run_data,
+)
+from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+    gate_for_measurement as photometry_gate_for_measurement,
+)
 from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
     build_measurement,
     gate_measurement,
 )
 from astrometricslib.pipelines.shared.quality.record_measurements import (
+    UNKNOWN_DEFINITION_VERSION,
     check_measurement_against_registry,
     record_measurements,
 )
@@ -123,6 +164,15 @@ from astrometricslib.pipelines.spectroscopy.metrics import (
     stage_metric_name,
     stage_spectrum_count_name,
 )
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
+    GATE_LIMIT_SOURCES as SPECTROSCOPY_GATE_LIMIT_SOURCES,
+)
+from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    GATE_LIMIT_SOURCES as STACKING_GATE_LIMIT_SOURCES,
+)
+from astrometricslib.pipelines.stacking.post_processing.record_quality import (
+    gate_for_measurement as stacking_gate_for_measurement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,18 +180,22 @@ logger = logging.getLogger(__name__)
 # equal a job id or a generated ``run-`` id.
 BACKFILL_RUN_ID_PREFIX = "backfill-"
 
-# The estimator changes the code documents, as the first pipeline version
-# whose summaries hold the metric as it is registered today. Every other
-# metric has had one estimator since it was first stored, so it is written for
-# any pipeline version. The astrometry version 1.4.0 note in
-# `models/quality/quality_summary.py` says: the residual gate judges the plate
-# solver's own fit when it reports one, and Gaia positions carry proper motion
-# to the observation epoch. So the residual gate, and the four numbers that
-# compare detected stars with Gaia positions, mean something different before
-# 1.4.0. The pipeline versions have moved in large steps (for example
-# astrometry went from 1.2.0 to 1.4.0 in one commit), so this table lists only
-# what the code says. A change it does not say is not covered, and the
-# validation register is where such a change would be recorded.
+# The estimator changes that were checked against the code's history, as the
+# first pipeline version whose summaries hold the metric as it is registered
+# today. Only the metrics in this table keep their registered definition
+# version when they are backfilled. Every other metric is written with the
+# definition version `UNKNOWN_DEFINITION_VERSION` (0), because the pipeline
+# versions move when a summary's shape changes, not when an estimator changes,
+# so an old summary's version does not show which estimator made its numbers.
+# The astrometry version 1.4.0 note in `models/quality/quality_summary.py`
+# says: the residual gate judges the plate solver's own fit when it reports
+# one, and Gaia positions carry proper motion to the observation epoch. So the
+# residual gate, and the four numbers that compare detected stars with Gaia
+# positions, mean something different before 1.4.0. The pipeline versions have
+# moved in large steps (for example astrometry went from 1.2.0 to 1.4.0 in one
+# commit), so this table lists only what the code says. To move a metric out
+# of "unknown", check its estimator's history in git, then add it here with
+# the first version that holds the registered estimator.
 ESTIMATOR_CHANGED_AT: dict[str, str] = {
     "astrometry.gate_astrometric_residual": "1.4.0",
     "astrometry.gaia_fit_star_count": "1.4.0",
@@ -166,6 +220,7 @@ class SkipReason(StrEnum):
     NEEDS_RUN_DATA = "needs_run_data"
     NO_STACK_FILE = "no_stack_file"
     NO_TIME = "no_time"
+    LIVE_ROWS_EXIST = "live_rows_exist"
     ESTIMATOR_UNKNOWN = "estimator_unknown"
     ESTIMATOR_OLDER = "estimator_older"
     DEFAULT_ZERO = "default_zero"
@@ -183,7 +238,9 @@ SKIP_DESCRIPTIONS: dict[SkipReason, str] = {
     SkipReason.UNKNOWN_GATE: "the stored gate has no declared metric",
     SkipReason.NEEDS_RUN_DATA: "the gate's steady number needs run data the summary does not hold",
     SkipReason.NO_STACK_FILE: "the target stores no stacked image name to file the value under",
-    SkipReason.NO_TIME: "the summary has no time and neither has the target's frames",
+    SkipReason.NO_TIME: "the summary stores no creation time to date its rows with",
+    SkipReason.LIVE_ROWS_EXIST: "a live run of the pipeline already stored rows for the target at or after "
+    "the summary's time",
     SkipReason.ESTIMATOR_UNKNOWN: "the pipeline version is unknown and the metric's estimator changed",
     SkipReason.ESTIMATOR_OLDER: "the summary is older than the metric's current estimator",
     SkipReason.DEFAULT_ZERO: "the star counts are all zero, as a path that does not count them stores",
@@ -242,14 +299,29 @@ class GateMapping:
         How the gate's limit was obtained.
     register_entry : `str`, optional
         The validation register entry that backs the limit.
-    register_from_metric : `bool`, optional
-        Take the register entry from the metric's declaration instead.
     """
 
     gate_name: str
     tier: LimitTier
     register_entry: str | None = None
-    register_from_metric: bool = False
+
+
+def gate_mappings_from_sources(sources: Mapping[str, GateLimitSource]) -> tuple[GateMapping, ...]:
+    """Turn a pipeline's published gate limit table into gate mappings.
+
+    Parameters
+    ----------
+    sources : `Mapping` [`str`, `GateLimitSource`]
+        The pipeline record step's ``GATE_LIMIT_SOURCES``, keyed by gate name.
+
+    Returns
+    -------
+    mappings : `tuple` [`GateMapping`, ...]
+        One mapping per gate, in the table's order.
+    """
+    return tuple(
+        GateMapping(gate_name, source.tier, source.register_entry) for gate_name, source in sources.items()
+    )
 
 
 GateAdjuster = Callable[[GateResult, Mapping[str, Any]], GateResult | None]
@@ -466,33 +538,6 @@ def read_stored_time(text: Any) -> tuple[datetime, str] | None:
     return moment, ""
 
 
-def newest_frame_time(document: Mapping[str, Any]) -> datetime | None:
-    """Find the time of the target's newest stored frame.
-
-    Parameters
-    ----------
-    document : `dict`
-        The target document.
-
-    Returns
-    -------
-    moment : `datetime` or `None`
-        The newest frame ``timestamp`` (seconds since the Unix epoch) as a UTC
-        time, or `None` if no frame has one.
-    """
-    stamps = []
-    for frame in document.get("frames") or []:
-        stamp = as_number(frame.get("timestamp")) if isinstance(frame, dict) else None
-        if stamp is not None and stamp > 0:
-            stamps.append(stamp)
-    if not stamps:
-        return None
-    try:
-        return datetime.fromtimestamp(max(stamps), tz=UTC)
-    except OverflowError, OSError, ValueError:
-        return None
-
-
 @dataclass
 class SummaryPlan:
     """The rows one stored summary will give.
@@ -509,6 +554,9 @@ class SummaryPlan:
         The rows, ready for `record_measurements`.
     skipped : `collections.Counter`
         How many values were skipped, by reason.
+    measured_at : `datetime` or `None`
+        The summary's ``createdAt``, which dates every row. `None` when the
+        summary stored no usable time.
     """
 
     target_id: str
@@ -516,6 +564,7 @@ class SummaryPlan:
     run_id: str
     measurements: list[QualityMeasurement] = field(default_factory=list)
     skipped: Counter = field(default_factory=Counter)
+    measured_at: datetime | None = None
 
 
 class SummaryPlanner:
@@ -649,7 +698,28 @@ class SummaryPlanner:
         """
         return self.run_subject() if kind is SubjectKind.RUN else self.stack_subject()
 
-    def _reason(self, spec: MetricSpec, existing: str) -> str:
+    def _definition_version(self, spec: MetricSpec) -> int:
+        """Choose the definition version a backfilled row carries.
+
+        Parameters
+        ----------
+        spec : `MetricSpec`
+            The metric's declaration.
+
+        Returns
+        -------
+        version : `int`
+            The registered version when the metric's estimator history was
+            checked (it is in `ESTIMATOR_CHANGED_AT`, and the caller already
+            skipped a summary that is too old for it). Otherwise
+            `UNKNOWN_DEFINITION_VERSION`, because nothing shows that an older
+            summary used today's estimator.
+        """
+        if spec.name in ESTIMATOR_CHANGED_AT:
+            return spec.definition_version
+        return UNKNOWN_DEFINITION_VERSION
+
+    def _reason(self, spec: MetricSpec, existing: str, definition_version: int) -> str:
         """Write the row's reason, which tags its estimator and source.
 
         Parameters
@@ -658,16 +728,24 @@ class SummaryPlanner:
             The metric's declaration.
         existing : `str`
             The reason the row already has (a gate's sentence).
+        definition_version : `int`
+            The version the row carries.
 
         Returns
         -------
         reason : `str`
             The existing sentence followed by the backfill tag.
         """
+        if definition_version == UNKNOWN_DEFINITION_VERSION:
+            estimator_text = (
+                "estimator not checked against the code's history, so the definition version is "
+                f"unknown (0; the metric is registered at version {spec.definition_version} today)"
+            )
+        else:
+            estimator_text = f"estimator as registered, definition version {definition_version}"
         tag = (
             f"Backfilled from the stored {self.kind.label} summary ({self.time_note}); "
-            f"estimator as registered, definition version {spec.definition_version}; "
-            f"pipeline version {self.pipeline_version or 'unknown'}."
+            f"{estimator_text}; pipeline version {self.pipeline_version or 'unknown'}."
         )
         return f"{existing} {tag}" if existing.strip() else tag
 
@@ -681,11 +759,13 @@ class SummaryPlanner:
         spec : `MetricSpec`
             The metric's declaration.
         """
+        definition_version = self._definition_version(spec)
         row = measurement.model_copy(
             update={
                 "origin": MeasurementOrigin.BACKFILLED,
                 "pipeline_version": self.pipeline_version,
-                "reason": self._reason(spec, measurement.reason),
+                "definition_version": definition_version,
+                "reason": self._reason(spec, measurement.reason, definition_version),
             }
         )
         try:
@@ -803,7 +883,7 @@ class SummaryPlanner:
             self.skip(problem)
             return
         spec = self._registry.get(metric)
-        register_entry = spec.register_entry if mapping.register_from_metric else mapping.register_entry
+        register_entry = mapping.register_entry
         try:
             measurement = gate_measurement(
                 gate, spec, self._context, subject, limit_tier=mapping.tier, register_entry=register_entry
@@ -838,9 +918,6 @@ class SummaryPlanner:
 def _stacking_negative_pixels_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult | None:
     """Put the negative-pixel gate in the unit its metric declares.
 
-    The check quotes whole percent; its metric is a fraction, like every other
-    share.
-
     Parameters
     ----------
     gate : `GateResult`
@@ -851,24 +928,17 @@ def _stacking_negative_pixels_gate(gate: GateResult, metrics: Mapping[str, Any])
     Returns
     -------
     gate : `GateResult`
-        The gate, with its number and limit divided by 100 for that gate.
+        The gate as the stacking record step stores it
+        (`gate_for_measurement`).
     """
-    if gate.name != "negative_pixels":
-        return gate
-    return gate.model_copy(
-        update={
-            "measured_value": None if gate.measured_value is None else gate.measured_value / 100.0,
-            "limit": None if gate.limit is None else gate.limit / 100.0,
-        }
-    )
+    return stacking_gate_for_measurement(gate)
 
 
 def _astrometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult | None:
     """Give an astrometry gate as the measurement step stores it.
 
-    The plate-solve gate carries 1 when the image was solved and 0 when it
-    was not, with the limit 1. The lookup gate carries the failed share of its
-    lookups whenever any was made.
+    This calls the record step's own `gate_for_measurement`, so a backfilled
+    gate carries the same steady number as a live one.
 
     Parameters
     ----------
@@ -883,25 +953,13 @@ def _astrometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
         The adjusted gate, or `None` if the steady number needs a field the
         summary does not hold.
     """
-    if gate.name == "plate_solve":
-        solved = metrics.get("plateSolveSucceeded")
-        if not isinstance(solved, bool):
-            return None
-        return gate.model_copy(
-            update={
-                "measured_value": 1.0 if solved else 0.0,
-                "limit": 1.0,
-                "limit_source": "sky coordinates need a plate solution",
-            }
-        )
-    if gate.name == "catalog_lookup" and gate.status is not GateStatus.NOT_CHECKED:
-        attempted = as_number(metrics.get("remoteCatalogQueriesAttempted"))
-        failed = as_number(metrics.get("remoteCatalogQueriesFailed"))
-        if attempted is None or failed is None:
-            return None
-        if attempted > 0:
-            return gate.model_copy(update={"measured_value": failed / attempted})
-    return gate
+    solved = metrics.get("plateSolveSucceeded")
+    return astrometry_gate_for_measurement(
+        gate,
+        plate_solve_succeeded=solved if isinstance(solved, bool) else None,
+        remote_catalog_queries_attempted=as_number(metrics.get("remoteCatalogQueriesAttempted")),
+        remote_catalog_queries_failed=as_number(metrics.get("remoteCatalogQueriesFailed")),
+    )
 
 
 def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult | None:
@@ -909,7 +967,8 @@ def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
 
     Two gates quote a steady number that comes from the run's own data (the
     smallest comparison set and the largest drift). The summary does not hold
-    it, so those gates are copied only when they were not checked.
+    it, so those gates are copied only when they were not checked. The rest
+    go through the record step's own `gate_for_measurement`.
 
     Parameters
     ----------
@@ -923,20 +982,15 @@ def _photometry_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult
     gate : `GateResult` or `None`
         The gate, or `None` if its steady number needs run data.
     """
-    if (
-        gate.name in ("comparison_ensemble", "registration_drift")
-        and gate.status is not GateStatus.NOT_CHECKED
-    ):
+    if steady_number_needs_run_data(gate):
         return None
-    return gate
+    return photometry_gate_for_measurement(gate, PhotometryRunInputs())
 
 
 def _asteroid_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult | None:
     """Give an asteroid gate as the measurement step stores it.
 
-    The known-asteroid gate carries the number of failed queries and the limit
-    0 unless it was not checked. The straight-line gate carries no number
-    unless it passed.
+    This calls the record step's own `gate_for_measurement`.
 
     Parameters
     ----------
@@ -951,14 +1005,7 @@ def _asteroid_gate(gate: GateResult, metrics: Mapping[str, Any]) -> GateResult |
         The adjusted gate, or `None` if the number needs a field the summary
         does not hold.
     """
-    if gate.name == "ephemeris_cross_match" and gate.status is not GateStatus.NOT_CHECKED:
-        failed = as_number(metrics.get("ephemerisQueriesFailed"))
-        if failed is None:
-            return None
-        return gate.model_copy(update={"measured_value": failed, "limit": 0.0})
-    if gate.name == "track_residuals" and gate.status is GateStatus.FAILED:
-        return gate.model_copy(update={"measured_value": None})
-    return gate
+    return asteroid_gate_for_measurement(gate, as_number(metrics.get("ephemerisQueriesFailed")))
 
 
 def exposure_group_subject_for(
@@ -1001,11 +1048,11 @@ def exposure_group_subject_for(
 # Fields on a stored exposure group that are plain numbers.
 _GROUP_FIELDS: tuple[tuple[str, str], ...] = (
     ("exposureSeconds", "stacking.group_exposure_s"),
-    ("framesSubmitted", "stacking.group_frames_submitted"),
-    ("framesStacked", "stacking.group_frames_stacked"),
+    ("framesSubmitted", "stacking.group_frames_submitted_count"),
+    ("framesStacked", "stacking.group_frames_stacked_count"),
     ("gainMidRange", "stacking.group_gain_mid_range"),
     ("gainBrightEndRatio", "stacking.group_gain_bright_end_ratio"),
-    ("gainDisagreement", "stacking.group_gain_disagreement"),
+    ("gainDisagreement", "stacking.group_gain_disagreement_fraction"),
 )
 _GROUP_SHIFT_METRIC = "stacking.group_alignment_shift_px"
 
@@ -1165,8 +1212,8 @@ _STACK = SubjectKind.STACK
 # fills the metric the stacking record step fills from the same field
 # (`_METRICS_FIELDS` and `_INPUT_FIELDS` in the stacking `record_quality.py`).
 _STACKING_VALUES: tuple[ValueMapping, ...] = (
-    _value("stacking.frames_submitted", "stackingMetrics", "framesSubmitted", subject=_STACK),
-    _value("stacking.frames_stacked", "stackingMetrics", "framesStacked", subject=_STACK),
+    _value("stacking.frames_submitted_count", "stackingMetrics", "framesSubmitted", subject=_STACK),
+    _value("stacking.frames_stacked_count", "stackingMetrics", "framesStacked", subject=_STACK),
     _value("stacking.rejected_pixel_fraction", "stackingMetrics", "rejectedPixelFraction", subject=_STACK),
     _value("stacking.flat_frame_count", "stackingMetrics", "flatFrameCount", subject=_STACK),
     _value("stacking.flat_noise_fraction", "stackingMetrics", "flatNoiseFraction", subject=_STACK),
@@ -1190,38 +1237,20 @@ _STACKING_VALUES: tuple[ValueMapping, ...] = (
         "registrationReferenceStarCount",
         subject=_STACK,
     ),
-    _value("stacking.frames_accepted", "inputQuality", "framesAccepted", subject=_STACK),
-    _value("stacking.frames_excluded_for_gain", "inputQuality", "framesExcludedForGain", subject=_STACK),
+    _value("stacking.frames_accepted_count", "inputQuality", "framesAccepted", subject=_STACK),
     _value(
-        "stacking.frames_excluded_for_background",
+        "stacking.frames_excluded_for_gain_count", "inputQuality", "framesExcludedForGain", subject=_STACK
+    ),
+    _value(
+        "stacking.frames_excluded_for_background_count",
         "inputQuality",
         "framesExcludedForBackground",
         subject=_STACK,
     ),
-    _value("stacking.frames_quarantined", "inputQuality", "framesQuarantined", subject=_STACK),
+    _value("stacking.frames_quarantined_count", "inputQuality", "framesQuarantined", subject=_STACK),
 )
 
-# How each stacking gate's limit was obtained, as the stacking record step
-# states it (`_TIER_BY_GATE`). The two gates whose limits the validation
-# register marks as measured carry their register entry.
-_STACKING_GATES: tuple[GateMapping, ...] = (
-    GateMapping("gain_homogeneity", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("frame_quarantine", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("background_homogeneity", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("flat_level", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("flat_noise", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("calibration_metadata", LimitTier.GEOMETRY),
-    GateMapping("calibration_frame_count", LimitTier.GEOMETRY),
-    GateMapping("exposure_group_linearity", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("exposure_groups_combined", LimitTier.GEOMETRY),
-    GateMapping("raw_frame_clipping", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("rejected_pixel_fraction", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("stack_sharpness", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("spectral_registration", LimitTier.GEOMETRY),
-    GateMapping("saturated_pixel_fraction", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("zero_pixel_fraction", LimitTier.VALIDATED_DATASET, "STK-26"),
-    GateMapping("negative_pixels", LimitTier.VALIDATED_DATASET, "STK-26"),
-)
+_STACKING_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(STACKING_GATE_LIMIT_SOURCES)
 
 # The stacking numbers the stored summary never held: the noise measured in
 # empty sky, the effective frame count and time, the frame weights and the
@@ -1234,12 +1263,15 @@ _STACKING_NOT_HELD: tuple[str, ...] = (
     "stacking.effective_frame_count",
     "stacking.effective_time_s",
     "stacking.frame_weight",
-    "stacking.night_weight_share",
+    "stacking.night_weight_fraction",
     "stacking.noise_without_night",
+    "stacking.noise_difference_without_night",
+    "stacking.subset_expected_noise_ratio",
+    "stacking.effective_time_read_noise_s",
 )
 
 _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
-    _value("astrometry.sources_detected", "astrometryMetrics", "sourcesDetected", subject=_STACK),
+    _value("astrometry.sources_detected_count", "astrometryMetrics", "sourcesDetected", subject=_STACK),
     _value("astrometry.simbad_matched_count", "astrometryMetrics", "simbadMatchedCount", subject=_STACK),
     _value(
         "astrometry.catalog_matched_star_count",
@@ -1251,7 +1283,7 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
         "astrometry.position_only_star_count", "astrometryMetrics", "positionOnlyStarCount", subject=_STACK
     ),
     _value("astrometry.unresolved_star_count", "astrometryMetrics", "unresolvedStarCount", subject=_STACK),
-    _value("astrometry.plate_solve_attempts", "astrometryMetrics", "plateSolveAttempts"),
+    _value("astrometry.plate_solve_attempts_count", "astrometryMetrics", "plateSolveAttempts"),
     _value(
         "astrometry.plate_solve_matched_star_count",
         "astrometryMetrics",
@@ -1260,9 +1292,13 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
     ),
     _value("astrometry.gaia_fit_star_count", "astrometryMetrics", "gaiaFitStarCount", subject=_STACK),
     _value(
-        "astrometry.remote_catalog_queries_attempted", "astrometryMetrics", "remoteCatalogQueriesAttempted"
+        "astrometry.remote_catalog_queries_attempted_count",
+        "astrometryMetrics",
+        "remoteCatalogQueriesAttempted",
     ),
-    _value("astrometry.remote_catalog_queries_failed", "astrometryMetrics", "remoteCatalogQueriesFailed"),
+    _value(
+        "astrometry.remote_catalog_queries_failed_count", "astrometryMetrics", "remoteCatalogQueriesFailed"
+    ),
     # Summaries saved before 2026-10-10 hold the catalog match separation as
     # ``astrometricResidualRmsArcsec``. It is the same number.
     _value(
@@ -1297,18 +1333,12 @@ _ASTROMETRY_VALUES: tuple[ValueMapping, ...] = (
     _value("astrometry.star_width_gaussian_px", "astrometryMetrics", "starFwhmPx", subject=_STACK),
 )
 
-_ASTROMETRY_GATES: tuple[GateMapping, ...] = (
-    GateMapping("plate_solve", LimitTier.GEOMETRY),
-    GateMapping("source_detection", LimitTier.GEOMETRY),
-    GateMapping("catalog_matches", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("astrometric_residual", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("catalog_lookup", LimitTier.PHYSICAL_BUDGET),
-)
+_ASTROMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(ASTROMETRY_GATE_LIMIT_SOURCES)
 
 _PHOTOMETRY_VALUES: tuple[ValueMapping, ...] = (
-    _value("photometry.stars_processed", "photometryMetrics", "starsProcessed"),
-    _value("photometry.stars_found", "photometryMetrics", "starsFound"),
-    _value("photometry.frames_processed", "photometryMetrics", "framesProcessed"),
+    _value("photometry.stars_processed_count", "photometryMetrics", "starsProcessed"),
+    _value("photometry.stars_found_count", "photometryMetrics", "starsFound"),
+    _value("photometry.frames_processed_count", "photometryMetrics", "framesProcessed"),
     _value("photometry.variable_candidate_count", "photometryMetrics", "variableCandidateCount"),
     _value("photometry.cross_session_match_count", "photometryMetrics", "crossSessionMatchCount"),
     _value(
@@ -1323,39 +1353,27 @@ _PHOTOMETRY_VALUES: tuple[ValueMapping, ...] = (
     _value("photometry.light_curve_scatter_rms_median_mag", "photometryMetrics", "lightCurveScatterRmsMag"),
 )
 
-_PHOTOMETRY_GATES: tuple[GateMapping, ...] = (
-    GateMapping("ensemble_frame_rejection", LimitTier.OWN_BASELINE, register_from_metric=True),
-    GateMapping("capture_timestamps", LimitTier.GEOMETRY, register_from_metric=True),
-    GateMapping("session_content", LimitTier.GEOMETRY, register_from_metric=True),
-    GateMapping("session_plate_solve", LimitTier.GEOMETRY, register_from_metric=True),
-    GateMapping("photometry_work", LimitTier.GEOMETRY, register_from_metric=True),
-    GateMapping("comparison_ensemble", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-    GateMapping("registration_drift", LimitTier.GEOMETRY, register_from_metric=True),
-    GateMapping("scatter_population", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-    GateMapping("variability_discrimination", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-    GateMapping("detectable_amplitude", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-    GateMapping("flux_uncertainty", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-)
+_PHOTOMETRY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(PHOTOMETRY_GATE_LIMIT_SOURCES)
 
 # The photometry numbers the stored summary never held: they come from the
 # run's per-session comparison sets and centroid summaries, and from counts
 # the summary does not keep.
 _PHOTOMETRY_NOT_HELD: tuple[str, ...] = (
-    "photometry.stars_with_light_curve_scatter",
+    "photometry.stars_with_light_curve_scatter_count",
     "photometry.noise_model_star_count",
     "photometry.comparison_scatter_over_predicted_worst",
     "photometry.corner_displacement_p95_worst_px",
-    "photometry.centroid_fallback_fraction_worst",
+    "photometry.centroid_fallback_worst_fraction",
 )
 
 _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (
     _value(
-        "spectroscopy.zero_order_saturated_fraction_max",
+        "spectroscopy.zero_order_saturated_max_fraction",
         "spectroscopyMetrics",
         "zeroOrderSaturatedPixelFraction",
     ),
-    _value("spectroscopy.dispersion_angle_first_star", "spectroscopyMetrics", "dispersionAngleDeg"),
-    _value("spectroscopy.trail_width_median", "spectroscopyMetrics", "medianTrailWidthPx"),
+    _value("spectroscopy.dispersion_angle_first_star_deg", "spectroscopyMetrics", "dispersionAngleDeg"),
+    _value("spectroscopy.trail_width_median_px", "spectroscopyMetrics", "medianTrailWidthPx"),
     _value(
         "spectroscopy.poor_match_classification_count", "spectroscopyMetrics", "poorMatchClassificationCount"
     ),
@@ -1419,17 +1437,7 @@ _SPECTROSCOPY_VALUES: tuple[ValueMapping, ...] = (
     ),
 )
 
-_SPECTROSCOPY_GATES: tuple[GateMapping, ...] = (
-    GateMapping("spectra_extracted", LimitTier.GEOMETRY),
-    GateMapping("zero_order_saturation", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("spectral_classification", LimitTier.GEOMETRY),
-    GateMapping("catalog_agreement", LimitTier.GEOMETRY),
-    GateMapping("feature_significance", LimitTier.GEOMETRY),
-    GateMapping("resolution_measured", LimitTier.GEOMETRY),
-    GateMapping("processing_quality", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("wavelength_scale", LimitTier.PHYSICAL_BUDGET),
-    GateMapping("gaia_xp_agreement", LimitTier.PHYSICAL_BUDGET),
-)
+_SPECTROSCOPY_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(SPECTROSCOPY_GATE_LIMIT_SOURCES)
 
 # The spectroscopy metrics the extras function fills: the three
 # star-identification counts, each checkpoint's spectrum count and medians,
@@ -1448,7 +1456,7 @@ _SPECTROSCOPY_EXTRA_METRICS: tuple[str, ...] = (
 )
 
 _ASTEROID_VALUES: tuple[ValueMapping, ...] = tuple(
-    _value(f"asteroid_detection.{snake_name}", "asteroidDetectionMetrics", stored_name)
+    _value(f"asteroid_detection.{snake_name}_count", "asteroidDetectionMetrics", stored_name)
     for snake_name, stored_name in (
         ("frames_with_wcs_estimate", "framesWithWcsEstimate"),
         ("frames_excluded_missing_pointing_metadata", "framesExcludedMissingPointingMetadata"),
@@ -1465,13 +1473,7 @@ _ASTEROID_VALUES: tuple[ValueMapping, ...] = tuple(
     )
 )
 
-_ASTEROID_GATES: tuple[GateMapping, ...] = (
-    GateMapping("search_frames", LimitTier.GEOMETRY),
-    GateMapping("pointing_metadata", LimitTier.GEOMETRY),
-    GateMapping("ephemeris_cross_match", LimitTier.GEOMETRY),
-    GateMapping("unmatched_movers", LimitTier.GEOMETRY),
-    GateMapping("track_residuals", LimitTier.PHYSICAL_BUDGET, register_from_metric=True),
-)
+_ASTEROID_GATES: tuple[GateMapping, ...] = gate_mappings_from_sources(ASTEROID_GATE_LIMIT_SOURCES)
 
 _STACKING_EXTRA_METRICS: tuple[str, ...] = (*(metric for _, metric in _GROUP_FIELDS), _GROUP_SHIFT_METRIC)
 
@@ -1638,28 +1640,67 @@ def plan_summary(
     Returns
     -------
     plan : `SummaryPlan`
-        The rows. If the summary has no time of its own and the target has no
-        frame time, the plan has no rows and counts the summary once as
-        ``NO_TIME``.
+        The rows. If the summary has no ``createdAt`` the plan has no rows and
+        counts the summary once as ``NO_TIME``. The target's frame times are
+        not a substitute: the newest one changes as frames are added, so the
+        same summary would be dated differently on a later run.
     """
     stored_text = summary.get("createdAt")
     stored = read_stored_time(stored_text)
-    if stored is not None:
-        measured_at, note = stored
-        time_note = f"created {stored_text}" + (f", {note}" if note else "")
-        run_label = str(stored_text)
-    else:
-        fallback = newest_frame_time(document)
-        if fallback is None:
-            plan = SummaryPlan(target_id, kind, "")
-            plan.skipped[SkipReason.NO_TIME] += 1
-            return plan
-        measured_at = fallback
-        time_note = "no creation time was stored, so the target's newest frame time was used"
-        run_label = fallback.isoformat()
-    run_id = f"{BACKFILL_RUN_ID_PREFIX}{target_id}-{run_label}"
+    if stored is None:
+        plan = SummaryPlan(target_id, kind, "")
+        plan.skipped[SkipReason.NO_TIME] += 1
+        return plan
+    measured_at, note = stored
+    time_note = f"created {stored_text}" + (f", {note}" if note else "")
+    run_id = f"{BACKFILL_RUN_ID_PREFIX}{target_id}-{kind.key}-{stored_text}"
     stack_file_name = file_name_of(first_present(document, kind.stack_image_paths))
-    return SummaryPlanner(kind, target_id, summary, measured_at, time_note, run_id, stack_file_name).build()
+    plan = SummaryPlanner(kind, target_id, summary, measured_at, time_note, run_id, stack_file_name).build()
+    plan.measured_at = measured_at
+    return plan
+
+
+def live_rows_exist(store: QualityStore, plan: SummaryPlan, job_id: str | None) -> bool:
+    """Say whether a live run already stored rows for a summary's pipeline.
+
+    Parameters
+    ----------
+    store : `QualityStore`
+        The store.
+    plan : `SummaryPlan`
+        The plan of the summary. Its ``measured_at`` is the summary's time.
+    job_id : `str` or `None`
+        The summary's ``provenanceActivityId``: the id of the job that made
+        it, which a live run uses as its run id.
+
+    Returns
+    -------
+    exists : `bool`
+        `True` if the table holds a row that is not backfilled, for the same
+        target, whose metric belongs to the summary's pipeline, and either
+        carries the summary's job id as its run id or was measured at or after
+        the summary's time. `False` for a plan with no time.
+
+    Notes
+    -----
+    A `StorageError` from reading the store is not caught here.
+
+    A run takes its ``measured_at`` before the pipeline starts and the summary
+    takes its ``createdAt`` while the pipeline runs, so the run that wrote a
+    summary is usually measured a little before the summary's time. The job id
+    finds that run exactly. The time rule finds a later run, or one that had
+    no job.
+    """
+    if plan.measured_at is None:
+        return False
+    prefix = f"{plan.kind.pipeline_name}."
+    for level in (SubjectLevel.RUN, SubjectLevel.STACK):
+        for row in store.query(target_id=plan.target_id, level=level, latest_only=False):
+            if row.origin is MeasurementOrigin.BACKFILLED or not row.metric.startswith(prefix):
+                continue
+            if (job_id is not None and row.run_id == job_id) or row.measured_at >= plan.measured_at:
+                return True
+    return False
 
 
 @dataclass
@@ -1933,6 +1974,10 @@ def run_backfill(
                 continue
             report.summaries_found[kind.key] += 1
             plan = plan_summary(row_target_id, document, kind, summary)
+            if plan.measurements and live_rows_exist(store, plan, summary.get("provenanceActivityId")):
+                plan = SummaryPlan(
+                    row_target_id, kind, plan.run_id, skipped=Counter({SkipReason.LIVE_ROWS_EXIST: 1})
+                )
             report.rows_planned[kind.key] += len(plan.measurements)
             for reason, count in plan.skipped.items():
                 report.skipped[kind.key, reason] += count

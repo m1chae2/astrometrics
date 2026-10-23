@@ -9,7 +9,7 @@ missing.
 
 from datetime import UTC, datetime
 
-from astrometricslib.models.quality.gate_result import passed_gate
+from astrometricslib.models.quality.gate_result import GateResult, passed_gate
 from astrometricslib.models.quality.measurement import QualityMeasurement
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
 from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
@@ -20,14 +20,17 @@ from astrometricslib.pipelines.astrometry.post_processing.record_quality import 
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 
 
-def astrometry_emitted_measurements() -> list[QualityMeasurement]:
-    """Run the astrometry record step on a fixed, fully measured run.
+def astrometry_fixture_run() -> tuple[AstrometryPipelineQualityMetrics, list[GateResult], PipelineRunContext]:
+    """Build a fixed, fully measured, solved astrometry run.
 
     Returns
     -------
-    measurements : `list` of `QualityMeasurement`
-        What the record step emits for a solved run with a Gaia refit and
-        a match table.
+    metrics : `AstrometryPipelineQualityMetrics`
+        The run's numbers.
+    gates : `list` of `GateResult`
+        The plate-solve gate and the four gates of `astrometry_run_gates`.
+    context : `PipelineRunContext`
+        The run's shared facts, for target ``M 99``.
     """
     metrics = AstrometryPipelineQualityMetrics(
         sources_detected=80,
@@ -55,4 +58,17 @@ def astrometry_emitted_measurements() -> list[QualityMeasurement]:
     context = PipelineRunContext(
         "M 99", "astrometry", "1.4.0", "job-1", "job-1", datetime(2026, 10, 22, tzinfo=UTC)
     )
+    return metrics, gates, context
+
+
+def astrometry_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the astrometry record step on a fixed, fully measured run.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a solved run with a Gaia refit and
+        a match table.
+    """
+    metrics, gates, context = astrometry_fixture_run()
     return astrometry_run_measurements(metrics, gates, context, "M99_Stacked.fits")

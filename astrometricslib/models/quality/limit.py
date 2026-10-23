@@ -23,6 +23,7 @@ class LimitTier(StrEnum):
     GEOMETRY = "geometry"
     SENSOR_PROFILE = "sensor_profile"
     PHYSICAL_BUDGET = "physical_budget"
+    DESIGN_ESTIMATE = "design_estimate"
     OWN_BASELINE = "own_baseline"
     VALIDATED_DATASET = "validated_dataset"
 

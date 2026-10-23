@@ -336,3 +336,36 @@ def test_a_storage_failure_does_not_fail_the_run(
     summary = _run_validate_output({"measured_at": MEASURED_AT})
 
     assert summary.gates
+
+
+# Summary fields that are not measurements, with the reason each is left out.
+_NOT_MEASUREMENT_FIELDS = {
+    "rejected_frames": "a list of excluded frames; the frame-rejection gate counts them",
+    "frame_ensemble_composition": "a table of the comparison ensemble per frame",
+    "noise_model_curve": "a curve of points, not one number",
+    "sessions_missing_wcs": "a list of session names; the session plate-solve gate counts them",
+    "sessions_with_reused_header_wcs": "a list of session names",
+    "sessions_with_replaced_header_wcs": "a list of session names",
+}
+
+
+def test_every_summary_field_is_a_measurement_or_listed_as_not_one() -> None:
+    """A new summary field needs a metric or a reason."""
+    from astrometricslib.models.quality.quality_summary import PhotometryPipelineQualityMetrics
+
+    fields = set(PhotometryPipelineQualityMetrics.model_fields)
+    mapped = set(rq.SUMMARY_COUNT_METRICS) | {"light_curve_scatter_rms_mag"}
+    assert fields == mapped | set(_NOT_MEASUREMENT_FIELDS)
+    assert not mapped & set(_NOT_MEASUREMENT_FIELDS)
+    assert set(rq.SUMMARY_COUNT_METRICS.values()) <= _declared_names()
+
+
+def test_the_gate_limit_table_covers_every_gate_and_uses_registered_metrics() -> None:
+    """Each gate has a registered metric; no limit is validated."""
+    from astrometricslib.models.quality.limit import LimitTier
+
+    assert {source.metric_name for source in rq.GATE_LIMIT_SOURCES.values()} <= _declared_names()
+    gate_metrics = {name for name in _declared_names() if ".gate_" in name}
+    assert {source.metric_name for source in rq.GATE_LIMIT_SOURCES.values()} == gate_metrics
+    assert all(source.tier is not LimitTier.VALIDATED_DATASET for source in rq.GATE_LIMIT_SOURCES.values())
+    assert rq.GATE_LIMIT_SOURCES[rq.DETECTABLE_AMPLITUDE_GATE_NAME].tier is LimitTier.DESIGN_ESTIMATE

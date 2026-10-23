@@ -49,6 +49,11 @@ class QualitySubject(BaseModel):
         Row in the capture-setting table.
     channel : `str` or `None`
         The color channel for a one-shot-color camera, else ``None``.
+    variant : `str` or `None`
+        ``None`` for a library stack (and for every frame and run). For a
+        subset stack made from some of a library stack's frames, the subset's
+        label. A reader filters on this field; it never has to parse the
+        subject id for ``_subsets/``.
     """
 
     model_config = ConfigDict(populate_by_name=True)
@@ -59,6 +64,7 @@ class QualitySubject(BaseModel):
     observing_night_id: str | None = Field(default=None, alias="observingNightId")
     capture_setting_id: int | None = Field(default=None, alias="captureSettingId")
     channel: str | None = None
+    variant: str | None = Field(default=None, alias="variant")
 
 
 class MeasurementStatus(StrEnum):

@@ -202,3 +202,22 @@ def test_the_registration_section_reports_a_missing_seq_file(tmp_path: Path) -> 
     assert report.rejected_fraction is None
     assert report.included == ["registration", "rejected_fraction"]
     assert len(report.notes) == 2
+
+
+def test_the_registration_section_returns_typed_rows_from_a_real_format_seq_file(tmp_path: Path) -> None:
+    """A real registration line becomes a typed row."""
+    stack = tmp_path / "M_27_L_Stacked.fits"
+    write_fits(stack, 0.01, 2)
+    # The line is copied from a real M 106 stack.
+    (tmp_path / "M_27_L_Stacked_Registration.seq").write_text(
+        "I 0 1\n"
+        "R1 2.83064 3.27475 0.886847 0 0.0238392 1163 H 1 -1.53863e-05 6.3825 1.73631e-05 "
+        "1.00003 -29.2903 -2.69105e-09 4.67203e-09 1\n"
+    )
+    report = _diagnostics().measure_stack(str(stack), include=["registration"], register_job=False)
+    assert report.registration is not None
+    (row,) = report.registration
+    assert row.star_count == 1163
+    assert row.dx == pytest.approx(6.3825)
+    assert len(row.homography) == 9
+    assert row.model_dump(by_alias=True)["weightedFwhmPx"] == pytest.approx(3.27475)

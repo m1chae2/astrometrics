@@ -126,6 +126,8 @@ class QualityRecords:
         since: TimeInput = None,
         row_ids: list[int] | None = None,
         latest_only: bool = True,
+        variant: str | None = None,
+        library_only: bool = False,
     ) -> list[QualityMeasurement]:
         """Read the quality measurements that earlier runs stored.
 
@@ -157,18 +159,27 @@ class QualityRecords:
         latest_only : `bool`, optional
             Give the newest row for each subject, metric and channel
             (default) instead of every row.
+        variant : `str`, optional
+            Only rows about the subset stack with this label.
+        library_only : `bool`, optional
+            Only rows that are not about a subset stack. Cannot be combined
+            with ``variant``.
 
         Returns
         -------
         measurements : `list` [`QualityMeasurement`]
             The matching measurements, oldest first.
 
+        Raises
+        ------
+        InvalidArgumentError
+            If ``metric`` is not registered (the error lists the registered
+            names), ``level`` is unknown, ``since`` cannot be read as a
+            time, or both ``variant`` and ``library_only`` are given.
+
         Notes
         -----
-        An unknown ``metric`` (the error lists the registered names), an
-        unknown ``level`` or a ``since`` that cannot be read as a time raises
-        `InvalidArgumentError`. A stored row that fails the model's checks
-        raises `StorageError`.
+        A stored row that fails the model's checks raises `StorageError`.
         """
         from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
         from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
@@ -177,6 +188,8 @@ class QualityRecords:
             check_choice("metric", metric, get_metric_registry().names())
         if level is not None:
             check_choice("level", level, tuple(member.value for member in SubjectLevel))
+        if variant is not None and library_only:
+            raise InvalidArgumentError("Give either variant or library_only, not both.")
         since_seconds = to_epoch_seconds(since, "since")
         since_time = None if since_seconds is None else datetime.fromtimestamp(since_seconds, tz=UTC)
         return QualityStore(quality_database_path(self._config)).query(
@@ -189,6 +202,8 @@ class QualityRecords:
             since=since_time,
             row_ids=None if row_ids is None else [int(row_id) for row_id in row_ids],
             latest_only=latest_only,
+            variant=variant,
+            library_only=library_only,
         )
 
     def metrics(
@@ -208,11 +223,11 @@ class QualityRecords:
             ``"frame"`` or ``"spectroscopy"``.
         detail : {``"summary"``, ``"full"``}, optional
             ``"summary"`` (the default) gives the name, unit, checkpoint,
-            levels and purpose of each metric. About 170 metrics are
-            registered, so a list with more than that is too long for an
-            MCP reply. ``"full"`` gives the whole declaration, including
-            the meaning, which way is better and how the number is
-            estimated. Pair it with ``checkpoint`` or ``name``.
+            levels and purpose of each metric. Over 200 metrics are
+            registered, so the full list is too long for an MCP reply.
+            ``"full"`` gives the whole declaration, including the meaning,
+            which way is better and how the number is estimated. Pair it with
+            ``checkpoint`` or ``name``.
 
         Returns
         -------

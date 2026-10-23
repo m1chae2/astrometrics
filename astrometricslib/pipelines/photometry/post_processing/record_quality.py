@@ -86,10 +86,11 @@ from astrometricslib.pipelines.photometry.processing.variability_indices import 
     MINIMUM_STARS_FOR_NOISE_MODEL,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
+    build_and_record_measurements,
     build_measurement,
     gate_measurement,
-    record_run_measurements,
 )
 
 # The percentage of rejected frames needed to trigger a quality warning flag.
@@ -847,33 +848,49 @@ class PhotometryRunInputs:
     errors_assume_unit_gain: bool = False
 
 
-# The metric that stands for each gate, and how its limit was obtained.
-# The tiers are the closest the plan offers; none of them is "design
-# estimate". A count that must be zero follows from the geometry of the run
-# (a frame without a time cannot be placed in a session). The frame-rejection
-# share and the scatter ratio come from earlier runs of this pipeline. The
-# rest are designed limits for an error budget or a sample size.
-_GATE_METRIC_AND_TIER: dict[str, tuple[str, LimitTier]] = {
-    ENSEMBLE_REJECTION_GATE_NAME: (PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION, LimitTier.OWN_BASELINE),
-    CAPTURE_TIMESTAMP_GATE_NAME: (PHOTOMETRY_GATE_CAPTURE_TIMESTAMPS, LimitTier.GEOMETRY),
-    SESSION_CONTENT_GATE_NAME: (PHOTOMETRY_GATE_SESSION_CONTENT, LimitTier.GEOMETRY),
-    SESSION_PLATE_SOLVE_GATE_NAME: (PHOTOMETRY_GATE_SESSION_PLATE_SOLVE, LimitTier.GEOMETRY),
-    PHOTOMETRY_WORK_GATE_NAME: (PHOTOMETRY_GATE_PHOTOMETRY_WORK, LimitTier.GEOMETRY),
-    COMPARISON_ENSEMBLE_GATE_NAME: (PHOTOMETRY_GATE_COMPARISON_ENSEMBLE, LimitTier.PHYSICAL_BUDGET),
-    REGISTRATION_DRIFT_GATE_NAME: (PHOTOMETRY_GATE_REGISTRATION_DRIFT, LimitTier.GEOMETRY),
-    SCATTER_POPULATION_GATE_NAME: (PHOTOMETRY_GATE_SCATTER_POPULATION, LimitTier.PHYSICAL_BUDGET),
-    VARIABILITY_DISCRIMINATION_GATE_NAME: (
-        PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION,
-        LimitTier.PHYSICAL_BUDGET,
+# The metric that stands for each gate, and how its limit was obtained. The
+# history fill (`scripts/backfill_quality_measurements.py`) reads this table
+# too, so a limit is described in one place.
+#
+# A count that must be zero, a missing time or a missing plate solve follows
+# from the geometry of the run (a frame without a time cannot be placed in a
+# session). Every other limit is a designed value that the validation register
+# lists in its design-estimates table, so each is a design estimate and cites
+# its row (PHO-D06, PHO-D09, PHO-D13 to PHO-D16). The frame-rejection share
+# was set above the 7 percent that earlier runs showed, but it is a chosen
+# threshold, not a measured baseline. The flux-uncertainty gate has no limit
+# (it reports the size of the errors); its source line is the error formula,
+# which is physics, so it keeps the physical-budget tier with no value.
+GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
+    ENSEMBLE_REJECTION_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION, LimitTier.DESIGN_ESTIMATE, "PHO-D09"
     ),
-    DETECTABLE_AMPLITUDE_GATE_NAME: (PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE, LimitTier.PHYSICAL_BUDGET),
-    FLUX_UNCERTAINTY_GATE_NAME: (PHOTOMETRY_GATE_FLUX_UNCERTAINTY, LimitTier.PHYSICAL_BUDGET),
+    CAPTURE_TIMESTAMP_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_CAPTURE_TIMESTAMPS, LimitTier.GEOMETRY),
+    SESSION_CONTENT_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_SESSION_CONTENT, LimitTier.GEOMETRY),
+    SESSION_PLATE_SOLVE_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_SESSION_PLATE_SOLVE, LimitTier.GEOMETRY),
+    PHOTOMETRY_WORK_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_PHOTOMETRY_WORK, LimitTier.GEOMETRY),
+    COMPARISON_ENSEMBLE_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_COMPARISON_ENSEMBLE, LimitTier.DESIGN_ESTIMATE, "PHO-D06"
+    ),
+    REGISTRATION_DRIFT_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_REGISTRATION_DRIFT, LimitTier.DESIGN_ESTIMATE, "PHO-D16"
+    ),
+    SCATTER_POPULATION_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_SCATTER_POPULATION, LimitTier.DESIGN_ESTIMATE, "PHO-D13"
+    ),
+    VARIABILITY_DISCRIMINATION_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_VARIABILITY_DISCRIMINATION, LimitTier.DESIGN_ESTIMATE, "PHO-D14"
+    ),
+    DETECTABLE_AMPLITUDE_GATE_NAME: GateLimitSource(
+        PHOTOMETRY_GATE_DETECTABLE_AMPLITUDE, LimitTier.DESIGN_ESTIMATE, "PHO-D15"
+    ),
+    FLUX_UNCERTAINTY_GATE_NAME: GateLimitSource(PHOTOMETRY_GATE_FLUX_UNCERTAINTY, LimitTier.PHYSICAL_BUDGET),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in PHOTOMETRY_METRICS}
 
 
-def _gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateResult:
+def gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> GateResult:
     """Adjust a gate so its number means one thing in every outcome.
 
     Two gates quote a different number depending on how they ended. The
@@ -883,6 +900,10 @@ def _gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> Gate
     metric has one unit and one meaning, so the measurement uses a steady
     number (the other numbers have metrics of their own). The gate itself is
     not changed.
+
+    The run's record step calls this function, and so does the history fill
+    (with empty inputs, for gates whose steady number does not need them; see
+    `steady_number_needs_run_data`).
 
     Parameters
     ----------
@@ -931,6 +952,32 @@ def _gate_for_measurement(gate: GateResult, inputs: PhotometryRunInputs) -> Gate
     return gate
 
 
+def steady_number_needs_run_data(gate: GateResult) -> bool:
+    """Say whether a gate's steady number needs run data.
+
+    `gate_for_measurement` gives each gate a steady number. The
+    comparison-ensemble and registration-drift gates quote a steady number
+    (the smallest comparison set, the largest drift) that comes from the
+    run's own lists. A stored summary does not hold those lists, so the
+    history fill cannot rebuild the number for a gate that ran. A gate that
+    was not checked keeps what it recorded.
+
+    Parameters
+    ----------
+    gate : `GateResult`
+        The gate as recorded on the summary.
+
+    Returns
+    -------
+    needs_run_data : `bool`
+        `True` when the gate ran and its steady number comes from run data.
+    """
+    return (
+        gate.name in (COMPARISON_ENSEMBLE_GATE_NAME, REGISTRATION_DRIFT_GATE_NAME)
+        and gate.status is not GateStatus.NOT_CHECKED
+    )
+
+
 def _worst_centroid_values(
     summaries: Sequence[CentroidShiftSummary],
 ) -> tuple[float | None, float | None]:
@@ -960,6 +1007,25 @@ def _worst_centroid_values(
         float(max(corners)) if corners else None,
         float(max(fallbacks)) if fallbacks else None,
     )
+
+
+# The summary's count fields, as the field name on
+# `PhotometryPipelineQualityMetrics` and the metric that holds each one. The
+# run's other numbers come from `PhotometryRunInputs` or are made from lists.
+# A test checks that every summary field is here, is the light-curve scatter,
+# or is named there as not a measurement.
+SUMMARY_COUNT_METRICS: dict[str, str] = {
+    "stars_processed": PHOTOMETRY_STARS_PROCESSED,
+    "stars_found": PHOTOMETRY_STARS_FOUND,
+    "frames_processed": PHOTOMETRY_FRAMES_PROCESSED,
+    "variable_candidate_count": PHOTOMETRY_VARIABLE_CANDIDATE_COUNT,
+    "cross_session_match_count": PHOTOMETRY_CROSS_SESSION_MATCH_COUNT,
+    "long_term_variable_candidate_count": PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT,
+    "astrometry_identified_star_count": PHOTOMETRY_ASTROMETRY_IDENTIFIED_STAR_COUNT,
+    "catalog_matched_star_count": PHOTOMETRY_CATALOG_MATCHED_STAR_COUNT,
+    "position_only_star_count": PHOTOMETRY_POSITION_ONLY_STAR_COUNT,
+    "unresolved_star_count": PHOTOMETRY_UNRESOLVED_STAR_COUNT,
+}
 
 
 def photometry_run_measurements(
@@ -995,19 +1061,10 @@ def photometry_run_measurements(
     measurements: list[QualityMeasurement] = []
 
     counts: dict[str, int | None] = {
-        PHOTOMETRY_STARS_PROCESSED: metrics.stars_processed,
-        PHOTOMETRY_STARS_FOUND: metrics.stars_found,
-        PHOTOMETRY_FRAMES_PROCESSED: metrics.frames_processed,
-        PHOTOMETRY_VARIABLE_CANDIDATE_COUNT: metrics.variable_candidate_count,
-        PHOTOMETRY_CROSS_SESSION_MATCH_COUNT: metrics.cross_session_match_count,
-        PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT: metrics.long_term_variable_candidate_count,
-        PHOTOMETRY_ASTROMETRY_IDENTIFIED_STAR_COUNT: metrics.astrometry_identified_star_count,
-        PHOTOMETRY_CATALOG_MATCHED_STAR_COUNT: metrics.catalog_matched_star_count,
-        PHOTOMETRY_POSITION_ONLY_STAR_COUNT: metrics.position_only_star_count,
-        PHOTOMETRY_UNRESOLVED_STAR_COUNT: metrics.unresolved_star_count,
-        PHOTOMETRY_STARS_WITH_SCATTER: inputs.stars_with_scatter,
-        PHOTOMETRY_NOISE_MODEL_STAR_COUNT: inputs.noise_model_star_count,
+        metric_name: getattr(metrics, field_name) for field_name, metric_name in SUMMARY_COUNT_METRICS.items()
     }
+    counts[PHOTOMETRY_STARS_WITH_SCATTER] = inputs.stars_with_scatter
+    counts[PHOTOMETRY_NOISE_MODEL_STAR_COUNT] = inputs.noise_model_star_count
     for metric_name, count in counts.items():
         measurements.append(
             build_measurement(
@@ -1054,18 +1111,18 @@ def photometry_run_measurements(
         )
 
     gates_by_name = {gate.name: gate for gate in gates}
-    for gate_name, (metric_name, tier) in _GATE_METRIC_AND_TIER.items():
+    for gate_name, limit_source in GATE_LIMIT_SOURCES.items():
         gate = gates_by_name.get(gate_name)
         if gate is None:
             continue
-        spec = _SPEC_BY_NAME[metric_name]
+        spec = _SPEC_BY_NAME[limit_source.metric_name]
         measurement = gate_measurement(
-            _gate_for_measurement(gate, inputs),
+            gate_for_measurement(gate, inputs),
             spec,
             context,
             subject,
-            limit_tier=tier,
-            register_entry=spec.register_entry,
+            limit_tier=limit_source.tier,
+            register_entry=limit_source.register_entry,
         )
         if (
             gate_name == FLUX_UNCERTAINTY_GATE_NAME
@@ -1086,7 +1143,7 @@ def record_photometry_quality(
     *,
     config: object = None,
 ) -> int:
-    """Store the run's measurements; a storage failure never fails the run.
+    """Store the run's measurements; no failure here ever fails the run.
 
     Parameters
     ----------
@@ -1104,8 +1161,11 @@ def record_photometry_quality(
     Returns
     -------
     new_count : `int`
-        How many rows were new.
+        How many rows were new. It is 0 when anything went wrong, either in
+        building the rows or in storing them (both are logged).
     """
-    return record_run_measurements(
-        photometry_run_measurements(metrics, gates, inputs, context), config=config
+    return build_and_record_measurements(
+        lambda: photometry_run_measurements(metrics, gates, inputs, context),
+        f"photometry run on {context.target_id}",
+        config=config,
     )

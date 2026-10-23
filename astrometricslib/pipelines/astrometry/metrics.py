@@ -38,16 +38,16 @@ from astrometricslib.models.quality.metric_spec import (
     UncertaintyKind,
 )
 
-ASTROMETRY_SOURCES_DETECTED = "astrometry.sources_detected"
+ASTROMETRY_SOURCES_DETECTED = "astrometry.sources_detected_count"
 ASTROMETRY_SIMBAD_MATCHED_COUNT = "astrometry.simbad_matched_count"
 ASTROMETRY_CATALOG_MATCHED_STAR_COUNT = "astrometry.catalog_matched_star_count"
 ASTROMETRY_POSITION_ONLY_STAR_COUNT = "astrometry.position_only_star_count"
 ASTROMETRY_UNRESOLVED_STAR_COUNT = "astrometry.unresolved_star_count"
-ASTROMETRY_PLATE_SOLVE_ATTEMPTS = "astrometry.plate_solve_attempts"
+ASTROMETRY_PLATE_SOLVE_ATTEMPTS = "astrometry.plate_solve_attempts_count"
 ASTROMETRY_PLATE_SOLVE_MATCHED_STAR_COUNT = "astrometry.plate_solve_matched_star_count"
 ASTROMETRY_GAIA_FIT_STAR_COUNT = "astrometry.gaia_fit_star_count"
-ASTROMETRY_REMOTE_CATALOG_QUERIES_ATTEMPTED = "astrometry.remote_catalog_queries_attempted"
-ASTROMETRY_REMOTE_CATALOG_QUERIES_FAILED = "astrometry.remote_catalog_queries_failed"
+ASTROMETRY_REMOTE_CATALOG_QUERIES_ATTEMPTED = "astrometry.remote_catalog_queries_attempted_count"
+ASTROMETRY_REMOTE_CATALOG_QUERIES_FAILED = "astrometry.remote_catalog_queries_failed_count"
 ASTROMETRY_CATALOG_MATCH_SEPARATION_RMS_ARCSEC = "astrometry.catalog_match_separation_rms_arcsec"
 ASTROMETRY_PLATE_SOLVE_FIT_RESIDUAL_RMS_ARCSEC = "astrometry.plate_solve_fit_residual_rms_arcsec"
 ASTROMETRY_GAIA_FIT_RMS_ARCSEC = "astrometry.gaia_fit_rms_arcsec"

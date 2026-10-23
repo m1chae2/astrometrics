@@ -10,19 +10,24 @@ when it fits the stack.
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.wcs import WCS
 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
     APERTURE_RADIUS_PX,
+    APERTURE_SEPARATION_PX,
+    MAD_SIGMA_ERROR_FACTOR,
     NO_WCS_REASON,
     RING_INNER_PX,
     RING_OUTER_PX,
     load_apertures,
     measure_stack_noise,
+    reset_apertures,
     signed_aperture_sum,
 )
 
@@ -62,6 +67,7 @@ def _sky_image(
     seed: int,
     star_amplitude: float = 2000.0,
     star_positions: list[tuple[float, float]] | None = None,
+    star_sigma: float = 2.0,
 ) -> np.ndarray:
     """Build a flat sky with white noise and bright round stars.
 
@@ -75,6 +81,9 @@ def _sky_image(
         The peak of each star above the sky.
     star_positions : `list` of `tuple`, optional
         The (column, row) of each star. A regular grid if left out.
+    star_sigma : `float`, optional
+        The Gaussian width of each star in pixels. The amplitude is scaled so
+        the star's total light is the same whatever the width.
 
     Returns
     -------
@@ -87,9 +96,9 @@ def _sky_image(
     image = SKY_LEVEL + generator.normal(0.0, noise_sigma, (SIZE, SIZE))
     # The amplitudes differ, because the star finder skips stars as bright as
     # the brightest pixels (it takes those for saturated).
-    amplitudes = np.linspace(0.3, 1.0, len(positions)) * star_amplitude
+    amplitudes = np.linspace(0.3, 1.0, len(positions)) * star_amplitude * (2.0 / star_sigma) ** 2
     for (x, y), amplitude in zip(positions, amplitudes, strict=True):
-        image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * 2.0**2))
+        image += amplitude * np.exp(-((columns - x) ** 2 + (rows - y) ** 2) / (2 * star_sigma**2))
     return image.astype(np.float32)
 
 
@@ -125,8 +134,10 @@ def test_noise_of_white_sky_is_recovered_within_its_uncertainty(tmp_path: Path) 
     result = outcome.result
     assert result.aperture_count >= 90
     assert abs(result.noise_adu - expected) < 3 * result.noise_uncertainty_adu
+    # The spread is 1.4826 x MAD, so its error is that of the MAD, not of a
+    # standard deviation: 1.1664 / sqrt(n).
     assert result.noise_uncertainty_adu / result.noise_adu == pytest.approx(
-        1 / math.sqrt(2 * (result.aperture_count - 1))
+        MAD_SIGMA_ERROR_FACTOR / math.sqrt(result.aperture_count)
     )
     assert result.reference_star_count == 10
     assert result.reference_flux_adu > 1000
@@ -152,7 +163,8 @@ def test_apertures_are_reused_by_a_later_stack_of_the_target(tmp_path: Path) -> 
         first_outcome.result.reference_flux_adu, rel=0.02
     )
     assert load_apertures(apertures).created_from == "first.fits"
-    assert json.loads(stored)["aperture_radius_px"] == APERTURE_RADIUS_PX
+    stored_set = next(iter(json.loads(stored)["sets"].values()))
+    assert stored_set["aperture_radius_px"] == APERTURE_RADIUS_PX
 
 
 def test_apertures_follow_the_sky_when_the_stack_is_shifted(tmp_path: Path) -> None:
@@ -293,3 +305,221 @@ def test_a_first_guess_solution_that_finds_no_stored_stars_is_refused(tmp_path: 
     outcome = measure_stack_noise(stack, reference, apertures)
     assert outcome.result is None
     assert "agree on a shift" in outcome.reason
+
+
+def _fake_camera_profile(saturation_adu: float) -> object:
+    """Build a stand-in camera profile with a chosen saturation level.
+
+    Parameters
+    ----------
+    saturation_adu : `float`
+        The saturation threshold, in ADU.
+
+    Returns
+    -------
+    profile : `types.SimpleNamespace`
+        An object with the fields the saturation check reads.
+    """
+    return SimpleNamespace(
+        saturation_threshold_adu=SimpleNamespace(value=saturation_adu),
+        photometric_linearity_limit_adu=None,
+        camera_name="Test camera",
+        is_generic_fallback=False,
+    )
+
+
+def test_the_spread_error_formula_matches_a_simulation() -> None:
+    """The error of 1.4826 MAD is 1.1664 sigma / sqrt(n)."""
+    generator = np.random.default_rng(7)
+    samples = generator.normal(0.0, 1.0, (20000, 100))
+    spreads = 1.4826 * np.median(np.abs(samples - np.median(samples, axis=1, keepdims=True)), axis=1)
+    assert np.std(spreads) * math.sqrt(100) == pytest.approx(MAD_SIGMA_ERROR_FACTOR, rel=0.03)
+    # The standard deviation's formula would give 0.71, a third too small.
+    assert 1 / math.sqrt(2 * 99) * math.sqrt(100) < 0.75 * MAD_SIGMA_ERROR_FACTOR
+
+
+def test_the_flux_scale_is_each_stars_ratio_to_its_first_stack_value(tmp_path: Path) -> None:
+    """Stars twice as bright give a zero point of 2 and a small error."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    bright = _write(
+        tmp_path / "bright.fits",
+        _sky_image(2.0, seed=2, star_positions=scattered, star_amplitude=4000.0),
+        _sky_header(),
+    )
+    first_result = measure_stack_noise(first, None, apertures).result
+    bright_result = measure_stack_noise(bright, None, apertures).result
+    assert first_result is not None and bright_result is not None
+    assert first_result.reference_zero_point == pytest.approx(1.0)
+    assert first_result.reference_zero_point_uncertainty == pytest.approx(0.0, abs=1e-9)
+    assert bright_result.reference_zero_point == pytest.approx(2.0, rel=0.02)
+    assert bright_result.reference_flux_adu == pytest.approx(2.0 * first_result.reference_flux_adu, rel=0.02)
+    # Stars of very different brightness no longer add to the error: the
+    # ratios scatter by the noise only.
+    assert bright_result.reference_zero_point_uncertainty < 0.01
+
+
+def test_the_flux_scale_does_not_change_when_the_seeing_does(tmp_path: Path) -> None:
+    """The same stars blurred from 2 px to 3 px keep the same zero point."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    sharp = _write(tmp_path / "sharp.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    blurred = _write(
+        tmp_path / "blurred.fits",
+        _sky_image(2.0, seed=2, star_positions=scattered, star_sigma=3.0),
+        _sky_header(),
+    )
+    sharp_result = measure_stack_noise(sharp, None, apertures).result
+    blurred_result = measure_stack_noise(blurred, None, apertures).result
+    assert sharp_result is not None and blurred_result is not None
+    assert sharp_result.reference_aperture_radius_px >= 8.0
+    assert blurred_result.reference_zero_point == pytest.approx(1.0, abs=0.03)
+
+
+def test_stars_saturated_in_the_reference_frame_are_never_reference_stars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stars at the saturation level are skipped when choosing."""
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise.resolve_camera_profile",
+        lambda camera_name: _fake_camera_profile(1500.0),
+    )
+    scattered = _scattered_stars(seed=3)
+    image = _sky_image(2.0, seed=1, star_positions=scattered)
+    frame = _write(tmp_path / "frame.fits", image, _sky_header())
+    stack = _write(tmp_path / "stack.fits", image, None)
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    outcome = measure_stack_noise(stack, frame, apertures)
+    assert outcome.result is not None, outcome.reason
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    columns, rows = wcs.world_to_pixel_values(chosen.reference_sky[:, 0], chosen.reference_sky[:, 1])
+    for column, row in zip(columns, rows, strict=True):
+        window = image[round(row) - 3 : round(row) + 4, round(column) - 3 : round(column) + 4]
+        assert window.max() < 1500.0
+    assert "1500" in chosen.saturation_source
+    assert outcome.result.saturated_reference_stars == 0
+
+
+def test_a_stored_star_that_saturates_on_a_later_stack_is_left_out_of_its_zero_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On a later stack, a stored star at the saturation level is not used."""
+    scattered = _scattered_stars(seed=3)
+    image = _sky_image(2.0, seed=1, star_positions=scattered)
+    first = _write(tmp_path / "first.fits", image, _sky_header())
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    assert measure_stack_noise(first, None, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    column, row = (float(value[0]) for value in wcs.world_to_pixel_values(*chosen.reference_sky[:1].T))
+    peak = float(image[round(row), round(column)])
+    monkeypatch.setattr(
+        "astrometricslib.pipelines.stacking.post_processing.stack_noise.resolve_camera_profile",
+        lambda camera_name: _fake_camera_profile(peak - 1.0),
+    )
+    frame = _write(tmp_path / "frame.fits", image, _sky_header())
+    stack = _write(tmp_path / "stack.fits", image, _sky_header())
+    result = measure_stack_noise(stack, frame, apertures).result
+    assert result is not None
+    assert result.saturated_reference_stars >= 1
+    assert result.reference_star_count == len(chosen.reference_sky) - result.saturated_reference_stars
+
+
+def test_a_header_solution_that_is_a_copied_guess_is_moved_onto_the_stored_stars(tmp_path: Path) -> None:
+    """A header solution that is 30 px wrong is checked and moved."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    first_result = measure_stack_noise(first, None, apertures).result
+    assert first_result is not None
+    # The header is the first stack's, but the stars have moved: a copied
+    # pointing guess, not a plate solution.
+    moved_image = np.roll(_sky_image(2.0, seed=7, star_positions=scattered), shift=(30, -25), axis=(0, 1))
+    stack = _write(tmp_path / "stack.fits", moved_image, _sky_header())
+    result = measure_stack_noise(stack, None, apertures).result
+    assert result is not None
+    assert result.wcs_source == "stack header"
+    assert "moved by +30.0 rows and -25.0 columns" in result.position_note
+    assert "px rms" in result.position_note
+    assert result.reference_zero_point == pytest.approx(1.0, abs=0.03)
+    assert first_result.position_note == ""
+
+
+def test_a_stack_rotated_beyond_the_limit_is_refused(tmp_path: Path) -> None:
+    """A rotation of 0.5 degree cannot follow by a shift: no noise."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    first = _write(tmp_path / "first.fits", _sky_image(2.0, seed=1, star_positions=scattered), _sky_header())
+    assert measure_stack_noise(first, None, apertures).result is not None
+    angle = math.radians(0.5)
+    center = SIZE / 2
+    rotated = [
+        (
+            center + (x - center) * math.cos(angle) - (y - center) * math.sin(angle),
+            center + (x - center) * math.sin(angle) + (y - center) * math.cos(angle),
+        )
+        for x, y in scattered
+    ]
+    stack = _write(tmp_path / "rotated.fits", _sky_image(2.0, seed=2, star_positions=rotated), _sky_header())
+    outcome = measure_stack_noise(stack, None, apertures)
+    assert outcome.result is None
+    assert "rotated by" in outcome.reason
+    assert "0.1 deg" in outcome.reason
+
+
+def test_apertures_are_at_least_the_separation_apart(tmp_path: Path) -> None:
+    """No two apertures overlap, so no two sky rings share a pixel."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    assert measure_stack_noise(stack, None, apertures).result is not None
+    chosen = load_apertures(apertures)
+    assert chosen is not None
+    wcs = WCS(_sky_header()).celestial
+    columns, rows = wcs.world_to_pixel_values(chosen.aperture_sky[:, 0], chosen.aperture_sky[:, 1])
+    points = np.column_stack([columns, rows])
+    distances = np.hypot(*(points[:, None, :] - points[None, :, :]).transpose(2, 0, 1))
+    np.fill_diagonal(distances, np.inf)
+    assert distances.min() >= APERTURE_SEPARATION_PX - 1e-6
+    assert APERTURE_SEPARATION_PX >= 2 * RING_OUTER_PX
+
+
+def test_each_camera_and_optic_keeps_its_own_apertures_and_they_can_be_reset(tmp_path: Path) -> None:
+    """Other equipment starts a new set; the old set stays."""
+    apertures = str(tmp_path / APERTURE_FILE_NAME)
+    scattered = _scattered_stars(seed=3)
+    header_a = _sky_header()
+    header_a["INSTRUME"] = "Camera A"
+    header_a["FOCALLEN"] = 400.0
+    header_b = _sky_header()
+    header_b["INSTRUME"] = "Camera B"
+    header_b["FOCALLEN"] = 400.0
+    stack_a = _write(tmp_path / "a.fits", _sky_image(2.0, seed=1, star_positions=scattered), header_a)
+    stack_b = _write(tmp_path / "b.fits", _sky_image(2.0, seed=2, star_positions=scattered), header_b)
+    first = measure_stack_noise(stack_a, None, apertures).result
+    other = measure_stack_noise(stack_b, None, apertures).result
+    assert first is not None and other is not None
+    assert first.apertures_created and other.apertures_created
+    sets = json.loads(Path(apertures).read_text())["sets"]
+    assert sorted(sets) == ["camera a|?|400", "camera b|?|400"]
+    assert load_apertures(apertures, "camera a|?|400").created_from == "a.fits"
+    # Forgetting one camera leaves the other; forgetting all deletes the file.
+    assert reset_apertures(apertures, "camera a|?|400") is True
+    assert sorted(json.loads(Path(apertures).read_text())["sets"]) == ["camera b|?|400"]
+    assert reset_apertures(apertures, "camera a|?|400") is False
+    assert reset_apertures(apertures) is True
+    assert not Path(apertures).exists()
+    assert measure_stack_noise(stack_a, None, apertures).result.apertures_created is True
+
+
+def test_an_aperture_file_from_the_first_development_version_is_replaced(tmp_path: Path) -> None:
+    """A version-1 file is replaced by a new set."""
+    apertures = tmp_path / APERTURE_FILE_NAME
+    apertures.write_text(json.dumps({"version": 1, "apertures_ra_dec_deg": []}))
+    stack = _write(tmp_path / "stack.fits", _sky_image(2.0, seed=1), _sky_header())
+    result = measure_stack_noise(stack, None, str(apertures)).result
+    assert result is not None and result.apertures_created
+    assert json.loads(apertures.read_text())["version"] == 2

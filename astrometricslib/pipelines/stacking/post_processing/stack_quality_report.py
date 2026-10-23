@@ -20,7 +20,7 @@ from collections.abc import Collection
 from typing import Literal
 
 from astrometricslib.foundation.errors import NotFoundError
-from astrometricslib.models.quality.quality_reports import StackQualityReport, StackSummary
+from astrometricslib.models.quality.quality_reports import RegistrationRow, StackQualityReport, StackSummary
 from astrometricslib.models.target import Target
 
 __all__ = ["STACK_QUALITY_SECTIONS", "stack_path_of", "stack_quality_report", "summarize_stack"]
@@ -115,7 +115,7 @@ def stack_quality_report(
     if "registration" in include:
         seq_path = os.path.splitext(stack_path)[0] + "_Registration.seq"
         if os.path.isfile(seq_path):
-            report.registration = parse_seq_file(seq_path)
+            report.registration = [RegistrationRow(**row) for row in parse_seq_file(seq_path)]
         else:
             notes.append("No _Registration.seq file was kept beside this stack.")
     if compare_to == "previous":

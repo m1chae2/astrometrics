@@ -14,7 +14,7 @@ import pytest
 
 from astrometricslib import Astrometrics
 from astrometricslib.api.quality import QualityRecords
-from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib.drivers.quality_store import QualityStore, quality_database_path
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.capture_setting import CaptureSetting
 from astrometricslib.models.quality.measurement import (
@@ -112,6 +112,33 @@ def test_stored_measurements_come_back_filtered(quality: QualityRecords, tmp_pat
     assert len(quality.query(since=BASE_TIME + timedelta(hours=2))) == 0
     cited = quality.query(row_ids=[1])
     assert [measurement.row_id for measurement in cited] == [1]
+
+
+def test_variant_and_library_only_filters(quality: QualityRecords) -> None:
+    """``variant`` picks one subset; ``library_only`` leaves subsets out."""
+    quality.query()  # The store file may not exist yet; asking must be harmless.
+    QualityStore(quality_database_path(quality._config)).write_measurements([
+        _measurement("run-1", BASE_TIME),
+        _measurement(
+            "run-1",
+            BASE_TIME,
+            subject=QualitySubject(
+                level=SubjectLevel.FRAME,
+                subject_id="M31/_subsets/half/a.fits",
+                target_id="M31",
+                variant="half",
+            ),
+        ),
+    ])
+
+    assert [m.subject.variant for m in quality.query(variant="half")] == ["half"]
+    assert [m.subject.variant for m in quality.query(library_only=True)] == [None]
+
+
+def test_variant_with_library_only_is_refused(quality: QualityRecords) -> None:
+    """Asking for one subset and for none at once raises an error."""
+    with pytest.raises(InvalidArgumentError):
+        quality.query(variant="half", library_only=True)
 
 
 def test_bad_arguments_are_refused(quality: QualityRecords) -> None:

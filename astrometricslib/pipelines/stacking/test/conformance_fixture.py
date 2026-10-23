@@ -36,7 +36,10 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     StackNoiseOutcome,
     StackNoiseResult,
 )
-from astrometricslib.pipelines.stacking.subset_noise_run import night_measurements
+from astrometricslib.pipelines.stacking.subset_noise_run import (
+    expected_ratio_measurement,
+    night_measurements,
+)
 
 FIXTURE_TIME = datetime(2026, 10, 22, tzinfo=UTC)
 
@@ -168,6 +171,19 @@ def stacking_emitted_measurements() -> list[QualityMeasurement]:
             "",
             SubsetStackResult(targetId="M 99", label="M99_L_Stacked.without-2026-10-01"),
             fixture_noise_outcome(),
+        )
+    )
+    measurements.append(
+        expected_ratio_measurement(
+            context,
+            context.stack_subject(
+                "_subsets/M99_L_Stacked.without-2026-10-01/M99_L_Stacked.without-2026-10-01.fits"
+            ),
+            None,
+            SubsetStackResult(
+                targetId="M 99", label="M99_L_Stacked.without-2026-10-01", effectiveFrameCount=9.0
+            ),
+            "",
         )
     )
     measurements.extend(

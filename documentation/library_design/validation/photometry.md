@@ -215,7 +215,7 @@ if summary is not None:
 - **Verdict:** Not judged.
 - **Limits:** Three fields and one camera. The 1 pixel and 20% limits are design estimates set with these values in view, not from a false-positive rate. The 0.6 px independent fit was done by hand.
 - **To tune for your setup:** If your steady nights show a corner displacement near 1 pixel, the scale term between the two centroid methods may dominate; check it on a night with no rotation before raising `MAXIMUM_CORNER_DISPLACEMENT_PX`. For larger star images (FWHM above about 4 px), the 11 px re-centering box is too small; widen `CENTROID_BOX_HALF_WIDTH_PX` and re-run this procedure.
-- **Regenerate with:** No script; measured by hand on 2026-10-11. Each run now also stores the 95th-percentile corner displacement and the fallback share (worst session) as `photometry.corner_displacement_p95_worst_px` and `photometry.centroid_fallback_fraction_worst`.
+- **Regenerate with:** No script; measured by hand on 2026-10-11. Each run now also stores the 95th-percentile corner displacement and the fallback share (worst session) as `photometry.corner_displacement_p95_worst_px` and `photometry.centroid_fallback_worst_fraction`.
 - **Guarded by tests:** The gate logic is pinned by `astrometricslib/pipelines/photometry/test/post_processing/test_record_quality.py` and `astrometricslib/pipelines/photometry/test/pre_processing/test_centroid_shift_summary.py`.
 - **Raw record:** None kept.
 

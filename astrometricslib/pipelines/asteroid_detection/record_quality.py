@@ -52,10 +52,11 @@ from astrometricslib.pipelines.asteroid_detection.metrics import (
     ASTEROID_RESIDUAL_WORST_ACCEPTED_RATIO,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
+    build_and_record_measurements,
     build_measurement,
     gate_measurement,
-    record_run_measurements,
 )
 
 SEARCH_FRAMES_GATE_NAME = "search_frames"
@@ -253,23 +254,35 @@ _COUNT_METRIC_BY_KEY: dict[str, str] = {
     "residual_assumed_error_detections": ASTEROID_RESIDUAL_ASSUMED_ERROR_DETECTIONS,
 }
 
-# The metric that stands for each gate, and how its limit was obtained.
-# A count that must be zero, or the frames a track needs, follows from the
-# geometry of the search: a frame without pointing cannot be searched and a
-# track needs a minimum number of dots. The residual limit is a multiple of
-# the position error of one picture, an error budget.
-_GATE_METRIC_AND_TIER: dict[str, tuple[str, LimitTier]] = {
-    SEARCH_FRAMES_GATE_NAME: (ASTEROID_GATE_SEARCH_FRAMES, LimitTier.GEOMETRY),
-    POINTING_METADATA_GATE_NAME: (ASTEROID_GATE_POINTING_METADATA, LimitTier.GEOMETRY),
-    EPHEMERIS_GATE_NAME: (ASTEROID_GATE_EPHEMERIS_CROSS_MATCH, LimitTier.GEOMETRY),
-    UNMATCHED_MOVERS_GATE_NAME: (ASTEROID_GATE_UNMATCHED_MOVERS, LimitTier.GEOMETRY),
-    RESIDUAL_CRITERION_GATE_NAME: (ASTEROID_GATE_TRACK_RESIDUALS, LimitTier.PHYSICAL_BUDGET),
+# The metric that stands for each gate, and how its limit was obtained. The
+# history fill (`scripts/backfill_quality_measurements.py`) reads this table
+# too, so a limit is described in one place.
+#
+# A count that must be zero follows from the geometry of the search: a frame
+# without pointing cannot be searched, and a mover that is confirmed but
+# matches no known body is, by definition, one to look at. The two limits
+# that are tunable settings are designed values: the fewest frames in a track
+# (3, the ``min_frames_for_persistence`` setting, row MOV-D01 of the
+# design-estimates table) and the straight-line residual, a multiple of the
+# position error of one picture (2.0, the ``residual_rms_max_multiple``
+# setting). Entry MOV-03 holds the only evidence for the residual multiple:
+# 40 synthetic fields, none on real data. Neither is a measured limit.
+GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
+    SEARCH_FRAMES_GATE_NAME: GateLimitSource(
+        ASTEROID_GATE_SEARCH_FRAMES, LimitTier.DESIGN_ESTIMATE, "MOV-D01"
+    ),
+    POINTING_METADATA_GATE_NAME: GateLimitSource(ASTEROID_GATE_POINTING_METADATA, LimitTier.GEOMETRY),
+    EPHEMERIS_GATE_NAME: GateLimitSource(ASTEROID_GATE_EPHEMERIS_CROSS_MATCH, LimitTier.GEOMETRY),
+    UNMATCHED_MOVERS_GATE_NAME: GateLimitSource(ASTEROID_GATE_UNMATCHED_MOVERS, LimitTier.GEOMETRY),
+    RESIDUAL_CRITERION_GATE_NAME: GateLimitSource(
+        ASTEROID_GATE_TRACK_RESIDUALS, LimitTier.DESIGN_ESTIMATE, "MOV-03"
+    ),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in ASTEROID_DETECTION_METRICS}
 
 
-def _gate_for_measurement(gate: GateResult, metrics: Mapping[str, float]) -> GateResult:
+def gate_for_measurement(gate: GateResult, ephemeris_queries_failed: float | None) -> GateResult | None:
     """Adjust a gate so its number means one thing in every outcome.
 
     Two gates quote a different number depending on how they ended. The
@@ -279,24 +292,28 @@ def _gate_for_measurement(gate: GateResult, metrics: Mapping[str, float]) -> Gat
     meaning, so the measurement uses a steady number instead. The gate itself
     is not changed.
 
+    The run's record step and the history fill both call this function.
+
     Parameters
     ----------
     gate : `GateResult`
         The gate as recorded on the summary.
-    metrics : `Mapping` [`str`, `float`]
-        The run's counts.
+    ephemeris_queries_failed : `float` or `None`
+        How many known-asteroid queries failed. `None` when unknown (only a
+        stored summary can lack it).
 
     Returns
     -------
-    gate : `GateResult`
+    gate : `GateResult` or `None`
         A copy for the measurement. The known-asteroid gate carries the number
         of failed queries and the limit 0 unless it was not checked; the
-        residual gate carries no number unless it passed.
+        residual gate carries no number unless it passed. `None` when the
+        number is needed and unknown.
     """
     if gate.name == EPHEMERIS_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
-        return gate.model_copy(
-            update={"measured_value": float(metrics.get("ephemeris_queries_failed", 0)), "limit": 0.0}
-        )
+        if ephemeris_queries_failed is None:
+            return None
+        return gate.model_copy(update={"measured_value": float(ephemeris_queries_failed), "limit": 0.0})
     if gate.name == RESIDUAL_CRITERION_GATE_NAME and gate.status is GateStatus.FAILED:
         return gate.model_copy(update={"measured_value": None})
     return gate
@@ -354,19 +371,20 @@ def asteroid_run_measurements(
     )
 
     gates_by_name = {gate.name: gate for gate in gates}
-    for gate_name, (metric_name, tier) in _GATE_METRIC_AND_TIER.items():
+    for gate_name, limit_source in GATE_LIMIT_SOURCES.items():
         gate = gates_by_name.get(gate_name)
         if gate is None:
             continue
-        spec = _SPEC_BY_NAME[metric_name]
+        spec = _SPEC_BY_NAME[limit_source.metric_name]
+        adjusted = gate_for_measurement(gate, metrics.get("ephemeris_queries_failed", 0))
         measurements.append(
             gate_measurement(
-                _gate_for_measurement(gate, metrics),
+                gate if adjusted is None else adjusted,
                 spec,
                 context,
                 subject,
-                limit_tier=tier,
-                register_entry=spec.register_entry if tier is LimitTier.PHYSICAL_BUDGET else None,
+                limit_tier=limit_source.tier,
+                register_entry=limit_source.register_entry,
             )
         )
     return measurements
@@ -379,7 +397,7 @@ def record_asteroid_quality(
     *,
     config: object = None,
 ) -> int:
-    """Store the run's measurements; a storage failure never fails the run.
+    """Store the run's measurements; no failure here ever fails the run.
 
     Parameters
     ----------
@@ -395,6 +413,11 @@ def record_asteroid_quality(
     Returns
     -------
     new_count : `int`
-        How many rows were new.
+        How many rows were new. It is 0 when anything went wrong, either in
+        building the rows or in storing them (both are logged).
     """
-    return record_run_measurements(asteroid_run_measurements(metrics, gates, context), config=config)
+    return build_and_record_measurements(
+        lambda: asteroid_run_measurements(metrics, gates, context),
+        f"asteroid detection run on {context.target_id}",
+        config=config,
+    )

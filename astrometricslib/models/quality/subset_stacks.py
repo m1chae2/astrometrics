@@ -48,6 +48,11 @@ class SubsetStackResult(BaseModel):
         Its 1-sigma uncertainty.
     noise_reason : `str`
         Why there is no noise value. Empty when there is one.
+    expected_noise_ratio : `float` or `None`
+        The ratio of this stack's noise to the library stack's that the two
+        stacks' own effective frame counts predict.
+    stack_error : `str`
+        Why the stacker failed, when it did. Empty otherwise.
     rows_written : `int`
         New rows stored in the quality database.
     """
@@ -65,6 +70,8 @@ class SubsetStackResult(BaseModel):
     normalized_noise: float | None = Field(default=None, alias="normalizedNoise")
     normalized_noise_uncertainty: float | None = Field(default=None, alias="normalizedNoiseUncertainty")
     noise_reason: str = Field(default="", alias="noiseReason")
+    expected_noise_ratio: float | None = Field(default=None, alias="expectedNoiseRatio")
+    stack_error: str = Field(default="", alias="stackError")
     rows_written: int = Field(default=0, alias="rowsWritten")
 
 

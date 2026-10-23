@@ -132,12 +132,12 @@ _DECLARED_BEFORE_PHASE_3: tuple[MetricSpec, ...] = (
 # empty sky, the frames that went in and their weights.
 # ---------------------------------------------------------------------------
 
-STACKING_FRAMES_SUBMITTED = "stacking.frames_submitted"
-STACKING_FRAMES_STACKED = "stacking.frames_stacked"
-STACKING_FRAMES_ACCEPTED = "stacking.frames_accepted"
-STACKING_FRAMES_EXCLUDED_FOR_GAIN = "stacking.frames_excluded_for_gain"
-STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND = "stacking.frames_excluded_for_background"
-STACKING_FRAMES_QUARANTINED = "stacking.frames_quarantined"
+STACKING_FRAMES_SUBMITTED = "stacking.frames_submitted_count"
+STACKING_FRAMES_STACKED = "stacking.frames_stacked_count"
+STACKING_FRAMES_ACCEPTED = "stacking.frames_accepted_count"
+STACKING_FRAMES_EXCLUDED_FOR_GAIN = "stacking.frames_excluded_for_gain_count"
+STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND = "stacking.frames_excluded_for_background_count"
+STACKING_FRAMES_QUARANTINED = "stacking.frames_quarantined_count"
 STACKING_FLAT_FRAME_COUNT = "stacking.flat_frame_count"
 STACKING_FLAT_NOISE_FRACTION = "stacking.flat_noise_fraction"
 STACKING_FLAT_SMOOTHING_SIGMA_PX = "stacking.flat_smoothing_sigma_px"
@@ -150,20 +150,23 @@ STACKING_EXPECTED_STACK_FWHM_PX = "stacking.expected_stack_fwhm_px"
 STACKING_DURATION_S = "stacking.duration_s"
 STACKING_REGISTRATION_REFERENCE_STAR_COUNT = "stacking.registration_reference_star_count"
 STACKING_GROUP_EXPOSURE_S = "stacking.group_exposure_s"
-STACKING_GROUP_FRAMES_SUBMITTED = "stacking.group_frames_submitted"
-STACKING_GROUP_FRAMES_STACKED = "stacking.group_frames_stacked"
+STACKING_GROUP_FRAMES_SUBMITTED = "stacking.group_frames_submitted_count"
+STACKING_GROUP_FRAMES_STACKED = "stacking.group_frames_stacked_count"
 STACKING_GROUP_ALIGNMENT_SHIFT_PX = "stacking.group_alignment_shift_px"
 STACKING_GROUP_GAIN_MID_RANGE = "stacking.group_gain_mid_range"
 STACKING_GROUP_GAIN_BRIGHT_END_RATIO = "stacking.group_gain_bright_end_ratio"
-STACKING_GROUP_GAIN_DISAGREEMENT = "stacking.group_gain_disagreement"
+STACKING_GROUP_GAIN_DISAGREEMENT = "stacking.group_gain_disagreement_fraction"
 STACKING_EMPTY_APERTURE_NOISE_ADU = "stacking.empty_aperture_noise_adu"
 STACKING_NOISE_REFERENCE_FLUX_ADU = "stacking.noise_reference_flux_adu"
 STACKING_EMPTY_APERTURE_NOISE_NORMALIZED = "stacking.empty_aperture_noise_normalized"
 STACKING_EFFECTIVE_FRAME_COUNT = "stacking.effective_frame_count"
 STACKING_EFFECTIVE_TIME_S = "stacking.effective_time_s"
+STACKING_EFFECTIVE_TIME_READ_NOISE_S = "stacking.effective_time_read_noise_s"
 STACKING_FRAME_WEIGHT = "stacking.frame_weight"
-STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_share"
+STACKING_NIGHT_WEIGHT_SHARE = "stacking.night_weight_fraction"
 STACKING_NOISE_WITHOUT_NIGHT = "stacking.noise_without_night"
+STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT = "stacking.noise_difference_without_night"
+STACKING_SUBSET_EXPECTED_NOISE_RATIO = "stacking.subset_expected_noise_ratio"
 
 # The self-checks. The key is the gate's name in the stack summary; the value
 # is the metric that stores it. Each is named ``stacking.gate_<gate name>``.
@@ -213,6 +216,7 @@ def _context_metric(
     uncertainty_kind: UncertaintyKind = UncertaintyKind.NONE,
     uncertainty_method: str = _NO_UNCERTAINTY,
     band: str = _BAND,
+    definition_version: int = 1,
 ) -> MetricSpec:
     """Declare one value that the stacking stage already makes.
 
@@ -246,15 +250,18 @@ def _context_metric(
         How the uncertainty is found.
     band : `str`, optional
         The filter the value applies to.
+    definition_version : `int`, optional
+        The version of the metric's estimator, sample and constants. Raise it
+        when any of them changes (plan section 3.4).
 
     Returns
     -------
     spec : `MetricSpec`
-        The declaration, at definition version 1.
+        The declaration, at the given definition version (1 unless raised).
     """
     return MetricSpec(
         name=name,
-        definition_version=1,
+        definition_version=definition_version,
         unit=unit,
         checkpoint=Checkpoint.STACKING,
         levels=levels,
@@ -588,11 +595,15 @@ _NOISE_PURPOSE_REASON = (
 _NOISE_SAMPLE = (
     "Up to 100 circular apertures (radius 4 px) placed once per target at sky positions away from "
     "every detected star, and reused by every later stack of the target. Apertures that fall off the "
-    "stack or on empty (zero) edge pixels are dropped. A stack needs at least 20 usable apertures."
+    "stack or on empty (zero) edge pixels are dropped. No two apertures are closer than 24 px, so no two "
+    "sky rings share a pixel. A stack needs at least 20 usable apertures. The target keeps one set of "
+    "apertures for each camera and optic (see `stack_noise.reset_apertures`)."
 )
 _NOISE_UNCERTAINTY = (
-    "Statistical, 1 sigma: the spread divided by sqrt(2 (n - 1)) for n usable apertures, the standard "
-    "error of a standard deviation from n independent samples."
+    "Statistical, 1 sigma: 1.1664 times the spread divided by sqrt(n) for n usable apertures. This is the "
+    "standard error of a spread taken as 1.4826 times the median absolute deviation (its variance is that of "
+    "a standard deviation divided by the 0.3675 efficiency of the median absolute deviation), for samples "
+    "from a bell curve. The apertures do not overlap, so the samples are independent."
 )
 _WEIGHT_PURPOSE_REASON = (
     "Membership and weights say which frames the stack really holds and how much each counted. The "
@@ -617,26 +628,36 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=_NOISE_UNCERTAINTY,
+        definition_version=2,
     ),
     _context_metric(
         STACKING_NOISE_REFERENCE_FLUX_ADU,
         "adu",
         "The brightness of the fixed reference stars in this stack, in the stack's own units.",
         (
-            "The median of the sky-subtracted aperture sums (radius 4 px, same ring) of the reference "
-            "stars. The reference stars are the 10 brightest unsaturated, isolated stars of the first "
-            "stack of the target, chosen once at sky positions and reused. A stack needs at least 5 "
-            "of them measurable."
+            "The zero point times the median brightness the reference stars had on the stack that chose "
+            "them. A star's brightness is its sky-subtracted sum in a large aperture (3 times the first "
+            "stack's star width, never under 8 px, with a 5 px sky ring starting 3 px beyond it), so it "
+            "hardly changes with the seeing. The zero point is the median, over the stars, of the ratio of "
+            "the star's brightness here to its brightness on the first stack. The 10 stars are the brightest "
+            "isolated stars of the first stack. A star whose peak in the registration reference frame is at "
+            "or above the camera profile's saturation threshold (or its linearity limit, if lower) is "
+            "never used, when the stars are chosen and on every later stack. A stack needs at least 5 usable "
+            "stars."
         ),
-        "The fixed reference stars of the target, those that fall on this stack.",
+        "The fixed reference stars of the target, those that fall on this stack and are not saturated.",
         "pipelines.stacking.post_processing.stack_noise.measure_stack_noise",
         better=Direction.NONE,
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Statistical, 1 sigma: 1.2533 times 1.4826 times the median absolute deviation of the "
-            "star sums, divided by sqrt(n): the standard error of a median of n stars."
+            "Statistical, 1 sigma: 1.2533 times 1.4826 times the median absolute deviation of the stars' "
+            "brightness ratios, divided by sqrt(k) for k stars (the standard error of a median), times the "
+            "first stack's median star brightness. It is 0 on the stack that chose the stars, because that "
+            "stack defines the scale. A star that widens past the large aperture would lower its ratio and "
+            "widen the scatter; no change in the stars themselves is in the error."
         ),
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
@@ -652,10 +673,11 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NOISE_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Statistical, 1 sigma: the relative error of the noise and of the reference flux added in "
-            "quadrature, times the ratio. The reference stars' own scatter is included; any change in "
-            "a star's brightness between stacks is not."
+            "Statistical, 1 sigma: the relative error of the noise (1.1664 / sqrt(n)) and the relative error "
+            "of the zero point added in quadrature, times the ratio. The scatter of the stars' brightness "
+            "ratios is included; any real change in a star's brightness between stacks is not."
         ),
+        definition_version=2,
     ),
     _context_metric(
         STACKING_EFFECTIVE_FRAME_COUNT,
@@ -685,6 +707,27 @@ _NOISE_AND_WEIGHT_METRICS: tuple[MetricSpec, ...] = (
         ),
         "The frames that are members of the stack.",
         "pipelines.stacking.post_processing.stack_membership.effective_exposure_seconds",
+        better=Direction.HIGHER,
+        purpose_reason=_WEIGHT_PURPOSE_REASON,
+    ),
+    _context_metric(
+        STACKING_EFFECTIVE_TIME_READ_NOISE_S,
+        "s",
+        (
+            "The length of one frame that would have the same read noise as this stack, "
+            "in the rate (counts per second)."
+        ),
+        (
+            "tau = (sum of w) / sqrt(sum of w^2 / t^2), where t is each frame's exposure in seconds. Read "
+            "noise RN adds a variance RN^2 to the counts of every frame whatever its length, so in the rate "
+            "it is RN^2 / t^2. A weighted mean of the rates has a read-noise variance RN^2 x sum(w^2 / t^2) "
+            "/ (sum w)^2, and one frame of tau seconds has RN^2 / tau^2. For N equal frames of t seconds it "
+            "is t x sqrt(N). With `stacking.effective_time_s` (T_eff, the photon-noise part) a rate "
+            "variance is R / T_eff + RN^2 / tau^2 for a sky rate R, which is what the forecast fit needs "
+            "when the frames differ in length. Not stored when the weights are not reported."
+        ),
+        "The frames that are members of the stack.",
+        "pipelines.stacking.post_processing.stack_membership.effective_read_noise_time_seconds",
         better=Direction.HIGHER,
         purpose_reason=_WEIGHT_PURPOSE_REASON,
     ),
@@ -745,7 +788,9 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
             "The sum of the night's frame weights divided by the sum of all the stack's frame "
             "weights. The weights are the `stacking.frame_weight` rows the library stack recorded "
             "(each relative to the average frame). The shares of all the nights add up to 1. Not "
-            "stored when the stack's weights are unknown, because equal weights are never assumed."
+            "stored when the stack's weights are unknown, because equal weights are never assumed. "
+            "The row is marked assumed, with the reason, when any weight it uses is assumed (the stack's "
+            "member list may include frames that Siril's filters dropped)."
         ),
         _NIGHT_SAMPLE,
         "pipelines.stacking.subset_noise_run.night_weight_shares",
@@ -759,10 +804,11 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         (
             "The normalized empty-aperture noise (see `stacking.empty_aperture_noise_normalized`) of "
             "a stack of the library stack's frames without the night's frames, measured in the same "
-            "sky apertures as the library stack. Compare it with the library stack's own value: if it "
-            "is lower, the night made the stack noisier. The leave-out stack uses the target's "
-            "normal stacking settings but skips the frame quarantine step, which the library "
-            "stack's own members have already passed."
+            "sky apertures as the library stack. The library stack's value is "
+            "`stacking.empty_aperture_noise_normalized`; `stacking.noise_difference_without_night` gives "
+            "the difference with an error that accounts for the two stacks sharing frames and apertures. "
+            "The leave-out stack uses the target's normal stacking settings but skips the frame "
+            "quarantine step, which the library stack's own members have already passed."
         ),
         _NIGHT_SAMPLE + " Up to 100 empty apertures, as for the stack noise.",
         "pipelines.stacking.subset_noise_run.run_night_contributions",
@@ -770,9 +816,63 @@ _NIGHT_METRICS: tuple[MetricSpec, ...] = (
         purpose_reason=_NIGHT_PURPOSE_REASON,
         uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
         uncertainty_method=(
-            "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized`. The stacker's "
-            "own run-to-run differences are not included."
+            "Statistical, 1 sigma: as for `stacking.empty_aperture_noise_normalized`. This is the "
+            "error of this stack's value on its own; it is not the error of a comparison with the "
+            "library stack, which the two stacks' shared frames make smaller (see "
+            "`stacking.noise_difference_without_night`). The stacker's own run-to-run differences are "
+            "not included."
         ),
+        definition_version=2,
+    ),
+    _context_metric(
+        STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
+        "",
+        (
+            "The noise of the stack without one night minus the noise of the library stack, "
+            "each as a fraction of its reference stars' brightness."
+        ),
+        (
+            "The normalized empty-aperture noise of the leave-out stack minus that of the library stack, "
+            "both measured in the same sky apertures. Each stack's per-aperture sums are divided by its "
+            "own reference flux first. The noise is 1.4826 times the median absolute deviation of the "
+            "sums. Only apertures usable on both stacks count. The library stack's sums are read from the "
+            "file kept beside it when it was stacked; the row is not measured when that file is missing "
+            "or belongs to other apertures."
+        ),
+        _NIGHT_SAMPLE + " Only the apertures usable on both stacks.",
+        "pipelines.stacking.post_processing.stack_noise.paired_noise_difference",
+        better=Direction.NONE,
+        purpose_reason=_NIGHT_PURPOSE_REASON,
+        uncertainty_kind=UncertaintyKind.STATISTICAL_1_SIGMA,
+        uncertainty_method=(
+            "Statistical, 1 sigma, paired: the apertures are resampled with replacement 1000 times (a fixed "
+            "seed), the same draw for both stacks, the difference of the two noises is found for each "
+            "draw, and the uncertainty is the standard deviation of those differences. Because the "
+            "stacks share frames and apertures, this is smaller than the two independent errors added in "
+            "quadrature. The stacker's run-to-run differences are not included."
+        ),
+    ),
+    _context_metric(
+        STACKING_SUBSET_EXPECTED_NOISE_RATIO,
+        "",
+        (
+            "How many times the library stack's noise a subset stack's noise would be if all frames "
+            "were alike: the square root of the library stack's effective frame count over the "
+            "subset's."
+        ),
+        (
+            "sqrt(N_eff,library / N_eff,subset), where N_eff = (sum of w)^2 / (sum of w^2) is the "
+            "effective frame count (see `stacking.effective_frame_count`). The subset's weights are its "
+            "own, because Siril rebuilds the star-width weights for each set of frames. If frames were "
+            "equally noisy, the subset's noise divided by the library stack's would be this number, so "
+            "it is the prediction to read the measured noise against. It says nothing about whether "
+            "frames or a night were worth keeping. Not stored when either count is unknown; stored as "
+            "assumed when either member list is."
+        ),
+        "One row for each subset stack (a growth step or a leave-one-night-out stack).",
+        "pipelines.stacking.subset_noise_run.expected_noise_ratio",
+        better=Direction.NONE,
+        purpose_reason=_NIGHT_PURPOSE_REASON,
     ),
 )
 

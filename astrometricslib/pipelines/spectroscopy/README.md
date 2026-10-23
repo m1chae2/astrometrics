@@ -205,8 +205,9 @@ Next to the summary and its gates, a run stores its numbers as quality measureme
 
 - Every row is about the run (subject level `run`) and carries the job id, the pipeline version, `origin = measured` and a time with a time zone. The caller supplies the time (`measured_at`); a run without it stores nothing and logs a warning.
 - A number the run could not make is stored as `not_measured` with a reason, never as zero. The session batch does not count star identification, so its three identification counts are `not_measured`.
-- A gate is stored as a self-check: its value, its outcome (`passed`, `failed` or `not_checked`) and its limit. Every limit here is a design estimate, so none claims a validated data set.
-- A storage failure is logged and never fails the run.
+- A gate is stored as a self-check: its value, its outcome (`passed`, `failed` or `not_checked`) and its limit. A limit that follows from what the check is for (a count that must be zero, the one spectrum a run needs) is geometry. The saturation share, the failed-spectrum share, the wavelength-scale RMS and the Gaia XP limits are design estimates, stored with their register entry (`GATE_LIMIT_SOURCES` in `post_processing/record_quality.py`). None claims a validated data set.
+- A failure while building or storing the rows is logged and never fails the run. A NaN or infinite number is stored as not measured with the reason "the value was not finite".
+- The values are run-level, not stack-level: the session batch rolls up every frame of every session, and the single-image runner does not say which stack it read. Each name ends with its unit; a stage metric adds the unit to the checkpoint's own name (for example `stage_raw_frame_streak_tilt_deg`).
 - The summary keeps only the median of each checkpoint metric over the spectra, so the stage metrics are those medians. The per-star values stay in the star records. Yes/no verdicts (for example `poor_match`, `trustworthy`, `wavelength_zero_point_applied`) and the failed-spectrum counts are not measurements.
 
 ### Run-level metrics

@@ -64,10 +64,11 @@ from astrometricslib.pipelines.astrometry.metrics import (
     ASTROMETRY_WCS_REFINEMENT_SHIFT_ARCSEC,
 )
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
+    build_and_record_measurements,
     build_measurement,
     gate_measurement,
-    record_run_measurements,
 )
 
 logger = logging.getLogger(__name__)
@@ -329,25 +330,43 @@ _MISSING_REASON_BY_FIELD: dict[str, str] = {
     "star_fwhm_px": "No star in the image could be measured.",
 }
 
-# The metric that stands for each gate, and how its limit was obtained.
+# The metric that stands for each gate, and how its limit was obtained. The
+# history fill (`scripts/backfill_quality_measurements.py`) reads this table
+# too, so a limit is described in one place.
+#
 # The plate solve and the one-star minimum follow from geometry: sky
-# coordinates need a solution and a solution needs a star. The other limits
-# are design estimates (validation register AST-04 and AST-05 for the first
-# two, "astrometry design estimates" for the lookup limit); each is a bound
-# on an error or a sample size, so they are physical budgets and none claims
-# the tier of a validated data set.
-_GATE_METRIC_AND_TIER: dict[str, tuple[str, LimitTier]] = {
-    PLATE_SOLVE_GATE_NAME: (ASTROMETRY_GATE_PLATE_SOLVE, LimitTier.GEOMETRY),
-    SOURCE_DETECTION_GATE_NAME: (ASTROMETRY_GATE_SOURCE_DETECTION, LimitTier.GEOMETRY),
-    MATCHED_STARS_GATE_NAME: (ASTROMETRY_GATE_CATALOG_MATCHES, LimitTier.PHYSICAL_BUDGET),
-    RESIDUAL_GATE_NAME: (ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL, LimitTier.PHYSICAL_BUDGET),
-    CATALOG_LOOKUP_GATE_NAME: (ASTROMETRY_GATE_CATALOG_LOOKUP, LimitTier.PHYSICAL_BUDGET),
+# coordinates need a solution and a solution needs a star. The other three
+# limits are designed values that no one has measured as a limit, and the
+# validation register lists them that way: the 20-star minimum
+# (`MINIMUM_MATCHED_STARS`, AST-05), the residual share of a star's width
+# (`MAXIMUM_RESIDUAL_FRACTION_OF_FWHM`, AST-04) and the failed-lookup share
+# (`MAXIMUM_FAILED_LOOKUP_FRACTION`, AST-D09). AST-04 and AST-05 hold the
+# partial evidence behind two of them; none claims the tier of a validated
+# data set.
+GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
+    PLATE_SOLVE_GATE_NAME: GateLimitSource(ASTROMETRY_GATE_PLATE_SOLVE, LimitTier.GEOMETRY),
+    SOURCE_DETECTION_GATE_NAME: GateLimitSource(ASTROMETRY_GATE_SOURCE_DETECTION, LimitTier.GEOMETRY),
+    MATCHED_STARS_GATE_NAME: GateLimitSource(
+        ASTROMETRY_GATE_CATALOG_MATCHES, LimitTier.DESIGN_ESTIMATE, "AST-05"
+    ),
+    RESIDUAL_GATE_NAME: GateLimitSource(
+        ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL, LimitTier.DESIGN_ESTIMATE, "AST-04"
+    ),
+    CATALOG_LOOKUP_GATE_NAME: GateLimitSource(
+        ASTROMETRY_GATE_CATALOG_LOOKUP, LimitTier.DESIGN_ESTIMATE, "AST-D09"
+    ),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in ASTROMETRY_METRICS}
 
 
-def _gate_for_measurement(gate: GateResult, metrics: AstrometryPipelineQualityMetrics) -> GateResult:
+def gate_for_measurement(
+    gate: GateResult,
+    *,
+    plate_solve_succeeded: bool | None,
+    remote_catalog_queries_attempted: int | float | None,
+    remote_catalog_queries_failed: int | float | None,
+) -> GateResult | None:
     """Adjust a gate so its number means one thing in every outcome.
 
     The plate-solve gate carries no number, and the lookup gate quotes the
@@ -355,32 +374,47 @@ def _gate_for_measurement(gate: GateResult, metrics: AstrometryPipelineQualityMe
     tripped. A stored metric has one unit and one meaning, so the measurement
     uses a steady number instead. The gate itself is not changed.
 
+    The run's record step and the history fill both call this function, so a
+    backfilled gate means what a live one does. The fill reads the numbers
+    from a stored summary that may lack them, hence the optional arguments.
+
     Parameters
     ----------
     gate : `GateResult`
         The gate as recorded on the summary.
-    metrics : `AstrometryPipelineQualityMetrics`
-        What the run measured.
+    plate_solve_succeeded : `bool` or `None`
+        Whether the image was solved. `None` when unknown.
+    remote_catalog_queries_attempted : `int` or `float` or `None`
+        How many remote catalog lookups were made. `None` when unknown.
+    remote_catalog_queries_failed : `int` or `float` or `None`
+        How many of them failed. `None` when unknown.
 
     Returns
     -------
-    gate : `GateResult`
+    gate : `GateResult` or `None`
         A copy for the measurement. The plate-solve gate carries 1 when the
         image was solved and 0 when it was not, with the limit 1. The lookup
-        gate carries the failed share whenever a lookup was made.
+        gate carries the failed share whenever a lookup was made. `None` when
+        the steady number needs a fact that is unknown (only the history fill
+        can meet that case).
     """
     if gate.name == PLATE_SOLVE_GATE_NAME:
-        solved = 1.0 if metrics.plate_solve_succeeded else 0.0
+        if plate_solve_succeeded is None:
+            return None
         return gate.model_copy(
             update={
-                "measured_value": solved,
+                "measured_value": 1.0 if plate_solve_succeeded else 0.0,
                 "limit": 1.0,
                 "limit_source": "sky coordinates need a plate solution",
             }
         )
-    attempted = metrics.remote_catalog_queries_attempted
-    if gate.name == CATALOG_LOOKUP_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED and attempted > 0:
-        return gate.model_copy(update={"measured_value": metrics.remote_catalog_queries_failed / attempted})
+    if gate.name == CATALOG_LOOKUP_GATE_NAME and gate.status is not GateStatus.NOT_CHECKED:
+        if remote_catalog_queries_attempted is None or remote_catalog_queries_failed is None:
+            return None
+        if remote_catalog_queries_attempted > 0:
+            return gate.model_copy(
+                update={"measured_value": remote_catalog_queries_failed / remote_catalog_queries_attempted}
+            )
     return gate
 
 
@@ -440,19 +474,25 @@ def astrometry_run_measurements(
         )
 
     gates_by_name = {gate.name: gate for gate in gates}
-    for gate_name, (metric_name, tier) in _GATE_METRIC_AND_TIER.items():
+    for gate_name, limit_source in GATE_LIMIT_SOURCES.items():
         gate = gates_by_name.get(gate_name)
         if gate is None:
             continue
-        spec = _SPEC_BY_NAME[metric_name]
+        spec = _SPEC_BY_NAME[limit_source.metric_name]
+        adjusted = gate_for_measurement(
+            gate,
+            plate_solve_succeeded=metrics.plate_solve_succeeded,
+            remote_catalog_queries_attempted=metrics.remote_catalog_queries_attempted,
+            remote_catalog_queries_failed=metrics.remote_catalog_queries_failed,
+        )
         measurements.append(
             gate_measurement(
-                _gate_for_measurement(gate, metrics),
+                gate if adjusted is None else adjusted,
                 spec,
                 context,
                 subject,
-                limit_tier=tier,
-                register_entry=None,
+                limit_tier=limit_source.tier,
+                register_entry=limit_source.register_entry,
             )
         )
     return measurements
@@ -466,7 +506,7 @@ def record_astrometry_quality(
     *,
     config: object = None,
 ) -> int:
-    """Store the run's measurements; a storage failure never fails the run.
+    """Store the run's measurements; no failure here ever fails the run.
 
     Parameters
     ----------
@@ -485,8 +525,11 @@ def record_astrometry_quality(
     Returns
     -------
     new_count : `int`
-        How many rows were new.
+        How many rows were new. It is 0 when anything went wrong: a storage
+        failure, or a failure while building the rows (both are logged).
     """
-    return record_run_measurements(
-        astrometry_run_measurements(metrics, gates, context, stack_file_name), config=config
+    return build_and_record_measurements(
+        lambda: astrometry_run_measurements(metrics, gates, context, stack_file_name),
+        f"astrometry run on {context.target_id}",
+        config=config,
     )

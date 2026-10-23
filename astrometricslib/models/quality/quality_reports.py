@@ -24,7 +24,7 @@ measured.
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from astrometricslib.models.quality.excluded_frames import SetAsideFrame
 from astrometricslib.models.quality.stack_comparison import StackComparison
@@ -32,6 +32,7 @@ from astrometricslib.models.quality.stack_comparison import StackComparison
 __all__ = [
     "InputQualityReport",
     "RawFrameCheckReport",
+    "RegistrationRow",
     "SpectralFrameCheckReport",
     "StackQualityReport",
     "StackSummary",
@@ -95,6 +96,53 @@ class SpectralFrameCheckReport(BaseModel):
     note: str = ""
 
 
+class RegistrationRow(BaseModel):
+    """What Siril's registration found for one frame of a stack.
+
+    The fields match the keys that `parse_seq_file` returns for each
+    registration line of the ``_Registration.seq`` file.
+
+    Attributes
+    ----------
+    fwhm_px : `float`
+        Width of the stars in pixels (Siril's plain FWHM).
+    weighted_fwhm_px : `float`
+        Siril's weighted FWHM in pixels, which counts each star by how well
+        its fit went.
+    roundness : `float`
+        Star roundness, 0 to 1 (1 is a perfect circle).
+    quality : `float`
+        Siril's registration quality score for the frame.
+    background_level : `float`
+        Sky background level, normalized to the 0 to 1 image range.
+    star_count : `int`
+        The number of stars Siril matched in the frame.
+    homography : `list` [`float`]
+        The 3 by 3 transform that moves the frame onto the reference, as nine
+        numbers in row order.
+    dx, dy : `float`
+        The shift in pixels (the homography's ``h02`` and ``h12``).
+    rotation_deg : `float`
+        The rotation in degrees.
+    scale : `float`
+        The scale factor (1.0 means the same size as the reference).
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    fwhm_px: float = Field(alias="fwhmPx")
+    weighted_fwhm_px: float = Field(alias="weightedFwhmPx")
+    roundness: float
+    quality: float
+    background_level: float = Field(alias="backgroundLevel")
+    star_count: int = Field(alias="starCount")
+    homography: list[float]
+    dx: float
+    dy: float
+    rotation_deg: float = Field(alias="rotationDeg")
+    scale: float
+
+
 class StackQualityReport(BaseModel):
     """Measurements of one stack, and optionally a comparison with another."""
 
@@ -108,7 +156,7 @@ class StackQualityReport(BaseModel):
     rejected_fraction: float | None = None
     # One row per registered frame, from the ``_Registration.seq`` file Siril
     # wrote beside the stack.
-    registration: list[dict[str, float]] | None = None
+    registration: list[RegistrationRow] | None = None
     # The comparison with the previous stack or another stack, when asked for.
     comparison: StackComparison | None = None
     # Sentences about sections that could not be measured, and why.

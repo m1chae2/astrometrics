@@ -2311,6 +2311,7 @@ export enum LimitTier {
   GEOMETRY = "geometry",
   SENSOR_PROFILE = "sensor_profile",
   PHYSICAL_BUDGET = "physical_budget",
+  DESIGN_ESTIMATE = "design_estimate",
   OWN_BASELINE = "own_baseline",
   VALIDATED_DATASET = "validated_dataset"
 }
@@ -2373,6 +2374,11 @@ export enum MetricPurpose {
  * Row in the capture-setting table.
  * channel : `str` or `None`
  * The color channel for a one-shot-color camera, else ``None``.
+ * variant : `str` or `None`
+ * ``None`` for a library stack (and for every frame and run). For a
+ * subset stack made from some of a library stack's frames, the subset's
+ * label. A reader filters on this field; it never has to parse the
+ * subject id for ``_subsets/``.
  */
 export interface QualitySubject {
   level: SubjectLevel;
@@ -2381,6 +2387,7 @@ export interface QualitySubject {
   observingNightId?: string | null;
   captureSettingId?: number | null;
   channel?: string | null;
+  variant?: string | null;
 }
 
 /**

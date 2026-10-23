@@ -5,32 +5,46 @@ target's library stack into the target's ``_subsets`` folder and measure each
 result's noise in the same empty sky apertures as the library stack (task E's
 `stack_noise.measure_stack_noise`), on the same flux scale. They never change
 the library stack, its previews, its previous-stack copy or its
-``_inputs.json`` (see `subset_stack.py`).
+``_inputs.json`` (see `subset_stack.py`). While a job runs, no library stack
+of the target and no other subset job of the target can run
+(`target_stack_guard.py`).
 
 Noise against frame count (`run_noise_growth`). The frames of the library stack
 are split by observing night. The subsets are the first night, the first two
 nights, and so on, up to one night fewer than the library stack. A target with
-one night uses the first quarter, half and three quarters of its frames in time
-order instead. Each subset stores the stack noise (three rows) and the weighted
-frame count and time (two rows) at level ``stack``, with the subset's label in
-the subject id. At most `DEFAULT_GROWTH_STEPS` subsets are made unless the
-caller asks for more, spaced evenly through the possible ones. The library
-stack is the last point of the curve and is not stacked again. Both jobs raise
-`NotFoundError` when the library stack has no ``_inputs.json``, because then
-its frames are not known.
+one night uses a quarter, a half and three quarters of its frames, taken
+evenly through the night (every fourth frame, and so on) so that a slow change
+in the sky or the seeing does not fall on one subset only. Each subset stores
+the stack noise (three rows) and the weighted frame count and times (three
+rows) at level ``stack``, with the subset's label in the subject id and in the
+subject's ``variant`` field. At most `DEFAULT_GROWTH_STEPS` subsets are made
+unless the caller asks for more, spaced evenly through the possible ones. The
+library stack is the last point of the curve and is not stacked again. If one
+subset cannot be stacked, its rows say why and the series goes on.
+
+Each subset also gets the noise ratio its own weighted frame count predicts
+against the library stack (`expected_noise_ratio`). Siril works out the
+star-width weights again for every set of frames, so a subset's prediction
+uses its own weights, never the library stack's.
 
 Each night's contribution (`run_night_contributions`). For each night, the
 library stack's frames without that night are stacked and measured. Each night
-gets two rows on the leave-out stack's subject (``stacking.night_weight_share``
-and ``stacking.noise_without_night``), with the night's id in the subject's
-observing night. It costs one stack per night, so it runs only when asked.
+gets four rows on the leave-out stack's subject: the night's share of the
+weights (``stacking.night_weight_fraction``), the noise without the night
+(``stacking.noise_without_night``), the difference from the library stack's
+noise with its paired error (``stacking.noise_difference_without_night``) and
+the expected ratio. The night's id is in the subject's observing night. It
+costs one stack per night, so it runs only when asked.
 
-Where the frames and weights come from. The library stack's ``_inputs.json``
-lists the frames given to the stacker (after the frame quarantine step), so
-that list is the stack's population. A night's weight share comes from the
-``stacking.frame_weight`` rows the library stack stored; when the stack's
-weights are unknown (Siril weighted the frames itself), the share is stored as
-not measured with that reason. Equal weights are never assumed.
+Where the frames and weights come from. The library stack's members are the
+frames of its ``stacking.frame_weight`` rows, which the stack's run stored for
+each frame it really used. Only a stack made before those rows existed falls
+back to ``_inputs.json``, which lists the frames given to the stacker and so
+may include frames Siril dropped; a note says so. A night's weight share comes
+from the weight rows; when the stack's weights are unknown (Siril weighted the
+frames itself), the share is stored as not measured with that reason. Equal
+weights are never assumed. A share built from assumed weights is stored as
+assumed.
 
 A storage failure is logged and never fails a subset. Nothing here reads the
 clock: the caller supplies the measurement time.
@@ -42,14 +56,17 @@ import os
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from astrometricslib.drivers.driver_set import Drivers
 from astrometricslib.drivers.quality_store import QualityStore
 from astrometricslib.foundation.errors import AstrometricsError, InvalidArgumentError, NotFoundError
 from astrometricslib.foundation.jobs.runner import get_current_job
 from astrometricslib.models.quality.measurement import (
+    MeasurementStatus,
     QualityMeasurement,
     QualitySubject,
     SubjectLevel,
@@ -71,7 +88,9 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_FRAME_WEIGHT,
     STACKING_METRICS,
     STACKING_NIGHT_WEIGHT_SHARE,
+    STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
     STACKING_NOISE_WITHOUT_NIGHT,
+    STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
 from astrometricslib.pipelines.stacking.post_processing.record_quality import (
     measure_noise_safely,
@@ -88,6 +107,8 @@ from astrometricslib.pipelines.stacking.post_processing.stack_membership import 
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
     StackNoiseOutcome,
+    load_noise_sums,
+    paired_noise_difference,
 )
 from astrometricslib.pipelines.stacking.pre_processing.stack_inputs import read_stack_inputs
 from astrometricslib.pipelines.stacking.subset_stack import (
@@ -95,8 +116,9 @@ from astrometricslib.pipelines.stacking.subset_stack import (
     SUBSET_FOLDER_NAME,
     check_subset_label,
     stack_frame_subset,
-    subset_stack_path,
+    subset_output_path,
 )
+from astrometricslib.pipelines.stacking.target_stack_guard import subset_job_guard
 from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
@@ -104,11 +126,15 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_GROWTH_STEPS",
     "GrowthStep",
+    "LibraryRun",
+    "expected_noise_ratio",
+    "expected_ratio_measurement",
     "frames_by_night",
     "library_member_frames",
     "night_measurements",
     "night_weight_shares",
     "plan_growth_steps",
+    "read_library_run",
     "run_night_contributions",
     "run_noise_growth",
     "stack_chosen_subset",
@@ -159,7 +185,11 @@ def _report(progress_current: int, message: str) -> None:
 
 
 def library_member_frames(target: Target, stack_path: str) -> tuple[list[FrameRecord], list[str]]:
-    """List the frames the library stack was made from.
+    """List the frames given to the stacker, from the stack's ``_inputs.json``.
+
+    This is the fallback for a stack whose run stored no frame rows. The list
+    holds the frames given to the stacker, so it may include frames Siril
+    dropped. `read_library_run` prefers the stored rows.
 
     Parameters
     ----------
@@ -268,8 +298,9 @@ def plan_growth_steps(
     -------
     steps : `list` [`GrowthStep`]
         With two or more nights, the first night, the first two nights and so
-        on up to all but the last night. With one night, the first quarter,
-        half and three quarters of its frames. Smallest first. The whole set is
+        on up to all but the last night. With one night, a quarter, a half
+        and three quarters of its frames, spread evenly through the night.
+        Smallest first. The whole set is
         the library stack and is not a step. A step with fewer than
         `MINIMUM_SUBSET_FRAMES` frames is left out.
 
@@ -289,8 +320,18 @@ def plan_growth_steps(
     elif len(names) == 1:
         only = nights[names[0]]
         for fraction in SINGLE_NIGHT_FRACTIONS:
-            frames = tuple(only[: math.floor(len(only) * fraction)])
-            candidates.append(GrowthStep(f"fraction-{round(fraction * 100)}", frames))
+            count = math.floor(len(only) * fraction)
+            # Frames spread evenly through the night, not the first ones: the
+            # sky and the seeing drift, and the first part of the night would
+            # then differ from the library stack in more than frame count.
+            picks = (
+                sorted({math.floor((index + 0.5) * len(only) / count) for index in range(count)})
+                if count
+                else []
+            )
+            candidates.append(
+                GrowthStep(f"fraction-{round(fraction * 100)}", tuple(only[pick] for pick in picks))
+            )
     candidates = [step for step in candidates if len(step.frames) >= MINIMUM_SUBSET_FRAMES]
     return _spread(candidates, maximum_steps)
 
@@ -329,10 +370,123 @@ def night_weight_shares(
     return {night: total / grand_total for night, total in totals.items()}, ""
 
 
-def _recorded_weights(
-    store: QualityStore, target_id: str, stack_file_name: str, member_subject_ids: set[str]
-) -> tuple[list[tuple[str | None, float | None]], str]:
-    """Read back the frame weights the library stack stored.
+@dataclass(frozen=True)
+class LibraryRun:
+    """What the library stack's own run stored about its frames and noise.
+
+    Parameters
+    ----------
+    members : `list` [`FrameRecord`]
+        The frames that went into the stack.
+    notes : `list` [`str`]
+        Plain sentences about frames that are gone or about where the member
+        list came from.
+    weights : `list` [`tuple`]
+        The observing night and weight of each member (a weight is `None`
+        when the stack did not report it).
+    weights_reason : `str`
+        Why there are no weights. Empty when there are.
+    assumed_reason : `str`
+        Why the weights or the effective count are assumed, when they are.
+        Empty otherwise.
+    effective_count : `float` or `None`
+        The library stack's effective frame count.
+    noise_sums : `tuple` or `None`
+        The library stack's per-aperture noise sums, the reference flux they
+        are read against and the name of the stack that chose the apertures
+        (see `stack_noise.load_noise_sums`); `None` when not saved.
+    """
+
+    members: list[FrameRecord]
+    notes: list[str] = field(default_factory=list)
+    weights: list[tuple[str | None, float | None]] = field(default_factory=list)
+    weights_reason: str = ""
+    assumed_reason: str = ""
+    effective_count: float | None = None
+    noise_sums: tuple[np.ndarray, float, str] | None = None
+
+
+def read_library_run(target: Target, library_stack_path: str, configuration: Any) -> LibraryRun:
+    """Read what the library stack's run stored about its members.
+
+    The members are the frames of the stack's ``stacking.frame_weight`` rows,
+    which the run wrote for each frame it really used. A stack made before
+    those rows existed falls back to ``_inputs.json`` (see
+    `library_member_frames`), and a note says that frames Siril dropped may be
+    in the list.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target that owns the stack. It is only read.
+    library_stack_path : `str`
+        The library stack.
+    configuration : `AppConfiguration`
+        Where the quality store lives.
+
+    Returns
+    -------
+    run : `LibraryRun`
+        The members, their weights and the stack's effective count.
+
+    Notes
+    -----
+    `NotFoundError` is raised (by `library_member_frames`) when the run stored
+    no frame rows and the stack has no readable ``_inputs.json`` either.
+    """
+    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+
+    store = QualityStore.from_configuration(configuration)
+    stack_file_name = os.path.basename(library_stack_path)
+    count_row, weight_rows, store_reason = _library_rows(store, target.id, stack_file_name)
+    sums = load_noise_sums(library_stack_path)
+    by_subject = {frame_subject_id(frame.path, target.id): frame for frame in target.frames}
+    notes: list[str] = []
+    if count_row is not None and weight_rows:
+        members = [
+            by_subject[row.subject.subject_id] for row in weight_rows if row.subject.subject_id in by_subject
+        ]
+        gone = len(weight_rows) - len(members)
+        if gone:
+            notes.append(
+                f"{gone} frame(s) of the library stack are no longer on the target and were left out."
+            )
+        weights = [(row.subject.observing_night_id, row.value) for row in weight_rows]
+        assumed = [
+            row.reason for row in weight_rows if row.status == MeasurementStatus.ASSUMED and row.reason
+        ]
+        if count_row.status == MeasurementStatus.ASSUMED and count_row.reason:
+            assumed.append(count_row.reason)
+        return LibraryRun(
+            members=members,
+            notes=notes,
+            weights=weights,
+            assumed_reason=assumed[0] if assumed else "",
+            effective_count=count_row.value,
+            noise_sums=sums,
+        )
+    members, missing = library_member_frames(target, library_stack_path)
+    if missing:
+        notes.append(
+            f"{len(missing)} frame(s) of the library stack are no longer on the target and were left out."
+        )
+    notes.append(
+        "The library stack stored no frame rows, so its members are the frames given to the stacker "
+        "(`_inputs.json`); frames Siril dropped may be among them."
+    )
+    return LibraryRun(
+        members=members,
+        notes=notes,
+        weights_reason=store_reason,
+        assumed_reason="the member list is the frames given to the stacker, not the frames Siril kept",
+        noise_sums=sums,
+    )
+
+
+def _library_rows(
+    store: QualityStore, target_id: str, stack_file_name: str
+) -> tuple[QualityMeasurement | None, list[QualityMeasurement], str]:
+    """Read the effective count and frame weights the library stack stored.
 
     Parameters
     ----------
@@ -342,30 +496,34 @@ def _recorded_weights(
         The target.
     stack_file_name : `str`
         The library stack's file name.
-    member_subject_ids : `set` [`str`]
-        The subject ids of the stack's frames (to leave out other stacks'
-        frames that share the run).
 
     Returns
     -------
-    weights : `list` [`tuple`]
-        The night and weight of each frame the stack's run recorded.
+    count_row : `QualityMeasurement` or `None`
+        The stack's newest effective-frame-count row.
+    weight_rows : `list` [`QualityMeasurement`]
+        The frame-weight rows of the same run (one for each member frame).
     reason : `str`
-        Why there are none, empty when there are some.
+        Why there are none. Empty when there are some.
     """
     stack_subject_id = f"{target_id}/{stack_file_name}"
     try:
         count_rows = [
             row
             for row in store.query(
-                metric=STACKING_EFFECTIVE_FRAME_COUNT, level=SubjectLevel.STACK, target_id=target_id
+                metric=STACKING_EFFECTIVE_FRAME_COUNT,
+                level=SubjectLevel.STACK,
+                target_id=target_id,
+                library_only=True,
             )
             if row.subject.subject_id == stack_subject_id
         ]
         if not count_rows:
-            return [], (
+            return (
+                None,
+                [],
                 "the library stack has no stored frame weights (it was stacked before they were "
-                "recorded; stack it again)"
+                "recorded; stack it again)",
             )
         run_id = count_rows[-1].run_id
         weight_rows = [
@@ -373,11 +531,35 @@ def _recorded_weights(
             for row in store.query(
                 metric=STACKING_FRAME_WEIGHT, level=SubjectLevel.FRAME, target_id=target_id, latest_only=False
             )
-            if row.run_id == run_id and row.subject.subject_id in member_subject_ids
+            if row.run_id == run_id
         ]
     except AstrometricsError as error:
-        return [], f"the stored frame weights could not be read: {error.message}"
-    return [(row.subject.observing_night_id, row.value) for row in weight_rows], ""
+        return None, [], f"the stored frame weights could not be read: {error.message}"
+    return count_rows[-1], weight_rows, ""
+
+
+def expected_noise_ratio(library_count: float | None, subset_count: float | None) -> float | None:
+    """Predict a subset's noise against the library stack's from frame counts.
+
+    If every frame were equally noisy, a stack's noise would fall as one over
+    the square root of its effective frame count.
+
+    Parameters
+    ----------
+    library_count : `float` or `None`
+        The library stack's effective frame count.
+    subset_count : `float` or `None`
+        The subset stack's own effective frame count.
+
+    Returns
+    -------
+    ratio : `float` or `None`
+        sqrt(library_count / subset_count), or `None` when either count is
+        unknown or not positive.
+    """
+    if library_count is None or subset_count is None or library_count <= 0 or subset_count <= 0:
+        return None
+    return math.sqrt(library_count / subset_count)
 
 
 def _subset_subject(context: PipelineRunContext, label: str, night_id: str | None = None) -> QualitySubject:
@@ -396,12 +578,66 @@ def _subset_subject(context: PipelineRunContext, label: str, night_id: str | Non
     -------
     subject : `QualitySubject`
         Level ``stack``; its id is the target, ``_subsets``, the label and the
-        subset's file name.
+        subset's file name. Its ``variant`` is the label, so a reader can
+        tell a subset from a library stack by the field.
     """
     subject = context.stack_subject(f"{SUBSET_FOLDER_NAME}/{label}/{label}.fits")
-    if night_id is None:
-        return subject
-    return subject.model_copy(update={"observing_night_id": night_id})
+    update: dict[str, str] = {"variant": label}
+    if night_id is not None:
+        update["observing_night_id"] = night_id
+    return subject.model_copy(update=update)
+
+
+def expected_ratio_measurement(
+    context: PipelineRunContext,
+    subject: QualitySubject,
+    library: LibraryRun | None,
+    result: SubsetStackResult,
+    subset_assumed_reason: str,
+) -> QualityMeasurement:
+    """Build the expected-noise-ratio row of one subset stack.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The subset stack.
+    library : `LibraryRun` or `None`
+        What the library stack stored, or `None` when it is not known.
+    result : `SubsetStackResult`
+        The subset's result, holding its own effective frame count.
+    subset_assumed_reason : `str`
+        Why the subset's member list is assumed. Empty when it is not.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        The ratio, assumed when either member list is; or not measured with
+        the reason.
+    """
+    spec = _SPEC_BY_NAME[STACKING_SUBSET_EXPECTED_NOISE_RATIO]
+    ratio = expected_noise_ratio(
+        None if library is None else library.effective_count, result.effective_frame_count
+    )
+    if ratio is None:
+        reason = (
+            "the library stack's effective frame count is not stored"
+            if library is None or library.effective_count is None
+            else "the subset's effective frame count is unknown"
+        )
+        return build_measurement(spec, None, context, subject, reason=reason)
+    assumed = " ".join(
+        part for part in (library.assumed_reason if library else "", subset_assumed_reason) if part
+    )
+    return build_measurement(
+        spec,
+        ratio,
+        context,
+        subject,
+        status=MeasurementStatus.ASSUMED if assumed else MeasurementStatus.MEASURED,
+        reason=assumed,
+    )
 
 
 def _stack_and_measure(
@@ -416,6 +652,8 @@ def _stack_and_measure(
     stacking_slot: Callable[[], AbstractContextManager],
     night_id: str | None = None,
     output_folder: str | None = None,
+    library: LibraryRun | None = None,
+    keep_going: bool = False,
     extra_measurements: Callable[[SubsetStackResult, StackNoiseOutcome | None], list[QualityMeasurement]]
     | None = None,
 ) -> SubsetStackResult:
@@ -442,8 +680,15 @@ def _stack_and_measure(
     night_id : `str`, optional
         For a leave-one-night-out stack, the night left out.
     output_folder : `str`, optional
-        The folder to write the subset stack to. Left out, it is
-        ``_subsets/<label>`` beside the library stack.
+        The folder to write the subset stack to. It must be inside
+        ``_subsets`` beside the library stack (see `subset_output_path`).
+        Left out, it is ``_subsets/<label>``.
+    library : `LibraryRun`, optional
+        What the library stack stored, for the expected noise ratio.
+    keep_going : `bool`, optional
+        When `True` (a series of subsets), a stacker that fails is reported
+        in the result, with its rows stored as not measured, and the series
+        goes on. When `False`, the error is raised.
     extra_measurements : `Callable`, optional
         Builds more rows from the finished subset result and its noise outcome
         (the night metrics). They are stored with the others.
@@ -451,43 +696,54 @@ def _stack_and_measure(
     Returns
     -------
     result : `SubsetStackResult`
-        What was stacked and measured. A subset that cannot be stacked or
-        measured is reported with the reason, not raised.
+        What was stacked and measured. A subset that cannot be measured is
+        reported with the reason, not raised.
 
     Raises
     ------
     InvalidArgumentError
-        If the subset's path would be the library stack's path.
+        If the subset's path would be the library stack's path, the output
+        folder is not inside ``_subsets``, or the frames are too few.
     """
     library_folder = os.path.dirname(library_stack_path)
-    if output_folder is None:
-        output_path = subset_stack_path(library_folder, label, f"{label}.fits")
-    else:
-        check_subset_label(label)
-        output_path = os.path.join(os.path.abspath(output_folder), f"{label}.fits")
+    output_path = subset_output_path(library_folder, label, output_folder)
     if os.path.abspath(output_path) == os.path.abspath(library_stack_path):
         raise InvalidArgumentError("A subset stack may never be written to the library stack's path.")
     nights = sorted({observing_night_id(frame.timestamp) for frame in frames if frame.timestamp is not None})
     result = SubsetStackResult(
         targetId=target.id, label=label, framesSubmitted=len(frames), observingNightIds=nights
     )
-    with stacking_slot():
-        outcome = stack_frame_subset(
-            target.id,
-            list(frames),
-            output_path,
-            configuration=configuration,
-            drivers=drivers,
-            job_id=None if context is None else context.job_id,
-        )
-    result.stack_path = outcome.stack_path
+    outcome = None
+    try:
+        with stacking_slot():
+            outcome = stack_frame_subset(
+                target.id,
+                list(frames),
+                output_path,
+                configuration=configuration,
+                drivers=drivers,
+                job_id=None if context is None else context.job_id,
+            )
+    except InvalidArgumentError:
+        raise
+    except Exception as error:
+        if not keep_going:
+            raise
+        logger.exception("The subset stack %s failed; the series goes on", label)
+        result.stack_error = f"{type(error).__name__}: {error}"
+    result.stack_path = None if outcome is None else outcome.stack_path
     subject = _subset_subject(context, label, night_id) if context is not None else None
     membership: StackMembership | None = None
     membership_reason = ""
     noise: StackNoiseOutcome | None
-    if outcome.stack_path is None:
-        noise = StackNoiseOutcome(None, "the stacker made no stack from these frames")
-        membership_reason = "the stacker made no stack from these frames"
+    if outcome is None or outcome.stack_path is None:
+        why = (
+            f"the stacker failed ({result.stack_error})"
+            if result.stack_error
+            else "the stacker made no stack from these frames"
+        )
+        noise = StackNoiseOutcome(None, why)
+        membership_reason = why
     else:
         apertures_path = os.path.join(library_folder, APERTURE_FILE_NAME)
         if os.path.isfile(apertures_path):
@@ -522,9 +778,18 @@ def _stack_and_measure(
         result.frames_stacked = len(membership.members)
         result.effective_frame_count = effective_frame_count(weights)
         result.effective_time_seconds = effective_exposure_seconds(weights, exposures)
+    if library is not None:
+        result.expected_noise_ratio = expected_noise_ratio(
+            library.effective_count, result.effective_frame_count
+        )
     if context is not None and subject is not None:
         measurements = noise_measurements(noise, context, subject)
         measurements.extend(membership_count_measurements(membership, membership_reason, context, subject))
+        measurements.append(
+            expected_ratio_measurement(
+                context, subject, library, result, membership.membership_reason if membership else ""
+            )
+        )
         if extra_measurements is not None:
             measurements.extend(extra_measurements(result, noise))
         result.rows_written = record_run_measurements(measurements, config=configuration)
@@ -548,7 +813,7 @@ def run_noise_growth(
     target : `Target`
         The target. It is only read.
     library_stack_path : `str`
-        The library stack whose frames to use. Its ``_inputs.json`` must exist.
+        The library stack whose frames to use.
     context : `PipelineRunContext` or `None`
         The run's shared facts, or `None` to store nothing.
     configuration : `AppConfiguration`
@@ -563,26 +828,24 @@ def run_noise_growth(
     Returns
     -------
     result : `NoiseGrowthResult`
-        The subsets, smallest first, and notes about steps left out.
+        The subsets, smallest first, and notes about steps left out or failed.
     """
-    members, missing = library_member_frames(target, library_stack_path)
-    nights, undated = frames_by_night(members)
-    notes: list[str] = []
-    if missing:
-        notes.append(
-            f"{len(missing)} frame(s) of the library stack are no longer on the target and were left out."
-        )
-    if undated:
-        notes.append(f"{len(undated)} frame(s) have no timestamp and were left out of the series.")
-    steps = plan_growth_steps(nights, maximum_steps)
-    if not steps:
-        notes.append(f"No subset has at least {MINIMUM_SUBSET_FRAMES} frames, so no subset stack was made.")
-    stem = os.path.splitext(os.path.basename(library_stack_path))[0]
-    subsets = []
-    for index, step in enumerate(steps):
-        _report(int(100 * index / len(steps)), f"Stacking subset {step.key} ({len(step.frames)} frames)")
-        subsets.append(
-            _stack_and_measure(
+    with subset_job_guard(target.id):
+        library = read_library_run(target, library_stack_path, configuration)
+        nights, undated = frames_by_night(library.members)
+        notes: list[str] = list(library.notes)
+        if undated:
+            notes.append(f"{len(undated)} frame(s) have no timestamp and were left out of the series.")
+        steps = plan_growth_steps(nights, maximum_steps)
+        if not steps:
+            notes.append(
+                f"No subset has at least {MINIMUM_SUBSET_FRAMES} frames, so no subset stack was made."
+            )
+        stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+        subsets = []
+        for index, step in enumerate(steps):
+            _report(int(100 * index / len(steps)), f"Stacking subset {step.key} ({len(step.frames)} frames)")
+            subset = _stack_and_measure(
                 target,
                 step.frames,
                 f"{stem}.{step.key}",
@@ -591,15 +854,19 @@ def run_noise_growth(
                 configuration=configuration,
                 drivers=drivers,
                 stacking_slot=stacking_slot,
+                library=library,
+                keep_going=True,
             )
+            if subset.stack_error:
+                notes.append(f"Subset {step.key} failed and was skipped: {subset.stack_error}")
+            subsets.append(subset)
+        return NoiseGrowthResult(
+            targetId=target.id,
+            libraryStackPath=library_stack_path,
+            subsets=subsets,
+            notes=notes,
+            rowsWritten=sum(subset.rows_written for subset in subsets),
         )
-    return NoiseGrowthResult(
-        targetId=target.id,
-        libraryStackPath=library_stack_path,
-        subsets=subsets,
-        notes=notes,
-        rowsWritten=sum(subset.rows_written for subset in subsets),
-    )
 
 
 def run_night_contributions(
@@ -618,7 +885,7 @@ def run_night_contributions(
     target : `Target`
         The target. It is only read.
     library_stack_path : `str`
-        The library stack whose frames to use. Its ``_inputs.json`` must exist.
+        The library stack whose frames to use.
     context : `PipelineRunContext` or `None`
         The run's shared facts, or `None` to store nothing.
     configuration : `AppConfiguration`
@@ -634,27 +901,58 @@ def run_night_contributions(
         One entry for each night. A target with one night has nothing to leave
         out: its entry has no subset and a note says so.
     """
-    members, missing = library_member_frames(target, library_stack_path)
-    nights, undated = frames_by_night(members)
-    notes: list[str] = []
-    if missing:
-        notes.append(
-            f"{len(missing)} frame(s) of the library stack are no longer on the target and were left out."
+    with subset_job_guard(target.id):
+        return _run_night_contributions(
+            target,
+            library_stack_path,
+            context=context,
+            configuration=configuration,
+            drivers=drivers,
+            stacking_slot=stacking_slot,
         )
+
+
+def _run_night_contributions(
+    target: Target,
+    library_stack_path: str,
+    *,
+    context: PipelineRunContext | None,
+    configuration: Any,
+    drivers: Drivers | None,
+    stacking_slot: Callable[[], AbstractContextManager],
+) -> NightContributionResult:
+    """Do the work of `run_night_contributions` while the guard is held.
+
+    Parameters
+    ----------
+    target : `Target`
+        The target. It is only read.
+    library_stack_path : `str`
+        The library stack whose frames to use.
+    context : `PipelineRunContext` or `None`
+        The run's shared facts, or `None` to store nothing.
+    configuration : `AppConfiguration`
+        The settings.
+    drivers : `Drivers`, optional
+        The stacking program.
+    stacking_slot : `Callable`
+        Gives the context manager that holds a stacking slot.
+
+    Returns
+    -------
+    result : `NightContributionResult`
+        One entry for each night.
+    """
+    library = read_library_run(target, library_stack_path, configuration)
+    nights, undated = frames_by_night(library.members)
+    notes: list[str] = list(library.notes)
     if undated:
         notes.append(
             f"{len(undated)} frame(s) have no timestamp. They stay in every leave-one-night-out stack."
         )
-    stack_file_name = os.path.basename(library_stack_path)
-    stem = os.path.splitext(stack_file_name)[0]
-    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
-
-    member_ids = {frame_subject_id(frame.path, target.id) for frame in members}
-    recorded, weights_reason = _recorded_weights(
-        QualityStore.from_configuration(configuration), target.id, stack_file_name, member_ids
-    )
-    shares, share_reason = night_weight_shares(recorded)
-    share_reason = weights_reason or share_reason
+    stem = os.path.splitext(os.path.basename(library_stack_path))[0]
+    shares, share_reason = night_weight_shares(library.weights)
+    share_reason = library.weights_reason or share_reason
     contributions = []
     if len(nights) < 2:
         notes.append("The stack has fewer than two observing nights, so there is no night to leave out.")
@@ -672,7 +970,7 @@ def run_night_contributions(
             night: str = night,
             label: str = label,
         ) -> list[QualityMeasurement]:
-            """Build the two night rows of one leave-out stack.
+            """Build the night rows of one leave-out stack.
 
             Parameters
             ----------
@@ -688,9 +986,20 @@ def run_night_contributions(
             Returns
             -------
             measurements : `list` [`QualityMeasurement`]
-                The night's share and the noise without the night.
+                The night's share, the noise without the night and its
+                difference from the library stack's.
             """
-            return night_measurements(context, label, night, shares.get(night), share_reason, result, noise)
+            return night_measurements(
+                context,
+                label,
+                night,
+                shares.get(night),
+                share_reason,
+                result,
+                noise,
+                share_assumed_reason=library.assumed_reason,
+                library_noise_sums=library.noise_sums,
+            )
 
         if len(remaining) < MINIMUM_SUBSET_FRAMES:
             subset = None
@@ -709,6 +1018,8 @@ def run_night_contributions(
                     share_reason,
                     skipped,
                     StackNoiseOutcome(None, reason),
+                    share_assumed_reason=library.assumed_reason,
+                    library_noise_sums=library.noise_sums,
                 )
                 record_run_measurements(rows, config=configuration)
         else:
@@ -722,8 +1033,14 @@ def run_night_contributions(
                 drivers=drivers,
                 stacking_slot=stacking_slot,
                 night_id=night,
+                library=library,
+                keep_going=True,
                 extra_measurements=night_rows,
             )
+            if subset.stack_error:
+                notes.append(
+                    f"The stack without the night {night} failed and was skipped: {subset.stack_error}"
+                )
         contributions.append(
             NightContribution(
                 nightId=night,
@@ -750,6 +1067,9 @@ def night_measurements(
     share_reason: str,
     result: SubsetStackResult,
     noise: StackNoiseOutcome | None,
+    *,
+    share_assumed_reason: str = "",
+    library_noise_sums: tuple[np.ndarray, float, str] | None = None,
 ) -> list[QualityMeasurement]:
     """Build the night's weight share and the noise without the night.
 
@@ -769,48 +1089,95 @@ def night_measurements(
         The leave-out stack's result.
     noise : `StackNoiseOutcome` or `None`
         The leave-out stack's noise or the reason there is none.
+    share_assumed_reason : `str`, optional
+        Why the weights behind the share are assumed. When it is not empty
+        the share is stored as assumed.
+    library_noise_sums : `tuple`, optional
+        The library stack's per-aperture sums, its reference flux and the
+        name of the stack that chose the apertures. Without it the
+        difference from the library stack's noise is not measured.
 
     Returns
     -------
     measurements : `list` [`QualityMeasurement`]
-        Two rows on the leave-out stack's subject.
+        Three rows on the leave-out stack's subject: the share, the noise
+        without the night, and its paired difference from the library stack's.
     """
     if context is None:
         return []
     subject = _subset_subject(context, label, night_id)
+    share_known = share is not None
     rows = [
         build_measurement(
             _SPEC_BY_NAME[STACKING_NIGHT_WEIGHT_SHARE],
             share,
             context,
             subject,
-            reason=share_reason or "the night's share is not known",
+            reason=(share_assumed_reason if share_known else share_reason)
+            or "the night's share is not known",
+            status=MeasurementStatus.ASSUMED
+            if share_known and share_assumed_reason
+            else MeasurementStatus.MEASURED,
         )
     ]
     outcome = noise.result if noise is not None else None
+    missing_reason = (
+        (noise.reason if noise is not None else "") or result.noise_reason or "the noise was not measured"
+    )
     if outcome is None:
         rows.append(
             build_measurement(
-                _SPEC_BY_NAME[STACKING_NOISE_WITHOUT_NIGHT],
+                _SPEC_BY_NAME[STACKING_NOISE_WITHOUT_NIGHT], None, context, subject, reason=missing_reason
+            )
+        )
+        rows.append(
+            build_measurement(
+                _SPEC_BY_NAME[STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT],
                 None,
                 context,
                 subject,
-                reason=(noise.reason if noise is not None else "")
-                or result.noise_reason
-                or "the noise was not measured",
+                reason=missing_reason,
             )
         )
+        return rows
+    rows.append(
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_NOISE_WITHOUT_NIGHT],
+            outcome.normalized_noise,
+            context,
+            subject,
+            uncertainty=outcome.normalized_uncertainty,
+            sample_count=outcome.aperture_count,
+        )
+    )
+    difference = None
+    difference_reason = ""
+    if library_noise_sums is None:
+        difference_reason = (
+            "the library stack's per-aperture sums were not saved; stack the target again to save them"
+        )
+    elif library_noise_sums[2] != outcome.aperture_set_origin:
+        difference_reason = "the library stack was measured in other apertures than this stack"
     else:
-        rows.append(
-            build_measurement(
-                _SPEC_BY_NAME[STACKING_NOISE_WITHOUT_NIGHT],
-                outcome.normalized_noise,
-                context,
-                subject,
-                uncertainty=outcome.normalized_uncertainty,
-                sample_count=outcome.aperture_count,
-            )
+        difference = paired_noise_difference(
+            library_noise_sums[0],
+            library_noise_sums[1],
+            np.asarray(outcome.aperture_sums, dtype=float),
+            outcome.reference_flux_adu,
         )
+        if difference is None:
+            difference_reason = "too few apertures are usable on both stacks"
+    rows.append(
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT],
+            None if difference is None else difference[0],
+            context,
+            subject,
+            reason=difference_reason,
+            uncertainty=None if difference is None else difference[1],
+            sample_count=None if difference is None else difference[2],
+        )
+    )
     return rows
 
 
@@ -840,9 +1207,9 @@ def stack_chosen_subset(
     label : `str`
         The subset's label. It names the folder and the file.
     library_stack_path : `str`
-        The target's library stack (or the path it will have). Its folder
-        holds the target's stored noise apertures and the default
-        ``_subsets`` folder.
+        The target's library stack (or the path it will have; for spectral
+        frames, the spectral library stack). Its folder holds the target's
+        stored noise apertures and the ``_subsets`` folder.
     context : `PipelineRunContext` or `None`
         The run's shared facts, or `None` to store nothing.
     configuration : `AppConfiguration`
@@ -852,21 +1219,23 @@ def stack_chosen_subset(
     stacking_slot : `Callable`
         Gives the context manager that holds a stacking slot.
     output_folder : `str`, optional
-        Where to write the stack instead of the default subset folder.
+        A folder to write the stack to instead of ``_subsets/<label>``. It
+        must lie inside the ``_subsets`` folder beside the library stack.
 
     Returns
     -------
     result : `SubsetStackResult`
         The stack's path, its frame counts and its noise.
     """
-    return _stack_and_measure(
-        target,
-        frames,
-        label,
-        library_stack_path,
-        context,
-        configuration=configuration,
-        drivers=drivers,
-        stacking_slot=stacking_slot,
-        output_folder=output_folder,
-    )
+    with subset_job_guard(target.id):
+        return _stack_and_measure(
+            target,
+            frames,
+            label,
+            library_stack_path,
+            context,
+            configuration=configuration,
+            drivers=drivers,
+            stacking_slot=stacking_slot,
+            output_folder=output_folder,
+        )

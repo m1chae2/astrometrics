@@ -41,6 +41,7 @@ __all__ = [
     "determine_stack_members",
     "effective_exposure_seconds",
     "effective_frame_count",
+    "effective_read_noise_time_seconds",
     "normalized_weights",
     "registration_reference_from_diagnostics",
     "wfwhm_weights",
@@ -386,3 +387,44 @@ def effective_exposure_seconds(
         weight * weight / exposure for weight, exposure in zip(weights, exposures, strict=True)
     )
     return None if denominator <= 0 else total * total / denominator
+
+
+def effective_read_noise_time_seconds(
+    weights: Sequence[float | None], exposures: Sequence[float | None]
+) -> float | None:
+    """Give the single-frame exposure with the same read noise as the stack.
+
+    Each frame gives an estimate of the sky's rate (counts per second). Read
+    noise adds a variance RN^2 to the counts of every frame whatever its
+    length, so in the rate it is RN^2 / t^2. A weighted mean of the rates then
+    has a read-noise variance RN^2 x sum(w^2 / t^2) / (sum w)^2. One frame of
+    tau seconds has RN^2 / tau^2. Setting them equal gives tau = sum(w) /
+    sqrt(sum(w^2 / t^2)). For N equal frames of t seconds it is t x sqrt(N).
+    Photon noise is described by `effective_exposure_seconds` instead; a stack
+    of frames of different lengths needs both, because the two kinds of noise
+    weight the frames differently.
+
+    Parameters
+    ----------
+    weights : `Sequence` of `float` or `None`
+        Each member's weight, in any scale.
+    exposures : `Sequence` of `float` or `None`
+        Each member's exposure time in seconds, in the same order.
+
+    Returns
+    -------
+    seconds : `float` or `None`
+        tau in seconds, or `None` when a weight or an exposure is unknown or
+        not positive.
+    """
+    if not weights or len(weights) != len(exposures):
+        return None
+    if any(weight is None or weight < 0 for weight in weights):
+        return None
+    if any(exposure is None or exposure <= 0 for exposure in exposures):
+        return None
+    total = math.fsum(weights)
+    denominator = math.fsum(
+        weight * weight / (exposure * exposure) for weight, exposure in zip(weights, exposures, strict=True)
+    )
+    return None if denominator <= 0 else total / math.sqrt(denominator)

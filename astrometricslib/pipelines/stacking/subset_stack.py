@@ -45,6 +45,7 @@ __all__ = [
     "SubsetStackOutcome",
     "check_subset_label",
     "stack_frame_subset",
+    "subset_output_path",
     "subset_stack_path",
 ]
 
@@ -134,6 +135,49 @@ def subset_stack_path(library_folder: str, label: str, file_name: str) -> str:
     return os.path.join(library_folder, SUBSET_FOLDER_NAME, label, os.path.basename(file_name))
 
 
+def subset_output_path(library_folder: str, label: str, output_folder: str | None) -> str:
+    """Give a subset stack's path, kept inside ``_subsets``.
+
+    Parameters
+    ----------
+    library_folder : `str`
+        The target's folder of stacks (the folder of its library stack).
+    label : `str`
+        The subset's label. It names the file.
+    output_folder : `str` or `None`
+        A folder the caller wants the stack written to. `None` gives the
+        default, ``<library_folder>/_subsets/<label>``.
+
+    Returns
+    -------
+    path : `str`
+        The stack's path. Its folder is the default one or a folder inside
+        ``<library_folder>/_subsets``.
+
+    Raises
+    ------
+    InvalidArgumentError
+        If the label is unsafe, or the folder (after following links) is not
+        inside ``<library_folder>/_subsets``. A subset stack must never land
+        among the library's own files.
+    """
+    check_subset_label(label)
+    if output_folder is None:
+        return subset_stack_path(library_folder, label, f"{label}.fits")
+    allowed = os.path.realpath(os.path.join(library_folder, SUBSET_FOLDER_NAME))
+    resolved = os.path.realpath(output_folder)
+    try:
+        inside = os.path.commonpath([allowed, resolved]) == allowed
+    except ValueError:  # paths on different drives
+        inside = False
+    if not inside:
+        raise InvalidArgumentError(
+            f"The subset stack's output folder {output_folder!r} must be inside {allowed!r}, so a "
+            "subset stack can never replace a library file."
+        )
+    return os.path.join(resolved, f"{label}.fits")
+
+
 def stack_frame_subset(
     target_id: str,
     frames: list[FrameRecord],
@@ -154,7 +198,10 @@ def stack_frame_subset(
     ----------
     target_id : `str`
         The target's id. It names Siril's work folder, together with the
-        output file.
+        output file's name without its extension. That name is the subset's
+        label, so the work folder of one subset is never the library stack's
+        or another subset's. Two jobs with the same label are refused by
+        `target_stack_guard.subset_job_guard`.
     frames : `list` [`FrameRecord`]
         The frames to stack, all of one camera. They are copied.
     output_path : `str`
@@ -182,8 +229,11 @@ def stack_frame_subset(
         path is not absolute.
     """
     from astrometricslib.pipelines.stacking.pre_processing.camera_selection import ensure_single_camera
-    from astrometricslib.pipelines.stacking.pre_processing.exposure_weighting import choose_stack_weight
     from astrometricslib.pipelines.stacking.stack_runner import run_stack
+    from astrometricslib.pipelines.stacking.stack_settings import (
+        choose_weight_for_frames,
+        trim_noisy_stack_edges,
+    )
 
     if len(frames) < MINIMUM_SUBSET_FRAMES:
         raise InvalidArgumentError(
@@ -194,11 +244,9 @@ def stack_frame_subset(
     frames_to_stack = [frame.model_copy(deep=True) for frame in frames]
     ensure_single_camera(frames_to_stack)
     is_spectral = any(frame_is_spectral(frame) for frame in frames_to_stack)
-    stack_weight = choose_stack_weight(
-        [float(frame.exposure) for frame in frames_to_stack if frame.exposure],
-        configuration.get_stack_weight(),
-        is_spectral=is_spectral,
-    )
+    # The library stack's own helper makes the choice, so a subset is weighted
+    # exactly as the library stack is.
+    stack_weight = choose_weight_for_frames(frames_to_stack, None, configuration, is_spectral=is_spectral)
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     engine = (drivers or Drivers()).stacking_or_default()
     stacked_path, diagnostics = run_stack(
@@ -211,13 +259,7 @@ def stack_frame_subset(
         job_id=job_id,
         stack_weight=stack_weight,
     )
-    crop_offset = (0, 0)
-    if stacked_path and not is_spectral and configuration.get_trim_noisy_stack_edges_enabled():
-        from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
-
-        crop_box = crop_stack_edges(stacked_path)
-        if crop_box is not None:
-            crop_offset = (crop_box.x0, crop_box.y0)
+    crop_offset = trim_noisy_stack_edges(stacked_path, configuration, is_spectral=is_spectral)
     reference = registration_reference_from_diagnostics(diagnostics) if stacked_path else None
     return SubsetStackOutcome(
         stack_path=stacked_path,

@@ -10,16 +10,28 @@ There are three kinds, all about one run (subject level ``run``):
 - Run totals from the summary: the worst zero-order saturation, the
   dispersion angle, the median trail width, the star identification counts and
   the classification concern counts. Each name says which estimator it keeps
-  (``_max``, ``_median``, ``_first_star``).
+  (``_max``, ``_median``, ``_first_star``) and ends with its unit.
 - Roll-ups of the per-spectrum checkpoints. Every spectrum passes four
   checkpoints (raw frame, pre-processing, processing, post-processing). The
   summary keeps, for each numeric checkpoint metric, the median over the
   run's spectra. Each of those medians is declared as
-  ``spectroscopy.stage_<stage>_<metric>``. The wavelength-scale scatter and
-  the Gaia XP comparison are rolled up in the same way, and declared too.
+  ``spectroscopy.stage_<stage>_<metric>``. The checkpoint keeps its own
+  metric names; the declared name adds the unit suffix the checkpoint name
+  lacks (see `stage_metric_name`). The wavelength-scale scatter and the Gaia
+  XP comparison are rolled up in the same way, and declared too.
 - The run's self-checks (gates), stored with their outcome and limit as
   ``spectroscopy.gate_<gate name>``. They stay self-checks: they flag the run
   for a look and say nothing about the sky.
+
+These values are run-level and not stack-level, unlike astrometry's, for two
+reasons found in the code. The session batch (`batch.py`) extracts spectra
+from every frame of every session of the target and rolls them up into one
+summary, so no single stack is the source of its numbers. The single-image
+runner (`runner.py`) may read a stack, but it does not tell the record step
+which one, and its numbers are medians over the many stars of that image, not
+a property of the image file. If the pipeline later records which stack a run
+read, the numbers that describe that stack alone (for example the trail
+width) could move to the stack level.
 
 Yes/no verdicts are not measurements and are not declared here (for example
 ``poor_match``, ``trustworthy`` and ``zero_order_saturation_flagged``). The
@@ -42,9 +54,9 @@ from astrometricslib.models.quality.metric_spec import (
 
 # ---- Run totals from the summary -----------------------------------------
 
-SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX = "spectroscopy.zero_order_saturated_fraction_max"
-SPECTROSCOPY_DISPERSION_ANGLE_FIRST_STAR = "spectroscopy.dispersion_angle_first_star"
-SPECTROSCOPY_TRAIL_WIDTH_MEDIAN = "spectroscopy.trail_width_median"
+SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX = "spectroscopy.zero_order_saturated_max_fraction"
+SPECTROSCOPY_DISPERSION_ANGLE_FIRST_STAR = "spectroscopy.dispersion_angle_first_star_deg"
+SPECTROSCOPY_TRAIL_WIDTH_MEDIAN = "spectroscopy.trail_width_median_px"
 SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT = "spectroscopy.catalog_matched_star_count"
 SPECTROSCOPY_POSITION_ONLY_STAR_COUNT = "spectroscopy.position_only_star_count"
 SPECTROSCOPY_UNRESOLVED_STAR_COUNT = "spectroscopy.unresolved_star_count"
@@ -679,6 +691,26 @@ STAGE_NAMES: tuple[str, ...] = tuple(_STAGE_DESCRIPTION)
 STAGE_METRIC_KEYS: tuple[tuple[str, str], ...] = tuple((row[0], row[1]) for row in _STAGE_ROWS)
 
 
+# A checkpoint's metric keeps its own name inside the checkpoint (the run
+# summary and the per-star records store it under that name). A registered
+# name must end with its unit (see `KNOWN_UNITS` and the metric conformance
+# test), so these checkpoint names get the unit suffix they lack. Each entry
+# maps a checkpoint metric name to the name used after ``stage_<stage>_``.
+_REGISTERED_NAME_BY_CHECKPOINT_METRIC: dict[str, str] = {
+    "target_altitude_degrees": "target_altitude_deg",
+    "parallactic_to_dispersion_angle_degrees": "parallactic_to_dispersion_angle_deg",
+    "median_trail_width": "median_trail_width_px",
+    "streak_tilt": "streak_tilt_deg",
+    "peak_above_sky": "peak_above_sky_adu",
+    "resolution_element": "resolution_element_angstrom",
+    "fraction_samples_snr_below_5": "snr_below_5_fraction",
+    "ebv_used": "ebv_used_mag",
+    "median_equivalent_width_relative_error": "median_equivalent_width_relative_error_fraction",
+    "synthetic_b_minus_v": "synthetic_b_minus_v_mag",
+    "emission_lines_detected": "emission_lines_detected_count",
+}
+
+
 def stage_metric_name(stage: str, checkpoint_metric: str) -> str:
     """Give the registered name of a checkpoint metric's run median.
 
@@ -688,14 +720,17 @@ def stage_metric_name(stage: str, checkpoint_metric: str) -> str:
         The checkpoint, one of ``raw_frame``, ``pre_processing``,
         ``processing`` or ``post_processing``.
     checkpoint_metric : `str`
-        The metric's name inside the checkpoint.
+        The metric's name inside the checkpoint (the name the summary and
+        the per-star records store it under).
 
     Returns
     -------
     name : `str`
-        ``spectroscopy.stage_<stage>_<metric>``.
+        ``spectroscopy.stage_<stage>_<metric>``, where ``<metric>`` is the
+        checkpoint name, ending with the metric's unit.
     """
-    return f"spectroscopy.stage_{stage}_{checkpoint_metric}"
+    registered = _REGISTERED_NAME_BY_CHECKPOINT_METRIC.get(checkpoint_metric, checkpoint_metric)
+    return f"spectroscopy.stage_{stage}_{registered}"
 
 
 def stage_spectrum_count_name(stage: str) -> str:

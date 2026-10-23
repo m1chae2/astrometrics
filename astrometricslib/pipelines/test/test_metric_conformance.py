@@ -39,6 +39,38 @@ PIPELINES_ROOT = LIBRARY_ROOT / "pipelines"
 REGISTER_DIR = LIBRARY_ROOT.parent / "documentation" / "library_design" / "validation"
 NAME_FORM = re.compile(r"^[a-z][a-z_]*\.[a-z][a-z0-9_]*$")
 REGISTER_ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE)
+# The ending a metric name must have for each unit, so a reader sees the unit
+# in the name. A unitless metric (unit "") has no required ending.
+UNIT_NAME_ENDING: dict[str, str] = {
+    "adu": "_adu",
+    "px": "_px",
+    "arcsec": "_arcsec",
+    "arcsec/px": "_arcsec_per_pixel",
+    "fraction": "_fraction",
+    "count": "_count",
+    "degC": "_degc",
+    "deg": "_deg",
+    "s": "_s",
+    "e-": "_e",
+    "e-/s/px": "_e_per_s_per_px",
+    "mag": "_mag",
+    "angstrom": "_angstrom",
+}
+# Names that are allowed to break the unit-ending rule, each with the reason.
+# Keep this list short. A gate's metric (``<pipeline>.gate_<name>``) carries
+# the gate's own name and the units of whatever number that gate quotes, so
+# gates are exempt as a group (see `is_gate_metric`). The two slopes below are
+# unitless in the registry because "percent per 1000 angstrom" is not a known
+# unit; their names spell the unit out in full.
+UNIT_ENDING_ALLOW_LIST: dict[str, str] = {
+    "spectroscopy.gaia_xp_median_slope_percent_per_1000_angstrom": "unit is percent per 1000 angstrom",
+    "spectroscopy.gaia_xp_median_absolute_slope_percent_per_1000_angstrom": (
+        "unit is percent per 1000 angstrom"
+    ),
+    "spectroscopy.stage_post_processing_gaia_xp_slope_percent_per_1000_angstrom": (
+        "unit is percent per 1000 angstrom"
+    ),
+}
 # Pipeline folders that hold no pipeline of their own.
 NON_PIPELINE_FOLDERS = frozenset({"shared", "test", "__pycache__"})
 
@@ -235,6 +267,50 @@ def find_bad_names_and_units(specs: tuple[MetricSpec, ...]) -> list[str]:
     return problems
 
 
+def is_gate_metric(name: str) -> bool:
+    """Say whether a metric stands for a self-check gate.
+
+    Parameters
+    ----------
+    name : `str`
+        A registered metric name.
+
+    Returns
+    -------
+    is_gate : `bool`
+        `True` for ``<checkpoint>.gate_<gate name>``.
+    """
+    return name.split(".", 1)[-1].startswith("gate_")
+
+
+def find_unit_ending_problems(specs: tuple[MetricSpec, ...]) -> list[str]:
+    """Name each spec whose name does not end with its unit.
+
+    Parameters
+    ----------
+    specs : `tuple` of `MetricSpec`
+        The declarations to check.
+
+    Returns
+    -------
+    problems : `list` of `str`
+        One line per metric. A gate metric and the names in
+        `UNIT_ENDING_ALLOW_LIST` are skipped. A unitless metric must not end
+        with another unit's ending (it would claim a unit it does not have).
+    """
+    problems = []
+    all_endings = tuple(UNIT_NAME_ENDING.values())
+    for spec in specs:
+        if is_gate_metric(spec.name) or spec.name in UNIT_ENDING_ALLOW_LIST:
+            continue
+        required = UNIT_NAME_ENDING.get(spec.unit)
+        if required is not None and not spec.name.endswith(required):
+            problems.append(f"{spec.name}: unit {spec.unit!r} needs the ending {required!r}")
+        if spec.unit == "" and spec.name.endswith(all_endings):
+            problems.append(f"{spec.name}: unitless, but the name ends with a unit")
+    return problems
+
+
 def find_unknown_register_entries(specs: tuple[MetricSpec, ...], known_entries: set[str]) -> list[str]:
     """Name each spec that cites a missing register entry.
 
@@ -292,6 +368,30 @@ def test_every_computed_by_resolves_to_a_callable() -> None:
 def test_names_follow_the_form_and_units_are_known() -> None:
     """Names are <checkpoint>.<snake_case> and units are known."""
     assert find_bad_names_and_units(get_metric_registry().all()) == []
+
+
+def test_every_metric_name_ends_with_its_unit() -> None:
+    """A name ends with its unit suffix, such as ``_px`` or ``_count``."""
+    assert find_unit_ending_problems(get_metric_registry().all()) == []
+
+
+def test_the_allow_list_names_are_registered_and_justified() -> None:
+    """Each allow-listed name still exists and gives a reason."""
+    registered = set(get_metric_registry().names())
+    assert set(UNIT_ENDING_ALLOW_LIST) <= registered
+    assert all(reason.strip() for reason in UNIT_ENDING_ALLOW_LIST.values())
+
+
+def test_the_unit_ending_checker_goes_red_on_broken_input() -> None:
+    """A name with the wrong ending is reported."""
+    good = get_metric_registry().get("asteroid_detection.candidates_detected_count")
+    assert find_unit_ending_problems((good,)) == []
+    wrong_name = good.model_copy(update={"name": "asteroid_detection.candidates_detected"})
+    assert find_unit_ending_problems((wrong_name,))
+    wrong_unit = good.model_copy(update={"unit": "px"})
+    assert find_unit_ending_problems((wrong_unit,))
+    unitless_with_ending = good.model_copy(update={"unit": ""})
+    assert find_unit_ending_problems((unitless_with_ending,))
 
 
 def test_no_duplicate_names_in_the_declarations() -> None:

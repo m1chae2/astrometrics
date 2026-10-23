@@ -36,9 +36,9 @@ from astrometricslib.models.quality.metric_spec import (
     UncertaintyKind,
 )
 
-PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed"
-PHOTOMETRY_STARS_FOUND = "photometry.stars_found"
-PHOTOMETRY_FRAMES_PROCESSED = "photometry.frames_processed"
+PHOTOMETRY_STARS_PROCESSED = "photometry.stars_processed_count"
+PHOTOMETRY_STARS_FOUND = "photometry.stars_found_count"
+PHOTOMETRY_FRAMES_PROCESSED = "photometry.frames_processed_count"
 PHOTOMETRY_VARIABLE_CANDIDATE_COUNT = "photometry.variable_candidate_count"
 PHOTOMETRY_CROSS_SESSION_MATCH_COUNT = "photometry.cross_session_match_count"
 PHOTOMETRY_LONG_TERM_VARIABLE_CANDIDATE_COUNT = "photometry.long_term_variable_candidate_count"
@@ -46,12 +46,12 @@ PHOTOMETRY_ASTROMETRY_IDENTIFIED_STAR_COUNT = "photometry.astrometry_identified_
 PHOTOMETRY_CATALOG_MATCHED_STAR_COUNT = "photometry.catalog_matched_star_count"
 PHOTOMETRY_POSITION_ONLY_STAR_COUNT = "photometry.position_only_star_count"
 PHOTOMETRY_UNRESOLVED_STAR_COUNT = "photometry.unresolved_star_count"
-PHOTOMETRY_STARS_WITH_SCATTER = "photometry.stars_with_light_curve_scatter"
+PHOTOMETRY_STARS_WITH_SCATTER = "photometry.stars_with_light_curve_scatter_count"
 PHOTOMETRY_NOISE_MODEL_STAR_COUNT = "photometry.noise_model_star_count"
 PHOTOMETRY_LIGHT_CURVE_SCATTER_RMS_MEDIAN_MAG = "photometry.light_curve_scatter_rms_median_mag"
 PHOTOMETRY_COMPARISON_SCATTER_OVER_PREDICTED = "photometry.comparison_scatter_over_predicted_worst"
 PHOTOMETRY_CORNER_DISPLACEMENT_P95_PX = "photometry.corner_displacement_p95_worst_px"
-PHOTOMETRY_CENTROID_FALLBACK_FRACTION = "photometry.centroid_fallback_fraction_worst"
+PHOTOMETRY_CENTROID_FALLBACK_FRACTION = "photometry.centroid_fallback_worst_fraction"
 
 PHOTOMETRY_GATE_ENSEMBLE_FRAME_REJECTION = "photometry.gate_ensemble_frame_rejection"
 PHOTOMETRY_GATE_CAPTURE_TIMESTAMPS = "photometry.gate_capture_timestamps"

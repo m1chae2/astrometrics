@@ -179,6 +179,8 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
         "since",
         "row_ids",
         "latest_only",
+        "variant",
+        "library_only",
     }
     assert not schema.get("required")
 

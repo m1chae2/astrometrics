@@ -8,6 +8,7 @@ nights' shares add up to one, and that missing inputs give a clear reason
 instead of a guess.
 """
 
+import contextvars
 import json
 import math
 from datetime import UTC, datetime
@@ -40,7 +41,9 @@ from astrometricslib.pipelines.stacking.metrics import (
     STACKING_FRAME_WEIGHT,
     STACKING_METRICS,
     STACKING_NIGHT_WEIGHT_SHARE,
+    STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT,
     STACKING_NOISE_WITHOUT_NIGHT,
+    STACKING_SUBSET_EXPECTED_NOISE_RATIO,
 )
 from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
     APERTURE_FILE_NAME,
@@ -48,6 +51,7 @@ from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
 )
 from astrometricslib.pipelines.stacking.subset_noise_run import (
     GrowthStep,
+    expected_noise_ratio,
     frames_by_night,
     night_weight_shares,
     plan_growth_steps,
@@ -641,7 +645,7 @@ def test_the_growth_job_can_include_the_night_contributions_only_when_asked(tmp_
 
 
 def test_stack_chosen_subset_writes_beside_the_library_stack_or_to_the_folder_asked(tmp_path: Path) -> None:
-    """The default folder is _subsets/<label>; a given folder is used."""
+    """The default folder is _subsets/<label>; a folder inside it works."""
     library = _Library(tmp_path, nights=3)
     frames = library.target.frames[:6]
     default = stack_chosen_subset(
@@ -664,9 +668,9 @@ def test_stack_chosen_subset_writes_beside_the_library_stack_or_to_the_folder_as
         configuration=library.configuration,
         drivers=library.drivers,
         stacking_slot=library.slot,
-        output_folder=str(tmp_path / "scratch"),
+        output_folder=str(Path(library.stack_path).parent / "_subsets" / "scratch"),
     )
-    assert elsewhere.stack_path == str(tmp_path / "scratch" / "mine.fits")
+    assert elsewhere.stack_path == str(Path(library.stack_path).parent / "_subsets" / "scratch" / "mine.fits")
     assert elsewhere.rows_written == 0
     assert Path(library.stack_path).exists()
 
@@ -753,3 +757,262 @@ def test_night_weight_shares_add_up_and_refuse_unknown_weights() -> None:
     assert night_weight_shares([])[1]
     assert night_weight_shares([(None, 1.0)])[1]
     assert night_weight_shares([("a", 0.0)])[1]
+
+
+def _subset_arguments(library: _Library, **keywords: Any) -> dict[str, Any]:
+    """Build the keyword arguments of `stack_chosen_subset` for a test library.
+
+    Parameters
+    ----------
+    library : `_Library`
+        The test library.
+    **keywords
+        Replacements.
+
+    Returns
+    -------
+    arguments : `dict`
+        The keywords.
+    """
+    arguments = {
+        "context": library.context(),
+        "configuration": library.configuration,
+        "drivers": library.drivers,
+        "stacking_slot": library.slot,
+    }
+    arguments.update(keywords)
+    return arguments
+
+
+def test_an_output_folder_outside_the_subsets_folder_is_refused(tmp_path: Path) -> None:
+    """A subset stack can never be written among the library's own files."""
+    library = _Library(tmp_path, nights=3)
+    frames = library.target.frames[:6]
+    library_folder = Path(library.stack_path).parent
+    for outside in (tmp_path / "scratch", library_folder, library_folder / "_subsets" / ".." / "x"):
+        with pytest.raises(InvalidArgumentError, match="inside"):
+            stack_chosen_subset(
+                library.target,
+                frames,
+                "mine",
+                library.stack_path,
+                **_subset_arguments(library, output_folder=str(outside)),
+            )
+    assert library.stacker.calls == []
+
+
+def test_the_work_folder_name_holds_the_subsets_label(tmp_path: Path) -> None:
+    """Siril's work folder name holds the label."""
+    from astrometricslib.drivers.siril_interface import work_directory_name
+
+    library = _Library(tmp_path, nights=3)
+    result = stack_chosen_subset(
+        library.target,
+        library.target.frames[:6],
+        "mine",
+        library.stack_path,
+        **_subset_arguments(library),
+    )
+    assert work_directory_name("M 99", result.stack_path) == "M_99__mine"
+    assert work_directory_name("M 99", library.stack_path) != "M_99__mine"
+
+
+def test_a_second_subset_job_or_a_library_stack_of_the_target_is_refused(tmp_path: Path) -> None:
+    """One subset job per target, and none beside a library stack."""
+    from astrometricslib.foundation.errors import ConflictError
+    from astrometricslib.pipelines.stacking.target_stack_guard import library_stack_guard, subset_job_guard
+
+    library = _Library(tmp_path, nights=3)
+    with subset_job_guard("M 99"):
+        # Another job has its own context, so the guard is not reused.
+        with pytest.raises(ConflictError, match="subset-stack job"):
+            contextvars.Context().run(_growth, library)
+        with pytest.raises(ConflictError, match="subset-stack job"):
+            with library_stack_guard("M 99"):
+                pass
+        # Another target is free.
+        with library_stack_guard("M 100"):
+            pass
+    with library_stack_guard("M 99"):
+        # Library stacks of one target do not block each other.
+        with library_stack_guard("M 99"):
+            with pytest.raises(ConflictError, match="library stack"):
+                with subset_job_guard("M 99"):
+                    pass
+    # Free again afterwards.
+    with subset_job_guard("M 99"):
+        pass
+    assert library.stacker.calls == []
+
+
+def test_one_failing_subset_is_recorded_as_failed_and_the_series_goes_on(tmp_path: Path) -> None:
+    """A stacker error in one step gives not-measured rows and a note."""
+    library = _Library(tmp_path, nights=4)
+    original = library.stacker.stack_batch
+
+    def run(*arguments: Any, **keywords: Any) -> Any:
+        """Fail on the first call only.
+
+        Returns
+        -------
+        result : `Any`
+            What the fake stacker returns.
+
+        Raises
+        ------
+        RuntimeError
+            On the first call.
+        """
+        if not library.stacker.calls:
+            library.stacker.calls.append("failed")
+            raise RuntimeError("Siril exploded")
+        return original(*arguments, **keywords)
+
+    library.stacker.stack_batch = run  # type: ignore[method-assign]
+    result = _growth(library)
+    assert len(result.subsets) == 3
+    assert "RuntimeError: Siril exploded" in result.subsets[0].stack_error
+    assert result.subsets[0].stack_path is None
+    assert all(subset.stack_path for subset in result.subsets[1:])
+    assert any("failed and was skipped" in note for note in result.notes)
+    failed_rows = [
+        row
+        for row in _rows(library, STACKING_EMPTY_APERTURE_NOISE_NORMALIZED)
+        if row.subject.variant == result.subsets[0].label
+    ]
+    assert failed_rows and all(row.status == MeasurementStatus.NOT_MEASURED for row in failed_rows)
+    assert "Siril exploded" in failed_rows[0].reason
+
+
+def test_every_subset_row_carries_the_variant_field(tmp_path: Path) -> None:
+    """Subset rows have the label as variant; library rows have none."""
+    library = _Library(tmp_path, nights=3)
+    result = _growth(library)
+    rows = _rows(library, STACKING_EMPTY_APERTURE_NOISE_NORMALIZED)
+    assert {row.subject.variant for row in rows} == {subset.label for subset in result.subsets}
+    assert all("/_subsets/" in row.subject.subject_id for row in rows)
+    assert library.store().query(library_only=True) == []
+
+
+def test_members_come_from_the_stored_frame_rows_not_the_inputs_file(tmp_path: Path) -> None:
+    """A frame the run did not keep is left out, whatever the inputs say."""
+    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+    from astrometricslib.pipelines.stacking.subset_noise_run import read_library_run
+
+    library = _Library(tmp_path, nights=3)
+    context = library.context("library-run")
+    rows = [
+        build_measurement(
+            SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT], 10.0, context, context.stack_subject(STACK_NAME)
+        )
+    ]
+    for frame in library.target.frames[1:]:
+        subject = context.stack_subject(STACK_NAME).model_copy(
+            update={"level": SubjectLevel.FRAME, "subject_id": frame_subject_id(frame.path, "M 99")}
+        )
+        rows.append(build_measurement(SPEC_BY_NAME[STACKING_FRAME_WEIGHT], 1.0, context, subject))
+    record_measurements(library.store(), rows)
+    run = read_library_run(library.target, library.stack_path, library.configuration)
+    assert [frame.path for frame in run.members] == [frame.path for frame in library.target.frames[1:]]
+    assert not any("_inputs.json" in note for note in run.notes)
+    # With no stored rows the inputs file is used, and a note says so.
+    other = _Library(tmp_path / "other", nights=3)
+    fallback = read_library_run(other.target, other.stack_path, other.configuration)
+    assert len(fallback.members) == len(other.target.frames)
+    assert any("_inputs.json" in note for note in fallback.notes)
+
+
+def test_a_single_night_series_takes_frames_evenly_through_the_night() -> None:
+    """The subsets interleave: every fourth frame, not the first quarter."""
+    frames = _frames(1, per_night=16)
+    nights, _ = frames_by_night(frames)
+    steps = plan_growth_steps(nights)
+    quarter = steps[0].frames
+    positions = [frames.index(frame) for frame in quarter]
+    assert positions == [2, 6, 10, 14]
+    half = [frames.index(frame) for frame in steps[1].frames]
+    assert half[0] < 4 and half[-1] > 11
+
+
+def test_the_expected_noise_ratio_uses_each_subsets_own_effective_count() -> None:
+    """The ratio is sqrt(N_library / N_subset); unknown counts give none."""
+    assert expected_noise_ratio(16.0, 4.0) == pytest.approx(2.0)
+    assert expected_noise_ratio(None, 4.0) is None
+    assert expected_noise_ratio(16.0, None) is None
+    assert expected_noise_ratio(16.0, 0.0) is None
+
+
+def test_each_subset_stores_its_expected_ratio_and_assumed_weights_make_it_assumed(tmp_path: Path) -> None:
+    """Every subset gets a ratio row."""
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    result = _growth(library)
+    rows = _rows(library, STACKING_SUBSET_EXPECTED_NOISE_RATIO)
+    assert len(rows) == len(result.subsets)
+    assert all(row.status == MeasurementStatus.MEASURED and row.value >= 1.0 for row in rows)
+    assert all(subset.expected_noise_ratio is not None for subset in result.subsets)
+
+
+def test_the_night_difference_is_paired_with_the_library_stacks_sums(tmp_path: Path) -> None:
+    """With the library's sums saved, the difference has a paired error."""
+    from astrometricslib.pipelines.stacking.post_processing.stack_noise import save_noise_sums
+
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    outcome = measure_stack_noise(
+        library.stack_path, None, str(Path(library.stack_path).parent / APERTURE_FILE_NAME)
+    )
+    assert outcome.result is not None
+    save_noise_sums(library.stack_path, outcome.result)
+    _nights(library)
+    rows = _rows(library, STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT)
+    assert len(rows) == 3
+    assert all(row.status == MeasurementStatus.MEASURED and row.uncertainty is not None for row in rows)
+    assert all(row.subject.observing_night_id and row.subject.variant for row in rows)
+
+
+def test_without_saved_library_sums_the_night_difference_says_so(tmp_path: Path) -> None:
+    """No saved sums means a not-measured difference with the reason."""
+    library = _Library(tmp_path, nights=3)
+    library.record_library_weights({0: 1.0, 1: 1.0, 2: 1.0})
+    _nights(library)
+    rows = _rows(library, STACKING_NOISE_DIFFERENCE_WITHOUT_NIGHT)
+    assert rows and all(row.status == MeasurementStatus.NOT_MEASURED for row in rows)
+    assert "per-aperture sums were not saved" in rows[0].reason
+
+
+def test_a_night_share_built_from_assumed_weights_is_assumed(tmp_path: Path) -> None:
+    """When the library stack's weight rows are assumed, so is the share."""
+    library = _Library(tmp_path, nights=3)
+    context = library.context("library-run")
+    from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+
+    rows = [
+        build_measurement(
+            SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT], 10.0, context, context.stack_subject(STACK_NAME)
+        )
+    ]
+    for frame in library.target.frames:
+        subject = context.stack_subject(STACK_NAME).model_copy(
+            update={
+                "level": SubjectLevel.FRAME,
+                "subject_id": frame_subject_id(frame.path, "M 99"),
+                "observing_night_id": observing_night_id(frame.timestamp or 0.0),
+            }
+        )
+        rows.append(
+            build_measurement(
+                SPEC_BY_NAME[STACKING_FRAME_WEIGHT],
+                1.0,
+                context,
+                subject,
+                status=MeasurementStatus.ASSUMED,
+                reason="Siril's filters may have dropped some frames",
+            )
+        )
+    record_measurements(library.store(), rows)
+    _nights(library)
+    shares = _rows(library, STACKING_NIGHT_WEIGHT_SHARE)
+    assert shares and all(
+        row.status == MeasurementStatus.ASSUMED and "filters" in row.reason for row in shares
+    )

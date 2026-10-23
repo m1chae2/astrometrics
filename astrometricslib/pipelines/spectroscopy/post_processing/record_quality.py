@@ -54,10 +54,11 @@ from astrometricslib.models.stellar_source import (
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
 from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    GateLimitSource,
     PipelineRunContext,
+    build_and_record_measurements,
     build_measurement,
     gate_measurement,
-    record_run_measurements,
 )
 from astrometricslib.pipelines.shared.quality.saturation import (
     DEFAULT_SATURATION_FLAG_THRESHOLD,
@@ -504,22 +505,37 @@ def spectroscopy_run_gates(
     return gates
 
 
-# The metric that stands for each gate, and how its limit was obtained.
+# The metric that stands for each gate, and how its limit was obtained. The
+# history fill (`scripts/backfill_quality_measurements.py`) reads this table
+# too, so a limit is described in one place.
+#
 # A count that must be zero, or the one spectrum a run needs, follows from
-# what the check is for. The other limits are designed values (see the
-# design-estimates table in the spectroscopy validation register): a share of
-# saturated pixels, a share of failed spectra, one pixel of dispersion, and a
-# tilt of the response. Each is an error budget, not a measured limit.
-_GATE_METRIC_AND_TIER: dict[str, tuple[str, LimitTier]] = {
-    SPECTRA_GATE_NAME: (SPECTROSCOPY_GATE_SPECTRA_EXTRACTED, LimitTier.GEOMETRY),
-    ZERO_ORDER_GATE_NAME: (SPECTROSCOPY_GATE_ZERO_ORDER_SATURATION, LimitTier.PHYSICAL_BUDGET),
-    CLASSIFICATION_GATE_NAME: (SPECTROSCOPY_GATE_SPECTRAL_CLASSIFICATION, LimitTier.GEOMETRY),
-    CATALOG_GATE_NAME: (SPECTROSCOPY_GATE_CATALOG_AGREEMENT, LimitTier.GEOMETRY),
-    FEATURE_GATE_NAME: (SPECTROSCOPY_GATE_FEATURE_SIGNIFICANCE, LimitTier.GEOMETRY),
-    RESOLUTION_GATE_NAME: (SPECTROSCOPY_GATE_RESOLUTION_MEASURED, LimitTier.GEOMETRY),
-    PROCESSING_QUALITY_GATE_NAME: (SPECTROSCOPY_GATE_PROCESSING_QUALITY, LimitTier.PHYSICAL_BUDGET),
-    WAVELENGTH_SCALE_GATE_NAME: (SPECTROSCOPY_GATE_WAVELENGTH_SCALE, LimitTier.PHYSICAL_BUDGET),
-    GAIA_XP_GATE_NAME: (SPECTROSCOPY_GATE_GAIA_XP_AGREEMENT, LimitTier.PHYSICAL_BUDGET),
+# what the check is for, so those limits are geometry. The other four are
+# designed values that the validation register lists in the spectroscopy
+# design-estimates table: the saturated share of the zero-order image (SPE-D11,
+# 0.1 percent of pixels, which is a share chosen by guess; the saturation level
+# itself comes from the camera profile), the share of failed spectra (SPE-D13),
+# the wavelength-scale RMS of one dispersion pixel (SPE-D12) and the Gaia XP
+# limits (SPE-28 holds the comparison and names the limits as design
+# estimates). None has been measured as a limit.
+GATE_LIMIT_SOURCES: dict[str, GateLimitSource] = {
+    SPECTRA_GATE_NAME: GateLimitSource(SPECTROSCOPY_GATE_SPECTRA_EXTRACTED, LimitTier.GEOMETRY),
+    ZERO_ORDER_GATE_NAME: GateLimitSource(
+        SPECTROSCOPY_GATE_ZERO_ORDER_SATURATION, LimitTier.DESIGN_ESTIMATE, "SPE-D11"
+    ),
+    CLASSIFICATION_GATE_NAME: GateLimitSource(SPECTROSCOPY_GATE_SPECTRAL_CLASSIFICATION, LimitTier.GEOMETRY),
+    CATALOG_GATE_NAME: GateLimitSource(SPECTROSCOPY_GATE_CATALOG_AGREEMENT, LimitTier.GEOMETRY),
+    FEATURE_GATE_NAME: GateLimitSource(SPECTROSCOPY_GATE_FEATURE_SIGNIFICANCE, LimitTier.GEOMETRY),
+    RESOLUTION_GATE_NAME: GateLimitSource(SPECTROSCOPY_GATE_RESOLUTION_MEASURED, LimitTier.GEOMETRY),
+    PROCESSING_QUALITY_GATE_NAME: GateLimitSource(
+        SPECTROSCOPY_GATE_PROCESSING_QUALITY, LimitTier.DESIGN_ESTIMATE, "SPE-D13"
+    ),
+    WAVELENGTH_SCALE_GATE_NAME: GateLimitSource(
+        SPECTROSCOPY_GATE_WAVELENGTH_SCALE, LimitTier.DESIGN_ESTIMATE, "SPE-D12"
+    ),
+    GAIA_XP_GATE_NAME: GateLimitSource(
+        SPECTROSCOPY_GATE_GAIA_XP_AGREEMENT, LimitTier.DESIGN_ESTIMATE, "SPE-28"
+    ),
 }
 
 _SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in SPECTROSCOPY_METRICS}
@@ -782,12 +798,19 @@ def spectroscopy_run_measurements(
         measurements.append(build_measurement(_SPEC_BY_NAME[name], value, context, subject, reason=reason))
 
     gates_by_name = {gate.name: gate for gate in gates}
-    for gate_name, (metric_name, tier) in _GATE_METRIC_AND_TIER.items():
+    for gate_name, limit_source in GATE_LIMIT_SOURCES.items():
         gate = gates_by_name.get(gate_name)
         if gate is None:
             continue
         measurements.append(
-            gate_measurement(gate, _SPEC_BY_NAME[metric_name], context, subject, limit_tier=tier)
+            gate_measurement(
+                gate,
+                _SPEC_BY_NAME[limit_source.metric_name],
+                context,
+                subject,
+                limit_tier=limit_source.tier,
+                register_entry=limit_source.register_entry,
+            )
         )
     return measurements
 
@@ -800,7 +823,7 @@ def record_spectroscopy_quality(
     star_identification_counted: bool = True,
     config: object = None,
 ) -> int:
-    """Store the run's measurements; a storage failure never fails the run.
+    """Store the run's measurements; no failure here ever fails the run.
 
     Parameters
     ----------
@@ -818,11 +841,13 @@ def record_spectroscopy_quality(
     Returns
     -------
     new_count : `int`
-        How many rows were new.
+        How many rows were new. It is 0 when anything went wrong, either in
+        building the rows or in storing them (both are logged).
     """
-    return record_run_measurements(
-        spectroscopy_run_measurements(
+    return build_and_record_measurements(
+        lambda: spectroscopy_run_measurements(
             metrics, gates, context, star_identification_counted=star_identification_counted
         ),
+        f"spectroscopy run on {context.target_id}",
         config=config,
     )

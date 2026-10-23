@@ -16,7 +16,7 @@ A script here may import astrometricslib's internal modules. It never imports an
 
 ## One-time migrations and cleanups
 
-- `migrate_camera_profiles.py` — moves a camera's old single gain and read noise into a setting-keyed `sensor_noise` entry. You give the camera and the gain setting, offset, binning and temperature the values were measured at. It prints what it would change and writes nothing unless you add `--apply`; a write is preceded by a timestamped config backup.
+- `migrate_camera_profiles.py` — moves a camera's old single gain and read noise into a setting-keyed `sensor_noise` entry (a camera that is already migrated is reported and left alone, exit code 0). You give the camera and the gain setting, offset, binning and temperature the values were measured at. It prints what it would change and writes nothing unless you add `--apply`; a write is preceded by a timestamped config backup.
 - `migrate_config_to_toml.py` — migrates the INI configuration file and JSON camera profiles into the current TOML configuration format.
 - `merge_duplicate_catalog_stars.py`, `merge_spectroscopy_star_rows.py`, `reconcile_position_only_star_catalog.py` — fold duplicate or split stellar catalog rows for the same real star back into one row.
 - `backfill_focal_length.py` — fills in a missing `FOCALLEN` header value on frames that lack it.

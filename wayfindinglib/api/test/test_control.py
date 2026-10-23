@@ -850,9 +850,13 @@ def test_remote_methods_delegate_to_the_task_module(
     assert control.remote.check_connection() is True
     remote_transfer_tasks.check_remote_connection.assert_called_once_with(context)
 
-    assert control.remote.sync_frames("M 81", local_path="/local/M81") == {"success": True, "target": "M 81"}
+    assert control.remote.sync_frames("M 81", local_path="/local/M81") == {
+        "success": True,
+        "target": "M 81",
+        "measurements": [],
+    }
     remote_transfer_tasks.download_remote_targets.assert_called_once_with(
-        context, "M 81", local_path="/local/M81"
+        context, "M 81", local_path="/local/M81", measurement_summaries=[]
     )
     assert control.remote.sync_frames("Dark") == {"success": True}
     remote_transfer_tasks.sync_calibration_folder.assert_called_once_with(context, "Dark")
@@ -898,7 +902,11 @@ def test_sync_frames_of_one_target_records_a_job_only_when_asked(
     mocker.patch.object(remote_transfer_tasks, "download_remote_targets", return_value=True)
     recorded = mocker.spy(remote, "registered_job")
 
-    assert control.remote.sync_frames("M 81", local_path="/tmp/frames") == {"success": True, "target": "M 81"}
+    assert control.remote.sync_frames("M 81", local_path="/tmp/frames") == {
+        "success": True,
+        "target": "M 81",
+        "measurements": [],
+    }
     control.remote.sync_frames("M 81", local_path="/tmp/frames", register_job=True)
 
     assert [call.kwargs["enabled"] for call in recorded.call_args_list] == [False, True]

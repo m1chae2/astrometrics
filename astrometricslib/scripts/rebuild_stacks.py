@@ -201,9 +201,13 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
     backup_directory : `str`
         Where the existing stacks are copied first.
     """
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
     from astrometricslib.pipelines.tasks import stack_frames_with_timeout
 
     target = astrometrics.targets.get(name)
+    quality_recording = FrameQualityRecording(
+        astrometrics.config, astrometrics.processing.calibration.library
+    )
     folder = os.path.join(astrometrics.config.get_frames_path(), "lights", name)
     destination = os.path.join(backup_directory, name.replace(" ", "_"))
     os.makedirs(destination, exist_ok=True)
@@ -219,7 +223,12 @@ def rebuild_target(astrometrics: Astrometrics, name: str, backup_directory: str)
         ):
             if kind_frames:
                 print(f"[{name}] Stacking {len(kind_frames)} frame(s) of {key}")
-                stack_frames_with_timeout(target, kind_frames, measured_at=datetime.now(UTC))
+                stack_frames_with_timeout(
+                    target,
+                    kind_frames,
+                    measured_at=datetime.now(UTC),
+                    quality_recording=quality_recording,
+                )
     astrometrics.targets.save()
 
 

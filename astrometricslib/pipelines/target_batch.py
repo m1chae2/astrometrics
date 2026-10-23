@@ -61,10 +61,12 @@ def _process_single_target_worker(
         ``error`` (the reason, if any) and ``stack_outputs`` (the stacks
         made, by kind).
     """
+    from astrometricslib.drivers.calibration_library import CalibrationLibrary
     from astrometricslib.drivers.catalog_access import CatalogAccess
     from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.shared.frame_grouping import select_frames_for_camera
     from astrometricslib.pipelines.shared.target_records import find_stored_target
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
     from astrometricslib.pipelines.tasks import run_full_pipeline
 
     result = {"status": "failed", "error": None, "stack_outputs": {}}
@@ -84,6 +86,11 @@ def _process_single_target_worker(
             result["error"] = f"No frames matching camera '{camera_id}'"
             return result
 
+        quality_recording = None
+        if measured_at is not None:
+            # One calibration library for all of this target's stacks. A
+            # worker process cannot share the parent's library object.
+            quality_recording = FrameQualityRecording(config, CalibrationLibrary(app_config=config))
         result["stack_outputs"] = run_full_pipeline(
             target,
             catalog_access,
@@ -92,6 +99,7 @@ def _process_single_target_worker(
             camera_name=camera_id,
             focal_length_mm=focal_length_mm,
             measured_at=measured_at,
+            quality_recording=quality_recording,
         )
         result["status"] = "success"
     except Exception as processing_error:

@@ -594,6 +594,7 @@ class ProcessingPipelines:
             cannot be read, ``frames`` is combined with a frame choice, or
             the frames come from more than one camera.
         """
+        from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
         from astrometricslib.pipelines.stacking.post_processing.stack_preview import PreviewSettings
         from astrometricslib.pipelines.stacking.stack_request import (
             SirilOptions,
@@ -645,6 +646,7 @@ class ProcessingPipelines:
             save_targets=self._targets.save,
             drivers=self._drivers,
             measured_at=datetime.now(UTC),
+            quality_recording=FrameQualityRecording(self._config, self.calibration.library),
         )
 
     @background_job("preview", grace_period_seconds=20.0)
@@ -1072,13 +1074,28 @@ class ProcessingPipelines:
         calibration library's bias frames; with none at that setting those
         two metrics are ``not_measured``.
 
-        The frame files are never moved or changed. The target is saved with
-        a stamp on each measured frame (the file size and change time at the
-        measurement). A frame whose file still matches its stamp is skipped,
-        so a second call measures nothing again. A frame that fails is
+        The frame files are never moved or changed. Each measured frame gets
+        a stamp (the file size and change time at the measurement), saved to
+        the stored target every 20 frames and at the end. Only the stamps are
+        written, so the save never overwrites other changes to the target. A
+        frame whose file still matches its stamp is skipped, so a second call
+        measures nothing again. A frame that fails, for any reason, is
         counted and tried again next time; one failure does not stop the
         others. Each frame takes about 12 s of one core, and four frames are
-        measured at once.
+        measured at once in four worker processes: real data (61 frames of
+        3008 by 3008 pixels) took about 345 s and about 2.7 GB of memory.
+
+        The worker processes are started with "spawn", which imports the
+        calling script again in each worker. A script that calls this method
+        must therefore keep its top-level code under
+        ``if __name__ == "__main__":``, or the workers stop and every frame
+        fails. The backend, the bundled scripts and notebooks run as modules
+        or cells and are not affected.
+
+        Only one run measures a target at a time, and only one run in the
+        process reads frames at a time. A second call for a target that is
+        already being measured returns at once with ``already_running`` set
+        and nothing measured. A call for another target waits for its turn.
 
         Parameters
         ----------
@@ -1104,6 +1121,7 @@ class ProcessingPipelines:
             If ``limit`` is below 1.
         """
         from astrometricslib.drivers.quality_store import QualityStore
+        from astrometricslib.pipelines.shared.target_records import save_quality_stamps
         from astrometricslib.pipelines.stacking.frame_measurement_run import (
             FrameMeasurementSession,
             record_frame_measurements_for_target,
@@ -1112,14 +1130,23 @@ class ProcessingPipelines:
         if limit is not None and limit < 1:
             raise InvalidArgumentError("limit must be at least 1.")
         resolved = self._resolve(target)
-        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id):
+        with registered_job(enabled=register_job, job_type="quality", target_id=resolved.id) as job:
+            # The run gets its own run id and reports progress only when it
+            # registered (or joined) a job of its own. Called from inside
+            # another job (stacking, ingestion), it leaves that job's
+            # progress and id alone.
             session = FrameMeasurementSession(
                 QualityStore.from_configuration(self._config),
                 self.calibration.library,
+                progress_job=job if job.job_id is not None and job.job_type == "quality" else None,
                 measured_at=datetime.now(UTC),
             )
             return record_frame_measurements_for_target(
-                resolved, session, frames=frames, limit=limit, save_target=self._targets.save
+                resolved,
+                session,
+                frames=frames,
+                limit=limit,
+                save_target=lambda: save_quality_stamps(self._targets, resolved),
             )
 
     def restore_excluded_frames(self, target: str | Target, apply: bool = False) -> RestoreReport:

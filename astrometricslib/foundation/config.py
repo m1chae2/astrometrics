@@ -1,12 +1,14 @@
 """Load, save, and expose access to the application configuration."""
 
 import configparser
+import contextlib
 import logging
 import math
 import os
+import shutil
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +38,14 @@ CONFIG_RECHECK_SECONDS = 1.0
 CONFIG_FILE_NAME = "astrometrics.config.toml"
 
 reload_logger = logging.getLogger(__name__)
+
+# Writers of the config file take turns. The thread lock keeps two threads of
+# one process apart, and the file lock (a lock file beside the config) keeps
+# two processes apart. The thread lock is re-entrant so that a caller can hold
+# the lock across a whole read-modify-write (`AppConfiguration.write_lock`)
+# and `save_configuration` can take it again inside.
+_CONFIG_WRITE_THREAD_LOCK = threading.RLock()
+_config_write_depth = 0
 
 
 class _TomlSectionedConfig:
@@ -390,10 +400,49 @@ class AppConfiguration:
         """
         self.app_config.watch_for_changes()
 
-    def save_configuration(self) -> None:
-        """Save the current config to the resolved astrometrics config file."""
-        import os
+    @contextlib.contextmanager
+    def write_lock(self) -> Generator[None]:
+        """Hold the config file's write lock, in this thread and process.
 
+        Take it around a whole read-modify-write of the file, such as adding
+        a camera profile entry: other writers wait, so none of them can save
+        a version made before this one finished. `save_configuration` takes
+        the same lock and may be called inside the block.
+
+        Yields
+        ------
+        None
+            Control, while the lock is held.
+        """
+        global _config_write_depth
+        # Imported here: the storage package imports this module.
+        from astrometricslib.foundation.storage.process_locks import file_lock
+
+        path = Path(self.config_file_path or self._find_config_file())
+        with _CONFIG_WRITE_THREAD_LOCK:
+            if _config_write_depth > 0:
+                _config_write_depth += 1
+                try:
+                    yield
+                finally:
+                    _config_write_depth -= 1
+                return
+            with file_lock(str(path.with_name(f"{path.name}.lock")), blocking=True):
+                _config_write_depth = 1
+                try:
+                    yield
+                finally:
+                    _config_write_depth = 0
+
+    def save_configuration(self) -> None:
+        """Save the current config to the resolved astrometrics config file.
+
+        The text is written to a temporary file beside the config, flushed to
+        disk, and moved over the config with `os.replace`. The move is atomic,
+        so a crash or a second reader never sees a half-written file, and the
+        old file stays whole until the new one is complete. The write holds
+        `write_lock`.
+        """
         path = self.config_file_path or self._find_config_file()
         if os.getenv("ASTROMETRICS_TESTING") == "1" and not (
             os.getenv("ASTROMETRICS_CONFIG_PATH") or os.getenv("ASTROMETRICS_CONFIG")
@@ -402,8 +451,19 @@ class AppConfiguration:
             # during testing.
             return
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as configfile:
-            self.app_config.write(configfile)
+        temporary_path = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with self.write_lock():
+            try:
+                with open(temporary_path, "w", encoding="utf-8") as configfile:
+                    self.app_config.write(configfile)
+                    configfile.flush()
+                    os.fsync(configfile.fileno())
+                if Path(path).is_file():
+                    shutil.copymode(path, temporary_path)
+                os.replace(temporary_path, path)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(temporary_path)
         self.app_config.note_file_written()
 
     def _populate_defaults(self) -> None:

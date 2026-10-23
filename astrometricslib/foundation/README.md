@@ -8,7 +8,7 @@ Terms are defined in the [glossary](../../documentation/Glossary.md). This docum
 
 - `errors.py` — one family of errors for the libraries, the backend and AI agents, and the `ErrorInfo` record that carries an error over JSON. Each error category says what kind of problem happened and what the caller can do about it.
 - `logging.py` — one way to set up logging, a log context that tags every message with the call or job that wrote it, and the router that fills a job's own log.
-- `config.py`, `config_schema.py` — the application configuration loader, and the Pydantic models (typed, validated classes) that define the configuration's structure and defaults.
+- `config.py`, `config_schema.py` — the application configuration loader, and the Pydantic models (typed, validated classes) that define the configuration's structure and defaults. A save writes a temporary file and moves it over the config (`os.replace`), under a write lock (`AppConfiguration.write_lock`, a thread lock and a lock file beside the config), so a crash or a second writer never leaves a half-written file.
 - `observatory_setups.py`, `observatory_site.py` — read the optics (telescopes and lenses), the camera-and-optic setups and the observatory's location from the config file. The site reader has no default site, because a made-up site would give wrong time corrections.
 - `camera_names.py` — turns the several spellings of one camera name (FITS header, config file, frame record) into one form so they can be compared.
 - `enums.py` — enumerations (fixed sets of named values) shared by the domain models.

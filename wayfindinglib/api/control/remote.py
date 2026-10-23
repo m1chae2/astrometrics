@@ -227,11 +227,17 @@ class RemoteControl(ControlChild):
         Returns
         -------
         result : `dict` [`str`, `Any`]
-            Every folder: ``succeeded``, ``failed`` and ``job_id``. A local
-            folder or chosen files: ``success`` and ``target``. Calibration:
-            ``success`` and the counts. A target: the plan (``remote_folder``,
-            ``remote_files``, ``already_held``, ``to_transfer``, ``examples``)
-            and, for a real run, ``success`` and ``transferred``. An
+            Every folder: ``succeeded``, ``failed``, ``job_id`` and
+            ``measurements``. A local folder or chosen files: ``success``,
+            ``target`` and ``measurements``. Calibration: ``success`` and the
+            counts. A target: the plan (``remote_folder``, ``remote_files``,
+            ``already_held``, ``to_transfer``, ``examples``) and, for a real
+            run, ``success``, ``transferred`` and ``measurements``.
+            ``measurements`` lists the summary (as a plain dict) of each
+            frame measurement run the sync started, the one source the
+            backend announces ``quality:measured`` from. The sync measures
+            only the frames it added, which takes about 11 s per frame, and
+            returns after that. An
             argument that the chosen case does not use is refused with
             `InvalidArgumentError`. A target with no remote folder raises
             `NotFoundError`, and a real run with the frames drive not
@@ -273,10 +279,17 @@ class RemoteControl(ControlChild):
         from wayfindinglib.tasks.control_tasks import remote_transfer_tasks as tasks
 
         context = self._context
+        measurement_summaries: builtins.list[Any] = []
         if local_path is not None:
             _refuse("Indexing a local folder", dry_run=dry_run or None, files=files, incremental=incremental)
-            success = tasks.download_remote_targets(context, target_id, local_path=local_path)
-            return {"success": bool(success), "target": target_id}
+            success = tasks.download_remote_targets(
+                context, target_id, local_path=local_path, measurement_summaries=measurement_summaries
+            )
+            return {
+                "success": bool(success),
+                "target": target_id,
+                "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
+            }
         if files is not None or log_callback is not None or incremental is not None:
             _refuse("Copying chosen files", dry_run=dry_run or None)
             success = tasks.download_remote_targets(
@@ -285,8 +298,13 @@ class RemoteControl(ControlChild):
                 selected_files=files,
                 log_callback=log_callback,
                 incremental=True if incremental is None else incremental,
+                measurement_summaries=measurement_summaries,
             )
-            return {"success": bool(success), "target": target_id}
+            return {
+                "success": bool(success),
+                "target": target_id,
+                "measurements": [summary.model_dump(mode="json") for summary in measurement_summaries],
+            }
         if tasks.is_calibration_folder(target_id):
             _refuse("Copying a calibration folder", dry_run=dry_run or None)
             return tasks.sync_calibration_folder(context, target_id)

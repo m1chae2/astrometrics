@@ -90,6 +90,7 @@ class TestProcessSingleTargetWorker:
             camera_name="ASI294",
             focal_length_mm=600.0,
             measured_at=None,
+            quality_recording=None,
         )
 
     def test_returns_failed_with_the_exception_message_when_the_pipeline_raises(

@@ -155,6 +155,21 @@ class SensorSettingNoise(BaseModel):
     temperature_c : `float` or `None`
         The sensor temperature, in degrees C, the values were measured at.
         It is a note about the measurement, not part of the key.
+    gain_spread_e_per_adu : `float` or `None`
+        The sample standard deviation of the gain over the flat pairs it was
+        measured from. It says how well the pairs agreed, not how accurate
+        the gain is. `None` for a value that was not measured from pairs.
+    pair_gains_e_per_adu : `tuple` [`float`, ...]
+        The gain of each flat pair, in electrons per ADU. Empty when not
+        measured from pairs. Kept so a later reader can see the pairs behind
+        the median, such as one pair far from the others.
+    read_noise_adu_robust : `float` or `None`
+        The read noise in ADU from the median absolute deviation of the bias
+        pair differences, which ignores hot pixels. It is a check on
+        ``read_noise_e``, which uses the plain standard deviation.
+    pair_read_noises_adu : `tuple` [`float`, ...]
+        The read noise of each bias pair, in ADU. Empty when not measured
+        from pairs.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -165,6 +180,10 @@ class SensorSettingNoise(BaseModel):
     gain_e_per_adu: ProvenancedValue | None = None
     read_noise_e: ProvenancedValue | None = None
     temperature_c: float | None = None
+    gain_spread_e_per_adu: float | None = None
+    pair_gains_e_per_adu: tuple[float, ...] = ()
+    read_noise_adu_robust: float | None = None
+    pair_read_noises_adu: tuple[float, ...] = ()
 
     @field_validator("gain_setting", mode="before")
     @classmethod

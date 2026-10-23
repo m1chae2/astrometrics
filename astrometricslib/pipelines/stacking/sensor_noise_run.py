@@ -2,10 +2,13 @@
 
 `measure_sensor_noise_from_library` is the glue between the calibration
 library and the measurement in `pre_processing/sensor_noise.py`. It finds
-the flat and bias frames for one camera setting, loads them, pairs them in
-file-name order (the names carry the time, so neighbors were taken one after
-the other), and runs the measurement. With ``save=True`` it also writes the
-result to the camera profile.
+the flat and bias frames for one camera setting, loads them, pairs the flats by
+the time they were taken (``DATE-OBS``, at most `MAXIMUM_PAIR_GAP_SECONDS`
+apart, so a pair never spans two sessions) and the biases in file-name order,
+and runs the measurement. Flats above the camera profile's photometric
+linearity limit are refused. With ``save=True`` it also writes the result to
+the camera profile, with the spread, the per-pair values and the robust read
+noise.
 
 It lives beside `calibration_ingest.py`, the other code that reads the
 calibration library, and not under `pipelines/shared/quality/`, because it is
@@ -18,7 +21,9 @@ Choices this module makes for the caller, each recorded in the result's notes:
   frames of two groups differ in exposure and level. The group with the most
   frames is used, and the others are named in the notes. The caller can name
   a telescope or filter to choose another.
-- Frames that cannot be read are skipped and counted in the notes.
+- Frames that cannot be read are skipped and counted in the notes. Flat
+  frames with no ``DATE-OBS`` cannot be paired by time and are left out and
+  counted in the notes.
 """
 
 import logging
@@ -27,7 +32,7 @@ import os
 from datetime import date
 
 from astrometricslib.drivers.calibration_library import CalibrationLibrary, FlatGroup
-from astrometricslib.drivers.camera_profile_store import save_sensor_setting_noise
+from astrometricslib.drivers.camera_profile_store import resolve_camera_profile, save_sensor_setting_noise
 from astrometricslib.foundation.config import AppConfiguration
 from astrometricslib.models.camera_profile import (
     ProvenancedValue,
@@ -37,13 +42,16 @@ from astrometricslib.models.camera_profile import (
 )
 from astrometricslib.models.quality.measurement import MeasurementStatus
 from astrometricslib.models.sensor_noise_measurement import SensorNoiseMeasurement
+from astrometricslib.pipelines.stacking.exact_bias_frames import exact_setting_bias_frames
 from astrometricslib.pipelines.stacking.pre_processing.sensor_noise import (
     EXPOSURE_RELATIVE_TOLERANCE,
+    MAXIMUM_PAIR_GAP_SECONDS,
     MAXIMUM_TEMPERATURE_SPREAD_C,
     CalibrationFrame,
     load_calibration_frame,
     make_unmeasured_result,
     measure_sensor_noise,
+    pair_by_observation_time,
     pair_consecutive,
 )
 from astrometricslib.utilities.camera_setting_text import (
@@ -151,6 +159,10 @@ def save_measurement(
         gain_e_per_adu=ProvenancedValue(value=result.gain_e_per_adu, provenance=provenance),
         read_noise_e=ProvenancedValue(value=result.read_noise_e, provenance=provenance),
         temperature_c=result.temperature_c,
+        gain_spread_e_per_adu=result.gain_spread_e_per_adu,
+        pair_gains_e_per_adu=tuple(result.pair_gains_e_per_adu),
+        read_noise_adu_robust=result.read_noise_adu_robust,
+        pair_read_noises_adu=tuple(result.pair_read_noises_adu),
     )
     backup_path = save_sensor_setting_noise(config, camera_id, entry)
     return result.model_copy(
@@ -231,28 +243,42 @@ def measure_sensor_noise_from_library(
         )
     flat_group = _choose_flat_group(groups, notes)
 
-    bias_selection = library.select_bias_frames(
-        camera_id, iso=gain_setting, offset=offset_setting, binning=binning_setting
+    bias_selection = exact_setting_bias_frames(
+        library, camera_id, gain_setting, offset_setting, binning_setting
     )
-    bias_problems = [*bias_selection.flags, *bias_selection.blocking_flags]
-    if bias_problems or not bias_selection.frames:
-        reason = (
-            "the calibration library has no bias frames at exactly this setting"
-            if not bias_problems
-            else "no bias frames at exactly this setting: " + "; ".join(bias_problems)
-        )
-        return make_unmeasured_result(camera_id, setting, reason, len(flat_group.paths), 0)
+    if not bias_selection.paths:
+        return make_unmeasured_result(camera_id, setting, bias_selection.reason, len(flat_group.paths), 0)
 
     flat_frames = _keep_near(_load_frames(flat_group.paths, notes, "flat"), temperature_c, exposure_seconds)
-    bias_frames = _keep_near(_load_frames(bias_selection.frames, notes, "bias"), temperature_c, None)
+    bias_frames = _keep_near(_load_frames(bias_selection.paths, notes, "bias"), temperature_c, None)
+    flat_pairing = pair_by_observation_time(flat_frames)
+    if flat_pairing.undated_count:
+        notes.append(
+            f"{flat_pairing.undated_count} flat frame(s) have no readable DATE-OBS and were not used, "
+            "because flats are paired by the time they were taken"
+        )
+    if flat_pairing.unpaired_count:
+        notes.append(
+            f"{flat_pairing.unpaired_count} flat frame(s) had no partner within "
+            f"{MAXIMUM_PAIR_GAP_SECONDS:g} s and were not used"
+        )
+    # The profile's linearity limit is the pixel value above which the sensor
+    # no longer responds in proportion to the light (see `CameraProfile`).
+    limit = resolve_camera_profile(camera_id, config).photometric_linearity_limit_adu
     result = measure_sensor_noise(
-        pair_consecutive(flat_frames),
+        flat_pairing.pairs,
         pair_consecutive(bias_frames),
         camera_id=camera_id,
         measured_on=measured_on,
+        linearity_limit_adu=None if limit is None else limit.value,
     )
     result = result.model_copy(
-        update={"notes": notes, "gain_setting": setting[0], "offset": setting[1], "binning": setting[2]}
+        update={
+            "notes": [*notes, *result.notes],
+            "gain_setting": setting[0],
+            "offset": setting[1],
+            "binning": setting[2],
+        }
     )
     if save and result.status == MeasurementStatus.MEASURED:
         result = save_measurement(config, result, camera_id)

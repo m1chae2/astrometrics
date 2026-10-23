@@ -6,7 +6,6 @@ and checking the quality of the final stacked images.
 
 import logging
 import os
-import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +21,7 @@ from astrometricslib.utilities.exceptions import DATA_ERRORS
 
 if TYPE_CHECKING:
     from astrometricslib.models.quality.quality_summary import StackQualitySummary
+    from astrometricslib.pipelines.stacking.frame_measurement_run import FrameQualityRecording
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ def stack_frames(
     preview_settings: Any | None = None,
     drivers: Drivers | None = None,
     measured_at: datetime | None = None,
+    quality_recording: FrameQualityRecording | None = None,
 ) -> str | None:
     """Run the main stacking process using the ImageProcessing driver.
 
@@ -108,6 +109,15 @@ def stack_frames(
         settings (see `stack_preview.PreviewSettings`).
     drivers : `Drivers` or `None`, optional
         The stacking program to use. Left out, it is Siril.
+    measured_at : `datetime` or `None`, optional
+        When the stack started, with a time zone. The frame quality rows the
+        stage stores carry it. Pipeline code does not read the clock, so the
+        caller supplies it.
+    quality_recording : `FrameQualityRecording` or `None`, optional
+        The configuration and the shared calibration library, from the caller,
+        for the frame quality rows. The stage stores them only for an imaging
+        stack with the quarantine step turned on, and only when both this and
+        ``measured_at`` are given. Left out (tests), none are stored.
 
     Returns
     -------
@@ -299,7 +309,12 @@ def stack_frames(
         frames_checked_by_quarantine = target_frames
         target_frames, quarantine_report = quarantine_bad_frames(target, target_frames)
         _record_frame_quality(
-            target, target_frames, quarantine_report, frames_checked_by_quarantine, measured_at
+            target,
+            target_frames,
+            quarantine_report,
+            frames_checked_by_quarantine,
+            measured_at,
+            quality_recording,
         )
         excluded_frames.extend(
             ExcludedFrame(path=path, reason=reason)
@@ -566,11 +581,19 @@ def _record_frame_quality(
     quarantine_report: Any,
     frames_checked: list[Any],
     measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
 ) -> None:
     """Store the quarantine step's frame numbers and any missing measurements.
 
-    This never stops a stack. A measurement or storage failure is logged and
+    This never stops a stack. Any failure, whatever its cause (a storage
+    error, or an unexpected error such as a ``RuntimeError`` or
+    ``MemoryError`` from the image libraries), is logged with its traceback and
     the stack goes on, because the stack does not depend on these numbers.
+
+    The hook runs only for imaging stacks with the quarantine step turned on,
+    because it sits inside that step. It does not read the global
+    configuration: the caller supplies the configuration and the shared
+    calibration library in ``quality_recording``.
 
     Parameters
     ----------
@@ -585,14 +608,16 @@ def _record_frame_quality(
     measured_at : `datetime` or `None`
         When the stack started, passed in by the caller because pipeline code
         does not read the clock. Nothing is stored when it is `None`.
+    quality_recording : `FrameQualityRecording` or `None`
+        The configuration and calibration library to store with. Nothing is
+        stored when it is `None`.
     """
-    from astrometricslib.foundation.config import get_configuration
     from astrometricslib.pipelines.stacking.frame_measurement_run import record_stage_frame_quality
 
-    if measured_at is None:
+    if measured_at is None or quality_recording is None:
         logger.warning(
-            "No measurement time was given, so frame quality of '%s' is not stored. "
-            "A caller of the stacking stage should pass measured_at.",
+            "No measurement time or recording context was given, so frame quality of '%s' is not stored. "
+            "A caller of the stacking stage should pass measured_at and quality_recording.",
             target.id,
         )
         return
@@ -602,19 +627,22 @@ def _record_frame_quality(
             kept_frames,
             quarantine_report.measurements,
             frames_checked,
-            get_configuration(),
+            quality_recording,
             measured_at,
         )
-    except (AstrometricsError, sqlite3.Error, *FITS_READ_ERRORS, *DATA_ERRORS) as error:
-        logger.warning("Frame quality measurements of target '%s' were not stored: %s", target.id, error)
+    except Exception:  # frame quality is a by-product: no failure here may fail the stack
+        logger.exception("Frame quality measurements of target '%s' were not stored", target.id)
         return
-    if summary.rows_written or summary.frames_failed:
+    if summary.rows_written or summary.frames_failed or summary.already_running:
         logger.info(
-            "Stored %d frame quality row(s) for target '%s' (%d frame(s) measured, %d failed).",
+            "Stored %d frame quality row(s) for target '%s' (%d frame(s) measured, %d failed%s).",
             summary.rows_written,
             target.id,
             summary.frames_measured,
             summary.frames_failed,
+            "; the full measurement was skipped because another run has the turn"
+            if summary.already_running
+            else "",
         )
 
 

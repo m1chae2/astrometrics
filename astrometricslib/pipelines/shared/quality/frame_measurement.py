@@ -12,10 +12,14 @@ What is measured, in plain words:
   value is the median over the stars, with a bootstrap uncertainty. No star is
   dropped for being stretched, so a trailed frame reads wide, not sharp.
 - The elongation of the stars (long axis divided by short axis) and the
-  direction of the long axis, from the second moments of the same stars.
-- The sky brightness in electrons, the noise of that sky, and the read noise of
-  the camera at the frame's setting. The ratio of the two noises is never
-  stored.
+  direction of the long axis, from the second moments of the same stars. The
+  direction comes from the average of the stars' ellipticity components, so a
+  round star, whose direction is only noise, counts for little.
+- The sky brightness in electrons (a sigma-clipped mean, found with the same
+  estimator as the bias level), the expected photon noise of that sky, and the
+  read noise of the camera at the frame's setting. The ratio of the two noises
+  is never stored. The sky includes dark current and amp glow; for a camera
+  with no recorded sensor temperature it is stored as ``assumed``.
 - The temperatures the frame recorded, and the metrics the library already
   measured (background level, saturated fraction, Gaussian star width of the
   brightest stars, count of bright regions).
@@ -25,13 +29,18 @@ a reason. It is never replaced by a default number.
 
 One-shot-color frames: a frame stored as separate color planes is measured per
 plane, and the plane's name goes on the subject. A raw mosaic (one plane with a
-color filter array, header card ``BAYERPAT``) is measured as it is, so its
-red, green and blue pixels are mixed. Its reasons say so.
+color filter array, header card ``BAYERPAT``) has its star shapes measured on
+2 x 2 super-pixels (the sum of each red, green, green, blue cell), so the
+Bayer pattern does not bend the second moments or the angle; the widths are
+given back in original pixels. Its sky and background use all color pixels
+mixed. Its reasons say so.
 
-A time budget keeps one slow frame from stalling a batch. It is checked between
-the steps; when it has run out, the remaining slow steps (the star detections
-and fits) come back ``not_measured`` and the quick header and background
-metrics are still returned.
+A time budget keeps one slow frame from stalling a batch. It counts the CPU
+time of the measuring thread, not the wall clock, so time spent waiting for
+Python's global lock, for the disk or for other programs does not use it up. It
+is checked between the steps; when it has run out, the remaining slow steps
+(the star detections and fits) come back ``not_measured`` and the quick
+header and background metrics are still returned.
 """
 
 import logging
@@ -39,14 +48,13 @@ import math
 import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import numpy as np
 from astropy.io import fits
 from astropy.stats import SigmaClip, sigma_clipped_stats
 from photutils.background import Background2D, MedianBackground
-from photutils.detection import DAOStarFinder
 from scipy import optimize
 from scipy.spatial import cKDTree
 
@@ -78,20 +86,34 @@ from astrometricslib.pipelines.shared.quality.metrics import (
 )
 from astrometricslib.pipelines.shared.quality.raw_frame_check import detect_stars
 from astrometricslib.pipelines.shared.quality.saturation import compute_saturated_pixel_fraction
+from astrometricslib.pipelines.shared.star_finding import find_sources_above_background
 from astrometricslib.utilities.exceptions import DATA_ERRORS
 from astrometricslib.utilities.observing_night import observing_night_id
 
 logger = logging.getLogger(__name__)
 
-# How long one frame may take before the slow steps are skipped, in seconds.
-# Timed on this machine (12 cores, serial) on the 3008 x 3008 ASI533MM golden
-# M 13 frames (M_13_Light_Luminance_019 and _020): the whole measurement took
-# 11.6 s and 13.5 s, with 175 to 179 stars fitted. The budget is about 5 times
-# that, so a normal frame never reaches it even on a busy machine (twelve
-# tests running at once took 15.5 s), and a frame that is several times slower
-# than normal (a busy disk, a larger sensor, a crowded field) is cut off
-# instead of stalling a batch. The budget is checked between the steps, not
-# inside one, so one step can run past it.
+# How much CPU time one frame may use before the slow steps are skipped, in
+# seconds. It counts the CPU time of the measuring thread
+# (`time.thread_time`), not the wall clock: on real data (M 57, 61 frames, four
+# threads, three test suites running) a wall-clock budget of 60 s cut 46 of 61
+# frames short, because the threads waited for Python's global lock and for
+# the other programs, which is time the frame did not use. Timed on this
+# machine (12 cores) on the two 3008 x 3008 ASI533MM golden M 13 frames
+# (M_13_Light_Luminance_019 and _020), 8 frames per row, 2026-10-22:
+#
+#   one at a time (one thread)        13.1 to 15.1 s of CPU time per frame
+#   four in worker processes          20.3 to 23.0 s
+#   four in worker threads (worst)    23.3 to 27.5 s
+#
+# The CPU time rises with the number of frames running at once because they
+# share memory bandwidth and, for threads, fight over the global lock. The
+# budget is 60 s: 4 times the lone-frame time and 2.2 times the worst measured
+# case, so a normal frame never reaches it on a busy machine, and a frame that
+# needs several times the normal work (a larger sensor, a crowded field) is cut
+# off instead of stalling a batch. The budget is checked between the steps, not
+# inside one, so one step can run past it. A frame that is cut off is not
+# marked as measured and is tried again on the next run. Register row STK-D22
+# holds the numbers.
 FRAME_MEASUREMENT_TIME_BUDGET_SECONDS = 60.0
 
 # The number of grid cells over the field. One star is taken from each cell, so
@@ -141,8 +163,15 @@ MOFFAT_SUBPIXEL_FACTOR = 3
 # of those values is then held fixed for a second pass. Beta and the scale
 # radius trade off against each other, so a free beta makes a faint star's
 # width noisy; a shared beta removes that noise and still lets the frame's own
-# wing shape decide the value. The limits keep a fit from wandering: below 1.2
-# the profile has an unbounded flux, above 8 it is a Gaussian.
+# wing shape decide the value. The limits keep a fit from wandering. The total
+# flux of a Moffat profile, proportional to 1 / (beta - 1), grows without bound
+# as beta falls to 1 and is infinite at beta <= 1, so beta must stay above 1.
+# The lower limit of 1.2 is not that mathematical edge: it keeps the profile's
+# wings from carrying five times the light of a beta of 2 (same amplitude and
+# scale radius), which a 21 x 21 px fit box can hardly tell apart from the sky
+# background because its constant background term absorbs the wings. It is a
+# design choice, not a measured value. Above 8 the profile is a Gaussian to
+# within the fit's noise.
 MOFFAT_BETA_MINIMUM = 1.2
 MOFFAT_BETA_MAXIMUM = 8.0
 MOFFAT_BETA_START = 3.0
@@ -184,20 +213,33 @@ BOOTSTRAP_RESAMPLE_COUNT = 1000
 # value itself is arbitrary.
 BOOTSTRAP_SEED = 20261022
 
-# The names of the planes of a frame stored as three color planes.
 # What the reason of a pixel metric starts with when the frame could not be
 # read at all. The measurement job tests for it so that an unreadable frame (a
 # network mount that dropped out, a file still being written) is retried on the
 # next run instead of being recorded as measured.
 UNREADABLE_FRAME_REASON_PREFIX = "the frame could not be read"
 
+# What the reason of a skipped step starts with when the frame's CPU time
+# budget ran out. The measurement job tests for it (see
+# `frame_needs_another_try`) so that a frame cut short is measured again on the
+# next run instead of being recorded as measured.
+TIME_BUDGET_REASON_PREFIX = "CPU time budget"
+
+# The names of the planes of a frame stored as three color planes.
 _COLOR_PLANE_NAMES = {3: ("R", "G", "B")}
+
+# The side, in pixels, of the repeating cell of a Bayer color filter array: one
+# red, two green and one blue pixel in a 2 x 2 block. The star shape metrics of
+# a raw color mosaic are measured on blocks of this size summed into single
+# super-pixels. The cell is 2 x 2 for every common Bayer order (RGGB, BGGR,
+# GRBG, GBRG), so the factor does not depend on the header's BAYERPAT text.
+BAYER_CELL_SIZE_PX = 2
 
 _DEFINITION_VERSIONS = {spec.name: spec.definition_version for spec in FRAME_METRICS}
 
 
 class _Stopwatch:
-    """Count the seconds spent on one frame against a budget.
+    """Count the CPU seconds spent on one frame against a budget.
 
     Parameters
     ----------
@@ -207,17 +249,19 @@ class _Stopwatch:
 
     def __init__(self, budget_seconds: float) -> None:
         self.budget_seconds = budget_seconds
-        self._start = time.monotonic()
+        self._start = time.thread_time()
 
     def elapsed(self) -> float:
-        """Give the seconds spent so far.
+        """Give the CPU seconds spent so far by the measuring thread.
 
         Returns
         -------
         seconds : `float`
-            Seconds since the frame measurement began.
+            CPU seconds of the thread that made the stopwatch, since it was
+            made. Waiting (a sleep, a lock, a disk read) adds nothing. Call it
+            from that same thread.
         """
-        return time.monotonic() - self._start
+        return time.thread_time() - self._start
 
     def expired(self) -> bool:
         """Say whether the budget is used up.
@@ -235,9 +279,59 @@ class _Stopwatch:
         Returns
         -------
         reason : `str`
-            "time budget of N s exceeded after M s".
+            "CPU time budget of N s exceeded after M s".
         """
-        return f"time budget of {self.budget_seconds:g} s exceeded after {self.elapsed():.1f} s"
+        return (
+            f"{TIME_BUDGET_REASON_PREFIX} of {self.budget_seconds:g} s exceeded after {self.elapsed():.1f} s"
+        )
+
+
+@dataclass(frozen=True)
+class CandidateRefusals:
+    """How many detected sources were refused at each cut, and why.
+
+    A trailed star is more likely to touch a neighbor, to be wide enough to
+    reach the saturation margin, or to fit badly. These cuts therefore remove
+    the most trailed stars first, and the counts let a reader see how much of
+    the field the width and elongation medians rest on.
+
+    Attributes
+    ----------
+    detected : `int`
+        All sources the star finder returned.
+    near_edge : `int`
+        Sources whose fit box would reach outside the frame.
+    near_neighbor : `int`
+        Sources with another detected source within
+        `MOFFAT_ISOLATION_RADIUS_PX`.
+    near_saturation : `int`
+        Sources whose fit box reaches `MOFFAT_SATURATION_MARGIN_FRACTION` of
+        the camera's usable top level.
+    fit_refused : `int`
+        Stars tried whose Moffat fit was refused (a poor fit, a center that
+        wandered, a width out of range, or a fit that failed), in either pass.
+    """
+
+    detected: int = 0
+    near_edge: int = 0
+    near_neighbor: int = 0
+    near_saturation: int = 0
+    fit_refused: int = 0
+
+    def describe(self) -> str:
+        """Write the counts as one sentence fragment for a reason.
+
+        Returns
+        -------
+        text : `str`
+            For example ``"412 sources detected; refused: 3 near the frame
+            edge, 120 with a neighbor within 14 px, ...``.
+        """
+        return (
+            f"{self.detected} sources detected; refused: {self.near_edge} near the frame edge, "
+            f"{self.near_neighbor} with a neighbor within {MOFFAT_ISOLATION_RADIUS_PX:g} px, "
+            f"{self.near_saturation} near saturation, {self.fit_refused} by the fit"
+        )
 
 
 @dataclass(frozen=True)
@@ -255,19 +349,24 @@ class StarProfileResult:
     elongation_uncertainty : `float` or `None`
         Bootstrap standard error of the median elongation.
     angle_deg : `float` or `None`
-        Circular mean angle of the long axis in degrees, from 0 up to but not
-        including 180, measured from the image x axis toward the y axis.
+        Direction of the long axis in degrees, from 0 up to but not including
+        180, measured from the image x axis toward the y axis. It comes from
+        the average of the stars' ellipticity components, so a round star
+        counts for little and a stretched one for much.
     angle_uncertainty_deg : `float` or `None`
-        Bootstrap standard deviation of the circular mean, in degrees.
+        Bootstrap standard deviation of that angle, in degrees.
     angle_coherence : `float` or `None`
-        Mean resultant length of the angles, from 0 (no preferred direction)
-        to 1 (all stars point the same way).
+        Length of the mean ellipticity vector divided by the mean ellipticity
+        of the stars, from 0 (no preferred direction) to 1 (all stars point
+        the same way).
     star_count : `int`
         Number of stars the medians are over.
     candidate_count : `int`
         Number of isolated, unsaturated stars that were tried.
     median_beta : `float` or `None`
         The shared Moffat power index of the second pass.
+    refusals : `CandidateRefusals`
+        How many detected sources each cut refused.
     reason : `str`
         Why the values are missing, or a note on how they were found.
     """
@@ -282,6 +381,7 @@ class StarProfileResult:
     star_count: int = 0
     candidate_count: int = 0
     median_beta: float | None = None
+    refusals: CandidateRefusals = field(default_factory=CandidateRefusals)
     reason: str = ""
 
 
@@ -294,9 +394,12 @@ class SkyElectrons:
     rate_e_per_s_per_px : `float` or `None`
         Sky electrons per second per pixel.
     noise_e : `float` or `None`
-        Square root of the sky electrons in one exposure, per pixel.
+        The expected photon (Poisson) noise of the sky in one exposure, per
+        pixel: the square root of the sky electrons. It is not the measured
+        scatter of the pixels, which also holds read noise, dark current and
+        the faint stars.
     background_adu : `float` or `None`
-        The sigma-clipped median of the plane, in ADU.
+        The sigma-clipped mean of the plane, in ADU.
     reason : `str`
         Why the values are missing, or the source of the gain.
     gain_is_measured : `bool`
@@ -702,8 +805,8 @@ def _fit_moffat(cutout: np.ndarray, grid: _SubpixelGrid, fixed_beta: float | Non
     )
 
 
-def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float, float] | None:
-    """Measure a star's elongation and angle from flux-weighted second moments.
+def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float, float, float] | None:
+    """Measure a star's elongation and ellipticity from second moments.
 
     The pixels are weighted by their light above the fitted background
     (negative values count as zero), inside an elliptical window that follows
@@ -720,9 +823,13 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
 
     Returns
     -------
-    shape : `tuple` [`float`, `float`] or `None`
-        ``(elongation, angle in degrees from 0 up to 180)``. `None` when the
-        weights sum to nothing.
+    shape : `tuple` [`float`, `float`, `float`] or `None`
+        ``(elongation, first ellipticity component, second ellipticity
+        component)``. The components are ``(Ixx - Iyy) / (Ixx + Iyy)`` and
+        ``2 Ixy / (Ixx + Iyy)`` of the second moments ``I``. Their length is
+        ``(a**2 - b**2) / (a**2 + b**2)`` for long and short axes ``a`` and
+        ``b``, and the long axis points along half the angle of the vector.
+        `None` when the weights sum to nothing.
     """
     size = cutout.shape[0]
     rows, columns = np.mgrid[:size, :size]
@@ -749,31 +856,45 @@ def _measure_second_moments(cutout: np.ndarray, fit: _FitResult) -> tuple[float,
     if smallest <= 0.0:
         return None
     elongation = math.sqrt(largest / smallest)
-    angle = math.degrees(0.5 * math.atan2(2.0 * covariance, variance_x - variance_y)) % 180.0
-    return elongation, angle
+    trace = variance_x + variance_y
+    return elongation, (variance_x - variance_y) / trace, 2.0 * covariance / trace
 
 
-def _circular_mean_axial_deg(angles_deg: np.ndarray) -> tuple[float, float]:
-    """Average angles of lines, where 0 and 180 degrees are the same line.
+def _mean_ellipticity_angle(
+    first_components: np.ndarray, second_components: np.ndarray
+) -> tuple[float, float]:
+    """Find the direction the stars are stretched in, from their ellipticities.
 
-    The angles are doubled, averaged as unit vectors, and halved.
+    Averaging the ellipticity components (not the stars' angles) lets a
+    stretched star count for more than a round one. A round star's angle is
+    set by noise, so averaging angles with equal weight would let the round
+    stars of a mostly round field wash out, or bias, the direction of the few
+    stretched ones.
 
     Parameters
     ----------
-    angles_deg : `numpy.ndarray`
-        Angles in degrees.
+    first_components : `numpy.ndarray`
+        ``(Ixx - Iyy) / (Ixx + Iyy)`` of each star.
+    second_components : `numpy.ndarray`
+        ``2 Ixy / (Ixx + Iyy)`` of each star.
 
     Returns
     -------
-    mean_deg : `float`
-        The mean angle, from 0 up to but not including 180.
+    angle_deg : `float`
+        The direction of the long axis, from 0 up to but not including 180
+        degrees, measured from the x axis toward the y axis.
     coherence : `float`
-        The mean resultant length, from 0 to 1.
+        The length of the mean ellipticity vector divided by the mean length
+        of the stars' own ellipticity vectors, from 0 to 1. It is 0 when the
+        stars' stretches cancel and 1 when they all point the same way. A
+        field of stars that are all exactly round gives 0.
     """
-    doubled = np.radians(2.0 * angles_deg)
-    sine_mean, cosine_mean = float(np.mean(np.sin(doubled))), float(np.mean(np.cos(doubled)))
-    mean_deg = (math.degrees(math.atan2(sine_mean, cosine_mean)) / 2.0) % 180.0
-    return mean_deg, math.hypot(sine_mean, cosine_mean)
+    mean_first = float(np.mean(first_components))
+    mean_second = float(np.mean(second_components))
+    angle_deg = (math.degrees(math.atan2(mean_second, mean_first)) / 2.0) % 180.0
+    mean_length = float(np.mean(np.hypot(first_components, second_components)))
+    coherence = math.hypot(mean_first, mean_second) / mean_length if mean_length > 0.0 else 0.0
+    return angle_deg, coherence
 
 
 def _bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) -> float:
@@ -796,32 +917,41 @@ def _bootstrap_median_error(values: np.ndarray, generator: np.random.Generator) 
     return float(np.std(np.median(values[draws], axis=1)))
 
 
-def _bootstrap_angle_error_deg(angles_deg: np.ndarray, generator: np.random.Generator) -> float:
-    """Estimate the error of the circular mean angle by resampling.
+def _bootstrap_angle_error_deg(
+    first_components: np.ndarray, second_components: np.ndarray, generator: np.random.Generator
+) -> float:
+    """Estimate the error of the stretch direction by resampling the stars.
 
     Parameters
     ----------
-    angles_deg : `numpy.ndarray`
-        The sample of angles.
+    first_components : `numpy.ndarray`
+        ``(Ixx - Iyy) / (Ixx + Iyy)`` of each star.
+    second_components : `numpy.ndarray`
+        ``2 Ixy / (Ixx + Iyy)`` of each star.
     generator : `numpy.random.Generator`
         The seeded random generator.
 
     Returns
     -------
     error_deg : `float`
-        The spread of the resampled means about their own circular mean, in
-        degrees (each difference wrapped into -90 to +90 degrees).
+        The spread of the resampled directions about their own circular mean,
+        in degrees (each difference wrapped into -90 to +90 degrees).
     """
-    draws = generator.integers(0, angles_deg.size, size=(BOOTSTRAP_RESAMPLE_COUNT, angles_deg.size))
-    doubled = np.radians(2.0 * angles_deg[draws])
-    means_deg = np.degrees(np.arctan2(np.sin(doubled).mean(axis=1), np.cos(doubled).mean(axis=1))) / 2.0
+    draws = generator.integers(
+        0, first_components.size, size=(BOOTSTRAP_RESAMPLE_COUNT, first_components.size)
+    )
+    resampled_first = first_components[draws].mean(axis=1)
+    resampled_second = second_components[draws].mean(axis=1)
+    angles_deg = np.degrees(np.arctan2(resampled_second, resampled_first)) / 2.0
     center = (
         np.degrees(
-            np.arctan2(np.sin(np.radians(2.0 * means_deg)).mean(), np.cos(np.radians(2.0 * means_deg)).mean())
+            np.arctan2(
+                np.sin(np.radians(2.0 * angles_deg)).mean(), np.cos(np.radians(2.0 * angles_deg)).mean()
+            )
         )
         / 2.0
     )
-    wrapped = (means_deg - center + 90.0) % 180.0 - 90.0
+    wrapped = (angles_deg - center + 90.0) % 180.0 - 90.0
     return float(np.std(wrapped))
 
 
@@ -843,7 +973,9 @@ STAR_FINDER_BOX_MAXIMUM_PX = 200
 STAR_FINDER_MINIMUM_BOXES_PER_AXIS = 3
 
 
-def detect_stars_without_shape_cut(plane: np.ndarray) -> list[dict]:
+def detect_stars_without_shape_cut(
+    plane: np.ndarray, expected_fwhm_px: float = STAR_FINDER_EXPECTED_FWHM_PX
+) -> list[dict]:
     """Find the stars of a plane without refusing the stretched ones.
 
     `SourceDetector` keeps only sources whose DAOStarFinder roundness lies in
@@ -851,9 +983,10 @@ def detect_stars_without_shape_cut(plane: np.ndarray) -> list[dict]:
     1.5 times as long as it is wide already fails that test, and on synthetic
     frames of 3 px stars the detector finds 4 sources at an elongation of 1.6
     where 294 exist. A width and elongation metric with no elongation cut needs
-    those stars, so this function repeats `SourceDetector`'s background
-    estimate and star finder settings but leaves the roundness range open. The
-    sharpness range (0.2 to 1.0) still removes hot pixels and broad glow.
+    those stars, so this function estimates the background the way
+    `SourceDetector` does and runs the same star finder core
+    (`pipelines/shared/star_finding.py`) with the roundness range left open.
+    The sharpness range (0.2 to 1.0) still removes hot pixels and broad glow.
     This module sits in a layer below the astrometry pipeline and may not
     import `SourceDetector` in any case.
 
@@ -861,6 +994,10 @@ def detect_stars_without_shape_cut(plane: np.ndarray) -> list[dict]:
     ----------
     plane : `numpy.ndarray`
         The 2-D pixels.
+    expected_fwhm_px : `float`, optional
+        How wide a star is expected to be, in the plane's own pixels. Defaults
+        to `STAR_FINDER_EXPECTED_FWHM_PX`. A plane of 2 x 2 super-pixels needs
+        half that.
 
     Returns
     -------
@@ -892,24 +1029,18 @@ def detect_stars_without_shape_cut(plane: np.ndarray) -> list[dict]:
             background = None
     if background is None:
         _, background, noise = sigma_clipped_stats(plane, sigma=3.0)
-    finder = DAOStarFinder(
-        fwhm=STAR_FINDER_EXPECTED_FWHM_PX,
-        threshold=STAR_FINDER_THRESHOLD_SIGMA * noise,
-        exclude_border=True,
-        sharpness_range=(0.2, 1.0),
+    return find_sources_above_background(
+        plane - background,
+        noise=noise,
+        expected_fwhm_px=expected_fwhm_px,
+        threshold_sigma=STAR_FINDER_THRESHOLD_SIGMA,
         roundness_range=None,
     )
-    found = finder(plane - background)
-    if found is None:
-        return []
-    found.sort("flux")
-    found.reverse()
-    return [dict(zip(found.colnames, row, strict=False)) for row in found]
 
 
 def _grid_candidates(
     sources: list[dict], shape: tuple[int, int], plane: np.ndarray, top_level_adu: float | None
-) -> list[list[tuple[float, float]]]:
+) -> tuple[list[list[tuple[float, float]]], CandidateRefusals]:
     """Pick the candidate stars of each grid cell.
 
     A candidate is isolated (no other detected source within
@@ -936,6 +1067,10 @@ def _grid_candidates(
     cells : `list` of `list`
         For each occupied cell, up to `MOFFAT_CANDIDATES_PER_CELL` ``(x, y)``
         centers, brightest first.
+    refusals : `CandidateRefusals`
+        How many sources each cut refused. A source is counted at the first
+        cut it fails, in the order edge, neighbor, saturation. The fit's own
+        refusals are added later by the caller.
     """
     rows, columns = shape
     cell_side = math.sqrt(rows * columns / MOFFAT_GRID_CELL_COUNT)
@@ -945,22 +1080,59 @@ def _grid_candidates(
     tree = cKDTree(positions)
     half = MOFFAT_FIT_BOX_HALF_WIDTH_PX
     cell_lists: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    near_edge = near_neighbor = near_saturation = 0
     for index, (x, y) in enumerate(positions):
         center_x, center_y = round(x), round(y)
         if center_x < half or center_y < half or center_x + half >= columns or center_y + half >= rows:
+            near_edge += 1
             continue
         neighbors = tree.query_ball_point(positions[index], MOFFAT_ISOLATION_RADIUS_PX)
         if len(neighbors) > 1:
+            near_neighbor += 1
             continue
         if top_level_adu is not None:
             box = plane[center_y - half : center_y + half + 1, center_x - half : center_x + half + 1]
             if box.max() >= MOFFAT_SATURATION_MARGIN_FRACTION * top_level_adu:
+                near_saturation += 1
                 continue
         key = (min(int(x / columns * cells_x), cells_x - 1), min(int(y / rows * cells_y), cells_y - 1))
         cell = cell_lists.setdefault(key, [])
         if len(cell) < MOFFAT_CANDIDATES_PER_CELL:
             cell.append((float(x), float(y)))
-    return list(cell_lists.values())
+    refusals = CandidateRefusals(
+        detected=len(sources),
+        near_edge=near_edge,
+        near_neighbor=near_neighbor,
+        near_saturation=near_saturation,
+    )
+    return list(cell_lists.values()), refusals
+
+
+def _sum_bayer_cells(plane: np.ndarray) -> np.ndarray:
+    """Add up each 2 x 2 cell of a raw color mosaic into one super-pixel.
+
+    A one-shot-color sensor puts a red, two green and a blue filter over every
+    2 x 2 block of pixels (the Bayer pattern, named for its inventor). The four
+    pixels of a block see the same star through different filters, so the
+    pixel-to-pixel pattern of the mosaic adds a fixed 2-pixel ripple to every
+    star. That ripple bends the star's second moments and its fitted angle.
+    Summing each block removes the ripple, because every block holds one of
+    each color, whatever the pattern order (RGGB, BGGR and so on).
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The 2-D raw mosaic.
+
+    Returns
+    -------
+    super_pixels : `numpy.ndarray`
+        The plane with an odd last row or column dropped, then every 2 x 2
+        block summed. Its sides are half those of the input.
+    """
+    rows, columns = plane.shape
+    trimmed = plane[: rows - rows % 2, : columns - columns % 2]
+    return trimmed.reshape(rows // 2, 2, columns // 2, 2).sum(axis=(1, 3))
 
 
 def measure_star_profiles(
@@ -968,6 +1140,8 @@ def measure_star_profiles(
     top_level_adu: float | None,
     stopwatch: _Stopwatch | None = None,
     sources: list[dict] | None = None,
+    *,
+    bayer_mosaic: bool = False,
 ) -> StarProfileResult:
     """Measure the Moffat width, elongation and angle of one plane's stars.
 
@@ -985,7 +1159,14 @@ def measure_star_profiles(
         no values.
     sources : `list` of `dict` or `None`, optional
         Detected sources of this plane, brightest first. They are detected
-        here when not given.
+        here when not given. Ignored for a Bayer mosaic, whose sources are
+        detected on the super-pixels.
+    bayer_mosaic : `bool`, optional
+        The plane is a raw color mosaic. Each 2 x 2 cell is summed into one
+        super-pixel (`BAYER_CELL_SIZE_PX` pixels on a side) and the stars are
+        measured on those. The widths are then multiplied by that factor to
+        give original pixels. The elongation and the angle are ratios and a
+        direction, so the factor does not change them.
 
     Returns
     -------
@@ -1002,15 +1183,23 @@ def measure_star_profiles(
     widths, so a trailed star reads wide. The elongation is not taken from the
     fit but from second moments, which do not depend on the profile shape.
     """
+    factor = BAYER_CELL_SIZE_PX if bayer_mosaic else 1
+    expected_fwhm_px = STAR_FINDER_EXPECTED_FWHM_PX / factor
+    if bayer_mosaic:
+        plane = _sum_bayer_cells(plane)
+        sources = None
+        # A super-pixel holds the sum of factor ** 2 pixels, so its top level
+        # is that many times the pixel's.
+        top_level_adu = None if top_level_adu is None else top_level_adu * factor**2
     if sources is None:
-        sources = detect_stars_without_shape_cut(plane)
+        sources = detect_stars_without_shape_cut(plane, expected_fwhm_px)
     if stopwatch is not None and stopwatch.expired():
         return StarProfileResult(reason=stopwatch.reason())
     if not sources:
         return StarProfileResult(reason="no stars were detected in the frame")
     if top_level_adu is None:
         top_level_adu = _plateau_saturation_level_adu(plane)
-    cells = _grid_candidates(sources, plane.shape, plane, top_level_adu)
+    cells, refusals = _grid_candidates(sources, plane.shape, plane, top_level_adu)
     half = MOFFAT_FIT_BOX_HALF_WIDTH_PX
     grid = _subpixel_grid(2 * half + 1)
 
@@ -1036,13 +1225,16 @@ def measure_star_profiles(
             if fit is not None:
                 first_pass.append(((x, y), fit))
                 break
+    first_pass_refused = candidate_count - len(first_pass)
+    refusals = replace(refusals, fit_refused=first_pass_refused)
     if len(first_pass) < MOFFAT_MINIMUM_STAR_COUNT:
         return StarProfileResult(
             candidate_count=candidate_count,
             star_count=len(first_pass),
+            refusals=refusals,
             reason=(
                 f"only {len(first_pass)} isolated, unsaturated stars fitted from {candidate_count} tried; "
-                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed"
+                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed ({refusals.describe()})"
             ),
         )
     shared_beta = float(
@@ -1050,7 +1242,8 @@ def measure_star_profiles(
     )
     widths: list[float] = []
     elongations: list[float] = []
-    angles: list[float] = []
+    first_components: list[float] = []
+    second_components: list[float] = []
     for (x, y), _ in first_pass:
         if stopwatch is not None and stopwatch.expired():
             return StarProfileResult(reason=stopwatch.reason(), candidate_count=candidate_count)
@@ -1061,34 +1254,39 @@ def measure_star_profiles(
         shape = _measure_second_moments(cutout, fit)
         if shape is None:
             continue
-        widths.append(math.sqrt(fit.fwhm_major_px * fit.fwhm_minor_px))
+        widths.append(factor * math.sqrt(fit.fwhm_major_px * fit.fwhm_minor_px))
         elongations.append(shape[0])
-        angles.append(shape[1])
+        first_components.append(shape[1])
+        second_components.append(shape[2])
+    refusals = replace(refusals, fit_refused=first_pass_refused + len(first_pass) - len(widths))
     if len(widths) < MOFFAT_MINIMUM_STAR_COUNT:
         return StarProfileResult(
             candidate_count=candidate_count,
             star_count=len(widths),
+            refusals=refusals,
             reason=(
                 f"only {len(widths)} stars survived the second pass (shared beta {shared_beta:.2f}); "
-                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed"
+                f"at least {MOFFAT_MINIMUM_STAR_COUNT} are needed ({refusals.describe()})"
             ),
         )
     width_array = np.array(widths)
     elongation_array = np.array(elongations)
-    angle_array = np.array(angles)
+    first_array = np.array(first_components)
+    second_array = np.array(second_components)
     generator = np.random.default_rng(BOOTSTRAP_SEED)
-    mean_angle, coherence = _circular_mean_axial_deg(angle_array)
+    mean_angle, coherence = _mean_ellipticity_angle(first_array, second_array)
     return StarProfileResult(
         width_px=float(np.median(width_array)),
         width_px_uncertainty=_bootstrap_median_error(width_array, generator),
         elongation=float(np.median(elongation_array)),
         elongation_uncertainty=_bootstrap_median_error(elongation_array, generator),
         angle_deg=mean_angle,
-        angle_uncertainty_deg=_bootstrap_angle_error_deg(angle_array, generator),
+        angle_uncertainty_deg=_bootstrap_angle_error_deg(first_array, second_array, generator),
         angle_coherence=coherence,
         star_count=len(widths),
         candidate_count=candidate_count,
         median_beta=shared_beta,
+        refusals=refusals,
     )
 
 
@@ -1186,15 +1384,18 @@ def measure_sky_electrons(
     the camera adds to every pixel, which the raw frame carries in its pixel
     values; the header's ``OFFSET`` card is a camera setting, not that level in
     ADU). The signal times the gain is the sky in electrons for one exposure,
-    and its square root is the noise of that sky per pixel (photon counting
-    noise).
+    and its square root is the expected photon counting (Poisson) noise of that
+    sky per pixel. Dark current and amp glow (light from the sensor's own
+    electronics) are inside the signal, because no dark frame is subtracted.
 
     Parameters
     ----------
     background_adu : `float`
-        The sigma-clipped median of the plane, in ADU.
+        The sigma-clipped mean of the plane, in ADU (see
+        `measure_clipped_mean_adu`).
     bias_level_adu : `float` or `None`
-        The bias level for the frame's setting, in ADU. `None` means unknown.
+        The bias level for the frame's setting, in ADU, found with the same
+        estimator. `None` means unknown.
     gain : `ProvenancedValue` or `None`
         Electrons per ADU at the frame's setting.
     exposure_seconds : `float` or `None`
@@ -1238,7 +1439,8 @@ def measure_sky_electrons(
         noise_e=math.sqrt(sky_electrons),
         background_adu=background_adu,
         reason=(
-            f"background {background_adu:.1f} ADU minus bias level {bias_level_adu:.1f} ADU, times "
+            f"clipped-mean background {background_adu:.1f} ADU minus bias level "
+            f"{bias_level_adu:.1f} ADU, times "
             f"{_provenance_text('gain (e-/ADU)', gain)}"
         ),
         gain_is_measured=gain.provenance.kind == ProvenanceKind.MEASURED,
@@ -1290,8 +1492,8 @@ def _emit_star_profile_measurements(
         context.add_not_measured(star_metrics, result.reason, channel)
         return
     fit_note = (
-        f"{result.star_count} stars from {result.candidate_count} tried, shared Moffat beta "
-        f"{result.median_beta:.2f}{mosaic_note}"
+        f"{result.star_count} stars from {result.candidate_count} tried ({result.refusals.describe()}), "
+        f"shared Moffat beta {result.median_beta:.2f}{mosaic_note}"
     )
     context.add(
         FRAME_STAR_WIDTH_MOFFAT_PX,
@@ -1345,6 +1547,7 @@ def _emit_sky_measurements(
     read_noise_reason: str,
     channel: str | None,
     mosaic_note: str,
+    uncooled_note: str = "",
 ) -> None:
     """Turn one plane's sky result and the read noise into measurements.
 
@@ -1362,13 +1565,20 @@ def _emit_sky_measurements(
         The plane's name.
     mosaic_note : `str`
         Text added to the reasons for a raw mosaic, else empty.
+    uncooled_note : `str`, optional
+        Why the camera is taken as uncooled, or an empty string for a camera
+        with a recorded sensor temperature. When it is given, the sky rows are
+        stored as assumed, because the dark current and amp glow in the sky
+        are then unknown and no dark frame was subtracted.
     """
     if sky.rate_e_per_s_per_px is None:
         context.add(FRAME_SKY_RATE_E_PER_S_PER_PX, reason=sky.reason, channel=channel)
         context.add(FRAME_SKY_NOISE_E, reason=sky.reason, channel=channel)
     else:
-        status = MeasurementStatus.MEASURED if sky.gain_is_measured else MeasurementStatus.ASSUMED
-        note = sky.reason + ("" if sky.gain_is_measured else "; the gain is not measured") + mosaic_note
+        is_measured = sky.gain_is_measured and not uncooled_note
+        status = MeasurementStatus.MEASURED if is_measured else MeasurementStatus.ASSUMED
+        note = sky.reason + ("" if sky.gain_is_measured else "; the gain is not measured")
+        note += (f"; {uncooled_note}" if uncooled_note else "") + mosaic_note
         context.add(
             FRAME_SKY_RATE_E_PER_S_PER_PX,
             value=sky.rate_e_per_s_per_px,
@@ -1483,25 +1693,38 @@ def measure_frame(
         return context.measurements
 
     is_mosaic = bool(str(header.get("BAYERPAT", "")).strip()) and len(planes) == 1
-    mosaic_note = "; raw color mosaic measured as it is, color pixels mixed" if is_mosaic else ""
+    mosaic_note = (
+        f"; raw color mosaic: the sky and background use all color pixels mixed, and the star shapes use "
+        f"{BAYER_CELL_SIZE_PX} x {BAYER_CELL_SIZE_PX} super-pixels (widths given back in original pixels)"
+        if is_mosaic
+        else ""
+    )
+    uncooled_note = (
+        ""
+        if frame.sensor_temperature_c is not None
+        else (
+            "the frame records no sensor temperature (no CCD-TEMP card), so the camera is taken as "
+            "uncooled, and the dark current and amp glow in the sky are unknown"
+        )
+    )
     top_level = _usable_top_level_adu(camera_profile)
     exposure_seconds = _frame_exposure_seconds(frame)
 
     # Quick metrics first: they are returned even when the budget runs out.
-    background_adu = _emit_background_and_saturation(context, collapsed, camera_profile)
-    plane_backgrounds = {
-        channel: background_adu if len(planes) == 1 else _clipped_median(plane) for channel, plane in planes
-    }
-    for channel, _plane in planes:
+    _emit_background_and_saturation(context, collapsed, camera_profile)
+    for channel, plane in planes:
+        # The sky uses the clipped mean, not the median of the background
+        # metric: a 14-bit sensor stores steps of 4 ADU, and a median of such
+        # data takes only a few values (see `measure_clipped_mean_adu`).
         sky = measure_sky_electrons(
-            plane_backgrounds[channel],
+            measure_clipped_mean_adu(plane),
             bias_level_adu,
             gain,
             exposure_seconds,
             noise_reason,
             bias_level_reason,
         )
-        _emit_sky_measurements(context, sky, read_noise, noise_reason, channel, mosaic_note)
+        _emit_sky_measurements(context, sky, read_noise, noise_reason, channel, mosaic_note, uncooled_note)
 
     # Slow steps: star detection and fits.
     _emit_region_count(context, collapsed, stopwatch)
@@ -1511,7 +1734,7 @@ def measure_frame(
             result = StarProfileResult(reason=stopwatch.reason())
         else:
             try:
-                result = measure_star_profiles(plane, top_level, stopwatch)
+                result = measure_star_profiles(plane, top_level, stopwatch, bayer_mosaic=is_mosaic)
             except DATA_ERRORS as error:
                 logger.warning("Moffat star profiles failed for %s: %s", path, error)
                 result = StarProfileResult(reason=f"the star fits failed: {error}")
@@ -1581,6 +1804,40 @@ def _clipped_median(plane: np.ndarray) -> float:
     """
     _, median, _ = sigma_clipped_stats(plane, sigma=3.0)
     return float(median)
+
+
+# The clipping of the sky and bias estimator. 3 sigma and astropy's default
+# of up to 5 passes are the same as the background metric's, so the two
+# estimators differ only in the statistic taken from the clipped pixels (mean,
+# not median).
+SKY_CLIP_SIGMA = 3.0
+
+
+def measure_clipped_mean_adu(plane: np.ndarray) -> float:
+    """Give the sigma-clipped mean of a plane, for the sky and the bias level.
+
+    The sky in electrons and the bias level are both found with this one
+    estimator, so they cancel each other's bias. The mean is used, not the
+    median, because the stored values are whole steps. A 14-bit sensor such as
+    the ASI 533 writes its values in steps of 4 ADU, and the median of such a
+    plane takes only a few values: on 61 real M 57 frames the clipped median
+    took 13 different values (792 to 952 ADU, in steps of 4), so the sky in
+    electrons moved in steps of 4 ADU times the gain. The mean of millions of
+    pixels varies smoothly. Clipping at `SKY_CLIP_SIGMA` sigma (up to 5 passes)
+    removes stars and hot pixels, which a plain mean would not.
+
+    Parameters
+    ----------
+    plane : `numpy.ndarray`
+        The pixels.
+
+    Returns
+    -------
+    mean_adu : `float`
+        The mean of the pixels left after sigma clipping.
+    """
+    mean, _, _ = sigma_clipped_stats(plane, sigma=SKY_CLIP_SIGMA)
+    return float(mean)
 
 
 def _emit_background_and_saturation(

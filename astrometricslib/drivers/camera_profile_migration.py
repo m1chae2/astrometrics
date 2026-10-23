@@ -120,8 +120,10 @@ def migrate_camera_profiles(
     ------
     ConfigurationError
         If a listed camera has no profile, or if a listed camera's section
-        already holds a ``sensor_noise`` entry. Nothing is written in either
-        case.
+        holds both the old values and a ``sensor_noise`` entry (a mix of the
+        two layouts). Nothing is written in either case. A section that
+        already holds only a ``sensor_noise`` entry is not an error: the
+        report says it is already migrated and nothing changes.
     """
     wanted_by_normalized_name = {
         normalize_camera_name(camera): (camera, setting) for camera, setting in settings_by_camera.items()
@@ -146,14 +148,20 @@ def migrate_camera_profiles(
     unknown = [camera for key, (camera, _) in wanted_by_normalized_name.items() if key not in matched_names]
     if unknown:
         raise ConfigurationError(f"no camera profile matches {', '.join(repr(name) for name in unknown)}")
-    already_migrated = [
-        name for name, section, setting in sections if setting and SENSOR_NOISE_KEY in section
+    # A section that holds both the old keys and a sensor_noise entry mixes the
+    # two layouts: which values are current is unknown, so nothing is touched.
+    # A section with a sensor_noise entry and no old keys is simply migrated
+    # already, and is reported as such below.
+    mixed_layouts = [
+        name
+        for name, section, setting in sections
+        if setting and SENSOR_NOISE_KEY in section and any(key in section for key in LEGACY_NOISE_KEYS)
     ]
-    if already_migrated:
+    if mixed_layouts:
         raise ConfigurationError(
-            f"{', '.join(already_migrated)} already holds a {SENSOR_NOISE_KEY} entry, so it is on the "
-            "setting-keyed layout. Nothing was changed.",
-            details={"sections": already_migrated},
+            f"{', '.join(mixed_layouts)} holds both the old gain or read noise and a {SENSOR_NOISE_KEY} "
+            "entry, so which values are current is unknown. Nothing was changed.",
+            details={"sections": mixed_layouts},
         )
 
     changes: list[MigrationChange] = []
@@ -169,9 +177,14 @@ def migrate_camera_profiles(
                 )
             continue
         if not has_old_values:
-            changes.append(
-                MigrationChange(section_name, False, "has no old gain or read noise; nothing to migrate")
-            )
+            if SENSOR_NOISE_KEY in section:
+                description = (
+                    f"already migrated: it holds a {SENSOR_NOISE_KEY} entry and no old gain or read noise; "
+                    "nothing to do"
+                )
+            else:
+                description = "has no old gain or read noise; nothing to migrate"
+            changes.append(MigrationChange(section_name, False, description))
             continue
         kwargs = {
             "gain_setting": setting.gain_setting,
@@ -196,11 +209,14 @@ def migrate_camera_profiles(
 
     backup_path = None
     if not dry_run and new_arrays:
-        backup_path = backup_config_file(config)
-        for section_name, entry in new_arrays.items():
-            config.app_config.set_item(section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array([entry]))
-            for key in LEGACY_NOISE_KEYS:
-                config.app_config.remove_key(section_name, key)
-        config.save_configuration()
-        _load_profiles_from_config.cache_clear()
+        with config.write_lock():
+            backup_path = backup_config_file(config)
+            for section_name, entry in new_arrays.items():
+                config.app_config.set_item(
+                    section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array([entry])
+                )
+                for key in LEGACY_NOISE_KEYS:
+                    config.app_config.remove_key(section_name, key)
+            config.save_configuration()
+            _load_profiles_from_config.cache_clear()
     return MigrationReport(changes=changes, dry_run=dry_run, backup_path=backup_path)

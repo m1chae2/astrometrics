@@ -8,11 +8,11 @@ offset of ``10`` or ``10.0``, a binning of ``2x2`` or the number ``2``. The
 helpers here write each part one way, so a stored setting and a frame's
 setting match exactly when they are the same setting.
 
-The binning rules agree with `astrometricslib.drivers.calibration_library`
-(``format_binning`` and ``normalize_binning``), which files calibration
-frames by setting. This module repeats the few lines instead of importing
-them because the camera-profile model sits below the drivers and cannot import
-from them. A test keeps the two in step.
+The binning rule here is the only one: `astrometricslib.drivers.
+calibration_library` (which files calibration frames by setting) imports
+`canonical_binning_setting` and offers it under its old name
+`normalize_binning`, so a stored setting, a frame's setting and a library key
+are always written the same way.
 """
 
 import math
@@ -22,7 +22,8 @@ from typing import Any
 from astrometricslib.utilities.iso_text import canonical_iso_text
 
 # The binning of a frame whose header names none: no binning at all. Same
-# default as `astrometricslib.drivers.calibration_library.UNBINNED`.
+# default as `astrometricslib.drivers.calibration_library.UNBINNED`, which
+# takes its value from here.
 UNBINNED_TEXT = "1x1"
 
 _BINNING_TEXT_PATTERN = re.compile(r"^\s*(\d+)\s*[xX]\s*(\d+)\s*$")

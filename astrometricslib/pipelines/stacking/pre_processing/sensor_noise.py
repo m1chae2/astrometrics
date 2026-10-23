@@ -17,7 +17,11 @@ The method follows the hand measurement behind the ASI 533MM Pro profile.
 1. Pair the frames. The difference of two frames taken one after the other
    cancels the vignette, the dust shadows and the pixel-to-pixel sensitivity
    pattern exactly, so it holds only noise. One frame's noise variance is
-   half the variance of the difference.
+   half the variance of the difference. Flat frames are paired by the time
+   they were taken (the header's ``DATE-OBS``), and only when the two are no
+   more than `MAXIMUM_PAIR_GAP_SECONDS` apart, so a pair never spans two
+   flat-taking sessions, whose lamp level, dust and focus differ. Two frames
+   of different sessions would leave that difference in the "noise".
 2. Read noise, from each bias pair: the standard deviation of the
    difference divided by the square root of 2, in ADU. This root-mean-square
    figure is the one the noise model needs. A robust figure from the median
@@ -32,13 +36,18 @@ Everything is measured in the central region of the frame, 1000 by 1000
 pixels by default. The center is the part of the sensor least affected by
 vignetting and amplifier glow.
 
-Limits worth knowing. One signal level cannot show whether the sensor is
-linear. The full photon transfer curve fits the slope of variance against
-signal over many levels. This module measures at the one level the flats
-sit at, and records that level so a reader knows where the gain holds. The
-variance of a frame also includes the rounding of the stored value (this
-sensor stores 14-bit values in steps of 4 ADU). The bias and flat variances
-both contain that rounding, and the subtraction in step 3 removes it.
+Limits worth knowing. A flat brighter than the camera profile's photometric
+linearity limit (`photometric_linearity_limit_adu`, the value above which the
+sensor stops responding in proportion to the light) is refused, because
+photon transfer assumes a linear response: past the limit the variance no
+longer tracks the signal and the gain reads wrong. One signal level cannot
+show whether the sensor is linear. The full photon transfer curve fits the
+slope of variance against signal over many levels. This module measures at the
+one level the flats sit at, and records that level so a reader knows where the
+gain holds. The variance of a frame also includes the rounding of the stored
+value (this sensor stores 14-bit values in steps of 4 ADU). The bias and flat
+variances both contain that rounding, and the subtraction in step 3 removes
+it.
 
 The pure functions work on frames already in memory. `load_calibration_frame`
 reads a file and the facts the checks need from its header.
@@ -46,8 +55,8 @@ reads a file and the facts the checks need from its header.
 
 import logging
 import math
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 
 import numpy as np
 
@@ -72,10 +81,15 @@ logger = logging.getLogger(__name__)
 # region is clipped to the sensor for a smaller frame.
 CENTRAL_REGION_SHAPE_PIXELS = (1000, 1000)
 
-# The fewest flat pairs a measurement may use. The hand measurement used 15
-# and found a pair-to-pair spread of 0.0004 on a gain of 0.783 (0.05%). The
-# median of 5 pairs then has a standard error near 1.25 * 0.0004 / sqrt(5),
-# well under 0.1%, and still survives two bad pairs. A design estimate,
+# The fewest flat pairs a measurement may use. The result is the median of the
+# pairs' gains, and the median of five survives two bad pairs (it is the third
+# of five sorted values). The standard error of a median of N pairs is about
+# 1.25 * sigma / sqrt(N), where sigma is the pair-to-pair spread, so five pairs
+# give a standard error of about 0.56 sigma. The spread is not assumed: every
+# measurement computes it (`gain_spread_e_per_adu`) and keeps it, with each
+# pair's gain, in the saved profile entry, so a reader can judge a result from
+# its own pairs. For scale, the hand measurement behind the ASI 533MM Pro
+# profile (STK-35) found a spread of 0.05% over 15 pairs. A design estimate,
 # checked only against that one data set.
 MINIMUM_FLAT_PAIRS = 5
 
@@ -96,6 +110,16 @@ MAXIMUM_TEMPERATURE_SPREAD_C = 1.0
 # fraction. Header exposure times are written to a few digits, so exact
 # equality would reject frames of one exposure.
 EXPOSURE_RELATIVE_TOLERANCE = 1.0e-3
+
+# The longest time between the two frames of a flat pair, in seconds. Flat
+# frames of one session are taken back to back (an Ekos or NINA flat sequence
+# runs one frame every few seconds), so a gap of five minutes is already longer
+# than any one sequence needs, while the next session is hours or days away. A
+# pair this close shows the same lamp, dust and focus; the small drift of the
+# lamp inside it is removed by scaling the second frame to the first's level.
+# A design estimate: it separates sessions by orders of magnitude, so its exact
+# value does not matter, and it has not been tuned on this library's flats.
+MAXIMUM_PAIR_GAP_SECONDS = 300.0
 
 # Turns a median absolute deviation into a standard deviation for Gaussian
 # noise (the same constant `flat_calibration.py` uses).
@@ -129,6 +153,10 @@ class CalibrationFrame:
     path : `str`
         The file the frame came from, for messages. Empty for a frame made
         in memory.
+    observed_at : `float` or `None`
+        When the exposure started, in seconds since 1970 (UTC), from the
+        header's ``DATE-OBS``. `None` when the header gives none or it cannot
+        be read.
     """
 
     pixels: np.ndarray
@@ -138,6 +166,7 @@ class CalibrationFrame:
     exposure_seconds: float | None = None
     temperature_c: float | None = None
     path: str = ""
+    observed_at: float | None = None
 
     @property
     def setting(self) -> tuple[str, str, str]:
@@ -149,6 +178,31 @@ class CalibrationFrame:
             Gain setting, offset and binning.
         """
         return (self.gain_setting, self.offset, self.binning)
+
+
+def _parse_observation_time(value: object) -> float | None:
+    """Read a header's ``DATE-OBS`` text as seconds since 1970 (UTC).
+
+    Parameters
+    ----------
+    value : `object`
+        The header value, such as ``"2026-10-03T03:12:11.123"``. A time with
+        no zone is taken as UTC, which is what the FITS standard says.
+
+    Returns
+    -------
+    seconds : `float` or `None`
+        The time, or `None` when the value is missing or not a date and time.
+    """
+    if value is None:
+        return None
+    try:
+        observed = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=UTC)
+    return observed.timestamp()
 
 
 def load_calibration_frame(path: str) -> CalibrationFrame | None:
@@ -192,6 +246,7 @@ def load_calibration_frame(path: str) -> CalibrationFrame | None:
         exposure_seconds=exposure_seconds,
         temperature_c=header_temperature_c(header),
         path=path,
+        observed_at=_parse_observation_time(header.get("DATE-OBS")),
     )
 
 
@@ -213,6 +268,67 @@ def pair_consecutive(frames: list[CalibrationFrame]) -> list[tuple[CalibrationFr
         Frames 0 and 1, 2 and 3, and so on.
     """
     return [(frames[index], frames[index + 1]) for index in range(0, len(frames) - 1, 2)]
+
+
+@dataclass(frozen=True)
+class FramePairing:
+    """The pairs made from a set of frames, and what was left out.
+
+    Attributes
+    ----------
+    pairs : `list` [`tuple` [`CalibrationFrame`, `CalibrationFrame`]]
+        The pairs, each of two frames taken within the allowed gap.
+    undated_count : `int`
+        Frames with no usable ``DATE-OBS``. They cannot be paired by time.
+    unpaired_count : `int`
+        Dated frames left without a partner because the next frame was too
+        far away in time.
+    """
+
+    pairs: list[tuple[CalibrationFrame, CalibrationFrame]] = field(default_factory=list)
+    undated_count: int = 0
+    unpaired_count: int = 0
+
+
+def pair_by_observation_time(
+    frames: list[CalibrationFrame], maximum_gap_seconds: float = MAXIMUM_PAIR_GAP_SECONDS
+) -> FramePairing:
+    """Pair frames that were taken one after the other, by their time.
+
+    The frames are put in the order they were taken (``DATE-OBS``), not in
+    file-name order, and each frame is paired with the next one only when the
+    two are at most `maximum_gap_seconds` apart. A frame whose next neighbor
+    is farther away starts a new session and is paired with the frame after
+    it, or left out if it has none. No frame is in two pairs, or their noise
+    would not be independent.
+
+    Parameters
+    ----------
+    frames : `list` [`CalibrationFrame`]
+        The frames, in any order.
+    maximum_gap_seconds : `float`, optional
+        The longest allowed time between the two frames of a pair. Defaults
+        to `MAXIMUM_PAIR_GAP_SECONDS`.
+
+    Returns
+    -------
+    pairing : `FramePairing`
+        The pairs and the counts of frames that could not be paired.
+    """
+    dated = sorted((frame for frame in frames if frame.observed_at is not None), key=lambda f: f.observed_at)
+    pairs = []
+    index = 0
+    while index + 1 < len(dated):
+        if dated[index + 1].observed_at - dated[index].observed_at <= maximum_gap_seconds:
+            pairs.append((dated[index], dated[index + 1]))
+            index += 2
+        else:
+            index += 1
+    return FramePairing(
+        pairs=pairs,
+        undated_count=len(frames) - len(dated),
+        unpaired_count=len(dated) - 2 * len(pairs),
+    )
 
 
 def _central_slices(shape: tuple[int, int], region_shape: tuple[int, int]) -> tuple[slice, slice]:
@@ -291,6 +407,7 @@ def measure_sensor_noise(
     *,
     camera_id: str = "",
     measured_on: date,
+    linearity_limit_adu: float | None = None,
 ) -> SensorNoiseMeasurement:
     """Measure the gain and read noise from flat pairs and bias pairs.
 
@@ -305,6 +422,13 @@ def measure_sensor_noise(
     first (a lamp that drifted) has the second frame scaled to the first's
     level before the difference, so the drift does not read as noise. A pair
     whose noise is not above the read noise gives no gain and is left out.
+
+    A flat pair is left out when either frame's central region has a mean
+    pixel value above `linearity_limit_adu` (the camera profile's photometric
+    linearity limit), because past that level the sensor no longer responds
+    in proportion to the light and the photon transfer gain reads wrong. If
+    fewer than `MINIMUM_FLAT_PAIRS` pairs remain, nothing is measured and the
+    reason names the limit.
 
     One signal level cannot show whether the sensor responds linearly. The
     level used is in the result.
@@ -323,6 +447,9 @@ def measure_sensor_noise(
     measured_on : `datetime.date`
         The date written in the provenance sentence. The caller gives it,
         because pipeline code does not read the wall clock.
+    linearity_limit_adu : `float`, optional
+        The pixel value above which the sensor is not linear, from the camera
+        profile. `None` (the default) applies no limit.
 
     Returns
     -------
@@ -347,11 +474,35 @@ def measure_sensor_noise(
             f"({2 * MINIMUM_BIAS_PAIRS} bias frames)"
         )
         return make_unmeasured_result(camera_id, setting, reason, *counts)
+    slices = _central_slices(first_frame.pixels.shape, region_shape)
+    linearity_notes: list[str] = []
+    if linearity_limit_adu is not None:
+        linear_pairs = [
+            pair
+            for pair in flat_pairs
+            if max(float(np.mean(frame.pixels[slices])) for frame in pair) <= linearity_limit_adu
+        ]
+        refused_count = len(flat_pairs) - len(linear_pairs)
+        if refused_count:
+            levels = [float(np.mean(frame.pixels[slices])) for pair in flat_pairs for frame in pair]
+            linearity_notes.append(
+                f"{refused_count} flat pair(s) were left out because their mean level is above the "
+                f"camera profile's photometric linearity limit of {linearity_limit_adu:.0f} ADU "
+                f"(the flats span {min(levels):.0f} to {max(levels):.0f} ADU)"
+            )
+        flat_pairs = linear_pairs
+        flat_frames = [frame for pair in flat_pairs for frame in pair]
+        if len(flat_pairs) < MINIMUM_FLAT_PAIRS:
+            reason = (
+                f"{len(flat_pairs)} flat pair(s) are below the camera profile's photometric linearity "
+                f"limit of {linearity_limit_adu:.0f} ADU; at least {MINIMUM_FLAT_PAIRS} are needed. "
+                f"{linearity_notes[0] if linearity_notes else ''}".strip()
+            )
+            return make_unmeasured_result(camera_id, setting, reason, *counts)
     problem = _find_condition_problem(flat_frames, bias_frames)
     if problem is not None:
         return make_unmeasured_result(camera_id, setting, problem, *counts)
 
-    slices = _central_slices(first_frame.pixels.shape, region_shape)
     region_shape_pixels = [slices[0].stop - slices[0].start, slices[1].stop - slices[1].start]
     mean_bias = np.mean([frame.pixels[slices] for frame in bias_frames], axis=0)
 
@@ -432,4 +583,5 @@ def measure_sensor_noise(
         flat_frame_count=len(flat_frames),
         bias_frame_count=len(bias_frames),
         provenance=provenance,
+        notes=linearity_notes,
     )

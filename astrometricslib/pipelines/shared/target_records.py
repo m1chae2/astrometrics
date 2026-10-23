@@ -475,6 +475,67 @@ def save_targets(api: Any) -> None:
     remember_stored_state(api, changed_targets)
 
 
+def merge_quality_stamps(existing_target: Target | None, updated_target: Target) -> Target:
+    """Copy only the measurement stamps of the frames onto the stored target.
+
+    The frame measurement job stamps each frame it measures with the size and
+    change time its file had (``quality_measured_file_size`` and
+    ``quality_measured_file_modified_ns``). Another program, or another part of
+    this one, may have changed the stored target since the job loaded it: new
+    frames, a new stack, edited settings. Saving the whole in-memory target
+    would overwrite those changes. This merge function takes the stored target
+    as it is and sets only the two stamp fields on its frames, matching frames
+    by path. A frame the stored target does not hold is ignored. A frame whose
+    in-memory stamp is empty leaves the stored stamp alone.
+
+    Parameters
+    ----------
+    existing_target : `Target` or `None`
+        The target as stored right now, or `None` when none is stored.
+    updated_target : `Target`
+        The in-memory target whose frames carry the new stamps.
+
+    Returns
+    -------
+    merged : `Target`
+        The stored target with the new stamps. When nothing is stored, the
+        in-memory target (there is nothing to overwrite).
+    """
+    if existing_target is None:
+        return updated_target
+    stamped_by_path = {
+        frame.path: frame for frame in updated_target.frames if frame.quality_measured_file_size is not None
+    }
+    for frame in existing_target.frames:
+        stamped = stamped_by_path.get(frame.path)
+        if stamped is not None:
+            frame.quality_measured_file_size = stamped.quality_measured_file_size
+            frame.quality_measured_file_modified_ns = stamped.quality_measured_file_modified_ns
+    return existing_target
+
+
+def save_quality_stamps(api: Any, target: Target) -> None:
+    """Save a target's frame measurement stamps without touching anything else.
+
+    The save reads the stored target and the new stamps are merged into it
+    under the storage's lock (`merge_quality_stamps`), so a long measurement
+    run can save its progress without overwriting changes made elsewhere in
+    the meantime. The in-memory target is not marked as saved: any other edit
+    it holds is still saved later by `save_targets`.
+
+    Parameters
+    ----------
+    api : `Any`
+        The system that manages the targets.
+    target : `Target`
+        The target whose frames were stamped.
+    """
+    if not hasattr(api.catalog_access, "merge_and_record"):
+        save_targets(api)
+        return
+    api.catalog_access.merge_and_record("target_catalog", [target], merge_quality_stamps)
+
+
 def read_saved_target(api: Any, target_id: str) -> Any | None:
     """Read one target's saved record straight from storage.
 

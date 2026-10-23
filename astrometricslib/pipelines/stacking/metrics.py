@@ -70,7 +70,10 @@ STACKING_METRICS: tuple[MetricSpec, ...] = (
         estimator=(
             "Median over the brightest detected stars (at most `MAXIMUM_STARS_MEASURED`) of the "
             "smaller flux-weighted second-moment width divided by the larger one, measured in a "
-            "small box on the background-subtracted frame by `detect_stars`."
+            "small box on the background-subtracted frame by `detect_stars`. The widths are taken "
+            "along the image x and y axes, not along the star's own axes, so a trail at 45 degrees "
+            "to the axes reads round (a roundness near 1); the metric catches trails along the axes "
+            "and is blind to diagonal ones. `frame.star_elongation` has no such blind spot."
         ),
         sample_definition=(
             "The brightest stars with a measurable shape, away from the frame edge. A frame with "

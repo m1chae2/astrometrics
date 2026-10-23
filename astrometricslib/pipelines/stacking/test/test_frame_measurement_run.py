@@ -8,6 +8,8 @@ what it stamps, and what it does when one frame fails.
 """
 
 import os
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,20 +30,31 @@ from astrometricslib.models.camera_profile import (
     SensorSettingNoise,
     ValueProvenance,
 )
-from astrometricslib.models.quality.measurement import MeasurementStatus
+from astrometricslib.models.quality.measurement import (
+    MeasurementOrigin,
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    SubjectLevel,
+)
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.quality.frame_measurement import measure_frame as real_measure_frame
 from astrometricslib.pipelines.shared.quality.metrics import (
     FRAME_BACKGROUND_LEVEL,
     FRAME_READ_NOISE_E,
     FRAME_SKY_RATE_E_PER_S_PER_PX,
+    FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX,
 )
 from astrometricslib.pipelines.stacking import frame_measurement_run
 from astrometricslib.pipelines.stacking.frame_measurement_run import (
     BIAS_FRAMES_FOR_LEVEL,
     BiasLevelFinder,
     FrameMeasurementSession,
+    FrameQualityRecording,
     build_capture_setting,
     frame_needs_measuring,
+    frame_was_cut_short,
+    measurements_to_store,
     quarantine_measurements_for_frame,
     record_frame_measurements_for_target,
     record_stage_frame_quality,
@@ -171,6 +184,7 @@ def target(tmp_path: Path) -> Target:
                 exposure="10.0",
                 timestamp=1_792_000_000.0 + 60.0 * index,
                 pixelScaleArcsec=2.0,
+                sensorTemperatureC=-10.0,
             )
         )
     dark = folder / "dark_0.fits"
@@ -210,6 +224,7 @@ def _session(store: QualityStore, biases: list[str]) -> FrameMeasurementSession:
         _Library(biases),
         run_id="run-test",
         measured_at=datetime(2026, 10, 22, 6, 0, tzinfo=UTC),
+        use_worker_processes=False,
     )
 
 
@@ -425,14 +440,11 @@ def test_quarantine_numbers_become_two_rows_and_a_missing_roundness_is_not_measu
 
 
 def test_the_stage_records_quarantine_rows_for_kept_frames(
-    target: Target, tmp_path: Path, biases: list[str], monkeypatch: pytest.MonkeyPatch
+    target: Target, tmp_path: Path, biases: list[str]
 ) -> None:
     """Every measured frame gets quarantine rows; new frames are measured."""
-    monkeypatch.setattr(
-        "astrometricslib.drivers.calibration_library.CalibrationLibrary",
-        lambda app_config: _Library(biases),
-    )
     config = SimpleNamespace(get_library_path=lambda: tmp_path)
+    recording = FrameQualityRecording(configuration=config, calibration_library=_Library(biases))
     lights = target.frames[:3]
     measurements = [
         {"path": frame.path, "roundness": 0.9, "sky_median_adu": 500.0 + index}
@@ -440,7 +452,7 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     ]
 
     summary = record_stage_frame_quality(
-        target, lights[:2], measurements, lights, config, datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
+        target, lights[:2], measurements, lights, recording, datetime(2026, 10, 22, 6, 0, tzinfo=UTC)
     )
 
     store = QualityStore.from_configuration(config)
@@ -452,26 +464,416 @@ def test_the_stage_records_quarantine_rows_for_kept_frames(
     assert lights[2].quality_measured_file_size is None
 
 
-def test_the_processing_api_runs_the_job_and_checks_the_limit(
-    target: Target, tmp_path: Path, biases: list[str]
-) -> None:
-    """The public method stores rows, saves the target, checks the limit."""
-    targets = SimpleNamespace(save=MagicMock())
+def _pipelines(tmp_path: Path, biases: list[str]) -> tuple[ProcessingPipelines, MagicMock]:
+    """Build the processing API over a fake catalog access.
+
+    Returns
+    -------
+    pipelines : `ProcessingPipelines`
+        The API, with a stand-in calibration library holding the biases.
+    catalog_access : `MagicMock`
+        The stand-in for the stored catalog, whose merge call shows what was
+        saved.
+    """
+    catalog_access = MagicMock()
+    targets = SimpleNamespace(save=MagicMock(), catalog_access=catalog_access)
     pipelines = ProcessingPipelines(
         SimpleNamespace(get_library_path=lambda: tmp_path),
         MagicMock(),
         targets=targets,
         calibration=SimpleNamespace(library=_Library(biases)),
     )
+    return pipelines, catalog_access
+
+
+def test_the_processing_api_runs_the_job_and_checks_the_limit(
+    target: Target, tmp_path: Path, biases: list[str]
+) -> None:
+    """The public method stores rows, saves only stamps, checks the limit."""
+    pipelines, catalog_access = _pipelines(tmp_path, biases)
 
     summary = pipelines.record_frame_measurements(target, register_job=False)
 
     assert summary.target_id == "M 99"
     assert summary.frames_measured == 3
     assert summary.observing_night_ids == ["2026-10-13"]
-    assert targets.save.call_count == 1
+    assert catalog_access.merge_and_record.call_count == 1
+    assert catalog_access.merge_and_record.call_args.args[0] == "target_catalog"
     assert QualityStore(str(tmp_path / "astrometrics.db")).query(target_id="M 99")
     again = pipelines.record_frame_measurements(target, register_job=False)
     assert again.frames_measured == 0
     with pytest.raises(InvalidArgumentError, match="limit"):
         pipelines.record_frame_measurements(target, limit=0, register_job=False)
+
+
+def test_the_stamps_are_saved_every_few_frames_and_at_the_end(
+    target: Target, store: QualityStore, biases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A long run keeps its progress: the save is called as the run goes."""
+    monkeypatch.setattr(frame_measurement_run, "STAMP_SAVE_INTERVAL_FRAMES", 2)
+    stamps_seen_at_save: list[int] = []
+
+    def save() -> None:
+        """Count how many frames carry a stamp when the save is called."""
+        stamps_seen_at_save.append(
+            sum(frame.quality_measured_file_size is not None for frame in target.frames)
+        )
+
+    record_frame_measurements_for_target(target, _session(store, biases), save_target=save)
+
+    # Three frames with an interval of two: one save after the second frame,
+    # one at the end for the third.
+    assert stamps_seen_at_save == [2, 3]
+
+
+def test_an_unexpected_error_on_one_frame_does_not_stop_the_run(
+    target: Target, store: QualityStore, biases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A RuntimeError from the image libraries costs one frame, not the run."""
+    session = _session(store, biases)
+    real_measure = session.measure
+    failing_name = os.path.basename(target.frames[1].path)
+
+    def measure_or_fail(frame: FrameRecord, target_id: str, capture_setting_id: int) -> list:
+        """Raise for one frame and measure the others.
+
+        Returns
+        -------
+        measurements : `list`
+            The rows of a frame that does not fail.
+
+        Raises
+        ------
+        RuntimeError
+            For the one frame chosen to fail.
+        """
+        if os.path.basename(frame.path) == failing_name:
+            raise RuntimeError("photutils broke")
+        return real_measure(frame, target_id, capture_setting_id)
+
+    monkeypatch.setattr(session, "measure", measure_or_fail)
+    saved = MagicMock()
+
+    summary = record_frame_measurements_for_target(target, session, save_target=saved)
+
+    assert summary.frames_measured == 2
+    assert summary.frames_failed == 1
+    assert "RuntimeError: photutils broke" in summary.notes[0]
+    assert target.frames[1].quality_measured_file_size is None
+    assert saved.call_count == 1
+
+
+def test_a_second_run_for_the_same_target_returns_at_once_and_says_so(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """While a target is being measured, another caller measures nothing."""
+    started = threading.Event()
+    release = threading.Event()
+    session = _session(store, biases)
+    real_measure = session.measure
+
+    def slow_measure(frame: FrameRecord, target_id: str, capture_setting_id: int) -> list:
+        """Hold the first run until the test has made its second call.
+
+        Returns
+        -------
+        measurements : `list`
+            The frame's rows.
+        """
+        started.set()
+        release.wait(30)
+        return real_measure(frame, target_id, capture_setting_id)
+
+    session.measure = slow_measure
+    results: list = []
+    worker = threading.Thread(
+        target=lambda: results.append(record_frame_measurements_for_target(target, session))
+    )
+    worker.start()
+    try:
+        assert started.wait(30)
+        second = record_frame_measurements_for_target(target, _session(store, biases))
+    finally:
+        release.set()
+        worker.join(60)
+
+    assert second.already_running is True
+    assert second.frames_measured == 0
+    assert "already going" in second.notes[0]
+    assert results[0].frames_measured == 3
+    assert results[0].already_running is False
+    # The guard is released: a later run goes ahead (and finds nothing to do).
+    later = record_frame_measurements_for_target(target, _session(store, biases))
+    assert later.already_running is False
+    assert later.frames_skipped_unchanged == 3
+
+
+def test_a_run_for_another_target_waits_its_turn_and_the_stage_never_waits(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """Runs take turns; the stacking stage skips instead of waiting."""
+    other = Target(id="M 100", frames=[])
+    started = threading.Event()
+    release = threading.Event()
+    session = _session(store, biases)
+    real_measure = session.measure
+
+    def slow_measure(frame: FrameRecord, target_id: str, capture_setting_id: int) -> list:
+        """Hold the first run until the test is done.
+
+        Returns
+        -------
+        measurements : `list`
+            The frame's rows.
+        """
+        started.set()
+        release.wait(30)
+        return real_measure(frame, target_id, capture_setting_id)
+
+    session.measure = slow_measure
+    worker = threading.Thread(target=lambda: record_frame_measurements_for_target(target, session))
+    worker.start()
+    try:
+        assert started.wait(30)
+        waited = time.monotonic()
+        skipped = record_frame_measurements_for_target(other, _session(store, biases), wait_for_turn=False)
+        assert time.monotonic() - waited < 5.0
+    finally:
+        release.set()
+        worker.join(60)
+
+    assert skipped.already_running is True
+    assert "another measurement run" in skipped.notes[0]
+    # With the turn free, the same call for the other target runs.
+    assert record_frame_measurements_for_target(other, _session(store, biases)).already_running is False
+
+
+def test_a_run_nested_in_a_parent_job_keeps_its_own_run_id_and_the_parents_progress(
+    target: Target, store: QualityStore, biases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside a parent job, the run keeps its own run id and no progress."""
+    parent = MagicMock()
+    parent.job_id = "stacking-job-1"
+    monkeypatch.setattr(frame_measurement_run, "get_current_job", lambda: parent)
+    session = FrameMeasurementSession(
+        store,
+        _Library(biases),
+        measured_at=datetime(2026, 10, 22, 6, 0, tzinfo=UTC),
+        use_worker_processes=False,
+    )
+
+    record_frame_measurements_for_target(target, session)
+
+    assert session.run_id != "stacking-job-1"
+    assert session.run_id.startswith("frame-measurement-")
+    assert session.job_id == "stacking-job-1"
+    parent.stage.assert_not_called()
+    rows = store.query(target_id="M 99", latest_only=False)
+    assert {row.run_id for row in rows} == {session.run_id}
+
+
+def test_a_run_with_its_own_job_reports_progress_and_uses_the_job_id_as_run_id(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """The run's own job gets the progress and names the run."""
+    own_job = MagicMock()
+    own_job.job_id = "quality-job-7"
+    session = FrameMeasurementSession(
+        store,
+        _Library(biases),
+        progress_job=own_job,
+        measured_at=datetime(2026, 10, 22, 6, 0, tzinfo=UTC),
+        use_worker_processes=False,
+    )
+
+    record_frame_measurements_for_target(target, session)
+
+    assert session.run_id == "quality-job-7"
+    assert own_job.stage.call_count == 3
+
+
+def test_an_uncooled_camera_gets_an_assumed_sky(
+    target: Target, store: QualityStore, biases: list[str]
+) -> None:
+    """A frame with no CCD-TEMP is taken as uncooled and its sky is assumed."""
+    for frame in target.frames[:3]:
+        frame.sensor_temperature_c = None
+
+    record_frame_measurements_for_target(target, _session(store, biases))
+
+    sky = store.query(metric=FRAME_SKY_RATE_E_PER_S_PER_PX)
+    assert sky
+    assert all(row.status == MeasurementStatus.ASSUMED for row in sky)
+    assert "uncooled" in sky[0].reason
+
+
+def test_the_bias_level_ignores_hot_pixels(tmp_path: Path, target: Target) -> None:
+    """The level is a clipped mean, so hot pixels do not pull it."""
+    folder = tmp_path / "hot"
+    folder.mkdir()
+    paths = []
+    for index in range(3):
+        path = folder / f"bias_{index}.fits"
+        generator = np.random.default_rng(index)
+        data = generator.normal(BIAS_LEVEL_ADU, 3.0, (FRAME_SIZE, FRAME_SIZE))
+        data[:5, :5] = 60000.0
+        fits.PrimaryHDU(data.clip(0, 65535).astype(np.uint16)).writeto(path)
+        paths.append(str(path))
+
+    level, reason = BiasLevelFinder(_Library(paths)).find(target.frames[0])
+
+    assert reason == ""
+    assert level == pytest.approx(BIAS_LEVEL_ADU, abs=0.5)
+
+
+def _spend_budget_of_one_frame(monkeypatch: pytest.MonkeyPatch, frame_name: str) -> None:
+    """Give one named frame a CPU time budget of zero.
+
+    Parameters
+    ----------
+    monkeypatch : `pytest.MonkeyPatch`
+        The fixture that undoes the change after the test.
+    frame_name : `str`
+        The file name of the frame whose budget runs out at once.
+    """
+
+    def measure_with_tiny_budget(path: str, *args: object, **kwargs: object) -> list:
+        """Measure, with no CPU time to spare for the chosen frame.
+
+        Returns
+        -------
+        measurements : `list` [`QualityMeasurement`]
+            The frame's rows.
+        """
+        if os.path.basename(path) == frame_name:
+            kwargs["time_budget_seconds"] = 0.0
+        return real_measure_frame(path, *args, **kwargs)
+
+    monkeypatch.setattr(frame_measurement_run, "measure_frame", measure_with_tiny_budget)
+
+
+def test_a_frame_cut_short_by_the_cpu_budget_is_not_stamped_and_the_next_run_measures_it(
+    target: Target, store: QualityStore, biases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A spent budget leaves the frame unstamped; a second run retries it."""
+    slow = target.frames[1]
+    _spend_budget_of_one_frame(monkeypatch, os.path.basename(slow.path))
+
+    first = record_frame_measurements_for_target(target, _session(store, biases))
+
+    assert first.frames_measured == 2
+    assert first.frames_cut_short == 1
+    assert first.frames_failed == 0
+    assert slow.quality_measured_file_size is None
+    assert any("ran out of CPU time" in note for note in first.notes)
+    slow_rows = [
+        row
+        for row in store.query(target_id="M 99", latest_only=False)
+        if os.path.basename(slow.path) in row.subject.subject_id
+    ]
+    # The quick metrics are stored; the skipped metrics leave no row.
+    assert slow_rows
+    assert all(not row.reason.startswith("CPU time budget") for row in slow_rows)
+    assert FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX not in {row.metric for row in slow_rows}
+
+    monkeypatch.setattr(frame_measurement_run, "measure_frame", real_measure_frame)
+    second = record_frame_measurements_for_target(target, _session(store, biases))
+
+    assert second.frames_measured == 1
+    assert second.frames_skipped_unchanged == 2
+    assert second.frames_cut_short == 0
+    assert slow.quality_measured_file_size is not None
+
+
+def test_a_retry_adds_a_second_row_for_each_quick_metric_under_a_new_run_id(
+    target: Target, store: QualityStore, biases: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A retry writes the measured metrics again; a latest read sees one."""
+    slow = target.frames[0]
+    _spend_budget_of_one_frame(monkeypatch, os.path.basename(slow.path))
+    record_frame_measurements_for_target(target, _session(store, biases))
+    monkeypatch.setattr(frame_measurement_run, "measure_frame", real_measure_frame)
+    retry_session = FrameMeasurementSession(
+        store,
+        _Library(biases),
+        run_id="run-retry",
+        measured_at=datetime(2026, 10, 22, 7, 0, tzinfo=UTC),
+        use_worker_processes=False,
+    )
+
+    record_frame_measurements_for_target(target, retry_session)
+
+    every_row = [
+        row
+        for row in store.query(target_id="M 99", latest_only=False)
+        if os.path.basename(slow.path) in row.subject.subject_id
+    ]
+    background = [row for row in every_row if row.metric == FRAME_BACKGROUND_LEVEL]
+    assert {row.run_id for row in background} == {"run-test", "run-retry"}
+    latest = [
+        row for row in store.query(target_id="M 99") if os.path.basename(slow.path) in row.subject.subject_id
+    ]
+    assert len([row for row in latest if row.metric == FRAME_BACKGROUND_LEVEL]) == 1
+    assert all(
+        row.run_id == "run-retry" for row in latest if row.metric == FRAME_STAR_WIDTH_GAUSSIAN_BRIGHTEST_PX
+    )
+
+
+def test_a_frame_not_measured_for_a_permanent_reason_is_stamped(target: Target, store: QualityStore) -> None:
+    """No bias at the setting is permanent: the frame is stamped."""
+    summary = record_frame_measurements_for_target(target, _session(store, []))
+
+    assert summary.frames_measured == 3
+    assert summary.frames_cut_short == 0
+    assert all(frame.quality_measured_file_size is not None for frame in target.frames[:3])
+    sky = store.query(metric=FRAME_SKY_RATE_E_PER_S_PER_PX)
+    assert sky
+    assert all(row.status == MeasurementStatus.NOT_MEASURED for row in sky)
+
+
+def test_only_a_budget_reason_counts_as_cut_short() -> None:
+    """The helpers tell a budget skip from any other not-measured reason."""
+    base = {
+        "metric": FRAME_BACKGROUND_LEVEL,
+        "definition_version": 1,
+        "subject": QualitySubject(level=SubjectLevel.FRAME, subject_id="a", target_id="t"),
+        "origin": MeasurementOrigin.MEASURED,
+        "run_id": "r",
+        "measured_at": datetime(2026, 10, 22, tzinfo=UTC),
+        "status": MeasurementStatus.NOT_MEASURED,
+    }
+    budget = QualityMeasurement(reason="CPU time budget of 60 s exceeded after 61.0 s", **base)
+    permanent = QualityMeasurement(reason="no gain for this setting", **base)
+
+    assert frame_was_cut_short([budget, permanent])
+    assert not frame_was_cut_short([permanent])
+    assert measurements_to_store([budget, permanent]) == [permanent]
+    assert measurements_to_store([permanent]) == [permanent]
+
+
+def test_worker_processes_give_the_same_rows_as_worker_threads(
+    target: Target, store: QualityStore, biases: list[str], tmp_path: Path
+) -> None:
+    """Worker processes store the same metrics as worker threads."""
+    thread_target = Target(id="M 99", frames=[frame.model_copy(deep=True) for frame in target.frames])
+    session = FrameMeasurementSession(
+        store,
+        _Library(biases),
+        run_id="run-processes",
+        measured_at=datetime(2026, 10, 22, 6, 0, tzinfo=UTC),
+        use_worker_processes=True,
+    )
+
+    summary = record_frame_measurements_for_target(target, session)
+
+    assert summary.frames_measured == 3
+    assert summary.frames_failed == 0
+    assert all(frame.quality_measured_file_size is not None for frame in target.frames[:3])
+    thread_store = QualityStore(str(tmp_path / "threads.db"))
+    record_frame_measurements_for_target(
+        thread_target,
+        _session(thread_store, biases),
+    )
+    process_metrics = sorted((row.metric, row.status.value) for row in store.query(target_id="M 99"))
+    thread_metrics = sorted((row.metric, row.status.value) for row in thread_store.query(target_id="M 99"))
+    assert process_metrics == thread_metrics

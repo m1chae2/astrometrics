@@ -7,7 +7,7 @@ captured frames associated with targets.
 
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib import (
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from backend.services.data.target_service import TargetService
     from backend.services.processing.image_processing_service import ImageProcessingService
     from backend.services.processing.job_service import JobService
+    from backend.services.processing.quality_measurement_service import QualityMeasurementPort
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class IngestionService(BaseBackgroundService):
         job_service: JobService | None = None,
         image_processing_service: ImageProcessingService | None = None,
         wayfinder: Wayfinder | None = None,
-        quality_measurement_service: Any = None,
+        quality_measurement_service: QualityMeasurementPort | None = None,
     ) -> None:
         super().__init__(job_service=job_service)
         self._quality_measurement_service = quality_measurement_service
@@ -245,7 +246,6 @@ class IngestionService(BaseBackgroundService):
 
         # REQ: IMG-5.3: Isolated log file per job
         safe_target = target_name.replace(" ", "_").replace("/", "_")
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()
@@ -280,7 +280,6 @@ class IngestionService(BaseBackgroundService):
                     )
 
         # REQ: IMG-5.3: Isolated log file per job
-        from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_dir = self._config_service.get_logs_path()
@@ -388,30 +387,30 @@ class IngestionService(BaseBackgroundService):
             return
         self._log(job_id, f"Measuring the new frames of {target_id} in the background.")
 
-    def _measure_new_frames(self, job_id: str, target_name: str | None, started_at: datetime) -> None:
-        """Announce what the sync measured, then measure any frame it missed.
+    def _announce_measurements(self, job_id: str, measurement_results: list[dict[str, Any]]) -> None:
+        """Announce what the frame sync measured.
 
-        The frame sync measures new frames itself when it adds any. This
-        announces those rows, and starts the job again so a frame whose
-        measurement failed is tried once more (a frame already measured is
-        skipped).
+        The frame sync measures the frames it adds, and returns the summary of
+        that run. This announces it, so the screens that show quality numbers
+        read them again. It starts no second run. A failure here is logged and
+        never fails the ingestion.
 
         Parameters
         ----------
         job_id : `str`
             The ingestion job, for the log.
-        target_name : `str` or `None`
-            The target ingested into. Calibration ingestion has none.
-        started_at : `datetime`
-            When the ingestion started, with a time zone.
+        measurement_results : `list` [`dict`]
+            The summaries (as plain dicts) that the sync returned under
+            ``measurements``.
         """
-        if not target_name or self._quality_measurement_service is None:
+        if not measurement_results or self._quality_measurement_service is None:
             return
         try:
-            self._quality_measurement_service.announce_rows_since(target_name, started_at)
+            self._quality_measurement_service.announce_summaries(measurement_results)
         except Exception:  # an announcement must never fail the ingestion: log it
-            logger.exception("Could not announce the quality rows of the %s ingestion", target_name)
-        self._start_measurement(job_id, target_name)
+            logger.exception("Could not announce the quality rows of the ingestion")
+            return
+        self._log(job_id, "Measured the new frames.")
 
     def _log(self, job_id: str, message: str) -> None:
         """Show a progress line on the job and write it to the log.
@@ -488,7 +487,7 @@ class IngestionService(BaseBackgroundService):
         ExternalServiceError
             If the remote download fails in any other way.
         """
-        ingestion_started_at = datetime.now(UTC)
+        measurement_results: list[dict[str, Any]] = []
         ingest_type = payload.get("type", "local")
         target_name = payload.get("targetName")
         selected_files = payload.get("selectedFiles", None)
@@ -615,9 +614,10 @@ class IngestionService(BaseBackgroundService):
                             progress_pct = min(int((downloaded_count / total_files) * 100), 99)
                             self._job_service.update_job(job_id, progress=progress_pct)
 
-                    self._wayfinder.control.remote.sync_frames(
+                    sync_result = self._wayfinder.control.remote.sync_frames(
                         target_name, files=selected_files, log_callback=ingest_log_callback
                     )
+                    measurement_results = list((sync_result or {}).get("measurements") or [])
                     self._log(job_id, "Download complete.")
                 except AstrometricsError as e:
                     self._log(job_id, f"Download failed: {e}")
@@ -635,10 +635,14 @@ class IngestionService(BaseBackgroundService):
         if ingest_type != "remote":
             # Local ingestion goes through the same library entry point
             # as remote downloads.
-            self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
+            sync_result = self._wayfinder.control.remote.sync_frames(target_name, local_path=source_dir)
+            measurement_results = list((sync_result or {}).get("measurements") or [])
             self._log(job_id, "Local frames ingested successfully.")
 
-        self._measure_new_frames(job_id, target_name, ingestion_started_at)
+        # The sync already measured the frames it added. Announce that run's
+        # own result; there is no second run (a frame that failed is measured
+        # by an explicit run or the re-index).
+        self._announce_measurements(job_id, measurement_results)
 
         # --- 3. Regeneration ---
         self._log(job_id, "Refreshing Shared State...")

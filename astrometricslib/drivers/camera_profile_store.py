@@ -24,6 +24,7 @@ measured at. A warning is logged once per camera, and the migration in
 
 import datetime
 import functools
+import glob
 import logging
 import shutil
 from pathlib import Path
@@ -52,6 +53,13 @@ LEGACY_NOISE_KEYS = ("gain_e_per_adu", "read_noise_e")
 
 # The key of the current layout: an array of inline tables, one per setting.
 SENSOR_NOISE_KEY = "sensor_noise"
+
+# How many ``.bak`` copies of one config file are kept. Each saved measurement
+# or migration copies the config first, and the config is a few tens of
+# kilobytes, so ten copies cost a few hundred kilobytes and cover the last ten
+# edits, enough to undo a mistake noticed within a session or two. Older copies
+# are deleted when a new one is made. A design choice, not a tuned value.
+MAXIMUM_CONFIG_BACKUPS = 10
 
 
 def _build_provenanced_value(field) -> ProvenancedValue:  # ruff: ignore[missing-type-function-argument]
@@ -101,6 +109,12 @@ def _build_sensor_setting_noise(field) -> SensorSettingNoise:  # ruff: ignore[mi
             kwargs[name] = _build_provenanced_value(field[name])
     if "temperature_c" in field:
         kwargs["temperature_c"] = float(field["temperature_c"])
+    for name in ("gain_spread_e_per_adu", "read_noise_adu_robust"):
+        if name in field:
+            kwargs[name] = float(field[name])
+    for name in ("pair_gains_e_per_adu", "pair_read_noises_adu"):
+        if name in field:
+            kwargs[name] = tuple(float(value) for value in field[name])
     return SensorSettingNoise(**kwargs)
 
 
@@ -391,6 +405,10 @@ def _find_camera_section_name(config: AppConfiguration, camera_name: str) -> str
 def backup_config_file(config: AppConfiguration) -> Path | None:
     """Copy the config file to a new timestamped ``.bak`` file beside it.
 
+    At most `MAXIMUM_CONFIG_BACKUPS` backups of this config are kept: after
+    the copy is made, the oldest ones beyond that number are deleted. Only
+    files named like this function's own backups are touched.
+
     Parameters
     ----------
     config : `AppConfiguration`
@@ -409,6 +427,13 @@ def backup_config_file(config: AppConfiguration) -> Path | None:
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d-%H%M%S-%f")
     backup_path = Path(path).with_name(f"{Path(path).name}.{stamp}.bak")
     shutil.copy2(path, backup_path)
+    # The timestamp in the name sorts in time order, so the oldest come first.
+    backups = sorted(Path(path).parent.glob(f"{glob.escape(Path(path).name)}.????????-??????-??????.bak"))
+    for stale_backup in backups[:-MAXIMUM_CONFIG_BACKUPS]:
+        try:
+            stale_backup.unlink()
+        except OSError as error:
+            logger.warning("Could not delete the old config backup %s: %s", stale_backup, error)
     return backup_path
 
 
@@ -455,6 +480,14 @@ def sensor_noise_to_toml_array(
             table["gain_e_per_adu"] = provenanced_table(entry.gain_e_per_adu)
         if entry.read_noise_e is not None:
             table["read_noise_e"] = provenanced_table(entry.read_noise_e)
+        if entry.gain_spread_e_per_adu is not None:
+            table["gain_spread_e_per_adu"] = entry.gain_spread_e_per_adu
+        if entry.pair_gains_e_per_adu:
+            table["pair_gains_e_per_adu"] = list(entry.pair_gains_e_per_adu)
+        if entry.read_noise_adu_robust is not None:
+            table["read_noise_adu_robust"] = entry.read_noise_adu_robust
+        if entry.pair_read_noises_adu:
+            table["pair_read_noises_adu"] = list(entry.pair_read_noises_adu)
         array.append(table)
     return array
 
@@ -492,21 +525,25 @@ def save_sensor_setting_noise(
         old single gain or read noise (run the profile migration first, so
         old and new values are never mixed).
     """
-    section_name = _find_camera_section_name(config, camera_name)
-    section = dict(config.app_config[section_name])
-    if any(key in section for key in LEGACY_NOISE_KEYS):
-        raise ConfigurationError(
-            f"The camera section [{section_name}] still holds a gain or read noise with no camera setting. "
-            "Run the profile migration before adding setting-keyed entries.",
-            details={"section": section_name},
-        )
-    existing = [_build_sensor_setting_noise(item) for item in section.get(SENSOR_NOISE_KEY, [])]
-    merged = [entry if item.setting_key == entry.setting_key else item for item in existing]
-    if all(item.setting_key != entry.setting_key for item in existing):
-        merged.append(entry)
+    # The whole read-modify-write holds the config's write lock, so two saves
+    # (two threads, or the app and a script) cannot each read the file before
+    # the other writes it and then overwrite each other's entry.
+    with config.write_lock():
+        section_name = _find_camera_section_name(config, camera_name)
+        section = dict(config.app_config[section_name])
+        if any(key in section for key in LEGACY_NOISE_KEYS):
+            raise ConfigurationError(
+                f"The camera section [{section_name}] still holds a gain or read noise with no camera "
+                "setting. Run the profile migration before adding setting-keyed entries.",
+                details={"section": section_name},
+            )
+        existing = [_build_sensor_setting_noise(item) for item in section.get(SENSOR_NOISE_KEY, [])]
+        merged = [entry if item.setting_key == entry.setting_key else item for item in existing]
+        if all(item.setting_key != entry.setting_key for item in existing):
+            merged.append(entry)
 
-    backup_path = backup_config_file(config)
-    config.app_config.set_item(section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array(merged))
-    config.save_configuration()
-    _load_profiles_from_config.cache_clear()
+        backup_path = backup_config_file(config)
+        config.app_config.set_item(section_name, SENSOR_NOISE_KEY, sensor_noise_to_toml_array(merged))
+        config.save_configuration()
+        _load_profiles_from_config.cache_clear()
     return backup_path

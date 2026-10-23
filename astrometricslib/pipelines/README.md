@@ -95,7 +95,7 @@ Both follow the three-folder split, and each stage folder has its own README.
 
 ## Asteroid detection
 
-`asteroid_detection/` does not use the three-folder split. `pipeline.py`, `runner.py`, `run_gates.py` and the step modules (`frame_wcs_composer.py`, `detection.py`, `ephemeris.py`, `rotation_period.py`, `mpc_report.py`) all sit at the package root. Its README says which step each file implements.
+`asteroid_detection/` does not use the three-folder split. `pipeline.py`, `runner.py`, `record_quality.py` and the step modules (`frame_wcs_composer.py`, `detection.py`, `ephemeris.py`, `rotation_period.py`, `mpc_report.py`) all sit at the package root. Its README says which step each file implements.
 
 ## Shared code and batch runs
 

@@ -170,6 +170,11 @@ KNOWN_WALL_CLOCK_SITES = frozenset({
     # Writes the time a rejected frame was moved into quarantine, in the
     # move log. It dates the move itself, not any frame's observation.
     "pipelines/stacking/pre_processing/frame_quarantine.py",
+    # `analyze_target` is the entry point that starts an analysis run. When
+    # its caller gives no `measured_at`, it supplies the current time as the
+    # stamp for the quality measurements the run stores; the pipelines
+    # themselves receive the time as an option and never read the clock.
+    "pipelines/tasks.py",
 })
 
 

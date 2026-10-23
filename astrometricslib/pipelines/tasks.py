@@ -37,7 +37,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from astrometricslib.drivers.driver_set import Drivers
@@ -266,6 +266,7 @@ def analyze_target(
     catalog_access=None,  # ruff: ignore[missing-type-function-argument]
     register_job: bool = True,
     path: str | None = None,
+    measured_at: datetime | None = None,
     **kwargs,  # ruff: ignore[missing-type-kwargs]
 ) -> dict[str, Any]:
     """Run a specific analysis pipeline on the given target.
@@ -281,6 +282,10 @@ def analyze_target(
         show up in the user interface's job tracker. Set to False if
         you are calling this from a tool that already tracks its own jobs
         (to prevent double-counting).
+    measured_at : datetime, optional
+        The time stamped on the quality measurements the pipeline stores,
+        with a time zone. Pipeline code never reads the clock, so this entry
+        point supplies the current time when the caller gives none.
 
     Returns
     -------
@@ -331,6 +336,7 @@ def analyze_target(
                 )
 
         kwargs["job_id"] = job.job_id
+        kwargs["measured_at"] = measured_at if measured_at is not None else datetime.now(UTC)
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )

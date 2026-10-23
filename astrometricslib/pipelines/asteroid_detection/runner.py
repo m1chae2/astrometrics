@@ -13,16 +13,21 @@ from typing import Any
 from astrometricslib.models.moving_object import CascadeStage
 from astrometricslib.models.moving_object_config import MovingObjectConfigLoader
 from astrometricslib.models.quality.quality_summary import (
+    ASTEROID_DETECTION_PIPELINE_VERSION,
     AsteroidDetectionPipelineQualityMetrics,
     AsteroidDetectionQualitySummary,
 )
-from astrometricslib.pipelines.asteroid_detection.run_gates import asteroid_run_gates
+from astrometricslib.pipelines.asteroid_detection.record_quality import (
+    asteroid_run_gates,
+    record_asteroid_quality,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 
 
 class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
@@ -135,13 +140,24 @@ class AsteroidDetectionPipelineAdapter(AnalysisPipeline):
         moving_object_config = request.options.get("moving_object_config") or (
             MovingObjectConfigLoader.load_moving_object_config()
         )
-        for gate in asteroid_run_gates(
+        gates = asteroid_run_gates(
             metrics,
             moving_object_config.min_frames_for_persistence,
             candidates_awaiting_recovery,
             moving_object_config.residual_rms_max_multiple,
-        ):
+        )
+        for gate in gates:
             summary.record_gate(gate)
+
+        # The same counts and gates, stored as measurements next to the
+        # summary. The context is None when the caller gave no time; then
+        # nothing is stored (a warning says so). A storage failure is logged
+        # inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            target.id, self.pipeline_name, ASTEROID_DETECTION_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            record_asteroid_quality(metrics, gates, measurement_context)
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             most_common_camera_name,

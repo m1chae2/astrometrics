@@ -688,6 +688,18 @@ class AsteroidDetectionPipelineQualityMetrics(BaseModel):
     # every real mover seem unknown.
     ephemeris_queries_attempted: int = Field(default=0, alias="ephemerisQueriesAttempted")
     ephemeris_queries_failed: int = Field(default=0, alias="ephemerisQueriesFailed")
+    # How the straight-line (residual) test went. The pipeline has always
+    # counted these; they were dropped here because the class had no fields
+    # for them. A summary saved before they were kept reads them as None.
+    residual_chains_tested: int | None = Field(default=None, alias="residualChainsTested")
+    residual_chains_rejected: int | None = Field(default=None, alias="residualChainsRejected")
+    residual_chains_non_monotonic: int | None = Field(default=None, alias="residualChainsNonMonotonic")
+    residual_assumed_error_detections: int | None = Field(
+        default=None, alias="residualAssumedErrorDetections"
+    )
+    # The largest RMS-to-position-error ratio among the accepted tracks; the
+    # pipeline gives 0.0 when no track was accepted.
+    residual_worst_accepted_ratio: float | None = Field(default=None, alias="residualWorstAcceptedRatio")
 
 
 class AsteroidDetectionQualitySummary(PipelineQualitySummaryBase):

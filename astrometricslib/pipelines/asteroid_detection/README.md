@@ -160,7 +160,7 @@ The validation register holds the results and the library calls that produced th
 
 ## Quality outputs
 
-A gate is a run-level pass/fail entry in a quality record. The summary keeps one record per gate in `gates`, built in `run_gates.py`. Each gate is `passed`, `failed` or `not_checked`, and a check that could not look is never recorded as passed. A search that finds nothing says little unless it could have found something, so the first gate records whether it could. The tests in `test/test_run_gates.py` give each gate input that must fail it.
+A gate is a run-level pass/fail entry in a quality record. The summary keeps one record per gate in `gates`, built in `record_quality.py`. Each gate is `passed`, `failed` or `not_checked`, and a check that could not look is never recorded as passed. A search that finds nothing says little unless it could have found something, so the first gate records whether it could. The tests in `test/test_record_quality.py` give each gate input that must fail it.
 
 | Gate | Fails when | Not checked when |
 | --- | --- | --- |
@@ -193,10 +193,10 @@ A gate is a run-level pass/fail entry in a quality record. The summary keeps one
 
 The [review guide for asteroid detection](../../../documentation/library_design/pipelines/asteroid_detection.md) summarizes the pipeline's parameters and their status.
 
-- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry: the eight counts of the summary, the five straight-line (residual) values and one self-check metric for each gate (for example `asteroid_detection.gate_track_residuals`). See [shared quality](../shared/quality/README.md).
 - `pipeline.py` is the coordinator. It ties together WCS estimation, detection, the pointing correction (step 3, which it implements itself), the rejection cascade and ephemeris matching for one run.
 - `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a target's stored images and writes the results back onto the target's record.
-- `run_gates.py` builds the run gates.
+- `record_quality.py` builds the run gates and stores the run's quality measurements. `asteroid_run_gates` makes the gates. `asteroid_run_measurements` turns the counts and gates into one measurement for each declared metric, and `record_asteroid_quality` stores them through the shared helpers. The summary and its gates are unchanged; the measurements are written next to them.
 - `detection.py`, `ephemeris.py` and `frame_wcs_composer.py` each implement one step above. `rotation_period.py` is the period search described after the steps, and nothing calls it yet.
 - `mpc_report.py` writes a confirmed track's detections as Minor Planet Center (MPC) 80-column observation lines and as ADES text. No pipeline step calls it yet, so a detection run does not produce MPC records, and a caller must call its functions on a candidate. See [MPC report lines](#mpc-report-lines).
 

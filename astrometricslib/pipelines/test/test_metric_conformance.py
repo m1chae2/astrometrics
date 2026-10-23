@@ -14,6 +14,7 @@ is shown to go red.
 import ast
 import importlib
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,52 @@ NAME_FORM = re.compile(r"^[a-z][a-z_]*\.[a-z][a-z0-9_]*$")
 REGISTER_ENTRY_HEADING = re.compile(r"^### ([A-Z]{3}-\d{2,3})\s*$", re.MULTILINE)
 # Pipeline folders that hold no pipeline of their own.
 NON_PIPELINE_FOLDERS = frozenset({"shared", "test", "__pycache__"})
+
+
+def _asteroid_detection_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the asteroid pipeline's record step on a fixed run.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a run whose counts and gates are known.
+    """
+    from datetime import UTC, datetime
+
+    from astrometricslib.pipelines.asteroid_detection.record_quality import (
+        asteroid_run_gates,
+        asteroid_run_measurements,
+    )
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+
+    counts = {
+        "frames_with_wcs_estimate": 8,
+        "frames_excluded_missing_pointing_metadata": 0,
+        "candidates_detected": 5,
+        "candidates_persistence_confirmed": 4,
+        "candidates_rate_linearity_confirmed": 2,
+        "candidates_ephemeris_matched": 2,
+        "ephemeris_queries_attempted": 4,
+        "ephemeris_queries_failed": 0,
+        "residual_chains_tested": 3,
+        "residual_chains_rejected": 1,
+        "residual_chains_non_monotonic": 2,
+        "residual_assumed_error_detections": 0,
+        "residual_worst_accepted_ratio": 1.4,
+    }
+    context = PipelineRunContext(
+        "M 99", "asteroid_detection", "1.1.0", "job-1", "job-1", datetime(2026, 10, 22, tzinfo=UTC)
+    )
+    return asteroid_run_measurements(counts, asteroid_run_gates(counts, 3, 0), context)
+
+
+# Phase 3 (plan section 3.7): a pipeline listed here produces every metric it
+# declares. Each entry maps the pipeline to a function that runs its record
+# step on a fixed run and returns the measurements. A pipeline joins this
+# table when its record step is built; the others are still on phase 2.
+PHASE_3_RECORD_STEPS: dict[str, Callable[[], list[QualityMeasurement]]] = {
+    "asteroid_detection": _asteroid_detection_emitted_measurements,
+}
 
 
 def _resolve_callable(dotted_path: str) -> object:
@@ -255,6 +302,22 @@ def test_not_measured_carries_a_reason_and_no_value() -> None:
     with pytest.raises(ValueError, match="value None"):
         QualityMeasurement(**common, value=3.0, reason="no stars")
     assert QualityMeasurement(**common, reason="no stars").value is None
+
+
+def test_phase_3_pipelines_are_known_pipelines() -> None:
+    """Only pipelines with a metrics file can be on the phase 3 list."""
+    assert set(PHASE_3_RECORD_STEPS) <= set(PIPELINES_WITH_METRICS)
+
+
+@pytest.mark.parametrize("pipeline", sorted(PHASE_3_RECORD_STEPS))
+def test_a_phase_3_pipeline_emits_every_metric_it_declares(pipeline: str) -> None:
+    """The record step emits each declared metric and nothing undeclared."""
+    from astrometricslib.pipelines.shared.quality.metric_registry import load_pipeline_metrics
+
+    declared = {spec.name for spec in load_pipeline_metrics(pipeline)}
+    emitted = {measurement.metric for measurement in PHASE_3_RECORD_STEPS[pipeline]()}
+    assert declared - emitted == set(), f"{pipeline} declares metrics its record step never emits"
+    assert emitted - declared == set(), f"{pipeline} emits metrics it does not declare"
 
 
 def test_checkers_go_red_on_broken_input() -> None:

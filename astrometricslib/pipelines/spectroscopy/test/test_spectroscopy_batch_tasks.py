@@ -26,7 +26,7 @@ from astrometricslib.models.quality.spectroscopy_quality import StageQualityChec
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
 from astrometricslib.pipelines.spectroscopy import batch
-from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import PROCESSING_QUALITY_GATE_NAME
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import PROCESSING_QUALITY_GATE_NAME
 from astrometricslib.utilities import parallel_batch
 
 

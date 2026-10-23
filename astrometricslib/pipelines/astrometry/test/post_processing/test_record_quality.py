@@ -1,14 +1,35 @@
-"""Red-team tests for the astrometry source-detection and catalog gates.
+"""Red-team tests for the astrometry gates and their measurements.
 
 Each gate has to fail on a run that is truly bad, pass on a good one, and
 read "not checked" when it could not look.
 """
 
-import pytest
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
-from astrometricslib.models.quality.gate_result import GateStatus
+import pytest
+from pytest_mock import MockerFixture
+
+from astrometricslib.drivers.quality_store import QualityStore
+from astrometricslib.foundation.errors import StorageError
+from astrometricslib.models.quality.gate_result import GateStatus, failed_gate, passed_gate
+from astrometricslib.models.quality.limit import LimitTier
+from astrometricslib.models.quality.measurement import MeasurementOrigin, MeasurementStatus, SubjectLevel
 from astrometricslib.models.quality.quality_summary import AstrometryPipelineQualityMetrics
-from astrometricslib.pipelines.astrometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.astrometry.metrics import (
+    ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL,
+    ASTROMETRY_GATE_CATALOG_LOOKUP,
+    ASTROMETRY_GATE_CATALOG_MATCHES,
+    ASTROMETRY_GATE_PLATE_SOLVE,
+    ASTROMETRY_METRICS,
+    ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL,
+    ASTROMETRY_PLATE_SOLVE_ATTEMPTS,
+    ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX,
+)
+from astrometricslib.pipelines.astrometry.post_processing import record_quality as rg
+from astrometricslib.pipelines.astrometry.test.conformance_fixture import astrometry_emitted_measurements
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext, make_run_id
 
 
 def make_metrics(**changes: object) -> AstrometryPipelineQualityMetrics:
@@ -244,3 +265,184 @@ def test_a_good_gaia_fit_passes_even_when_the_catalog_separation_is_large() -> N
 
     assert gate.status is GateStatus.PASSED
     assert "150 Gaia stars" in gate.detail
+
+
+# --- Measurements stored next to the gates ---------------------------------
+
+MEASURED_AT = datetime(2026, 10, 22, tzinfo=UTC)
+
+
+def _declared_names() -> set[str]:
+    """Name every metric the astrometry pipeline declares.
+
+    Returns
+    -------
+    names : `set` [`str`]
+        The declared metric names.
+    """
+    return {spec.name for spec in ASTROMETRY_METRICS}
+
+
+def _context(job_id: str | None = "job-1") -> PipelineRunContext:
+    """Build a run context for the tests.
+
+    Returns
+    -------
+    context : `PipelineRunContext`
+        A context for target ``M 99`` at a fixed time.
+    """
+    return PipelineRunContext("M 99", "astrometry", "1.4.0", make_run_id(job_id), job_id, MEASURED_AT)
+
+
+def _all_gates(metrics: AstrometryPipelineQualityMetrics) -> list:
+    """Build the plate-solve gate and the four run gates.
+
+    Returns
+    -------
+    gates : `list` [`GateResult`]
+        The five gates, as the runner records them.
+    """
+    first = (
+        passed_gate(rg.PLATE_SOLVE_GATE_NAME)
+        if metrics.plate_solve_succeeded
+        else failed_gate(rg.PLATE_SOLVE_GATE_NAME, "plate solve failed")
+    )
+    return [first, *rg.astrometry_run_gates(metrics)]
+
+
+def test_the_record_step_emits_every_declared_metric_once() -> None:
+    """A fully measured run gives one measurement per declared metric."""
+    measurements = astrometry_emitted_measurements()
+
+    assert [m.metric for m in measurements].count(ASTROMETRY_GATE_PLATE_SOLVE) == 1
+    assert {m.metric for m in measurements} == _declared_names()
+    assert len(measurements) == len(_declared_names())
+    assert {m.origin for m in measurements} == {MeasurementOrigin.MEASURED}
+    level_by_metric = {m.metric: m.subject.level for m in measurements}
+    assert level_by_metric[ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL] is SubjectLevel.STACK
+    assert level_by_metric[ASTROMETRY_STAR_WIDTH_GAUSSIAN_PX] is SubjectLevel.STACK
+    assert level_by_metric[ASTROMETRY_PLATE_SOLVE_ATTEMPTS] is SubjectLevel.RUN
+    assert level_by_metric[ASTROMETRY_GATE_PLATE_SOLVE] is SubjectLevel.RUN
+    stack_ids = {m.subject.subject_id for m in measurements if m.subject.level is SubjectLevel.STACK}
+    assert stack_ids == {"M 99/M99_Stacked.fits"}
+
+
+def test_a_run_with_no_stack_file_name_stores_no_stack_values() -> None:
+    """A stack value is never filed under the run when it has no name."""
+    metrics = make_metrics()
+    measurements = rg.astrometry_run_measurements(metrics, _all_gates(metrics), _context(), None)
+
+    assert {m.subject.level for m in measurements} == {SubjectLevel.RUN}
+    assert ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL not in {m.metric for m in measurements}
+
+
+def test_an_unsolved_run_leaves_missing_values_not_measured_with_a_reason() -> None:
+    """No solve means no scale, no residual and a failed plate-solve gate."""
+    metrics = make_metrics(plate_solve_succeeded=False, plate_scale_arcsec_per_pixel=None)
+    by_metric = {
+        m.metric: m
+        for m in rg.astrometry_run_measurements(metrics, _all_gates(metrics), _context(), "M99_Stacked.fits")
+    }
+
+    scale = by_metric[ASTROMETRY_PLATE_SCALE_ARCSEC_PER_PIXEL]
+    assert scale.status is MeasurementStatus.NOT_MEASURED
+    assert scale.value is None
+    assert scale.reason
+    solve = by_metric[ASTROMETRY_GATE_PLATE_SOLVE]
+    assert solve.check_outcome is GateStatus.FAILED
+    assert solve.value == pytest.approx(0.0)
+    matches = by_metric[ASTROMETRY_GATE_CATALOG_MATCHES]
+    assert matches.check_outcome is GateStatus.NOT_CHECKED
+    assert matches.status is MeasurementStatus.NOT_MEASURED
+
+
+def test_the_residual_gate_stores_the_fraction_of_a_star_width_and_its_limit() -> None:
+    """The stored number is residual over star width, with the 0.5 limit."""
+    metrics = make_metrics(catalog_match_separation_rms_arcsec=5.7)
+    by_metric = {
+        m.metric: m
+        for m in rg.astrometry_run_measurements(metrics, _all_gates(metrics), _context(), "M99_Stacked.fits")
+    }
+
+    residual = by_metric[ASTROMETRY_GATE_ASTROMETRIC_RESIDUAL]
+    assert residual.check_outcome is GateStatus.FAILED
+    assert residual.value == pytest.approx(5.7 / (1.9 * 3.0))
+    assert residual.check_limit is not None
+    assert residual.check_limit.value == pytest.approx(rg.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM)
+    assert residual.check_limit.tier is LimitTier.PHYSICAL_BUDGET
+
+
+def test_the_lookup_gate_always_stores_the_failed_share() -> None:
+    """A tripped breaker stores the failed share, as a pass does."""
+    tripped = make_metrics(
+        remote_catalog_circuit_breaker_tripped=True,
+        remote_catalog_queries_attempted=10,
+        remote_catalog_queries_failed=3,
+    )
+    by_metric = {
+        m.metric: m
+        for m in rg.astrometry_run_measurements(tripped, _all_gates(tripped), _context(), "M99_Stacked.fits")
+    }
+
+    lookup = by_metric[ASTROMETRY_GATE_CATALOG_LOOKUP]
+    assert lookup.check_outcome is GateStatus.FAILED
+    assert lookup.value == pytest.approx(0.3)
+
+
+def _use_temporary_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> QualityStore:
+    """Point the quality store at a temporary library.
+
+    Returns
+    -------
+    store : `QualityStore`
+        The store on the temporary library's database.
+    """
+    from astrometricslib.foundation.config import get_configuration
+
+    monkeypatch.setattr(get_configuration(), "get_library_path", lambda: tmp_path)
+    return QualityStore(str(tmp_path / "astrometrics.db"))
+
+
+def test_a_record_stores_one_row_per_metric_and_a_repeat_stores_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first record writes every metric; the second writes none."""
+    store = _use_temporary_store(tmp_path, monkeypatch)
+    metrics = make_metrics()
+    gates = _all_gates(metrics)
+
+    first = rg.record_astrometry_quality(metrics, gates, _context("job-9"), "M99_Stacked.fits")
+    second = rg.record_astrometry_quality(metrics, gates, _context("job-9"), "M99_Stacked.fits")
+    rows = [row for row in store.query(target_id="M 99", latest_only=False) if row.run_id == "job-9"]
+
+    assert first == len(_declared_names())
+    assert second == 0
+    assert {row.metric for row in rows} == _declared_names()
+    assert len(rows) == len(_declared_names())
+
+
+def test_validate_output_records_the_run_and_a_storage_failure_does_not_fail_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mocker: MockerFixture
+) -> None:
+    """validate_output stores the run and survives a broken store."""
+    from astrometricslib.models.target import Target
+    from astrometricslib.pipelines.astrometry.test.test_plate_solve_gate import validate_with_options
+
+    store = _use_temporary_store(tmp_path, monkeypatch)
+    stacked = SimpleNamespace(header={}, path=str(tmp_path / "Test Target_Stacked.fits"))
+    summary = validate_with_options(
+        monkeypatch, {"job_id": "job-3", "measured_at": MEASURED_AT}, object(), image=stacked
+    )
+    rows = store.query(target_id=Target(id="Test Target").id, latest_only=False)
+
+    assert summary.gates
+    assert {row.metric for row in rows} == _declared_names()
+    stack_subjects = {row.subject.subject_id for row in rows if row.subject.level is SubjectLevel.STACK}
+    assert stack_subjects == {"Test Target/Test Target_Stacked.fits"}
+
+    mocker.patch(
+        "astrometricslib.pipelines.shared.quality.pipeline_measurements.record_measurements",
+        side_effect=StorageError("disk full"),
+    )
+    broken = validate_with_options(monkeypatch, {"job_id": "job-4", "measured_at": MEASURED_AT}, object())
+    assert broken.gates

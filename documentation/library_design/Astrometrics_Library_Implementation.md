@@ -88,7 +88,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Plate solving and Gaia (§4.2).** `astrometricslib/drivers/astrometry_net_driver.py`, `gaia_cone_driver.py`, `catalog_store.py`; `utilities/catalog_seeding.py`.
 - **Gaia refit (§4.2).** `processing/wcs_refinement.py`.
 - **WCS header (§4.3).** `astrometricslib/pipelines/shared/session_identification.py` (`write_wcs_to_fits_header`).
-- **Checks (§4.4).** `post_processing/run_gates.py`, `assess_match_quality.py`.
+- **Checks (§4.4).** `post_processing/record_quality.py`, `assess_match_quality.py`.
 
 ### 4.3 Photometry (Architecture §5)
 
@@ -98,7 +98,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Aperture photometry (§5.2).** `pre_processing/frame_photometry.py`, `detector_noise.py`, `observation_times.py`.
 - **Comparison stars and light curves (§5.2).** `processing/comparison_ensemble.py`, `variability_analyzer.py`, `variability_indices.py`.
 - **Period search (§5.2).** `processing/periodicity_search.py`, `period_checks.py`, `family_wise_correction.py`.
-- **Checks (§5.4).** `pre_processing/assess_input_quality.py`; `post_processing/run_gates.py`, `variability_skill.py`, `known_variability_labels.py`, `assess_output_quality.py`.
+- **Checks (§5.4).** `pre_processing/assess_input_quality.py`; `post_processing/record_quality.py`, `variability_skill.py`, `known_variability_labels.py`, `assess_output_quality.py`.
 
 ### 4.4 Spectroscopy (Architecture §6)
 
@@ -111,7 +111,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Flux and resolution (§6.2).** `pre_processing/quantum_efficiency_correction.py`, `instrument_response.py`, `atmospheric_extinction.py`, `measured_line_spread.py`, `spectral_resolution.py`.
 - **Classification and features (§6.2).** `processing/spectral_classifier.py`, `spectrum_analysis.py`, `star_reddening.py`, `interstellar_extinction.py`.
 - **Stack registration quality (§6.3).** `utilities/registration_quality.py`.
-- **Checks (§6.4).** `post_processing/run_gates.py`, `compare_to_gaia_xp.py`, `compare_to_catalog.py`, `wavelength_scale.py`.
+- **Checks (§6.4).** `post_processing/record_quality.py`, `compare_to_gaia_xp.py`, `compare_to_catalog.py`, `wavelength_scale.py`.
 
 ### 4.5 Asteroid detection (Architecture §7)
 
@@ -119,7 +119,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§7.1).** `pipeline.py`; `runner.py` (adapter).
 - **Detection (§7.2).** `detection.py` (blink analysis, tracking), `frame_wcs_composer.py` (per-frame WCS), `ephemeris.py` (IMCCE SkyBoT).
-- **Checks (§7.4).** `run_gates.py`.
+- **Checks (§7.4).** `record_quality.py`.
 - **Unused by any pipeline step.** `mpc_report.py` (MPC report formats [8]) and `rotation_period.py`. Both are tested.
 
 ### 4.6 Shared pipeline code
@@ -260,9 +260,9 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.astrometry.pre_processing.source_detection.SourceDetector -->
 <!-- impl: astrometricslib.drivers.astrometry_net_driver.MINIMUM_SOURCES_FOR_LOCAL_SOLVE -->
 <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
-<!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
+<!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MAXIMUM_PLATE_SOLVE_SOURCES -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MINIMUM_MATCHED_STARS -->
 <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.MAXIMUM_SHIFT_ARCSEC -->
@@ -327,8 +327,8 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.MINIMUM_LONG_TERM_AMPLITUDE_MAG -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_LONG_TERM_SIGNIFICANCE_THRESHOLD -->
 <!-- impl: astrometricslib.pipelines.photometry.post_processing.variability_skill.MINIMUM_DISCRIMINATION_AUC -->
-<!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
-<!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG -->
+<!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MAXIMUM_DETECTABLE_AMPLITUDE_MAG -->
+<!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.MINIMUM_ENSEMBLE_REJECTION_FRACTION_TO_FLAG -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.variability_analyzer.DEFAULT_VARIABILITY_SIGMA_THRESHOLD -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.FALSE_ALARM_FOR_DETECTION -->
 <!-- impl: astrometricslib.pipelines.photometry.processing.periodicity_search.verdict_from_false_alarm -->
@@ -370,7 +370,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 <!-- impl: astrometricslib.models.stellar_source.DIFFERS_FROM_CATALOG_SUBTYPES -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
+<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.record_quality.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
 
 ### 5.5 Asteroid detection settings
 

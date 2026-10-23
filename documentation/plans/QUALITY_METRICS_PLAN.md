@@ -1195,7 +1195,7 @@ the affected READMEs updated. Each phase is one pull request.
    - a migration of the camera profile config, because keying by setting changes its schema;
    - updates to every reader of gain and read noise: `photometry/pre_processing/detector_noise.py`,
      `photometry/pre_processing/frame_photometry.py`,
-     `spectroscopy/pre_processing/intensity_variance.py`, the photometry `run_gates.py` and
+     `spectroscopy/pre_processing/intensity_variance.py`, the photometry `record_quality.py` and
      `models/stellar_source.py`;
    - a backend RPC method for the measurement call. The call writes a profile, so it is withheld
      from the read-only MCP profile.

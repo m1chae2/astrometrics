@@ -165,3 +165,57 @@ class MetricSpec(BaseModel):
         elif not self.purpose_reason.strip():
             raise ValueError(f"A {self.purpose.value} metric must give a purpose_reason.")
         return self
+
+
+class MetricSummary(BaseModel):
+    """The short form of a `MetricSpec`, for listings.
+
+    A full `MetricSpec` is long. About 170 metrics are registered, and even a
+    one-line meaning for each makes a listing of all of them too long for an
+    MCP reply (the limit is 40,000 bytes). This record keeps only what a
+    reader needs to find a metric. Ask for the meaning and the rest with
+    ``detail="full"``, usually together with a ``checkpoint``.
+
+    Parameters
+    ----------
+    name : `str`
+        The metric name.
+    unit : `str`
+        The unit every measurement of this metric uses.
+    checkpoint : `Checkpoint`
+        Where in processing the metric is measured.
+    levels : `tuple` of `SubjectLevel`
+        The subject levels the metric applies to, sorted by value.
+    purpose : `MetricPurpose`
+        Why the metric exists.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
+
+    name: str
+    unit: str
+    checkpoint: Checkpoint
+    levels: tuple[SubjectLevel, ...]
+    purpose: MetricPurpose
+
+    @classmethod
+    def from_spec(cls, spec: MetricSpec) -> Self:
+        """Build the short form of a full declaration.
+
+        Parameters
+        ----------
+        spec : `MetricSpec`
+            The full declaration.
+
+        Returns
+        -------
+        summary : `MetricSummary`
+            The short form.
+        """
+        return cls(
+            name=spec.name,
+            unit=spec.unit,
+            checkpoint=spec.checkpoint,
+            levels=spec.levels,
+            purpose=spec.purpose,
+        )

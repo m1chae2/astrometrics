@@ -9,7 +9,9 @@ calibrated against each spectrum's own noise, and was the instrument's
 resolution measured rather than assumed.
 
 The eighth check, ``wavelength_scale``, reads how much the spectra's
-wavelength zero points scatter (see `wavelength_scale`).
+wavelength zero points scatter (see `wavelength_scale`). A ninth,
+``gaia_xp_agreement``, compares the spectra with Gaia XP (see
+`compare_to_gaia_xp`); the caller adds it.
 
 Each check is returned as a `GateResult`. A check that could not look (no
 zero-order measurement, no catalog type to compare with) is ``not_checked``;
@@ -24,6 +26,11 @@ The module also rolls up the four per-spectrum quality checkpoints
 summary. The workers pass each spectrum's checkpoints between processes as
 plain dictionaries (`stage_quality_rows`), and `summarize_stage_quality` reads
 them back.
+
+The same module turns the run's summary numbers, roll-ups and gates into
+quality measurements (`spectroscopy_run_measurements`) and stores them
+(`record_spectroscopy_quality`). The gates and the summary stay as they are;
+the measurements are written next to them.
 """
 
 import statistics
@@ -31,6 +38,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from astrometricslib.models.quality.gate_result import GateResult, failed_gate, passed_gate, unchecked_gate
+from astrometricslib.models.quality.limit import LimitTier
+from astrometricslib.models.quality.measurement import QualityMeasurement
+from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.models.quality.quality_summary import SpectroscopyPipelineQualityMetrics
 from astrometricslib.models.quality.spectroscopy_quality import (
     STAGE_ORDER,
     StageQualityCheckpoint,
@@ -42,11 +53,56 @@ from astrometricslib.models.stellar_source import (
     NO_GOOD_MATCH_RMS,
 )
 from astrometricslib.models.wavelength_scale import WavelengthScaleSummary
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    PipelineRunContext,
+    build_measurement,
+    gate_measurement,
+    record_run_measurements,
+)
 from astrometricslib.pipelines.shared.quality.saturation import (
     DEFAULT_SATURATION_FLAG_THRESHOLD,
     is_saturation_significant,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import wavelength_scale_gate
+from astrometricslib.pipelines.spectroscopy.metrics import (
+    GAIA_XP_BAND_EDGES_ANGSTROM,
+    SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT,
+    SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT,
+    SPECTROSCOPY_DISPERSION_ANGLE_FIRST_STAR,
+    SPECTROSCOPY_GAIA_XP_COMPARED_STAR_COUNT,
+    SPECTROSCOPY_GAIA_XP_MEDIAN_ABSOLUTE_SLOPE,
+    SPECTROSCOPY_GAIA_XP_MEDIAN_SLOPE,
+    SPECTROSCOPY_GATE_CATALOG_AGREEMENT,
+    SPECTROSCOPY_GATE_FEATURE_SIGNIFICANCE,
+    SPECTROSCOPY_GATE_GAIA_XP_AGREEMENT,
+    SPECTROSCOPY_GATE_PROCESSING_QUALITY,
+    SPECTROSCOPY_GATE_RESOLUTION_MEASURED,
+    SPECTROSCOPY_GATE_SPECTRA_EXTRACTED,
+    SPECTROSCOPY_GATE_SPECTRAL_CLASSIFICATION,
+    SPECTROSCOPY_GATE_WAVELENGTH_SCALE,
+    SPECTROSCOPY_GATE_ZERO_ORDER_SATURATION,
+    SPECTROSCOPY_METRICS,
+    SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
+    SPECTROSCOPY_POSITION_ONLY_STAR_COUNT,
+    SPECTROSCOPY_TRAIL_WIDTH_MEDIAN,
+    SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
+    SPECTROSCOPY_WAVELENGTH_SCALE_APPLIED_COUNT,
+    SPECTROSCOPY_WAVELENGTH_SCALE_CORRELATION_SPECTRUM_COUNT,
+    SPECTROSCOPY_WAVELENGTH_SCALE_RMS_AFTER,
+    SPECTROSCOPY_WAVELENGTH_SCALE_RMS_BEFORE,
+    SPECTROSCOPY_WAVELENGTH_SCALE_SATURATION_CORRELATION,
+    SPECTROSCOPY_WAVELENGTH_SCALE_SPECTRUM_COUNT,
+    SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
+    STAGE_METRIC_KEYS,
+    STAGE_NAMES,
+    gaia_xp_band_metric_name,
+    stage_metric_name,
+    stage_spectrum_count_name,
+)
+from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import GAIA_XP_GATE_NAME
+from astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale import (
+    WAVELENGTH_SCALE_GATE_NAME,
+    wavelength_scale_gate,
+)
 
 SPECTRA_GATE_NAME = "spectra_extracted"
 ZERO_ORDER_GATE_NAME = "zero_order_saturation"
@@ -446,3 +502,327 @@ def spectroscopy_run_gates(
             )
     gates.append(wavelength_scale_gate(wavelength_scale))
     return gates
+
+
+# The metric that stands for each gate, and how its limit was obtained.
+# A count that must be zero, or the one spectrum a run needs, follows from
+# what the check is for. The other limits are designed values (see the
+# design-estimates table in the spectroscopy validation register): a share of
+# saturated pixels, a share of failed spectra, one pixel of dispersion, and a
+# tilt of the response. Each is an error budget, not a measured limit.
+_GATE_METRIC_AND_TIER: dict[str, tuple[str, LimitTier]] = {
+    SPECTRA_GATE_NAME: (SPECTROSCOPY_GATE_SPECTRA_EXTRACTED, LimitTier.GEOMETRY),
+    ZERO_ORDER_GATE_NAME: (SPECTROSCOPY_GATE_ZERO_ORDER_SATURATION, LimitTier.PHYSICAL_BUDGET),
+    CLASSIFICATION_GATE_NAME: (SPECTROSCOPY_GATE_SPECTRAL_CLASSIFICATION, LimitTier.GEOMETRY),
+    CATALOG_GATE_NAME: (SPECTROSCOPY_GATE_CATALOG_AGREEMENT, LimitTier.GEOMETRY),
+    FEATURE_GATE_NAME: (SPECTROSCOPY_GATE_FEATURE_SIGNIFICANCE, LimitTier.GEOMETRY),
+    RESOLUTION_GATE_NAME: (SPECTROSCOPY_GATE_RESOLUTION_MEASURED, LimitTier.GEOMETRY),
+    PROCESSING_QUALITY_GATE_NAME: (SPECTROSCOPY_GATE_PROCESSING_QUALITY, LimitTier.PHYSICAL_BUDGET),
+    WAVELENGTH_SCALE_GATE_NAME: (SPECTROSCOPY_GATE_WAVELENGTH_SCALE, LimitTier.PHYSICAL_BUDGET),
+    GAIA_XP_GATE_NAME: (SPECTROSCOPY_GATE_GAIA_XP_AGREEMENT, LimitTier.PHYSICAL_BUDGET),
+}
+
+_SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in SPECTROSCOPY_METRICS}
+
+_NO_STAGE_REASON = "No spectrum of the run had a {stage} quality checkpoint."
+_NO_STAGE_VALUE_REASON = "No spectrum of the run had a value for this metric at the {stage} checkpoint."
+_NO_WAVELENGTH_SCALE_REASON = "No spectrum of the run had a measured wavelength zero-point offset."
+_NO_GAIA_XP_REASON = "No star of the run was compared with a Gaia XP spectrum."
+_NOT_COUNTED_REASON = "This run path does not count star identification."
+
+
+def _optional_float(value: float | int | None) -> float | None:
+    """Cast a number to a plain `float`, keeping `None`.
+
+    Parameters
+    ----------
+    value : `float`, `int` or `None`
+        A number from a summary field.
+
+    Returns
+    -------
+    number : `float` or `None`
+        The same number as a built-in `float`.
+    """
+    return None if value is None else float(value)
+
+
+def _summary_values(
+    metrics: SpectroscopyPipelineQualityMetrics, star_identification_counted: bool
+) -> list[tuple[str, float | None, str, int | None]]:
+    """List the run totals and roll-up numbers of the summary.
+
+    Parameters
+    ----------
+    metrics : `SpectroscopyPipelineQualityMetrics`
+        The run's summary metrics.
+    star_identification_counted : `bool`
+        Whether this run path counted star identification. The session batch
+        does not, and its zero counts are defaults, not measurements.
+
+    Returns
+    -------
+    values : `list` [`tuple`]
+        One ``(metric name, value, reason if missing, sample count)`` for
+        each metric except the checkpoint medians and the gates.
+    """
+    identification_reason = _NOT_COUNTED_REASON
+    rows: list[tuple[str, float | None, str, int | None]] = [
+        (
+            SPECTROSCOPY_ZERO_ORDER_SATURATED_FRACTION_MAX,
+            _optional_float(metrics.zero_order_saturated_pixel_fraction),
+            "No processed star had a zero-order saturation measurement.",
+            None,
+        ),
+        (
+            SPECTROSCOPY_DISPERSION_ANGLE_FIRST_STAR,
+            _optional_float(metrics.dispersion_angle_deg),
+            "No star had a measured dispersion angle.",
+            None,
+        ),
+        (
+            SPECTROSCOPY_TRAIL_WIDTH_MEDIAN,
+            _optional_float(metrics.median_trail_width_px),
+            "No star had a fitted trail width.",
+            None,
+        ),
+        (
+            SPECTROSCOPY_CATALOG_MATCHED_STAR_COUNT,
+            float(metrics.catalog_matched_star_count) if star_identification_counted else None,
+            identification_reason,
+            None,
+        ),
+        (
+            SPECTROSCOPY_POSITION_ONLY_STAR_COUNT,
+            float(metrics.position_only_star_count) if star_identification_counted else None,
+            identification_reason,
+            None,
+        ),
+        (
+            SPECTROSCOPY_UNRESOLVED_STAR_COUNT,
+            float(metrics.unresolved_star_count) if star_identification_counted else None,
+            identification_reason,
+            None,
+        ),
+        (
+            SPECTROSCOPY_POOR_MATCH_CLASSIFICATION_COUNT,
+            float(metrics.poor_match_classification_count),
+            "",
+            None,
+        ),
+        (
+            SPECTROSCOPY_AMBIGUOUS_CLASSIFICATION_COUNT,
+            float(metrics.ambiguous_classification_count),
+            "",
+            None,
+        ),
+    ]
+    scale = metrics.wavelength_scale_summary
+    scale_rows = (
+        (SPECTROSCOPY_WAVELENGTH_SCALE_SPECTRUM_COUNT, None if scale is None else scale.spectrum_count),
+        (SPECTROSCOPY_WAVELENGTH_SCALE_APPLIED_COUNT, None if scale is None else scale.applied_count),
+        (
+            SPECTROSCOPY_WAVELENGTH_SCALE_RMS_BEFORE,
+            None if scale is None else scale.rms_before_correction_angstrom,
+        ),
+        (
+            SPECTROSCOPY_WAVELENGTH_SCALE_RMS_AFTER,
+            None if scale is None else scale.rms_after_correction_angstrom,
+        ),
+        (
+            SPECTROSCOPY_WAVELENGTH_SCALE_SATURATION_CORRELATION,
+            None if scale is None else scale.offset_saturation_correlation,
+        ),
+        (
+            SPECTROSCOPY_WAVELENGTH_SCALE_CORRELATION_SPECTRUM_COUNT,
+            None if scale is None else scale.correlation_spectrum_count,
+        ),
+    )
+    correlation_reason = (
+        "Fewer than three spectra had both an offset and a saturation value, or one list did not vary."
+    )
+    for name, value in scale_rows:
+        reason = (
+            correlation_reason
+            if scale is not None and name == SPECTROSCOPY_WAVELENGTH_SCALE_SATURATION_CORRELATION
+            else _NO_WAVELENGTH_SCALE_REASON
+        )
+        # The RMS after correction is a statistic of spectra with an offset.
+        sample_count = (
+            scale.spectrum_count
+            if scale is not None and name == SPECTROSCOPY_WAVELENGTH_SCALE_RMS_AFTER
+            else None
+        )
+        rows.append((name, _optional_float(value), reason, sample_count))
+
+    gaia = metrics.gaia_xp_summary
+    rows.append((
+        SPECTROSCOPY_GAIA_XP_COMPARED_STAR_COUNT,
+        None if gaia is None else float(gaia.compared_star_count),
+        _NO_GAIA_XP_REASON,
+        None,
+    ))
+    rows.append((
+        SPECTROSCOPY_GAIA_XP_MEDIAN_SLOPE,
+        None if gaia is None else _optional_float(gaia.median_slope_percent_per_1000_angstrom),
+        _NO_GAIA_XP_REASON if gaia is None else "No compared star had a measurable tilt.",
+        None,
+    ))
+    rows.append((
+        SPECTROSCOPY_GAIA_XP_MEDIAN_ABSOLUTE_SLOPE,
+        None if gaia is None else _optional_float(gaia.median_absolute_slope_percent_per_1000_angstrom),
+        _NO_GAIA_XP_REASON if gaia is None else "No compared star had a measurable tilt.",
+        None,
+    ))
+    for band_index, (band_start, _band_end) in enumerate(GAIA_XP_BAND_EDGES_ANGSTROM):
+        band = None
+        if gaia is not None:
+            band = next((entry for entry in gaia.bands if round(entry.start_angstrom) == band_start), None)
+        band_reason = _NO_GAIA_XP_REASON if band is None else "No compared star had a value in this band."
+        rows.append((
+            gaia_xp_band_metric_name(band_index, "median_ratio"),
+            None if band is None else _optional_float(band.median_ratio),
+            band_reason,
+            None if band is None else band.star_count,
+        ))
+        rows.append((
+            gaia_xp_band_metric_name(band_index, "scatter"),
+            None if band is None else _optional_float(band.scatter),
+            band_reason if band is None or band.star_count < 2 else "The band's scatter was not computed.",
+            None if band is None else band.star_count,
+        ))
+        rows.append((
+            gaia_xp_band_metric_name(band_index, "star_count"),
+            None if band is None else float(band.star_count),
+            band_reason,
+            None,
+        ))
+    return rows
+
+
+def _stage_values(
+    metrics: SpectroscopyPipelineQualityMetrics,
+) -> list[tuple[str, float | None, str]]:
+    """List the checkpoint spectrum counts and medians of the summary.
+
+    Parameters
+    ----------
+    metrics : `SpectroscopyPipelineQualityMetrics`
+        The run's summary metrics.
+
+    Returns
+    -------
+    values : `list` [`tuple`]
+        One ``(metric name, value, reason if missing)`` for each declared
+        checkpoint count and median. A checkpoint metric the roll-up does not
+        hold, such as a yes/no verdict, is not listed.
+    """
+    rollups = {rollup.stage: rollup for rollup in metrics.stage_quality_summary or []}
+    values: list[tuple[str, float | None, str]] = []
+    for stage in STAGE_NAMES:
+        rollup = rollups.get(stage)
+        values.append((
+            stage_spectrum_count_name(stage),
+            None if rollup is None else float(rollup.spectrum_count),
+            _NO_STAGE_REASON.format(stage=stage),
+        ))
+    for stage, key in STAGE_METRIC_KEYS:
+        rollup = rollups.get(stage)
+        median = None if rollup is None else rollup.metric_medians.get(key)
+        reason = (
+            _NO_STAGE_REASON.format(stage=stage)
+            if rollup is None
+            else _NO_STAGE_VALUE_REASON.format(stage=stage)
+        )
+        values.append((stage_metric_name(stage, key), _optional_float(median), reason))
+    return values
+
+
+def spectroscopy_run_measurements(
+    metrics: SpectroscopyPipelineQualityMetrics,
+    gates: Sequence[GateResult],
+    context: PipelineRunContext,
+    *,
+    star_identification_counted: bool = True,
+) -> list[QualityMeasurement]:
+    """Build every measurement the spectroscopy pipeline declares for one run.
+
+    Parameters
+    ----------
+    metrics : `SpectroscopyPipelineQualityMetrics`
+        The run's summary metrics, with its checkpoint, Gaia XP and
+        wavelength-scale roll-ups.
+    gates : `Sequence` [`GateResult`]
+        The run's gates: the eight from `spectroscopy_run_gates` and the Gaia
+        XP gate.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    star_identification_counted : `bool`, optional
+        `False` for the session batch, which does not count star
+        identification. The three identification counts are then
+        ``not_measured`` instead of a default zero.
+
+    Returns
+    -------
+    measurements : `list` [`QualityMeasurement`]
+        One measurement for each declared metric, all about the run. A value
+        the run could not make is ``not_measured`` with a reason. The gate
+        metrics carry the gate's outcome and limit. Yes/no verdicts are not
+        measurements and are not included.
+    """
+    subject = context.run_subject()
+    measurements: list[QualityMeasurement] = []
+    for name, value, reason, sample_count in _summary_values(metrics, star_identification_counted):
+        measurements.append(
+            build_measurement(
+                _SPEC_BY_NAME[name], value, context, subject, reason=reason, sample_count=sample_count
+            )
+        )
+    for name, value, reason in _stage_values(metrics):
+        measurements.append(build_measurement(_SPEC_BY_NAME[name], value, context, subject, reason=reason))
+
+    gates_by_name = {gate.name: gate for gate in gates}
+    for gate_name, (metric_name, tier) in _GATE_METRIC_AND_TIER.items():
+        gate = gates_by_name.get(gate_name)
+        if gate is None:
+            continue
+        measurements.append(
+            gate_measurement(gate, _SPEC_BY_NAME[metric_name], context, subject, limit_tier=tier)
+        )
+    return measurements
+
+
+def record_spectroscopy_quality(
+    metrics: SpectroscopyPipelineQualityMetrics,
+    gates: Sequence[GateResult],
+    context: PipelineRunContext,
+    *,
+    star_identification_counted: bool = True,
+    config: object = None,
+) -> int:
+    """Store the run's measurements; a storage failure never fails the run.
+
+    Parameters
+    ----------
+    metrics : `SpectroscopyPipelineQualityMetrics`
+        The run's summary metrics.
+    gates : `Sequence` [`GateResult`]
+        The run's gates, the Gaia XP gate included.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    star_identification_counted : `bool`, optional
+        `False` for the session batch (see `spectroscopy_run_measurements`).
+    config : `AppConfiguration`, optional
+        Where the quality store lives. The process-wide one if omitted.
+
+    Returns
+    -------
+    new_count : `int`
+        How many rows were new.
+    """
+    return record_run_measurements(
+        spectroscopy_run_measurements(
+            metrics, gates, context, star_identification_counted=star_identification_counted
+        ),
+        config=config,
+    )

@@ -37,7 +37,7 @@ import logging
 import os
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from astrometricslib.drivers.driver_set import Drivers
@@ -303,8 +303,9 @@ def analyze_target(
         (to prevent double-counting).
     measured_at : datetime, optional
         The time stamped on the quality measurements the pipeline stores,
-        with a time zone. Pipeline code never reads the clock, so this entry
-        point supplies the current time when the caller gives none.
+        with a time zone. Pipeline code never reads the clock, so the caller
+        supplies it. With `None` (for tests only) the pipeline stores no
+        quality measurements and logs a warning.
 
     Returns
     -------
@@ -355,7 +356,7 @@ def analyze_target(
                 )
 
         kwargs["job_id"] = job.job_id
-        kwargs["measured_at"] = measured_at if measured_at is not None else datetime.now(UTC)
+        kwargs["measured_at"] = measured_at
         return _run_analysis_pipeline_match(
             target, frames, pipeline_type, filter_type, catalog_access, path, **kwargs
         )
@@ -408,6 +409,7 @@ def run_target_stages(
     register_job: bool,
     drivers: Drivers | None = None,
     frame_selection: ProcessingFrameSelection | None = None,
+    measured_at: datetime | None = None,
 ) -> ProcessTargetResult:
     """Run the chosen analysis stages for one target, always in the same order.
 
@@ -438,6 +440,10 @@ def run_target_stages(
         unless its options name ``frames``. Spectroscopy runs only when
         the selection holds spectral frames or the target already has a
         spectral stack. Without it, every frame of the target is used.
+    measured_at : `datetime`, optional
+        The time stamped on the quality measurements each stage stores,
+        with a time zone. The caller supplies it because pipeline code does
+        not read the clock. `None` (for tests only) stores no measurements.
 
     Returns
     -------
@@ -473,6 +479,7 @@ def run_target_stages(
             pipeline_type=_PIPELINE_TYPES[stage],
             catalog_access=catalog_access,
             register_job=register_job,
+            measured_at=measured_at,
             **options,
         )
         result.stages_run.append(stage)
@@ -555,9 +562,11 @@ def run_full_pipeline(
     # standard stack -- skip them (rather than fail the whole target) when
     # it didn't stack, so a spectral-only success is still saved below.
     if "standard" in stack_outputs:
-        _run_astrometry_stage(target, catalog_access)
+        _run_astrometry_stage(target, catalog_access, measured_at)
         _save_target(target, catalog_access)
-        _run_photometry_stage(target, catalog_access, config, camera_frames, max_workers, max_concurrent_jobs)
+        _run_photometry_stage(
+            target, catalog_access, config, camera_frames, max_workers, max_concurrent_jobs, measured_at
+        )
         _save_target(target, catalog_access)
     elif standard_frames:
         logger.warning("[%s] Standard stacking failed; skipping astrometry and photometry.", target.id)
@@ -565,7 +574,9 @@ def run_full_pipeline(
     # 4. Spectroscopy Analysis (only when this target actually has a
     # SPEC stack)
     if "spectral" in stack_outputs:
-        _run_spectroscopy_stage(target, catalog_access, config, spectral_frames, max_concurrent_jobs)
+        _run_spectroscopy_stage(
+            target, catalog_access, config, spectral_frames, max_concurrent_jobs, measured_at
+        )
         _save_target(target, catalog_access)
     elif spectral_frames:
         logger.warning("[%s] Spectral stacking failed; skipping spectroscopy.", target.id)
@@ -664,7 +675,9 @@ def _stack_camera_frames(
     return stack_outputs
 
 
-def _run_astrometry_stage(target: Target, catalog_access: Any) -> dict[str, Any]:
+def _run_astrometry_stage(
+    target: Target, catalog_access: Any, measured_at: datetime | None = None
+) -> dict[str, Any]:
     """Run astrometry analysis on the target's stacked image.
 
     Returns
@@ -678,7 +691,9 @@ def _run_astrometry_stage(target: Target, catalog_access: Any) -> dict[str, Any]
         If astrometry analysis failed to produce a result.
     """
     logger.info("[%s] Running Astrometry Analysis...", target.id)
-    astrometry_results = analyze_target(target, pipeline_type="astrometry", catalog_access=catalog_access)
+    astrometry_results = analyze_target(
+        target, pipeline_type="astrometry", catalog_access=catalog_access, measured_at=measured_at
+    )
     if astrometry_results is None:
         raise ProcessingError("Astrometry analysis failed.")
     logger.info(
@@ -696,6 +711,7 @@ def _run_photometry_stage(
     camera_frames: list[FrameRecord],
     max_workers: int | None,
     max_concurrent_jobs: int,
+    measured_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Run photometry/variability analysis on the target's camera frames.
 
@@ -712,6 +728,7 @@ def _run_photometry_stage(
             frames=camera_frames,
             catalog_access=catalog_access,
             max_workers=max_workers,
+            measured_at=measured_at,
         )
     logger.info(
         "[%s] Photometry Analysis complete. Stars found: %s",
@@ -727,6 +744,7 @@ def _run_spectroscopy_stage(
     config: Any,
     spectral_frames: list[FrameRecord],
     max_concurrent_jobs: int,
+    measured_at: datetime | None = None,
 ) -> None:
     """Run spectroscopy analysis when the target has SPEC frames.
 
@@ -742,7 +760,11 @@ def _run_spectroscopy_stage(
     logger.info("[%s] Running Spectroscopy Analysis...", target.id)
     with acquire_resource_slot(config, "job", max_concurrent_jobs):
         spectroscopy_results = analyze_target(
-            target, pipeline_type="spectroscopy", limit=10, catalog_access=catalog_access
+            target,
+            pipeline_type="spectroscopy",
+            limit=10,
+            catalog_access=catalog_access,
+            measured_at=measured_at,
         )
     if spectroscopy_results is None:
         raise ProcessingError("Spectroscopy analysis failed.")

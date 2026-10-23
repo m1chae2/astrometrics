@@ -184,7 +184,7 @@ A cycle or dip search reports a verdict (`detected`, `possible`, `not_detected`,
 
 A *gate* is a yes-or-no entry on a whole run, as opposed to the quality records kept for each star. Gates catch problems that affect every star at once, such as lost tracking or a poor comparison set.
 
-Besides each star's own quality records, a run keeps one record per run-level gate in the summary's `gates` (built in `post_processing/run_gates.py`). Each gate is `passed`, `failed` or `not_checked`; a gate that could not look is never recorded as passed. The tests in `test/post_processing/test_run_gates.py` give every gate input that must fail it.
+Besides each star's own quality records, a run keeps one record per run-level gate in the summary's `gates` (built in `post_processing/record_quality.py`). Each gate is `passed`, `failed` or `not_checked`; a gate that could not look is never recorded as passed. The tests in `test/post_processing/test_record_quality.py` give every gate input that must fail it.
 
 | Gate | Fails when | Not checked when |
 | --- | --- | --- |
@@ -238,10 +238,10 @@ Registration is the lining up of each frame with the first one. This gate checks
 
 ## Where each piece lives
 
-- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares 27 run-level metrics: 12 counts, 4 measurements (the median light-curve scatter, the worst comparison-scatter ratio, the worst corner displacement and the worst centroid fallback share) and the 11 gates as self-checks. Per-star results, the two period checks and the noise-model curve stay where they are. `post_processing/record_quality.py` stores them next to the summary after the gates are recorded, when the caller gives a measurement time. See [shared quality](../shared/quality/README.md).
 - [`pre_processing/`](pre_processing/README.md) turns a raw frame into one brightness measurement per star, and judges how good that raw measurement was.
 - [`processing/`](processing/README.md) compares stars against each other, decides which ones are variable, and searches for repeating patterns.
-- [`post_processing/`](post_processing/README.md) judges how much to trust a variability result and builds the run's gates.
+- [`post_processing/`](post_processing/README.md) judges how much to trust a variability result and builds the run's gates and stores the run's quality measurements.
 - `runner.py` and `batch.py` run the steps above in order, for one target, and combine the results.
 - The [photometry review guide](../../../documentation/library_design/pipelines/photometry.md) summarizes the pipeline for reviewers.
 

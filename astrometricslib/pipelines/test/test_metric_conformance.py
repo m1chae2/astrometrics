@@ -80,12 +80,60 @@ def _asteroid_detection_emitted_measurements() -> list[QualityMeasurement]:
     return asteroid_run_measurements(counts, asteroid_run_gates(counts, 3, 0), context)
 
 
+def _astrometry_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the astrometry pipeline's record step on a fixed run.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a fully measured, solved run.
+    """
+    from astrometricslib.pipelines.astrometry.test.conformance_fixture import (
+        astrometry_emitted_measurements,
+    )
+
+    return astrometry_emitted_measurements()
+
+
+def _photometry_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the photometry pipeline's record step on a fixed, healthy run.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a healthy run.
+    """
+    from astrometricslib.pipelines.photometry.test.conformance_fixture import (
+        photometry_emitted_measurements,
+    )
+
+    return photometry_emitted_measurements()
+
+
+def _spectroscopy_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the spectroscopy pipeline's record step on a fixed run.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a healthy run.
+    """
+    from astrometricslib.pipelines.spectroscopy.test.conformance_fixture import (
+        spectroscopy_emitted_measurements,
+    )
+
+    return spectroscopy_emitted_measurements()
+
+
 # Phase 3 (plan section 3.7): a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
 # step on a fixed run and returns the measurements. A pipeline joins this
 # table when its record step is built; the others are still on phase 2.
 PHASE_3_RECORD_STEPS: dict[str, Callable[[], list[QualityMeasurement]]] = {
     "asteroid_detection": _asteroid_detection_emitted_measurements,
+    "astrometry": _astrometry_emitted_measurements,
+    "photometry": _photometry_emitted_measurements,
+    "spectroscopy": _spectroscopy_emitted_measurements,
 }
 
 

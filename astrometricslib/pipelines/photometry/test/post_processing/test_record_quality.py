@@ -16,7 +16,7 @@ from astrometricslib.models.quality.quality_summary import ExcludedFrame
 from astrometricslib.models.stellar_source import PhotometryResult
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry import runner
-from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.photometry.post_processing import record_quality as rg
 from astrometricslib.pipelines.photometry.post_processing.variability_skill import (
     MINIMUM_DISCRIMINATION_AUC,
     discrimination,

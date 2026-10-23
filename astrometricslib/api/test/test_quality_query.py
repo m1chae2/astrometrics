@@ -24,7 +24,7 @@ from astrometricslib.models.quality.measurement import (
     QualitySubject,
     SubjectLevel,
 )
-from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.models.quality.metric_spec import MetricSpec, MetricSummary
 
 BASE_TIME = datetime(2026, 10, 1, 3, 0, 0, tzinfo=UTC)
 
@@ -138,11 +138,27 @@ def test_metrics_with_a_name_gives_that_one_spec(quality: QualityRecords) -> Non
 
 
 def test_metrics_lists_the_declarations(quality: QualityRecords) -> None:
-    """`metrics` returns the registry's declarations as a list."""
-    specs = quality.metrics()
-    assert specs
+    """`metrics` gives summaries by default and full specs on request."""
+    summaries = quality.metrics()
+    assert summaries
+    assert all(isinstance(summary, MetricSummary) for summary in summaries)
+    assert len({summary.name for summary in summaries}) == len(summaries)
+    specs = quality.metrics(detail="full")
     assert all(isinstance(spec, MetricSpec) for spec in specs)
-    assert len({spec.name for spec in specs}) == len(specs)
+    assert [spec.name for spec in specs] == [summary.name for summary in summaries]
+
+
+def test_metrics_filters_by_checkpoint_and_name(quality: QualityRecords) -> None:
+    """A checkpoint keeps only its metrics; bad choices raise."""
+    frame_metrics = quality.metrics(checkpoint="frame", detail="full")
+    assert frame_metrics
+    assert all(spec.checkpoint.value == "frame" for spec in frame_metrics)
+    assert len(frame_metrics) < len(quality.metrics())
+    one = quality.metrics(name=frame_metrics[0].name)
+    assert [summary.name for summary in one] == [frame_metrics[0].name]
+    for bad in ({"checkpoint": "nowhere"}, {"detail": "everything"}, {"name": "not.a.metric"}):
+        with pytest.raises(InvalidArgumentError):
+            quality.metrics(**bad)
 
 
 def test_the_root_object_holds_the_quality_child() -> None:

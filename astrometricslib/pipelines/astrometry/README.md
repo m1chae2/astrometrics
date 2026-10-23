@@ -109,11 +109,11 @@ The full list matters. The single main type of Algol, a textbook eclipsing binar
 | `CATALOG_MATCH_RADIUS_ARCSEC` in `shared/catalog_star_identity.py` | 10 arcsec (design estimate; see [astrometry design estimates](../../../documentation/library_design/validation/astrometry.md#design-estimates)) | Largest distance between a detected star and a catalog entry for the two to count as one star |
 | Gaia search constants in `processing/star_identifier.py` | Timeouts and depth steps (partly measured; see [AST-08](../../../documentation/library_design/validation/astrometry.md#ast-08)); margin 1 magnitude, 14 to 20, 50,000 rows (design estimate; see [astrometry design estimates](../../../documentation/library_design/validation/astrometry.md#design-estimates)) | Set how deep and how long the Gaia search goes |
 | Refit constants in `processing/wcs_refinement.py` | 40 stars (design estimate; see [astrometry design estimates](../../../documentation/library_design/validation/astrometry.md#design-estimates)); 4 pixels and 30 arcsec (partly measured; see [AST-02](../../../documentation/library_design/validation/astrometry.md#ast-02)) | Decide whether the Gaia refit is attempted and kept |
-| Gate limits in `post_processing/run_gates.py` | See the gate table below | Set when each gate fails |
+| Gate limits in `post_processing/record_quality.py` | See the gate table below | Set when each gate fails |
 
 ## Quality outputs
 
-A gate is a run-level pass/fail entry in a quality record. The summary keeps one record per gate in `gates`. Each gate is `passed`, `failed` or `not_checked`, and a check that could not look is never recorded as passed. `runner.py` builds `plate_solve`, and `post_processing/run_gates.py` builds the other four. The tests in `test/test_plate_solve_gate.py` and `test/post_processing/test_run_gates.py` give each gate input that must fail it.
+A gate is a run-level pass/fail entry in a quality record. The summary keeps one record per gate in `gates`. Each gate is `passed`, `failed` or `not_checked`, and a check that could not look is never recorded as passed. `runner.py` builds `plate_solve`, and `post_processing/record_quality.py` builds the other four. The tests in `test/test_plate_solve_gate.py` and `test/post_processing/test_record_quality.py` give each gate input that must fail it.
 
 | Gate | Fails when | Not checked when |
 | --- | --- | --- |
@@ -126,6 +126,15 @@ A gate is a run-level pass/fail entry in a quality record. The summary keeps one
 The catalog circuit breaker stops further catalog lookups after repeated failures, so a dead service does not slow every image.
 
 **Limits.** The 50% failed-lookup limit of `catalog_lookup` (design estimate; see [astrometry design estimates](../../../documentation/library_design/validation/astrometry.md#design-estimates)) rests on this reasoning: the first failures usually come from one slow or unreachable service, and half failing means most stars went unnamed. The 20-star limit of `catalog_matches` is partly measured (see [AST-05](../../../documentation/library_design/validation/astrometry.md#ast-05)). The half-width limit of `astrometric_residual` is partly measured (see [AST-04](../../../documentation/library_design/validation/astrometry.md#ast-04)). The half-width limit is tied to the equipment: the residual is judged against the star width in pixels times the pixel scale, both recorded with each run. It catches a failed solve and does not rank good ones. A library-wide solve check that does not use these gates is recorded separately (partly measured; see [AST-14](../../../documentation/library_design/validation/astrometry.md#ast-14)).
+
+### Stored measurements
+
+After the run records its gates, `runner.py` also stores the summary's numbers and the five gates as quality measurements, one row per metric. The values read from the one stacked image (the star counts, the position errors, the pixel scale and the star width) are about that stack and are filed under the stack's file name. The solver uploads, the online lookups and the five gates are about the run. The summary and the gates stay as they are. Each gate is stored with its outcome and its limit, under the name `astrometry.gate_<gate name>`. A gate has one meaning in every outcome:
+
+- `plate_solve` stores 1 when the image was solved and 0 when it was not.
+- `catalog_lookup` stores the share of lookups that failed, also when the circuit breaker tripped.
+
+A value the run could not fill (the solver's fit residual after an online solve, the Gaia refit when it was not tried) is stored as not measured with a reason, never as a default. The star width is stored as `astrometry.star_width_gaussian_px`, and the plate scale as `astrometry.plate_scale_arcsec_per_pixel` in arcsec/px (arcseconds per pixel). Nothing is stored when the caller gives no measurement time, and the stack values are left out when the image has no file name, and a storage failure is logged and never fails the run. The list and booleans of the summary (`astrometry_flags`, `solve_attempted`, `plate_solve_succeeded`, `remote_catalog_circuit_breaker_tripped`) are not numbers and are not stored.
 
 ### Metrics
 
@@ -143,7 +152,7 @@ The catalog circuit breaker stops further catalog lookups after repeated failure
 
 The [review guide for astrometry](../../../documentation/library_design/pipelines/astrometry.md) summarizes the pipeline's parameters and their status.
 
-- `metrics.py` is where this pipeline declares its quality metrics for the metric registry. It declares none yet. See [shared quality](../shared/quality/README.md).
+- `metrics.py` is where this pipeline declares its quality metrics for the metric registry: the counts and measured values of the summary and the five gates, 22 in all. `post_processing/record_quality.py` stores them as measurements, one set per run, next to the summary (see [stored measurements](#stored-measurements)). See [shared quality](../shared/quality/README.md).
 - `pipeline.py` runs steps 1 through 4 for a single image. It is the coordinator. It does not detect stars or query catalogs itself, but it calls the pieces that do, in the right order.
 - `runner.py` sits one level above `pipeline.py`. It runs the pipeline across a whole session (the frames from one continuous run with the same setup), writes the solved sky position back onto the target's record, and produces a summary of how well the run went.
   - It also saves the solved sky map (the WCS) into the image's FITS header, so the next program to open the file does not solve it again.

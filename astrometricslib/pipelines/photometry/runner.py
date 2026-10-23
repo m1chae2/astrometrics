@@ -14,7 +14,7 @@ import statistics
 from typing import Any
 
 from astrometricslib.foundation.errors import AstrometricsError
-from astrometricslib.models.quality.quality_summary import NoiseModelPoint
+from astrometricslib.models.quality.quality_summary import PHOTOMETRY_PIPELINE_VERSION, NoiseModelPoint
 from astrometricslib.models.stellar_source import PhotometryResult, StellarObject, VariableCandidate
 from astrometricslib.models.target import Target
 from astrometricslib.pipelines.photometry.batch import (
@@ -26,7 +26,11 @@ from astrometricslib.pipelines.photometry.post_processing.known_variability_labe
     label_known_variability,
     split_scores_by_catalog_status,
 )
-from astrometricslib.pipelines.photometry.post_processing.run_gates import photometry_run_gates
+from astrometricslib.pipelines.photometry.post_processing.record_quality import (
+    PhotometryRunInputs,
+    photometry_run_gates,
+    record_photometry_quality,
+)
 from astrometricslib.pipelines.photometry.pre_processing.observation_times import (
     TIME_BASIS_BJD_TDB,
     TIME_BASIS_BJD_TDB_GEOCENTRIC,
@@ -39,6 +43,7 @@ from astrometricslib.pipelines.pipeline_base import (
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.star_recording import (
     merge_photometry_stellar_object,
     record_pipeline_stars,
@@ -607,7 +612,19 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
         frames_without_timestamp_total = len(photometry_frames_without_timestamp) + len(
             unreadable_date_obs_frames
         )
-        for gate in photometry_run_gates(
+        comparison_sets = payload.get("all_comparison_sets", [])
+        registration_drifts_px = [
+            photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
+            for photometry in star_photometry
+        ]
+        centroid_shift_summaries = payload.get("all_centroid_shift_summaries", [])
+        stars_with_scatter = sum(
+            1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
+        )
+        noise_model_star_count = len(_noise_model_inputs(star_photometry)[0])
+        flux_error_mag = median_flux_error_mag(result.stellar_objects)
+        errors_assume_unit_gain = any(photometry.errors_assume_unit_gain for photometry in star_photometry)
+        gates = photometry_run_gates(
             frames_contributed=frames_contributed_total,
             rejected_frame_count=len(all_rejected_files),
             frames_without_timestamp=frames_without_timestamp_total,
@@ -618,28 +635,47 @@ class PhotometryPipelineAdapter(AnalysisPipeline):
             session_empty_reasons=session_empty_reasons,
             sessions_missing_wcs=sessions_missing_wcs,
             no_work_reason=payload.get("no_work_reason"),
-            comparison_sets=payload.get("all_comparison_sets", []),
-            registration_drifts_px=[
-                photometry.input_quality.max_registration_drift_px if photometry.input_quality else None
-                for photometry in star_photometry
-            ],
-            centroid_shift_summaries=payload.get("all_centroid_shift_summaries", []),
-            stars_with_scatter=sum(
-                1 for photometry in star_photometry if photometry.coefficient_of_variation is not None
-            ),
+            comparison_sets=comparison_sets,
+            registration_drifts_px=registration_drifts_px,
+            centroid_shift_summaries=centroid_shift_summaries,
+            stars_with_scatter=stars_with_scatter,
             known_variable_scores=known_variable_scores,
             unlisted_scores=unlisted_scores,
             cutoff_cv=float(statistics.median(cutoffs)) if cutoffs else None,
-            noise_model_stars=len(_noise_model_inputs(star_photometry)[0]),
+            noise_model_stars=noise_model_star_count,
             noise_floor_mag=_typical_noise_mag(noise_model, star_photometry),
             time_basis=_run_time_basis(star_photometry),
-            median_flux_error_mag=median_flux_error_mag(result.stellar_objects),
-            errors_assume_unit_gain=any(photometry.errors_assume_unit_gain for photometry in star_photometry),
+            median_flux_error_mag=flux_error_mag,
+            errors_assume_unit_gain=errors_assume_unit_gain,
             errors_assume_zero_read_noise=any(
                 photometry.errors_assume_zero_read_noise for photometry in star_photometry
             ),
-        ):
+        )
+        for gate in gates:
             summary.record_gate(gate)
+
+        # The same counts, measurements and gates, stored as measurements
+        # next to the summary. The context is None when the caller gave no
+        # time; then nothing is stored (a warning says so). A storage failure
+        # is logged inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            target.id, self.pipeline_name, PHOTOMETRY_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            record_photometry_quality(
+                summary.photometry_metrics,
+                gates,
+                PhotometryRunInputs(
+                    comparison_sets=comparison_sets,
+                    registration_drifts_px=registration_drifts_px,
+                    centroid_shift_summaries=centroid_shift_summaries,
+                    stars_with_scatter=stars_with_scatter,
+                    noise_model_star_count=noise_model_star_count,
+                    median_flux_error_mag=flux_error_mag,
+                    errors_assume_unit_gain=errors_assume_unit_gain,
+                ),
+                measurement_context,
+            )
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_for_paths,

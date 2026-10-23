@@ -9,14 +9,14 @@ Terms are defined in the [glossary](../../../../documentation/Glossary.md). This
 1. Record how the star was matched. The pipeline marks every identified star with which catalog matched it, SIMBAD or Gaia.
 2. Record how far off the match was. The pipeline stores the distance, in arcsec (1/3600°), between the detected position and the catalog's own position, with the star. A smaller distance means a more confident match.
 3. Flag crowded matches. If the pipeline picked the star out from two or more catalog entries that were too close together to tell apart, it records that too, so the uncertainty is visible later rather than hidden.
-4. Build the run gates. `run_gates.py` builds four of the run's pass/fail quality entries (gates) from the session summary. `source_detection` asks whether any star was detected. `astrometric_residual` asks whether the solution misses its stars by more than half a star's width. `catalog_matches` asks whether at least 20 stars were matched. `catalog_lookup` asks whether the catalog lookups worked. The [astrometry README](../README.md#quality-outputs) lists when each gate passes, fails or is not checked.
+4. Build the run gates. `record_quality.py` builds four of the run's pass/fail quality entries (gates) from the session summary. `source_detection` asks whether any star was detected. `astrometric_residual` asks whether the solution misses its stars by more than half a star's width. `catalog_matches` asks whether at least 20 stars were matched. `catalog_lookup` asks whether the catalog lookups worked. The [astrometry README](../README.md#quality-outputs) lists when each gate passes, fails or is not checked.
 
 ## Settings
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Residual limit in `run_gates.py` | Half a star's width (partly measured; see [AST-04](../../../../documentation/library_design/validation/astrometry.md#ast-04)) | Sets when `astrometric_residual` fails |
-| Matched-star limit in `run_gates.py` | 20 stars (partly measured; see [AST-05](../../../../documentation/library_design/validation/astrometry.md#ast-05)) | Sets when `catalog_matches` fails |
+| Residual limit in `record_quality.py` | Half a star's width (partly measured; see [AST-04](../../../../documentation/library_design/validation/astrometry.md#ast-04)) | Sets when `astrometric_residual` fails |
+| Matched-star limit in `record_quality.py` | 20 stars (partly measured; see [AST-05](../../../../documentation/library_design/validation/astrometry.md#ast-05)) | Sets when `catalog_matches` fails |
 
 ## Quality metrics
 
@@ -32,7 +32,7 @@ This stage produces one quality record per identified star, made up of the first
 ## Files
 
 - `assess_match_quality.py`: the per-star match record.
-- `run_gates.py`: the four run gates and their limits.
+- `record_quality.py`: the four run gates and their limits, and the step that stores the run's numbers and all five gates as quality measurements (`record_astrometry_quality`). The metrics it stores are declared in `../metrics.py`.
 
 This record travels with the star from this point on. A scientist checking a specific star, or a report summarizing a whole session, can see exactly how confident the identification was, instead of trusting the match blindly or repeating the lookup.
 

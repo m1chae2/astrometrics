@@ -19,7 +19,7 @@ from astrometricslib.pipelines.pipeline_base import PipelineRequest, Result
 from astrometricslib.pipelines.shared.quality.saturation import DEFAULT_SATURATION_FLAG_THRESHOLD
 from astrometricslib.pipelines.shared.star_recording import StarIdentificationBreakdown
 from astrometricslib.pipelines.spectroscopy import runner
-from astrometricslib.pipelines.spectroscopy.post_processing import run_gates as rg
+from astrometricslib.pipelines.spectroscopy.post_processing import record_quality as rg
 
 
 def make_star(

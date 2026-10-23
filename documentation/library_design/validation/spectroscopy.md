@@ -1149,7 +1149,7 @@ These tuned values have not been measured. Each is a reasoned choice.
 | SPE-D10 | Blur with the measured line spread | off | `use_measured_line_spread` argument of `SpectroscopyPipeline` | Template blur that does not match the observed star. | Classify stars of known type with the option off and on and compare the steps from the catalog type. |
 | SPE-D11 | Zero-order saturation limit | 0.1% of pixels | `DEFAULT_SATURATION_FLAG_THRESHOLD` in `pipelines/shared/quality/saturation.py` | Saturated zero orders pass unflagged. | Plot `wavelength_scale_summary.offset_saturation_correlation` against the saturated share over many runs. |
 | SPE-D12 | Wavelength-scale gate | 11 Å RMS (one pixel of dispersion) | `WAVELENGTH_SCALE_LIMIT_ANGSTROM` in `post_processing/wavelength_scale.py` | A poor wavelength scale passes, or a good one fails. | Collect `rms_after_correction_angstrom` over many runs with `report_gate_limits.py`. |
-| SPE-D13 | Processing-quality gate | 50% of classified spectra | `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` in `post_processing/run_gates.py` | A run with many failed spectra passes. | Collect the failed share from `stage_quality_summary` over many runs with `report_gate_limits.py`. |
+| SPE-D13 | Processing-quality gate | 50% of classified spectra | `PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION` in `post_processing/record_quality.py` | A run with many failed spectra passes. | Collect the failed share from `stage_quality_summary` over many runs with `report_gate_limits.py`. |
 | SPE-D14 | Gaia XP residual limit | 0.05 RMS (above XP's own 1 to 2% calibration error) | `GAIA_XP_RESIDUAL_RMS_LIMIT` in `post_processing/compare_to_gaia_xp.py` | Calibration errors pass, or good runs fail. | Run `compare_spectra_with_gaia_xp.py` on targets of known good calibration and take the spread. |
 | SPE-D15 | Gaia XP tilt limit | 3% per 1000 Å (11% across the range; about the extinction error at 0.3 airmass) | `GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM` in `post_processing/compare_to_gaia_xp.py` | Response tilt errors pass, or good runs fail. | As above, over several nights. |
 | SPE-D16 | Gaia XP shift limit | 11 Å (one pixel) | `GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM` in `post_processing/compare_to_gaia_xp.py` | Wavelength shifts pass, or good runs fail. | As above; first measure the shift's noise floor on one star observed many times. |
@@ -1173,7 +1173,7 @@ These tuned values have not been measured. Each is a reasoned choice.
 <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.measured_line_spread.CHROMATIC_DEFOCUS_RATIO_LIMIT -->
 <!-- impl: astrometricslib.pipelines.shared.quality.saturation.DEFAULT_SATURATION_FLAG_THRESHOLD -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.WAVELENGTH_SCALE_LIMIT_ANGSTROM -->
-<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
+<!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.record_quality.PROCESSING_QUALITY_MAXIMUM_FAILED_FRACTION -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_RESIDUAL_RMS_LIMIT -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM -->
 <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_WAVELENGTH_SHIFT_LIMIT_ANGSTROM -->

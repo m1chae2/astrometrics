@@ -123,6 +123,7 @@ EXPECTED_PUBLIC_NAMES = frozenset({
     "MeasurementStatus",
     "MetricPurpose",
     "MetricSpec",
+    "MetricSummary",
     "QualityLimit",
     "QualityMeasurement",
     "QualitySubject",

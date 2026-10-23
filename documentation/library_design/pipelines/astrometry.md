@@ -164,7 +164,7 @@ Symbols follow the architecture paper's [list of symbols](../Astrometrics_Librar
 
 - **Stage 1 (`process_input`).** A no-op that returns an empty `Result`. `analyze_target` has already checked that an image path exists.
 - **Stage 2 (`run`).** Runs `AstrometryPipeline.process` (detection, solve, refit, header-WCS fallback, naming). It writes the solved WCS into the FITS header, fills in the target's RA/Dec when they were unset, and saves the stars to the shared catalog.
-- **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all).
+- **Stage 3 (`validate_output`).** Builds the `AstrometryQualitySummary`. The runner records `plate_solve`, then `astrometry_run_gates` adds the rest (5 run gates in all). The runner then stores the summary's numbers and the gates as quality measurements (`record_astrometry_quality`).
 - **Stage 4 (`to_result_dict`).** Returns `context`, `stellar_objects`, `wcs` and `image_stats`.
 
 ### 4.1 Quality gates
@@ -173,11 +173,11 @@ A quality gate is an automatic test on a run. It passes, fails, or is "not check
 
 | Gate | Role | Defined in | What it checks |
 | --- | --- | --- | --- |
-| `source_detection` | run gate | `post_processing/run_gates.py` | Fails when no star was detected. |
-| `astrometric_residual` | run gate | `post_processing/run_gates.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of the FWHM (Eq. 5). Not checked when the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing. |
-| `catalog_matches` | run gate | `post_processing/run_gates.py` | Fails when fewer than `MINIMUM_MATCHED_STARS` stars were matched to a catalog. Not checked when the image was not solved. |
-| `catalog_lookup` | run gate | `post_processing/run_gates.py` | Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries after repeated failures) tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
-| `plate_solve` | run gate | `runner.py` | Fails when the image ends the run with no sky solution (pixel-to-sky map, or WCS), from the solver or from the image's own header. |
+| `plate_solve` | run gate | `post_processing/record_quality.py` | Fails when the image ends the run with no sky solution (pixel-to-sky map, or WCS), from the solver or from the image's own header. |
+| `source_detection` | run gate | `post_processing/record_quality.py` | Fails when no star was detected. |
+| `astrometric_residual` | run gate | `post_processing/record_quality.py` | Fails when the solution misses its stars by more than `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` of the FWHM (Eq. 5). Not checked when the residual (position error), pixel scale (sky angle per pixel) or FWHM is missing. |
+| `catalog_matches` | run gate | `post_processing/record_quality.py` | Fails when fewer than `MINIMUM_MATCHED_STARS` stars were matched to a catalog. Not checked when the image was not solved. |
+| `catalog_lookup` | run gate | `post_processing/record_quality.py` | Fails when the remote-catalog circuit breaker (a switch that stops online catalog queries after repeated failures) tripped during the run, or when at least `MAXIMUM_FAILED_LOOKUP_FRACTION` of lookups failed. Not checked when no lookup was made. |
 
 ## 5. Tuned calibration parameters
 
@@ -192,7 +192,7 @@ The labels are defined in the [validation register](../validation/index.md). Eac
 | Parameter | Live value | Status | Notes |
 | --- | --- | --- | --- |
 | `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` | `0.5` | Partly measured ([AST-04](../validation/astrometry.md#ast-04)) | Largest allowed residual (position error of the sky map), as a share of the FWHM. It is there to catch a failed solve, not to rank good ones. |
-| `MINIMUM_MATCHED_STARS` (`run_gates`) | `20` | Partly measured ([AST-05](../validation/astrometry.md#ast-05)) | Fewest stars matched to a catalog for the residual to mean anything. |
+| `MINIMUM_MATCHED_STARS` (`record_quality`) | `20` | Partly measured ([AST-05](../validation/astrometry.md#ast-05)) | Fewest stars matched to a catalog for the residual to mean anything. |
 | `MAXIMUM_FAILED_LOOKUP_FRACTION` | `0.5` | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | Share of failed online catalog lookups at which `catalog_lookup` fails. |
 | `CATALOG_MATCH_RADIUS_ARCSEC` | `10.0` arcsec | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | Largest distance at which a detected star is paired with a SIMBAD or Gaia DR3 star. |
 | `MAXIMUM_PLATE_SOLVE_SOURCES` | `100` | Design estimate ([astrometry design estimates](../validation/astrometry.md#design-estimates)) | How many of the brightest detected stars are sent to the online solver. |

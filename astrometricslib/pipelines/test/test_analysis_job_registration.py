@@ -252,3 +252,37 @@ def test_a_missing_image_path_fails_the_job_before_running_anything(
     jobs = _read_jobs(isolated_job_logging, "NoImageTarget")
     assert len(jobs) == 1
     assert jobs[0].status == "failed"
+
+
+def test_analyze_target_passes_the_callers_time_on_and_never_invents_one(
+    isolated_job_logging: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify `measured_at` reaches the runner exactly as given.
+
+    Pipeline code never reads the clock, so with no time from the caller
+    the runner must receive `None` (and so store no measurements).
+    """
+    from datetime import UTC, datetime
+
+    received: list[object] = []
+
+    def _record_options(*args: object, **kwargs: object) -> dict:
+        """Remember the `measured_at` the runner is given.
+
+        Returns
+        -------
+        result : `dict`
+            A stand-in result.
+        """
+        received.append(kwargs["measured_at"])
+        return {}
+
+    monkeypatch.setattr(tasks, "_run_analysis_pipeline_match", _record_options)
+    given = datetime(2026, 10, 1, 3, 0, tzinfo=UTC)
+
+    tasks.analyze_target(
+        Target(id="ClockTarget"), pipeline_type="astrometry", path="x.fits", measured_at=given
+    )
+    tasks.analyze_target(Target(id="ClockTarget"), pipeline_type="astrometry", path="x.fits")
+
+    assert received == [given, None]

@@ -10,18 +10,22 @@ uses those same stars for all the other images in the session.
 import logging
 import math
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from astrometricslib.drivers.driver_set import Drivers
+from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
 from astrometricslib.models.stellar_source import StellarObject
 from astrometricslib.models.target import FrameRecord, Target
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp import (
     gaia_xp_gate,
     gaia_xp_rows,
     summarize_gaia_xp,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
     merge_spectrum_facts,
+    record_spectroscopy_quality,
     spectroscopy_run_gates,
     spectrum_facts,
     stage_quality_rows,
@@ -405,6 +409,7 @@ def process_spectroscopy_frames_by_session(
     on_item_complete: Callable[[str, dict, int, int], None] | None = None,
     job_id: str | None = None,
     drivers: Drivers | None = None,
+    measured_at: datetime | None = None,
 ) -> tuple[parallel_batch.BatchRunSummary, list]:
     """Process a target's spectroscopy images, grouped by observing session.
 
@@ -432,6 +437,11 @@ def process_spectroscopy_frames_by_session(
     drivers : `Drivers`, optional
         The plate solver and SIMBAD driver the star identification uses.
         Any left out is the built-in one.
+    measured_at : `datetime`, optional
+        The time stamped on the quality measurements the run stores, with a
+        time zone. Pipeline code never reads the clock, so the caller
+        supplies it. Without it the run stores no measurements and logs a
+        warning.
 
     Returns
     -------
@@ -496,12 +506,16 @@ def process_spectroscopy_frames_by_session(
         )
 
     merged_summary = _merge_batch_summaries(session_summaries)
-    _attach_spectroscopy_quality_summary(target, merged_summary, session_results, job_id)
+    _attach_spectroscopy_quality_summary(target, merged_summary, session_results, job_id, measured_at)
     return merged_summary, session_results
 
 
 def _attach_spectroscopy_quality_summary(
-    target: Target, summary: parallel_batch.BatchRunSummary, session_results: list, job_id: str | None = None
+    target: Target,
+    summary: parallel_batch.BatchRunSummary,
+    session_results: list,
+    job_id: str | None = None,
+    measured_at: datetime | None = None,
 ) -> None:
     """Gather up all the worker results into a single quality report.
 
@@ -583,11 +597,36 @@ def _attach_spectroscopy_quality_summary(
             wavelength_scale_summary=wavelength_scale,
         ),
     )
-    for gate in spectroscopy_run_gates(
-        all_spectrum_facts, all_zero_order_fractions, all_spectral_classification_concerns, wavelength_scale
-    ):
+    gates = [
+        *spectroscopy_run_gates(
+            all_spectrum_facts,
+            all_zero_order_fractions,
+            all_spectral_classification_concerns,
+            wavelength_scale,
+        ),
+        gaia_xp_gate(all_gaia_xp_rows),
+    ]
+    for gate in gates:
         target.quality.spectroscopy.record_gate(gate)
-    target.quality.spectroscopy.record_gate(gaia_xp_gate(all_gaia_xp_rows))
+
+    # The same numbers, roll-ups and gates, stored as measurements next to
+    # the summary. Nothing is stored when the caller gave no time (a warning
+    # says so). A storage failure is logged inside and never fails the run.
+    # This path does not count star identification, so the three counts are
+    # recorded as not measured rather than as zero.
+    measurement_context = PipelineRunContext.from_options(
+        target.id,
+        "spectroscopy",
+        SPECTROSCOPY_PIPELINE_VERSION,
+        {"job_id": job_id, "measured_at": measured_at},
+    )
+    if measurement_context is not None:
+        record_spectroscopy_quality(
+            target.quality.spectroscopy.spectroscopy_metrics,
+            gates,
+            measurement_context,
+            star_identification_counted=False,
+        )
 
     from astrometricslib.pipelines.shared.applied_camera_profile import (
         camera_name_for_paths,
@@ -599,7 +638,6 @@ def _attach_spectroscopy_quality_summary(
         camera_name_for_paths(target.frames, [path for session in sessions for path in session.frame_paths]),
     )
 
-    from astrometricslib.models.quality.quality_summary import SPECTROSCOPY_PIPELINE_VERSION
     from astrometricslib.pipelines.shared.provenance_recording import record_pipeline_run
 
     record_pipeline_run(

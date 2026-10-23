@@ -14,7 +14,7 @@ Two quantities appear in many entries. A *residual* is the distance left between
 
 - **Claim:** The plate solver's own fit residual mostly measures position errors in its index files (its pre-built reference stars), not errors in the solution. Measured against Gaia DR3, the solutions were several times better than the fit residual says. One solution still carried a constant shift that no gate measured.
 - **Settings it supports:**
-  - The order in which the `astrometric_residual` gate picks its residual: the RMS against Gaia from the refit first, then the solver's fit residual, then the catalog match separation. This order is code, not a setting (`_residual_and_basis` in `astrometricslib/pipelines/astrometry/post_processing/run_gates.py`; changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis -->
+  - The order in which the `astrometric_residual` gate picks its residual: the RMS against Gaia from the refit first, then the solver's fit residual, then the catalog match separation. This order is code, not a setting (`_residual_and_basis` in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py`; changing it means editing the code). Relation: derived from this entry. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis -->
   - The Gaia refit itself (see [AST-02](#ast-02)). Relation: derived from this entry.
 - **Status:** Partly measured. Two stacks from one camera, measured by hand with no script.
 - **Data you need:** A stacked image solved by the local solver (solve-field), so that the solver's `.corr` match table and its fit residual exist. The image needs a `DATE-OBS` card and at least a few hundred unsaturated stars brighter than G = 16 that Gaia lists.
@@ -208,7 +208,7 @@ print(refinement.applied, refinement.star_count, np.median(errors), errors.max()
 
 - **Claim:** On the saved solves, the residual was 0.14 to 0.44 of a star's width, so a limit of 0.5 does not fire on any of them. It is there to catch a failed solve, not to rank good ones.
 - **Settings it supports:**
-  - code constant `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` = 0.5 in `astrometricslib/pipelines/astrometry/post_processing/run_gates.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
+  - code constant `MAXIMUM_RESIDUAL_FRACTION_OF_FWHM` = 0.5 in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_RESIDUAL_FRACTION_OF_FWHM -->
 - **Status:** Partly measured. Set on catalog match separations, not on the solver's fit residuals or the Gaia refit RMS that the gate now prefers; no failed solve was in the sample.
 - **Data you need:** A library of solved stacks with quality summaries that carry a plate scale and a star width. Include at least one known bad solve if you have one.
 - **Procedure:**
@@ -246,7 +246,7 @@ for target in astrometrics.targets.list():
 - **Limits:** Eight solves, all from one camera, and all good. The numbers are catalog match separations; a fit residual is usually smaller, so the limit is more lenient for it. The limit has not been re-measured on fit residuals or on the Gaia refit RMS.
 - **To tune for your setup:** Run the procedure with the Gaia refit RMS on your library. If your good solves sit near 0.5, the limit is too tight for your optics; if a known bad solve sits below it, lower the limit. Re-run the procedure afterwards.
 - **Regenerate with:** `astrometricslib/scripts/report_gate_limits.py` reports the spread of the stored fit residuals and catalog match separations in arcseconds, but not the fraction (`python -m astrometricslib.scripts.report_gate_limits`).
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_run_gates.py` checks the gate logic.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_record_quality.py` checks the gate logic.
 - **Raw record:** None kept.
 
 ### AST-05
@@ -255,7 +255,7 @@ for target in astrometrics.targets.list():
 
 - **Claim:** Solves with fewer than 20 catalog-matched stars are among those with the largest residuals, so a residual over so few stars cannot be trusted.
 - **Settings it supports:**
-  - code constant `MINIMUM_MATCHED_STARS` = 20 in `astrometricslib/pipelines/astrometry/post_processing/run_gates.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MINIMUM_MATCHED_STARS -->
+  - code constant `MINIMUM_MATCHED_STARS` = 20 in `astrometricslib/pipelines/astrometry/post_processing/record_quality.py` (changing it means editing the code). Relation: sanity check only. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MINIMUM_MATCHED_STARS -->
 - **Status:** Partly measured. One look at the saved solves; four solves below the limit, and no tuning of the value.
 - **Data you need:** A library of solved stacks with quality summaries.
 - **Procedure:**
@@ -287,7 +287,7 @@ for residual, matched, name in sorted(rows, reverse=True):
 - **Limits:** The residuals are catalog match separations. Four solves below the limit is a small sample, and the value 20 itself was not varied.
 - **To tune for your setup:** Run the procedure. If your solves with, say, 15 matches have small residuals, lower the limit; if solves with 30 matches still scatter widely, raise it.
 - **Regenerate with:** `astrometricslib/scripts/report_gate_limits.py` reports the spread of catalog-matched star counts and how many fall below 20 (`python -m astrometricslib.scripts.report_gate_limits`).
-- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_run_gates.py` checks the gate logic.
+- **Guarded by tests:** `astrometricslib/pipelines/astrometry/test/post_processing/test_record_quality.py` checks the gate logic.
 - **Raw record:** None kept.
 
 ### AST-06
@@ -835,7 +835,7 @@ These values have not been measured. Each is a code constant unless the table sa
 | AST-D06 | Pixel-scale window; driver widening; blind-retry cut-off | ±5%; 0.8 and 1.2; 90% of the time limit | `StarIdentifier._calculate_scale_hints`; `AstrometryNetPlateSolveDriver` and `HINTED_SOLVE_NEAR_TIMEOUT_FRACTION` in `drivers/astrometry_net_driver.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._calculate_scale_hints --> <!-- impl: astrometricslib.drivers.astrometry_net_driver.HINTED_SOLVE_NEAR_TIMEOUT_FRACTION --> | Solver search too wide (slow) or too narrow (no solve). | Compare the solved plate scale with the hint across your library (`report_gate_limits.py` lists stored values) to see how much window you need. |
 | AST-D07 | Catalog match radius | 10 arcsec | `CATALOG_MATCH_RADIUS_ARCSEC` in `pipelines/shared/catalog_star_identity.py` <!-- impl: astrometricslib.pipelines.shared.catalog_star_identity.CATALOG_MATCH_RADIUS_ARCSEC --> | True matches missed or wrong stars matched. | After a Gaia refit, histogram the detected-to-catalog distances from `StarIdentifier.catalog_match_separations_arcsec` and set the radius where true matches end. |
 | AST-D08 | Most stars identified per image | 500 | config key `[Processing.Astrometry] maximum_identified_stars` (default 500; 0 means no limit) <!-- impl: astrometricslib.AppConfiguration.get_maximum_identified_stars --> | Long run time and high memory use. | Time a run and watch memory with 500, 1000 and 0 on your densest field. |
-| AST-D09 | Failed catalog lookups allowed | under 50% | `MAXIMUM_FAILED_LOOKUP_FRACTION` in `pipelines/astrometry/post_processing/run_gates.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.MAXIMUM_FAILED_LOOKUP_FRACTION --> | Network outages pass the gate, or normal runs fail it. | `report_gate_limits.py` prints the failed / attempted share of every stored run; compare it with runs you know had a network outage. |
+| AST-D09 | Failed catalog lookups allowed | under 50% | `MAXIMUM_FAILED_LOOKUP_FRACTION` in `pipelines/astrometry/post_processing/record_quality.py` <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.MAXIMUM_FAILED_LOOKUP_FRACTION --> | Network outages pass the gate, or normal runs fail it. | `report_gate_limits.py` prints the failed / attempted share of every stored run; compare it with runs you know had a network outage. |
 | AST-D10 | Consecutive Gaia failures before the circuit breaker trips | 3 | `GAIA_CONSECUTIVE_FAILURE_LIMIT` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_CONSECUTIVE_FAILURE_LIMIT --> | Retries last too long, or the service is abandoned too early. | Read `get_gaia_query_statistics()` after batch runs and count how often a run recovered after 1, 2 or 3 failures. |
 | AST-D11 | Gaia search depth: margin; clamps; default; fewest stars for the estimate | 1.0 mag; G 14 to 20; G 18; 5 | `GAIA_MAGNITUDE_LIMIT_MARGIN`, `GAIA_MINIMUM_MAGNITUDE_LIMIT`, `GAIA_MAXIMUM_MAGNITUDE_LIMIT`, `GAIA_DEFAULT_MAGNITUDE_LIMIT`, `MINIMUM_STARS_FOR_DEPTH_ESTIMATE` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAGNITUDE_LIMIT_MARGIN --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MINIMUM_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_MAXIMUM_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_DEFAULT_MAGNITUDE_LIMIT --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.MINIMUM_STARS_FOR_DEPTH_ESTIMATE --> | Too few Gaia stars to match, or too many to download. | Compare `estimate_gaia_magnitude_limit` with the G magnitude of the faintest detected star that Gaia matched, over several frames. |
 | AST-D12 | Gaia rows per cone search | 50,000 | `GAIA_ROW_LIMIT` in `pipelines/astrometry/processing/star_identifier.py` <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.GAIA_ROW_LIMIT --> | Truncated Gaia lists in dense fields. | Count how often runs record `gaia_row_limit_reached` in `astrometry_flags`. |

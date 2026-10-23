@@ -2230,6 +2230,11 @@ export interface AsteroidDetectionPipelineQualityMetrics {
   candidatesEphemerisMatched: number;
   ephemerisQueriesAttempted?: number;
   ephemerisQueriesFailed?: number;
+  residualChainsTested?: number | null;
+  residualChainsRejected?: number | null;
+  residualChainsNonMonotonic?: number | null;
+  residualAssumedErrorDetections?: number | null;
+  residualWorstAcceptedRatio?: number | null;
 }
 
 /**
@@ -2602,6 +2607,36 @@ export interface MetricSpec {
   purposeReason?: string;
   exploratoryQuestion?: string;
   reviewDate?: string | null;
+}
+
+/**
+ * The short form of a `MetricSpec`, for listings.
+ *
+ * A full `MetricSpec` is long. About 170 metrics are registered, and even a
+ * one-line meaning for each makes a listing of all of them too long for an
+ * MCP reply (the limit is 40,000 bytes). This record keeps only what a
+ * reader needs to find a metric. Ask for the meaning and the rest with
+ * ``detail="full"``, usually together with a ``checkpoint``.
+ *
+ * Parameters
+ * ----------
+ * name : `str`
+ * The metric name.
+ * unit : `str`
+ * The unit every measurement of this metric uses.
+ * checkpoint : `Checkpoint`
+ * Where in processing the metric is measured.
+ * levels : `tuple` of `SubjectLevel`
+ * The subject levels the metric applies to, sorted by value.
+ * purpose : `MetricPurpose`
+ * Why the metric exists.
+ */
+export interface MetricSummary {
+  name: string;
+  unit: string;
+  checkpoint: Checkpoint;
+  levels: SubjectLevel[];
+  purpose: MetricPurpose;
 }
 
 /**

@@ -274,7 +274,7 @@ export interface ActionRegistry {
     // Parameter names are snake_case (target_id, not targetId); the router
     // drops names it does not know, so a misspelled filter is ignored.
     "quality:query": { payload: { metric?: string; level?: import('../types/backendTypes').SubjectLevel; target_id?: string; observing_night_id?: string; camera?: string; telescope?: string; since?: string; row_ids?: number[]; latest_only?: boolean }; response: import('../types/backendTypes').QualityMeasurement[] };
-    "quality:metrics": { payload: { name?: string }; response: import('../types/backendTypes').MetricSpec[] };
+    "quality:metrics": { payload: { name?: string; checkpoint?: import('../types/backendTypes').Checkpoint; detail?: 'summary' | 'full' }; response: import('../types/backendTypes').MetricSummary[] | import('../types/backendTypes').MetricSpec[] };
 
     // Analysis
     "analysis:analyze_image": { payload: { target_id: string; filter_type?: string; image_files?: string[]; type?: string }; response: AnalysisResult };

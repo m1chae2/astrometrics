@@ -55,6 +55,7 @@ from astrometricslib.models.quality.metric_spec import (
     Direction,
     MetricPurpose,
     MetricSpec,
+    MetricSummary,
     UncertaintyKind,
 )
 from astrometricslib.models.quality.quality_summary import (
@@ -530,6 +531,7 @@ def render_types() -> str:
         generate_interface(MeasurementReference, "MeasurementReference"),
         generate_interface(QualityMeasurement, "QualityMeasurement"),
         generate_interface(MetricSpec, "MetricSpec"),
+        generate_interface(MetricSummary, "MetricSummary"),
         generate_interface(SensorNoiseMeasurement, "SensorNoiseMeasurement"),
         generate_public_interface(),
     ]

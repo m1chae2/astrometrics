@@ -146,6 +146,7 @@ from astrometricslib.models.quality.metric_spec import (
     Direction,
     MetricPurpose,
     MetricSpec,
+    MetricSummary,
     UncertaintyKind,
 )
 from astrometricslib.models.quality.quality_reports import (
@@ -443,6 +444,7 @@ __all__ = [
     "MeasurementStatus",
     "MetricPurpose",
     "MetricSpec",
+    "MetricSummary",
     "MovingObjectConfig",
     "NotFoundError",
     "NumpyEncoder",

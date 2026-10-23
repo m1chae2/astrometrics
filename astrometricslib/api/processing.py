@@ -913,6 +913,7 @@ class ProcessingPipelines:
             register_job,
             drivers=self._drivers,
             frame_selection=frame_selection,
+            measured_at=datetime.now(UTC),
         )
 
     def run_spectroscopy_by_session(
@@ -965,6 +966,7 @@ class ProcessingPipelines:
                 on_item_complete=on_item_complete,
                 job_id=job.job_id,
                 drivers=self._drivers,
+                measured_at=datetime.now(UTC),
             )
 
     # -- Reading and changing a target's stacks and set-aside frames --------

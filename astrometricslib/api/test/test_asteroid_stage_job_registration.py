@@ -135,3 +135,32 @@ def test_a_failing_run_records_a_failed_job_and_still_raises(
     jobs = _read_jobs(logs_database_path, "AsteroidJobFailureTarget")
     assert len(jobs) == 1
     assert jobs[0].status == "failed"
+
+
+def test_the_api_supplies_the_time_so_the_analysis_run_stores_quality_rows(
+    isolated_job_logging: tuple[str, AppConfiguration], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify a run started through the API stores time-zone-aware rows.
+
+    The pipelines never read the clock, so the API supplies `measured_at`.
+    """
+    from astrometricslib.drivers import quality_store
+    from astrometricslib.drivers.quality_store import QualityStore
+
+    _, config = isolated_job_logging
+    library_path = Path(config.get_library_path())
+    # The quality store finds its database through the process-wide settings.
+    # It imported `get_configuration` by name, so the fixture's patch of the
+    # settings module does not reach it once it has been imported (by an
+    # earlier test); patch the store's own name too, or it would write to
+    # the real library.
+    monkeypatch.setattr(quality_store, "get_configuration", lambda: config)
+    monkeypatch.setattr(AsteroidDetectionPipeline, "process", _fake_process_with_zero_candidates)
+
+    _pipelines(config).process_target(Target(id="AsteroidQualityTarget"), stages=["asteroids"])
+
+    store = QualityStore(str(library_path / "astrometrics.db"))
+    rows = store.query(target_id="AsteroidQualityTarget", latest_only=False)
+    assert rows
+    assert all(row.measured_at.tzinfo is not None for row in rows)
+    assert all(row.job_id for row in rows)

@@ -21,7 +21,7 @@ from PIL import Image
 from astrometricslib import Visualization
 from mcp_servers.astrometrics_core.definition import MANIFEST_PATH, build_registry
 from mcp_servers.common.profile import load_manifest
-from mcp_servers.common.tool_registry import ToolRegistry
+from mcp_servers.common.tool_registry import MAXIMUM_REPLY_BYTES, ToolRegistry
 
 pytestmark = pytest.mark.anyio
 
@@ -184,20 +184,33 @@ def test_the_stored_quality_query_has_the_documented_arguments(registry: ToolReg
 
 
 async def test_quality_metrics_reply_is_json_with_levels_as_a_list(registry: ToolRegistry) -> None:
-    """`quality_metrics` replies with JSON; `levels` is a list of strings."""
+    """The summary reply is JSON under the size limit."""
     reply = await registry.execute("quality_metrics", {})
+    assert len(reply[0].text.encode()) < MAXIMUM_REPLY_BYTES
     specs = json.loads(reply[0].text)
     assert specs
     for spec in specs:
         assert isinstance(spec["levels"], list)
         assert all(isinstance(level, str) for level in spec["levels"])
-        assert isinstance(spec["decisions"], list)
+        assert "estimator" not in spec
+        assert "meaning" not in spec
     one = json.loads((await registry.execute("quality_metrics", {"name": specs[0]["name"]}))[0].text)
     assert [spec["name"] for spec in one] == [specs[0]["name"]]
 
 
-def test_quality_metrics_offers_an_optional_name(registry: ToolRegistry) -> None:
-    """`quality_metrics` takes one optional `name` argument."""
+async def test_quality_metrics_full_detail_with_a_checkpoint_is_json(registry: ToolRegistry) -> None:
+    """Full detail for one checkpoint is JSON with whole declarations."""
+    reply = await registry.execute("quality_metrics", {"detail": "full", "checkpoint": "frame"})
+    specs = json.loads(reply[0].text)
+    assert specs
+    for spec in specs:
+        assert spec["checkpoint"] == "frame"
+        assert isinstance(spec["decisions"], list)
+        assert "estimator" in spec
+
+
+def test_quality_metrics_offers_optional_arguments(registry: ToolRegistry) -> None:
+    """`quality_metrics` takes `name`, `checkpoint` and `detail`."""
     schema = registry.tools["quality_metrics"]["tool_def"].input_schema
-    assert set(schema["properties"]) == {"name"}
+    assert set(schema["properties"]) == {"name", "checkpoint", "detail"}
     assert not schema.get("required")

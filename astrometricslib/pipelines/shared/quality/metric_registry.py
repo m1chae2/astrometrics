@@ -23,6 +23,7 @@ KNOWN_UNITS: frozenset[str] = frozenset({
     "adu",
     "px",
     "arcsec",
+    "arcsec/px",
     "fraction",
     "count",
     "degC",

@@ -21,7 +21,7 @@ from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.foundation.jobs.runner import background_job, registered_job
 from astrometricslib.models.quality.excluded_frames import QuarantinePreview
 from astrometricslib.models.quality.measurement import QualityMeasurement, SubjectLevel
-from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.models.quality.metric_spec import Checkpoint, MetricSpec, MetricSummary
 from astrometricslib.models.quality.quality_reports import (
     InputQualityReport,
     RawFrameCheckReport,
@@ -191,32 +191,55 @@ class QualityRecords:
             latest_only=latest_only,
         )
 
-    def metrics(self, name: str | None = None) -> list[MetricSpec]:
+    def metrics(
+        self,
+        name: str | None = None,
+        checkpoint: str | None = None,
+        detail: Literal["summary", "full"] = "summary",
+    ) -> list[MetricSummary] | list[MetricSpec]:
         """List the declared quality metrics and what they mean.
 
         Parameters
         ----------
         name : `str`, optional
             One metric name. The list then holds only that metric.
+        checkpoint : `str`, optional
+            Only the metrics measured at this checkpoint, such as
+            ``"frame"`` or ``"spectroscopy"``.
+        detail : {``"summary"``, ``"full"``}, optional
+            ``"summary"`` (the default) gives the name, unit, checkpoint,
+            levels and purpose of each metric. About 170 metrics are
+            registered, so a list with more than that is too long for an
+            MCP reply. ``"full"`` gives the whole declaration, including
+            the meaning, which way is better and how the number is
+            estimated. Pair it with ``checkpoint`` or ``name``.
 
         Returns
         -------
-        metrics : `list` [`MetricSpec`]
-            The declarations, in the order they are registered. Each says
-            the unit, the checkpoint, which way is better and how the number
-            is estimated.
+        metrics : `list` [`MetricSummary`] or `list` [`MetricSpec`]
+            The declarations, in the order they are registered.
 
         Notes
         -----
-        An unknown ``name`` raises `InvalidArgumentError`.
+        An unknown ``name``, ``checkpoint`` or ``detail`` raises
+        `InvalidArgumentError`.
         """
         from astrometricslib.pipelines.shared.quality.metric_registry import get_metric_registry
 
+        check_choice("detail", detail, ("summary", "full"))
+        if checkpoint is not None:
+            check_choice("checkpoint", checkpoint, tuple(member.value for member in Checkpoint))
         registry = get_metric_registry()
         if name is not None:
             check_choice("name", name, registry.names())
-            return [registry.get(name)]
-        return list(registry.all())
+            specs = [registry.get(name)]
+        else:
+            specs = list(registry.all())
+        if checkpoint is not None:
+            specs = [spec for spec in specs if spec.checkpoint.value == checkpoint]
+        if detail == "full":
+            return specs
+        return [MetricSummary.from_spec(spec) for spec in specs]
 
     def _label(self, target: Target | None, folder_path: str | None = None) -> str:
         """Name the subject of a job.

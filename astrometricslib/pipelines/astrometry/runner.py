@@ -6,23 +6,30 @@ saves the identified stars into the shared star catalog.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from astrometricslib.drivers.fits_access import FITS_READ_ERRORS
 from astrometricslib.foundation.errors import InvalidArgumentError
 from astrometricslib.models.quality.gate_result import failed_gate, passed_gate
 from astrometricslib.models.quality.quality_summary import (
+    ASTROMETRY_PIPELINE_VERSION,
     AstrometryPipelineQualityMetrics,
     AstrometryQualitySummary,
 )
 from astrometricslib.models.target import Target
-from astrometricslib.pipelines.astrometry.post_processing.run_gates import astrometry_run_gates
+from astrometricslib.pipelines.astrometry.post_processing.record_quality import (
+    PLATE_SOLVE_GATE_NAME,
+    astrometry_run_gates,
+    record_astrometry_quality,
+)
 from astrometricslib.pipelines.pipeline_base import (
     AnalysisPipeline,
     PipelineRequest,
     Result,
     run_pipeline,
 )
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
 from astrometricslib.pipelines.shared.session_identification import write_wcs_to_fits_header
 from astrometricslib.pipelines.shared.star_recording import (
     _drop_unresolved_stars,
@@ -31,9 +38,6 @@ from astrometricslib.pipelines.shared.star_recording import (
 )
 from astrometricslib.utilities.coordinate_parsing import parse_coordinate_string
 from astrometricslib.utilities.exceptions import DATA_ERRORS
-
-# The name the plate-solve check goes by in an astrometry run's gate record.
-PLATE_SOLVE_GATE_NAME = "plate_solve"
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +185,6 @@ def _stored_stack_fwhm_px(path: str, target: Any) -> float | None:
         The stored width, or `None` when there is no target, the image is not
         the target's stacked image, or no width was stored.
     """
-    from pathlib import Path
-
     try:
         stacking = target.stacking
         stacked_image = stacking.stacked_image
@@ -378,6 +380,23 @@ class AstrometryPipelineAdapter(AnalysisPipeline):
             summary.record_gate(failed_gate(PLATE_SOLVE_GATE_NAME, "plate solve failed"))
         for gate in astrometry_run_gates(summary.astrometry_metrics):
             summary.record_gate(gate)
+
+        # The same numbers and gates, stored as measurements next to the
+        # summary. The context is None when the caller gave no time; then
+        # nothing is stored (a warning says so). A storage failure is logged
+        # inside and never fails the run.
+        measurement_context = PipelineRunContext.from_options(
+            request.target.id, self.pipeline_name, ASTROMETRY_PIPELINE_VERSION, request.options
+        )
+        if measurement_context is not None:
+            # Values read from the stacked image go on the stack's subject.
+            image_path = getattr(result.context.image, "path", None)
+            record_astrometry_quality(
+                summary.astrometry_metrics,
+                list(summary.gates),
+                measurement_context,
+                Path(image_path).name if image_path else None,
+            )
 
         from astrometricslib.pipelines.shared.applied_camera_profile import (
             camera_name_from_header,

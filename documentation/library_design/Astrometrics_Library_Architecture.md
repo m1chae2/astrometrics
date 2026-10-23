@@ -212,8 +212,8 @@ Plate solving connects pixel coordinates $(x,y)$ to sky coordinates $(\alpha, \d
 
    The WCS is written into the FITS header with its SIP terms, so a later reader keeps the lens correction. <!-- impl: astrometricslib.pipelines.shared.session_identification.write_wcs_to_fits_header -->
 4. **Naming the stars.** Each detected star is matched to the nearest entry in the SIMBAD database [22] or the Gaia catalog [23]. Gaia lists positions for one fixed date, the catalog epoch, with each star's proper motion (its yearly drift across the sky). Over a decade a fast star can drift a whole match radius, so each Gaia position is moved to the observation date first. <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.propagate_gaia_positions --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._move_gaia_coords_to_observation_epoch -->
-5. **Judging the fit.** Two numbers come from the solve. The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's index. An online solve returns no match table, so it has none. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
-6. **Refitting to Gaia.** The solver fits a few dozen bright stars of its own index, which carry the index's errors, so a solution can be a pixel off and still agree with itself. The pipeline therefore fits a new low-order SIP solution to the detected stars matched to Gaia stars at the observation date. It drops stars far from the fit (blends, double stars, wrong matches) and repeats until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. The quality check judges the first available of three numbers: the RMS against Gaia, the solver's fit residual, and the catalog match separation. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
+5. **Judging the fit.** Two numbers come from the solve. The *fit residual* is the root mean square (RMS) distance, in arcseconds, between each matched star's position under the fitted WCS and its position in the solver's index. An online solve returns no match table, so it has none. The *catalog match separation* is the RMS distance from each detected star to its nearest catalog star within the match radius. <!-- impl: astrometricslib.drivers.astrometry_net_driver.read_corr_fit_statistics --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier.get_catalog_match_separation_rms_arcsec -->
+6. **Refitting to Gaia.** The solver fits a few dozen bright stars of its own index, which carry the index's errors, so a solution can be a pixel off and still agree with itself. The pipeline therefore fits a new low-order SIP solution to the detected stars matched to Gaia stars at the observation date. It drops stars far from the fit (blends, double stars, wrong matches) and repeats until the set is stable. The new solution replaces the solver's only when it fits better. The residual against Gaia is recorded either way, and it does not depend on the solver. The quality check judges the first available of three numbers: the RMS against Gaia, the solver's fit residual, and the catalog match separation. <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality._residual_and_basis --> <!-- impl: astrometricslib.pipelines.astrometry.processing.wcs_refinement.refine_wcs_with_gaia --> <!-- impl: astrometricslib.pipelines.astrometry.processing.star_identifier.StarIdentifier._refine_wcs_against_gaia -->
 
 ### 4.3 Pipeline theory of operations
 
@@ -237,7 +237,7 @@ At least four stars are needed, since one quad needs four. Below a higher count 
 
 #### 4.4.2 After solving: checking the result
 
-The solver must find a WCS, and enough stars must match a catalog entry, or the residual is an average over too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. The limit sits well above centroid noise (the small random error in finding a star's center), so a larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.quality.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.run_gates.astrometry_run_gates -->
+The solver must find a WCS, and enough stars must match a catalog entry, or the residual is an average over too few stars. The residual of Section 4.2, step 6, must stay below a fixed fraction of the star width. The limit sits well above centroid noise (the small random error in finding a star's center), so a larger residual means a wrong match, a bad distortion model, or a wrong field. A network check fails when remote catalog lookups were paused or too many failed, which tells a sparse field from a network problem. <!-- impl: astrometricslib.models.quality.gate_result.unchecked_gate --> <!-- impl: astrometricslib.pipelines.astrometry.post_processing.record_quality.astrometry_run_gates -->
 
 :::{warning}
 **A pass is not a measure of position accuracy.** The residual limit catches a failed solve and does not rank good ones.
@@ -321,7 +321,7 @@ Table 5 lists the steps.
 
 ### 5.4 Quality metrics and photometric validation
 
-Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. <!-- impl: astrometricslib.pipelines.photometry.post_processing.run_gates.photometry_run_gates -->
+Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. <!-- impl: astrometricslib.pipelines.photometry.post_processing.record_quality.photometry_run_gates -->
 
 #### 5.4.1 Before measuring: screening the input
 
@@ -391,7 +391,7 @@ Table 6 lists the steps.
 
 ### 6.4 Quality metrics and spectral validation
 
-The pipeline keeps run gates, recorded as passed, failed, or not checked as in Section 4.4, and checkpoint metrics, numbers stored with each spectrum at four points of its processing. There are nine run gates. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates -->
+The pipeline keeps run gates, recorded as passed, failed, or not checked as in Section 4.4, and checkpoint metrics, numbers stored with each spectrum at four points of its processing. There are nine run gates. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.record_quality.spectroscopy_run_gates -->
 
 #### 6.4.1 Before extracting: checking the input
 
@@ -399,7 +399,7 @@ A gate fails when a star's zero-order image holds many saturated pixels, which m
 
 #### 6.4.2 After extracting: checking the spectrum
 
-The leftover zero-point offsets across the run must scatter by less than about one pixel of wavelength. The median tilt of observed spectra over their Gaia XP spectra must stay below a limit, since a tilt shared by most stars points at the response or the airmass correction. The classification gate fails on a poor match or a gap to another class below the gap limit, but not on a tie between neighboring subtypes alone. Further gates compare the measured type with the catalog's, check line-feature probabilities and the measured resolution, and count spectra that fail a checkpoint metric. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.wavelength_scale_gate --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.run_gates.spectroscopy_run_gates --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips -->
+The leftover zero-point offsets across the run must scatter by less than about one pixel of wavelength. The median tilt of observed spectra over their Gaia XP spectra must stay below a limit, since a tilt shared by most stars points at the response or the airmass correction. The classification gate fails on a poor match or a gap to another class below the gap limit, but not on a tie between neighboring subtypes alone. Further gates compare the measured type with the catalog's, check line-feature probabilities and the measured resolution, and count spectra that fail a checkpoint metric. <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.wavelength_scale.wavelength_scale_gate --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.compare_to_gaia_xp.GAIA_XP_SLOPE_LIMIT_PERCENT_PER_1000_ANGSTROM --> <!-- impl: astrometricslib.pipelines.spectroscopy.post_processing.record_quality.spectroscopy_run_gates --> <!-- impl: astrometricslib.pipelines.spectroscopy.pre_processing.atmospheric_extinction.ExtinctionCorrection --> <!-- impl: astrometricslib.pipelines.spectroscopy.utilities.calibration_tuner.SpectroscopyCalibrationTuner._detect_absorption_dips -->
 
 ---
 
@@ -446,7 +446,7 @@ Table 7 lists the steps.
 
 ### 7.4 Quality metrics and motion track validation
 
-Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. A search that finds nothing says little unless it could have found something, so the first check records whether it could. <!-- impl: astrometricslib.pipelines.asteroid_detection.run_gates.asteroid_run_gates -->
+Each run-level check is recorded as passed, failed, or not checked, as in Section 4.4. A search that finds nothing says little unless it could have found something, so the first check records whether it could. <!-- impl: astrometricslib.pipelines.asteroid_detection.record_quality.asteroid_run_gates -->
 
 #### 7.4.1 Before fitting: checking detections
 

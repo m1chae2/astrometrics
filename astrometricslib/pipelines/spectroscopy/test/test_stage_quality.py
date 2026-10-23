@@ -34,7 +34,7 @@ from astrometricslib.pipelines.spectroscopy.post_processing.assess_output_qualit
     assess_output_quality,
     output_quality_checkpoint,
 )
-from astrometricslib.pipelines.spectroscopy.post_processing.run_gates import (
+from astrometricslib.pipelines.spectroscopy.post_processing.record_quality import (
     stage_quality_rows,
     summarize_stage_quality,
 )

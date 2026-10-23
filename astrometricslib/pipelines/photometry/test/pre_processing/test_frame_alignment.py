@@ -24,7 +24,7 @@ import pytest
 from astropy.io import fits
 
 from astrometricslib.models.quality.gate_result import GateStatus
-from astrometricslib.pipelines.photometry.post_processing import run_gates as rg
+from astrometricslib.pipelines.photometry.post_processing import record_quality as rg
 from astrometricslib.pipelines.photometry.pre_processing.detector_noise import DetectorNoise
 from astrometricslib.pipelines.photometry.pre_processing.frame_photometry import (
     MINIMUM_ANCHORS_FOR_SIMILARITY,

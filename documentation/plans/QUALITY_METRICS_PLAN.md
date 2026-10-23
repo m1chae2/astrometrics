@@ -29,7 +29,8 @@ of truth. Line numbers drift, so this plan names files and functions instead.
 Status on 2026-10-23: design, target dataset report and order of work agreed after two board
 reviews. Phase 0 is merged (#100, Appendix C). Phase 1 is built and board-reviewed on branch
 `94-phase1-foundations` (Appendix D, PR #103). Phase 2 is built and board-reviewed on branch
-`94-phase2a-sensor-noise` (Appendix E). Phase 3 is in progress. Tracked in issue #93.
+`94-phase2a-sensor-noise` (Appendix E). Phase 3 is built on branch `94-phase3-pipeline-metrics`; the
+board review is next. Tracked in issue #93.
 
 A technical review board (an observational astronomer, a software engineer and a technical
 architect) reviewed the plan on 2026-10-17. All three approved it with changes. Appendix A lists
@@ -187,6 +188,12 @@ decisions 16 to 21 with the second.
     fitting cannot use in parallel) and over a threads-only default. The cost is memory (about
     2.7 GB on real data) and one rule for callers: a script that starts the job must keep its
     top-level code under a `__main__` guard (Appendix E).
+25. **The spectral registration check no longer tests the background level.** Agreed with the user
+    on 2026-10-23, in phase 3: Siril's sequence column the check read as a registration error is
+    the frame's sky background level (Siril's reader, `src/io/seqfile.c`), so that part never
+    tested alignment; it is dropped, because the quarantine's cloud check and the
+    background-homogeneity check already watch the sky. A real alignment check comes with the
+    field-rotation metric (`QUALITY_SCIENCE_PLAN.md`).
 
 ## 3. The shared shape
 
@@ -1205,10 +1212,11 @@ the affected READMEs updated. Each phase is one pull request.
    golden suite gives the same science numbers with the profiles keyed by setting.
 3. **Existing pipeline metrics in the new shape.** In each pipeline's change, rename its
    `run_gates.py` to `record_quality.py` (decision 10) and emit measurements next to its current
-   summary. In the stacking change, add the stack noise in empty apertures, the effective frame
+   summary. In the stacking change (its own `post_processing/record_quality.py`), add the stack noise in empty apertures, the effective frame
    count and time of each run, and each run's frame membership and weights as frame-level rows
    (section 5.1). Each night's contribution to a stack follows right after the subset stacks
-   (decision 17). Fix the dropped asteroid `residual_*` counts and
+   (decision 17); the subset stacks are built by `subset_stack.py` and `subset_noise_run.py` in the stacking folder
+   and write only under the target's `_subsets/` folder. Fix the dropped asteroid `residual_*` counts and
    regenerate the UI types. Run the history fill (safeguard 3). Done when every metric in the five
    summaries has a registered name, appears in the table after a run, and the filled history
    matches the JSON.

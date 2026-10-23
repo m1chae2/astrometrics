@@ -4,13 +4,13 @@
 
 ## Abstract
 
-This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers of the package and the rule that keeps them apart, the model classes that hold each kind of observational record, and the modules that carry out each of the five pipelines. It lists the tuned values each pipeline uses, with the status label of each value and a link to the validation register entry that holds its evidence. It also names the scripts and tests that check the code. The paper states no evidence itself. It is written for developers who review or change the algorithms.
+This paper maps the design in `Astrometrics_Library_Architecture.md` to the Python source in `astrometricslib/`. It names the layers and the rule that keeps them apart, the model classes, the modules of each of the five pipelines, and the scripts and tests that check them. It lists each pipeline's tuned values with a status label and a link to the register entry that holds the evidence. It is written for developers who review or change the algorithms.
 
 Terms are defined in the [glossary](../Glossary.md). This document also defines each term the first time it appears.
 
 ## 1. Scope
 
-**Statement of need.** This paper is an index from the theory to the code. Theory stays in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md). Evidence stays in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [pipeline review guides](./pipelines/index.md) and the READMEs.
+**Statement of need.** This paper indexes the theory to the code. Theory is in [Astrometrics_Library_Architecture.md](./Astrometrics_Library_Architecture.md). Evidence is in the validation register, [validation/index.md](./validation/index.md). Module paths are relative to `astrometricslib/`. Stage detail is in the [pipeline review guides](./pipelines/index.md) and the READMEs.
 
 The one supported entry point is the package root (`from astrometricslib import Astrometrics`, names in `astrometricslib.__all__`). It re-exports the facade from `api/`, the driver interfaces (Section 4.7), the job framework (Section 4.9), and the error types. The package builds on Astropy [1]. `wayfindinglib`, the backend and the MCP servers [2] use the library. The settings each pipeline uses are listed in Section 5.
 
@@ -70,7 +70,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Interfaces (§3.1).** `stack_request.py` (`choose_frames_to_stack`, `run_stack`), `stage.py` (`stack_frames`), `stack_runner.py` (engine run, `PIPELINE_STEPS`). Batch dispatch is in `astrometricslib/pipelines/tasks.py` and `target_batch.py`.
 - **Calibration frames (§3.2).** `calibration_ingest.py`, `astrometricslib/drivers/calibration_library.py`, `pre_processing/flat_calibration.py`.
-- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which finds a setting's flats and bias frames and calls `pre_processing/sensor_noise.py` (`measure_sensor_noise`). With `save=True` it writes the camera profile, so it lives under `stacking/` and not `shared/quality/`. The result is a `SensorNoiseMeasurement`. The RPC is `calibration:measure_sensor_noise`; the MCP server withholds it. Evidence: [STK-35](validation/stacking.md#stk-35).
+- **Gain and read noise (§3.2).** `CalibrationCatalog.measure_sensor_noise` (`astrometricslib/api/processing.py`) calls `sensor_noise_run.py`, which finds a setting's flats and bias frames and calls `pre_processing/sensor_noise.py` (`measure_sensor_noise`). With `save=True` it writes the camera profile. The RPC is `calibration:measure_sensor_noise`; the MCP server withholds it. Evidence: [STK-35](validation/stacking.md#stk-35).
 - **Rejection and filtering (§3.2).** `astrometricslib/utilities/rejection_thresholds.py`, `astrometricslib/utilities/stack_filter_floor.py`.
 - **Exposure groups and weights (§3.2).** `processing/exposure_groups.py`, `group_alignment.py`, `group_derotation.py`, `star_pattern_candidates.py`, `spectral_frame_alignment.py`; `pre_processing/exposure_weighting.py`.
 - **Sequence and restacks (§3.3).** `pre_processing/stack_inputs.py`; `post_processing/previous_stack.py`, `stack_comparison.py`, `interrupted_jobs.py`.
@@ -78,6 +78,9 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Frame measurement (§2.1).** `ProcessingPipelines.record_frame_measurements` (`frame_measurement_run.py`) measures each light frame with `measure_frame`.
 - **Input screening (§3.4.1).** `pre_processing/frame_quarantine.py`, `frame_homogeneity.py`, `background_homogeneity.py`, `camera_selection.py`, `assess_input_quality.py`.
 - **Output checks (§3.4.2).** `post_processing/assess_output_quality.py`, `stack_quality.py`, `exposure_group_report.py`, `stack_quality_report.py`.
+- **Stack measurements (§3.4.2).** `stage._record_stack_quality` calls `post_processing/record_quality.py` (`record_stacking_quality`), which stores the summary, 16 gates, the stack noise and the frame weights. <!-- impl: astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality -->
+- **Stack noise and weights (§3.4.2).** `post_processing/stack_noise.py` (`measure_stack_noise`) and `stack_membership.py` (`wfwhm_weights`). Evidence: [STK-36](validation/stacking.md#stk-36), [STK-07](validation/stacking.md#stk-07).
+- **Subset stacks (§3.4.2).** `subset_noise_run.py` and `subset_stack.stack_frame_subset` stack parts of the library stack into `_subsets/`. Evidence: [STK-36](validation/stacking.md#stk-36), [STK-37](validation/stacking.md#stk-37).
 
 ### 4.2 Astrometry (Architecture §4)
 
@@ -128,10 +131,11 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 - **Frames and targets.** `frame_grouping.py`, `quality/frame_selection.py`, `frame_scanning.py`, `target_records.py`, `target_sessions.py`.
 - **Images.** `image_conversions.py`, `image_scaling.py`.
-- **Stars.** `star_recording.py`; `catalog_star_identity.py` (position tolerance, name preference, also used by `scripts/merge_duplicate_catalog_stars.py`).
+- **Stars.** `star_recording.py`; `catalog_star_identity.py`.
 - **Solving and state.** `session_identification.py`, `analysis_context.py`.
 - **Recording.** `provenance_recording.py`, `applied_camera_profile.py`.
 - **Quality primitives.** `quality/saturation.py`, `quality_metrics.py`, `frame_statistics.py`, `background_measurement.py`, `raw_frame_check.py`, `frame_measurement.py`.
+- **Run measurements.** Each pipeline's `record_quality.py` stores its run's numbers and gates as the metrics declared in its `metrics.py`.
 
 ### 4.7 Drivers and pixel-level primitives
 
@@ -143,7 +147,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 - **Stores.** `calibration_library.py`, `camera_profile_store.py`, `provenance_store.py`, `local_database.py`, `catalog_access.py` (`CatalogAccess`).
 - **Images.** `fits_access.py`, `image.py` (`AstrometricsImage`), `filter_detection.py`, `frame_prefetch.py`.
 
-`catalog_access.py` runs no SQL itself. It uses the Butler, a keyed-record SQLite store shared with wayfindinglib and modeled on the Rubin data butler [9] (Section 4.8). Target reads use `local_database.load_targets`.
+`catalog_access.py` runs no SQL itself. It uses the Butler, a keyed-record SQLite store shared with wayfindinglib and modeled on the Rubin data butler [9] (Section 4.8).
 
 ### 4.8 Shared storage backend
 
@@ -155,7 +159,7 @@ Paths are relative to the pipeline's folder unless they start with `astrometrics
 
 ## 5. Tuned parameters and validation status
 
-Tables 4 to 8 list each pipeline's tuned values and the architecture section that explains each. *Measured* means real data chose or confirmed the value. *Partly measured* means the measurement is incomplete, such as synthetic data or one target. *Design estimate* means a reasoned choice, not yet measured. Each label links to the [validation register](./validation/index.md), either to the evidence entry or to the pipeline's design-estimate table. A hidden link after each table names the code that holds each value, and a test checks it.
+Tables 4 to 8 list each pipeline's tuned values and the architecture section that explains each. Each status label (*Measured*, *Partly measured*, *Design estimate*; defined in the [register](./validation/index.md#3-status-labels)) links to its evidence entry or design-estimate table. A hidden link after each table names the code that holds each value, and a test checks it.
 
 ### 5.1 Stacking settings
 
@@ -393,6 +397,7 @@ Tables 4 to 8 list each pipeline's tuned values and the architecture section tha
 Evidence is in the [validation register](./validation/index.md). This section maps behaviors the [validation sessions](./validation/index.md#6-validation-sessions) rely on to code.
 
 - **Scripts** in `astrometricslib/scripts/`: `run_empirical_validation.py` (campaign through the public API), `run_all_target_processing.py` (batch), `seed_local_star_catalog.py`, `benchmark_siril_concurrency.py`, `backfill_focal_length.py`.
+- **History fill.** `scripts/backfill_quality_measurements.py` copies saved summaries into the quality store. Record: [Section 6.4](./validation/index.md#64-history-fill-of-the-quality-store).
 - **Per-session photometry.** `analyze_target(pipeline_type="photometry")` runs `VariabilityAnalyzer` once per `TargetSession` ([PHO-14](./validation/photometry.md#pho-14)).
 - **Cross-session star matching** (Architecture §5.2, concept 6): `_match_and_merge_across_sessions` in `pipelines/photometry/batch.py`. It uses `search_around_sky`, backed by a KD-tree [10]. Photometry passes its own `StarIdentifier()` to `resolve_frame_wcs`, so SIMBAD is not queried per star. `sessions_missing_wcs` isolates a session that lacks a WCS.
 - **Track linking.** `MovingObjectDetector._chain_detections_by_persistence` in `pipelines/asteroid_detection/detection.py` filters pairs with a vectorized RA/Dec box before computing separations. The search is still $O(N \times M)$ ([MOV-07](./validation/asteroid_detection.md#mov-07)).

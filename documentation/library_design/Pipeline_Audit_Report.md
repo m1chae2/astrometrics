@@ -4,8 +4,8 @@
 
 ## 1. Executive Summary
 
-- **Implementation References Checked:** 250
-- **Resolved Code Symbols:** 250
+- **Implementation References Checked:** 251
+- **Resolved Code Symbols:** 251
 - **Broken / Stale Implementation Links:** 0
 - **Analysis Pipelines Audited:** 4 (plus stacking, which has no adapter)
 - **Documented Tuned Parameters:** 74
@@ -173,6 +173,7 @@ Traceability audit of embedded `<!-- impl: ... -->` symbols from `Astrometrics_L
 | `astrometricslib.pipelines.asteroid_detection.rotation_period.find_rotation_period` | RESOLVED | Resolves; present and tested, not called by any pipeline step |
 | `astrometricslib.pipelines.asteroid_detection.record_quality.asteroid_run_gates` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.scripts.validate_asteroid_detection` | RESOLVED | Resolves; a script run by hand |
+| `astrometricslib.pipelines.stacking.post_processing.record_quality.record_stacking_quality` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.shared.quality.frame_measurement.FRAME_MEASUREMENT_TIME_BUDGET_SECONDS` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_GRID_CELL_COUNT` | RESOLVED | Resolves; used by library code |
 | `astrometricslib.pipelines.shared.quality.frame_measurement.MOFFAT_CANDIDATES_PER_CELL` | RESOLVED | Resolves; used by library code |

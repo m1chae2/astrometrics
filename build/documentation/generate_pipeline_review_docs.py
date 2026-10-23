@@ -3453,6 +3453,13 @@ Stacking has no `AnalysisPipeline` adapter. The entry point is `stage.stack_fram
    so the edges of a stack are covered by fewer frames than the middle and are noisier. The trim
    measures the noise and cuts each side back to where it matches the interior; a stack with
    clean edges is left alone. The quality summary and its gates are built (<<gate_count>>).
+   The stage then stores the summary's numbers, the gates, the stack's noise, the effective frame
+   count and time, and one weight per member frame as quality measurements
+   (`record_stacking_quality`). The noise is the scatter of the summed sky in fixed empty
+   patches, scaled by the flux of reference stars. With star-width weighting the frame weights
+   are rebuilt from the sequence file's star widths; with noise or star-count weighting they are
+   stored as not measured. When the patches' sky coordinates come from a frame header, they are
+   first moved onto the stored reference stars.
 6. **Preview image.** A JPEG for people to look at is made from a copy of the stack; the stack
    itself is never changed. GraXpert, an AI tool, removes the sky's brightness gradient. Siril
    stretches the brightness so faint parts show. Cosmic Clarity, another AI tool, removes noise.

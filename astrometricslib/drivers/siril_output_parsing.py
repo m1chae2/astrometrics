@@ -16,6 +16,11 @@ from astrometricslib.drivers.fits_access import read_data
 
 _REGISTRATION_LINE_PATTERN = re.compile(r"^R(\d+) ")
 
+# An image line of a Siril sequence file: "I <image number> <included> ...".
+# The second number is 1 for an image still in the sequence and 0 for one that
+# was dropped (for example when registration found no stars in it).
+_IMAGE_LINE_PATTERN = re.compile(r"^I\s+\d+\s+([01])(?:\s|$)")
+
 # Siril reports how registration went as "Total: 46 failed, 94 registered."
 _REGISTRATION_TOTAL_PATTERN = re.compile(r"Total:\s*(\d+)\s+failed,\s*(\d+)\s+registered")
 
@@ -119,6 +124,34 @@ def parse_seq_file(seq_path: str) -> list[dict[str, float]]:
                 "dy": float(parts[13]),
             })
     return frames
+
+
+def parse_seq_inclusion(seq_path: str) -> list[bool]:
+    """Read which images a Siril sequence file still includes.
+
+    Siril marks an image it could not register as not included. The stack
+    leaves that image out, so it is not a member of the stack.
+
+    Parameters
+    ----------
+    seq_path : `str`
+        The file path to the Siril `.seq` file.
+
+    Returns
+    -------
+    included : `list` of `bool`
+        One flag per image, in file order. Empty if the file does not exist
+        or has no image lines.
+    """
+    flags: list[bool] = []
+    if not os.path.exists(seq_path):
+        return flags
+    with open(seq_path) as seq_file:
+        for line in seq_file:
+            match = _IMAGE_LINE_PATTERN.match(line)
+            if match:
+                flags.append(match.group(1) == "1")
+    return flags
 
 
 def parse_zero_order_star(lst_path: str) -> dict[str, float] | None:

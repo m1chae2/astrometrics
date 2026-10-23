@@ -67,11 +67,16 @@ class SirilStackingDriver(StackingDriver):
             The per-frame registration results and the rejected pixel
             fraction (see `StackingDriver.read_stack_artifacts`).
         """
-        from astrometricslib.drivers.siril_output_parsing import measure_rejected_fraction, parse_seq_file
+        from astrometricslib.drivers.siril_output_parsing import (
+            measure_rejected_fraction,
+            parse_seq_file,
+            parse_seq_inclusion,
+        )
 
         stem = stacked_path.rsplit(".", 1)[0]
         return {
             "registration_frames": parse_seq_file(f"{stem}_Registration.seq"),
+            "registration_included": parse_seq_inclusion(f"{stem}_Registration.seq"),
             "rejected_pixel_fraction": measure_rejected_fraction(stacked_path),
         }
 

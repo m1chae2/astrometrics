@@ -125,6 +125,22 @@ def _spectroscopy_emitted_measurements() -> list[QualityMeasurement]:
     return spectroscopy_emitted_measurements()
 
 
+def _stacking_emitted_measurements() -> list[QualityMeasurement]:
+    """Run the stacking pipeline's record step on a fixed stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        What the record step emits for a fully measured stack of two exposure
+        groups.
+    """
+    from astrometricslib.pipelines.stacking.test.conformance_fixture import (
+        stacking_emitted_measurements,
+    )
+
+    return stacking_emitted_measurements()
+
+
 # Phase 3 (plan section 3.7): a pipeline listed here produces every metric it
 # declares. Each entry maps the pipeline to a function that runs its record
 # step on a fixed run and returns the measurements. A pipeline joins this
@@ -134,6 +150,7 @@ PHASE_3_RECORD_STEPS: dict[str, Callable[[], list[QualityMeasurement]]] = {
     "astrometry": _astrometry_emitted_measurements,
     "photometry": _photometry_emitted_measurements,
     "spectroscopy": _spectroscopy_emitted_measurements,
+    "stacking": _stacking_emitted_measurements,
 }
 
 

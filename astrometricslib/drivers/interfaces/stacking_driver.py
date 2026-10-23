@@ -157,8 +157,10 @@ class StackingDriver(ABC):
             (``dx``, ``dy``, ``fwhm_x``, ``fwhm_y``, ``roundness``, ``rmse``
             and ``nb_stars``), in the order of the diagnostics'
             ``"symlinked_light_paths"``. ``"rejected_pixel_fraction"``, the
-            share of pixel values thrown out, 0 to 1, or `None`. A value the
-            engine did not produce is an empty list or `None`.
+            share of pixel values thrown out, 0 to 1, or `None`.
+            ``"registration_included"``, one flag per image in the same order:
+            `False` for an image the engine dropped while registering. A value
+            the engine did not produce is an empty list or `None`.
         """
 
     @abstractmethod

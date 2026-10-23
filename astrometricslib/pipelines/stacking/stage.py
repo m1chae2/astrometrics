@@ -496,10 +496,13 @@ def stack_frames(
     # are covered by fewer frames and are noisier. Trim them off. The check
     # leaves a stack with clean edges as it is. It runs before the stack is
     # measured and pictured, so both describe the trimmed stack.
+    crop_offset = (0, 0)
     if stacked_path and not has_spectral and get_configuration().get_trim_noisy_stack_edges_enabled():
         from astrometricslib.pipelines.stacking.post_processing.stack_crop import crop_stack_edges
 
-        crop_stack_edges(stacked_path)
+        crop_box = crop_stack_edges(stacked_path)
+        if crop_box is not None:
+            crop_offset = (crop_box.x0, crop_box.y0)
     excluded_frames.extend(
         ExcludedFrame(path=path, reason="corrupt or unreadable FITS file")
         for path in diagnostics.get("corrupt_frames_skipped", [])
@@ -547,6 +550,21 @@ def stack_frames(
                     id=entity_id, location=stacked_path, entity_description="entitydesc:stacked-image"
                 )
             },
+        )
+        # The same summary, the stack's noise in empty sky and the frames
+        # that went in, stored as measurements. A failure here never fails
+        # the stack.
+        _record_stack_quality(
+            summary,
+            target.id,
+            stacked_path,
+            target_frames,
+            diagnostics,
+            stack_weight,
+            crop_offset,
+            job_id,
+            measured_at,
+            quality_recording,
         )
         # A picture for people to look at. It never changes the stack and a
         # failure to make it is logged, not raised. The image viewer shows it
@@ -644,6 +662,74 @@ def _record_frame_quality(
             if summary.already_running
             else "",
         )
+
+
+def _record_stack_quality(
+    summary: StackQualitySummary,
+    target_id: str,
+    stacked_path: str,
+    target_frames: list[Any],
+    diagnostics: dict[str, Any],
+    stack_weight: str | None,
+    crop_offset: tuple[int, int],
+    job_id: str | None,
+    measured_at: datetime | None,
+    quality_recording: FrameQualityRecording | None,
+) -> None:
+    """Store the finished stack's quality measurements.
+
+    This never stops a stack. The measurements are written next to the quality
+    summary, which stays as it is. Nothing is stored when the caller gave no
+    measurement time, because pipeline code does not read the clock.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary.
+    target_id : `str`
+        The target's id.
+    stacked_path : `str`
+        The finished stack.
+    target_frames : `list`
+        The frames given to the stacking program.
+    diagnostics : `dict`
+        What the stacking run reported.
+    stack_weight : `str` or `None`
+        The Siril weighting mode the stack used.
+    crop_offset : `tuple` [`int`, `int`]
+        The (columns, rows) trimmed from the stack's left and top edges.
+    job_id : `str` or `None`
+        The tracked job, if any.
+    measured_at : `datetime` or `None`
+        When the stack started, with a time zone, from the caller.
+    quality_recording : `FrameQualityRecording` or `None`
+        The caller's configuration, which says where the quality store lives.
+    """
+    from astrometricslib.models.quality.quality_summary import STACKING_PIPELINE_VERSION
+    from astrometricslib.pipelines.shared.quality.pipeline_measurements import PipelineRunContext
+    from astrometricslib.pipelines.stacking.post_processing.record_quality import record_stacking_quality
+
+    if measured_at is None:
+        logger.warning(
+            "No measurement time was given, so the quality measurements of the stack of '%s' are not stored.",
+            target_id,
+        )
+        return
+    context = PipelineRunContext.from_options(
+        target_id, "stacking", STACKING_PIPELINE_VERSION, {"job_id": job_id, "measured_at": measured_at}
+    )
+    if context is None:
+        return
+    record_stacking_quality(
+        summary,
+        context,
+        stacked_path,
+        target_frames,
+        diagnostics,
+        stack_weight,
+        crop_offset,
+        config=None if quality_recording is None else quality_recording.configuration,
+    )
 
 
 def _record_unchanged_stack(

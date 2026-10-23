@@ -66,6 +66,8 @@ logger = logging.getLogger(__name__)
 # A per-frame registration line in Siril's ``.seq`` file starts with R and the
 # frame's number (the same pattern `parse_seq_file` reads).
 _REGISTRATION_LINE_PATTERN = re.compile(r"^R\d+ ")
+# An image line of a Siril sequence file ("I <number> <included> ...").
+_IMAGE_LINE_PATTERN = re.compile(r"^I\s+\d+\s+[01](?:\s|$)")
 
 # The fewest frames a group of one exposure length may have and still be
 # stacked on its own. A group smaller than this cannot be registered or
@@ -2007,8 +2009,10 @@ def merge_rejection_maps(
 def merge_registration_sequences(sequence_paths: list[str], output_path: str) -> bool:
     """Join the groups' registration sequence files into one.
 
-    Only the per-frame registration lines are kept, in group order. Those
-    are the lines the stack quality checks read (see `parse_seq_file`).
+    Only the per-frame registration lines (``R``) and the image lines (``I``,
+    which say whether Siril kept the image) are kept, in group order. Those are
+    the lines the stack quality checks read (see `parse_seq_file` and
+    `parse_seq_inclusion`).
 
     Parameters
     ----------
@@ -2027,7 +2031,11 @@ def merge_registration_sequences(sequence_paths: list[str], output_path: str) ->
         if not path or not os.path.exists(path):
             continue
         with open(path) as sequence_file:
-            lines.extend(line for line in sequence_file if _REGISTRATION_LINE_PATTERN.match(line))
+            lines.extend(
+                line
+                for line in sequence_file
+                if _REGISTRATION_LINE_PATTERN.match(line) or _IMAGE_LINE_PATTERN.match(line)
+            )
     if not lines:
         return False
     with open(output_path, "w") as output_file:

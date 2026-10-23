@@ -23,6 +23,7 @@ The steps are:
 6. Previous stack (`previous_stack.py`). Before a restack overwrites a stack, it moves the old stack and its companion files (rejection map, registration table, preview, stretched FITS) into a staging folder. If the restack works, those files go into `_previous` and replace that stack's older version, and the other stacks of the target keep theirs. If it fails, everything moves back. The stage keeps only one previous version. `discard_previous_stack` deletes it and `swap_with_previous_stack` exchanges it with the current stack. `interrupted_jobs.py` puts back the old stack when the program running a restack was killed before it finished. The package root registers `restore_interrupted_stacks`, and `close_interrupted_jobs` calls it for each stacking job it closes.
 7. Stack comparison (`stack_comparison.py`). It measures two stacks the same way (sky level, pixel noise, large-scale flatness, star width) and reports the change in each as a number and a sentence. It does not pick a winner. New flats should lower the flatness number and leave the noise alone, while more frames should lower the noise and leave the flatness alone.
 8. Stack reports (`stack_quality_report.py`). It builds what `QualityRecords.measure_stack` and `ProcessingPipelines.stack_summary` return. It finds a target's stack file and measures the stack's star width, share of rejected pixels (from the rejection map beside the stack) and frame registration (from the `_Registration.seq` file beside it). It optionally compares the stack with the previous stack or another stack file, and reads back the summary the stage saved. It writes no file.
+9. Quality measurements (`record_quality.py`, `stack_noise.py`, `stack_membership.py`). They store the summary's numbers and gates as measurements, measure the stack's noise in empty patches of sky on a flux scale fixed by reference stars, and give each frame that went into the stack its weight. See [quality measurements in the stacking README](../README.md#quality-measurements).
 
 ### Color calibration compared with Siril's
 
@@ -65,5 +66,8 @@ Siril warns that PCC and SPCC give an imprecise solution when the image still ho
 - `previous_stack.py`, `interrupted_jobs.py`: the previous-stack backup and its recovery.
 - `stack_comparison.py`, `stack_quality_report.py`: the comparison and the stack reports.
 - `stack_crop.py`: the noisy-edge trim.
+- `record_quality.py`: builds the stack's quality measurements from the finished summary and stores them. It judges nothing.
+- `stack_noise.py`: the noise in empty sky, the stored sky apertures and the reference stars.
+- `stack_membership.py`: the frames a stack holds, their weights, and the effective frame count and time.
 
 For exact behavior, read the code.

@@ -1,0 +1,637 @@
+"""Builds and records the quality measurements of one stack.
+
+The stacking stage keeps its checks where they are measured (the frame
+quarantine, the background check, the flat assessment and so on), and collects
+their results in the stack's quality summary. This file does not judge
+anything. It only turns that finished summary into quality measurements and
+stores them next to the summary, which stays as it is.
+
+Four kinds of measurement are made:
+
+- The summary's numbers, such as the rejected pixel fraction, the flat noise
+  and the star widths, each under a name that says how it was measured.
+- The summary's self-checks (gates), each stored with its outcome and limit.
+- The noise of the stack in empty sky, on a flux scale that is the same for
+  every stack of the target (see `stack_noise.py`), and the effective frame
+  count and time (see `stack_membership.py`).
+- One weight for each frame that went into the stack.
+
+Nothing here reads the clock: the caller supplies the time. A failure while
+measuring or storing is logged and never fails the stack.
+"""
+
+import logging
+import math
+import os
+import time
+from collections.abc import Sequence
+from typing import Any
+
+from astrometricslib.models.quality.gate_result import GateResult
+from astrometricslib.models.quality.limit import LimitTier
+from astrometricslib.models.quality.measurement import (
+    MeasurementStatus,
+    QualityMeasurement,
+    QualitySubject,
+    SubjectLevel,
+)
+from astrometricslib.models.quality.metric_spec import MetricSpec
+from astrometricslib.models.quality.quality_summary import ExposureGroupSummary, StackQualitySummary
+from astrometricslib.pipelines.shared.quality.frame_measurement import frame_subject_id
+from astrometricslib.pipelines.shared.quality.pipeline_measurements import (
+    PipelineRunContext,
+    build_measurement,
+    gate_measurement,
+    record_run_measurements,
+)
+from astrometricslib.pipelines.stacking.metrics import (
+    GATE_METRIC_BY_NAME,
+    STACKING_DURATION_S,
+    STACKING_EFFECTIVE_FRAME_COUNT,
+    STACKING_EFFECTIVE_TIME_S,
+    STACKING_EMPTY_APERTURE_NOISE_ADU,
+    STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+    STACKING_EXPECTED_STACK_FWHM_PX,
+    STACKING_FLAT_FRAME_COUNT,
+    STACKING_FLAT_NOISE_FRACTION,
+    STACKING_FLAT_SMOOTHING_SIGMA_PX,
+    STACKING_FRAME_WEIGHT,
+    STACKING_FRAMES_ACCEPTED,
+    STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
+    STACKING_FRAMES_EXCLUDED_FOR_GAIN,
+    STACKING_FRAMES_QUARANTINED,
+    STACKING_FRAMES_STACKED,
+    STACKING_FRAMES_SUBMITTED,
+    STACKING_GROUP_ALIGNMENT_SHIFT_PX,
+    STACKING_GROUP_EXPOSURE_S,
+    STACKING_GROUP_FRAMES_STACKED,
+    STACKING_GROUP_FRAMES_SUBMITTED,
+    STACKING_GROUP_GAIN_BRIGHT_END_RATIO,
+    STACKING_GROUP_GAIN_DISAGREEMENT,
+    STACKING_GROUP_GAIN_MID_RANGE,
+    STACKING_MEDIAN_INPUT_FWHM_PX,
+    STACKING_METRICS,
+    STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
+    STACKING_NOISE_REFERENCE_FLUX_ADU,
+    STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
+    STACKING_REJECTED_PIXEL_FRACTION,
+    STACKING_SATURATED_PIXEL_FRACTION,
+    STACKING_STACKED_FWHM_PX,
+    STACKING_ZERO_PIXEL_FRACTION,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_membership import (
+    StackMembership,
+    determine_stack_members,
+    effective_exposure_seconds,
+    effective_frame_count,
+    normalized_weights,
+)
+from astrometricslib.pipelines.stacking.post_processing.stack_noise import (
+    APERTURE_FILE_NAME,
+    NO_WCS_REASON,
+    StackNoiseOutcome,
+    measure_stack_noise,
+)
+from astrometricslib.utilities.observing_night import observing_night_id
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "exposure_group_subject",
+    "measure_noise_safely",
+    "record_stacking_quality",
+    "stacking_measurements",
+]
+
+_SPEC_BY_NAME: dict[str, MetricSpec] = {spec.name: spec for spec in STACKING_METRICS}
+
+# How each gate's limit was obtained. Gates whose limits the validation
+# register marks as measured use the validated tier (the register entry goes
+# with it); the rest are rules the design chose or follow from how the data
+# are used.
+_TIER_BY_GATE: dict[str, tuple[LimitTier, str | None]] = {
+    "gain_homogeneity": (LimitTier.PHYSICAL_BUDGET, None),
+    "frame_quarantine": (LimitTier.PHYSICAL_BUDGET, None),
+    "background_homogeneity": (LimitTier.PHYSICAL_BUDGET, None),
+    "flat_level": (LimitTier.PHYSICAL_BUDGET, None),
+    "flat_noise": (LimitTier.PHYSICAL_BUDGET, None),
+    "calibration_metadata": (LimitTier.GEOMETRY, None),
+    "calibration_frame_count": (LimitTier.GEOMETRY, None),
+    "exposure_group_linearity": (LimitTier.PHYSICAL_BUDGET, None),
+    "exposure_groups_combined": (LimitTier.GEOMETRY, None),
+    "raw_frame_clipping": (LimitTier.PHYSICAL_BUDGET, None),
+    "rejected_pixel_fraction": (LimitTier.PHYSICAL_BUDGET, None),
+    "stack_sharpness": (LimitTier.PHYSICAL_BUDGET, None),
+    "spectral_registration": (LimitTier.GEOMETRY, None),
+    "saturated_pixel_fraction": (LimitTier.PHYSICAL_BUDGET, None),
+    "zero_pixel_fraction": (LimitTier.VALIDATED_DATASET, "STK-26"),
+    "negative_pixels": (LimitTier.VALIDATED_DATASET, "STK-26"),
+}
+
+# Summary fields on `StackingPipelineQualityMetrics`: the metric each fills and
+# the reason given when the field is empty.
+_METRICS_FIELDS: dict[str, tuple[str, str]] = {
+    "frames_submitted": (STACKING_FRAMES_SUBMITTED, "the stage reported no frame count"),
+    "frames_stacked": (STACKING_FRAMES_STACKED, "the stage reported no frame count"),
+    "rejected_pixel_fraction": (
+        STACKING_REJECTED_PIXEL_FRACTION,
+        "the stacker did not report how many pixels it rejected (a single-frame stack rejects none)",
+    ),
+    "flat_frame_count": (STACKING_FLAT_FRAME_COUNT, "the stack used no flat frames"),
+    "flat_noise_fraction": (
+        STACKING_FLAT_NOISE_FRACTION,
+        "the stack used no flat frames, or their noise could not be estimated",
+    ),
+    "flat_smoothing_sigma_px": (STACKING_FLAT_SMOOTHING_SIGMA_PX, "the stack used no flat frames"),
+    "saturated_pixel_fraction": (
+        STACKING_SATURATED_PIXEL_FRACTION,
+        "the stack's saturated pixels could not be measured",
+    ),
+    "zero_pixel_fraction": (
+        STACKING_ZERO_PIXEL_FRACTION,
+        "the stack file could not be read to count zero pixels",
+    ),
+    "negative_pixel_max_percent": (
+        STACKING_NEGATIVE_PIXEL_MAX_FRACTION,
+        "Siril printed no negative-pixel warning",
+    ),
+    "stacked_fwhm_px": (
+        STACKING_STACKED_FWHM_PX,
+        "the star width does not apply to this stack or could not be measured",
+    ),
+    "median_input_fwhm_px": (
+        STACKING_MEDIAN_INPUT_FWHM_PX,
+        "the star width does not apply to this stack or the input frames could not be measured",
+    ),
+    "expected_stack_fwhm_px": (
+        STACKING_EXPECTED_STACK_FWHM_PX,
+        "the star width does not apply to this stack or the input frames could not be measured",
+    ),
+    "stacking_duration_seconds": (STACKING_DURATION_S, "the stacking program reported no duration"),
+    "registration_reference_star_count": (
+        STACKING_REGISTRATION_REFERENCE_STAR_COUNT,
+        "no single registration reference frame could be identified",
+    ),
+}
+
+# Fields on `StackingInputQuality`.
+_INPUT_FIELDS: dict[str, tuple[str, str]] = {
+    "frames_accepted": (STACKING_FRAMES_ACCEPTED, "the input quality was not assessed"),
+    "frames_excluded_for_gain": (STACKING_FRAMES_EXCLUDED_FOR_GAIN, "the input quality was not assessed"),
+    "frames_excluded_for_background": (
+        STACKING_FRAMES_EXCLUDED_FOR_BACKGROUND,
+        "the input quality was not assessed",
+    ),
+    "frames_quarantined": (STACKING_FRAMES_QUARANTINED, "the input quality was not assessed"),
+}
+
+# Fields on `ExposureGroupSummary` that are plain numbers, with the reason
+# given when the group has none.
+_GROUP_FIELDS: dict[str, tuple[str, str]] = {
+    "exposure_seconds": (STACKING_GROUP_EXPOSURE_S, "the group reported no exposure"),
+    "frames_submitted": (STACKING_GROUP_FRAMES_SUBMITTED, "the group reported no frame count"),
+    "frames_stacked": (STACKING_GROUP_FRAMES_STACKED, "the group reported no frame count"),
+    "gain_mid_range": (
+        STACKING_GROUP_GAIN_MID_RANGE,
+        "this is the reference group, or its brightness ratio could not be measured",
+    ),
+    "gain_bright_end_ratio": (
+        STACKING_GROUP_GAIN_BRIGHT_END_RATIO,
+        "this is the reference group, or its brightness ratio could not be measured",
+    ),
+    "gain_disagreement": (
+        STACKING_GROUP_GAIN_DISAGREEMENT,
+        "this is the reference group, or its brightness ratios could not be compared",
+    ),
+}
+
+
+def exposure_group_subject(
+    context: PipelineRunContext, stack_file_name: str, group: ExposureGroupSummary, group_index: int
+) -> QualitySubject:
+    """Name the subject of one exposure group's values.
+
+    A group is stacked on its own and its stack is kept in the ``groups``
+    folder beside the combined stack, so the group's own stack file names the
+    subject. A stack of one exposure length has one group whose file is the
+    stack itself, so its group values sit on the stack's own subject. A group
+    that could not be stacked has no file; it is named after the combined
+    stack, its place in the list and its exposure.
+
+    Parameters
+    ----------
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_file_name : `str`
+        The combined stack's file name.
+    group : `ExposureGroupSummary`
+        The group.
+    group_index : `int`
+        The group's place in the summary's list.
+
+    Returns
+    -------
+    subject : `QualitySubject`
+        Level ``stack``.
+    """
+    if group.stack_path:
+        folder = os.path.basename(os.path.dirname(group.stack_path))
+        name = os.path.basename(group.stack_path)
+        return context.stack_subject(f"groups/{name}" if folder == "groups" else name)
+    return context.stack_subject(f"{stack_file_name}#group-{group_index}-{group.exposure_seconds:g}s")
+
+
+def _value_measurement(
+    metric_name: str,
+    value: float | int | None,
+    reason: str,
+    context: PipelineRunContext,
+    subject: QualitySubject,
+) -> QualityMeasurement:
+    """Build the measurement of one summary number.
+
+    Parameters
+    ----------
+    metric_name : `str`
+        The metric's name.
+    value : `float` or `int` or `None`
+        The number, or `None` when the summary has none.
+    reason : `str`
+        Why there may be no number.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        What the number is about.
+
+    Returns
+    -------
+    measurement : `QualityMeasurement`
+        A measured record, or a not-measured one with the reason.
+    """
+    return build_measurement(
+        _SPEC_BY_NAME[metric_name],
+        None if value is None else float(value),
+        context,
+        subject,
+        reason=reason,
+    )
+
+
+def _gate_for_measurement(gate: GateResult) -> GateResult:
+    """Put a gate's number in the unit its metric declares.
+
+    The negative-pixel check quotes whole percent; its metric is a fraction,
+    like every other share. The gate itself is not changed.
+
+    Parameters
+    ----------
+    gate : `GateResult`
+        The gate as recorded on the summary.
+
+    Returns
+    -------
+    gate : `GateResult`
+        A copy for the measurement.
+    """
+    if gate.name != "negative_pixels":
+        return gate
+    return gate.model_copy(
+        update={
+            "measured_value": None if gate.measured_value is None else gate.measured_value / 100.0,
+            "limit": None if gate.limit is None else gate.limit / 100.0,
+        }
+    )
+
+
+def _noise_measurements(
+    outcome: StackNoiseOutcome, context: PipelineRunContext, subject: QualitySubject
+) -> list[QualityMeasurement]:
+    """Build the three noise measurements of a stack.
+
+    Parameters
+    ----------
+    outcome : `StackNoiseOutcome`
+        The noise measurement or the reason there is none.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The noise, the reference flux and their ratio; all not measured, with
+        the reason, when there is no result.
+    """
+    result = outcome.result
+    reason = outcome.reason or "the noise was not measured"
+    if result is None:
+        return [
+            build_measurement(_SPEC_BY_NAME[name], None, context, subject, reason=reason)
+            for name in (
+                STACKING_EMPTY_APERTURE_NOISE_ADU,
+                STACKING_NOISE_REFERENCE_FLUX_ADU,
+                STACKING_EMPTY_APERTURE_NOISE_NORMALIZED,
+            )
+        ]
+    return [
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_ADU],
+            result.noise_adu,
+            context,
+            subject,
+            uncertainty=result.noise_uncertainty_adu,
+            sample_count=result.aperture_count,
+        ),
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_NOISE_REFERENCE_FLUX_ADU],
+            result.reference_flux_adu,
+            context,
+            subject,
+            uncertainty=result.reference_uncertainty_adu,
+            sample_count=result.reference_star_count,
+        ),
+        build_measurement(
+            _SPEC_BY_NAME[STACKING_EMPTY_APERTURE_NOISE_NORMALIZED],
+            result.normalized_noise,
+            context,
+            subject,
+            uncertainty=result.normalized_uncertainty,
+            sample_count=result.aperture_count,
+        ),
+    ]
+
+
+def _membership_measurements(
+    membership: StackMembership | None,
+    unavailable_reason: str,
+    context: PipelineRunContext,
+    stack_subject: QualitySubject,
+) -> list[QualityMeasurement]:
+    """Build the effective counts and one weight row per member frame.
+
+    Parameters
+    ----------
+    membership : `StackMembership` or `None`
+        The stack's members, or `None` when they could not be worked out.
+    unavailable_reason : `str`
+        Why there is no membership.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_subject : `QualitySubject`
+        The stack.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        The effective frame count and time on the stack, and a weight for each
+        member frame. A weight that is unknown is a not-measured record that
+        still records the membership; a member list that may include frames
+        Siril's filters dropped makes every row ``assumed``.
+    """
+    effective_count_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_FRAME_COUNT]
+    effective_time_spec = _SPEC_BY_NAME[STACKING_EFFECTIVE_TIME_S]
+    if membership is None or not membership.members:
+        reason = unavailable_reason or "the stack has no member frames"
+        return [
+            build_measurement(effective_count_spec, None, context, stack_subject, reason=reason),
+            build_measurement(effective_time_spec, None, context, stack_subject, reason=reason),
+        ]
+    weights = normalized_weights(membership)
+    exposures = [
+        float(member.frame.exposure) if member.frame.exposure else None for member in membership.members
+    ]
+    count = effective_frame_count(weights)
+    seconds = effective_exposure_seconds(weights, exposures)
+    unknown_reason = membership.weights_reason or "the frames' weights are unknown"
+    uncertain = bool(membership.membership_reason)
+    status = MeasurementStatus.ASSUMED if uncertain else MeasurementStatus.MEASURED
+    rows = []
+    for spec, value in ((effective_count_spec, count), (effective_time_spec, seconds)):
+        rows.append(
+            build_measurement(
+                spec,
+                value,
+                context,
+                stack_subject,
+                reason=unknown_reason if value is None else membership.membership_reason,
+                sample_count=len(membership.members),
+                status=status,
+            )
+        )
+    weight_spec = _SPEC_BY_NAME[STACKING_FRAME_WEIGHT]
+    for member, weight in zip(membership.members, weights, strict=True):
+        frame = member.frame
+        subject = QualitySubject(
+            level=SubjectLevel.FRAME,
+            subjectId=frame_subject_id(frame.path, context.target_id),
+            targetId=context.target_id,
+            observingNightId=observing_night_id(frame.timestamp) if frame.timestamp is not None else None,
+        )
+        if weight is None:
+            reason = unknown_reason
+            if uncertain:
+                reason += "; " + membership.membership_reason
+            rows.append(build_measurement(weight_spec, None, context, subject, reason=reason))
+        else:
+            rows.append(
+                build_measurement(
+                    weight_spec,
+                    weight,
+                    context,
+                    subject,
+                    reason=membership.membership_reason,
+                    status=status,
+                )
+            )
+    return rows
+
+
+def stacking_measurements(
+    summary: StackQualitySummary,
+    context: PipelineRunContext,
+    stack_file_name: str,
+    noise: StackNoiseOutcome,
+    membership: StackMembership | None,
+    membership_reason: str = "",
+) -> list[QualityMeasurement]:
+    """Build every measurement the stacking stage declares for one stack.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary, with its metrics, input quality and gates.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_file_name : `str`
+        The stack's file name (not a mount path).
+    noise : `StackNoiseOutcome`
+        The empty-aperture noise or the reason there is none.
+    membership : `StackMembership` or `None`
+        The stack's members and weights, or `None` when they could not be
+        worked out.
+    membership_reason : `str`, optional
+        Why there is no membership.
+
+    Returns
+    -------
+    measurements : `list` of `QualityMeasurement`
+        One record for each stack-level metric, each exposure group's values,
+        one record for each gate the summary holds, and the weights. A number
+        the summary does not have is ``not_measured`` with a reason.
+    """
+    stack_subject = context.stack_subject(stack_file_name)
+    metrics = summary.stacking_metrics
+    measurements: list[QualityMeasurement] = []
+    for field_name, (metric_name, reason) in _METRICS_FIELDS.items():
+        value = getattr(metrics, field_name)
+        if field_name == "negative_pixel_max_percent" and value is not None:
+            value = value / 100.0
+        measurements.append(_value_measurement(metric_name, value, reason, context, stack_subject))
+    for field_name, (metric_name, reason) in _INPUT_FIELDS.items():
+        value = getattr(summary.input_quality, field_name) if summary.input_quality is not None else None
+        measurements.append(_value_measurement(metric_name, value, reason, context, stack_subject))
+
+    for index, group in enumerate(metrics.exposure_groups):
+        group_subject = exposure_group_subject(context, stack_file_name, group, index)
+        for field_name, (metric_name, reason) in _GROUP_FIELDS.items():
+            measurements.append(
+                _value_measurement(metric_name, getattr(group, field_name), reason, context, group_subject)
+            )
+        shift = group.alignment_shift_pixels
+        measurements.append(
+            _value_measurement(
+                STACKING_GROUP_ALIGNMENT_SHIFT_PX,
+                None if not shift else math.hypot(*shift),
+                "this is the reference group, or the group could not be lined up",
+                context,
+                group_subject,
+            )
+        )
+
+    for gate in summary.gates:
+        metric_name = GATE_METRIC_BY_NAME.get(gate.name)
+        if metric_name is None:
+            logger.warning("The stacking gate %r has no declared metric, so it was not stored.", gate.name)
+            continue
+        tier, register_entry = _TIER_BY_GATE[gate.name]
+        measurements.append(
+            gate_measurement(
+                _gate_for_measurement(gate),
+                _SPEC_BY_NAME[metric_name],
+                context,
+                stack_subject,
+                limit_tier=tier,
+                register_entry=register_entry,
+            )
+        )
+
+    measurements.extend(_noise_measurements(noise, context, stack_subject))
+    measurements.extend(_membership_measurements(membership, membership_reason, context, stack_subject))
+    return measurements
+
+
+def measure_noise_safely(
+    stack_path: str,
+    reference_frame_path: str | None,
+    is_spectral: bool,
+    crop_offset: tuple[int, int] = (0, 0),
+) -> StackNoiseOutcome:
+    """Measure the stack's empty-aperture noise, never raising.
+
+    Parameters
+    ----------
+    stack_path : `str`
+        The finished stack.
+    reference_frame_path : `str` or `None`
+        The registration reference frame, for a stack with no solution.
+    is_spectral : `bool`
+        Whether the stack is spectral. A spectral stack has no point sources to
+        set a flux scale from, so its noise is not measured.
+    crop_offset : `tuple` [`int`, `int`], optional
+        The (columns, rows) trimmed from the stack's left and top edges.
+
+    Returns
+    -------
+    outcome : `StackNoiseOutcome`
+        The measurement, or the reason there is none. Any failure while
+        reading or measuring is logged and returned as a reason.
+    """
+    if is_spectral:
+        return StackNoiseOutcome(None, "a spectral stack has no point sources to set a flux scale from")
+    apertures_path = os.path.join(os.path.dirname(stack_path), APERTURE_FILE_NAME)
+    started = time.monotonic()
+    try:
+        outcome = measure_stack_noise(stack_path, reference_frame_path, apertures_path, crop_offset)
+    except Exception as error:  # the noise is a by-product: no failure here may fail the stack
+        logger.exception("The noise of the stack %s could not be measured", stack_path)
+        return StackNoiseOutcome(None, f"the noise measurement failed: {type(error).__name__}")
+    logger.info(
+        "Measured the noise of %s in %.1f s%s.",
+        os.path.basename(stack_path),
+        time.monotonic() - started,
+        "" if outcome.result is not None else f" (no result: {outcome.reason or NO_WCS_REASON})",
+    )
+    return outcome
+
+
+def record_stacking_quality(
+    summary: StackQualitySummary,
+    context: PipelineRunContext,
+    stack_path: str,
+    target_frames: Sequence[Any],
+    diagnostics: dict[str, Any],
+    stack_weight: str | None,
+    crop_offset: tuple[int, int] = (0, 0),
+    *,
+    config: object = None,
+) -> int:
+    """Measure the stack's noise and members, then store every measurement.
+
+    A failure at any point is logged and never fails the stack.
+
+    Parameters
+    ----------
+    summary : `StackQualitySummary`
+        The finished summary.
+    context : `PipelineRunContext`
+        The run's shared facts.
+    stack_path : `str`
+        The finished stack's path. Only its file name goes into a subject.
+    target_frames : `Sequence`
+        The frames given to the stacking program.
+    diagnostics : `dict`
+        What the stacking run reported.
+    stack_weight : `str` or `None`
+        The Siril weighting mode the stack used.
+    crop_offset : `tuple` [`int`, `int`], optional
+        The (columns, rows) trimmed from the stack's left and top edges.
+    config : `AppConfiguration`, optional
+        Where the quality store lives. The process-wide one if omitted.
+
+    Returns
+    -------
+    new_count : `int`
+        How many rows were new; 0 when anything failed.
+    """
+    try:
+        noise = measure_noise_safely(
+            stack_path,
+            summary.stacking_metrics.registration_reference_frame,
+            summary.stacking_metrics.is_spectral,
+            crop_offset,
+        )
+        membership = None
+        membership_reason = ""
+        try:
+            membership = determine_stack_members(target_frames, diagnostics, stack_weight)
+        except Exception as error:  # a by-product again
+            logger.exception("The member frames of the stack %s could not be worked out", stack_path)
+            membership_reason = f"the member frames could not be worked out: {type(error).__name__}"
+        measurements = stacking_measurements(
+            summary, context, os.path.basename(stack_path), noise, membership, membership_reason
+        )
+        return record_run_measurements(measurements, config=config)
+    except Exception:  # quality rows must never stop a stack
+        logger.exception("The quality measurements of the stack %s were not stored", stack_path)
+        return 0

@@ -296,8 +296,8 @@ def test_rejection_maps_skip_missing_files(tmp_path: Path) -> None:
     assert not merge_rejection_maps([str(tmp_path / "none.fits")], [1], str(tmp_path / "n.fits"))
 
 
-def test_registration_sequences_keep_only_the_per_frame_lines(tmp_path: Path) -> None:
-    """Only Siril's per-frame R lines are joined, in group order."""
+def test_registration_sequences_keep_only_the_per_frame_and_image_lines(tmp_path: Path) -> None:
+    """Only the R lines and the I lines are joined, in group order."""
     first, second = tmp_path / "a.seq", tmp_path / "b.seq"
     first.write_text(
         "#Siril sequence file\nS 'x' 0 2 2 0 0 6 0 0 0\nR0 3.6 3.6 0.9 0 8e-05 19 H 1 0 0 0 1 0 0 0 1\n"
@@ -308,8 +308,9 @@ def test_registration_sequences_keep_only_the_per_frame_lines(tmp_path: Path) ->
 
     lines = (tmp_path / "merged.seq").read_text().splitlines()
     assert written is True
-    assert len(lines) == 2
+    assert len(lines) == 3
     assert lines[0].startswith("R0 3.6") and lines[1].startswith("R0 2.9")
+    assert lines[2] == "I 0 1"
     assert not merge_registration_sequences([str(tmp_path / "gone.seq")], str(tmp_path / "x.seq"))
 
 

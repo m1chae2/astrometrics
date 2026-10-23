@@ -384,7 +384,9 @@ not the generic `Butler`: the `Butler` is a key/value store that writes with `IN
 and has no views, ordering or exact filters, which an append-only, filtered table needs.
 
 - **Typed columns**, one per field in section 3.1, with no JSON copy. The schema carries a version
-  (`PRAGMA user_version`), and the store migrates it explicitly.
+  in its own table, `quality_schema_version`, and the store migrates it explicitly. It never uses
+  `PRAGMA user_version`, which is one number for the whole file: the real `astrometrics.db` already
+  held 2 from an older stellar-catalog mechanism (found on real data, 2026-10-22).
 - **Capture settings in their own table**, `quality_capture_setting`, referenced by
   `capture_setting_id`. A capture setting is the camera, telescope, focal length, pixel scale,
   filter, exposure length, gain setting, offset and binning a frame was taken with. Nine

@@ -16,10 +16,13 @@ each subject, metric and channel; "newest" means the latest
 The camera and equipment settings are kept once each in
 ``quality_capture_setting``; a measurement refers to them by id.
 
-The schema version is kept in ``PRAGMA user_version``. No other store that
-writes to astrometrics.db uses that number. If one ever does, this store
-must move to its own version table. A migration only creates the quality
-tables and view and never touches any other table.
+The schema version is kept in its own table, ``quality_schema_version``
+(one row). This store never reads or writes ``PRAGMA user_version``, because
+that number is one value for the whole file and other code has used it. A
+database written by the first version of this code has the quality tables
+but no version table; it is recognized as version 1 and gets the table. A
+migration only creates the quality tables, view and version table and never
+touches any other table.
 
 Reading and writing are separate paths. A read opens the file read-only
 (``mode=ro``), takes no write lock, never changes the journal mode and never
@@ -501,17 +504,14 @@ class QualityStore:
                 details={"path": self.db_path, "error": str(error)},
             ) from error
         try:
-            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            version = self._read_schema_version(connection)
             if version > SCHEMA_VERSION:
                 raise StorageError(
                     "The quality database is newer than this software understands.",
                     details={"found": version, "supported": SCHEMA_VERSION},
                     retryable=False,
                 )
-            has_tables = connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_measurements'"
-            ).fetchone()
-            yield connection if has_tables is not None and version >= 1 else None
+            yield connection if version >= 1 else None
         except (sqlite3.Error, OSError) as error:
             raise StorageError(
                 "The quality database could not be read.",
@@ -519,6 +519,34 @@ class QualityStore:
             ) from error
         finally:
             connection.close()
+
+    @staticmethod
+    def _read_schema_version(connection: sqlite3.Connection) -> int:
+        """Return the quality schema version stored in the database.
+
+        Parameters
+        ----------
+        connection : `sqlite3.Connection`
+            Any open connection. Nothing is written.
+
+        Returns
+        -------
+        version : `int`
+            0 if there are no quality tables. 1 if the quality tables exist
+            but the version table does not (the first release of this
+            store). Otherwise the number in ``quality_schema_version``.
+        """
+        names = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('quality_schema_version', 'quality_measurements')"
+            )
+        }
+        if "quality_schema_version" in names:
+            row = connection.execute("SELECT MAX(version) FROM quality_schema_version").fetchone()
+            return int(row[0]) if row[0] is not None else 0
+        return 1 if "quality_measurements" in names else 0
 
     @staticmethod
     def _migrate(connection: sqlite3.Connection) -> None:
@@ -538,7 +566,7 @@ class QualityStore:
         StorageError
             If the database was written by a newer version of this code.
         """
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        version = QualityStore._read_schema_version(connection)
         if version > SCHEMA_VERSION:
             raise StorageError(
                 "The quality database is newer than this software understands.",
@@ -548,7 +576,12 @@ class QualityStore:
         if version < 1:
             for statement in _CREATE_SCHEMA_STATEMENTS:
                 connection.execute(statement)
-            connection.execute("PRAGMA user_version = 1")
+        has_version_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quality_schema_version'"
+        ).fetchone()
+        if has_version_table is None:
+            connection.execute("CREATE TABLE quality_schema_version (version INTEGER NOT NULL)")
+            connection.execute("INSERT INTO quality_schema_version (version) VALUES (1)")
 
     def get_or_create_capture_setting(self, setting: CaptureSetting) -> int:
         """Return the id of a capture setting, adding it if it is new.

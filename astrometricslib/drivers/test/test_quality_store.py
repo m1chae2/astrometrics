@@ -252,8 +252,9 @@ def test_unopenable_database_raises_storage_error(tmp_path: Path) -> None:
 def test_newer_schema_is_refused(tmp_path: Path) -> None:
     """A database from a newer version raises `StorageError`."""
     path = tmp_path / "astrometrics.db"
+    QualityStore(str(path)).write_measurements([make_measurement()])
     with sqlite3.connect(path) as connection:
-        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        connection.execute("UPDATE quality_schema_version SET version = ?", (SCHEMA_VERSION + 1,))
     with pytest.raises(StorageError):
         QualityStore(str(path)).write_measurements([make_measurement()])
     with pytest.raises(StorageError):
@@ -273,10 +274,43 @@ def test_migration_is_idempotent_and_leaves_other_tables_alone(tmp_path: Path) -
     second = QualityStore(str(path))
     assert len(second.query()) == 1
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [
+            (SCHEMA_VERSION,)
+        ]
         assert connection.execute("SELECT id, name FROM targets").fetchall() == [("M31", "Andromeda")]
         names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     assert {"quality_measurements", "quality_capture_setting", "quality_measurements_latest"} <= names
+
+
+def test_foreign_user_version_is_ignored_and_kept(tmp_path: Path) -> None:
+    """A file with a user_version set by other code works and keeps it."""
+    path = tmp_path / "astrometrics.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE stellar_objects (id TEXT)")
+        connection.execute("PRAGMA user_version = 2")
+    store = QualityStore(str(path))
+    assert store.query() == []
+    store.write_measurements([make_measurement()])
+    assert len(store.query()) == 1
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def test_first_release_database_gets_version_table(tmp_path: Path) -> None:
+    """Quality tables with no version table read as version 1, then upgrade."""
+    path = tmp_path / "astrometrics.db"
+    QualityStore(str(path)).write_measurements([make_measurement()])
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE quality_schema_version")
+        connection.execute("PRAGMA user_version = 1")
+    store = QualityStore(str(path))
+    assert len(store.query()) == 1
+    store.write_measurements([make_measurement(run_id="second")])
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT version FROM quality_schema_version").fetchall() == [(1,)]
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        count = connection.execute("SELECT COUNT(*) FROM quality_measurements").fetchone()[0]
+    assert count == 2
 
 
 def test_from_configuration_uses_library_path(tmp_path: Path) -> None:
@@ -321,7 +355,6 @@ def test_read_path_does_not_migrate(tmp_path: Path) -> None:
     assert reader.query() == []
     assert reader.get_capture_setting(1) is None
     with sqlite3.connect(database) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
         names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
     assert names == {"targets"}
 
